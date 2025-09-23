@@ -2,4 +2,4 @@
 // - Copying the raw or post-processed transcript
 // - Playing back the audio file showing the costs and models used and associated
 // It also has the ability to philtre items using the History Manager and present all of that information back here.
-// When expanded, a user can also navigate through the API requests included and any other API goals.
+// When a history item is expanded, there must be a button to expose the full API requests/responses that formed part of that transction.

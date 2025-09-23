@@ -2,6 +2,7 @@
 // - What models were used
 // - The raw transcription
 // - Any post-processing transcription
+// - The duration of the recording
 // - The cost of the model
 // - A link to the persisted audio file
 // - Any raw network requests and responses? In sequence. 

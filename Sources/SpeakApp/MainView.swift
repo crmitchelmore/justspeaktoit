@@ -1,1 +1,1 @@
-// @Implement This is the main app container and handles all top-level system events. It has a sidebar on the left And then when items are selected, they're shown on the right in the main window. If it's the right place, this is where the status bar item should also be initialised.
+// @Implement This is the main app container and handles all top-level system events. It has a sidebar on the left And then when items are selected, they're shown on the right in the main window. If it's the right place, this is where the status bar item and view should also be initialised.

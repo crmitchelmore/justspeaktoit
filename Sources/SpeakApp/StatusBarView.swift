@@ -1,0 +1,1 @@
+// @Implement: This file should provide the UI for the status bar. It should briefly show the core settings of the app (which model we're currently using and if we're using post-processing). To open the main window of the app.What is the current insert method, and what are brief stats from recordings?

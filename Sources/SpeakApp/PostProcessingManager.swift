@@ -1,0 +1,1 @@
+// @Implement This manager depends on the chat LLM protocol as a dependency and alongside app settings for any configuration. It can read the system prompt that should come with it and orchestrate sending the request off, receiving it, and sending it back to the caller.

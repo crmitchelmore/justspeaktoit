@@ -1,0 +1,1 @@
+// @Implement: This file should wire up and configure all app dependencies based on the approach laid out in this talk https://www.infoq.com/presentations/8-lines-code-refactoring/

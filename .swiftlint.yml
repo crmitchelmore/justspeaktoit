@@ -1,0 +1,19 @@
+strict: true
+opt_in_rules:
+  - empty_count
+  - explicit_self
+  - fatal_error_message
+  - implicit_return
+  - redundant_nil_coalescing
+included:
+  - Sources
+  - Tests
+excluded:
+  - .build
+line_length:
+  warning: 120
+  error: 160
+identifier_name:
+  min_length:
+    warning: 3
+    error: 2

@@ -8,3 +8,4 @@
 // - Any raw network requests and responses? In sequence. 
 // Timestamps for each step
 // The events that started and stopped the recording, where the output was pasted to (if possible) and how it was pasted using accessibility or clipboard. Which hotkey and hotkey type of event started the recording.
+// History items should also be able to store errors to any of the above data whilst retaining all useful information so that it can be presented as part of the history view.

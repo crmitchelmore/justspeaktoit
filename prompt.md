@@ -8,7 +8,7 @@ Install relevant packages where they are really good and won't slow down the app
 
 Don't worry about writing any tests, just focus on the implementation, but the project needs to build cleanly and run without crashing. Some of the files provide additional context after @context that you can choose to use or reference, especially if things aren't working, or take for information. This shouldn't be taken as an implementation plan rather just tips that might be useful. I've also attached some screenshots as inspiration for UI style. /Users/cm/Desktop/Screenshot\ 2025-09-23\ at\ 17.40.30.png / Users/cm/Desktop/Screenshot\ 2025-09-23\ at\ 17.40.45.png /Users/cm/Desktop/Screenshot\ 2025-09-23\ at\ 17.40.37.png
 
-The app also needs a good looking app icon that follows the same style and a status bar icon and pop out design that also adheres to that style.
+The app also needs a good looking app icon to be added and configured. It should follow the same style of design as the app. Additionally a status bar icon and pop out menu design that also adheres to that style.
 
 Make sure the app builds and runs successfully.
 

@@ -1,7 +1,7 @@
- // @Implement this file should manage when hockey events are received and trigger the action functions.
- // It's also responsible for configuring what the actual hotkey we're looking for is to app settings.
- // Callers should be able to add themselves as  hotkey listeners, and recieve 4 types of events: held, released, single tap, double tap and the timings for those should be read from app settings. Also this file should set those timeings to app settings when asked to.
- // This file should also check for accessibility permissions and if not present, call out to the permissions manager to request them.
+// @Implement this file should manage when hockey events are received and trigger the action functions.
+// It's also responsible for configuring what the actual hotkey we're looking for is to app settings.
+// Callers should be able to add themselves as  hotkey listeners, and recieve 4 types of events: held, released, single tap, double tap and the timings for those should be read from app settings. Also this file should set those timeings to app settings when asked to.
+// This file should also check for accessibility permissions and if not present, call out to the permissions manager to request them.
 
 /* @Context: Tracks a single managed key (Fn) and emits four gestures: singleTap, doubleTap, holdStart, holdEnd.
 	•	Provides a handler registry: multiple callbacks per (key, gesture).
@@ -79,10 +79,208 @@ Minimal diagnostics another team should implement
 	•	A small on-screen indicator (or status item) that lights up on Fn down for sanity checks.
 
 If you want, I can turn this into a short README snippet or a checklist you can drop into their repo. */
- struct HotKeyManager {
-   let permissionsManager: PermissionsManager
-   let appSettings: AppSettings
-  
-  
+import AppKit
+import Foundation
+import os.log
 
- }
+enum HotKeyGesture: String, CaseIterable, Identifiable {
+	case holdStart
+	case holdEnd
+	case singleTap
+	case doubleTap
+
+	var id: String { rawValue }
+}
+
+struct HotKeyListenerToken: Hashable {
+	fileprivate let id: UUID
+	fileprivate let gesture: HotKeyGesture
+}
+
+// swiftlint:disable:next type_body_length
+@MainActor
+final class HotKeyManager: ObservableObject {
+	private let permissionsManager: PermissionsManager
+	private let appSettings: AppSettings
+	private let log = Logger(subsystem: "com.github.speakapp", category: "HotKeyManager")
+
+	private var listeners: [HotKeyGesture: [UUID: () -> Void]] = [:]
+	private var globalMonitor: Any?
+	private var localMonitor: Any?
+	private var holdTimer: DispatchSourceTimer?
+	private var pollTimer: Timer?
+	private var pendingSingleTapWorkItem: DispatchWorkItem?
+
+	private var isKeyDown = false
+	private var holdFired = false
+	private var lastReleaseUptime: TimeInterval = 0
+
+	private let pollInterval: TimeInterval = 0.2
+
+	init(permissionsManager: PermissionsManager, appSettings: AppSettings) {
+		self.permissionsManager = permissionsManager
+		self.appSettings = appSettings
+	}
+
+	func startMonitoring() {
+		guard globalMonitor == nil else { return }
+
+		Task { [weak self] in
+			guard let self else { return }
+			for permission in [PermissionType.accessibility, .inputMonitoring] {
+				let status = await MainActor.run { self.permissionsManager.status(for: permission) }
+				if !status.isGranted {
+					_ = await self.permissionsManager.request(permission)
+				}
+			}
+		}
+
+		globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.flagsChanged, .keyDown, .keyUp]) {
+			[weak self] event in
+			self?.handle(event: event)
+		}
+		localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .keyDown, .keyUp]) {
+			[weak self] event in
+			self?.handle(event: event)
+			return event
+		}
+
+		pollTimer = Timer.scheduledTimer(withTimeInterval: pollInterval, repeats: true) {
+			[weak self] _ in
+			guard let self else { return }
+			Task { @MainActor in
+				self.pollModifierFlags()
+			}
+		}
+		if let pollTimer {
+			RunLoop.main.add(pollTimer, forMode: .common)
+		}
+	}
+
+	func stopMonitoring() {
+		if let globalMonitor {
+			NSEvent.removeMonitor(globalMonitor)
+			self.globalMonitor = nil
+		}
+		if let localMonitor {
+			NSEvent.removeMonitor(localMonitor)
+			self.localMonitor = nil
+		}
+		holdTimer?.cancel()
+		holdTimer = nil
+		pollTimer?.invalidate()
+		pollTimer = nil
+		pendingSingleTapWorkItem?.cancel()
+		pendingSingleTapWorkItem = nil
+		isKeyDown = false
+		holdFired = false
+	}
+
+	@discardableResult
+	func register(gesture: HotKeyGesture, handler: @escaping () -> Void) -> HotKeyListenerToken {
+		let identifier = UUID()
+		var handlers = listeners[gesture, default: [:]]
+		handlers[identifier] = handler
+		listeners[gesture] = handlers
+		return HotKeyListenerToken(id: identifier, gesture: gesture)
+	}
+
+	func unregister(_ token: HotKeyListenerToken) {
+		listeners[token.gesture]?[token.id] = nil
+	}
+
+	func updateTiming(holdThreshold: TimeInterval, doubleTapWindow: TimeInterval) {
+		appSettings.holdThreshold = holdThreshold
+		appSettings.doubleTapWindow = doubleTapWindow
+	}
+
+	private func handle(event: NSEvent) {
+		guard event.modifierFlags.contains(.function) else {
+			if isKeyDown {
+				handleKeyRelease(source: "event")
+			}
+			return
+		}
+
+		switch event.type {
+		case .flagsChanged, .keyDown:
+			handleKeyPress(source: "event")
+		case .keyUp:
+			handleKeyRelease(source: "event")
+		default:
+			break
+		}
+	}
+
+	private func pollModifierFlags() {
+		let flags = NSEvent.modifierFlags
+		if flags.contains(.function) {
+			handleKeyPress(source: "poll")
+		} else if isKeyDown {
+			handleKeyRelease(source: "poll")
+		}
+	}
+
+	private func handleKeyPress(source: StaticString) {
+		guard !isKeyDown else { return }
+		log.debug("Fn down via \(source)")
+		isKeyDown = true
+		holdFired = false
+		pendingSingleTapWorkItem?.cancel()
+		scheduleHoldTimer()
+	}
+
+	private func handleKeyRelease(source: StaticString) {
+		guard isKeyDown else { return }
+		log.debug("Fn up via \(source)")
+		isKeyDown = false
+		holdTimer?.cancel()
+		holdTimer = nil
+
+		let now = ProcessInfo.processInfo.systemUptime
+		if holdFired {
+			holdFired = false
+			fire(.holdEnd)
+			lastReleaseUptime = now
+			return
+		}
+
+		let elapsed = now - lastReleaseUptime
+		if elapsed <= appSettings.doubleTapWindow {
+			pendingSingleTapWorkItem?.cancel()
+			pendingSingleTapWorkItem = nil
+			fire(.doubleTap)
+			lastReleaseUptime = 0
+		} else {
+			let workItem = DispatchWorkItem { [weak self] in
+				self?.fire(.singleTap)
+			}
+			pendingSingleTapWorkItem = workItem
+			DispatchQueue.main.asyncAfter(deadline: .now() + appSettings.doubleTapWindow) {
+				[weak workItem] in
+				guard let workItem, !workItem.isCancelled else { return }
+				workItem.perform()
+			}
+			lastReleaseUptime = now
+		}
+	}
+
+	private func scheduleHoldTimer() {
+		let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.main)
+		timer.schedule(deadline: .now() + appSettings.holdThreshold)
+		timer.setEventHandler { [weak self] in
+			guard let self, self.isKeyDown, !self.holdFired else { return }
+			self.holdFired = true
+			self.fire(.holdStart)
+		}
+		holdTimer = timer
+		timer.resume()
+	}
+
+	private func fire(_ gesture: HotKeyGesture) {
+		log.debug("Firing gesture: \(gesture.rawValue)")
+		listeners[gesture]?.values.forEach { handler in
+			handler()
+		}
+	}
+}

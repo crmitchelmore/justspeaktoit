@@ -1,15 +1,19 @@
-import SwiftUI
 import AppKit
-// @Implement: This file should create call out to wireup to create all dependnecies and then call out setup the main app view 
+import SwiftUI
+
+// @Implement: This file should create call out to wireup to create all dependnecies and then call out setup the main app view
 @main
 struct SpeakApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @StateObject private var environment = WireUp.bootstrap()
 
     var body: some Scene {
         WindowGroup("Speak") {
-            ContentView()
+            MainView()
+                .environmentObject(environment)
+                .environmentObject(environment.settings)
         }
-        .defaultSize(width: 480, height: 320)
+        .defaultSize(width: 1080, height: 720)
     }
 }
 
@@ -21,22 +25,4 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.windows.first?.makeKeyAndOrderFront(nil)
         }
     }
-}
-
-struct ContentView: View {
-    var body: some View {
-        VStack(spacing: 16) {
-            Text("Hello, Speak")
-                .font(.system(size: 32, weight: .semibold, design: .rounded))
-            Text("You're ready to build a macOS SwiftUI app.")
-                .font(.title3)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(32)
-    }
-}
-
-#Preview {
-    ContentView()
 }

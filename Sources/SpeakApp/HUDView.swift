@@ -1,3 +1,104 @@
+import SwiftUI
+
+struct HUDOverlay: View {
+  @ObservedObject var manager: HUDManager
+
+  var body: some View {
+    if manager.snapshot.phase.isVisible {
+      content
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+        .padding(.bottom, 24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        .ignoresSafeArea()
+    }
+  }
+
+  private var content: some View {
+    VStack(spacing: 12) {
+      animatedGlyph
+      VStack(spacing: 4) {
+        Text(manager.snapshot.headline)
+          .font(.headline)
+        if let sub = manager.snapshot.subheadline {
+          Text(sub)
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+        }
+      }
+      if manager.snapshot.phase.isTerminal == false {
+        Text(elapsedText)
+          .font(.caption.monospacedDigit())
+          .foregroundStyle(.secondary)
+      }
+    }
+    .padding(.horizontal, 24)
+    .padding(.vertical, 16)
+    .background(.thickMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    .overlay(
+      RoundedRectangle(cornerRadius: 20, style: .continuous)
+        .stroke(phaseColor.opacity(0.4), lineWidth: 1)
+    )
+    .shadow(color: .black.opacity(0.25), radius: 18, x: 0, y: 12)
+    .animation(.spring(response: 0.25, dampingFraction: 0.85), value: manager.snapshot)
+    .padding(.horizontal, 60)
+  }
+
+  private var phaseColor: Color {
+    switch manager.snapshot.phase {
+    case .recording:
+      return .red
+    case .transcribing:
+      return .blue
+    case .postProcessing:
+      return .purple
+    case .delivering:
+      return .green
+    case .success:
+      return .green
+    case .failure:
+      return .orange
+    case .hidden:
+      return .gray
+    }
+  }
+
+  private var animatedGlyph: some View {
+    TimelineView(.animation) { context in
+      let progress = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1)
+      let scale = 0.9 + (progress < 0.5 ? progress : 1 - progress) * 0.4
+      return Circle()
+        .fill(phaseColor.gradient)
+        .frame(width: 18, height: 18)
+        .scaleEffect(scale)
+        .shadow(color: phaseColor.opacity(0.4), radius: 6, x: 0, y: 4)
+    }
+  }
+
+  private var elapsedText: String {
+    let duration = manager.snapshot.elapsed
+    let minutes = Int(duration) / 60
+    let seconds = Int(duration) % 60
+    let milliseconds = Int((duration - floor(duration)) * 100)
+    if minutes > 0 {
+      return String(format: "%02d:%02d.%02d", minutes, seconds, milliseconds)
+    } else {
+      return String(format: "%02d.%02ds", seconds, milliseconds)
+    }
+  }
+}
+
+struct HUDOverlay_Previews: PreviewProvider {
+  static var previews: some View {
+    HUDOverlay(manager: previewManager)
+      .frame(width: 600, height: 400)
+  }
+
+  private static var previewManager: HUDManager {
+    let manager = HUDManager()
+    manager.beginRecording()
+    return manager
+  }
+}
 // @Implement: This is the view that shows a floating indicator at the bottom middle of the screen. This view should float on top of all windows in the system but only show when recording is in progress. This should be a minimal view but must be engaging and informative to the users. It should have a cool animated graphic for each phase.
 // - Recording: Show in red and how long recording is for with a cool icon as well as animation
 // - Transcribing: If the operation is a batch request, this is the transcribing phase waiting for the raw transcription to return

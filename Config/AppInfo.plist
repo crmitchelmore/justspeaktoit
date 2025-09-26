@@ -18,6 +18,14 @@
 	<string>0.1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Speak uses the microphone to capture audio for transcription.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Speak transcribes your speech into text using speech recognition.</string>
+	<key>NSAccessibilityUsageDescription</key>
+	<string>Speak needs Accessibility access to observe the Fn key for global shortcuts.</string>
+	<key>NSInputMonitoringUsageDescription</key>
+	<string>Speak needs Input Monitoring access to detect your Fn key presses for shortcuts.</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<key>NSPrincipalClass</key>

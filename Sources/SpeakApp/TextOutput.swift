@@ -14,97 +14,163 @@ This guide explains how to integrate an "Insert" action that prefers Accessibili
 ### 1.2 Enrich InjectionError
 - File: `Sources/PasteDelayApp/TextInjector.swift:29`
 - Ensure `InjectionError` covers `emptyPayload`, `accessibilityDenied`, `noFocusedElement`, and `valueNotSettable`.
-- Provide two helpers:
-  - `errorDescription` returning precise guidance (e.g. "Focused control does not allow direct Accessibility edits. Command+V fallback is required.").
-  - `fallbackSummary` describing why the Command+V path was needed (e.g. "focused control rejected direct Accessibility edits").
-
-### 1.3 Introduce the Smart Insert Method
-- File: `Sources/PasteDelayApp/TextInjector.swift:73`
-- Add `@MainActor func insert(_ text: String) throws -> Result`.
-- Behaviour sequence:
-  1. Attempt `injectViaAccessibilityValue(text:)`.
-  2. If it succeeds, return `.accessibilityValue` with no fallback reason.
-  3. If it throws `valueNotSettable` or `noFocusedElement`, immediately attempt `injectViaPasteboard(text:)`.
-  4. If the fallback paste succeeds, return `.pasteboard` populated with the triggering error.
-  5. For any other error (permissions, empty payload), rethrow to the caller unchanged.
-- Keep the existing `inject(_:using:)` method public for callers that need to force a specific path.
-
-## 2. UI State Machine Consolidation
-
-### 2.1 Replace Dual Buttons
-- File: `Sources/PasteDelayApp/ContentView.swift:25`
-- Collapse the previous "Pasteboard"/"Accessibility" buttons into a single `Button` labelled by `status.buttonLabel`.
-- Disable the button when input is empty; keep it enabled during countdown so the user can cancel.
-- Update the helper text above the field to explain the automatic hierarchy.
-
-### 2.2 Simplify Countdown View
-- File: `Sources/PasteDelayApp/ContentView.swift:35`
-- Show a single progress bar and caption `Insert in <n>s` whenever `status` is `.countingDown`.
-
-### 2.3 Rewrite InjectionStatus
-- File: `Sources/PasteDelayApp/ContentView.swift:141`
-- Refactor the enum to remove mode-specific associated values:
-  - Cases: `.idle`, `.countingDown(remaining: Int)`, `.sending`, `.success(result: TextInjector.Result)`, `.failure(reason: String)`.
-  - Computed properties:
-    - `buttonLabel` returns "Insert", "Cancel", or "Working…".
-    - `message` maps to idle guidance, countdown instructions, generic sending text, `result.successMessage`, or the error reason.
-    - `messageColor` returns `.green` on success, `.red` on failure, `.secondary` otherwise.
-    - `isInputLocked` disables the text field during countdown and send.
-
-### 2.4 Coordinate Task Lifecycle
-- File: `Sources/PasteDelayApp/ContentView.swift:67`
-- `handleButtonTap()` toggles between starting and cancelling the countdown.
-- `startCountdown()` captures the payload snapshot and queues a `Task` that sleeps for three seconds, updating status every second.
-- `countdownAndInject(text:)` performs the countdown, transitions to `.sending`, calls `injector.insert(text)`, and sets `status` to `.success(result:)` or `.failure(reason:)`.
-- `scheduleReset()` keeps the success banner visible for two seconds before returning to `.idle`.
-- Always cancel and nil out `countdownTask` in `cancelCountdown()` and at the end of `countdownAndInject(text:)`.
-
-## 3. Accessibility Messaging Touch-Up
-
-- File: `Sources/PasteDelayApp/TextInjector.swift:35`
-- Update the `valueNotSettable` error message to steer users toward the automatic fallback: "Command+V fallback is required." This keeps runtime feedback aligned with the new single-button behaviour.
-
-## 4. Validation Checklist
-
-1. Run `swift build` (or `make build`) to ensure the code compiles.
-2. Manually grant Accessibility permissions to the host app if prompted.
-3. Test three scenarios:
-   - Standard text field (AX settable): confirm the success banner reports "Set text via Accessibility value attribute." and the clipboard contents are preserved.
-   - Non-settable control (e.g., secure field): confirm we fall back to pasteboard and report the fallback reason.
-   - No focused element: confirm the countdown ends in an error banner from the injector.
-4. From `.success`, wait for the automatic reset to `.idle` before triggering another insert.
-
-## 5. Integration Tips for Other Apps
-
-- Keep Accessibility interactions behind a façade type (`TextInjector` or similar) so UI code never reaches through to raw AX APIs.
-- Maintain public API stability: expose a single `insert(text:)` entry point and keep method-selection logic internal.
-- When porting, ensure the host app has a main-thread entry point (AX APIs are main-thread only) and that any SwiftUI view state mirrors the `InjectionStatus` shape above.
+// @Implement: This implementation should use the clipboard to paste text into the focused app. It should restore the previous pasteboard value (if the app setting output to clipboard is false) It should respect any relevant settings from app settings
+import AppKit
+import ApplicationServices
+import Foundation
 - Restore the clipboard after pasteboard-based injection to avoid surprising users.
 - Document fallback behaviour prominently in user-facing copy so expectations stay aligned.
 
 Following this sequence allows another project to drop in the same smart Insert capability with minimal guesswork.
  */
 
+import AppKit
+import ApplicationServices
+import Foundation
+
+struct TextOutputResult {
+  let method: HistoryTrigger.OutputMethod
+  let error: Error?
+}
+
+@MainActor
 protocol TextOutputting {
-  func output(text: String) -> Error?
+  func output(text: String) -> TextOutputResult
+}
+
+enum TextOutputError: LocalizedError {
+  case accessibilityPermissionMissing
+  case unableToFindFocusedElement
+  case unableToSetValue(AXError)
+  case clipboardWriteFailed
+
+  var errorDescription: String? {
+    switch self {
+    case .accessibilityPermissionMissing:
+      return "Accessibility permission is required to insert text directly."
+    case .unableToFindFocusedElement:
+      return "No focused field was detected."
+    case .unableToSetValue(let status):
+      return "Unable to set text via accessibility APIs (status: \(status.rawValue))."
+    case .clipboardWriteFailed:
+      return "Failed to write to the clipboard."
+    }
+  }
 }
 
 // @Implement: This implementation should check for accessibility permissions and use the accessibility API to paste text into the focused app. It should respect any relevant settings from app settings
+@MainActor
 struct AccessibilityTextOutput: TextOutputting {
   let permissionsManager: PermissionsManager
   let appSettings: AppSettings
 
-  func output(text: String) -> Error? {
-    return nil
+  func output(text: String) -> TextOutputResult {
+    let status = permissionsManager.status(for: .accessibility)
+    guard status.isGranted else {
+      return TextOutputResult(
+        method: .none,
+        error: TextOutputError.accessibilityPermissionMissing
+      )
+    }
+
+    let systemWideElement = AXUIElementCreateSystemWide()
+    var rawFocused: CFTypeRef?
+    let copyStatus = AXUIElementCopyAttributeValue(
+      systemWideElement, kAXFocusedUIElementAttribute as CFString, &rawFocused)
+    guard copyStatus == .success, let rawFocused else {
+      return TextOutputResult(
+        method: .none,
+        error: TextOutputError.unableToFindFocusedElement
+      )
+    }
+
+    let focusedElement = unsafeBitCast(rawFocused, to: AXUIElement.self)
+
+    let setResult = AXUIElementSetAttributeValue(
+      focusedElement, kAXValueAttribute as CFString, text as CFTypeRef)
+    guard setResult == .success else {
+      return TextOutputResult(
+        method: .none,
+        error: TextOutputError.unableToSetValue(setResult)
+      )
+    }
+
+    return TextOutputResult(method: .accessibility, error: nil)
   }
 }
 
 // @Implement: This implementation should use the clipboard to paste text into the focused app. It should restore the previous pasteboard value (if the app setting output to clipboard is false) It should respect any relevant settings from app settings
+@MainActor
 struct PasteTextOutput: TextOutputting {
   let permissionsManager: PermissionsManager
   let appSettings: AppSettings
 
-  func output(text: String) -> Error? {
-    return nil
+  func output(text: String) -> TextOutputResult {
+    let pasteboard = NSPasteboard.general
+    let restoreClipboard = appSettings.restoreClipboardAfterPaste
+    let previousString = restoreClipboard ? pasteboard.string(forType: .string) : nil
+
+    pasteboard.clearContents()
+    guard pasteboard.setString(text, forType: .string) else {
+      return TextOutputResult(method: .none, error: TextOutputError.clipboardWriteFailed)
+    }
+
+    simulatePasteShortcut()
+
+    if restoreClipboard {
+      pasteboard.clearContents()
+      if let previousString {
+        pasteboard.setString(previousString, forType: .string)
+      }
+    }
+
+    return TextOutputResult(method: .clipboard, error: nil)
+  }
+
+  private func simulatePasteShortcut() {
+    guard let source = CGEventSource(stateID: .combinedSessionState) else { return }
+    let vKey: CGKeyCode = 9
+
+    if let keyDown = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: true) {
+      keyDown.flags = .maskCommand
+      keyDown.post(tap: .cghidEventTap)
+    }
+
+    if let keyUp = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: false) {
+      keyUp.flags = .maskCommand
+      keyUp.post(tap: .cghidEventTap)
+    }
+  }
+}
+
+// @Implement: Smart text output that uses accessibility when permitted and falls back to clipboard.
+@MainActor
+struct SmartTextOutput: TextOutputting {
+  let permissionsManager: PermissionsManager
+  let appSettings: AppSettings
+
+  private var accessibilityOutput: AccessibilityTextOutput {
+    AccessibilityTextOutput(permissionsManager: permissionsManager, appSettings: appSettings)
+  }
+
+  private var clipboardOutput: PasteTextOutput {
+    PasteTextOutput(permissionsManager: permissionsManager, appSettings: appSettings)
+  }
+
+  func output(text: String) -> TextOutputResult {
+    switch appSettings.textOutputMethod {
+    case .accessibilityOnly:
+      return accessibilityOutput.output(text: text)
+    case .clipboardOnly:
+      return clipboardOutput.output(text: text)
+    case .smart:
+      if permissionsManager.status(for: .accessibility).isGranted {
+        let result = accessibilityOutput.output(text: text)
+        if result.error == nil {
+          return result
+        }
+      }
+      return clipboardOutput.output(text: text)
+    }
   }
 }

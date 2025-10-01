@@ -71,7 +71,8 @@ enum WireUp {
       appSettings: settings,
       permissionsManager: permissions,
       batchClient: RemoteAudioTranscriber(client: openRouter),
-      openRouter: openRouter
+      openRouter: openRouter,
+      secureStorage: secureStorage
     )
     let postProcessing = PostProcessingManager(client: openRouter, settings: settings)
     let main = MainManager(
@@ -86,7 +87,7 @@ enum WireUp {
     )
     let hudPresenter = HUDWindowPresenter(manager: hud)
 
-    return AppEnvironment(
+    let environment = AppEnvironment(
       settings: settings,
       permissions: permissions,
       history: history,
@@ -100,6 +101,10 @@ enum WireUp {
       main: main,
       hudPresenter: hudPresenter
     )
+
+    Task { await secureStorage.preloadTrackedSecrets() }
+
+    return environment
   }
 }
 // @Implement: This file should wire up and configure all app dependencies based on the approach laid out in this talk https://www.infoq.com/presentations/8-lines-code-refactoring/

@@ -31,6 +31,7 @@ final class TranscriptionManager: ObservableObject {
   private let liveController: NativeOSXLiveTranscriber
   private let batchClient: BatchTranscriptionClient
   private let openRouter: OpenRouterAPIClient
+  private let secureStorage: SecureAppStorage
 
   private var continuation: CheckedContinuation<TranscriptionResult, Error>?
 
@@ -38,7 +39,8 @@ final class TranscriptionManager: ObservableObject {
     appSettings: AppSettings,
     permissionsManager: PermissionsManager,
     batchClient: BatchTranscriptionClient,
-    openRouter: OpenRouterAPIClient
+    openRouter: OpenRouterAPIClient,
+    secureStorage: SecureAppStorage
   ) {
     self.appSettings = appSettings
     self.liveController = NativeOSXLiveTranscriber(
@@ -47,6 +49,7 @@ final class TranscriptionManager: ObservableObject {
     )
     self.batchClient = batchClient
     self.openRouter = openRouter
+    self.secureStorage = secureStorage
     self.liveController.delegate = self
   }
 
@@ -83,20 +86,65 @@ final class TranscriptionManager: ObservableObject {
   }
 
   func transcribeFile(at url: URL) async throws -> TranscriptionResult {
-    try await batchClient.transcribeFile(
+    let model = appSettings.batchTranscriptionModel
+    let registry = TranscriptionProviderRegistry.shared
+
+    // Check if this model uses a dedicated transcription provider
+    if let provider = await registry.provider(forModel: model) {
+      let apiKey = try await getAPIKey(for: provider.metadata)
+      return try await provider.transcribeFile(
+        at: url,
+        apiKey: apiKey,
+        model: model,
+        language: appSettings.preferredLocaleIdentifier
+      )
+    }
+
+    // Fallback to OpenRouter for legacy models
+    return try await batchClient.transcribeFile(
       at: url,
-      model: appSettings.batchTranscriptionModel,
+      model: model,
       language: appSettings.preferredLocaleIdentifier
     )
   }
 
   func batchTranscriptionUsesRemoteService() async -> Bool {
-    await openRouter.requiresRemoteAccess(for: appSettings.batchTranscriptionModel)
+    let model = appSettings.batchTranscriptionModel
+    let registry = TranscriptionProviderRegistry.shared
+
+    // Check if provider requires API key
+    if await registry.requiresAPIKey(for: model) {
+      return true
+    }
+
+    // Fallback to OpenRouter check
+    return await openRouter.requiresRemoteAccess(for: model)
   }
 
   func hasValidBatchAPIKey() async -> Bool {
     guard await batchTranscriptionUsesRemoteService() else { return true }
+
+    let model = appSettings.batchTranscriptionModel
+    let registry = TranscriptionProviderRegistry.shared
+
+    // Check if provider has API key
+    if let provider = await registry.provider(forModel: model) {
+      return await hasAPIKey(for: provider.metadata)
+    }
+
+    // Fallback to OpenRouter
     return await openRouter.hasStoredAPIKey()
+  }
+
+  private func getAPIKey(for metadata: TranscriptionProviderMetadata) async throws -> String {
+    guard let key = try? await secureStorage.secret(identifier: metadata.apiKeyIdentifier) else {
+      throw TranscriptionProviderError.apiKeyMissing
+    }
+    return key
+  }
+
+  private func hasAPIKey(for metadata: TranscriptionProviderMetadata) async -> Bool {
+    await secureStorage.hasSecret(identifier: metadata.apiKeyIdentifier)
   }
 }
 
@@ -233,7 +281,8 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
       duration: duration,
       modelIdentifier: currentModel ?? "apple/local/SFSpeechRecognizer",
       cost: nil,
-      rawPayload: nil
+      rawPayload: nil,
+      debugInfo: nil
     )
 
     delegate?.liveTranscriber(self, didFinishWith: outcome)

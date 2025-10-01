@@ -53,6 +53,15 @@ struct TranscriptionSegment: Codable, Hashable, Identifiable {
   }
 }
 
+struct TranscriptionDebugInfo: Codable, Hashable {
+  let endpoint: URL
+  let requestHeaders: [String: String]
+  let requestBodyPreview: String
+  let responseCode: Int
+  let responseHeaders: [String: String]
+  let responseBodyPreview: String
+}
+
 struct TranscriptionResult: Codable, Hashable {
   let text: String
   let segments: [TranscriptionSegment]
@@ -61,6 +70,7 @@ struct TranscriptionResult: Codable, Hashable {
   let modelIdentifier: String
   let cost: ChatCostBreakdown?
   let rawPayload: String?
+  let debugInfo: TranscriptionDebugInfo?
 }
 
 protocol BatchTranscriptionClient {

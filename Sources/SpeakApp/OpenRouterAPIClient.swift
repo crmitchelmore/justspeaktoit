@@ -432,7 +432,8 @@ actor OpenRouterAPIClient: ChatLLMClient, BatchTranscriptionClient {
       duration: duration,
       modelIdentifier: model,
       cost: nil,
-      rawPayload: nil
+      rawPayload: nil,
+      debugInfo: nil
     )
   }
 
@@ -540,7 +541,8 @@ actor OpenRouterAPIClient: ChatLLMClient, BatchTranscriptionClient {
       duration: duration,
       modelIdentifier: model,
       cost: nil,
-      rawPayload: String(data: payload, encoding: .utf8)
+      rawPayload: String(data: payload, encoding: .utf8),
+      debugInfo: nil
     )
   }
 
@@ -611,32 +613,4 @@ private struct OpenRouterValidationResponse: Decodable {
   let data: ValidationData?
 }
 
-extension Data {
-  fileprivate mutating func appendString(_ string: String) {
-    if let data = string.data(using: .utf8) {
-      append(data)
-    }
-  }
-
-  fileprivate mutating func appendFormField(named name: String, value: String, boundary: String) {
-    appendString("--\(boundary)\r\n")
-    appendString("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n")
-    appendString("\(value)\r\n")
-  }
-
-  fileprivate mutating func appendFileField(
-    named name: String,
-    filename: String,
-    mimeType: String,
-    fileData: Data,
-    boundary: String
-  ) {
-    appendString("--\(boundary)\r\n")
-    appendString(
-      "Content-Disposition: form-data; name=\"\(name)\"; filename=\"\(filename)\"\r\n")
-    appendString("Content-Type: \(mimeType)\r\n\r\n")
-    append(fileData)
-    appendString("\r\n")
-  }
-}
 // @Implement: This class is responsible for interacting with the OpenRouter API and implements the LLMProtocols to do so. It takes the api key from SecureAppStorage

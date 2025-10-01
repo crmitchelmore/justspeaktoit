@@ -36,7 +36,7 @@ actor SecureAppStorage {
   }
 
   func storeSecret(_ value: String, identifier: String, label: String? = nil) async throws {
-    guard await permissionsManager.ensureKeychainAccess() else {
+    guard await permissionsManager.ensureKeychainAccess(forService: service) else {
       throw SecureAppStorageError.permissionDenied
     }
 
@@ -52,6 +52,7 @@ actor SecureAppStorage {
     let attributesToUpdate: [String: Any] = [
       kSecValueData as String: data,
       kSecAttrLabel as String: label ?? identifier,
+      kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
     ]
 
     let status = SecItemUpdate(query as CFDictionary, attributesToUpdate as CFDictionary)
@@ -59,6 +60,7 @@ actor SecureAppStorage {
       var addQuery = query
       addQuery[kSecValueData as String] = data
       addQuery[kSecAttrLabel as String] = label ?? identifier
+      addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
       let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
       guard addStatus == errSecSuccess else {
         throw SecureAppStorageError.unexpectedStatus(addStatus)
@@ -77,7 +79,7 @@ actor SecureAppStorage {
       return cached
     }
 
-    guard await permissionsManager.ensureKeychainAccess() else {
+    guard await permissionsManager.ensureKeychainAccess(forService: service) else {
       throw SecureAppStorageError.permissionDenied
     }
 
@@ -139,6 +141,13 @@ actor SecureAppStorage {
       return !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     } catch {
       return false
+    }
+  }
+
+  func preloadTrackedSecrets() async {
+    let identifiers = await appSettings.trackedAPIKeyIdentifiers
+    for identifier in identifiers {
+      _ = try? await secret(identifier: identifier)
     }
   }
 }

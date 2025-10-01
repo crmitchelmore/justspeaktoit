@@ -88,7 +88,7 @@ final class HUDManager: ObservableObject {
 
     guard showsTimer else { return }
 
-    timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
+    timer = Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { [weak self] _ in
       Task { @MainActor [weak self] in
         guard let self, let start = self.phaseStartDate else { return }
         let elapsed = Date().timeIntervalSince(start)

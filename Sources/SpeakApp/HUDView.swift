@@ -75,14 +75,15 @@ struct HUDOverlay: View {
   }
 
   private var elapsedText: String {
-    let duration = manager.snapshot.elapsed
-    let minutes = Int(duration) / 60
-    let seconds = Int(duration) % 60
-    let milliseconds = Int((duration - floor(duration)) * 100)
+    let duration = max(manager.snapshot.elapsed, 0)
+    let totalHundredths = max(0, Int((duration * 100).rounded()))
+    let minutes = totalHundredths / 6000
+    let seconds = (totalHundredths / 100) % 60
+    let hundredths = totalHundredths % 100
     if minutes > 0 {
-      return String(format: "%02d:%02d.%02d", minutes, seconds, milliseconds)
+      return String(format: "%02d:%02d.%02d", minutes, seconds, hundredths)
     } else {
-      return String(format: "%02d.%02ds", seconds, milliseconds)
+      return String(format: "%02d.%02ds", seconds, hundredths)
     }
   }
 }

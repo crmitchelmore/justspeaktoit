@@ -94,22 +94,24 @@ final class PermissionsManager: ObservableObject {
     return status
   }
 
-  func ensureKeychainAccess() async -> Bool {
-    // Keychain access usually does not require explicit permission, but sandboxed apps may need to
-    // ensure the call succeeds. Attempt a no-op query to confirm accessibility.
+  func ensureKeychainAccess(forService service: String) async -> Bool {
+    // Attempt a scoped, non-destructive lookup within our service namespace. This avoids prompting
+    // for unrelated keychain items while still surfacing permission failures.
     let query: [String: Any] = [
       kSecClass as String: kSecClassGenericPassword,
-      kSecReturnData as String: true,
+      kSecAttrService as String: service,
+      kSecReturnData as String: false,
       kSecMatchLimit as String: kSecMatchLimitOne,
     ]
 
-    var item: CFTypeRef?
-    let status = SecItemCopyMatching(query as CFDictionary, &item)
+    let status = SecItemCopyMatching(query as CFDictionary, nil)
     switch status {
     case errSecSuccess, errSecItemNotFound:
       return true
-    default:
+    case errSecInteractionNotAllowed, errSecMissingEntitlement:
       return false
+    default:
+      return true
     }
   }
 

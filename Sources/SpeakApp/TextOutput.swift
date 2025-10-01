@@ -118,10 +118,7 @@ struct PasteTextOutput: TextOutputting {
     simulatePasteShortcut()
 
     if restoreClipboard {
-      pasteboard.clearContents()
-      if let previousString {
-        pasteboard.setString(previousString, forType: .string)
-      }
+      scheduleClipboardRestore(previousString, on: pasteboard)
     }
 
     return TextOutputResult(method: .clipboard, error: nil)
@@ -139,6 +136,16 @@ struct PasteTextOutput: TextOutputting {
     if let keyUp = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: false) {
       keyUp.flags = .maskCommand
       keyUp.post(tap: .cghidEventTap)
+    }
+  }
+
+  private func scheduleClipboardRestore(_ previousString: String?, on pasteboard: NSPasteboard) {
+    let delay = DispatchTime.now() + .milliseconds(300)
+    DispatchQueue.main.asyncAfter(deadline: delay) {
+      pasteboard.clearContents()
+      if let previousString {
+        pasteboard.setString(previousString, forType: .string)
+      }
     }
   }
 }

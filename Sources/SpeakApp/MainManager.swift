@@ -30,6 +30,7 @@ final class MainManager: ObservableObject {
   private var activeSession: ActiveSession?
   private var cancellables: Set<AnyCancellable> = []
   private var hotKeyTokens: [HotKeyListenerToken] = []
+  private var lastDoubleTapEventUptime: TimeInterval = 0
 
   init(
     appSettings: AppSettings,
@@ -111,10 +112,17 @@ final class MainManager: ObservableObject {
         Task { @MainActor in
           guard let self else { return }
           guard self.appSettings.hotKeyActivationStyle.allowsDoubleTap else { return }
-          if self.activeSession == nil {
-            await self.startSession(trigger: .doubleTap)
-          } else {
+          let now = ProcessInfo.processInfo.systemUptime
+          if now - self.lastDoubleTapEventUptime < 0.25 {
+            return
+          }
+          self.lastDoubleTapEventUptime = now
+
+          if let session = self.activeSession {
+            guard session.gesture == .doubleTap else { return }
             await self.endSession(trigger: .doubleTap)
+          } else {
+            await self.startSession(trigger: .doubleTap)
           }
         }
       }
@@ -125,7 +133,7 @@ final class MainManager: ObservableObject {
         Task { @MainActor in
           guard let self else { return }
           guard self.appSettings.hotKeyActivationStyle.allowsDoubleTap else { return }
-          if self.activeSession != nil {
+          if let session = self.activeSession, session.gesture == .doubleTap {
             await self.endSession(trigger: .singleTap)
           }
         }
@@ -238,10 +246,13 @@ final class MainManager: ObservableObject {
         if let payload = result.rawPayload {
           session.networkExchanges.append(
             HistoryNetworkExchange(
-              url: URL(string: "https://openrouter.ai/api/v1/audio/transcriptions")!,
+              url: URL(string: "https://openrouter.ai/api/v1/responses")!,
               method: "POST",
-              requestHeaders: ["Model": result.modelIdentifier],
-              requestBodyPreview: summary.url.lastPathComponent,
+              requestHeaders: [
+                "Model": result.modelIdentifier,
+                "Content-Type": "application/json",
+              ],
+              requestBodyPreview: "JSON payload with \(summary.url.lastPathComponent) audio",
               responseCode: 200,
               responseHeaders: [:],
               responseBodyPreview: String(payload.prefix(800))
@@ -393,10 +404,13 @@ final class MainManager: ObservableObject {
       if let payload = result.rawPayload {
         session.networkExchanges.append(
           HistoryNetworkExchange(
-            url: URL(string: "https://openrouter.ai/api/v1/audio/transcriptions")!,
+            url: URL(string: "https://openrouter.ai/api/v1/responses")!,
             method: "POST",
-            requestHeaders: ["Model": result.modelIdentifier],
-            requestBodyPreview: url.lastPathComponent,
+            requestHeaders: [
+              "Model": result.modelIdentifier,
+              "Content-Type": "application/json",
+            ],
+            requestBodyPreview: "JSON payload with \(url.lastPathComponent) audio",
             responseCode: 200,
             responseHeaders: [:],
             responseBodyPreview: String(payload.prefix(800))

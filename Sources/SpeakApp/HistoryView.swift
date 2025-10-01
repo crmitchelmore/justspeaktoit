@@ -1,35 +1,72 @@
 import AVFoundation
 import AppKit
+import Combine
 import SwiftUI
 
 struct HistoryView: View {
   @EnvironmentObject private var environment: AppEnvironment
   @State private var searchText: String = ""
   @State private var showErrorsOnly: Bool = false
+  @State private var historyItems: [HistoryItem] = []
+  @State private var historyStats: HistoryStatistics = .init(
+    totalSessions: 0,
+    cumulativeRecordingDuration: 0,
+    totalSpend: 0,
+    averageSessionLength: 0,
+    sessionsWithErrors: 0
+  )
 
   private var filteredItems: [HistoryItem] {
     var filter = HistoryFilter.none
     filter.searchText = searchText.isEmpty ? nil : searchText
     filter.includeErrorsOnly = showErrorsOnly
-    return environment.history.items(matching: filter)
+    return apply(filter: filter, to: historyItems)
   }
 
   var body: some View {
-    ScrollView {
-      VStack(alignment: .leading, spacing: 24) {
-        header
-        if filteredItems.isEmpty {
-          emptyState
-        } else {
-          LazyVStack(spacing: 20) {
-            ForEach(filteredItems) { item in
-              HistoryListRow(item: item)
+    ScrollViewReader { proxy in
+      ScrollView {
+        VStack(alignment: .leading, spacing: 24) {
+          header
+          if filteredItems.isEmpty {
+            emptyState
+          } else {
+            LazyVStack(spacing: 20) {
+              ForEach(filteredItems) { item in
+                HistoryListRow(item: item)
+                  .id(item.id)
+              }
+            }
+            .animation(.spring(response: 0.28, dampingFraction: 0.88), value: filteredItems)
+          }
+        }
+        .padding(24)
+        .frame(maxWidth: 1100, alignment: .center)
+      }
+      .onAppear {
+        historyItems = environment.history.items
+        historyStats = environment.history.statistics
+      }
+      .onReceive(environment.history.$items) { items in
+        let previous = historyItems
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+          historyItems = items
+        }
+        guard let newest = items.first else { return }
+        let wasPresent = previous.contains(where: { $0.id == newest.id })
+        if !wasPresent {
+          DispatchQueue.main.async {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+              proxy.scrollTo(newest.id, anchor: .top)
             }
           }
         }
       }
-      .padding(24)
-      .frame(maxWidth: 1100, alignment: .center)
+      .onReceive(environment.history.$statistics) { stats in
+        withAnimation(.easeInOut(duration: 0.2)) {
+          historyStats = stats
+        }
+      }
     }
     .background(
       LinearGradient(
@@ -42,7 +79,6 @@ struct HistoryView: View {
   }
 
   private var header: some View {
-    let stats = environment.history.statistics
     return VStack(alignment: .leading, spacing: 18) {
       VStack(alignment: .leading, spacing: 8) {
         Text("Session History")
@@ -85,17 +121,17 @@ struct HistoryView: View {
         .buttonStyle(.borderedProminent)
         .tint(.white)
         .foregroundStyle(Color.accentColor)
-        .disabled(environment.history.items.isEmpty)
+        .disabled(historyItems.isEmpty)
       }
 
       HStack(spacing: 16) {
-        historyChip(title: "Sessions", value: "\(stats.totalSessions)")
-        historyChip(title: "Errors", value: "\(stats.sessionsWithErrors)")
+        historyChip(title: "Sessions", value: "\(historyStats.totalSessions)")
+        historyChip(title: "Errors", value: "\(historyStats.sessionsWithErrors)")
         historyChip(
           title: "Average Length",
-          value: formattedDuration(stats.averageSessionLength)
+          value: formattedDuration(historyStats.averageSessionLength)
         )
-        historyChip(title: "Spend", value: formattedCurrency(stats.totalSpend))
+        historyChip(title: "Spend", value: formattedCurrency(historyStats.totalSpend))
       }
     }
     .padding(24)
@@ -159,6 +195,15 @@ struct HistoryView: View {
     )
   }
 
+  private static let headerCurrencyFormatter: NumberFormatter = {
+    let formatter = NumberFormatter()
+    formatter.numberStyle = .currency
+    formatter.currencyCode = "USD"
+    formatter.maximumFractionDigits = 2
+    formatter.minimumFractionDigits = 2
+    return formatter
+  }()
+
   private func formattedDuration(_ duration: TimeInterval) -> String {
     guard duration.isFinite, duration > 0 else { return "—" }
     let minutes = Int(duration) / 60
@@ -167,11 +212,38 @@ struct HistoryView: View {
   }
 
   private func formattedCurrency(_ value: Decimal) -> String {
-    guard value > 0 else { return "—" }
-    let formatter = NumberFormatter()
-    formatter.numberStyle = .currency
-    formatter.currencyCode = "USD"
-    return formatter.string(from: value as NSDecimalNumber) ?? "—"
+    HistoryView.headerCurrencyFormatter.string(from: value as NSDecimalNumber) ?? "—"
+  }
+
+  private func apply(filter: HistoryFilter, to items: [HistoryItem]) -> [HistoryItem] {
+    items.filter { item in
+      if let text = filter.searchText?.lowercased(), !text.isEmpty {
+        let combined = [item.rawTranscription, item.postProcessedTranscription]
+          .compactMap { $0?.lowercased() }
+          .joined(separator: "\n")
+        if !combined.contains(text) {
+          return false
+        }
+      }
+
+      if !filter.modelIdentifiers.isEmpty {
+        let itemModels = Set(item.modelsUsed.map { $0.lowercased() })
+        let requested = filter.modelIdentifiers.map { $0.lowercased() }
+        if Set(requested).intersection(itemModels).isEmpty {
+          return false
+        }
+      }
+
+      if filter.includeErrorsOnly && item.errors.isEmpty {
+        return false
+      }
+
+      if let range = filter.dateRange, !range.contains(item.createdAt) {
+        return false
+      }
+
+      return true
+    }
   }
 }
 
@@ -179,6 +251,7 @@ private struct HistoryListRow: View {
   @EnvironmentObject private var environment: AppEnvironment
   let item: HistoryItem
   @State private var isExpanded: Bool = false
+  @State private var showNetworkDetails: Bool = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: 20) {
@@ -187,86 +260,54 @@ private struct HistoryListRow: View {
           isExpanded.toggle()
         }
       } label: {
-        HStack(alignment: .top, spacing: 16) {
-          VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-              Text(item.createdAt, format: Date.FormatStyle(date: .abbreviated, time: .shortened))
-                .font(.headline)
-                .foregroundStyle(.primary)
-              if !item.errors.isEmpty {
-                Label("", systemImage: "exclamationmark.triangle.fill")
-                  .labelStyle(.iconOnly)
-                  .foregroundStyle(.yellow)
-              }
-              Spacer(minLength: 0)
+        VStack(alignment: .leading, spacing: 12) {
+          HStack(alignment: .top, spacing: 16) {
+            ViewThatFits(in: .horizontal) {
               HStack(spacing: 8) {
-                HStack(spacing: 6) {
-                  Image(systemName: "clock")
-                  Text(formatDuration(item.recordingDuration))
-                    .font(.callout.monospacedDigit())
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(
-                  Capsule()
-                    .fill(Color.accentColor.opacity(0.12))
-                )
-
-                if let cost = item.cost {
-                  HStack(spacing: 6) {
-                    Image(systemName: "creditcard")
-                    Text(formatCurrency(cost.total, currency: cost.currency))
-                      .font(.callout.monospacedDigit())
-                  }
-                  .padding(.horizontal, 12)
-                  .padding(.vertical, 6)
-                  .background(
-                    Capsule()
-                      .fill(Color.green.opacity(0.15))
-                  )
-                }
+                badgeViews
+              }
+              VStack(alignment: .leading, spacing: 8) {
+                badgeViews
               }
             }
+            Spacer(minLength: 0)
+            Image(systemName: isExpanded ? "chevron.up.circle.fill" : "chevron.down.circle")
+              .imageScale(.large)
+              .symbolRenderingMode(.palette)
+              .foregroundStyle(Color.accentColor, Color.accentColor.opacity(0.3))
+          }
 
+          if let transcript = bestTranscript {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+              Text(previewText)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+
+              Button {
+                copyToPasteboard(transcript)
+              } label: {
+                Label("Copy", systemImage: "doc.on.doc")
+                  .labelStyle(.iconOnly)
+              }
+              .buttonStyle(.borderless)
+              .help("Copy the best available transcript")
+            }
+          } else {
             Text(previewText)
               .font(.subheadline)
               .foregroundStyle(.secondary)
               .lineLimit(2)
-
-            HStack(spacing: 12) {
-              if let models = modelsSummary {
-                Label(
-                  models.replacingOccurrences(of: "\n", with: ", "),
-                  systemImage: "brain.head.profile"
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-              }
-              if !item.networkExchanges.isEmpty {
-                Label(
-                  item.networkExchanges.count == 1
-                    ? "1 network call"
-                    : "\(item.networkExchanges.count) network calls",
-                  systemImage: "antenna.radiowaves.left.and.right"
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-              }
-              if let cost = item.cost?.total {
-                Label(
-                  formatCurrency(cost, currency: item.cost?.currency ?? "USD"),
-                  systemImage: "creditcard"
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-              }
-            }
           }
 
-          Image(systemName: isExpanded ? "chevron.up.circle.fill" : "chevron.down.circle")
-            .imageScale(.large)
-            .symbolRenderingMode(.palette)
-            .foregroundStyle(Color.accentColor, Color.accentColor.opacity(0.3))
+          if let models = modelsSummary {
+            Label(
+              models.replacingOccurrences(of: "\n", with: ", "),
+              systemImage: "brain.head.profile"
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+          }
         }
         .contentShape(Rectangle())
       }
@@ -276,24 +317,59 @@ private struct HistoryListRow: View {
         Divider()
           .padding(.vertical, 4)
 
-        VStack(alignment: .leading, spacing: 20) {
-          metaSection
+        ViewThatFits(in: .horizontal) {
+          HStack(alignment: .top, spacing: 28) {
+            VStack(alignment: .leading, spacing: 20) {
+              if !item.networkExchanges.isEmpty {
+                networkSummaryButton
+                if showNetworkDetails {
+                  networkSection
+                }
+              }
 
-          if let url = item.audioFileURL {
-            AudioPlaybackControls(url: url)
+              metaSection
+
+              if let url = item.audioFileURL {
+                AudioPlaybackControls(url: url)
+              }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            VStack(alignment: .leading, spacing: 20) {
+              transcriptSection
+
+              if !item.errors.isEmpty {
+                errorSection
+              }
+
+              footerActions
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
           }
+          .frame(maxWidth: .infinity, alignment: .leading)
 
-          transcriptSection
+          VStack(alignment: .leading, spacing: 20) {
+            if !item.networkExchanges.isEmpty {
+              networkSummaryButton
+              if showNetworkDetails {
+                networkSection
+              }
+            }
 
-          if !item.networkExchanges.isEmpty {
-            networkSection
+            metaSection
+
+            if let url = item.audioFileURL {
+              AudioPlaybackControls(url: url)
+            }
+
+            transcriptSection
+
+            if !item.errors.isEmpty {
+              errorSection
+            }
+
+            footerActions
           }
-
-          if !item.errors.isEmpty {
-            errorSection
-          }
-
-          footerActions
         }
         .transition(.opacity.combined(with: .move(edge: .top)))
       }
@@ -308,10 +384,15 @@ private struct HistoryListRow: View {
         .stroke(borderColor, lineWidth: 1)
     )
     .shadow(color: borderColor.opacity(0.3), radius: 18, x: 0, y: 12)
+    .onChange(of: isExpanded) { _, expanded in
+      if !expanded {
+        showNetworkDetails = false
+      }
+    }
   }
 
   private var previewText: String {
-    if let processed = item.postProcessedTranscription, !processed.isEmpty {
+    if let processed = processedTranscriptToDisplay {
       return processed
     }
     if let raw = item.rawTranscription, !raw.isEmpty {
@@ -324,9 +405,124 @@ private struct HistoryListRow: View {
     item.errors.isEmpty ? Color.accentColor.opacity(0.15) : Color.orange.opacity(0.35)
   }
 
+  private var metaColumns: [GridItem] {
+    [
+      GridItem(
+        .adaptive(minimum: 160, maximum: 340), spacing: 10, alignment: .topLeading
+      )
+    ]
+  }
+
+  private var formattedCreatedAt: String {
+    item.createdAt.formatted(date: .abbreviated, time: .shortened)
+  }
+
+  @ViewBuilder
+  private var badgeViews: some View {
+    historyBadge(
+      icon: "calendar",
+      title: "Created",
+      value: formattedCreatedAt
+    )
+
+    if item.recordingDuration > 0 {
+      historyBadge(
+        icon: "waveform",
+        title: "Audio",
+        value: formatDuration(item.recordingDuration)
+      )
+    }
+
+    if let prompt = promptDuration {
+      historyBadge(
+        icon: "bolt.fill",
+        title: "Prompt",
+        value: formatDuration(prompt),
+        tint: .purple
+      )
+    }
+
+    if let cost = item.cost {
+      historyBadge(
+        icon: "creditcard",
+        title: "Cost",
+        value: formatCurrency(cost.total, currency: cost.currency),
+        tint: .green
+      )
+    }
+
+    if let error = errorBadgeInfo {
+      historyBadge(
+        icon: "exclamationmark.triangle.fill",
+        title: error.title,
+        value: error.value,
+        tint: .orange
+      )
+    }
+  }
+
+  private func historyBadge(
+    icon: String,
+    title: String,
+    value: String,
+    tint: Color = .accentColor
+  ) -> some View {
+    VStack(alignment: .leading, spacing: 6) {
+      HStack(spacing: 6) {
+        Image(systemName: icon)
+          .imageScale(.medium)
+        Text(title.uppercased())
+          .font(.caption2.weight(.semibold))
+      }
+      .foregroundStyle(tint)
+
+      Text(value)
+        .font(.footnote.weight(.medium))
+        .foregroundStyle(.primary)
+        .lineLimit(1)
+        .truncationMode(.tail)
+    }
+    .padding(.horizontal, 12)
+    .padding(.vertical, 8)
+    .background(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .fill(tint.opacity(0.12))
+    )
+    .overlay(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .stroke(tint.opacity(0.2), lineWidth: 1)
+    )
+  }
+  private var promptDuration: TimeInterval? {
+    let start =
+      item.phaseTimestamps.transcriptionStarted
+      ?? item.phaseTimestamps.recordingEnded
+      ?? item.phaseTimestamps.recordingStarted
+    let end =
+      item.phaseTimestamps.outputDelivered
+      ?? item.phaseTimestamps.postProcessingEnded
+      ?? item.phaseTimestamps.transcriptionEnded
+
+    guard let start, let end else { return nil }
+
+    let duration = end.timeIntervalSince(start)
+    guard duration.isFinite, duration > 0 else { return nil }
+
+    return duration
+  }
+
+  private var errorBadgeInfo: (title: String, value: String)? {
+    guard !item.errors.isEmpty else { return nil }
+    if item.errors.count == 1 {
+      let phase = item.errors.first?.phase.rawValue.capitalized ?? "Issue"
+      return (title: "Error", value: phase)
+    }
+    return (title: "Errors", value: "\(item.errors.count) issues")
+  }
+
   private var transcriptSection: some View {
     VStack(alignment: .leading, spacing: 8) {
-      if let processed = item.postProcessedTranscription {
+      if let processed = processedTranscriptToDisplay {
         Text("Processed Transcript")
           .font(.subheadline.bold())
         transcriptBox(processed)
@@ -340,31 +536,55 @@ private struct HistoryListRow: View {
   }
 
   private var metaSection: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      labeledRow(icon: "bolt.horizontal.circle", title: "Trigger") {
-        VStack(alignment: .leading, spacing: 2) {
-          Text(item.trigger.gesture.rawValue.capitalized)
-          Text("Hotkey: \(item.trigger.hotKeyDescription)")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
-      }
+    VStack(alignment: .leading, spacing: 10) {
+      Text("Session Details")
+        .font(.subheadline.bold())
 
-      if let models = modelsSummary {
-        labeledRow(icon: "brain.head.profile", title: "Models") {
-          Text(models)
-            .multilineTextAlignment(.leading)
+      LazyVGrid(columns: metaColumns, alignment: .leading, spacing: 12) {
+        metaTile(icon: "bolt.horizontal.circle", title: "Trigger") {
+          VStack(alignment: .leading, spacing: 2) {
+            Text(item.trigger.gesture.rawValue.capitalized)
+            Text("Hotkey: \(item.trigger.hotKeyDescription)")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
         }
-      }
 
-      if let cost = item.cost {
-        labeledRow(icon: "creditcard", title: "Cost") {
-          VStack(alignment: .leading, spacing: 4) {
-            Text(formatCurrency(cost.total, currency: cost.currency))
-            if let breakdown = cost.breakdown {
-              Text("Input tokens: \(breakdown.inputTokens) • Output: \(breakdown.outputTokens)")
+        if let destination = item.trigger.destinationApplication {
+          metaTile(icon: "app", title: "Destination") {
+            Text(destination)
+          }
+        }
+
+        if let models = modelsSummary {
+          metaTile(icon: "brain.head.profile", title: "Models") {
+            Text(models.replacingOccurrences(of: "\n", with: ", "))
+              .fixedSize(horizontal: false, vertical: true)
+          }
+        }
+
+        metaTile(icon: "clock.arrow.circlepath", title: "Timeline") {
+          if let start = item.phaseTimestamps.recordingStarted,
+            let end = item.phaseTimestamps.outputDelivered
+          {
+            let total = end.timeIntervalSince(start)
+            Text("Total: \(formatDuration(total))")
+          } else {
+            Text("Recording: \(formatDuration(item.recordingDuration))")
+          }
+        }
+
+        if let cost = item.cost {
+          metaTile(icon: "creditcard", title: "Cost") {
+            VStack(alignment: .leading, spacing: 4) {
+              Text(formatCurrency(cost.total, currency: cost.currency))
+              if let breakdown = cost.breakdown {
+                Text(
+                  "Input tokens: \(breakdown.inputTokens) • Output: \(breakdown.outputTokens)"
+                )
                 .font(.caption)
                 .foregroundStyle(.secondary)
+              }
             }
           }
         }
@@ -378,21 +598,34 @@ private struct HistoryListRow: View {
     return friendly.joined(separator: "\n")
   }
 
-  private func labeledRow<Content: View>(
-    icon: String, title: String, @ViewBuilder content: () -> Content
+  private func metaTile<Content: View>(
+    icon: String,
+    title: String,
+    @ViewBuilder content: () -> Content
   ) -> some View {
-    HStack(alignment: .top, spacing: 12) {
-      Image(systemName: icon)
-        .foregroundStyle(Color.accentColor)
-        .frame(width: 20)
-      VStack(alignment: .leading, spacing: 4) {
+    VStack(alignment: .leading, spacing: 3) {
+      HStack(alignment: .firstTextBaseline, spacing: 6) {
+        Image(systemName: icon)
+          .imageScale(.small)
+          .foregroundStyle(Color.accentColor.opacity(0.8))
         Text(title.uppercased())
-          .font(.caption.weight(.semibold))
+          .font(.caption2.weight(.semibold))
           .foregroundStyle(.secondary)
-        content()
       }
-      Spacer()
+      content()
+        .font(.footnote)
+        .foregroundStyle(.primary)
     }
+    .padding(.horizontal, 10)
+    .padding(.vertical, 6)
+    .background(
+      RoundedRectangle(cornerRadius: 14, style: .continuous)
+        .fill(Color(nsColor: .controlBackgroundColor))
+    )
+    .overlay(
+      RoundedRectangle(cornerRadius: 14, style: .continuous)
+        .stroke(Color.accentColor.opacity(0.1), lineWidth: 1)
+    )
   }
 
   private func transcriptBox(_ text: String) -> some View {
@@ -506,6 +739,54 @@ private struct HistoryListRow: View {
     }
   }
 
+  private var networkSummaryButton: some View {
+    let count = item.networkExchanges.count
+    let responseSummary: String
+    if let last = item.networkExchanges.last {
+      responseSummary = "Latest: HTTP \(last.responseCode)"
+    } else {
+      responseSummary = ""
+    }
+
+    return Button {
+      withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
+        showNetworkDetails.toggle()
+      }
+    } label: {
+      HStack(spacing: 12) {
+        Label(
+          showNetworkDetails ? "Hide API details" : "Show API details",
+          systemImage: showNetworkDetails ? "chevron.up.circle.fill" : "chevron.down.circle"
+        )
+        .labelStyle(.titleAndIcon)
+        .font(.callout.weight(.semibold))
+
+        Spacer(minLength: 8)
+
+        HStack(spacing: 6) {
+          Text("\(count) request\(count == 1 ? "" : "s")")
+          if !responseSummary.isEmpty {
+            Text("•")
+            Text(responseSummary)
+          }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      }
+      .padding(.horizontal, 14)
+      .padding(.vertical, 10)
+      .background(
+        RoundedRectangle(cornerRadius: 16, style: .continuous)
+          .fill(Color.accentColor.opacity(0.09))
+      )
+      .overlay(
+        RoundedRectangle(cornerRadius: 16, style: .continuous)
+          .stroke(Color.accentColor.opacity(0.2), lineWidth: 1)
+      )
+    }
+    .buttonStyle(.plain)
+  }
+
   private var footerActions: some View {
     HStack(spacing: 12) {
       if let url = item.audioFileURL {
@@ -540,9 +821,15 @@ private struct HistoryListRow: View {
 
   private func formatDuration(_ duration: TimeInterval) -> String {
     guard duration.isFinite, duration > 0 else { return "—" }
-    let minutes = Int(duration) / 60
-    let seconds = Int(duration) % 60
-    return String(format: "%02d:%02d", minutes, seconds)
+    let totalHundredths = max(0, Int((duration * 100).rounded()))
+    let minutes = totalHundredths / 6000
+    let seconds = (totalHundredths / 100) % 60
+    let hundredths = totalHundredths % 100
+    if minutes > 0 {
+      return String(format: "%02d:%02d.%02d", minutes, seconds, hundredths)
+    } else {
+      return String(format: "%02d.%02d", seconds, hundredths)
+    }
   }
 
   private func formatCurrency(_ value: Decimal, currency: String) -> String {
@@ -557,6 +844,34 @@ private struct HistoryListRow: View {
       .sorted { $0.key < $1.key }
       .map { "\($0): \($1)" }
       .joined(separator: "\n")
+  }
+
+  private var processedTranscriptToDisplay: String? {
+    guard
+      let processed = item.postProcessedTranscription,
+      !processed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    else { return nil }
+
+    if let raw = item.rawTranscription,
+      raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        == processed.trimmingCharacters(in: .whitespacesAndNewlines)
+    {
+      return nil
+    }
+
+    return processed
+  }
+
+  private var bestTranscript: String? {
+    if let processed = processedTranscriptToDisplay {
+      return processed
+    }
+    if let raw = item.rawTranscription,
+      !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    {
+      return raw
+    }
+    return nil
   }
 }
 
@@ -662,7 +977,7 @@ private final class AudioPlaybackController: NSObject, ObservableObject, AVAudio
 
   private func startTimer() {
     timer?.invalidate()
-    timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
+    timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
       guard let self, let player else { return }
       self.currentTime = player.currentTime
       if !player.isPlaying {
@@ -676,9 +991,12 @@ private final class AudioPlaybackController: NSObject, ObservableObject, AVAudio
   }
 
   private func format(_ time: TimeInterval) -> String {
-    let minutes = Int(time) / 60
-    let seconds = Int(time) % 60
-    return String(format: "%02d:%02d", minutes, seconds)
+    guard time.isFinite else { return "--:--.--" }
+    let hundredths = Int((time * 100).rounded())
+    let minutes = hundredths / 6000
+    let seconds = (hundredths / 100) % 60
+    let fractional = hundredths % 100
+    return String(format: "%02d:%02d.%02d", minutes, seconds, fractional)
   }
 
   func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {

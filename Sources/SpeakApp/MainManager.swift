@@ -680,7 +680,7 @@ private final class ActiveSession {
       updatedAt: updatedAt,
       modelsUsed: models,
       rawTranscription: transcriptionResult?.text,
-      postProcessedTranscription: postProcessingOutcome?.processed ?? finalText,
+      postProcessedTranscription: postProcessingOutcome?.processed,
       recordingDuration: recordingSummary?.duration ?? 0,
       cost: cost,
       audioFileURL: recordingSummary?.url,

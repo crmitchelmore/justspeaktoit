@@ -106,6 +106,13 @@ final class AppSettings: ObservableObject {
     case postRecordingTailDuration
   }
 
+  private static let defaultBatchTranscriptionModel = "google/gemini-2.0-flash-001"
+  private static let legacyWhisperModelIDs: Set<String> = [
+    "openrouter/whisper-large-v3",
+    "openrouter/whisper-medium",
+    "openrouter/whisper-small",
+  ]
+
   @Published var appearance: Appearance {
     didSet { store(appearance.rawValue, key: .appearance) }
   }
@@ -119,7 +126,14 @@ final class AppSettings: ObservableObject {
   }
 
   @Published var batchTranscriptionModel: String {
-    didSet { store(batchTranscriptionModel, key: .batchTranscriptionModel) }
+    didSet {
+      let normalized = Self.normalizedBatchModel(batchTranscriptionModel)
+      if normalized != batchTranscriptionModel {
+        batchTranscriptionModel = normalized
+        return
+      }
+      store(batchTranscriptionModel, key: .batchTranscriptionModel)
+    }
   }
 
   @Published var preferredLocaleIdentifier: String {
@@ -203,8 +217,8 @@ final class AppSettings: ObservableObject {
       defaults.string(forKey: DefaultsKey.liveTranscriptionModel.rawValue)
       ?? "apple/local/SFSpeechRecognizer"
     batchTranscriptionModel =
-      defaults.string(forKey: DefaultsKey.batchTranscriptionModel.rawValue)
-      ?? "openrouter/whisper-large-v3"
+      Self.normalizedBatchModel(
+        defaults.string(forKey: DefaultsKey.batchTranscriptionModel.rawValue))
     preferredLocaleIdentifier =
       defaults.string(forKey: DefaultsKey.preferredLocale.rawValue) ?? Locale.current.identifier
     postProcessingEnabled =
@@ -274,6 +288,13 @@ final class AppSettings: ObservableObject {
     default:
       defaults.set(value, forKey: key.rawValue)
     }
+  }
+
+  private static func normalizedBatchModel(_ identifier: String?) -> String {
+    let trimmed = identifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    guard !trimmed.isEmpty else { return defaultBatchTranscriptionModel }
+    if legacyWhisperModelIDs.contains(trimmed) { return defaultBatchTranscriptionModel }
+    return trimmed
   }
 
   private func ensureRecordingsDirectoryExists() {

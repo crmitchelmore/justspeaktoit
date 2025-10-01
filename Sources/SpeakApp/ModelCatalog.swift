@@ -25,15 +25,26 @@ struct ModelCatalog {
   ]
 
   static let batchTranscription: [Option] = [
+    // Dedicated transcription providers (OpenAI, Rev.ai, etc.)
     Option(
-      id: "openrouter/whisper-large-v3", displayName: "Whisper Large v3 (OpenRouter)",
-      description: "High accuracy, slower processing."),
+      id: "openai/whisper-1", displayName: "Whisper (OpenAI)",
+      description: "OpenAI's speech recognition model. Fast and accurate."),
     Option(
-      id: "openrouter/whisper-medium", displayName: "Whisper Medium (OpenRouter)",
-      description: "Balanced accuracy and speed."),
+      id: "revai/default", displayName: "Rev.ai",
+      description: "Rev.ai's speech recognition. High accuracy with speaker identification."),
+
+    // OpenRouter multimodal models
     Option(
-      id: "openrouter/whisper-small", displayName: "Whisper Small (OpenRouter)",
-      description: "Fastest for shorter clips."),
+      id: "google/gemini-2.0-flash-001", displayName: "Gemini 2.0 Flash (OpenRouter)",
+      description: "Fast multimodal model with strong shorthand transcription."),
+    Option(
+      id: "google/gemini-2.0-flash-lite-001",
+      displayName: "Gemini 2.0 Flash Lite (OpenRouter)",
+      description: "Low-latency, budget-friendly multimodal option."),
+    Option(
+      id: "openai/gpt-4o-audio-preview-2024-12-17",
+      displayName: "GPT-4o Audio Preview (OpenRouter)",
+      description: "Early-access GPT-4o variant optimised for audio understanding."),
     Option(
       id: "deepgram/nova-2", displayName: "Deepgram Nova-2",
       description: "Third-party streaming/batch model."),

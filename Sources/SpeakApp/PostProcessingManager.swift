@@ -25,7 +25,16 @@ final class PostProcessingManager: ObservableObject {
   private var effectiveSystemPrompt: String {
     let trimmed = settings.postProcessingSystemPrompt
       .trimmingCharacters(in: .whitespacesAndNewlines)
-    return trimmed.isEmpty ? Self.defaultPrompt : trimmed
+    let basePrompt = trimmed.isEmpty ? Self.defaultPrompt : trimmed
+
+    let language = settings.postProcessingOutputLanguage
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+
+    if !language.isEmpty {
+      return "Always output using \(language). \(basePrompt)"
+    }
+
+    return basePrompt
   }
 
   func process(rawText: String) async -> Result<PostProcessingOutcome, Error> {

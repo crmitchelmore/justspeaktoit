@@ -184,6 +184,12 @@ struct SettingsView: View {
             }
           }
           .pickerStyle(.segmented)
+          .padding(.horizontal, 12)
+          .padding(.vertical, 8)
+          .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+              .fill(Color(nsColor: .controlBackgroundColor))
+          )
         }
       }
 
@@ -195,6 +201,12 @@ struct SettingsView: View {
             }
           }
           .pickerStyle(.menu)
+          .padding(.horizontal, 12)
+          .padding(.vertical, 8)
+          .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+              .fill(Color(nsColor: .controlBackgroundColor))
+          )
 
           VStack(alignment: .leading, spacing: 8) {
             settingsToggle(
@@ -272,6 +284,12 @@ struct SettingsView: View {
             }
           }
           .pickerStyle(.segmented)
+          .padding(.horizontal, 12)
+          .padding(.vertical, 8)
+          .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+              .fill(Color(nsColor: .controlBackgroundColor))
+          )
 
           TextField(
             "Preferred Locale (e.g. en_US)",
@@ -376,6 +394,34 @@ struct SettingsView: View {
             isOn: settingsBinding(\AppSettings.postProcessingEnabled),
             tint: .pink
           )
+
+          VStack(alignment: .leading, spacing: 8) {
+            Picker("Output Language", selection: settingsBinding(\AppSettings.postProcessingOutputLanguage)) {
+              Text("English").tag("English")
+              Text("Spanish").tag("Spanish")
+              Text("French").tag("French")
+              Text("German").tag("German")
+              Text("Italian").tag("Italian")
+              Text("Portuguese").tag("Portuguese")
+              Text("Chinese").tag("Chinese")
+              Text("Japanese").tag("Japanese")
+              Text("Korean").tag("Korean")
+              Text("Russian").tag("Russian")
+              Text("Arabic").tag("Arabic")
+              Text("Hindi").tag("Hindi")
+            }
+            .pickerStyle(.menu)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+              RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor))
+            )
+
+            Text("The language that the transcription will be output in.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
 
           ModelPicker(
             title: "Post-processing Model",
@@ -824,6 +870,12 @@ struct SettingsView: View {
             }
           }
           .pickerStyle(.segmented)
+          .padding(.horizontal, 12)
+          .padding(.vertical, 8)
+          .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+              .fill(Color(nsColor: .controlBackgroundColor))
+          )
         }
       }
 
@@ -1052,6 +1104,12 @@ private struct ModelPicker: View {
         Text("Custom…").tag(ModelCatalog.customOptionID)
       }
       .pickerStyle(.menu)
+      .padding(.horizontal, 12)
+      .padding(.vertical, 8)
+      .background(
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+          .fill(Color(nsColor: .controlBackgroundColor))
+      )
 
       if let help {
         Text(help)

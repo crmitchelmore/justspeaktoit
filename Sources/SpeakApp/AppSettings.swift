@@ -92,6 +92,7 @@ final class AppSettings: ObservableObject {
     case postProcessingModel
     case postProcessingTemperature
     case postProcessingSystemPrompt
+    case postProcessingOutputLanguage
     case textOutputMethod
     case restoreClipboard
     case showHUD
@@ -154,6 +155,10 @@ final class AppSettings: ObservableObject {
 
   @Published var postProcessingSystemPrompt: String {
     didSet { store(postProcessingSystemPrompt, key: .postProcessingSystemPrompt) }
+  }
+
+  @Published var postProcessingOutputLanguage: String {
+    didSet { store(postProcessingOutputLanguage, key: .postProcessingOutputLanguage) }
   }
 
   @Published var textOutputMethod: TextOutputMethod {
@@ -230,6 +235,8 @@ final class AppSettings: ObservableObject {
     postProcessingSystemPrompt =
       defaults.string(forKey: DefaultsKey.postProcessingSystemPrompt.rawValue)
       ?? "You are a transcription assistant. Clean up the text, fix punctuation, and respect speaker turns."
+    postProcessingOutputLanguage =
+      defaults.string(forKey: DefaultsKey.postProcessingOutputLanguage.rawValue) ?? "English"
     textOutputMethod =
       TextOutputMethod(
         rawValue: defaults.string(forKey: DefaultsKey.textOutputMethod.rawValue)

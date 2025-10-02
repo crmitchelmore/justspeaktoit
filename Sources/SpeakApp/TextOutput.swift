@@ -171,7 +171,9 @@ struct SmartTextOutput: TextOutputting {
     case .clipboardOnly:
       return clipboardOutput.output(text: text)
     case .smart:
-      if permissionsManager.status(for: .accessibility).isGranted {
+      // Only try accessibility if permission is granted AND there's a focused element
+      if permissionsManager.status(for: .accessibility).isGranted,
+         hasFocusedElement() {
         let result = accessibilityOutput.output(text: text)
         if result.error == nil {
           return result
@@ -179,5 +181,13 @@ struct SmartTextOutput: TextOutputting {
       }
       return clipboardOutput.output(text: text)
     }
+  }
+
+  private func hasFocusedElement() -> Bool {
+    let systemWideElement = AXUIElementCreateSystemWide()
+    var rawFocused: CFTypeRef?
+    let copyStatus = AXUIElementCopyAttributeValue(
+      systemWideElement, kAXFocusedUIElementAttribute as CFString, &rawFocused)
+    return copyStatus == .success && rawFocused != nil
   }
 }

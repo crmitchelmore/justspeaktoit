@@ -15,7 +15,7 @@ struct DashboardView: View {
     }
     .background(
       LinearGradient(
-        colors: [.accentColor.opacity(0.08), Color(nsColor: .windowBackgroundColor)],
+        colors: [Color.cyan.opacity(0.08), Color(nsColor: .windowBackgroundColor)],
         startPoint: .topLeading,
         endPoint: .bottomTrailing
       )
@@ -95,7 +95,7 @@ struct DashboardView: View {
     .padding(24)
     .background(
       LinearGradient(
-        colors: [Color.accentColor, Color.accentColor.opacity(0.7)],
+        colors: [Color.cyan, Color.blue.opacity(0.8)],
         startPoint: .topLeading,
         endPoint: .bottomTrailing
       )
@@ -105,7 +105,7 @@ struct DashboardView: View {
       RoundedRectangle(cornerRadius: 32, style: .continuous)
         .stroke(Color.white.opacity(0.1), lineWidth: 1)
     )
-    .shadow(color: Color.accentColor.opacity(0.35), radius: 24, x: 0, y: 16)
+    .shadow(color: Color.cyan.opacity(0.35), radius: 24, x: 0, y: 16)
   }
 
   private var dashboardSections: some View {

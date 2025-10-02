@@ -28,6 +28,17 @@ enum SidebarItem: Hashable, Identifiable {
       return "gearshape"
     }
   }
+
+  var color: Color {
+    switch self {
+    case .dashboard:
+      return .cyan
+    case .history:
+      return .purple
+    case .settings:
+      return .orange
+    }
+  }
 }
 
 struct SideBarView: View {
@@ -39,7 +50,9 @@ struct SideBarView: View {
         ForEach([SidebarItem.dashboard, .history, .settings]) { item in
           NavigationLink(value: item) {
             Label(item.label, systemImage: item.systemImage)
+              .foregroundStyle(selection == item ? item.color : .primary)
           }
+          .listItemTint(item.color)
         }
       }
     }

@@ -69,7 +69,7 @@ struct SettingsView: View {
           .font(.system(size: 34, weight: .semibold))
           .frame(width: 56, height: 56)
           .background(
-            Color.accentColor.opacity(0.6),
+            Color.orange.opacity(0.6),
             in: RoundedRectangle(cornerRadius: 18, style: .continuous))
 
         VStack(alignment: .leading, spacing: 6) {
@@ -103,11 +103,11 @@ struct SettingsView: View {
     .padding(24)
     .background(
       LinearGradient(
-        colors: [Color.accentColor, Color.accentColor.opacity(0.7)], startPoint: .topLeading,
+        colors: [Color.orange, Color.orange.opacity(0.7)], startPoint: .topLeading,
         endPoint: .bottomTrailing
       )
       .cornerRadius(24)
-      .shadow(color: Color.accentColor.opacity(0.3), radius: 18, x: 0, y: 12)
+      .shadow(color: Color.orange.opacity(0.3), radius: 18, x: 0, y: 12)
     )
   }
 
@@ -165,7 +165,7 @@ struct SettingsView: View {
     }
     .background(
       LinearGradient(
-        colors: [.accentColor.opacity(0.08), .clear], startPoint: .top, endPoint: .center))
+        colors: [Color.orange.opacity(0.08), .clear], startPoint: .top, endPoint: .center))
     .task {
       transcriptionProviders = await TranscriptionProviderRegistry.shared.allProviders()
     }

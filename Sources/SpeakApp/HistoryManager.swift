@@ -94,6 +94,13 @@ final class HistoryManager: ObservableObject {
     await persist(items: updated)
   }
 
+  func remove(id: UUID) async {
+    let updated = items.filter { $0.id != id }
+    items = updated
+    statistics = calculateStatistics(for: updated)
+    await persist(items: updated)
+  }
+
   func removeAll() async {
     items = []
     statistics = calculateStatistics(for: [])

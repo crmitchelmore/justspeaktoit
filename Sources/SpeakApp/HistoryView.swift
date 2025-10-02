@@ -252,6 +252,7 @@ private struct HistoryListRow: View {
   let item: HistoryItem
   @State private var isExpanded: Bool = false
   @State private var showNetworkDetails: Bool = false
+  @State private var showDeleteConfirmation: Bool = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: 20) {
@@ -271,6 +272,15 @@ private struct HistoryListRow: View {
               }
             }
             Spacer(minLength: 0)
+            Button {
+              showDeleteConfirmation = true
+            } label: {
+              Label("Delete", systemImage: "trash")
+                .labelStyle(.iconOnly)
+                .foregroundStyle(.red)
+            }
+            .buttonStyle(.borderless)
+            .help("Delete this history item")
             Image(systemName: isExpanded ? "chevron.up.circle.fill" : "chevron.down.circle")
               .imageScale(.large)
               .symbolRenderingMode(.palette)
@@ -388,6 +398,20 @@ private struct HistoryListRow: View {
       if !expanded {
         showNetworkDetails = false
       }
+    }
+    .confirmationDialog(
+      "Delete History Item",
+      isPresented: $showDeleteConfirmation,
+      titleVisibility: .visible
+    ) {
+      Button("Delete", role: .destructive) {
+        Task {
+          await environment.history.remove(id: item.id)
+        }
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text("Are you sure you want to delete this history item? This action cannot be undone.")
     }
   }
 

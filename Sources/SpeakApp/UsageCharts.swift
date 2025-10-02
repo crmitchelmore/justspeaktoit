@@ -80,12 +80,12 @@ extension HistoryItem {
     case .transcription:
       // Look for transcription models (non-chat models)
       return modelsUsed.first { model in
-        !model.contains("gpt") && !model.contains("claude") && !model.contains("llama")
+        !model.contains("gpt") && !model.contains("claude") && !model.contains("llama") && !model.contains("inception") && !model.contains("mercury")
       } ?? modelsUsed.first
     case .postProcessing:
       // Look for chat/LLM models
       return modelsUsed.first { model in
-        model.contains("gpt") || model.contains("claude") || model.contains("llama")
+        model.contains("gpt") || model.contains("claude") || model.contains("llama") || model.contains("inception") || model.contains("mercury")
       }
     }
   }

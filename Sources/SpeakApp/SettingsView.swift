@@ -200,10 +200,14 @@ struct SettingsView: View {
             "Restore clipboard after paste",
             isOn: settingsBinding(\AppSettings.restoreClipboardAfterPaste)
           )
+          .tint(.blue)
           Toggle(
             "Show HUD during sessions", isOn: settingsBinding(\AppSettings.showHUDDuringSessions))
+          .tint(.blue)
           Toggle("Show status bar only", isOn: settingsBinding(\AppSettings.showStatusBarOnly))
+          .tint(.blue)
           Toggle("Launch at login", isOn: settingsBinding(\AppSettings.runAtLogin))
+          .tint(.blue)
         }
       }
 
@@ -329,6 +333,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 12) {
           Toggle(
             "Enable Post-processing", isOn: settingsBinding(\AppSettings.postProcessingEnabled))
+          .tint(.pink)
 
           ModelPicker(
             title: "Post-processing Model",

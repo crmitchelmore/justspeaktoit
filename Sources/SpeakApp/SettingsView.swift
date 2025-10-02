@@ -296,8 +296,23 @@ struct SettingsView: View {
       }
 
       SettingsCard(title: "Live transcription", systemImage: "mic.fill", tint: Color.indigo) {
-        VStack(alignment: .leading, spacing: 8) {
-          Text("Model used while recording continuously on-device.")
+        VStack(alignment: .leading, spacing: 12) {
+          HStack(spacing: 8) {
+            Image(systemName: "bolt.fill")
+              .foregroundStyle(.indigo)
+              .imageScale(.small)
+            Text("Fastest - Real-time Response")
+              .font(.subheadline.weight(.semibold))
+              .foregroundStyle(.indigo)
+          }
+          .padding(.horizontal, 12)
+          .padding(.vertical, 6)
+          .background(
+            Capsule()
+              .fill(Color.indigo.opacity(0.12))
+          )
+
+          Text("Model used while recording continuously on-device. Provides instant feedback as you speak.")
             .font(.caption)
             .foregroundStyle(.secondary)
           ModelPicker(
@@ -312,13 +327,28 @@ struct SettingsView: View {
       SettingsCard(
         title: "Batch transcription", systemImage: "folder.badge.clock", tint: Color.cyan
       ) {
-        VStack(alignment: .leading, spacing: 8) {
-          Text("Model used when we upload the recording after it finishes.")
+        VStack(alignment: .leading, spacing: 12) {
+          HStack(spacing: 8) {
+            Image(systemName: "star.fill")
+              .foregroundStyle(.cyan)
+              .imageScale(.small)
+            Text("Best Quality - Most Accurate")
+              .font(.subheadline.weight(.semibold))
+              .foregroundStyle(.cyan)
+          }
+          .padding(.horizontal, 12)
+          .padding(.vertical, 6)
+          .background(
+            Capsule()
+              .fill(Color.cyan.opacity(0.12))
+          )
+
+          Text("Model used when the recording is uploaded after it finishes. Delivers the highest accuracy.")
             .font(.caption)
             .foregroundStyle(.secondary)
           ModelPicker(
             title: "Batch Model",
-            help: "Remote transcription runs after recording stops.",
+            help: "Remote transcription runs after recording stops for maximum accuracy.",
             options: ModelCatalog.batchTranscription,
             value: settingsBinding(\AppSettings.batchTranscriptionModel)
           )

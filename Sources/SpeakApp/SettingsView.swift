@@ -157,6 +157,7 @@ struct SettingsView: View {
         }
         .pickerStyle(.segmented)
         .padding(.horizontal, 6)
+        .speakTooltip("Switch between each area of Speak's preferences.")
 
         tabContent
       }
@@ -190,8 +191,10 @@ struct SettingsView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
               .fill(Color(nsColor: .controlBackgroundColor))
           )
+          .speakTooltip("Choose whether Speak follows macOS appearance or stays in light or dark mode all the time.")
         }
       }
+      .speakTooltip("Set Speak's look to match your workspace with light, dark, or system themes.")
 
       SettingsCard(title: "Output", systemImage: "textformat.alt", tint: Color.blue) {
         VStack(alignment: .leading, spacing: 12) {
@@ -207,6 +210,7 @@ struct SettingsView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
               .fill(Color(nsColor: .controlBackgroundColor))
           )
+          .speakTooltip("Decide how Speak returns transcripts—typed for you, placed on the clipboard, or saved for later.")
 
           VStack(alignment: .leading, spacing: 8) {
             settingsToggle(
@@ -214,24 +218,29 @@ struct SettingsView: View {
               isOn: settingsBinding(\AppSettings.restoreClipboardAfterPaste),
               tint: .blue
             )
+            .speakTooltip("After Speak pastes your transcript, we put your original clipboard content back automatically.")
             settingsToggle(
               "Show HUD during sessions",
               isOn: settingsBinding(\AppSettings.showHUDDuringSessions),
               tint: .blue
             )
+            .speakTooltip("Display a small heads-up display so you always know when Speak is listening.")
             settingsToggle(
               "Show status bar only",
               isOn: settingsBinding(\AppSettings.showStatusBarOnly),
               tint: .blue
             )
+            .speakTooltip("Keep Speak tucked into the menu bar while still being ready when you need it.")
             settingsToggle(
               "Launch at login",
               isOn: settingsBinding(\AppSettings.runAtLogin),
               tint: .blue
             )
+            .speakTooltip("Have Speak start alongside macOS so recording is always one shortcut away.")
           }
         }
       }
+      .speakTooltip("Control how Speak delivers transcripts and how gently we touch your clipboard and interface.")
 
       SettingsCard(title: "Housekeeping", systemImage: "tray.full", tint: Color.orange) {
         VStack(alignment: .leading, spacing: 12) {
@@ -252,6 +261,7 @@ struct SettingsView: View {
               ])
             }
             .buttonStyle(.bordered)
+            .speakTooltip("Open the folder where Speak saves raw audio so you can manage it yourself.")
           }
 
           Button {
@@ -269,8 +279,10 @@ struct SettingsView: View {
           .buttonStyle(.borderedProminent)
           .tint(.red)
           .disabled(isDeletingRecordings)
+          .speakTooltip("Permanently delete every saved audio file from your recordings folder.")
         }
       }
+      .speakTooltip("Manage where your audio lives and tidy up archives when you're ready.")
     }
   }
 
@@ -290,14 +302,17 @@ struct SettingsView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
               .fill(Color(nsColor: .controlBackgroundColor))
           )
+          .speakTooltip("Pick the recording flow that best matches how you speak—continuous live captions or hold-to-talk batches.")
 
           TextField(
             "Preferred Locale (e.g. en_US)",
             text: settingsBinding(\AppSettings.preferredLocaleIdentifier)
           )
           .textFieldStyle(.roundedBorder)
+          .speakTooltip("Force Speak to transcribe with a specific locale when the default detection isn't right.")
         }
       }
+      .speakTooltip("Choose which transcription flow Speak uses and the locale it should prefer.")
 
       SettingsCard(title: "Recording buffer", systemImage: "waveform.path.ecg", tint: Color.cyan) {
         VStack(alignment: .leading, spacing: 12) {
@@ -310,6 +325,7 @@ struct SettingsView: View {
               in: 0...2,
               step: 0.1
             )
+            .speakTooltip("Control how long Speak keeps capturing after you finish talking.")
             Text(
               settings.postRecordingTailDuration,
               format: .number.precision(.fractionLength(1))
@@ -322,6 +338,7 @@ struct SettingsView: View {
           }
         }
       }
+      .speakTooltip("Decide how much breathing room Speak gives you after releasing your shortcut.")
 
       SettingsCard(title: "Live transcription", systemImage: "mic.fill", tint: Color.indigo) {
         VStack(alignment: .leading, spacing: 12) {
@@ -351,6 +368,7 @@ struct SettingsView: View {
           )
         }
       }
+      .speakTooltip("Pick the on-device model that keeps up with you during live recording.")
 
       SettingsCard(
         title: "Batch transcription", systemImage: "folder.badge.clock", tint: Color.cyan
@@ -382,6 +400,7 @@ struct SettingsView: View {
           )
         }
       }
+      .speakTooltip("Tell Speak which cloud transcription model should polish the full recording.")
     }
   }
 
@@ -394,6 +413,7 @@ struct SettingsView: View {
             isOn: settingsBinding(\AppSettings.postProcessingEnabled),
             tint: .pink
           )
+          .speakTooltip("Let Speak clean and enhance transcripts automatically before they reach your clipboard.")
 
           VStack(alignment: .leading, spacing: 8) {
             Picker("Output Language", selection: settingsBinding(\AppSettings.postProcessingOutputLanguage)) {
@@ -417,6 +437,7 @@ struct SettingsView: View {
               RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color(nsColor: .controlBackgroundColor))
             )
+            .speakTooltip("Let Speak know which language you want your polished transcript delivered in.")
 
             Text("The language that the transcription will be output in.")
               .font(.caption)
@@ -443,9 +464,11 @@ struct SettingsView: View {
             }
             Slider(
               value: settingsBinding(\AppSettings.postProcessingTemperature), in: 0...1, step: 0.05)
+            .speakTooltip("Lower values stay close to your words; higher values let Speak be more creative.")
           }
         }
       }
+      .speakTooltip("Choose how Speak cleans up transcripts—from languages to creativity and custom prompts.")
 
       SettingsCard(title: "System prompt", systemImage: "quote.bubble", tint: Color.mint) {
         VStack(alignment: .leading, spacing: 8) {
@@ -461,6 +484,7 @@ struct SettingsView: View {
             )
         }
       }
+      .speakTooltip("Guide the cleanup model with your own instructions for tone and formatting.")
     }
   }
 
@@ -480,6 +504,7 @@ struct SettingsView: View {
             .textContentType(.password)
             .privacySensitive()
             .textFieldStyle(.roundedBorder)
+            .speakTooltip("Paste your OpenRouter API key here so Speak can call their models on your behalf.")
 
           Text("Stored securely in your macOS Keychain. We only use it when calling OpenRouter.")
             .font(.caption)
@@ -500,6 +525,7 @@ struct SettingsView: View {
                 || newAPIKeyValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             )
             .buttonStyle(.borderedProminent)
+            .speakTooltip("Store this OpenRouter key safely in your macOS Keychain for Speak to use when needed.")
 
             if isOpenRouterKeyStored {
               Button {
@@ -509,11 +535,13 @@ struct SettingsView: View {
               }
               .disabled(isValidatingKey)
               .buttonStyle(.bordered)
+              .speakTooltip("Make sure your saved key still works before you rely on it in a session.")
 
               Button("Remove Key", role: .destructive) {
                 removeOpenRouterKey()
               }
               .disabled(isValidatingKey)
+              .speakTooltip("Forget this key from Speak and your Keychain if you no longer need it.")
             }
           }
 
@@ -521,6 +549,7 @@ struct SettingsView: View {
           validationDebugDetails
         }
       }
+      .speakTooltip("Securely store and validate the OpenRouter key Speak uses for advanced models.")
 
       // Transcription Providers (Dynamic)
       ForEach(transcriptionProviders) { provider in
@@ -549,12 +578,14 @@ struct SettingsView: View {
             Label("Get API Key", systemImage: "arrow.up.forward.square")
               .font(.caption)
           }
+          .speakTooltip("Open \(provider.displayName)'s site to create or manage your API key in your browser.")
         }
 
         SecureField(provider.apiKeyLabel, text: binding(for: provider.id))
           .textContentType(.password)
           .privacySensitive()
           .textFieldStyle(.roundedBorder)
+          .speakTooltip("Paste your \(provider.displayName) key exactly as issued; Speak stores it securely in your Keychain.")
 
         Text("Stored securely in your macOS Keychain. Used only for \(provider.displayName) transcription.")
           .font(.caption)
@@ -579,6 +610,7 @@ struct SettingsView: View {
           )
           .buttonStyle(.borderedProminent)
           .tint(tintColor)
+          .speakTooltip("Securely store your \(provider.displayName) key so Speak can contact the service when needed.")
 
           if isStored {
             Button {
@@ -593,17 +625,20 @@ struct SettingsView: View {
             }
             .disabled(isValidating || isValidatingProviderKey(validationState))
             .buttonStyle(.bordered)
+            .speakTooltip("Confirm that your \(provider.displayName) key is still valid before a big session.")
 
             Button("Remove Key", role: .destructive) {
               removeProviderAPIKey(provider)
             }
             .disabled(isValidating)
+            .speakTooltip("Forget this service key from Speak and your Keychain when you no longer use it.")
           }
         }
 
         providerValidationStatusView(for: provider.id, state: validationState)
       }
     }
+    .speakTooltip("Manage your \(provider.displayName) API key securely without leaving Speak.")
   }
 
   private func binding(for providerID: String) -> Binding<String> {
@@ -876,8 +911,10 @@ struct SettingsView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
               .fill(Color(nsColor: .controlBackgroundColor))
           )
+          .speakTooltip("Decide whether you press, hold, or double-tap the Fn key to start a session.")
         }
       }
+      .speakTooltip("Choose how the Fn key behaves when you start and stop recordings.")
 
       SettingsCard(title: "Timing", systemImage: "timer", tint: Color.orange) {
         VStack(alignment: .leading, spacing: 16) {
@@ -892,6 +929,7 @@ struct SettingsView: View {
               .foregroundStyle(.secondary)
             }
             Slider(value: settingsBinding(\AppSettings.holdThreshold), in: 0.2...1.5, step: 0.05)
+            .speakTooltip("Decide how long you must hold the shortcut before Speak starts recording.")
           }
 
           VStack(alignment: .leading, spacing: 6) {
@@ -905,9 +943,11 @@ struct SettingsView: View {
               .foregroundStyle(.secondary)
             }
             Slider(value: settingsBinding(\AppSettings.doubleTapWindow), in: 0.2...1.0, step: 0.05)
+            .speakTooltip("Set the gap allowed between taps when you double-press to trigger Speak.")
           }
         }
       }
+      .speakTooltip("Fine-tune how long you hold or double-tap the shortcut before Speak responds.")
     }
   }
 
@@ -929,6 +969,7 @@ struct SettingsView: View {
                 Task { await environment.permissions.request(permission) }
               }
               .buttonStyle(.bordered)
+              .speakTooltip("Ask macOS to prompt again for \(permission.displayName) access.")
             }
           }
 
@@ -936,8 +977,10 @@ struct SettingsView: View {
             environment.permissions.refreshAll()
           }
           .buttonStyle(.borderedProminent)
+          .speakTooltip("Re-check what the system currently allows without leaving Speak.")
         }
       }
+      .speakTooltip("Review and refresh the macOS permissions Speak depends on.")
     }
   }
 
@@ -1110,6 +1153,7 @@ private struct ModelPicker: View {
         RoundedRectangle(cornerRadius: 8, style: .continuous)
           .fill(Color(nsColor: .controlBackgroundColor))
       )
+      .speakTooltip(tooltipText)
 
       if let help {
         Text(help)
@@ -1127,6 +1171,7 @@ private struct ModelPicker: View {
         TextField("Custom model identifier", text: $customValue, prompt: Text("provider/model"))
           .textFieldStyle(.roundedBorder)
           .autocorrectionDisabled()
+          .speakTooltip("Type the exact provider/model identifier from your transcription service, such as openai/whisper-1.")
       } else {
         HStack(spacing: 6) {
           Image(systemName: "info.circle")
@@ -1159,6 +1204,16 @@ private struct ModelPicker: View {
     options.first { option in
       option.id.caseInsensitiveCompare(selection) == .orderedSame
     }
+  }
+
+  private var tooltipText: String {
+    if let help, !help.isEmpty {
+      return help
+    }
+    if let description = selectedOption?.description, !description.isEmpty {
+      return description
+    }
+    return "Choose which model Speak should use for this step."
   }
 }
 
@@ -1267,7 +1322,7 @@ private struct ValidationDebugDetailsView: View {
             .labelStyle(.iconOnly)
         }
         .buttonStyle(.borderless)
-        .help("Copy to clipboard")
+        .speakTooltip("Copy to clipboard")
       }
       ScrollView(.vertical) {
         Text(value)

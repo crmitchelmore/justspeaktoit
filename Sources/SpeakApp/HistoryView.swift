@@ -98,6 +98,7 @@ struct HistoryView: View {
           TextField("Search history", text: $searchText)
             .textFieldStyle(.plain)
             .foregroundColor(.white)
+            .speakTooltip("Search your past sessions by transcript, model, or keyword so you can quickly revisit the right moment.")
         }
         .padding(.vertical, 12)
         .padding(.horizontal, 16)
@@ -110,6 +111,7 @@ struct HistoryView: View {
           .toggleStyle(.switch)
           .tint(.white)
           .foregroundStyle(.white)
+          .speakTooltip("Show only sessions where Speak spotted issues, making it easy to focus on what needs attention.")
 
         Spacer()
 
@@ -122,6 +124,7 @@ struct HistoryView: View {
         .tint(.white)
         .foregroundStyle(Color.purple)
         .disabled(historyItems.isEmpty)
+        .speakTooltip("Clear every saved session entry from this history view. Your original audio files stay where you left them.")
       }
 
       HStack(spacing: 16) {
@@ -280,7 +283,7 @@ private struct HistoryListRow: View {
                 .foregroundStyle(.red)
             }
             .buttonStyle(.borderless)
-            .help("Delete this history item")
+            .speakTooltip("Delete this history item")
             Image(systemName: isExpanded ? "chevron.up.circle.fill" : "chevron.down.circle")
               .imageScale(.large)
               .symbolRenderingMode(.palette)
@@ -301,7 +304,7 @@ private struct HistoryListRow: View {
                   .labelStyle(.iconOnly)
               }
               .buttonStyle(.borderless)
-              .help("Copy the best available transcript")
+              .speakTooltip("Copy the best available transcript")
             }
           } else {
             Text(previewText)
@@ -319,6 +322,7 @@ private struct HistoryListRow: View {
         .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
+      .speakTooltip("Click to open or close full details for this session, including transcripts, costs, and network activity.")
 
       if isExpanded {
         Divider()
@@ -875,6 +879,7 @@ private struct HistoryListRow: View {
       )
     }
     .buttonStyle(.plain)
+    .speakTooltip("Peek behind the scenes to review the API requests and responses that powered this session.")
   }
 
   private var footerActions: some View {
@@ -885,13 +890,23 @@ private struct HistoryListRow: View {
         } label: {
           Label("Show in Finder", systemImage: "folder")
         }
+        .speakTooltip("Open the folder where this recording lives so you can manage or share the original audio.")
 
         Button {
           Task { await environment.main.reprocessHistoryItem(item) }
         } label: {
-          Label("Reprocess", systemImage: "arrow.triangle.2.circlepath")
+          Label {
+            HStack(spacing: 6) {
+              Text("Reprocess")
+              Image(systemName: "questionmark.circle")
+                .imageScale(.small)
+            }
+          } icon: {
+            Image(systemName: "arrow.triangle.2.circlepath")
+          }
         }
         .disabled(environment.main.isBusy)
+        .speakTooltip("Sometimes on-device audio misses words. Reprocess sends this clip to our larger cloud models, which usually pick up every detail.")
       }
       if environment.main.isBusy {
         ProgressView()
@@ -982,12 +997,14 @@ private struct AudioPlaybackControls: View {
         .labelStyle(.titleAndIcon)
       }
       .buttonStyle(.borderedProminent)
+      .speakTooltip("Tap to listen back and double-check what Speak heard for this session.")
 
       Button(action: controller.stop) {
         Label("Stop", systemImage: "stop.circle")
       }
       .buttonStyle(.bordered)
       .disabled(controller.state == .idle)
+      .speakTooltip("Stop playback and reset the audio timer back to the beginning.")
 
       Text(controller.formattedTime)
         .font(.caption.monospacedDigit())

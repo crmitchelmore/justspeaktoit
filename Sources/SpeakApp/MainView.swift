@@ -67,6 +67,7 @@ struct MainView: View {
         }
       }
       .keyboardShortcut(.space, modifiers: [.command, .shift])
+      .speakTooltip("Start or stop a recording from anywhere in Speak. We'll let you know when we're listening.")
     }
     ToolbarItem(placement: .status) {
       VStack(alignment: .trailing, spacing: 2) {

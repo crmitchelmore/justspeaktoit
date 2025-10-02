@@ -56,6 +56,7 @@ struct DashboardView: View {
         .contentShape(Capsule())
         .keyboardShortcut(.space, modifiers: [.command])
         .disabled(isBusy)
+        .speakTooltip("Start a new recording instantly or stop the current one—Speak keeps you informed every step of the way.")
         .shadow(color: Color.black.opacity(0.25), radius: 18, x: 0, y: 12)
         .animation(.easeInOut(duration: 0.2), value: environment.main.state)
       }
@@ -248,6 +249,7 @@ struct DashboardView: View {
         }
       }
     }
+    .speakTooltip("Review and grant the permissions Speak needs so recordings and shortcuts work reliably.")
   }
 
   private func permissionCard(for permission: PermissionType) -> some View {
@@ -272,6 +274,7 @@ struct DashboardView: View {
         Task { await request(permission) }
       }
       .controlSize(.small)
+      .speakTooltip(permission.guidanceText)
     }
     .padding()
     .background(
@@ -282,6 +285,7 @@ struct DashboardView: View {
       RoundedRectangle(cornerRadius: 18, style: .continuous)
         .stroke(statusColor(status).opacity(0.4), lineWidth: 1)
     )
+    .speakTooltip(permission.guidanceText)
   }
 
   private func request(_ permission: PermissionType) async {
@@ -330,6 +334,7 @@ struct DashboardView: View {
         statCard(title: "Spend", value: formattedCurrency(stats.totalSpend))
       }
     }
+    .speakTooltip("Keep tabs on how often you record, how long sessions run, and what they cost over time.")
   }
 
   private func statCard(title: String, value: String) -> some View {
@@ -374,6 +379,7 @@ struct DashboardView: View {
           .foregroundStyle(.secondary)
       }
     }
+    .speakTooltip("Revisit your latest session with transcripts, timing, and model details all in one place.")
   }
 
   private func recentItemView(_ item: HistoryItem) -> some View {
@@ -415,6 +421,7 @@ struct DashboardView: View {
     DashboardCard(title: "Daily Usage", systemImage: "chart.bar.fill", tint: Color.cyan) {
       DailyRecordingsChart(data: environment.history.items.dailyUsageForLastMonth())
     }
+    .speakTooltip("See when you rely on Speak the most so you can plan deep work and reviews thoughtfully.")
   }
 
   private var transcriptionModelChartSection: some View {
@@ -425,6 +432,7 @@ struct DashboardView: View {
         color: .green
       )
     }
+    .speakTooltip("Compare which transcription services you lean on most and balance accuracy with cost.")
   }
 
   private var postProcessingModelChartSection: some View {
@@ -435,6 +443,7 @@ struct DashboardView: View {
         color: .purple
       )
     }
+    .speakTooltip("Understand which refinement models polish your transcripts after the first pass.")
   }
 }
 

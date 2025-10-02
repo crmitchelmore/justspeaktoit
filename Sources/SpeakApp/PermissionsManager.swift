@@ -40,6 +40,19 @@ enum PermissionType: CaseIterable, Identifiable {
       return "keyboard"
     }
   }
+
+  var guidanceText: String {
+    switch self {
+    case .microphone:
+      return "Allow Speak to access your microphone so we can capture your words the moment you press record."
+    case .speechRecognition:
+      return "Grant macOS speech recognition so Speak can turn your recordings into on-screen text in real time."
+    case .accessibility:
+      return "Enable accessibility controls so Speak can show helpful overlays and respond to your shortcuts respectfully."
+    case .inputMonitoring:
+      return "Permit hotkey monitoring so Speak notices only the shortcuts you assign—nothing more."
+    }
+  }
 }
 
 enum PermissionStatus: Equatable {

@@ -39,6 +39,17 @@ enum SidebarItem: Hashable, Identifiable {
       return .orange
     }
   }
+
+  var helpMessage: String {
+    switch self {
+    case .dashboard:
+      return "Open the dashboard for live stats, quick actions, and your most recent session."
+    case .history:
+      return "Review every past recording with transcripts, costs, and network details."
+    case .settings:
+      return "Adjust Speak's recording, transcription, and shortcut preferences."
+    }
+  }
 }
 
 struct SideBarView: View {
@@ -53,6 +64,7 @@ struct SideBarView: View {
               .foregroundStyle(selection == item ? item.color : .primary)
           }
           .listItemTint(item.color)
+          .speakTooltip(item.helpMessage)
         }
       }
     }

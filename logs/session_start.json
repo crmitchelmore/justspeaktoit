@@ -1,9 +1,0 @@
-[
-  {
-    "session_id": "4a3b685e-d7d1-4311-97a6-30d290e2f8d5",
-    "transcript_path": "/Users/cm/.claude/projects/-Users-cm-work-speak-claude-s/4a3b685e-d7d1-4311-97a6-30d290e2f8d5.jsonl",
-    "cwd": "/Users/cm/work/speak-claude-s",
-    "hook_event_name": "SessionStart",
-    "source": "startup"
-  }
-]

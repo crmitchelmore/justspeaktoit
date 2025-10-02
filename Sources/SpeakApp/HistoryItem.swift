@@ -115,6 +115,22 @@ struct HistoryCost: Codable, Hashable {
   let breakdown: ChatCostBreakdown?
 }
 
+enum ModelUsagePhase: String, Codable, Hashable {
+  case transcriptionLive = "live"
+  case transcriptionBatch = "batch"
+  case postProcessing = "post-processing"
+}
+
+struct ModelUsage: Codable, Hashable {
+  let modelIdentifier: String
+  let phase: ModelUsagePhase
+
+  init(modelIdentifier: String, phase: ModelUsagePhase) {
+    self.modelIdentifier = modelIdentifier
+    self.phase = phase
+  }
+}
+
 struct PhaseTimestamps: Codable, Hashable {
   let recordingStarted: Date?
   let recordingEnded: Date?
@@ -129,7 +145,8 @@ struct HistoryItem: Codable, Identifiable, Hashable {
   let id: UUID
   let createdAt: Date
   let updatedAt: Date
-  let modelsUsed: [String]
+  let modelsUsed: [String]  // Deprecated: kept for backwards compatibility
+  let modelUsages: [ModelUsage]
   let rawTranscription: String?
   let postProcessedTranscription: String?
   let recordingDuration: TimeInterval
@@ -143,6 +160,7 @@ struct HistoryItem: Codable, Identifiable, Hashable {
 
   init(
     id: UUID = UUID(), createdAt: Date = .init(), updatedAt: Date = .init(), modelsUsed: [String],
+    modelUsages: [ModelUsage] = [],
     rawTranscription: String?, postProcessedTranscription: String?, recordingDuration: TimeInterval,
     cost: HistoryCost?, audioFileURL: URL?, networkExchanges: [HistoryNetworkExchange],
     events: [HistoryEvent], phaseTimestamps: PhaseTimestamps, trigger: HistoryTrigger,
@@ -152,6 +170,7 @@ struct HistoryItem: Codable, Identifiable, Hashable {
     self.createdAt = createdAt
     self.updatedAt = updatedAt
     self.modelsUsed = modelsUsed
+    self.modelUsages = modelUsages
     self.rawTranscription = rawTranscription
     self.postProcessedTranscription = postProcessedTranscription
     self.recordingDuration = recordingDuration
@@ -165,7 +184,11 @@ struct HistoryItem: Codable, Identifiable, Hashable {
   }
 
   static let placeholder: HistoryItem = .init(
-    modelsUsed: ["apple/local/SFSpeechRecognizer"],
+    modelsUsed: ["apple/local/SFSpeechRecognizer", "inception/mercury"],
+    modelUsages: [
+      ModelUsage(modelIdentifier: "apple/local/SFSpeechRecognizer", phase: .transcriptionLive),
+      ModelUsage(modelIdentifier: "inception/mercury", phase: .postProcessing)
+    ],
     rawTranscription: "Hello world, this is a placeholder recording.",
     postProcessedTranscription: "Hello world — this is a placeholder recording.",
     recordingDuration: 32.5,

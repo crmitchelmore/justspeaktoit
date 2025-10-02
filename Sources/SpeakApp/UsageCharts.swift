@@ -52,13 +52,30 @@ extension Array where Element == HistoryItem {
     var modelData: [String: (count: Int, spend: Decimal)] = [:]
 
     for item in self {
-      // Determine which model was used for this phase
-      let model = item.modelForPhase(phase)
-      guard let model = model else { continue }
+      // Use explicit phase tracking if available, otherwise fall back to inference
+      if !item.modelUsages.isEmpty {
+        let relevantUsages: [ModelUsage]
+        switch phase {
+        case .transcription:
+          relevantUsages = item.modelUsages.filter { $0.phase == .transcriptionLive || $0.phase == .transcriptionBatch }
+        case .postProcessing:
+          relevantUsages = item.modelUsages.filter { $0.phase == .postProcessing }
+        }
 
-      let current = modelData[model] ?? (count: 0, spend: Decimal(0))
-      let spend = item.spendForPhase(phase) ?? Decimal(0)
-      modelData[model] = (count: current.count + 1, spend: current.spend + spend)
+        for usage in relevantUsages {
+          let current = modelData[usage.modelIdentifier] ?? (count: 0, spend: Decimal(0))
+          let spend = item.spendForPhase(phase) ?? Decimal(0)
+          modelData[usage.modelIdentifier] = (count: current.count + 1, spend: current.spend + spend)
+        }
+      } else {
+        // Fallback for legacy items without phase tracking
+        let model = item.modelForPhase(phase)
+        guard let model = model else { continue }
+
+        let current = modelData[model] ?? (count: 0, spend: Decimal(0))
+        let spend = item.spendForPhase(phase) ?? Decimal(0)
+        modelData[model] = (count: current.count + 1, spend: current.spend + spend)
+      }
     }
 
     return modelData.map { key, value in

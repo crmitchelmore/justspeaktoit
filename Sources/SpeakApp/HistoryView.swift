@@ -310,13 +310,10 @@ private struct HistoryListRow: View {
               .lineLimit(2)
           }
 
-          if let models = modelsSummary {
-            Label(
-              models.replacingOccurrences(of: "\n", with: ", "),
-              systemImage: "brain.head.profile"
-            )
-            .font(.caption)
-            .foregroundStyle(.secondary)
+          if let models = modelsSummaryByPhase {
+            Label(models, systemImage: "brain.head.profile")
+              .font(.caption)
+              .foregroundStyle(.secondary)
           }
         }
         .contentShape(Rectangle())
@@ -580,7 +577,22 @@ private struct HistoryListRow: View {
           }
         }
 
-        if let models = modelsSummary {
+        if !item.modelUsages.isEmpty {
+          metaTile(icon: "brain.head.profile", title: "Models") {
+            VStack(alignment: .leading, spacing: 4) {
+              ForEach(groupedModelsByPhase, id: \.phase) { group in
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                  Text("\(group.phaseLabel):")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                  Text(group.models)
+                    .font(.caption)
+                }
+              }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+          }
+        } else if let models = modelsSummary {
           metaTile(icon: "brain.head.profile", title: "Models") {
             Text(models.replacingOccurrences(of: "\n", with: ", "))
               .fixedSize(horizontal: false, vertical: true)
@@ -620,6 +632,60 @@ private struct HistoryListRow: View {
     guard !item.modelsUsed.isEmpty else { return nil }
     let friendly = item.modelsUsed.map { ModelCatalog.friendlyName(for: $0) }
     return friendly.joined(separator: "\n")
+  }
+
+  private var modelsSummaryByPhase: String? {
+    guard !item.modelUsages.isEmpty else { return nil }
+
+    let groups = Dictionary(grouping: item.modelUsages, by: { $0.phase })
+      .sorted { phaseOrder($0.key) < phaseOrder($1.key) }
+
+    let parts = groups.map { phase, usages in
+      let models = usages.map { ModelCatalog.friendlyName(for: $0.modelIdentifier) }.joined(separator: ", ")
+      return "\(phaseLabel(phase)): \(models)"
+    }
+
+    return parts.joined(separator: " • ")
+  }
+
+  private struct ModelsByPhase {
+    let phase: ModelUsagePhase
+    let phaseLabel: String
+    let models: String
+  }
+
+  private var groupedModelsByPhase: [ModelsByPhase] {
+    guard !item.modelUsages.isEmpty else { return [] }
+
+    let groups = Dictionary(grouping: item.modelUsages, by: { $0.phase })
+      .sorted { phaseOrder($0.key) < phaseOrder($1.key) }
+
+    return groups.map { phase, usages in
+      let models = usages.map { ModelCatalog.friendlyName(for: $0.modelIdentifier) }.joined(separator: ", ")
+      return ModelsByPhase(phase: phase, phaseLabel: phaseLabel(phase), models: models)
+    }
+  }
+
+  private func phaseLabel(_ phase: ModelUsagePhase) -> String {
+    switch phase {
+    case .transcriptionLive:
+      return "Live"
+    case .transcriptionBatch:
+      return "Batch"
+    case .postProcessing:
+      return "Post-processing"
+    }
+  }
+
+  private func phaseOrder(_ phase: ModelUsagePhase) -> Int {
+    switch phase {
+    case .transcriptionLive:
+      return 0
+    case .transcriptionBatch:
+      return 1
+    case .postProcessing:
+      return 2
+    }
   }
 
   private func metaTile<Content: View>(

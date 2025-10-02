@@ -221,6 +221,7 @@ final class MainManager: ObservableObject {
         session.transcriptionEnded = Date()
         session.transcriptionResult = result
         session.modelsUsed.insert(result.modelIdentifier)
+        session.modelUsages.append(ModelUsage(modelIdentifier: result.modelIdentifier, phase: .transcriptionLive))
         session.events.append(
           HistoryEvent(kind: .transcriptionReceived, description: "Live transcription complete")
         )
@@ -240,6 +241,7 @@ final class MainManager: ObservableObject {
         session.transcriptionEnded = Date()
         session.transcriptionResult = result
         session.modelsUsed.insert(result.modelIdentifier)
+        session.modelUsages.append(ModelUsage(modelIdentifier: result.modelIdentifier, phase: .transcriptionBatch))
         session.events.append(
           HistoryEvent(kind: .transcriptionReceived, description: "Batch transcription complete")
         )
@@ -312,6 +314,7 @@ final class MainManager: ObservableObject {
               )
             }
             session.modelsUsed.insert(resolvedPostProcessingModel)
+            session.modelUsages.append(ModelUsage(modelIdentifier: resolvedPostProcessingModel, phase: .postProcessing))
             if let cost = response.cost {
               session.recordCostFragment(cost)
             }
@@ -397,6 +400,7 @@ final class MainManager: ObservableObject {
       session.transcriptionEnded = Date()
       session.transcriptionResult = result
       session.modelsUsed.insert(result.modelIdentifier)
+      session.modelUsages.append(ModelUsage(modelIdentifier: result.modelIdentifier, phase: .transcriptionBatch))
       session.events.append(
         HistoryEvent(kind: .transcriptionReceived, description: "Batch transcription complete")
       )
@@ -469,6 +473,7 @@ final class MainManager: ObservableObject {
             }
             if !appSettings.postProcessingModel.isEmpty {
               session.modelsUsed.insert(appSettings.postProcessingModel)
+              session.modelUsages.append(ModelUsage(modelIdentifier: appSettings.postProcessingModel, phase: .postProcessing))
             }
           }
         case .failure(let error):
@@ -619,7 +624,8 @@ private final class ActiveSession {
   var events: [HistoryEvent] = []
   var errors: [HistoryError] = []
   var networkExchanges: [HistoryNetworkExchange] = []
-  var modelsUsed: Set<String> = []
+  var modelsUsed: Set<String> = []  // Deprecated: kept for backwards compatibility
+  var modelUsages: [ModelUsage] = []
   var totalCost: Decimal = 0
   var costBreakdown: ChatCostBreakdown?
   var recordingStarted: Date
@@ -679,6 +685,7 @@ private final class ActiveSession {
       createdAt: createdAt,
       updatedAt: updatedAt,
       modelsUsed: models,
+      modelUsages: modelUsages,
       rawTranscription: transcriptionResult?.text,
       postProcessedTranscription: postProcessingOutcome?.processed,
       recordingDuration: recordingSummary?.duration ?? 0,

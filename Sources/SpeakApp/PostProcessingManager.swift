@@ -12,52 +12,42 @@ struct PostProcessingOutcome {
 final class PostProcessingManager: ObservableObject {
   private let client: ChatLLMClient
   private let settings: AppSettings
+  private let personalLexicon: PersonalLexiconService
   private let log = Logger(subsystem: "com.github.speakapp", category: "PostProcessing")
 
   static let defaultPrompt =
     "The following message is a raw transcription. Improve the transcription by fixing grammar, punctuation, and formatting while preserving the original meaning. Only ever return the processed transcription, no additional text."
 
-  init(client: ChatLLMClient, settings: AppSettings) {
+  init(client: ChatLLMClient, settings: AppSettings, personalLexicon: PersonalLexiconService) {
     self.client = client
     self.settings = settings
+    self.personalLexicon = personalLexicon
   }
 
-  private var effectiveSystemPrompt: String {
-    let trimmed = settings.postProcessingSystemPrompt
-      .trimmingCharacters(in: .whitespacesAndNewlines)
-    let basePrompt = trimmed.isEmpty ? Self.defaultPrompt : trimmed
-
-    let language = settings.postProcessingOutputLanguage
-      .trimmingCharacters(in: .whitespacesAndNewlines)
-
-    if !language.isEmpty {
-      return "Always output using \(language). \(basePrompt)"
-    }
-
-    return basePrompt
-  }
-
-  func process(rawText: String) async -> Result<PostProcessingOutcome, Error> {
+  func process(
+    rawText: String,
+    context: PersonalLexiconContext,
+    corrections: PersonalLexiconHistorySummary?
+  ) async -> Result<PostProcessingOutcome, Error> {
     guard settings.postProcessingEnabled else {
       return .success(
         .init(
           original: rawText,
           processed: rawText,
           response: nil,
-          systemPrompt: effectiveSystemPrompt
+          systemPrompt: basePrompt()
         )
       )
     }
 
     do {
-      let systemPrompt = effectiveSystemPrompt
+      let systemPrompt = effectiveSystemPrompt(for: context, corrections: corrections)
       let response = try await client.sendChat(
         systemPrompt: systemPrompt,
         messages: [ChatMessage(role: .user, content: rawText)],
         model: settings.postProcessingModel.isEmpty
           ? "inception/mercury"
-          : settings
-            .postProcessingModel,
+          : settings.postProcessingModel,
         temperature: settings.postProcessingTemperature
       )
 
@@ -93,6 +83,121 @@ final class PostProcessingManager: ObservableObject {
     }
 
     return await openRouterClient.hasStoredAPIKey()
+  }
+
+  private func basePrompt() -> String {
+    let trimmed = settings.postProcessingSystemPrompt
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    let basePrompt = trimmed.isEmpty ? Self.defaultPrompt : trimmed
+
+    let rawLanguage = settings.postProcessingOutputLanguage
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+
+    let language: String
+    if rawLanguage.uppercased() == "ENGB" || rawLanguage.lowercased() == "en_gb" {
+      language = "British English"
+    } else {
+      language = rawLanguage
+    }
+
+    if !language.isEmpty {
+      return "Always output using \(language). \(basePrompt)"
+    }
+
+    return basePrompt
+  }
+
+  private func effectiveSystemPrompt(
+    for context: PersonalLexiconContext,
+    corrections: PersonalLexiconHistorySummary?
+  ) -> String {
+    var sections: [String] = []
+
+    let directives = lexiconDirectives(for: context, corrections: corrections)
+    if !directives.isEmpty {
+      let bulletList = directives.map { "- \($0)" }.joined(separator: "\n")
+      let directiveSection = "Personal lexicon directives (internal use only):\n\(bulletList)\nApply these silently and never repeat or reference them in the response."
+      sections.append(directiveSection)
+    }
+
+    var corePrompt = basePrompt()
+
+    if !context.tags.isEmpty {
+      let tagList = context.tags.sorted().joined(separator: ", ")
+      corePrompt += "\nContext tags: \(tagList)."
+    }
+
+    sections.append(corePrompt)
+
+    return sections.joined(separator: "\n\n")
+  }
+
+  private func lexiconDirectives(
+    for context: PersonalLexiconContext,
+    corrections: PersonalLexiconHistorySummary?
+  ) -> [String] {
+    var canonicalToAliases: [String: Set<String>] = [:]
+    var canonicalConfidence: [String: PersonalLexiconConfidence] = [:]
+
+    func merge(alias: String, canonical: String, confidence: PersonalLexiconConfidence) {
+      canonicalToAliases[canonical, default: []].insert(alias)
+      let existing = canonicalConfidence[canonical]
+      canonicalConfidence[canonical] = maxConfidence(existing, confidence)
+    }
+
+    for rule in personalLexicon.activeRules(for: context) {
+      for alias in rule.aliases {
+        merge(alias: alias, canonical: rule.canonical, confidence: rule.confidence)
+      }
+    }
+
+    if let corrections {
+      for record in corrections.applied {
+        merge(alias: record.alias, canonical: record.canonical, confidence: record.confidence)
+      }
+    }
+
+    var directives: [String] = []
+
+    for canonical in canonicalToAliases.keys.sorted(by: { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }) {
+      let aliases = canonicalToAliases[canonical]?.sorted() ?? []
+      guard !aliases.isEmpty else { continue }
+      let aliasList = aliases.joined(separator: ", ")
+      let confidenceLabel = confidenceDescription(canonicalConfidence[canonical] ?? .medium)
+      directives.append("Normalize \(aliasList) to \"\(canonical)\" (confidence: \(confidenceLabel)).")
+    }
+
+    if let suggestions = corrections?.suggestions, !suggestions.isEmpty {
+      for suggestion in suggestions {
+        let confidenceLabel = confidenceDescription(suggestion.confidence)
+        let reason = suggestion.reason ?? "manual rule"
+        directives.append(
+          "Suggestion: Only change \"\(suggestion.alias)\" to \"\(suggestion.canonical)\" when the conversation matches (confidence: \(confidenceLabel), reason: \(reason))."
+        )
+      }
+    }
+
+    return directives
+  }
+
+  private func confidenceDescription(_ confidence: PersonalLexiconConfidence) -> String {
+    switch confidence {
+    case .high: return "high"
+    case .medium: return "medium"
+    case .low: return "low"
+    }
+  }
+
+  private func maxConfidence(
+    _ existing: PersonalLexiconConfidence?,
+    _ candidate: PersonalLexiconConfidence
+  ) -> PersonalLexiconConfidence {
+    guard let existing else { return candidate }
+    let order: [PersonalLexiconConfidence: Int] = [.low: 0, .medium: 1, .high: 2]
+    if (order[candidate] ?? 0) >= (order[existing] ?? 0) {
+      return candidate
+    }
+    return existing
   }
 }
 // @Implement This manager depends on the chat LLM protocol as a dependency and alongside app settings for any configuration. It can read the system prompt that should come with it and orchestrate sending the request off, receiving it, and sending it back to the caller.

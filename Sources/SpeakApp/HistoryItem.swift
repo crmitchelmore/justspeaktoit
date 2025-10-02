@@ -156,6 +156,7 @@ struct HistoryItem: Codable, Identifiable, Hashable {
   let events: [HistoryEvent]
   let phaseTimestamps: PhaseTimestamps
   let trigger: HistoryTrigger
+  let personalCorrections: PersonalLexiconHistorySummary?
   let errors: [HistoryError]
 
   init(
@@ -164,7 +165,7 @@ struct HistoryItem: Codable, Identifiable, Hashable {
     rawTranscription: String?, postProcessedTranscription: String?, recordingDuration: TimeInterval,
     cost: HistoryCost?, audioFileURL: URL?, networkExchanges: [HistoryNetworkExchange],
     events: [HistoryEvent], phaseTimestamps: PhaseTimestamps, trigger: HistoryTrigger,
-    errors: [HistoryError]
+    personalCorrections: PersonalLexiconHistorySummary?, errors: [HistoryError]
   ) {
     self.id = id
     self.createdAt = createdAt
@@ -180,6 +181,7 @@ struct HistoryItem: Codable, Identifiable, Hashable {
     self.events = events
     self.phaseTimestamps = phaseTimestamps
     self.trigger = trigger
+    self.personalCorrections = personalCorrections
     self.errors = errors
   }
 
@@ -190,7 +192,7 @@ struct HistoryItem: Codable, Identifiable, Hashable {
       ModelUsage(modelIdentifier: "inception/mercury", phase: .postProcessing)
     ],
     rawTranscription: "Hello world, this is a placeholder recording.",
-    postProcessedTranscription: "Hello world — this is a placeholder recording.",
+    postProcessedTranscription: "Hello world - this is a placeholder recording.",
     recordingDuration: 32.5,
     cost: .init(total: 0.002, currency: "USD", breakdown: nil),
     audioFileURL: nil,
@@ -214,6 +216,22 @@ struct HistoryItem: Codable, Identifiable, Hashable {
       hotKeyDescription: "Fn",
       outputMethod: .accessibility,
       destinationApplication: "Notes"
+    ),
+    personalCorrections: .init(
+      applied: [
+        PersonalLexiconCorrectionRecord(
+          ruleID: UUID(),
+          alias: "susie",
+          canonical: "Susy",
+          occurrences: 1,
+          wasApplied: true,
+          confidence: .high,
+          reason: nil
+        )
+      ],
+      suggestions: [],
+      contextTags: ["intimate"],
+      destinationApplication: "Messages"
     ),
     errors: []
   )

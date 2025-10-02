@@ -26,6 +26,7 @@ final class MainManager: ObservableObject {
   private let postProcessingManager: PostProcessingManager
   private let historyManager: HistoryManager
   private let hudManager: HUDManager
+  private let personalLexicon: PersonalLexiconService
 
   private var activeSession: ActiveSession?
   private var cancellables: Set<AnyCancellable> = []
@@ -40,7 +41,8 @@ final class MainManager: ObservableObject {
     transcriptionManager: TranscriptionManager,
     postProcessingManager: PostProcessingManager,
     historyManager: HistoryManager,
-    hudManager: HUDManager
+    hudManager: HUDManager,
+    personalLexicon: PersonalLexiconService
   ) {
     self.appSettings = appSettings
     self.permissionsManager = permissionsManager
@@ -50,6 +52,7 @@ final class MainManager: ObservableObject {
     self.postProcessingManager = postProcessingManager
     self.historyManager = historyManager
     self.hudManager = hudManager
+    self.personalLexicon = personalLexicon
 
     transcriptionManager.$livePartialText
       .receive(on: RunLoop.main)
@@ -267,7 +270,16 @@ final class MainManager: ObservableObject {
       }
 
       let baseText = session.transcriptionResult?.text ?? ""
-      var finalText = baseText
+      let lexiconContext = makeLexiconContext(for: baseText, destination: nil)
+      let corrections = personalLexicon.apply(to: baseText, context: lexiconContext)
+      session.personalCorrections = PersonalLexiconHistorySummary(
+        applied: corrections.applied,
+        suggestions: corrections.suggestions,
+        contextTags: Array(lexiconContext.tags).sorted(),
+        destinationApplication: lexiconContext.destinationApplication
+      )
+      session.lexiconContext = lexiconContext
+      var finalText = corrections.transformedText
 
       if appSettings.postProcessingEnabled {
         hudManager.beginPostProcessing()
@@ -287,7 +299,12 @@ final class MainManager: ObservableObject {
           configuredModel.isEmpty
           ? "inception/mercury"
           : configuredModel
-        let outcomeResult = await postProcessingManager.process(rawText: baseText)
+        let postProcessingInput = finalText
+        let outcomeResult = await postProcessingManager.process(
+          rawText: postProcessingInput,
+          context: session.lexiconContext,
+          corrections: session.personalCorrections
+        )
         switch outcomeResult {
         case .success(let outcome):
           session.postProcessingEnded = Date()
@@ -305,7 +322,7 @@ final class MainManager: ObservableObject {
                   requestHeaders: ["Model": resolvedPostProcessingModel],
                   requestBodyPreview: postProcessingRequestPreview(
                     systemPrompt: outcome.systemPrompt,
-                    rawText: baseText
+                    rawText: postProcessingInput
                   ),
                   responseCode: 200,
                   responseHeaders: [:],
@@ -353,6 +370,13 @@ final class MainManager: ObservableObject {
         )
         let appName = NSWorkspace.shared.frontmostApplication?.localizedName
         session.destination = appName
+        session.lexiconContext = makeLexiconContext(for: finalText, destination: appName)
+        if let summary = session.personalCorrections {
+          session.personalCorrections = summary.updatingContext(
+            tags: Array(session.lexiconContext.tags).sorted(),
+            destination: appName
+          )
+        }
         let historyItem = session.buildHistoryItem(finalText: finalText)
         await historyManager.append(historyItem)
         hudManager.finishSuccess(message: "Delivered")
@@ -425,7 +449,17 @@ final class MainManager: ObservableObject {
         session.recordCostFragment(cost)
       }
 
-      var finalText = result.text
+      let baseText = result.text
+      let lexiconContext = makeLexiconContext(for: baseText, destination: nil)
+      let corrections = personalLexicon.apply(to: baseText, context: lexiconContext)
+      session.personalCorrections = PersonalLexiconHistorySummary(
+        applied: corrections.applied,
+        suggestions: corrections.suggestions,
+        contextTags: Array(lexiconContext.tags).sorted(),
+        destinationApplication: lexiconContext.destinationApplication
+      )
+      session.lexiconContext = lexiconContext
+      var finalText = corrections.transformedText
 
       if appSettings.postProcessingEnabled {
         hudManager.beginPostProcessing()
@@ -442,7 +476,12 @@ final class MainManager: ObservableObject {
         session.events.append(
           HistoryEvent(kind: .postProcessingSubmitted, description: "Sending to post-processor")
         )
-        let outcomeResult = await postProcessingManager.process(rawText: finalText)
+        let postProcessingInput = finalText
+        let outcomeResult = await postProcessingManager.process(
+          rawText: postProcessingInput,
+          context: session.lexiconContext,
+          corrections: session.personalCorrections
+        )
         switch outcomeResult {
         case .success(let outcome):
           session.postProcessingEnded = Date()
@@ -460,7 +499,7 @@ final class MainManager: ObservableObject {
                   requestHeaders: ["Model": appSettings.postProcessingModel],
                   requestBodyPreview: postProcessingRequestPreview(
                     systemPrompt: outcome.systemPrompt,
-                    rawText: result.text
+                    rawText: postProcessingInput
                   ),
                   responseCode: 200,
                   responseHeaders: [:],
@@ -560,6 +599,38 @@ final class MainManager: ObservableObject {
     return "System Prompt:\n\(promptSection)\n\nUser Text:\n\(truncatedRaw)"
   }
 
+  private func makeLexiconContext(for text: String, destination: String?) -> PersonalLexiconContext {
+    var tags: Set<String> = []
+    let lowered = text.lowercased()
+    if lowered.contains("dear ") || lowered.contains("regards") || lowered.contains("sincerely") {
+      tags.insert("formal")
+    }
+    if lowered.contains("meeting") || lowered.contains("agenda") || lowered.contains("project") || lowered.contains("quarterly") {
+      tags.insert("work")
+    }
+    if lowered.contains("love") || lowered.contains("babe") || lowered.contains("sweetheart") {
+      tags.insert("intimate")
+    }
+    if let destination, !destination.isEmpty {
+      let lowerDest = destination.lowercased()
+      if lowerDest.contains("mail") || lowerDest.contains("outlook") {
+        tags.insert("formal")
+      }
+      if lowerDest.contains("messages") || lowerDest.contains("imessage") {
+        tags.insert("casual")
+      }
+      if lowerDest.contains("slack") || lowerDest.contains("teams") {
+        tags.insert("work")
+      }
+    }
+    let window = String(text.suffix(400))
+    return PersonalLexiconContext(
+      tags: tags,
+      destinationApplication: destination,
+      recentTranscriptWindow: window
+    )
+  }
+
   private func cleanupAfterFailure(message: String, preserveFile: Bool) {
     lastErrorMessage = message
     hudManager.finishFailure(message: message)
@@ -637,6 +708,8 @@ private final class ActiveSession {
   var outputDelivered: Date?
   var outputMethod: HistoryTrigger.OutputMethod = .none
   var destination: String?
+  var personalCorrections: PersonalLexiconHistorySummary?
+  var lexiconContext: PersonalLexiconContext = .empty
 
   init(gesture: HistoryTrigger.HotKeyGesture, hotKeyDescription: String) {
     self.gesture = gesture
@@ -695,6 +768,7 @@ private final class ActiveSession {
       events: events,
       phaseTimestamps: timestamps,
       trigger: trigger,
+      personalCorrections: personalCorrections,
       errors: errors
     )
   }

@@ -3,6 +3,7 @@ import SwiftUI
 struct MainView: View {
   @EnvironmentObject private var environment: AppEnvironment
   @EnvironmentObject private var history: HistoryManager
+  @EnvironmentObject private var personalLexicon: PersonalLexiconService
   @State private var selection: SidebarItem? = .dashboard
   @State private var presentError: Bool = false
   @State private var latestErrorMessage: String = ""
@@ -46,6 +47,9 @@ struct MainView: View {
       DashboardView()
     case .history:
       HistoryView()
+    case .corrections:
+      PersonalCorrectionsView()
+        .environmentObject(personalLexicon)
     case .settings:
       SettingsView()
     }

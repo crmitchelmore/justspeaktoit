@@ -26,6 +26,26 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
 struct SettingsView: View {
   @EnvironmentObject private var environment: AppEnvironment
   @EnvironmentObject private var settings: AppSettings
+  private static let localeOptions: [LocaleOption] = [
+    LocaleOption(displayName: "English (United States)", identifier: "en_US"),
+    LocaleOption(displayName: "English (United Kingdom)", identifier: "en_GB"),
+    LocaleOption(displayName: "English (Australia)", identifier: "en_AU"),
+    LocaleOption(displayName: "English (Canada)", identifier: "en_CA"),
+    LocaleOption(displayName: "Spanish (Spain)", identifier: "es_ES"),
+    LocaleOption(displayName: "Spanish (Mexico)", identifier: "es_MX"),
+    LocaleOption(displayName: "French (France)", identifier: "fr_FR"),
+    LocaleOption(displayName: "German (Germany)", identifier: "de_DE"),
+    LocaleOption(displayName: "Hindi (India)", identifier: "hi_IN"),
+    LocaleOption(displayName: "Japanese (Japan)", identifier: "ja_JP"),
+    LocaleOption(displayName: "Korean (South Korea)", identifier: "ko_KR"),
+    LocaleOption(displayName: "Portuguese (Brazil)", identifier: "pt_BR"),
+    LocaleOption(displayName: "Portuguese (Portugal)", identifier: "pt_PT"),
+    LocaleOption(displayName: "Chinese (Simplified)", identifier: "zh_CN"),
+    LocaleOption(displayName: "Chinese (Traditional)", identifier: "zh_TW"),
+    LocaleOption(displayName: "Arabic (Saudi Arabia)", identifier: "ar_SA"),
+    LocaleOption(displayName: "Russian (Russia)", identifier: "ru_RU")
+  ]
+
   @State private var selectedTab: SettingsTab = .general
   @State private var newAPIKeyValue: String = ""
   @State private var apiKeyValidationState: ValidationViewState = .idle
@@ -294,15 +314,23 @@ struct SettingsView: View {
           )
           .speakTooltip("Pick the recording flow that best matches how you speak—continuous live captions or hold-to-talk batches.")
 
-          TextField(
-            "Preferred Locale (e.g. en_US)",
-            text: settingsBinding(\AppSettings.preferredLocaleIdentifier)
+          Picker("Preferred Locale", selection: settingsBinding(\AppSettings.preferredLocaleIdentifier)) {
+            ForEach(resolvedLocaleOptions) { option in
+              Text(option.displayName).tag(option.identifier)
+            }
+          }
+          .pickerStyle(.menu)
+          .padding(.horizontal, 12)
+          .padding(.vertical, 8)
+          .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+              .fill(Color(nsColor: .controlBackgroundColor))
           )
-          .textFieldStyle(.roundedBorder)
-          .speakTooltip("Force Speak to transcribe with a specific locale when the default detection isn't right.")
+          .speakTooltip("Choose from supported locales so Speak uses the right accent while transcribing.")
         }
       }
       .speakTooltip("Choose which transcription flow Speak uses and the locale it should prefer.")
+
 
       SettingsCard(title: "Recording buffer", systemImage: "waveform.path.ecg", tint: Color.cyan) {
         VStack(alignment: .leading, spacing: 12) {
@@ -393,6 +421,29 @@ struct SettingsView: View {
       .speakTooltip("Tell Speak which cloud transcription model should polish the full recording.")
     }
   }
+
+  private var resolvedLocaleOptions: [LocaleOption] {
+    var options = Self.localeOptions
+    let current = settings.preferredLocaleIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !current.isEmpty else { return options }
+    if !options.contains(where: { $0.identifier == current }) {
+      let display = localeDisplayName(for: current)
+      options.append(LocaleOption(displayName: display, identifier: current))
+    }
+    return options
+  }
+
+  private func localeDisplayName(for identifier: String) -> String {
+    let locale = Locale(identifier: identifier)
+    if let localized = locale.localizedString(forIdentifier: identifier) {
+      return localized.capitalized
+    }
+    if let localized = Locale.current.localizedString(forIdentifier: identifier) {
+      return localized.capitalized
+    }
+    return identifier
+  }
+
 
   private var postProcessingSettings: some View {
     LazyVStack(spacing: 20) {
@@ -1037,6 +1088,12 @@ struct SettingsView: View {
           .fill(Color(nsColor: .controlBackgroundColor))
       )
   }
+}
+
+private struct LocaleOption: Identifiable, Equatable {
+  let displayName: String
+  let identifier: String
+  var id: String { identifier }
 }
 
 private struct SettingsCard<Content: View>: View {

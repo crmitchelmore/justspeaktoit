@@ -12,6 +12,7 @@ final class AppEnvironment: ObservableObject {
   let postProcessing: PostProcessingManager
   let secureStorage: SecureAppStorage
   let openRouter: OpenRouterAPIClient
+  let personalLexicon: PersonalLexiconService
   let main: MainManager
   private let hudPresenter: HUDWindowPresenter
 
@@ -28,6 +29,7 @@ final class AppEnvironment: ObservableObject {
     postProcessing: PostProcessingManager,
     secureStorage: SecureAppStorage,
     openRouter: OpenRouterAPIClient,
+    personalLexicon: PersonalLexiconService,
     main: MainManager,
     hudPresenter: HUDWindowPresenter
   ) {
@@ -41,6 +43,7 @@ final class AppEnvironment: ObservableObject {
     self.postProcessing = postProcessing
     self.secureStorage = secureStorage
     self.openRouter = openRouter
+    self.personalLexicon = personalLexicon
     self.main = main
     self.hudPresenter = hudPresenter
   }
@@ -74,7 +77,13 @@ enum WireUp {
       openRouter: openRouter,
       secureStorage: secureStorage
     )
-    let postProcessing = PostProcessingManager(client: openRouter, settings: settings)
+    let personalLexiconStore = PersonalLexiconStore()
+    let personalLexicon = PersonalLexiconService(store: personalLexiconStore)
+    let postProcessing = PostProcessingManager(
+      client: openRouter,
+      settings: settings,
+      personalLexicon: personalLexicon
+    )
     let main = MainManager(
       appSettings: settings,
       permissionsManager: permissions,
@@ -83,7 +92,8 @@ enum WireUp {
       transcriptionManager: transcription,
       postProcessingManager: postProcessing,
       historyManager: history,
-      hudManager: hud
+      hudManager: hud,
+      personalLexicon: personalLexicon
     )
     let hudPresenter = HUDWindowPresenter(manager: hud)
 
@@ -98,6 +108,7 @@ enum WireUp {
       postProcessing: postProcessing,
       secureStorage: secureStorage,
       openRouter: openRouter,
+      personalLexicon: personalLexicon,
       main: main,
       hudPresenter: hudPresenter
     )

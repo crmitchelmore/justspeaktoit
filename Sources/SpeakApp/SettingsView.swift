@@ -196,18 +196,28 @@ struct SettingsView: View {
           }
           .pickerStyle(.menu)
 
-          Toggle(
-            "Restore clipboard after paste",
-            isOn: settingsBinding(\AppSettings.restoreClipboardAfterPaste)
-          )
-          .tint(.blue)
-          Toggle(
-            "Show HUD during sessions", isOn: settingsBinding(\AppSettings.showHUDDuringSessions))
-          .tint(.blue)
-          Toggle("Show status bar only", isOn: settingsBinding(\AppSettings.showStatusBarOnly))
-          .tint(.blue)
-          Toggle("Launch at login", isOn: settingsBinding(\AppSettings.runAtLogin))
-          .tint(.blue)
+          VStack(alignment: .leading, spacing: 8) {
+            settingsToggle(
+              "Restore clipboard after paste",
+              isOn: settingsBinding(\AppSettings.restoreClipboardAfterPaste),
+              tint: .blue
+            )
+            settingsToggle(
+              "Show HUD during sessions",
+              isOn: settingsBinding(\AppSettings.showHUDDuringSessions),
+              tint: .blue
+            )
+            settingsToggle(
+              "Show status bar only",
+              isOn: settingsBinding(\AppSettings.showStatusBarOnly),
+              tint: .blue
+            )
+            settingsToggle(
+              "Launch at login",
+              isOn: settingsBinding(\AppSettings.runAtLogin),
+              tint: .blue
+            )
+          }
         }
       }
 
@@ -361,9 +371,11 @@ struct SettingsView: View {
     LazyVStack(spacing: 20) {
       SettingsCard(title: "Cleanup", systemImage: "wand.and.stars", tint: Color.pink) {
         VStack(alignment: .leading, spacing: 12) {
-          Toggle(
-            "Enable Post-processing", isOn: settingsBinding(\AppSettings.postProcessingEnabled))
-          .tint(.pink)
+          settingsToggle(
+            "Enable Post-processing",
+            isOn: settingsBinding(\AppSettings.postProcessingEnabled),
+            tint: .pink
+          )
 
           ModelPicker(
             title: "Post-processing Model",
@@ -941,6 +953,17 @@ struct SettingsView: View {
       get: { settings[keyPath: keyPath] },
       set: { settings[keyPath: keyPath] = $0 }
     )
+  }
+
+  private func settingsToggle(_ label: String, isOn: Binding<Bool>, tint: Color) -> some View {
+    Toggle(label, isOn: isOn)
+      .tint(tint)
+      .padding(.horizontal, 12)
+      .padding(.vertical, 8)
+      .background(
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+          .fill(Color(nsColor: .controlBackgroundColor))
+      )
   }
 }
 

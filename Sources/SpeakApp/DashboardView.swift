@@ -2,6 +2,7 @@ import SwiftUI
 
 struct DashboardView: View {
   @EnvironmentObject private var environment: AppEnvironment
+  @EnvironmentObject private var history: HistoryManager
   @State private var requestingPermission: PermissionType?
 
   var body: some View {
@@ -24,7 +25,7 @@ struct DashboardView: View {
   }
 
   private var heroHeader: some View {
-    let stats = environment.history.statistics
+    let stats = history.statistics
     return VStack(alignment: .leading, spacing: 18) {
       HStack(alignment: .top, spacing: 20) {
         VStack(alignment: .leading, spacing: 8) {
@@ -322,7 +323,7 @@ struct DashboardView: View {
   }
 
   private var statisticsSection: some View {
-    let stats = environment.history.statistics
+    let stats = history.statistics
     return DashboardCard(title: "Insights", systemImage: "chart.xyaxis.line", tint: Color.indigo) {
       LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 16)], spacing: 16) {
         statCard(title: "Sessions", value: "\(stats.totalSessions)")
@@ -371,7 +372,7 @@ struct DashboardView: View {
   private var recentSection: some View {
     DashboardCard(title: "Recent Session", systemImage: "clock.arrow.circlepath", tint: Color.cyan)
     {
-      if let item = environment.history.items.first {
+      if let item = history.items.first {
         recentItemView(item)
       } else {
         Text("No recordings yet. Press Record to begin.")
@@ -419,7 +420,7 @@ struct DashboardView: View {
 
   private var dailyUsageChartSection: some View {
     DashboardCard(title: "Daily Usage", systemImage: "chart.bar.fill", tint: Color.cyan) {
-      DailyRecordingsChart(data: environment.history.items.dailyUsageForLastMonth())
+      DailyRecordingsChart(data: history.items.dailyUsageForLastMonth())
     }
     .speakTooltip("See when you rely on Speak the most so you can plan deep work and reviews thoughtfully.")
   }
@@ -428,7 +429,7 @@ struct DashboardView: View {
     DashboardCard(title: "Transcription Models", systemImage: "waveform", tint: Color.green) {
       ModelUsageChart(
         title: "Transcription Model Usage",
-        data: environment.history.items.modelUsage(for: .transcription),
+        data: history.items.modelUsage(for: .transcription),
         color: .green
       )
     }
@@ -439,7 +440,7 @@ struct DashboardView: View {
     DashboardCard(title: "Post-Processing Models", systemImage: "wand.and.stars", tint: Color.purple) {
       ModelUsageChart(
         title: "Post-Processing Model Usage",
-        data: environment.history.items.modelUsage(for: .postProcessing),
+        data: history.items.modelUsage(for: .postProcessing),
         color: .purple
       )
     }

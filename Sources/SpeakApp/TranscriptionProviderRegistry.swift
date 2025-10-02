@@ -12,7 +12,7 @@ protocol TranscriptionProvider: Sendable {
     language: String?
   ) async throws -> TranscriptionResult
 
-  func validateAPIKey(_ key: String) async -> Bool
+  func validateAPIKey(_ key: String) async -> APIKeyValidationResult
   func requiresAPIKey(for model: String) -> Bool
   func supportedModels() -> [ModelCatalog.Option]
 }

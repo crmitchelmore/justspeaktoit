@@ -12,6 +12,7 @@ struct SpeakApp: App {
             MainView()
                 .environmentObject(environment)
                 .environmentObject(environment.settings)
+                .environmentObject(environment.history)
         }
         .defaultSize(width: 1080, height: 720)
     }

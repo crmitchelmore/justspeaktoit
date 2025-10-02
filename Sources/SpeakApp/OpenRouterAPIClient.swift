@@ -19,17 +19,6 @@ enum OpenRouterClientError: LocalizedError {
   }
 }
 
-struct OpenRouterValidationDebugSnapshot: Sendable {
-  let url: String
-  let method: String
-  let requestHeaders: [String: String]
-  let requestBody: String?
-  let statusCode: Int?
-  let responseHeaders: [String: String]
-  let responseBody: String?
-  let errorDescription: String?
-}
-
 actor OpenRouterAPIClient: ChatLLMClient, BatchTranscriptionClient {
   private let baseURL = URL(string: "https://openrouter.ai/api/v1")!
   private let session: URLSession
@@ -38,24 +27,21 @@ actor OpenRouterAPIClient: ChatLLMClient, BatchTranscriptionClient {
   private let apiKeyIdentifier = "openrouter.apiKey"
   private let titleHeaderValue = "SpeakApp (macOS)"
   private let refererHeaderValue = "https://github.com/speak"
-  private var lastValidationDebug: OpenRouterValidationDebugSnapshot?
 
   private struct ValidationAttemptResult {
     let success: Bool
-    let debug: OpenRouterValidationDebugSnapshot
+    let debug: APIKeyValidationDebugSnapshot
+    let message: String
   }
 
   private struct ValidationAttemptError: Error {
-    let debug: OpenRouterValidationDebugSnapshot
+    let debug: APIKeyValidationDebugSnapshot
+    let message: String
   }
 
   init(secureStorage: SecureAppStorage, session: URLSession = .shared) {
     self.secureStorage = secureStorage
     self.session = session
-  }
-
-  func latestValidationDebug() -> OpenRouterValidationDebugSnapshot? {
-    lastValidationDebug
   }
 
   func hasStoredAPIKey() async -> Bool {
@@ -104,38 +90,43 @@ actor OpenRouterAPIClient: ChatLLMClient, BatchTranscriptionClient {
     throw OpenRouterClientError.apiKeyMissing
   }
 
-  func validateAPIKey(_ key: String) async -> Bool {
+  func validateAPIKey(_ key: String) async -> APIKeyValidationResult {
     let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else {
-      lastValidationDebug = OpenRouterValidationDebugSnapshot(
-        url: "",
-        method: "",
-        requestHeaders: [:],
-        requestBody: nil,
-        statusCode: nil,
-        responseHeaders: [:],
-        responseBody: nil,
-        errorDescription: "API key is empty"
+      return .failure(
+        message: "API key is empty",
+        debug: APIKeyValidationDebugSnapshot(
+          url: "",
+          method: "",
+          requestHeaders: [:],
+          requestBody: nil,
+          statusCode: nil,
+          responseHeaders: [:],
+          responseBody: nil,
+          errorDescription: "API key is empty"
+        )
       )
-      return false
     }
+
+    var lastFailure: (message: String, debug: APIKeyValidationDebugSnapshot?) =
+      ("Validation failed", nil)
 
     do {
       let authResult = try await validateViaAuthEndpoint(apiKey: trimmed)
-      lastValidationDebug = authResult.debug
       if authResult.success {
-        return true
+        return .success(
+          message: "OpenRouter API key validated via auth endpoint",
+          debug: authResult.debug
+        )
       }
+      lastFailure = (authResult.message, authResult.debug)
     } catch let attemptError as ValidationAttemptError {
-      lastValidationDebug = attemptError.debug
-      logger.error(
-        "API key auth validation failed: \(attemptError.debug.errorDescription ?? "Unknown", privacy: .public)"
-      )
+      logger.error("API key auth validation failed: \(attemptError.message, privacy: .public)")
+      lastFailure = (attemptError.message, attemptError.debug)
     } catch {
-      logger.error(
-        "API key auth validation failed: \(error.localizedDescription, privacy: .public)")
-      lastValidationDebug = OpenRouterValidationDebugSnapshot(
-        url: "",
+      logger.error("API key auth validation failed: \(error.localizedDescription, privacy: .public)")
+      let debug = APIKeyValidationDebugSnapshot(
+        url: baseURL.appendingPathComponent("auth/validate").absoluteString,
         method: "GET",
         requestHeaders: [:],
         requestBody: nil,
@@ -144,23 +135,30 @@ actor OpenRouterAPIClient: ChatLLMClient, BatchTranscriptionClient {
         responseBody: nil,
         errorDescription: error.localizedDescription
       )
+      lastFailure = (error.localizedDescription, debug)
     }
 
     do {
       let chatResult = try await validateViaChat(apiKey: trimmed)
-      lastValidationDebug = chatResult.debug
-      return chatResult.success
+      if chatResult.success {
+        return .success(
+          message: "OpenRouter API key validated via models endpoint",
+          debug: chatResult.debug
+        )
+      }
+      lastFailure = (chatResult.message, chatResult.debug)
     } catch let attemptError as ValidationAttemptError {
-      lastValidationDebug = attemptError.debug
       logger.error(
-        "API key validation via chat failed: \(attemptError.debug.errorDescription ?? "Unknown", privacy: .public)"
+        "API key validation via chat failed: \(attemptError.message, privacy: .public)"
       )
+      lastFailure = (attemptError.message, attemptError.debug)
     } catch {
       logger.error(
-        "API key validation via chat failed: \(error.localizedDescription, privacy: .public)")
-      lastValidationDebug = OpenRouterValidationDebugSnapshot(
-        url: "",
-        method: "POST",
+        "API key validation via chat failed: \(error.localizedDescription, privacy: .public)"
+      )
+      let debug = APIKeyValidationDebugSnapshot(
+        url: baseURL.appendingPathComponent("models").absoluteString,
+        method: "GET",
         requestHeaders: [:],
         requestBody: nil,
         statusCode: nil,
@@ -168,9 +166,10 @@ actor OpenRouterAPIClient: ChatLLMClient, BatchTranscriptionClient {
         responseBody: nil,
         errorDescription: error.localizedDescription
       )
+      lastFailure = (error.localizedDescription, debug)
     }
 
-    return false
+    return .failure(message: lastFailure.message, debug: lastFailure.debug)
   }
 
   private func validateViaAuthEndpoint(apiKey: String) async throws -> ValidationAttemptResult {
@@ -185,7 +184,7 @@ actor OpenRouterAPIClient: ChatLLMClient, BatchTranscriptionClient {
     do {
       let (data, response) = try await session.data(for: request)
       guard let http = response as? HTTPURLResponse else {
-        let debug = OpenRouterValidationDebugSnapshot(
+        let debug = APIKeyValidationDebugSnapshot(
           url: url.absoluteString,
           method: request.httpMethod ?? "GET",
           requestHeaders: headers,
@@ -195,11 +194,14 @@ actor OpenRouterAPIClient: ChatLLMClient, BatchTranscriptionClient {
           responseBody: nil,
           errorDescription: OpenRouterClientError.invalidResponse.localizedDescription
         )
-        throw ValidationAttemptError(debug: debug)
+        throw ValidationAttemptError(
+          debug: debug,
+          message: OpenRouterClientError.invalidResponse.localizedDescription
+        )
       }
 
       let responseBody = string(from: data)
-      let debug = OpenRouterValidationDebugSnapshot(
+      let debug = APIKeyValidationDebugSnapshot(
         url: url.absoluteString,
         method: request.httpMethod ?? "GET",
         requestHeaders: headers,
@@ -213,24 +215,43 @@ actor OpenRouterAPIClient: ChatLLMClient, BatchTranscriptionClient {
       if http.statusCode == 200 {
         if let payload = try? JSONDecoder().decode(OpenRouterValidationResponse.self, from: data) {
           if let valid = payload.valid {
-            return ValidationAttemptResult(success: valid, debug: debug)
+            return ValidationAttemptResult(
+              success: valid,
+              debug: debug,
+              message: valid ? "Validated" : "Auth validation returned invalid"
+            )
           }
           if let valid = payload.data?.valid {
-            return ValidationAttemptResult(success: valid, debug: debug)
+            return ValidationAttemptResult(
+              success: valid,
+              debug: debug,
+              message: valid ? "Validated" : "Auth validation returned invalid"
+            )
           }
         }
-        return ValidationAttemptResult(success: true, debug: debug)
+        return ValidationAttemptResult(
+          success: true,
+          debug: debug,
+          message: "Validated"
+        )
       }
 
       if http.statusCode == 401 {
-        return ValidationAttemptResult(success: false, debug: debug)
+        return ValidationAttemptResult(
+          success: false,
+          debug: debug,
+          message: "Unauthorized response from auth endpoint"
+        )
       }
 
-      throw ValidationAttemptError(debug: debug)
+      throw ValidationAttemptError(
+        debug: debug,
+        message: "Unexpected status \(http.statusCode)"
+      )
     } catch let attemptError as ValidationAttemptError {
       throw attemptError
     } catch {
-      let debug = OpenRouterValidationDebugSnapshot(
+      let debug = APIKeyValidationDebugSnapshot(
         url: url.absoluteString,
         method: request.httpMethod ?? "GET",
         requestHeaders: headers,
@@ -240,7 +261,7 @@ actor OpenRouterAPIClient: ChatLLMClient, BatchTranscriptionClient {
         responseBody: nil,
         errorDescription: error.localizedDescription
       )
-      throw ValidationAttemptError(debug: debug)
+      throw ValidationAttemptError(debug: debug, message: error.localizedDescription)
     }
   }
 
@@ -256,7 +277,7 @@ actor OpenRouterAPIClient: ChatLLMClient, BatchTranscriptionClient {
     do {
       let (data, response) = try await session.data(for: request)
       guard let http = response as? HTTPURLResponse else {
-        let debug = OpenRouterValidationDebugSnapshot(
+        let debug = APIKeyValidationDebugSnapshot(
           url: url.absoluteString,
           method: request.httpMethod ?? "GET",
           requestHeaders: headers,
@@ -266,11 +287,14 @@ actor OpenRouterAPIClient: ChatLLMClient, BatchTranscriptionClient {
           responseBody: nil,
           errorDescription: OpenRouterClientError.invalidResponse.localizedDescription
         )
-        throw ValidationAttemptError(debug: debug)
+        throw ValidationAttemptError(
+          debug: debug,
+          message: OpenRouterClientError.invalidResponse.localizedDescription
+        )
       }
 
       let responseBody = string(from: data)
-      let debug = OpenRouterValidationDebugSnapshot(
+      let debug = APIKeyValidationDebugSnapshot(
         url: url.absoluteString,
         method: request.httpMethod ?? "GET",
         requestHeaders: headers,
@@ -282,18 +306,29 @@ actor OpenRouterAPIClient: ChatLLMClient, BatchTranscriptionClient {
       )
 
       if (200..<300).contains(http.statusCode) {
-        return ValidationAttemptResult(success: true, debug: debug)
+        return ValidationAttemptResult(
+          success: true,
+          debug: debug,
+          message: "Validated"
+        )
       }
 
       if http.statusCode == 401 {
-        return ValidationAttemptResult(success: false, debug: debug)
+        return ValidationAttemptResult(
+          success: false,
+          debug: debug,
+          message: "Unauthorized response from models endpoint"
+        )
       }
 
-      throw ValidationAttemptError(debug: debug)
+      throw ValidationAttemptError(
+        debug: debug,
+        message: "Unexpected status \(http.statusCode)"
+      )
     } catch let attemptError as ValidationAttemptError {
       throw attemptError
     } catch {
-      let debug = OpenRouterValidationDebugSnapshot(
+      let debug = APIKeyValidationDebugSnapshot(
         url: url.absoluteString,
         method: request.httpMethod ?? "GET",
         requestHeaders: headers,
@@ -303,7 +338,7 @@ actor OpenRouterAPIClient: ChatLLMClient, BatchTranscriptionClient {
         responseBody: nil,
         errorDescription: error.localizedDescription
       )
-      throw ValidationAttemptError(debug: debug)
+      throw ValidationAttemptError(debug: debug, message: error.localizedDescription)
     }
   }
 

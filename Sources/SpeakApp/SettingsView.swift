@@ -28,27 +28,17 @@ struct SettingsView: View {
   @EnvironmentObject private var settings: AppSettings
   @State private var selectedTab: SettingsTab = .general
   @State private var newAPIKeyValue: String = ""
-  @State private var apiKeyValidationState: ValidationState = .idle
+  @State private var apiKeyValidationState: ValidationViewState = .idle
   @State private var isDeletingRecordings: Bool = false
-  @State private var lastValidationDebug: OpenRouterValidationDebugSnapshot?
   @State private var transcriptionProviders: [TranscriptionProviderMetadata] = []
   @State private var providerAPIKeys: [String: String] = [:]
-  @State private var validatingProviders: Set<String> = []
-  @State private var providerValidationStates: [String: ProviderValidationState] = [:]
+  @State private var providerValidationStates: [String: ValidationViewState] = [:]
   private let openRouterKeyIdentifier = "openrouter.apiKey"
 
-  enum ValidationState {
+  enum ValidationViewState {
     case idle
     case validating
-    case success
-    case failure(String)
-  }
-
-  enum ProviderValidationState {
-    case idle
-    case validating
-    case success(String) // Success message
-    case failure(String) // Error message
+    case finished(APIKeyValidationResult)
   }
 
   private var isOpenRouterKeyStored: Bool {
@@ -491,65 +481,34 @@ struct SettingsView: View {
   private var apiKeySettings: some View {
     LazyVStack(spacing: 20) {
       // OpenRouter (Legacy)
-      SettingsCard(title: "OpenRouter", systemImage: "network", tint: Color.green) {
-        VStack(alignment: .leading, spacing: 14) {
-          HStack(alignment: .center, spacing: 12) {
-            Label("Status", systemImage: isOpenRouterKeyStored ? "checkmark.seal.fill" : "key.fill")
-              .foregroundStyle(isOpenRouterKeyStored ? Color.green : Color.secondary)
-              .labelStyle(.titleAndIcon)
-            openRouterStatusBadge
-          }
-
-          SecureField("OpenRouter API Key", text: $newAPIKeyValue)
-            .textContentType(.password)
-            .privacySensitive()
-            .textFieldStyle(.roundedBorder)
-            .speakTooltip("Paste your OpenRouter API key here so Speak can call their models on your behalf.")
-
-          Text("Stored securely in your macOS Keychain. We only use it when calling OpenRouter.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-
-          HStack(spacing: 12) {
-            Button(action: saveAPIKey) {
-              if isValidatingKey {
-                ProgressView()
-              } else {
-                Label(
-                  isOpenRouterKeyStored ? "Replace Key" : "Save Key",
-                  systemImage: "arrow.down.circle")
-              }
-            }
-            .disabled(
-              isValidatingKey
-                || newAPIKeyValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            )
-            .buttonStyle(.borderedProminent)
-            .speakTooltip("Store this OpenRouter key safely in your macOS Keychain for Speak to use when needed.")
-
-            if isOpenRouterKeyStored {
-              Button {
-                checkOpenRouterKeyValidity()
-              } label: {
-                Label("Check Validity", systemImage: "checkmark.shield")
-              }
-              .disabled(isValidatingKey)
-              .buttonStyle(.bordered)
-              .speakTooltip("Make sure your saved key still works before you rely on it in a session.")
-
-              Button("Remove Key", role: .destructive) {
-                removeOpenRouterKey()
-              }
-              .disabled(isValidatingKey)
-              .speakTooltip("Forget this key from Speak and your Keychain if you no longer need it.")
-            }
-          }
-
-          validationStatusView
-          validationDebugDetails
-        }
-      }
-      .speakTooltip("Securely store and validate the OpenRouter key Speak uses for advanced models.")
+      apiKeyCard(
+        title: "OpenRouter",
+        systemImage: "network",
+        tint: .green,
+        statusIcon: isOpenRouterKeyStored ? "checkmark.seal.fill" : "key.fill",
+        statusTint: .green,
+        isStored: isOpenRouterKeyStored,
+        descriptionText: "Stored securely in your macOS Keychain. We only use it when calling OpenRouter.",
+        keyFieldLabel: "OpenRouter API Key",
+        keyBinding: $newAPIKeyValue,
+        onSave: saveAPIKey,
+        onValidate: isOpenRouterKeyStored ? checkOpenRouterKeyValidity : nil,
+        onRemove: isOpenRouterKeyStored ? removeOpenRouterKey : nil,
+        isSaveDisabled: isValidatingKey
+          || newAPIKeyValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+        isValidateDisabled: isValidatingKey,
+        isRemoveDisabled: isValidatingKey,
+        validationState: apiKeyValidationState,
+        tooltip: "Securely store and validate the OpenRouter key Speak uses for advanced models.",
+        saveButtonTitle: isOpenRouterKeyStored ? "Replace Key" : "Save Key",
+        saveTooltip: "Store this OpenRouter key safely in your macOS Keychain for Speak to use when needed.",
+        validateButtonTitle: "Check Validity",
+        validateTooltip: "Make sure your saved key still works before you rely on it in a session.",
+        removeButtonTitle: "Remove Key",
+        removeTooltip: "Forget this key from Speak and your Keychain if you no longer need it.",
+        link: nil,
+        linkLabel: nil
+      )
 
       // Transcription Providers (Dynamic)
       ForEach(transcriptionProviders) { provider in
@@ -560,85 +519,138 @@ struct SettingsView: View {
 
   private func providerAPIKeyCard(for provider: TranscriptionProviderMetadata) -> some View {
     let isStored = settings.trackedAPIKeyIdentifiers.contains(provider.apiKeyIdentifier)
-    let isValidating = validatingProviders.contains(provider.id)
     let tintColor = colorFromString(provider.tintColor)
     let validationState = providerValidationStates[provider.id] ?? .idle
+    let inFlight = isValidationInFlight(validationState)
+    let saveDisabled = inFlight
+      || (providerAPIKeys[provider.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    let validateDisabled = inFlight || !isStored
+    let removeDisabled = inFlight
 
-    return SettingsCard(title: provider.displayName, systemImage: provider.systemImage, tint: tintColor) {
+    return apiKeyCard(
+      title: provider.displayName,
+      systemImage: provider.systemImage,
+      tint: tintColor,
+      statusIcon: isStored ? "checkmark.seal.fill" : "key.fill",
+      statusTint: tintColor,
+      isStored: isStored,
+      descriptionText: "Stored securely in your macOS Keychain. Used only for \(provider.displayName) transcription.",
+      keyFieldLabel: provider.apiKeyLabel,
+      keyBinding: binding(for: provider.id),
+      onSave: { saveProviderAPIKey(provider) },
+      onValidate: isStored ? { checkProviderKeyValidity(provider) } : nil,
+      onRemove: isStored ? { removeProviderAPIKey(provider) } : nil,
+      isSaveDisabled: saveDisabled,
+      isValidateDisabled: validateDisabled,
+      isRemoveDisabled: removeDisabled,
+      validationState: validationState,
+      tooltip: "Manage your \(provider.displayName) API key securely without leaving Speak.",
+      saveButtonTitle: isStored ? "Replace Key" : "Save Key",
+      saveTooltip: "Securely store your \(provider.displayName) key so Speak can contact the service when needed.",
+      validateButtonTitle: "Check Validity",
+      validateTooltip: "Confirm that your \(provider.displayName) key is still valid before a big session.",
+      removeButtonTitle: "Remove Key",
+      removeTooltip: "Forget this service key from Speak and your Keychain when you no longer use it.",
+      link: provider.website.isEmpty ? nil : URL(string: provider.website),
+      linkLabel: provider.website.isEmpty ? nil : "Get API Key"
+    )
+  }
+
+  private func apiKeyCard(
+    title: String,
+    systemImage: String,
+    tint: Color,
+    statusIcon: String,
+    statusTint: Color,
+    isStored: Bool,
+    descriptionText: String,
+    keyFieldLabel: String,
+    keyBinding: Binding<String>,
+    onSave: @escaping () -> Void,
+    onValidate: (() -> Void)?,
+    onRemove: (() -> Void)?,
+    isSaveDisabled: Bool,
+    isValidateDisabled: Bool,
+    isRemoveDisabled: Bool,
+    validationState: ValidationViewState,
+    tooltip: String,
+    saveButtonTitle: String,
+    saveTooltip: String,
+    validateButtonTitle: String,
+    validateTooltip: String,
+    removeButtonTitle: String,
+    removeTooltip: String,
+    link: URL?,
+    linkLabel: String?,
+    statusLabel: String = "Status"
+  ) -> some View {
+    SettingsCard(title: title, systemImage: systemImage, tint: tint) {
       VStack(alignment: .leading, spacing: 14) {
         HStack(alignment: .center, spacing: 12) {
-          Label("Status", systemImage: isStored ? "checkmark.seal.fill" : "key.fill")
-            .foregroundStyle(isStored ? tintColor : Color.secondary)
+          Label(statusLabel, systemImage: statusIcon)
+            .foregroundStyle(isStored ? statusTint : Color.secondary)
             .labelStyle(.titleAndIcon)
-          statusBadge(isStored: isStored, color: tintColor)
+          statusBadge(isStored: isStored, color: statusTint)
         }
 
-        if !provider.website.isEmpty {
-          Link(destination: URL(string: provider.website)!) {
-            Label("Get API Key", systemImage: "arrow.up.forward.square")
+        if let link, let linkLabel {
+          Link(destination: link) {
+            Label(linkLabel, systemImage: "arrow.up.forward.square")
               .font(.caption)
           }
-          .speakTooltip("Open \(provider.displayName)'s site to create or manage your API key in your browser.")
+          .speakTooltip("Open \(title)'s site to create or manage your API key in your browser.")
         }
 
-        SecureField(provider.apiKeyLabel, text: binding(for: provider.id))
+        SecureField(keyFieldLabel, text: keyBinding)
           .textContentType(.password)
           .privacySensitive()
           .textFieldStyle(.roundedBorder)
-          .speakTooltip("Paste your \(provider.displayName) key exactly as issued; Speak stores it securely in your Keychain.")
+          .speakTooltip("Paste your \(title) key exactly as issued; Speak stores it securely in your Keychain.")
 
-        Text("Stored securely in your macOS Keychain. Used only for \(provider.displayName) transcription.")
+        Text(descriptionText)
           .font(.caption)
           .foregroundStyle(.secondary)
 
         HStack(spacing: 12) {
-          Button {
-            saveProviderAPIKey(provider)
-          } label: {
-            if isValidating {
+          Button(action: onSave) {
+            if isValidationInFlight(validationState) {
               ProgressView()
                 .controlSize(.small)
             } else {
-              Label(
-                isStored ? "Replace Key" : "Save Key",
-                systemImage: "arrow.down.circle")
+              Label(saveButtonTitle, systemImage: "arrow.down.circle")
             }
           }
-          .disabled(
-            isValidating
-              || (providerAPIKeys[provider.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-          )
+          .disabled(isSaveDisabled)
           .buttonStyle(.borderedProminent)
-          .tint(tintColor)
-          .speakTooltip("Securely store your \(provider.displayName) key so Speak can contact the service when needed.")
+          .tint(tint)
+          .speakTooltip(saveTooltip)
 
-          if isStored {
-            Button {
-              checkProviderKeyValidity(provider)
-            } label: {
-              if case .validating = validationState {
+          if let onValidate, isStored {
+            Button(action: onValidate) {
+              if isValidationInFlight(validationState) {
                 ProgressView()
                   .controlSize(.small)
               } else {
-                Label("Check Validity", systemImage: "checkmark.shield")
+                Label(validateButtonTitle, systemImage: "checkmark.shield")
               }
             }
-            .disabled(isValidating || isValidatingProviderKey(validationState))
+            .disabled(isValidateDisabled)
             .buttonStyle(.bordered)
-            .speakTooltip("Confirm that your \(provider.displayName) key is still valid before a big session.")
+            .speakTooltip(validateTooltip)
+          }
 
-            Button("Remove Key", role: .destructive) {
-              removeProviderAPIKey(provider)
-            }
-            .disabled(isValidating)
-            .speakTooltip("Forget this service key from Speak and your Keychain when you no longer use it.")
+          if let onRemove, isStored {
+            Button(removeButtonTitle, role: .destructive, action: onRemove)
+              .disabled(isRemoveDisabled)
+              .speakTooltip(removeTooltip)
           }
         }
 
-        providerValidationStatusView(for: provider.id, state: validationState)
+        validationStatusView(for: validationState)
+        validationDebugDetails(for: validationState)
       }
     }
-    .speakTooltip("Manage your \(provider.displayName) API key securely without leaving Speak.")
+    .speakTooltip(tooltip)
   }
 
   private func binding(for providerID: String) -> Binding<String> {
@@ -648,24 +660,18 @@ struct SettingsView: View {
     )
   }
 
-  private func isValidatingProviderKey(_ state: ProviderValidationState) -> Bool {
-    if case .validating = state {
-      return true
-    }
-    return false
-  }
-
   private func statusBadge(isStored: Bool, color: Color) -> some View {
     let text = isStored ? "Saved" : "Not Set"
+    let displayColor = isStored ? color : Color.secondary
     return Text(text.uppercased())
       .font(.caption2.weight(.semibold))
       .padding(.horizontal, 8)
       .padding(.vertical, 4)
       .background(
         Capsule()
-          .fill(color.opacity(0.15))
+          .fill(displayColor.opacity(0.15))
       )
-      .foregroundStyle(color)
+      .foregroundStyle(displayColor)
   }
 
   private func colorFromString(_ name: String) -> Color {
@@ -685,30 +691,6 @@ struct SettingsView: View {
     }
   }
 
-  @ViewBuilder
-  private func providerValidationStatusView(for providerID: String, state: ProviderValidationState) -> some View {
-    switch state {
-    case .idle:
-      EmptyView()
-    case .validating:
-      HStack(spacing: 6) {
-        ProgressView()
-          .controlSize(.small)
-        Text("Validating key...")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      }
-    case .success(let message):
-      Label(message, systemImage: "checkmark.seal")
-        .font(.caption)
-        .foregroundStyle(.green)
-    case .failure(let message):
-      Label(message, systemImage: "exclamationmark.triangle")
-        .font(.caption)
-        .foregroundStyle(.red)
-    }
-  }
-
   private func checkProviderKeyValidity(_ provider: TranscriptionProviderMetadata) {
     providerValidationStates[provider.id] = .validating
 
@@ -716,7 +698,8 @@ struct SettingsView: View {
       let registry = TranscriptionProviderRegistry.shared
       guard let providerInstance = await registry.provider(withID: provider.id) else {
         await MainActor.run {
-          providerValidationStates[provider.id] = .failure("Provider not found")
+          providerValidationStates[provider.id] =
+            .finished(.failure(message: "Provider not found"))
         }
         return
       }
@@ -724,19 +707,16 @@ struct SettingsView: View {
       // Get the stored key
       guard let storedKey = try? await environment.secureStorage.secret(identifier: provider.apiKeyIdentifier) else {
         await MainActor.run {
-          providerValidationStates[provider.id] = .failure("API key not found in keychain")
+          providerValidationStates[provider.id] =
+            .finished(.failure(message: "API key not found in Keychain"))
         }
         return
       }
 
-      let isValid = await providerInstance.validateAPIKey(storedKey)
+      let result = await providerInstance.validateAPIKey(storedKey)
 
       await MainActor.run {
-        if isValid {
-          providerValidationStates[provider.id] = .success("API key is valid and working")
-        } else {
-          providerValidationStates[provider.id] = .failure("API key validation failed")
-        }
+        providerValidationStates[provider.id] = .finished(result)
       }
     }
   }
@@ -746,43 +726,49 @@ struct SettingsView: View {
       !value.isEmpty
     else { return }
 
-    validatingProviders.insert(provider.id)
     providerValidationStates[provider.id] = .validating
 
     Task {
       let registry = TranscriptionProviderRegistry.shared
       guard let providerInstance = await registry.provider(withID: provider.id) else {
         await MainActor.run {
-          validatingProviders.remove(provider.id)
-          providerValidationStates[provider.id] = .failure("Provider not found")
+          providerValidationStates[provider.id] =
+            .finished(.failure(message: "Provider not found"))
         }
         return
       }
 
-      let isValid = await providerInstance.validateAPIKey(value)
+      let validation = await providerInstance.validateAPIKey(value)
 
-      if isValid {
+      switch validation.outcome {
+      case .success:
         do {
           try await environment.secureStorage.storeSecret(
             value,
             identifier: provider.apiKeyIdentifier,
             label: provider.apiKeyLabel
           )
+
+          let result = validation.updatingOutcome(
+            .success(message: "API key saved and validated successfully")
+          )
+
           await MainActor.run {
-            validatingProviders.remove(provider.id)
             providerAPIKeys[provider.id] = ""
-            providerValidationStates[provider.id] = .success("API key saved and validated successfully")
+            providerValidationStates[provider.id] = .finished(result)
           }
         } catch {
+          let failure = APIKeyValidationResult.failure(
+            message: "Failed to store key: \(error.localizedDescription)",
+            debug: validation.debug
+          )
           await MainActor.run {
-            validatingProviders.remove(provider.id)
-            providerValidationStates[provider.id] = .failure("Failed to store key: \(error.localizedDescription)")
+            providerValidationStates[provider.id] = .finished(failure)
           }
         }
-      } else {
+      case .failure:
         await MainActor.run {
-          validatingProviders.remove(provider.id)
-          providerValidationStates[provider.id] = .failure("API key validation failed. Please check your key.")
+          providerValidationStates[provider.id] = .finished(validation)
         }
       }
     }
@@ -794,6 +780,7 @@ struct SettingsView: View {
         try await environment.secureStorage.removeSecret(identifier: provider.apiKeyIdentifier)
         await MainActor.run {
           providerAPIKeys[provider.id] = ""
+          providerValidationStates[provider.id] = .idle
         }
       } catch {
         // Handle error silently
@@ -803,30 +790,20 @@ struct SettingsView: View {
 
   private func checkOpenRouterKeyValidity() {
     apiKeyValidationState = .validating
-    lastValidationDebug = nil
 
     Task {
       do {
         let storedKey = try await environment.secureStorage.secret(identifier: openRouterKeyIdentifier)
-        let isValid = await environment.openRouter.validateAPIKey(storedKey)
-        let debug = await environment.openRouter.latestValidationDebug()
+        let result = await environment.openRouter.validateAPIKey(storedKey)
 
         await MainActor.run {
-          if isValid {
-            apiKeyValidationState = .success
-            lastValidationDebug = debug
-          } else {
-            apiKeyValidationState = .failure(
-              debug?.errorDescription?.isEmpty == false
-                ? debug?.errorDescription ?? "Validation failed"
-                : "Validation failed"
-            )
-            lastValidationDebug = debug
-          }
+          apiKeyValidationState = .finished(result)
         }
       } catch {
         await MainActor.run {
-          apiKeyValidationState = .failure(error.localizedDescription)
+          apiKeyValidationState = .finished(
+            .failure(message: error.localizedDescription)
+          )
         }
       }
     }
@@ -839,57 +816,55 @@ struct SettingsView: View {
         await MainActor.run {
           apiKeyValidationState = .idle
           newAPIKeyValue = ""
-          lastValidationDebug = nil
         }
       } catch {
         await MainActor.run {
-          apiKeyValidationState = .failure(error.localizedDescription)
+          apiKeyValidationState = .finished(
+            .failure(message: error.localizedDescription)
+          )
         }
       }
     }
   }
 
-  private var openRouterStatusBadge: some View {
-    let color: Color = isOpenRouterKeyStored ? .green : .secondary
-    let text = isOpenRouterKeyStored ? "Saved" : "Not Set"
-    return Text(text.uppercased())
-      .font(.caption2.weight(.semibold))
-      .padding(.horizontal, 8)
-      .padding(.vertical, 4)
-      .background(
-        Capsule()
-          .fill(color.opacity(0.15))
-      )
-      .foregroundStyle(color)
-  }
-
   @ViewBuilder
-  private var validationStatusView: some View {
-    switch apiKeyValidationState {
+  private func validationStatusView(
+    for state: ValidationViewState,
+    successFallback: String = "Key saved and validated"
+  ) -> some View {
+    switch state {
     case .idle:
       EmptyView()
     case .validating:
       Text("Validating key…")
         .font(.caption)
         .foregroundStyle(.secondary)
-    case .success:
-      Label("Key saved and validated", systemImage: "checkmark.seal")
-        .font(.caption)
-        .foregroundStyle(.green)
-    case .failure(let message):
-      Label(message, systemImage: "exclamationmark.triangle")
-        .font(.caption)
-        .foregroundStyle(.red)
+    case .finished(let result):
+      switch result.outcome {
+      case .success(let message):
+        Label(message.isEmpty ? successFallback : message, systemImage: "checkmark.seal")
+          .font(.caption)
+          .foregroundStyle(.green)
+      case .failure(let message):
+        Label(message, systemImage: "exclamationmark.triangle")
+          .font(.caption)
+          .foregroundStyle(.red)
+      }
     }
   }
 
   @ViewBuilder
-  private var validationDebugDetails: some View {
-    if let debug = lastValidationDebug {
+  private func validationDebugDetails(for state: ValidationViewState) -> some View {
+    if case .finished(let result) = state, let debug = result.debug {
       Divider()
         .padding(.vertical, 4)
-      ValidationDebugDetailsView(debug: debug)
+      APIKeyValidationDebugDetailsView(debug: debug)
     }
+  }
+
+  private func isValidationInFlight(_ state: ValidationViewState) -> Bool {
+    if case .validating = state { return true }
+    return false
   }
 
   private var hotKeySettings: some View {
@@ -1007,35 +982,37 @@ struct SettingsView: View {
     let value = newAPIKeyValue.trimmingCharacters(in: .whitespacesAndNewlines)
 
     Task {
-      do {
-        let isValid = await environment.openRouter.validateAPIKey(value)
-        let debug = await environment.openRouter.latestValidationDebug()
-        if isValid {
+      let validation = await environment.openRouter.validateAPIKey(value)
+
+      switch validation.outcome {
+      case .success:
+        do {
           try await environment.secureStorage.storeSecret(
             value,
             identifier: openRouterKeyIdentifier,
             label: "OpenRouter API Key"
           )
+
+          let result = validation.updatingOutcome(
+            .success(message: "Key saved and validated")
+          )
+
           await MainActor.run {
-            apiKeyValidationState = .success
+            apiKeyValidationState = .finished(result)
             newAPIKeyValue = ""
-            lastValidationDebug = debug
           }
-        } else {
+        } catch {
+          let failure = APIKeyValidationResult.failure(
+            message: "Failed to store key: \(error.localizedDescription)",
+            debug: validation.debug
+          )
           await MainActor.run {
-            apiKeyValidationState = .failure(
-              debug?.errorDescription?.isEmpty == false
-                ? debug?.errorDescription ?? "Validation failed"
-                : "Validation failed"
-            )
-            lastValidationDebug = debug
+            apiKeyValidationState = .finished(failure)
           }
         }
-      } catch {
-        let debug = await environment.openRouter.latestValidationDebug()
+      case .failure:
         await MainActor.run {
-          apiKeyValidationState = .failure(error.localizedDescription)
-          lastValidationDebug = debug
+          apiKeyValidationState = .finished(validation)
         }
       }
     }
@@ -1217,8 +1194,8 @@ private struct ModelPicker: View {
   }
 }
 
-private struct ValidationDebugDetailsView: View {
-  let debug: OpenRouterValidationDebugSnapshot
+private struct APIKeyValidationDebugDetailsView: View {
+  let debug: APIKeyValidationDebugSnapshot
   @State private var isExpanded: Bool = true
 
   var body: some View {

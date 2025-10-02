@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MainView: View {
   @EnvironmentObject private var environment: AppEnvironment
+  @EnvironmentObject private var history: HistoryManager
   @State private var selection: SidebarItem? = .dashboard
   @State private var presentError: Bool = false
   @State private var latestErrorMessage: String = ""
@@ -74,7 +75,7 @@ struct MainView: View {
         Text(environment.settings.transcriptionMode.displayName)
           .font(.caption)
           .foregroundStyle(.secondary)
-        if let item = environment.history.items.first {
+        if let item = history.items.first {
           Text("Last: \(item.createdAt.formatted())")
             .font(.caption2)
             .foregroundStyle(.tertiary)

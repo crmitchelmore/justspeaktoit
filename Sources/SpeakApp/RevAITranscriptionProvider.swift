@@ -37,9 +37,11 @@ struct RevAITranscriptionProvider: TranscriptionProvider {
     )
   }
 
-  func validateAPIKey(_ key: String) async -> Bool {
+  func validateAPIKey(_ key: String) async -> APIKeyValidationResult {
     let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else { return false }
+    guard !trimmed.isEmpty else {
+      return .failure(message: "API key is empty")
+    }
 
     let url = baseURL.appendingPathComponent("jobs")
     var request = URLRequest(url: url)
@@ -47,11 +49,24 @@ struct RevAITranscriptionProvider: TranscriptionProvider {
     request.setValue("Bearer \(trimmed)", forHTTPHeaderField: "Authorization")
 
     do {
-      let (_, response) = try await session.data(for: request)
-      guard let http = response as? HTTPURLResponse else { return false }
-      return (200..<300).contains(http.statusCode)
+      let (data, response) = try await session.data(for: request)
+      guard let http = response as? HTTPURLResponse else {
+        return .failure(message: "Received a non-HTTP response", debug: debugSnapshot(request: request))
+      }
+
+      let debug = debugSnapshot(request: request, response: http, data: data)
+
+      if (200..<300).contains(http.statusCode) {
+        return .success(message: "Rev.ai API key validated", debug: debug)
+      }
+
+      let message = "HTTP \(http.statusCode) while validating key"
+      return .failure(message: message, debug: debug)
     } catch {
-      return false
+      return .failure(
+        message: "Validation failed: \(error.localizedDescription)",
+        debug: debugSnapshot(request: request, error: error)
+      )
     }
   }
 
@@ -236,6 +251,29 @@ struct RevAITranscriptionProvider: TranscriptionProvider {
     // e.g., "en_GB" -> "en", "en-US" -> "en", "en" -> "en"
     let components = locale.split(whereSeparator: { $0 == "_" || $0 == "-" })
     return components.first.map(String.init)?.lowercased() ?? locale.lowercased()
+  }
+
+  private func debugSnapshot(
+    request: URLRequest,
+    response: HTTPURLResponse? = nil,
+    data: Data? = nil,
+    error: Error? = nil
+  ) -> APIKeyValidationDebugSnapshot {
+    APIKeyValidationDebugSnapshot(
+      url: request.url?.absoluteString ?? "",
+      method: request.httpMethod ?? "GET",
+      requestHeaders: request.allHTTPHeaderFields ?? [:],
+      requestBody: request.httpBody.flatMap { String(data: $0, encoding: .utf8) },
+      statusCode: response?.statusCode,
+      responseHeaders: response.map { headers in
+        headers.allHeaderFields.reduce(into: [String: String]()) { partialResult, entry in
+          guard let key = entry.key as? String else { return }
+          partialResult[key] = String(describing: entry.value)
+        }
+      } ?? [:],
+      responseBody: data.flatMap { String(data: $0, encoding: .utf8) },
+      errorDescription: error?.localizedDescription
+    )
   }
 }
 

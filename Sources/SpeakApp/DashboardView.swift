@@ -109,10 +109,20 @@ struct DashboardView: View {
   }
 
   private var dashboardSections: some View {
-    LazyVGrid(columns: [GridItem(.adaptive(minimum: 340), spacing: 24)], spacing: 24) {
-      permissionsSection
-      statisticsSection
-      recentSection
+    VStack(spacing: 24) {
+      LazyVGrid(columns: [GridItem(.adaptive(minimum: 340), spacing: 24)], spacing: 24) {
+        permissionsSection
+        statisticsSection
+        recentSection
+      }
+
+      // Usage Charts
+      dailyUsageChartSection
+
+      LazyVGrid(columns: [GridItem(.adaptive(minimum: 340), spacing: 24)], spacing: 24) {
+        transcriptionModelChartSection
+        postProcessingModelChartSection
+      }
     }
   }
 
@@ -399,6 +409,32 @@ struct DashboardView: View {
       RoundedRectangle(cornerRadius: 20, style: .continuous)
         .fill(.thinMaterial)
     )
+  }
+
+  private var dailyUsageChartSection: some View {
+    DashboardCard(title: "Daily Usage", systemImage: "chart.bar.fill", tint: Color.cyan) {
+      DailyRecordingsChart(data: environment.history.items.dailyUsageForLastMonth())
+    }
+  }
+
+  private var transcriptionModelChartSection: some View {
+    DashboardCard(title: "Transcription Models", systemImage: "waveform", tint: Color.green) {
+      ModelUsageChart(
+        title: "Transcription Model Usage",
+        data: environment.history.items.modelUsage(for: .transcription),
+        color: .green
+      )
+    }
+  }
+
+  private var postProcessingModelChartSection: some View {
+    DashboardCard(title: "Post-Processing Models", systemImage: "wand.and.stars", tint: Color.purple) {
+      ModelUsageChart(
+        title: "Post-Processing Model Usage",
+        data: environment.history.items.modelUsage(for: .postProcessing),
+        color: .purple
+      )
+    }
   }
 }
 

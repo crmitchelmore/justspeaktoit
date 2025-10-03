@@ -105,6 +105,7 @@ final class AppSettings: ObservableObject {
     case trackedKeyIdentifiers
     case preferredLocale
     case postRecordingTailDuration
+    case preferredAudioInputUID
   }
 
   private static let defaultBatchTranscriptionModel = "google/gemini-2.0-flash-001"
@@ -139,6 +140,17 @@ final class AppSettings: ObservableObject {
 
   @Published var preferredLocaleIdentifier: String {
     didSet { store(preferredLocaleIdentifier, key: .preferredLocale) }
+  }
+
+  @Published var preferredAudioInputUID: String? {
+    didSet {
+      let key = DefaultsKey.preferredAudioInputUID.rawValue
+      if let value = preferredAudioInputUID, !value.isEmpty {
+        defaults.set(value, forKey: key)
+      } else {
+        defaults.removeObject(forKey: key)
+      }
+    }
   }
 
   @Published var postProcessingEnabled: Bool {
@@ -226,6 +238,7 @@ final class AppSettings: ObservableObject {
         defaults.string(forKey: DefaultsKey.batchTranscriptionModel.rawValue))
     preferredLocaleIdentifier =
       defaults.string(forKey: DefaultsKey.preferredLocale.rawValue) ?? Locale.current.identifier
+    preferredAudioInputUID = defaults.string(forKey: DefaultsKey.preferredAudioInputUID.rawValue)
     postProcessingEnabled =
       defaults.object(forKey: DefaultsKey.postProcessingEnabled.rawValue) as? Bool ?? true
     postProcessingModel =

@@ -38,6 +38,7 @@ final class TranscriptionManager: ObservableObject {
   init(
     appSettings: AppSettings,
     permissionsManager: PermissionsManager,
+    audioDeviceManager: AudioInputDeviceManager,
     batchClient: BatchTranscriptionClient,
     openRouter: OpenRouterAPIClient,
     secureStorage: SecureAppStorage
@@ -45,7 +46,8 @@ final class TranscriptionManager: ObservableObject {
     self.appSettings = appSettings
     self.liveController = NativeOSXLiveTranscriber(
       permissionsManager: permissionsManager,
-      appSettings: appSettings
+      appSettings: appSettings,
+      audioDeviceManager: audioDeviceManager
     )
     self.batchClient = batchClient
     self.openRouter = openRouter
@@ -176,6 +178,7 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
 
   private let permissionsManager: PermissionsManager
   private let appSettings: AppSettings
+  private let audioDeviceManager: AudioInputDeviceManager
   private var speechRecognizer: SFSpeechRecognizer?
   private let audioEngine = AVAudioEngine()
   private var recognitionTask: SFSpeechRecognitionTask?
@@ -183,10 +186,16 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
   private var currentLocaleIdentifier: String?
   private var currentModel: String?
   private var latestResult: SFSpeechRecognitionResult?
+  private var activeInputSession: AudioInputDeviceManager.SessionContext?
 
-  init(permissionsManager: PermissionsManager, appSettings: AppSettings) {
+  init(
+    permissionsManager: PermissionsManager,
+    appSettings: AppSettings,
+    audioDeviceManager: AudioInputDeviceManager
+  ) {
     self.permissionsManager = permissionsManager
     self.appSettings = appSettings
+    self.audioDeviceManager = audioDeviceManager
   }
 
   func configure(language: String?, model: String) {
@@ -199,9 +208,12 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
       throw TranscriptionManagerError.permissionsMissing
     }
 
+    let sessionContext = await audioDeviceManager.beginUsingPreferredInput()
+
     let localeIdentifier = currentLocaleIdentifier ?? appSettings.preferredLocaleIdentifier
 
     guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: localeIdentifier)) else {
+      await audioDeviceManager.endUsingPreferredInput(session: sessionContext)
       throw TranscriptionManagerError.recognizerUnavailable
     }
     speechRecognizer = recognizer
@@ -217,7 +229,12 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
     }
 
     audioEngine.prepare()
-    try audioEngine.start()
+    do {
+      try audioEngine.start()
+    } catch {
+      await audioDeviceManager.endUsingPreferredInput(session: sessionContext)
+      throw error
+    }
 
     latestResult = nil
     recognitionTask = recognizer.recognitionTask(with: request!) { [weak self] result, error in
@@ -237,9 +254,11 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
           guard let self else { return }
           self.delegate?.liveTranscriber(self, didFail: error)
         }
+        Task { await self.endActiveInputSession() }
       }
     }
 
+    activeInputSession = sessionContext
     isRunning = true
   }
 
@@ -258,9 +277,19 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
         finish(with: result)
       }
     }
+
+    await endActiveInputSession()
+  }
+
+  private func endActiveInputSession() async {
+    guard let session = activeInputSession else { return }
+    activeInputSession = nil
+    await audioDeviceManager.endUsingPreferredInput(session: session)
   }
 
   private func finish(with result: SFSpeechRecognitionResult) {
+    Task { await self.endActiveInputSession() }
+
     let segments = result.bestTranscription.segments.map { segment in
       TranscriptionSegment(
         startTime: segment.timestamp,

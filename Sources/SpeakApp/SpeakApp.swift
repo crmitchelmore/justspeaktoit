@@ -13,6 +13,7 @@ struct SpeakApp: App {
         .environmentObject(environment.settings)
         .environmentObject(environment.history)
         .environmentObject(environment.personalLexicon)
+        .environmentObject(environment.audioDevices)
     }
     .defaultSize(width: 1080, height: 720)
   }

@@ -4,11 +4,11 @@ struct PersonalCorrectionsView: View {
   @EnvironmentObject private var lexicon: PersonalLexiconService
   @State private var draft = RuleDraft()
   @State private var alertMessage: String?
+  @State private var showAdvancedOptions: Bool = false
   @State private var previewText: String = "Hey love, Susie and I will join the meeting at 3pm."
   @FocusState private var focusedField: Field?
 
   enum Field: Hashable {
-    case displayName
     case canonical
     case aliases
     case contextTags
@@ -24,7 +24,7 @@ struct PersonalCorrectionsView: View {
         previewSection
       }
       .padding(24)
-      .frame(maxWidth: 960, alignment: .leading)
+      .frame(maxWidth: 1100, alignment: .center)
     }
     .background(
       LinearGradient(colors: [Color.pink.opacity(0.08), .clear], startPoint: .top, endPoint: .center)
@@ -60,18 +60,13 @@ struct PersonalCorrectionsView: View {
     }
     .padding(32)
     .background(
-      RoundedRectangle(cornerRadius: 28, style: .continuous)
-        .fill(
-          LinearGradient(
-            colors: [Color.pink.opacity(0.35), Color.purple.opacity(0.2)],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-          )
-        )
-    )
-    .overlay(
-      RoundedRectangle(cornerRadius: 28, style: .continuous)
-        .stroke(Color.pink.opacity(0.3), lineWidth: 1)
+      LinearGradient(
+        colors: [Color.pink, Color.purple.opacity(0.85)],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+      )
+      .cornerRadius(32)
+      .shadow(color: Color.pink.opacity(0.28), radius: 24, x: 0, y: 12)
     )
   }
 
@@ -80,35 +75,43 @@ struct PersonalCorrectionsView: View {
       headerRow
 
       VStack(alignment: .leading, spacing: 12) {
-        TextField("Display name", text: $draft.displayName)
-          .textFieldStyle(.roundedBorder)
-          .focused($focusedField, equals: Field.displayName)
-        TextField("Canonical spelling", text: $draft.canonical)
-          .textFieldStyle(.roundedBorder)
-          .focused($focusedField, equals: Field.canonical)
-        TextField("Spoken variants (comma or newline separated)", text: $draft.aliasesText, axis: .vertical)
-          .lineLimit(2...4)
-          .textFieldStyle(.roundedBorder)
-          .focused($focusedField, equals: Field.aliases)
-        Picker("Activation", selection: $draft.activation) {
-          ForEach(PersonalLexiconRule.Activation.allCases, id: \.self) { activation in
-            Text(label(for: activation)).tag(activation)
+        LabeledContent("Correct spelling") {
+          TextField("e.g. Susy", text: $draft.canonical)
+            .textFieldStyle(.roundedBorder)
+            .focused($focusedField, equals: Field.canonical)
+        }
+        LabeledContent("Heard as") {
+          TextField("e.g. Susie, Suzie", text: $draft.aliasesText, axis: .vertical)
+            .lineLimit(2...4)
+            .textFieldStyle(.roundedBorder)
+            .focused($focusedField, equals: Field.aliases)
+        }
+
+        DisclosureGroup("Advanced options", isExpanded: $showAdvancedOptions) {
+          Picker("Activation", selection: $draft.activation) {
+            ForEach(PersonalLexiconRule.Activation.allCases, id: \.self) { activation in
+              Text(label(for: activation)).tag(activation)
+            }
+          }
+          .pickerStyle(.segmented)
+          Picker("Confidence", selection: $draft.confidence) {
+            ForEach(PersonalLexiconConfidence.allCases, id: \.self) { confidence in
+              Text(label(for: confidence)).tag(confidence)
+            }
+          }
+          .pickerStyle(.segmented)
+          LabeledContent("Only apply when tags match") {
+            TextField("partner, project", text: $draft.contextTagsText)
+              .textFieldStyle(.roundedBorder)
+              .focused($focusedField, equals: Field.contextTags)
+          }
+          LabeledContent("Notes") {
+            TextField("Optional context", text: $draft.notes, axis: .vertical)
+              .lineLimit(1...3)
+              .textFieldStyle(.roundedBorder)
+              .focused($focusedField, equals: Field.notes)
           }
         }
-        .pickerStyle(.segmented)
-        Picker("Confidence", selection: $draft.confidence) {
-          ForEach(PersonalLexiconConfidence.allCases, id: \.self) { confidence in
-            Text(label(for: confidence)).tag(confidence)
-          }
-        }
-        .pickerStyle(.segmented)
-        TextField("Context tags (comma separated, e.g. partner, meeting)", text: $draft.contextTagsText)
-          .textFieldStyle(.roundedBorder)
-          .focused($focusedField, equals: Field.contextTags)
-        TextField("Notes", text: $draft.notes, axis: .vertical)
-          .lineLimit(1...3)
-          .textFieldStyle(.roundedBorder)
-          .focused($focusedField, equals: Field.notes)
       }
 
       HStack(spacing: 12) {
@@ -118,7 +121,7 @@ struct PersonalCorrectionsView: View {
         Button("Reset", role: .cancel, action: resetDraft)
           .buttonStyle(.bordered)
         if draft.isEditing {
-          Text("Editing \(draft.displayName)")
+          Text("Editing \(draft.canonicalDisplay)")
             .font(.footnote)
             .foregroundStyle(.secondary)
         }
@@ -171,13 +174,15 @@ struct PersonalCorrectionsView: View {
 
   private func ruleRow(_ rule: PersonalLexiconRule) -> some View {
     VStack(alignment: .leading, spacing: 10) {
-      HStack {
+      HStack(alignment: .top) {
         VStack(alignment: .leading, spacing: 4) {
-          Text(rule.displayName)
-            .font(.headline)
           Text(rule.canonical)
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
+            .font(.headline)
+          if !rule.aliases.isEmpty {
+            Text("Heard as: \(rule.aliases.joined(separator: ", "))")
+              .font(.subheadline)
+              .foregroundStyle(.secondary)
+          }
         }
         Spacer()
         Text(label(for: rule.activation))
@@ -185,15 +190,6 @@ struct PersonalCorrectionsView: View {
           .padding(.horizontal, 10)
           .padding(.vertical, 4)
           .background(Capsule().fill(Color.secondary.opacity(0.1)))
-      }
-
-      if !rule.aliases.isEmpty {
-        HStack(spacing: 6) {
-          Text("Aliases:")
-            .font(.caption.bold())
-          Text(rule.aliases.joined(separator: ", "))
-            .font(.caption)
-        }
       }
 
       if !rule.contextTags.isEmpty {
@@ -214,7 +210,8 @@ struct PersonalCorrectionsView: View {
       HStack(spacing: 12) {
         Button("Edit") {
           draft = RuleDraft(rule: rule)
-          focusedField = .displayName
+          showAdvancedOptions = draft.requiresAdvancedOptions
+          focusedField = .canonical
         }
         .buttonStyle(.bordered)
         Button("Delete", role: .destructive) {
@@ -319,7 +316,7 @@ struct PersonalCorrectionsView: View {
     if let ruleID = draft.id, let existing = lexicon.rules.first(where: { $0.id == ruleID }) {
       let updated = PersonalLexiconRule(
         id: existing.id,
-        displayName: draft.displayName,
+        displayName: draft.generatedDisplayName,
         canonical: draft.canonical,
         aliases: aliases,
         activation: draft.activation,
@@ -341,7 +338,7 @@ struct PersonalCorrectionsView: View {
       Task {
         do {
           _ = try await lexicon.addRule(
-            displayName: draft.displayName,
+            displayName: draft.generatedDisplayName,
             canonical: draft.canonical,
             aliases: aliases,
             activation: draft.activation,
@@ -359,6 +356,7 @@ struct PersonalCorrectionsView: View {
 
   private func resetDraft() {
     draft = RuleDraft()
+    showAdvancedOptions = false
     focusedField = nil
   }
 
@@ -387,7 +385,6 @@ struct PersonalCorrectionsView: View {
 
 private struct RuleDraft {
   var id: UUID?
-  var displayName: String = ""
   var canonical: String = ""
   var aliasesText: String = ""
   var activation: PersonalLexiconRule.Activation = .automatic
@@ -397,6 +394,12 @@ private struct RuleDraft {
 
   var isEditing: Bool { id != nil }
 
+
+  var canonicalDisplay: String {
+    let trimmed = canonical.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? "New correction" : trimmed
+  }
+
   var aliases: [String] {
     tokenize(aliasesText)
   }
@@ -405,9 +408,15 @@ private struct RuleDraft {
     Set(tokenize(contextTagsText))
   }
 
+  var generatedDisplayName: String {
+    if let firstAlias = aliases.first?.trimmingCharacters(in: .whitespacesAndNewlines), !firstAlias.isEmpty {
+      return "\(canonicalDisplay) (\(firstAlias))"
+    }
+    return canonicalDisplay
+  }
+
   var isSavable: Bool {
-    !displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-      && !canonical.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    !canonical.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
       && !aliases.isEmpty
   }
 
@@ -415,11 +424,19 @@ private struct RuleDraft {
     tags
   }
 
+  var requiresAdvancedOptions: Bool {
+    if activation != .automatic { return true }
+    if confidence != .high { return true }
+    if !tags.isEmpty { return true }
+    let trimmedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !trimmedNotes.isEmpty { return true }
+    return false
+  }
+
   init() {}
 
   init(rule: PersonalLexiconRule) {
     id = rule.id
-    displayName = rule.displayName
     canonical = rule.canonical
     aliasesText = rule.aliases.joined(separator: ", ")
     activation = rule.activation

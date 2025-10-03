@@ -26,6 +26,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
 struct SettingsView: View {
   @EnvironmentObject private var environment: AppEnvironment
   @EnvironmentObject private var settings: AppSettings
+  @EnvironmentObject private var audioDevices: AudioInputDeviceManager
   private static let localeOptions: [LocaleOption] = [
     LocaleOption(displayName: "English (United States)", identifier: "en_US"),
     LocaleOption(displayName: "English (United Kingdom)", identifier: "en_GB"),
@@ -137,6 +138,21 @@ struct SettingsView: View {
     case .permissions:
       permissionsSettings
     }
+  }
+
+  private var audioInputSelectionBinding: Binding<String> {
+    Binding(
+      get: {
+        audioDevices.selectedDeviceUID ?? AudioInputDeviceManager.systemDefaultToken
+      },
+      set: { newValue in
+        if newValue == AudioInputDeviceManager.systemDefaultToken {
+          audioDevices.selectSystemDefault()
+        } else {
+          audioDevices.selectDevice(uid: newValue)
+        }
+      }
+    )
   }
 
   private func overviewChip(title: String, value: String, systemImage: String) -> some View {
@@ -251,6 +267,50 @@ struct SettingsView: View {
         }
       }
       .speakTooltip("Control how Speak delivers transcripts and how gently we touch your clipboard and interface.")
+
+      SettingsCard(title: "Microphone", systemImage: "mic.circle", tint: Color.orange) {
+        VStack(alignment: .leading, spacing: 12) {
+          Picker("Input Device", selection: audioInputSelectionBinding) {
+            Text("System Default (\(audioDevices.systemDefaultDisplayName))")
+              .tag(AudioInputDeviceManager.systemDefaultToken)
+            ForEach(audioDevices.devices) { device in
+              Text(device.displayName).tag(device.id)
+            }
+          }
+          .pickerStyle(.menu)
+          .padding(.horizontal, 12)
+          .padding(.vertical, 8)
+          .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+              .fill(Color(nsColor: .controlBackgroundColor))
+          )
+          .speakTooltip("Choose which microphone Speak listens to when recording or transcribing.")
+
+          if let details = audioDevices.currentSelectionDetails {
+            Text(details)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+
+          HStack(spacing: 8) {
+            Image(systemName: "waveform")
+              .foregroundStyle(.orange)
+            Text("Currently active: \(audioDevices.systemDefaultDisplayName)")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+            Spacer()
+            Button {
+              audioDevices.refresh()
+            } label: {
+              Label("Refresh", systemImage: "arrow.clockwise")
+                .labelStyle(.titleAndIcon)
+            }
+            .buttonStyle(.bordered)
+            .speakTooltip("Reload the list of connected microphones.")
+          }
+        }
+      }
+      .speakTooltip("Pick the microphone Speak should use. We fall back to the system default if a device disconnects.")
 
       SettingsCard(title: "Housekeeping", systemImage: "tray.full", tint: Color.orange) {
         VStack(alignment: .leading, spacing: 12) {

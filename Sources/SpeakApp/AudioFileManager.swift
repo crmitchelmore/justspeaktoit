@@ -37,13 +37,20 @@ enum AudioFileManagerError: LocalizedError {
 actor AudioFileManager {
   private let appSettings: AppSettings
   private let permissionsManager: PermissionsManager
+  private let audioDeviceManager: AudioInputDeviceManager
   private var recorder: AVAudioRecorder?
   private var currentRecordingID: UUID?
   private var currentRecordingStart: Date?
+  private var activeInputSession: AudioInputDeviceManager.SessionContext?
 
-  init(appSettings: AppSettings, permissionsManager: PermissionsManager) {
+  init(
+    appSettings: AppSettings,
+    permissionsManager: PermissionsManager,
+    audioDeviceManager: AudioInputDeviceManager
+  ) {
     self.appSettings = appSettings
     self.permissionsManager = permissionsManager
+    self.audioDeviceManager = audioDeviceManager
   }
 
   func startRecording() async throws -> URL {
@@ -56,6 +63,8 @@ actor AudioFileManager {
         throw AudioFileManagerError.microphonePermissionMissing
       }
     }
+
+    let sessionContext = await audioDeviceManager.beginUsingPreferredInput()
 
     let id = UUID()
     let startDate = Date()
@@ -78,8 +87,10 @@ actor AudioFileManager {
       recorder = newRecorder
       currentRecordingID = id
       currentRecordingStart = startDate
+      activeInputSession = sessionContext
       return fileURL
     } catch {
+      await audioDeviceManager.endUsingPreferredInput(session: sessionContext)
       throw AudioFileManagerError.failedToCreateRecorder
     }
   }
@@ -101,24 +112,39 @@ actor AudioFileManager {
     let duration =
       preciseDuration.isFinite && preciseDuration > 0 ? preciseDuration : measuredDuration
 
-    return RecordingSummary(
+    let summary = RecordingSummary(
       id: currentRecordingID,
       url: url,
       startedAt: start,
       duration: duration,
       fileSize: fileSize
     )
+
+    if let session = activeInputSession {
+      await audioDeviceManager.endUsingPreferredInput(session: session)
+      activeInputSession = nil
+    }
+
+    return summary
   }
 
-  func cancelRecording(deleteFile: Bool = true) {
-    guard let recorder else { return }
-    recorder.stop()
-    let url = recorder.url
-    self.recorder = nil
-    currentRecordingStart = nil
-    currentRecordingID = nil
-    if deleteFile {
-      try? FileManager.default.removeItem(at: url)
+  func cancelRecording(deleteFile: Bool = true) async {
+    let session = activeInputSession
+
+    if let recorder {
+      recorder.stop()
+      let url = recorder.url
+      self.recorder = nil
+      currentRecordingStart = nil
+      currentRecordingID = nil
+      if deleteFile {
+        try? FileManager.default.removeItem(at: url)
+      }
+    }
+
+    if let session {
+      await audioDeviceManager.endUsingPreferredInput(session: session)
+      activeInputSession = nil
     }
   }
 

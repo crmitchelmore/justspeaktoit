@@ -7,6 +7,7 @@ final class AppEnvironment: ObservableObject {
   let history: HistoryManager
   let hud: HUDManager
   let hotKeys: HotKeyManager
+  let audioDevices: AudioInputDeviceManager
   let audio: AudioFileManager
   let transcription: TranscriptionManager
   let postProcessing: PostProcessingManager
@@ -24,6 +25,7 @@ final class AppEnvironment: ObservableObject {
     history: HistoryManager,
     hud: HUDManager,
     hotKeys: HotKeyManager,
+    audioDevices: AudioInputDeviceManager,
     audio: AudioFileManager,
     transcription: TranscriptionManager,
     postProcessing: PostProcessingManager,
@@ -38,6 +40,7 @@ final class AppEnvironment: ObservableObject {
     self.history = history
     self.hud = hud
     self.hotKeys = hotKeys
+    self.audioDevices = audioDevices
     self.audio = audio
     self.transcription = transcription
     self.postProcessing = postProcessing
@@ -67,12 +70,18 @@ enum WireUp {
     let history = HistoryManager()
     let hud = HUDManager()
     let hotKeys = HotKeyManager(permissionsManager: permissions, appSettings: settings)
-    let audio = AudioFileManager(appSettings: settings, permissionsManager: permissions)
+    let audioDevices = AudioInputDeviceManager(appSettings: settings)
+    let audio = AudioFileManager(
+      appSettings: settings,
+      permissionsManager: permissions,
+      audioDeviceManager: audioDevices
+    )
     let secureStorage = SecureAppStorage(permissionsManager: permissions, appSettings: settings)
     let openRouter = OpenRouterAPIClient(secureStorage: secureStorage)
     let transcription = TranscriptionManager(
       appSettings: settings,
       permissionsManager: permissions,
+      audioDeviceManager: audioDevices,
       batchClient: RemoteAudioTranscriber(client: openRouter),
       openRouter: openRouter,
       secureStorage: secureStorage
@@ -103,6 +112,7 @@ enum WireUp {
       history: history,
       hud: hud,
       hotKeys: hotKeys,
+      audioDevices: audioDevices,
       audio: audio,
       transcription: transcription,
       postProcessing: postProcessing,

@@ -11,6 +11,7 @@ final class AppEnvironment: ObservableObject {
   let audio: AudioFileManager
   let transcription: TranscriptionManager
   let postProcessing: PostProcessingManager
+  let tts: TextToSpeechManager
   let secureStorage: SecureAppStorage
   let openRouter: OpenRouterAPIClient
   let personalLexicon: PersonalLexiconService
@@ -29,6 +30,7 @@ final class AppEnvironment: ObservableObject {
     audio: AudioFileManager,
     transcription: TranscriptionManager,
     postProcessing: PostProcessingManager,
+    tts: TextToSpeechManager,
     secureStorage: SecureAppStorage,
     openRouter: OpenRouterAPIClient,
     personalLexicon: PersonalLexiconService,
@@ -44,6 +46,7 @@ final class AppEnvironment: ObservableObject {
     self.audio = audio
     self.transcription = transcription
     self.postProcessing = postProcessing
+    self.tts = tts
     self.secureStorage = secureStorage
     self.openRouter = openRouter
     self.personalLexicon = personalLexicon
@@ -93,6 +96,17 @@ enum WireUp {
       settings: settings,
       personalLexicon: personalLexicon
     )
+    let ttsClients: [TTSProvider: TextToSpeechClient] = [
+      .elevenlabs: ElevenLabsClient(secureStorage: secureStorage),
+      .openai: OpenAITTSClient(secureStorage: secureStorage),
+      .azure: AzureSpeechClient(secureStorage: secureStorage, appSettings: settings),
+      .system: SystemTTSClient(),
+    ]
+    let tts = TextToSpeechManager(
+      appSettings: settings,
+      secureStorage: secureStorage,
+      clients: ttsClients
+    )
     let main = MainManager(
       appSettings: settings,
       permissionsManager: permissions,
@@ -116,6 +130,7 @@ enum WireUp {
       audio: audio,
       transcription: transcription,
       postProcessing: postProcessing,
+      tts: tts,
       secureStorage: secureStorage,
       openRouter: openRouter,
       personalLexicon: personalLexicon,

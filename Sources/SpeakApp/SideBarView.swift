@@ -3,6 +3,7 @@ import SwiftUI
 enum SidebarItem: Hashable, Identifiable {
   case dashboard
   case history
+  case voiceOutput
   case corrections
   case settings
 
@@ -14,6 +15,8 @@ enum SidebarItem: Hashable, Identifiable {
       return "Dashboard"
     case .history:
       return "History"
+    case .voiceOutput:
+      return "Voice Output"
     case .corrections:
       return "Corrections"
     case .settings:
@@ -27,6 +30,8 @@ enum SidebarItem: Hashable, Identifiable {
       return "waveform"
     case .history:
       return "clock"
+    case .voiceOutput:
+      return "speaker.wave.3"
     case .corrections:
       return "character.book.closed"
     case .settings:
@@ -40,6 +45,8 @@ enum SidebarItem: Hashable, Identifiable {
       return .cyan
     case .history:
       return .purple
+    case .voiceOutput:
+      return .green
     case .corrections:
       return .pink
     case .settings:
@@ -53,6 +60,8 @@ enum SidebarItem: Hashable, Identifiable {
       return "Open the dashboard for live stats, quick actions, and your most recent session."
     case .history:
       return "Review every past recording with transcripts, costs, and network details."
+    case .voiceOutput:
+      return "Convert text to natural speech with various voices and providers."
     case .corrections:
       return "Curate custom name and phrase corrections that stay private to your device."
     case .settings:
@@ -65,19 +74,41 @@ struct SideBarView: View {
   @Binding var selection: SidebarItem?
 
   var body: some View {
-    List(selection: $selection) {
+    List {
       Section("Speak") {
-        ForEach([SidebarItem.dashboard, .history, .corrections, .settings]) { item in
-          NavigationLink(value: item) {
-            Label(item.label, systemImage: item.systemImage)
-              .foregroundStyle(selection == item ? item.color : .primary)
+        ForEach([SidebarItem.dashboard, .history, .voiceOutput, .corrections, .settings]) { item in
+          Button {
+            selection = item
+          } label: {
+            HStack(spacing: 12) {
+              Image(systemName: item.systemImage)
+                .foregroundStyle(item.color)
+                .imageScale(.medium)
+                .frame(width: 20)
+              Text(item.label)
+                .fontWeight(selection == item ? .semibold : .regular)
+                .foregroundStyle(.primary)
+              Spacer()
+            }
+            .contentShape(Rectangle())
           }
-          .listItemTint(item.color)
+          .buttonStyle(.plain)
+          .padding(.horizontal, 12)
+          .padding(.vertical, 8)
+          .background(
+            selection == item
+              ? RoundedRectangle(cornerRadius: 8)
+                .fill(item.color.opacity(0.15))
+              : nil
+          )
+          .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
+          .listRowBackground(Color.clear)
           .speakTooltip(item.helpMessage)
         }
       }
     }
     .listStyle(.sidebar)
+    .scrollContentBackground(.hidden)
   }
 }
 

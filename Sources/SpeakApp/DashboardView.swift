@@ -125,6 +125,12 @@ struct DashboardView: View {
         transcriptionModelChartSection
         postProcessingModelChartSection
       }
+
+      // TTS Charts
+      LazyVGrid(columns: [GridItem(.adaptive(minimum: 340), spacing: 24)], spacing: 24) {
+        ttsUsageChartSection
+        ttsProviderChartSection
+      }
     }
   }
 
@@ -445,6 +451,94 @@ struct DashboardView: View {
       )
     }
     .speakTooltip("Understand which refinement models polish your transcripts after the first pass.")
+  }
+
+  private var ttsUsageChartSection: some View {
+    DashboardCard(title: "Voice Output Usage", systemImage: "speaker.wave.3", tint: Color.blue) {
+      VStack(alignment: .leading, spacing: 12) {
+        let totalCharacters = environment.tts.totalCharactersThisMonth()
+        let totalCost = environment.tts.totalCostThisMonth()
+
+        HStack {
+          VStack(alignment: .leading, spacing: 4) {
+            Text("Characters This Month")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+            Text("\(totalCharacters)")
+              .font(.title2.bold())
+              .foregroundStyle(.blue)
+          }
+          Spacer()
+          VStack(alignment: .trailing, spacing: 4) {
+            Text("Total Cost")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+            Text("$\(totalCost, format: .number.precision(.fractionLength(2)))")
+              .font(.title2.bold())
+              .foregroundStyle(.blue)
+          }
+        }
+
+        if totalCharacters > 0 {
+          Text(
+            "\(totalCharacters) characters synthesized this month"
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        } else {
+          Text("No voice output generated yet this month")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+      }
+    }
+    .speakTooltip("Track your text-to-speech usage and costs this month.")
+  }
+
+  private var ttsProviderChartSection: some View {
+    DashboardCard(title: "TTS Providers", systemImage: "waveform.circle", tint: Color.purple) {
+      let now = Date()
+      let monthAgo = Calendar.current.date(byAdding: .month, value: -1, to: now)!
+      let usage = environment.tts.usageByProvider(since: monthAgo)
+
+      if usage.isEmpty {
+        VStack(spacing: 8) {
+          Image(systemName: "speaker.wave.2.circle")
+            .font(.largeTitle)
+            .foregroundStyle(.secondary)
+          Text("No TTS usage yet")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, minHeight: 120)
+      } else {
+        VStack(alignment: .leading, spacing: 12) {
+          ForEach(usage.sorted(by: { $0.value > $1.value }), id: \.key) { provider, count in
+            HStack {
+              Circle()
+                .fill(providerColor(provider))
+                .frame(width: 12, height: 12)
+              Text(provider.displayName)
+                .font(.subheadline)
+              Spacer()
+              Text("\(count) chars")
+                .font(.subheadline.monospacedDigit())
+                .foregroundStyle(.secondary)
+            }
+          }
+        }
+      }
+    }
+    .speakTooltip("See which TTS providers you use most frequently.")
+  }
+
+  private func providerColor(_ provider: TTSProvider) -> Color {
+    switch provider {
+    case .elevenlabs: return .purple
+    case .openai: return .green
+    case .azure: return .blue
+    case .system: return .gray
+    }
   }
 }
 

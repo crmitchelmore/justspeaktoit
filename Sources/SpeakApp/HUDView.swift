@@ -56,7 +56,7 @@ struct HUDOverlay: View {
     case .success:
       return .green
     case .failure:
-      return .orange
+      return .red
     case .hidden:
       return .gray
     }

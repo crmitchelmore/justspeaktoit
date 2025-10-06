@@ -5,6 +5,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
   case general
   case transcription
   case postProcessing
+  case voiceOutput
   case apiKeys
   case hotKeys
   case permissions
@@ -16,6 +17,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
     case .general: return "General"
     case .transcription: return "Transcription"
     case .postProcessing: return "Post-processing"
+    case .voiceOutput: return "Voice Output"
     case .apiKeys: return "API Keys"
     case .hotKeys: return "Hotkeys"
     case .permissions: return "Permissions"
@@ -54,6 +56,8 @@ struct SettingsView: View {
   @State private var transcriptionProviders: [TranscriptionProviderMetadata] = []
   @State private var providerAPIKeys: [String: String] = [:]
   @State private var providerValidationStates: [String: ValidationViewState] = [:]
+  @State private var ttsProviderAPIKeys: [String: String] = [:]
+  @State private var ttsProviderValidationStates: [String: ValidationViewState] = [:]
   private let openRouterKeyIdentifier = "openrouter.apiKey"
 
   enum ValidationViewState {
@@ -131,6 +135,8 @@ struct SettingsView: View {
       transcriptionSettings
     case .postProcessing:
       postProcessingSettings
+    case .voiceOutput:
+      voiceOutputSettings
     case .apiKeys:
       apiKeySettings
     case .hotKeys:
@@ -589,6 +595,110 @@ struct SettingsView: View {
     }
   }
 
+  private var voiceOutputSettings: some View {
+    LazyVStack(spacing: 20) {
+      SettingsCard(title: "Default Voice", systemImage: "speaker.wave.3", tint: Color.blue) {
+        VStack(alignment: .leading, spacing: 12) {
+          VStack(alignment: .leading, spacing: 8) {
+            Picker("Voice", selection: settingsBinding(\AppSettings.defaultTTSVoice)) {
+              ForEach(VoiceCatalog.allVoices) { voice in
+                Text(voice.displayName).tag(voice.id)
+              }
+            }
+            .pickerStyle(.menu)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+              RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor))
+            )
+            .speakTooltip("Choose your preferred voice for text-to-speech synthesis")
+
+            Text("Your default voice for converting text to speech")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+        }
+      }
+      .speakTooltip("Select which voice to use by default when generating speech from text.")
+
+      SettingsCard(title: "Audio Quality & Performance", systemImage: "waveform.circle", tint: Color.green) {
+        VStack(alignment: .leading, spacing: 16) {
+          VStack(alignment: .leading, spacing: 8) {
+            Picker("Quality", selection: settingsBinding(\AppSettings.ttsQuality)) {
+              ForEach(TTSQuality.allCases) { quality in
+                Text(quality.displayName).tag(quality)
+              }
+            }
+            .pickerStyle(.segmented)
+            .speakTooltip("Higher quality produces better audio but takes longer")
+          }
+
+          VStack(alignment: .leading, spacing: 8) {
+            HStack {
+              Text("Speed")
+              Spacer()
+              Text(String(format: "%.2fx", settings.ttsSpeed))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+            }
+            Slider(value: settingsBinding(\AppSettings.ttsSpeed), in: 0.5...2.0, step: 0.1)
+              .speakTooltip("Adjust playback speed from 0.5x (slower) to 2.0x (faster)")
+          }
+
+          VStack(alignment: .leading, spacing: 8) {
+            HStack {
+              Text("Pitch")
+              Spacer()
+              Text("\(settings.ttsPitch > 0 ? "+" : "")\(Int(settings.ttsPitch)) semitones")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+            }
+            Slider(value: settingsBinding(\AppSettings.ttsPitch), in: -12...12, step: 1)
+              .speakTooltip("Adjust voice pitch from -12 (lower) to +12 (higher) semitones")
+          }
+        }
+      }
+      .speakTooltip("Control audio quality, playback speed, and voice pitch for generated speech.")
+
+      SettingsCard(title: "Output & Export", systemImage: "arrow.down.circle", tint: Color.orange) {
+        VStack(alignment: .leading, spacing: 12) {
+          VStack(alignment: .leading, spacing: 8) {
+            Picker("File Format", selection: settingsBinding(\AppSettings.ttsOutputFormat)) {
+              ForEach(AudioFormat.allCases) { format in
+                Text(format.displayName).tag(format)
+              }
+            }
+            .pickerStyle(.segmented)
+            .speakTooltip("Choose the audio file format for exported speech")
+          }
+
+          settingsToggle(
+            "Auto-play after synthesis",
+            isOn: settingsBinding(\AppSettings.ttsAutoPlay),
+            tint: .orange
+          )
+          .speakTooltip("Automatically play audio after synthesis completes")
+
+          settingsToggle(
+            "Save to recordings directory",
+            isOn: settingsBinding(\AppSettings.ttsSaveToDirectory),
+            tint: .orange
+          )
+          .speakTooltip("Automatically save generated speech files to your recordings folder")
+
+          settingsToggle(
+            "Enable SSML support",
+            isOn: settingsBinding(\AppSettings.ttsUseSSML),
+            tint: .orange
+          )
+          .speakTooltip("Enable Speech Synthesis Markup Language for advanced voice control")
+        }
+      }
+      .speakTooltip("Configure how generated speech is saved and played back.")
+    }
+  }
+
   private var apiKeySettings: some View {
     LazyVStack(spacing: 20) {
       // OpenRouter (Legacy)
@@ -625,6 +735,11 @@ struct SettingsView: View {
       ForEach(transcriptionProviders) { provider in
         providerAPIKeyCard(for: provider)
       }
+
+      // TTS Providers
+      ForEach([TTSProvider.elevenlabs, .openai, .azure]) { provider in
+        ttsProviderAPIKeyCard(for: provider)
+      }
     }
   }
 
@@ -639,7 +754,7 @@ struct SettingsView: View {
     let removeDisabled = inFlight
 
     return apiKeyCard(
-      title: provider.displayName,
+      title: "\(provider.displayName) (Transcription)",
       systemImage: provider.systemImage,
       tint: tintColor,
       statusIcon: isStored ? "checkmark.seal.fill" : "key.fill",
@@ -664,6 +779,71 @@ struct SettingsView: View {
       removeTooltip: "Forget this service key from Speak and your Keychain when you no longer use it.",
       link: provider.website.isEmpty ? nil : URL(string: provider.website),
       linkLabel: provider.website.isEmpty ? nil : "Get API Key"
+    )
+  }
+
+  private func ttsProviderAPIKeyCard(for provider: TTSProvider) -> some View {
+    let isStored = settings.trackedAPIKeyIdentifiers.contains(provider.apiKeyIdentifier)
+    let validationState = ttsProviderValidationStates[provider.rawValue] ?? .idle
+    let inFlight = isValidationInFlight(validationState)
+    let saveDisabled = inFlight
+      || (ttsProviderAPIKeys[provider.rawValue] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    let validateDisabled = inFlight || !isStored
+    let removeDisabled = inFlight
+
+    let tintColor: Color = {
+      switch provider {
+      case .elevenlabs: return .purple
+      case .openai: return .green
+      case .azure: return .blue
+      case .system: return .gray
+      }
+    }()
+    let systemImage: String = {
+      switch provider {
+      case .elevenlabs: return "waveform.circle"
+      case .openai: return "brain"
+      case .azure: return "cloud"
+      case .system: return "speaker.wave.2"
+      }
+    }()
+    let website: String = {
+      switch provider {
+      case .elevenlabs: return "https://elevenlabs.io"
+      case .openai: return "https://platform.openai.com"
+      case .azure: return "https://azure.microsoft.com/en-us/services/cognitive-services/text-to-speech/"
+      case .system: return ""
+      }
+    }()
+
+    return apiKeyCard(
+      title: "\(provider.displayName) (TTS)",
+      systemImage: systemImage,
+      tint: tintColor,
+      statusIcon: isStored ? "checkmark.seal.fill" : "key.fill",
+      statusTint: tintColor,
+      isStored: isStored,
+      descriptionText: provider == .azure
+        ? "For Azure Text-to-Speech, use format: 'your-api-key:your-region' (e.g., 'abc123:eastus')"
+        : "Stored securely in your macOS Keychain. Used only for \(provider.displayName) text-to-speech voice synthesis.",
+      keyFieldLabel: "\(provider.displayName) TTS API Key",
+      keyBinding: ttsBinding(for: provider.rawValue),
+      onSave: { saveTTSProviderAPIKey(provider) },
+      onValidate: isStored ? { checkTTSProviderKeyValidity(provider) } : nil,
+      onRemove: isStored ? { removeTTSProviderAPIKey(provider) } : nil,
+      isSaveDisabled: saveDisabled,
+      isValidateDisabled: validateDisabled,
+      isRemoveDisabled: removeDisabled,
+      validationState: validationState,
+      tooltip: "Manage your \(provider.displayName) API key for text-to-speech synthesis.",
+      saveButtonTitle: isStored ? "Replace Key" : "Save Key",
+      saveTooltip: "Securely store your \(provider.displayName) key for voice synthesis.",
+      validateButtonTitle: "Check Validity",
+      validateTooltip: "Confirm that your \(provider.displayName) key is still valid.",
+      removeButtonTitle: "Remove Key",
+      removeTooltip: "Forget this key from Speak and your Keychain.",
+      link: website.isEmpty ? nil : URL(string: website),
+      linkLabel: website.isEmpty ? nil : "Get API Key"
     )
   }
 
@@ -892,6 +1072,111 @@ struct SettingsView: View {
         await MainActor.run {
           providerAPIKeys[provider.id] = ""
           providerValidationStates[provider.id] = .idle
+        }
+      } catch {
+        // Handle error silently
+      }
+    }
+  }
+
+  // MARK: - TTS Provider API Key Management
+
+  private func ttsBinding(for providerID: String) -> Binding<String> {
+    Binding(
+      get: { ttsProviderAPIKeys[providerID] ?? "" },
+      set: { ttsProviderAPIKeys[providerID] = $0 }
+    )
+  }
+
+  private func saveTTSProviderAPIKey(_ provider: TTSProvider) {
+    guard let value = ttsProviderAPIKeys[provider.rawValue]?.trimmingCharacters(in: .whitespacesAndNewlines),
+      !value.isEmpty
+    else { return }
+
+    ttsProviderValidationStates[provider.rawValue] = .validating
+
+    Task {
+      let client = environment.tts.clients[provider]
+      guard let client = client else {
+        await MainActor.run {
+          ttsProviderValidationStates[provider.rawValue] =
+            .finished(.failure(message: "TTS provider not found"))
+        }
+        return
+      }
+
+      let validation = await client.validateAPIKey(value)
+
+      switch validation.outcome {
+      case .success:
+        do {
+          try await environment.secureStorage.storeSecret(
+            value,
+            identifier: provider.apiKeyIdentifier,
+            label: "\(provider.displayName) TTS API Key"
+          )
+
+          let result = validation.updatingOutcome(
+            .success(message: "API key saved and validated successfully")
+          )
+
+          await MainActor.run {
+            ttsProviderAPIKeys[provider.rawValue] = ""
+            ttsProviderValidationStates[provider.rawValue] = .finished(result)
+          }
+        } catch {
+          let failure = APIKeyValidationResult.failure(
+            message: "Failed to store key: \(error.localizedDescription)",
+            debug: validation.debug
+          )
+          await MainActor.run {
+            ttsProviderValidationStates[provider.rawValue] = .finished(failure)
+          }
+        }
+      case .failure:
+        await MainActor.run {
+          ttsProviderValidationStates[provider.rawValue] = .finished(validation)
+        }
+      }
+    }
+  }
+
+  private func checkTTSProviderKeyValidity(_ provider: TTSProvider) {
+    ttsProviderValidationStates[provider.rawValue] = .validating
+
+    Task {
+      let client = environment.tts.clients[provider]
+      guard let client = client else {
+        await MainActor.run {
+          ttsProviderValidationStates[provider.rawValue] =
+            .finished(.failure(message: "TTS provider not found"))
+        }
+        return
+      }
+
+      guard let storedKey = try? await environment.secureStorage.secret(identifier: provider.apiKeyIdentifier) else {
+        await MainActor.run {
+          ttsProviderValidationStates[provider.rawValue] =
+            .finished(.failure(message: "API key not found in Keychain"))
+        }
+        return
+      }
+
+      let result = await client.validateAPIKey(storedKey)
+
+      await MainActor.run {
+        ttsProviderValidationStates[provider.rawValue] = .finished(result)
+      }
+    }
+  }
+
+  private func removeTTSProviderAPIKey(_ provider: TTSProvider) {
+    Task {
+      do {
+        try await environment.secureStorage.removeSecret(identifier: provider.apiKeyIdentifier)
+        await MainActor.run {
+          ttsProviderAPIKeys[provider.rawValue] = ""
+          ttsProviderValidationStates[provider.rawValue] = .idle
         }
       } catch {
         // Handle error silently

@@ -14,6 +14,7 @@ struct SpeakApp: App {
         .environmentObject(environment.history)
         .environmentObject(environment.personalLexicon)
         .environmentObject(environment.audioDevices)
+        .environmentObject(environment.tts)
     }
     .defaultSize(width: 1080, height: 720)
   }

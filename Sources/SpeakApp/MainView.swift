@@ -5,12 +5,11 @@ struct MainView: View {
   @EnvironmentObject private var history: HistoryManager
   @EnvironmentObject private var personalLexicon: PersonalLexiconService
   @State private var selection: SidebarItem? = .dashboard
-  @State private var presentError: Bool = false
-  @State private var latestErrorMessage: String = ""
 
   var body: some View {
     NavigationSplitView {
       SideBarView(selection: $selection)
+        .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 300)
     } detail: {
       detailView
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -25,19 +24,6 @@ struct MainView: View {
         NSApp.windows.first?.makeKeyAndOrderFront(nil)
       }
     }
-    .onReceive(environment.main.$lastErrorMessage) { message in
-      guard let message else { return }
-      latestErrorMessage = message
-      presentError = true
-    }
-    .alert(
-      "Something went wrong", isPresented: $presentError,
-      actions: {
-        Button("Dismiss", role: .cancel) { presentError = false }
-      },
-      message: {
-        Text(latestErrorMessage)
-      })
   }
 
   @ViewBuilder
@@ -47,6 +33,8 @@ struct MainView: View {
       DashboardView()
     case .history:
       HistoryView()
+    case .voiceOutput:
+      VoiceOutputView()
     case .corrections:
       PersonalCorrectionsView()
         .environmentObject(personalLexicon)

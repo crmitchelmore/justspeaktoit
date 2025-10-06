@@ -106,6 +106,14 @@ final class AppSettings: ObservableObject {
     case preferredLocale
     case postRecordingTailDuration
     case preferredAudioInputUID
+    case defaultTTSVoice
+    case ttsSpeed
+    case ttsPitch
+    case ttsQuality
+    case ttsOutputFormat
+    case ttsAutoPlay
+    case ttsSaveToDirectory
+    case ttsUseSSML
   }
 
   private static let defaultBatchTranscriptionModel = "google/gemini-2.0-flash-001"
@@ -217,6 +225,39 @@ final class AppSettings: ObservableObject {
     didSet { store(trackedAPIKeyIdentifiers, key: .trackedKeyIdentifiers) }
   }
 
+  // TTS Settings
+  @Published var defaultTTSVoice: String {
+    didSet { store(defaultTTSVoice, key: .defaultTTSVoice) }
+  }
+
+  @Published var ttsSpeed: Double {
+    didSet { store(ttsSpeed, key: .ttsSpeed) }
+  }
+
+  @Published var ttsPitch: Double {
+    didSet { store(ttsPitch, key: .ttsPitch) }
+  }
+
+  @Published var ttsQuality: TTSQuality {
+    didSet { store(ttsQuality.rawValue, key: .ttsQuality) }
+  }
+
+  @Published var ttsOutputFormat: AudioFormat {
+    didSet { store(ttsOutputFormat.rawValue, key: .ttsOutputFormat) }
+  }
+
+  @Published var ttsAutoPlay: Bool {
+    didSet { store(ttsAutoPlay, key: .ttsAutoPlay) }
+  }
+
+  @Published var ttsSaveToDirectory: Bool {
+    didSet { store(ttsSaveToDirectory, key: .ttsSaveToDirectory) }
+  }
+
+  @Published var ttsUseSSML: Bool {
+    didSet { store(ttsUseSSML, key: .ttsUseSSML) }
+  }
+
   private let defaults: UserDefaults
 
   init(defaults: UserDefaults = .standard) {
@@ -281,6 +322,21 @@ final class AppSettings: ObservableObject {
       defaults.object(forKey: DefaultsKey.postRecordingTailDuration.rawValue) as? Double ?? 0.5
     trackedAPIKeyIdentifiers =
       defaults.array(forKey: DefaultsKey.trackedKeyIdentifiers.rawValue) as? [String] ?? []
+
+    // TTS Settings
+    defaultTTSVoice =
+      defaults.string(forKey: DefaultsKey.defaultTTSVoice.rawValue) ?? "openai/alloy"
+    ttsSpeed = defaults.object(forKey: DefaultsKey.ttsSpeed.rawValue) as? Double ?? 1.0
+    ttsPitch = defaults.object(forKey: DefaultsKey.ttsPitch.rawValue) as? Double ?? 0.0
+    ttsQuality =
+      TTSQuality(rawValue: defaults.string(forKey: DefaultsKey.ttsQuality.rawValue) ?? "") ?? .high
+    ttsOutputFormat =
+      AudioFormat(rawValue: defaults.string(forKey: DefaultsKey.ttsOutputFormat.rawValue) ?? "")
+      ?? .mp3
+    ttsAutoPlay = defaults.object(forKey: DefaultsKey.ttsAutoPlay.rawValue) as? Bool ?? true
+    ttsSaveToDirectory =
+      defaults.object(forKey: DefaultsKey.ttsSaveToDirectory.rawValue) as? Bool ?? false
+    ttsUseSSML = defaults.object(forKey: DefaultsKey.ttsUseSSML.rawValue) as? Bool ?? false
 
     ensureRecordingsDirectoryExists()
   }

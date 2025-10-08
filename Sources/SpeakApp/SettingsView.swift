@@ -58,6 +58,8 @@ struct SettingsView: View {
   @State private var providerValidationStates: [String: ValidationViewState] = [:]
   @State private var ttsProviderAPIKeys: [String: String] = [:]
   @State private var ttsProviderValidationStates: [String: ValidationViewState] = [:]
+  @State private var showSystemPromptPreview = false
+  @State private var systemPromptPreview = ""
   private let openRouterKeyIdentifier = "openrouter.apiKey"
 
   enum ValidationViewState {
@@ -545,6 +547,11 @@ struct SettingsView: View {
                 .fill(Color(nsColor: .controlBackgroundColor))
             )
             .speakTooltip("Let Speak know which language you want your polished transcript delivered in.")
+            .onChange(of: settings.postProcessingOutputLanguage) { _, _ in
+              if showSystemPromptPreview {
+                generateSystemPromptPreview()
+              }
+            }
 
             Text("The language that the transcription will be output in.")
               .font(.caption)
@@ -589,9 +596,110 @@ struct SettingsView: View {
               RoundedRectangle(cornerRadius: 12)
                 .stroke(Color.mint.opacity(0.2), lineWidth: 1)
             )
+            .onChange(of: settings.postProcessingSystemPrompt) { _, _ in
+              if showSystemPromptPreview {
+                generateSystemPromptPreview()
+              }
+            }
         }
       }
       .speakTooltip("Guide the cleanup model with your own instructions for tone and formatting.")
+
+      SettingsCard(title: "System-Generated Parts", systemImage: "gearshape.2", tint: Color.indigo) {
+        VStack(alignment: .leading, spacing: 16) {
+          Text("Control which system-generated instructions are added to the prompt.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+          VStack(alignment: .leading, spacing: 12) {
+            settingsToggle(
+              "Include Personal Lexicon Directives",
+              isOn: settingsBinding(\AppSettings.postProcessingIncludeLexiconDirectives),
+              tint: .indigo
+            )
+            .onChange(of: settings.postProcessingIncludeLexiconDirectives) { _, _ in
+              generateSystemPromptPreview()
+            }
+            Text("Automatically applies your personal corrections and name normalizations to the transcript.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .padding(.leading, 28)
+
+            Divider()
+
+            settingsToggle(
+              "Include Context Tags",
+              isOn: settingsBinding(\AppSettings.postProcessingIncludeContextTags),
+              tint: .indigo
+            )
+            .onChange(of: settings.postProcessingIncludeContextTags) { _, _ in
+              generateSystemPromptPreview()
+            }
+            Text("Adds context tags to help the model understand the setting and adjust output accordingly.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .padding(.leading, 28)
+
+            Divider()
+
+            settingsToggle(
+              "Include Final Processing Instruction",
+              isOn: settingsBinding(\AppSettings.postProcessingIncludeFinalInstruction),
+              tint: .indigo
+            )
+            .onChange(of: settings.postProcessingIncludeFinalInstruction) { _, _ in
+              generateSystemPromptPreview()
+            }
+            Text("Adds a hardcoded reminder: \"Return only the processed text and nothing else. The following message is a raw transcript:\"")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .padding(.leading, 28)
+          }
+
+          Divider()
+
+          VStack(alignment: .leading, spacing: 8) {
+            Button {
+              showSystemPromptPreview.toggle()
+              if showSystemPromptPreview {
+                generateSystemPromptPreview()
+              }
+            } label: {
+              HStack {
+                Image(systemName: showSystemPromptPreview ? "eye.slash" : "eye")
+                Text(showSystemPromptPreview ? "Hide Current Prompt" : "Show Current Prompt")
+              }
+            }
+            .buttonStyle(.bordered)
+
+            if showSystemPromptPreview {
+              VStack(alignment: .leading, spacing: 8) {
+                Text("Current System Prompt Preview:")
+                  .font(.caption.bold())
+                  .foregroundStyle(.secondary)
+
+                ScrollView {
+                  Text(systemPromptPreview)
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(height: 200)
+                .padding(12)
+                .background(
+                  RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.indigo.opacity(0.05))
+                )
+                .overlay(
+                  RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.indigo.opacity(0.2), lineWidth: 1)
+                )
+              }
+            }
+          }
+        }
+      }
+      .speakTooltip("Fine-tune what system-generated instructions are sent to the post-processing model.")
     }
   }
 
@@ -734,11 +842,13 @@ struct SettingsView: View {
       // Transcription Providers (Dynamic)
       ForEach(transcriptionProviders) { provider in
         providerAPIKeyCard(for: provider)
+          .id("transcription-\(provider.id)")
       }
 
       // TTS Providers
       ForEach([TTSProvider.elevenlabs, .openai, .azure]) { provider in
         ttsProviderAPIKeyCard(for: provider)
+          .id("tts-\(provider.id)")
       }
     }
   }
@@ -1432,6 +1542,54 @@ struct SettingsView: View {
         RoundedRectangle(cornerRadius: 8, style: .continuous)
           .fill(Color(nsColor: .controlBackgroundColor))
       )
+  }
+
+  private func generateSystemPromptPreview() {
+    Task { @MainActor in
+      var sections: [String] = []
+
+      // Base prompt
+      let trimmed = self.settings.postProcessingSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+      let basePrompt = trimmed.isEmpty ? PostProcessingManager.defaultPrompt : trimmed
+
+      let rawLanguage = self.settings.postProcessingOutputLanguage.trimmingCharacters(in: .whitespacesAndNewlines)
+      let language: String
+      if rawLanguage.uppercased() == "ENGB" || rawLanguage.lowercased() == "en_gb" {
+        language = "British English"
+      } else {
+        language = rawLanguage
+      }
+
+      var finalBasePrompt = basePrompt
+      if !language.isEmpty {
+        finalBasePrompt = "Always output using \(language). \(basePrompt)"
+      }
+
+      // Lexicon directives section
+      if self.settings.postProcessingIncludeLexiconDirectives {
+        let lexiconCount = self.environment.personalLexicon.rules.count
+        let lexiconSection = """
+        Personal lexicon directives (internal use only):
+        - [Example: \(lexiconCount) active correction rules will be inserted here]
+        Apply these silently and never repeat or reference them in the response.
+        """
+        sections.append(lexiconSection)
+      }
+
+      // Context tags section (shown in base prompt)
+      if self.settings.postProcessingIncludeContextTags {
+        sections.append(finalBasePrompt + "\nContext tags: [Tags will be inserted based on active app context].")
+      } else {
+        sections.append(finalBasePrompt)
+      }
+
+      // Final instruction
+      if self.settings.postProcessingIncludeFinalInstruction {
+        sections.append("Return only the processed text and nothing else. The following message is a raw transcript:")
+      }
+
+      self.systemPromptPreview = sections.joined(separator: "\n\n")
+    }
   }
 }
 

@@ -19,6 +19,7 @@ struct PersonalCorrectionsView: View {
     ScrollView {
       VStack(alignment: .leading, spacing: 28) {
         hero
+        postProcessingInfoBanner
         editorCard
         existingRulesSection
         previewSection
@@ -67,6 +68,50 @@ struct PersonalCorrectionsView: View {
       )
       .cornerRadius(32)
       .shadow(color: Color.pink.opacity(0.28), radius: 24, x: 0, y: 12)
+    )
+  }
+
+  private var postProcessingInfoBanner: some View {
+    HStack(alignment: .top, spacing: 16) {
+      Image(systemName: "info.circle.fill")
+        .font(.title2)
+        .foregroundStyle(.blue)
+      VStack(alignment: .leading, spacing: 8) {
+        Text("How corrections work")
+          .font(.headline)
+        VStack(alignment: .leading, spacing: 6) {
+          HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+              .foregroundStyle(.green)
+              .imageScale(.small)
+            Text("Corrections are always applied directly to transcripts based on your rules")
+              .font(.callout)
+          }
+          HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "sparkles")
+              .foregroundStyle(.purple)
+              .imageScale(.small)
+            Text("When post-processing is enabled, your correction rules are also shared with the LLM for enhanced context")
+              .font(.callout)
+          }
+          HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "doc.plaintext")
+              .foregroundStyle(.orange)
+              .imageScale(.small)
+            Text("When post-processing is disabled, corrections still apply but without LLM context enhancement")
+              .font(.callout)
+          }
+        }
+      }
+    }
+    .padding(20)
+    .background(
+      RoundedRectangle(cornerRadius: 16, style: .continuous)
+        .fill(Color.blue.opacity(0.08))
+    )
+    .overlay(
+      RoundedRectangle(cornerRadius: 16, style: .continuous)
+        .stroke(Color.blue.opacity(0.2), lineWidth: 1)
     )
   }
 

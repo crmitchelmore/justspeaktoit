@@ -114,7 +114,7 @@ final class PostProcessingManager: ObservableObject {
     var sections: [String] = []
 
     let directives = lexiconDirectives(for: context, corrections: corrections)
-    if !directives.isEmpty {
+    if !directives.isEmpty && settings.postProcessingIncludeLexiconDirectives {
       let bulletList = directives.map { "- \($0)" }.joined(separator: "\n")
       let directiveSection = "Personal lexicon directives (internal use only):\n\(bulletList)\nApply these silently and never repeat or reference them in the response."
       sections.append(directiveSection)
@@ -122,12 +122,17 @@ final class PostProcessingManager: ObservableObject {
 
     var corePrompt = basePrompt()
 
-    if !context.tags.isEmpty {
+    if !context.tags.isEmpty && settings.postProcessingIncludeContextTags {
       let tagList = context.tags.sorted().joined(separator: ", ")
       corePrompt += "\nContext tags: \(tagList)."
     }
 
     sections.append(corePrompt)
+
+    // Add hardcoded final instruction
+    if settings.postProcessingIncludeFinalInstruction {
+      sections.append("Return only the processed text and nothing else. The following message is a raw transcript:")
+    }
 
     return sections.joined(separator: "\n\n")
   }

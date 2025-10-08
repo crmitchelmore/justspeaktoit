@@ -93,6 +93,9 @@ final class AppSettings: ObservableObject {
     case postProcessingTemperature
     case postProcessingSystemPrompt
     case postProcessingOutputLanguage
+    case postProcessingIncludeLexiconDirectives
+    case postProcessingIncludeContextTags
+    case postProcessingIncludeFinalInstruction
     case textOutputMethod
     case restoreClipboard
     case showHUD
@@ -179,6 +182,18 @@ final class AppSettings: ObservableObject {
 
   @Published var postProcessingOutputLanguage: String {
     didSet { store(postProcessingOutputLanguage, key: .postProcessingOutputLanguage) }
+  }
+
+  @Published var postProcessingIncludeLexiconDirectives: Bool {
+    didSet { store(postProcessingIncludeLexiconDirectives, key: .postProcessingIncludeLexiconDirectives) }
+  }
+
+  @Published var postProcessingIncludeContextTags: Bool {
+    didSet { store(postProcessingIncludeContextTags, key: .postProcessingIncludeContextTags) }
+  }
+
+  @Published var postProcessingIncludeFinalInstruction: Bool {
+    didSet { store(postProcessingIncludeFinalInstruction, key: .postProcessingIncludeFinalInstruction) }
   }
 
   @Published var textOutputMethod: TextOutputMethod {
@@ -291,6 +306,12 @@ final class AppSettings: ObservableObject {
       ?? "You are a transcription assistant. Clean up the text, fix punctuation, and respect speaker turns."
     postProcessingOutputLanguage =
       defaults.string(forKey: DefaultsKey.postProcessingOutputLanguage.rawValue) ?? "English"
+    postProcessingIncludeLexiconDirectives =
+      defaults.object(forKey: DefaultsKey.postProcessingIncludeLexiconDirectives.rawValue) as? Bool ?? true
+    postProcessingIncludeContextTags =
+      defaults.object(forKey: DefaultsKey.postProcessingIncludeContextTags.rawValue) as? Bool ?? true
+    postProcessingIncludeFinalInstruction =
+      defaults.object(forKey: DefaultsKey.postProcessingIncludeFinalInstruction.rawValue) as? Bool ?? true
     textOutputMethod =
       TextOutputMethod(
         rawValue: defaults.string(forKey: DefaultsKey.textOutputMethod.rawValue)

@@ -41,6 +41,7 @@ final class HUDManager: ObservableObject {
 
   private var timer: Timer?
   private var phaseStartDate: Date?
+  private var autoHideTimer: Timer?
 
   func beginRecording() {
     transition(.recording, headline: "Recording", subheadline: "Capturing audio")
@@ -72,7 +73,7 @@ final class HUDManager: ObservableObject {
   }
 
   func hide() {
-    invalidateTimer()
+    invalidateTimers()
     snapshot = .hidden
   }
 
@@ -82,7 +83,7 @@ final class HUDManager: ObservableObject {
     subheadline: String?,
     showsTimer: Bool = true
   ) {
-    invalidateTimer()
+    invalidateTimers()
     phaseStartDate = showsTimer ? Date() : nil
     snapshot = Snapshot(phase: phase, headline: headline, subheadline: subheadline, elapsed: 0)
 
@@ -101,16 +102,25 @@ final class HUDManager: ObservableObject {
   }
 
   private func scheduleAutoHide() {
-    Timer.scheduledTimer(withTimeInterval: 2.4, repeats: false) { [weak self] _ in
+    autoHideTimer?.invalidate()
+    autoHideTimer = Timer.scheduledTimer(withTimeInterval: 2.4, repeats: false) { [weak self] _ in
       Task { @MainActor [weak self] in
-        self?.hide()
+        guard let self else { return }
+        defer { self.autoHideTimer = nil }
+        guard self.snapshot.phase.isTerminal else { return }
+        self.hide()
       }
+    }
+    if let autoHideTimer {
+      RunLoop.main.add(autoHideTimer, forMode: .common)
     }
   }
 
-  private func invalidateTimer() {
+  private func invalidateTimers() {
     timer?.invalidate()
     timer = nil
+    autoHideTimer?.invalidate()
+    autoHideTimer = nil
   }
 }
 // @Implement: This file is the state manager for the Heads-Up display. It exposes lifecycle functions so that another class can notify it when recording has started, transcribing has started, post-processing has started, etc. It has an enum for all the states it can be in and is a state machine. It also has the ability to surface errors in any of those things and it has an internal timer that shows the duration of each step.

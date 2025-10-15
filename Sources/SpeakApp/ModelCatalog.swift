@@ -55,10 +55,11 @@ struct ModelCatalog {
 
   static let postProcessing: [Option] = [
     Option(
-      id: "openrouter/gpt-4o-mini", displayName: "GPT-4o mini (OpenRouter)",
+      id: "openai/gpt-4o-mini", displayName: "GPT-4o mini (OpenAI via OpenRouter)",
       description: "Great balance of quality and speed."),
     Option(
-      id: "openrouter/gpt-4o", displayName: "GPT-4o (OpenRouter)", description: "Flagship quality."),
+      id: "openai/gpt-4o", displayName: "GPT-4o (OpenAI via OpenRouter)",
+      description: "Flagship quality."),
     Option(
       id: "anthropic/claude-3.5-sonnet", displayName: "Claude 3.5 Sonnet",
       description: "Strong reasoning and tone preservation."),

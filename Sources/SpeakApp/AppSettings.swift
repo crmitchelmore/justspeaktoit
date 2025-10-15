@@ -125,6 +125,11 @@ final class AppSettings: ObservableObject {
     "openrouter/whisper-medium",
     "openrouter/whisper-small",
   ]
+  private static let defaultPostProcessingModel = "openai/gpt-4o-mini"
+  private static let legacyPostProcessingModelMapping: [String: String] = [
+    "openrouter/gpt-4o-mini": defaultPostProcessingModel,
+    "openrouter/gpt-4o": "openai/gpt-4o",
+  ]
 
   @Published var appearance: Appearance {
     didSet { store(appearance.rawValue, key: .appearance) }
@@ -169,7 +174,14 @@ final class AppSettings: ObservableObject {
   }
 
   @Published var postProcessingModel: String {
-    didSet { store(postProcessingModel, key: .postProcessingModel) }
+    didSet {
+      let normalized = Self.normalizedPostProcessingModel(postProcessingModel)
+      if normalized != postProcessingModel {
+        postProcessingModel = normalized
+        return
+      }
+      store(postProcessingModel, key: .postProcessingModel)
+    }
   }
 
   @Published var postProcessingTemperature: Double {
@@ -297,8 +309,9 @@ final class AppSettings: ObservableObject {
     preferredAudioInputUID = defaults.string(forKey: DefaultsKey.preferredAudioInputUID.rawValue)
     postProcessingEnabled =
       defaults.object(forKey: DefaultsKey.postProcessingEnabled.rawValue) as? Bool ?? true
-    postProcessingModel =
-      defaults.string(forKey: DefaultsKey.postProcessingModel.rawValue) ?? "openrouter/gpt-4o-mini"
+    postProcessingModel = Self.normalizedPostProcessingModel(
+      defaults.string(forKey: DefaultsKey.postProcessingModel.rawValue)
+    )
     postProcessingTemperature =
       defaults.object(forKey: DefaultsKey.postProcessingTemperature.rawValue) as? Double ?? 0.2
     postProcessingSystemPrompt =
@@ -391,6 +404,15 @@ final class AppSettings: ObservableObject {
     let trimmed = identifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     guard !trimmed.isEmpty else { return defaultBatchTranscriptionModel }
     if legacyWhisperModelIDs.contains(trimmed) { return defaultBatchTranscriptionModel }
+    return trimmed
+  }
+
+  private static func normalizedPostProcessingModel(_ identifier: String?) -> String {
+    let trimmed = identifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    guard !trimmed.isEmpty else { return defaultPostProcessingModel }
+    if let mapped = legacyPostProcessingModelMapping[trimmed] {
+      return mapped
+    }
     return trimmed
   }
 

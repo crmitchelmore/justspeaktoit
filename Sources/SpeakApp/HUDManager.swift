@@ -62,14 +62,17 @@ final class HUDManager: ObservableObject {
   func finishSuccess(message: String) {
     transition(
       .success(message: message), headline: "Completed", subheadline: message, showsTimer: false)
-    scheduleAutoHide()
+    scheduleAutoHide(after: 2.4)
   }
 
   func finishFailure(message: String) {
+    finishFailure(headline: "Something went wrong", message: message)
+  }
+
+  func finishFailure(headline: String, message: String, displayDuration: TimeInterval = 6.0) {
     transition(
-      .failure(message: message), headline: "Something went wrong", subheadline: message,
-      showsTimer: false)
-    scheduleAutoHide()
+      .failure(message: message), headline: headline, subheadline: message, showsTimer: false)
+    scheduleAutoHide(after: displayDuration)
   }
 
   func hide() {
@@ -101,9 +104,10 @@ final class HUDManager: ObservableObject {
     }
   }
 
-  private func scheduleAutoHide() {
+  private func scheduleAutoHide(after delay: TimeInterval) {
     autoHideTimer?.invalidate()
-    autoHideTimer = Timer.scheduledTimer(withTimeInterval: 2.4, repeats: false) { [weak self] _ in
+    guard delay > 0 else { return }
+    autoHideTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
       Task { @MainActor [weak self] in
         guard let self else { return }
         defer { self.autoHideTimer = nil }

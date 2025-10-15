@@ -19,6 +19,7 @@ struct HUDOverlay: View {
       VStack(spacing: 4) {
         Text(manager.snapshot.headline)
           .font(.headline)
+          .foregroundStyle(headlineColor)
         if let sub = manager.snapshot.subheadline {
           Text(sub)
             .font(.subheadline)
@@ -33,10 +34,14 @@ struct HUDOverlay: View {
     }
     .padding(.horizontal, 24)
     .padding(.vertical, 16)
-    .background(.thickMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    .background(
+      RoundedRectangle(cornerRadius: 20, style: .continuous)
+        .fill(.thickMaterial)
+        .overlay(phaseTint)
+    )
     .overlay(
       RoundedRectangle(cornerRadius: 20, style: .continuous)
-        .stroke(phaseColor.opacity(0.4), lineWidth: 1)
+        .stroke(phaseColor.opacity(0.45), lineWidth: strokeWidth)
     )
     .shadow(color: .black.opacity(0.25), radius: 18, x: 0, y: 12)
     .animation(.spring(response: 0.25, dampingFraction: 0.85), value: manager.snapshot)
@@ -62,15 +67,65 @@ struct HUDOverlay: View {
     }
   }
 
+  private var headlineColor: Color {
+    switch manager.snapshot.phase {
+    case .failure:
+      return phaseColor
+    default:
+      return .primary
+    }
+  }
+
+  @ViewBuilder
+  private var phaseTint: some View {
+    let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
+    switch manager.snapshot.phase {
+    case .failure:
+      shape.fill(phaseColor.opacity(0.18))
+    case .postProcessing:
+      shape.fill(phaseColor.opacity(0.06))
+    default:
+      EmptyView()
+    }
+  }
+
+  private var strokeWidth: CGFloat {
+    switch manager.snapshot.phase {
+    case .failure:
+      return 2
+    default:
+      return 1
+    }
+  }
+
+  @ViewBuilder
   private var animatedGlyph: some View {
-    TimelineView(.animation) { context in
-      let progress = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1)
-      let scale = 0.9 + (progress < 0.5 ? progress : 1 - progress) * 0.4
-      return Circle()
-        .fill(phaseColor.gradient)
-        .frame(width: 18, height: 18)
-        .scaleEffect(scale)
-        .shadow(color: phaseColor.opacity(0.4), radius: 6, x: 0, y: 4)
+    switch manager.snapshot.phase {
+    case .failure:
+      TimelineView(.animation) { context in
+        let progress = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1)
+        let scale = 0.9 + (progress < 0.5 ? progress : 1 - progress) * 0.35
+        Image(systemName: "exclamationmark.triangle.fill")
+          .font(.system(size: 32, weight: .bold))
+          .foregroundStyle(phaseColor.gradient)
+          .scaleEffect(scale)
+          .shadow(color: phaseColor.opacity(0.45), radius: 10, x: 0, y: 6)
+      }
+    case .success:
+      Image(systemName: "checkmark.circle.fill")
+        .font(.system(size: 28, weight: .semibold))
+        .foregroundStyle(phaseColor)
+        .shadow(color: phaseColor.opacity(0.3), radius: 6, x: 0, y: 4)
+    default:
+      TimelineView(.animation) { context in
+        let progress = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1)
+        let scale = 0.9 + (progress < 0.5 ? progress : 1 - progress) * 0.4
+        Circle()
+          .fill(phaseColor.gradient)
+          .frame(width: 18, height: 18)
+          .scaleEffect(scale)
+          .shadow(color: phaseColor.opacity(0.4), radius: 6, x: 0, y: 4)
+      }
     }
   }
 

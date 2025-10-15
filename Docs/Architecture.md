@@ -5,99 +5,113 @@
 ```mermaid
 graph TD
     App[SpeakApp.swift] --> WireUp[WireUp]
-    WireUp --> Settings[AppSettings]
-    WireUp --> Permissions[PermissionsManager]
-    WireUp --> SecureStore[SecureAppStorage]
-    WireUp --> HotKeys[HotKeyManager]
-    WireUp --> Audio[AudioFileManager]
-    WireUp --> HUDManager
-    WireUp --> TextOutput
-    WireUp --> HistoryMgr[HistoryManager]
-    WireUp --> TranscribeMgr[TranscriptionManager]
-    WireUp --> PostProcess[PostProcessingManager]
-    WireUp --> MainMgr[MainManager]
-    WireUp --> StatusBar
-    MainMgr --> HUDManager
-    MainMgr --> Audio
-    MainMgr --> TranscribeMgr
-    MainMgr --> PostProcess
-    MainMgr --> HistoryMgr
-    MainMgr --> TextOutput
-    MainMgr --> Settings
-    TranscribeMgr -->|Live| NativeLiveTranscriber
-    TranscribeMgr -->|Batch| RemoteBatchTranscriber
-    NativeLiveTranscriber --> Permissions
-    RemoteBatchTranscriber --> OpenRouter
+    WireUp --> AppEnv[AppEnvironment]
+    AppEnv --> Settings[AppSettings]
+    AppEnv --> Permissions[PermissionsManager]
+    AppEnv --> SecureStore[SecureAppStorage]
+    AppEnv --> HotKeys[HotKeyManager]
+    AppEnv --> AudioDevices[AudioInputDeviceManager]
+    AppEnv --> Audio[AudioFileManager]
+    AppEnv --> History[HistoryManager]
+    AppEnv --> HUD[HUDManager]
+    AppEnv --> Lexicon[PersonalLexiconService]
+    AppEnv --> PostProcess[PostProcessingManager]
+    AppEnv --> TTS[TextToSpeechManager]
+    AppEnv --> OpenRouter[OpenRouterAPIClient]
+    AppEnv --> Transcribe[TranscriptionManager]
+    AppEnv --> Main[MainManager]
+    AppEnv --> HUDPresenter[HUDWindowPresenter]
+    AppEnv --> StatusBar[StatusBarController]
+
+    Main --> HUD
+    Main --> Audio
+    Main --> Transcribe
+    Main --> PostProcess
+    Main --> History
+    Main --> Lexicon
+    Main --> HotKeys
+    Main --> Settings
+    Main --> Output[SmartTextOutput]
+
+    Transcribe --> Live[NativeOSXLiveTranscriber]
+    Transcribe --> Registry[TranscriptionProviderRegistry]
+    Registry --> Providers((Transcription Providers))
+    Transcribe --> RemoteClient[RemoteAudioTranscriber]
+    RemoteClient --> OpenRouter
+
     PostProcess --> OpenRouter
-    OpenRouter --> SecureStore
-    HistoryMgr --> Storage[(Application Support)]
-    Audio --> AudioFiles[(Recordings Folder)]
-    MainView -->|Observes| MainMgr
-    MainView --> Sidebar
-    Sidebar --> Dashboard
-    Sidebar --> HistoryView
-    Sidebar --> SettingsView
-    Dashboard --> MainMgr
-    HistoryView --> HistoryMgr
-    SettingsView --> Settings
-    StatusBar --> MainMgr
+    PostProcess --> Lexicon
+    TTS --> SecureStore
+    TTS --> TTSClients((TTS Provider Clients))
+
+    History --> Storage[(Application Support)]
+    Audio --> Recordings[(Recordings Folder)]
+    SecureStore --> Keychain[(Keychain Item)]
+    StatusBar --> Main
     StatusBar --> Settings
 ```
 
 ## Module Responsibilities
 
-- **SpeakApp.swift** bootstraps dependency graph through `WireUp` then renders `MainView`. It also applies runtime resources such as the dynamic app icon.
-- **WireUp** aggregates macOS services and constructs shared singletons using the eight-lines-of-code composition pattern. The wiring yields a `MainEnvironment` that the UI injects via environment objects.
-- **AppSettings** encapsulates persisted configuration. It uses `UserDefaults` for non-sensitive values and defers API secrets to `SecureAppStorage`. It exposes Combine publishers for reactive updates.
-- **PermissionsManager** normalises macOS permission flows (microphone, speech recognition, accessibility, input monitoring) with async request APIs and cached status introspection.
-- **SecureAppStorage** provides Keychain-backed storage with an in-memory cache. All secrets live in a single Keychain item (`speak-app-secrets`) whose payload is a `NAME=value` list delimited by semicolons, letting the app hydrate everything on launch while still exposing a narrow API surface. Legacy per-key entries are migrated into this blob automatically the first time the new build runs.
-- **HotKeyManager** owns the global Fn gesture detector. It emits `HotKeyEvent` values (singleTap, doubleTap, holdStart, holdEnd) to registered listeners, keeps timing tunables in sync with `AppSettings`, and falls back through event taps, NSEvent monitors, and polling to stay resilient.
-- **AudioFileManager** streams audio through `AVAudioEngine` into CAF files while exposing utilities for listing, deleting, and migrating recordings. It guarantees data durability by writing to a crash-safe staging directory before moving into the archive folder.
-- **TranscriptionManager** orchestrates live and batch modes behind a unified async API. It fans out to `NativeLiveTranscriber` for on-device SFSpeechRecognition and `RemoteBatchTranscriber` for OpenRouter uploads.
-- **PostProcessingManager** wraps the chat LLM protocol, sending cleaned-up prompts when enabled and returning enriched transcripts.
-- **OpenRouterAPIClient** unifies chat and transcription HTTP calls, using modern concurrency, retries, and cost calculation helpers.
-- **HUDManager** maintains the session state machine (`idle → recording → transcribing → postProcessing → delivering → complete|error`) and timers for each phase. It publishes `HUDSnapshot` models that `HUDView` renders.
-- **HistoryManager** serialises `HistoryItem` models to an Application Support JSON log. It indexes by session identifier and exposes filters, sections, and aggregated metrics for analytics.
-- **TextOutput** contains both accessibility-driven insertion (`AccessibilityTextOutput`) and clipboard fallbacks (`PasteTextOutput`), exposing a unified `SmartTextOutput` façade used by `MainManager`.
-- **MainManager** is the orchestration hub. It reacts to hotkeys, coordinates audio capture, drives the HUD, chains transcription and post-processing, handles error recovery, logs history, and triggers text output.
-- **UI Layer** (`MainView`, `SideBarView`, `DashboardView`, `HistoryView`, `SettingsView`, `StatusBarView`, `HUDView`) reads from environment objects, kicks off commands on the managers, and surfaces status visually. The UI follows SwiftUI best practices with modular subviews and responsive layouts.
+- **SpeakApp.swift** bootstraps the dependency graph through `WireUp.bootstrap()`, installs the `AppEnvironment` into SwiftUI, and presents the primary window. It also triggers status bar installation and HUD presentation.
+- **WireUp** constructs the shared `AppEnvironment` using "eight lines of code" composition. Each dependency is created once, then injected into collaborators so modules can be developed and tested independently.
+- **AppEnvironment** owns long-lived services (`AppSettings`, `PermissionsManager`, etc.), exposes them as read-only properties to the UI layer, and handles late-bound features such as the status bar controller.
+- **AppSettings** persists user preferences (transcription models, output behaviour, TTS defaults) through `UserDefaults`, while delegating secure secrets to `SecureAppStorage`. It publishes updates so downstream modules react to configuration changes.
+- **PermissionsManager** unifies macOS permission flows (microphone, speech recognition, accessibility, keychain) behind async APIs and cached results.
+- **SecureAppStorage** stores all API keys in a single keychain item (`speak-app-secrets` service `com.github.speakapp.credentials`), keeps an in-memory cache, migrates legacy per-key entries, and registers identifiers back into settings for discovery.
+- **HotKeyManager** watches Fn-tap gestures via event taps and NSEvent monitors, emits debounced `HotKeyEvent` values, and syncs gesture preferences with `AppSettings`.
+- **AudioInputDeviceManager** enumerates Core Audio inputs, observes hardware/default changes, and coordinates temporary device switches during live capture.
+- **AudioFileManager** records audio with `AVAudioEngine`, writes crash-safe CAF files into the recordings directory, exposes cleanup utilities, and returns session summaries to `MainManager`.
+- **TranscriptionManager** orchestrates live and batch transcription. It wires `NativeOSXLiveTranscriber` for on-device sessions, routes batch work through `TranscriptionProviderRegistry` when a provider-specific client exists, and falls back to `RemoteAudioTranscriber` (OpenRouter) for legacy models. It resolves API keys via `SecureAppStorage` and reports partial results to the UI.
+- **TranscriptionProviderRegistry** keeps a catalogue of external transcription providers (OpenAI, Rev AI, etc.), including metadata, supported models, API key requirements, and validation helpers.
+- **OpenRouterAPIClient** centralises REST traffic for transcription, chat/post-processing, and model metadata. It handles retries, cost attribution, and secure credential lookup.
+- **PostProcessingManager** conditionally sends transcripts (plus personal lexicon context) to LLM backends via `OpenRouterAPIClient`, applies responses, and returns enriched text alongside cost information.
+- **PersonalLexiconService** augments transcripts with organisation- or user-specific terminology, driven by the persistent `PersonalLexiconStore`.
+- **TextToSpeechManager** coordinates synthesis requests across provider clients (system voices, OpenAI, ElevenLabs, Azure), tracks progress, persists usage history, and optionally auto-plays or exports audio based on settings.
+- **HUDManager** owns the session HUD state machine with phases `.hidden`, `.recording`, `.transcribing`, `.postProcessing`, `.delivering`, `.success`, and `.failure`. It maintains per-phase timers and auto-hides terminal states.
+- **HUDWindowPresenter** attaches the HUD window and mirrors `HUDManager.snapshot` updates onto screen.
+- **HistoryManager** serialises `HistoryItem` records, appends session metrics, stores network exchanges, and exposes Combine publishers for dashboard visuals.
+- **SmartTextOutput** encapsulates text delivery. It prefers `AccessibilityTextOutput` when accessibility permissions are granted and falls back to `PasteTextOutput`, which temporarily replaces the clipboard and restores it when configured.
+- **MainManager** is the orchestration hub. It reacts to hotkeys/UI actions, coordinates recording, transcription, post-processing, smart output delivery, lexicon corrections, HUD transitions, and history logging. It also surfaces state to SwiftUI (`idle`, `recording`, `processing`, `delivering`, `completed`, `failed`).
+- **StatusBarController** exposes quick controls, recent history, and settings shortcuts from the menu bar while reusing `MainManager` and `AppSettings` state.
+- **UI Layer** (`MainView`, `SideBarView`, `DashboardView`, `HistoryView`, `SettingsView`, `HUDView`, `StatusBarView`, etc.) binds to environment objects, issues commands to managers, and renders status updates.
 
 ## Data Flow Summary
 
-1. **Trigger**: A hotkey event or UI button informs `MainManager` to start a session.
-2. **Recording**: `MainManager` tells `AudioFileManager` to begin capturing, updates `HUDManager`, and optionally starts live transcription via `TranscriptionManager`.
-3. **Transcription**: When recording stops, audio is streamed to either the live accumulator result or to a batch request on the remote client. Errors propagate back through `MainManager` and `HUDManager`.
-4. **Post-processing**: If enabled, `PostProcessingManager` enriches the transcript.
-5. **Output**: `MainManager` calls `TextOutput` with the final text. Delivery mode respects settings and permissions.
-6. **History**: The entire session is captured as a `HistoryItem` and saved to disk. Aggregated statistics update the dashboard and status bar.
-7. **UI Feedback**: `HUDView`, `StatusBarView`, and the main content refresh via observed state.
+1. **Initiation**: A hotkey gesture or UI button triggers `MainManager.startSession`, which validates settings and spins up recording.
+2. **Recording**: `AudioFileManager` begins streaming audio; optional live transcription is started via `TranscriptionManager` using the current audio input from `AudioInputDeviceManager`. `HUDManager` enters `.recording`.
+3. **Live Feedback**: `TranscriptionManager` publishes partial text for live preview. Any permission errors are surfaced immediately through `HUDManager` and `MainManager` state.
+4. **Submission**: When recording stops, `MainManager` switches to `.processing`, asks `TranscriptionManager` to run batch transcription using either a provider client from `TranscriptionProviderRegistry` or the OpenRouter fallback.
+5. **Lexicon & Post-Processing**: Completed transcripts pass through `PersonalLexiconService` for substitutions and, if enabled, `PostProcessingManager` for LLM clean-up. HUD advances through `.transcribing` and `.postProcessing`.
+6. **Delivery**: `SmartTextOutput` inserts the final text via accessibility APIs or a clipboard-driven Command+V fallback (`HUDManager` enters `.delivering`). Any delivery errors short-circuit to `.failure`.
+7. **Persistence & Analytics**: `HistoryManager` records the session (audio URL, events, costs, lexicon tags). Dashboard charts and the status bar update via Combine publishers.
+8. **Follow-up Services**: Optional text-to-speech playback or exports run through `TextToSpeechManager` using provider credentials from `SecureAppStorage`.
 
 ## Key State Machines
 
-- **HUDManager** ensures mutually exclusive phases with timed durations. Each transition logs metrics used by analytics.
-- **HotKeyManager** implements a debounced gesture recogniser with hold/double-tap semantics and auto-recovery from CGEvent tap failures.
-- **MainManager** tracks session lifecycle with an enum backing `@Published` view state (`idle`, `recording`, `processing`, `delivering`, `completed`, `error`).
+- **HUDManager** transitions through `.recording → .transcribing → .postProcessing → .delivering → .success|.failure`, updating elapsed timers for each visible phase and auto-hiding after terminal states.
+- **HotKeyManager** manages gesture recognition with debounced taps/holds and automatic recovery if the CGEvent tap drops.
+- **MainManager** tracks session lifecycle (`idle`, `recording`, `processing`, `delivering`, `completed`, `failed`), ensuring mutually exclusive phases and cleaning up resources on error or cancellation.
 
 ## Threading Model
 
-- UI updates run on the main actor.
-- Long-running IO (recording, network, keychain) occurs on dedicated actors/queues.
-- Combine publishers from managers are bridged onto the main queue before binding to SwiftUI state.
+- User-facing managers conform to `@MainActor`, keeping SwiftUI interactions and published state on the main thread.
+- Long-running IO (audio capture, network requests, keychain access) executes on dedicated actors/queues, with results marshalled back to the main actor via `Task { @MainActor ... }` or Combine.
 
 ## Extension Points
 
-- Swap transcription/post-processing backends by supplying new `LiveTranscriber`/`BatchTranscriber`/`ChatLLMClient` implementations to `WireUp`.
-- Augment the dashboard by subscribing to `HistoryManager.statsPublisher`.
-- Extend status menu commands via `StatusBarController`'s menu builder closure.
+- Register new transcription providers by adding them to `TranscriptionProviderRegistry` (metadata, supported models, client implementation).
+- Implement additional post-processing or TTS backends by supplying new clients that honour existing protocols and inject them during `WireUp`.
+- Extend status menu options through `StatusBarController`'s menu builder or dashboard visualisations by subscribing to `HistoryManager` publishers.
 
 ## Error Handling
 
-- Recoverable errors bubble to `MainManager` which updates UI, history, and HUD accordingly.
-- Critical permission failures present actionable guidance in both settings and status menu.
-- All network/storage errors are logged with payload excerpts in the associated `HistoryItem` for troubleshooting.
+- Recoverable errors propagate to `MainManager`, which logs failures, updates history, and drives HUD failure states with actionable messaging.
+- Permission issues prompt `PermissionsManager` to request access and report missing capabilities to both HUD and Settings views.
+- Network and storage errors capture payload excerpts within `HistoryItem.networkExchanges` for later debugging.
 
 ## Resources & Styling
 
-- App icon and status bar imagery are generated programmatically for consistency with adaptive appearance.
-- The UI uses a neutral palette with accent highlights derived from the selected appearance in settings.
-- Animations for HUD phases rely on `TimelineView` to keep CPU impact low.
+- App and status bar icons are generated programmatically to maintain consistency with light/dark appearances.
+- The UI keeps a neutral foundation with accent colours derived from user settings.
+- HUD animations use `TimelineView` to balance responsiveness with low CPU overhead.

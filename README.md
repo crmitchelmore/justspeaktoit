@@ -4,7 +4,7 @@ Native macOS SwiftUI starter project with standard tooling and automation to sup
 
 ## Prerequisites
 
-- macOS 14 or newer with Xcode 16 (or Swift toolchain 5.9+) installed.
+- macOS 14 or newer with Xcode 15 (ships Swift toolchain 5.9) or a standalone Swift 5.9+ toolchain installed.
 - SwiftPM handles dependencies; no manual installations are required for linting/formatting.
 
 ## Key Commands

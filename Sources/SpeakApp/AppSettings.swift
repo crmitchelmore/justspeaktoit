@@ -143,6 +143,7 @@ final class AppSettings: ObservableObject {
     case connectionPreWarmingEnabled
     case postProcessingStreamingEnabled
     case hudSizePreference
+    case showLiveTranscriptInHUD
   }
 
   private static let defaultBatchTranscriptionModel = "google/gemini-2.0-flash-001"
@@ -244,6 +245,10 @@ final class AppSettings: ObservableObject {
 
   @Published var showHUDDuringSessions: Bool {
     didSet { store(showHUDDuringSessions, key: .showHUD) }
+  }
+
+  @Published var showLiveTranscriptInHUD: Bool {
+    didSet { store(showLiveTranscriptInHUD, key: .showLiveTranscriptInHUD) }
   }
 
   @Published var showStatusBarOnly: Bool {
@@ -392,6 +397,8 @@ final class AppSettings: ObservableObject {
     restoreClipboardAfterPaste =
       defaults.object(forKey: DefaultsKey.restoreClipboard.rawValue) as? Bool ?? true
     showHUDDuringSessions = defaults.object(forKey: DefaultsKey.showHUD.rawValue) as? Bool ?? true
+    showLiveTranscriptInHUD =
+      defaults.object(forKey: DefaultsKey.showLiveTranscriptInHUD.rawValue) as? Bool ?? true
     showStatusBarOnly =
       defaults.object(forKey: DefaultsKey.showStatusBarOnly.rawValue) as? Bool ?? false
     runAtLogin = defaults.object(forKey: DefaultsKey.runAtLogin.rawValue) as? Bool ?? false

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct HUDOverlay: View {
   @ObservedObject var manager: HUDManager
+  @EnvironmentObject private var settings: AppSettings
 
   var body: some View {
     if manager.snapshot.phase.isVisible {
@@ -43,7 +44,7 @@ struct HUDOverlay: View {
       }
 
       // Live transcript section (only during recording phase with content)
-      if case .recording = manager.snapshot.phase {
+      if case .recording = manager.snapshot.phase, settings.showLiveTranscriptInHUD {
         transcriptSection
       }
     }

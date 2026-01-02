@@ -260,6 +260,12 @@ struct SettingsView: View {
             )
             .speakTooltip("Display a small heads-up display so you always know when Speak is listening.")
             settingsToggle(
+              "Show live transcript in HUD",
+              isOn: settingsBinding(\AppSettings.showLiveTranscriptInHUD),
+              tint: .blue
+            )
+            .speakTooltip("Show real-time transcription text in the HUD while recording.")
+            settingsToggle(
               "Show status bar only",
               isOn: settingsBinding(\AppSettings.showStatusBarOnly),
               tint: .blue

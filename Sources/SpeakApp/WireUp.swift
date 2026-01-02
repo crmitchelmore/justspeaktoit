@@ -15,6 +15,7 @@ final class AppEnvironment: ObservableObject {
   let secureStorage: SecureAppStorage
   let openRouter: OpenRouterAPIClient
   let personalLexicon: PersonalLexiconService
+  let pronunciationManager: PronunciationManager
   let main: MainManager
   private let hudPresenter: HUDWindowPresenter
 
@@ -34,6 +35,7 @@ final class AppEnvironment: ObservableObject {
     secureStorage: SecureAppStorage,
     openRouter: OpenRouterAPIClient,
     personalLexicon: PersonalLexiconService,
+    pronunciationManager: PronunciationManager,
     main: MainManager,
     hudPresenter: HUDWindowPresenter
   ) {
@@ -50,6 +52,7 @@ final class AppEnvironment: ObservableObject {
     self.secureStorage = secureStorage
     self.openRouter = openRouter
     self.personalLexicon = personalLexicon
+    self.pronunciationManager = pronunciationManager
     self.main = main
     self.hudPresenter = hudPresenter
   }
@@ -91,6 +94,7 @@ enum WireUp {
     )
     let personalLexiconStore = PersonalLexiconStore()
     let personalLexicon = PersonalLexiconService(store: personalLexiconStore)
+    let pronunciationManager = PronunciationManager()
     let postProcessing = PostProcessingManager(
       client: openRouter,
       settings: settings,
@@ -106,7 +110,8 @@ enum WireUp {
     let tts = TextToSpeechManager(
       appSettings: settings,
       secureStorage: secureStorage,
-      clients: ttsClients
+      clients: ttsClients,
+      pronunciationManager: pronunciationManager
     )
     let main = MainManager(
       appSettings: settings,
@@ -136,6 +141,7 @@ enum WireUp {
       secureStorage: secureStorage,
       openRouter: openRouter,
       personalLexicon: personalLexicon,
+      pronunciationManager: pronunciationManager,
       main: main,
       hudPresenter: hudPresenter
     )

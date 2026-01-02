@@ -6,6 +6,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
   case transcription
   case postProcessing
   case voiceOutput
+  case pronunciation
   case apiKeys
   case hotKeys
   case permissions
@@ -18,6 +19,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
     case .transcription: return "Transcription"
     case .postProcessing: return "Post-processing"
     case .voiceOutput: return "Voice Output"
+    case .pronunciation: return "Pronunciation"
     case .apiKeys: return "API Keys"
     case .hotKeys: return "Hotkeys"
     case .permissions: return "Permissions"
@@ -139,6 +141,8 @@ struct SettingsView: View {
       postProcessingSettings
     case .voiceOutput:
       voiceOutputSettings
+    case .pronunciation:
+      pronunciationSettings
     case .apiKeys:
       apiKeySettings
     case .hotKeys:
@@ -978,6 +982,11 @@ struct SettingsView: View {
       }
       .speakTooltip("Add custom pronunciations for words that TTS engines commonly mispronounce.")
     }
+  }
+
+  private var pronunciationSettings: some View {
+    PronunciationDictionaryView()
+      .environmentObject(environment.pronunciationManager)
   }
 
   private var apiKeySettings: some View {

@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import os.log
 
@@ -187,6 +188,20 @@ final class HistoryManager: ObservableObject {
     cachedStatistics = calculateStatistics(for: [])
     statistics = cachedStatistics!
     await persist(items: [])
+  }
+
+  func deleteHistoryItem(_ item: HistoryItem) async {
+    await remove(id: item.id)
+  }
+
+  func playAudio(for item: HistoryItem) {
+    guard let url = item.audioFileURL else { return }
+    NSWorkspace.shared.open(url)
+  }
+
+  func showInFinder(for item: HistoryItem) {
+    guard let url = item.audioFileURL else { return }
+    NSWorkspace.shared.activateFileViewerSelecting([url])
   }
 
   func items(matching filter: HistoryFilter) -> [HistoryItem] {

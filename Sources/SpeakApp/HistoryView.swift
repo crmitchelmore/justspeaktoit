@@ -307,8 +307,56 @@ private struct HistoryListRow: View {
   @State private var isExpanded: Bool = false
   @State private var showNetworkDetails: Bool = false
   @State private var showDeleteConfirmation: Bool = false
+  @FocusState private var isFocused: Bool
 
   var body: some View {
+    rowContent
+      .focusable()
+      .focused($isFocused)
+      .focusEffectDisabled()
+      .contextMenu { contextMenuContent }
+      .onChange(of: isExpanded) { _, expanded in
+        if !expanded {
+          showNetworkDetails = false
+        }
+      }
+      .onKeyPress(.delete) {
+        showDeleteConfirmation = true
+        return .handled
+      }
+      .onKeyPress(keys: [KeyEquivalent("c")]) { press in
+        if press.modifiers == [.command, .shift] {
+          if let raw = item.rawTranscription {
+            copyToPasteboard(raw)
+          }
+          return .handled
+        } else if press.modifiers == .command {
+          if let processed = item.postProcessedTranscription {
+            copyToPasteboard(processed)
+          } else if let raw = item.rawTranscription {
+            copyToPasteboard(raw)
+          }
+          return .handled
+        }
+        return .ignored
+      }
+      .confirmationDialog(
+        "Delete History Item",
+        isPresented: $showDeleteConfirmation,
+        titleVisibility: .visible
+      ) {
+        Button("Delete", role: .destructive) {
+          Task {
+            await environment.history.remove(id: item.id)
+          }
+        }
+        Button("Cancel", role: .cancel) {}
+      } message: {
+        Text("Are you sure you want to delete this history item? This action cannot be undone.")
+      }
+  }
+
+  private var rowContent: some View {
     VStack(alignment: .leading, spacing: 20) {
       Button {
         withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
@@ -376,64 +424,7 @@ private struct HistoryListRow: View {
       .speakTooltip("Click to open or close full details for this session, including transcripts, costs, and network activity.")
 
       if isExpanded {
-        Divider()
-          .padding(.vertical, 4)
-
-        ViewThatFits(in: .horizontal) {
-          HStack(alignment: .top, spacing: 28) {
-            VStack(alignment: .leading, spacing: 20) {
-              if !item.networkExchanges.isEmpty {
-                networkSummaryButton
-                if showNetworkDetails {
-                  networkSection
-                }
-              }
-
-              metaSection
-
-              if let url = item.audioFileURL {
-                AudioPlaybackControls(url: url)
-              }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            VStack(alignment: .leading, spacing: 20) {
-              transcriptSection
-
-              if !item.errors.isEmpty {
-                errorSection
-              }
-
-              footerActions
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-          }
-          .frame(maxWidth: .infinity, alignment: .leading)
-
-          VStack(alignment: .leading, spacing: 20) {
-            if !item.networkExchanges.isEmpty {
-              networkSummaryButton
-              if showNetworkDetails {
-                networkSection
-              }
-            }
-
-            metaSection
-
-            if let url = item.audioFileURL {
-              AudioPlaybackControls(url: url)
-            }
-
-            transcriptSection
-
-            if !item.errors.isEmpty {
-              errorSection
-            }
-
-            footerActions
-          }
-        }
-        .transition(.opacity.combined(with: .move(edge: .top)))
+        expandedContent
       }
     }
     .padding(24)
@@ -446,24 +437,119 @@ private struct HistoryListRow: View {
         .stroke(borderColor, lineWidth: 1)
     )
     .shadow(color: borderColor.opacity(0.3), radius: 18, x: 0, y: 12)
-    .onChange(of: isExpanded) { _, expanded in
-      if !expanded {
-        showNetworkDetails = false
+  }
+
+  @ViewBuilder
+  private var expandedContent: some View {
+    Divider()
+      .padding(.vertical, 4)
+
+    ViewThatFits(in: .horizontal) {
+      HStack(alignment: .top, spacing: 28) {
+        VStack(alignment: .leading, spacing: 20) {
+          if !item.networkExchanges.isEmpty {
+            networkSummaryButton
+            if showNetworkDetails {
+              networkSection
+            }
+          }
+
+          metaSection
+
+          if let url = item.audioFileURL {
+            AudioPlaybackControls(url: url)
+          }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+
+        VStack(alignment: .leading, spacing: 20) {
+          transcriptSection
+
+          if !item.errors.isEmpty {
+            errorSection
+          }
+
+          footerActions
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+
+      VStack(alignment: .leading, spacing: 20) {
+        if !item.networkExchanges.isEmpty {
+          networkSummaryButton
+          if showNetworkDetails {
+            networkSection
+          }
+        }
+
+        metaSection
+
+        if let url = item.audioFileURL {
+          AudioPlaybackControls(url: url)
+        }
+
+        transcriptSection
+
+        if !item.errors.isEmpty {
+          errorSection
+        }
+
+        footerActions
       }
     }
-    .confirmationDialog(
-      "Delete History Item",
-      isPresented: $showDeleteConfirmation,
-      titleVisibility: .visible
-    ) {
-      Button("Delete", role: .destructive) {
-        Task {
-          await environment.history.remove(id: item.id)
-        }
+    .transition(.opacity.combined(with: .move(edge: .top)))
+  }
+
+  @ViewBuilder
+  private var contextMenuContent: some View {
+    if let raw = item.rawTranscription {
+      Button {
+        copyToPasteboard(raw)
+      } label: {
+        Label("Copy Raw Transcription", systemImage: "doc.on.doc")
       }
-      Button("Cancel", role: .cancel) {}
-    } message: {
-      Text("Are you sure you want to delete this history item? This action cannot be undone.")
+    }
+
+    if let processed = item.postProcessedTranscription {
+      Button {
+        copyToPasteboard(processed)
+      } label: {
+        Label("Copy Processed Transcription", systemImage: "doc.on.doc.fill")
+      }
+    }
+
+    Divider()
+
+    if item.audioFileURL != nil {
+      Button {
+        Task { await environment.main.reprocessHistoryItem(item) }
+      } label: {
+        Label("Re-process with Current Settings", systemImage: "arrow.triangle.2.circlepath")
+      }
+      .disabled(environment.main.isBusy)
+    }
+
+    if let url = item.audioFileURL {
+      Button {
+        NSWorkspace.shared.open(url)
+      } label: {
+        Label("Play Audio", systemImage: "play.circle")
+      }
+
+      Button {
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+      } label: {
+        Label("Show in Finder", systemImage: "folder")
+      }
+    }
+
+    Divider()
+
+    Button(role: .destructive) {
+      showDeleteConfirmation = true
+    } label: {
+      Label("Delete", systemImage: "trash")
     }
   }
 

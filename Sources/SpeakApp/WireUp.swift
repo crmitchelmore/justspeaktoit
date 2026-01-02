@@ -100,6 +100,7 @@ enum WireUp {
       .elevenlabs: ElevenLabsClient(secureStorage: secureStorage),
       .openai: OpenAITTSClient(secureStorage: secureStorage),
       .azure: AzureSpeechClient(secureStorage: secureStorage, appSettings: settings),
+      .deepgram: DeepgramTTSClient(secureStorage: secureStorage),
       .system: SystemTTSClient(),
     ]
     let tts = TextToSpeechManager(

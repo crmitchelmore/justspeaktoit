@@ -136,6 +136,8 @@ final class AppSettings: ObservableObject {
     case ttsAutoPlay
     case ttsSaveToDirectory
     case ttsUseSSML
+    case ttsFavoriteVoices
+    case ttsPronunciationDictionary
     case historyFlushInterval
     case silenceDetectionEnabled
     case silenceThreshold
@@ -316,6 +318,20 @@ final class AppSettings: ObservableObject {
     didSet { store(ttsUseSSML, key: .ttsUseSSML) }
   }
 
+  /// Favorite TTS voice IDs for quick access
+  @Published var ttsFavoriteVoices: [String] {
+    didSet { store(ttsFavoriteVoices, key: .ttsFavoriteVoices) }
+  }
+
+  /// TTS pronunciation dictionary - maps words to phonetic spellings
+  @Published var ttsPronunciationDictionary: [String: String] {
+    didSet {
+      if let data = try? JSONEncoder().encode(ttsPronunciationDictionary) {
+        defaults.set(data, forKey: DefaultsKey.ttsPronunciationDictionary.rawValue)
+      }
+    }
+  }
+
   // History Settings
   @Published var historyFlushInterval: TimeInterval {
     didSet { store(historyFlushInterval, key: .historyFlushInterval) }
@@ -438,6 +454,15 @@ final class AppSettings: ObservableObject {
     ttsSaveToDirectory =
       defaults.object(forKey: DefaultsKey.ttsSaveToDirectory.rawValue) as? Bool ?? false
     ttsUseSSML = defaults.object(forKey: DefaultsKey.ttsUseSSML.rawValue) as? Bool ?? false
+    ttsFavoriteVoices =
+      defaults.array(forKey: DefaultsKey.ttsFavoriteVoices.rawValue) as? [String] ?? []
+    if let pronData = defaults.data(forKey: DefaultsKey.ttsPronunciationDictionary.rawValue),
+      let dict = try? JSONDecoder().decode([String: String].self, from: pronData)
+    {
+      ttsPronunciationDictionary = dict
+    } else {
+      ttsPronunciationDictionary = [:]
+    }
     connectionPreWarmingEnabled =
       defaults.object(forKey: DefaultsKey.connectionPreWarmingEnabled.rawValue) as? Bool ?? true
     postProcessingStreamingEnabled =

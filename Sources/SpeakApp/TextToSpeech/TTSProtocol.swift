@@ -4,6 +4,7 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
   case elevenlabs
   case openai
   case azure
+  case deepgram
   case system
 
   var id: String { rawValue }
@@ -13,6 +14,7 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     case .elevenlabs: return "ElevenLabs"
     case .openai: return "OpenAI"
     case .azure: return "Azure Cognitive Services"
+    case .deepgram: return "Deepgram Aura"
     case .system: return "macOS System"
     }
   }
@@ -29,6 +31,7 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     case .elevenlabs: return "elevenlabs.apiKey"
     case .openai: return "openai.tts.apiKey"
     case .azure: return "azure.speech.apiKey"
+    case .deepgram: return "deepgram.apiKey"
     case .system: return ""
     }
   }
@@ -37,6 +40,7 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     if voiceID.hasPrefix("elevenlabs/") { return .elevenlabs }
     if voiceID.hasPrefix("openai/") { return .openai }
     if voiceID.hasPrefix("azure/") { return .azure }
+    if voiceID.hasPrefix("deepgram/") { return .deepgram }
     if voiceID.hasPrefix("system/") { return .system }
     return .system
   }
@@ -435,14 +439,103 @@ struct VoiceCatalog {
     ),
   ]
 
+  // Deepgram Aura voices - ultra-low latency (~250ms first byte)
+  static let deepgramVoices: [TTSVoice] = [
+    TTSVoice(
+      id: "deepgram/aura-asteria-en",
+      name: "Asteria",
+      provider: .deepgram,
+      traits: [.female, .american, .professional, .lowLatency],
+      previewURL: nil
+    ),
+    TTSVoice(
+      id: "deepgram/aura-luna-en",
+      name: "Luna",
+      provider: .deepgram,
+      traits: [.female, .american, .warm, .lowLatency],
+      previewURL: nil
+    ),
+    TTSVoice(
+      id: "deepgram/aura-stella-en",
+      name: "Stella",
+      provider: .deepgram,
+      traits: [.female, .american, .professional, .lowLatency],
+      previewURL: nil
+    ),
+    TTSVoice(
+      id: "deepgram/aura-athena-en",
+      name: "Athena",
+      provider: .deepgram,
+      traits: [.female, .british, .professional, .lowLatency],
+      previewURL: nil
+    ),
+    TTSVoice(
+      id: "deepgram/aura-hera-en",
+      name: "Hera",
+      provider: .deepgram,
+      traits: [.female, .american, .clear, .lowLatency],
+      previewURL: nil
+    ),
+    TTSVoice(
+      id: "deepgram/aura-orion-en",
+      name: "Orion",
+      provider: .deepgram,
+      traits: [.male, .american, .deep, .lowLatency],
+      previewURL: nil
+    ),
+    TTSVoice(
+      id: "deepgram/aura-arcas-en",
+      name: "Arcas",
+      provider: .deepgram,
+      traits: [.male, .american, .professional, .lowLatency],
+      previewURL: nil
+    ),
+    TTSVoice(
+      id: "deepgram/aura-perseus-en",
+      name: "Perseus",
+      provider: .deepgram,
+      traits: [.male, .american, .energetic, .lowLatency],
+      previewURL: nil
+    ),
+    TTSVoice(
+      id: "deepgram/aura-angus-en",
+      name: "Angus",
+      provider: .deepgram,
+      traits: [.male, .british, .professional, .lowLatency],
+      previewURL: nil
+    ),
+    TTSVoice(
+      id: "deepgram/aura-orpheus-en",
+      name: "Orpheus",
+      provider: .deepgram,
+      traits: [.male, .american, .warm, .lowLatency],
+      previewURL: nil
+    ),
+    TTSVoice(
+      id: "deepgram/aura-helios-en",
+      name: "Helios",
+      provider: .deepgram,
+      traits: [.male, .british, .deep, .lowLatency],
+      previewURL: nil
+    ),
+    TTSVoice(
+      id: "deepgram/aura-zeus-en",
+      name: "Zeus",
+      provider: .deepgram,
+      traits: [.male, .american, .deep, .lowLatency],
+      previewURL: nil
+    ),
+  ]
+
   static let allVoices: [TTSVoice] =
-    elevenlabsVoices + openaiVoices + azureVoices + systemVoices
+    elevenlabsVoices + openaiVoices + azureVoices + deepgramVoices + systemVoices
 
   static func voices(for provider: TTSProvider) -> [TTSVoice] {
     switch provider {
     case .elevenlabs: return elevenlabsVoices
     case .openai: return openaiVoices
     case .azure: return azureVoices
+    case .deepgram: return deepgramVoices
     case .system: return systemVoices
     }
   }

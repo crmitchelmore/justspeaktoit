@@ -196,6 +196,9 @@ final class TextToSpeechManager: ObservableObject {
     case .azure:
       // Azure: ~$16 per 1M chars for neural voices
       return Decimal(characterCount) * 16.0 / 1_000_000.0
+    case .deepgram:
+      // Deepgram Aura: $0.0135 per 1000 chars
+      return Decimal(characterCount) * Decimal(string: "0.0135")! / 1000.0
     case .system:
       return nil
     }

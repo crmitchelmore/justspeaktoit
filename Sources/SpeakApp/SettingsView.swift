@@ -897,6 +897,86 @@ struct SettingsView: View {
         }
       }
       .speakTooltip("Configure how generated speech is saved and played back.")
+
+      SettingsCard(title: "Favorite Voices", systemImage: "star.fill", tint: Color.yellow) {
+        VStack(alignment: .leading, spacing: 12) {
+          Text("Quick access to your preferred voices")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+          if settings.ttsFavoriteVoices.isEmpty {
+            Text("No favorites yet. Add voices from the Voice Output view.")
+              .font(.caption)
+              .foregroundStyle(.tertiary)
+              .padding(.vertical, 8)
+          } else {
+            ForEach(settings.ttsFavoriteVoices, id: \.self) { voiceID in
+              if let voice = VoiceCatalog.voice(forID: voiceID) {
+                HStack {
+                  Text(voice.displayName)
+                    .font(.subheadline)
+                  Spacer()
+                  Button {
+                    settings.ttsFavoriteVoices.removeAll { $0 == voiceID }
+                  } label: {
+                    Image(systemName: "xmark.circle.fill")
+                      .foregroundStyle(.secondary)
+                  }
+                  .buttonStyle(.plain)
+                }
+                .padding(.vertical, 4)
+              }
+            }
+          }
+        }
+      }
+      .speakTooltip("Manage your favorite voices for quick access.")
+
+      SettingsCard(title: "Pronunciation Dictionary", systemImage: "text.book.closed", tint: Color.purple) {
+        VStack(alignment: .leading, spacing: 12) {
+          Text("Custom pronunciations for words the TTS mispronounces")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+          if settings.ttsPronunciationDictionary.isEmpty {
+            Text("No custom pronunciations. Add words that are commonly mispronounced.")
+              .font(.caption)
+              .foregroundStyle(.tertiary)
+              .padding(.vertical, 8)
+          } else {
+            ForEach(Array(settings.ttsPronunciationDictionary.keys.sorted()), id: \.self) { word in
+              if let pronunciation = settings.ttsPronunciationDictionary[word] {
+                HStack {
+                  Text(word)
+                    .font(.subheadline.bold())
+                  Text("→")
+                    .foregroundStyle(.secondary)
+                  Text(pronunciation)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                  Spacer()
+                  Button {
+                    settings.ttsPronunciationDictionary.removeValue(forKey: word)
+                  } label: {
+                    Image(systemName: "xmark.circle.fill")
+                      .foregroundStyle(.secondary)
+                  }
+                  .buttonStyle(.plain)
+                }
+                .padding(.vertical, 4)
+              }
+            }
+          }
+
+          Divider()
+
+          PronunciationEntryView(dictionary: Binding(
+            get: { settings.ttsPronunciationDictionary },
+            set: { settings.ttsPronunciationDictionary = $0 }
+          ))
+        }
+      }
+      .speakTooltip("Add custom pronunciations for words that TTS engines commonly mispronounce.")
     }
   }
 
@@ -939,7 +1019,7 @@ struct SettingsView: View {
       }
 
       // TTS Providers
-      ForEach([TTSProvider.elevenlabs, .openai, .azure]) { provider in
+      ForEach([TTSProvider.elevenlabs, .openai, .azure, .deepgram]) { provider in
         ttsProviderAPIKeyCard(for: provider)
           .id("tts-\(provider.id)")
       }
@@ -999,6 +1079,7 @@ struct SettingsView: View {
       case .elevenlabs: return .purple
       case .openai: return .green
       case .azure: return .blue
+      case .deepgram: return .orange
       case .system: return .gray
       }
     }()
@@ -1007,6 +1088,7 @@ struct SettingsView: View {
       case .elevenlabs: return "waveform.circle"
       case .openai: return "brain"
       case .azure: return "cloud"
+      case .deepgram: return "bolt.circle"
       case .system: return "speaker.wave.2"
       }
     }()
@@ -1015,6 +1097,7 @@ struct SettingsView: View {
       case .elevenlabs: return "https://elevenlabs.io"
       case .openai: return "https://platform.openai.com"
       case .azure: return "https://azure.microsoft.com/en-us/services/cognitive-services/text-to-speech/"
+      case .deepgram: return "https://deepgram.com"
       case .system: return ""
       }
     }()
@@ -1975,6 +2058,44 @@ private struct APIKeyValidationDebugDetailsView: View {
       .padding(8)
       .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
     }
+  }
+}
+
+// MARK: - Pronunciation Entry Helper
+
+private struct PronunciationEntryView: View {
+  @Binding var dictionary: [String: String]
+  @State private var newWord = ""
+  @State private var newPronunciation = ""
+
+  var body: some View {
+    HStack(spacing: 8) {
+      TextField("Word", text: $newWord)
+        .textFieldStyle(.roundedBorder)
+        .frame(width: 120)
+
+      Text("→")
+        .foregroundStyle(.secondary)
+
+      TextField("Pronunciation", text: $newPronunciation)
+        .textFieldStyle(.roundedBorder)
+        .frame(width: 150)
+
+      Button("Add") {
+        let word = newWord.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pronunciation = newPronunciation.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !word.isEmpty, !pronunciation.isEmpty else { return }
+        dictionary[word] = pronunciation
+        newWord = ""
+        newPronunciation = ""
+      }
+      .buttonStyle(.bordered)
+      .disabled(newWord.isEmpty || newPronunciation.isEmpty)
+    }
+
+    Text("Example: \"GIF\" → \"jif\" or \"API\" → \"A P I\"")
+      .font(.caption2)
+      .foregroundStyle(.tertiary)
   }
 }
 

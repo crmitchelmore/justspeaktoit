@@ -537,6 +537,7 @@ struct DashboardView: View {
     case .elevenlabs: return .purple
     case .openai: return .green
     case .azure: return .blue
+    case .deepgram: return .orange
     case .system: return .gray
     }
   }

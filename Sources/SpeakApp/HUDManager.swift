@@ -36,10 +36,11 @@ final class HUDManager: ObservableObject {
     var liveText: String?
     var liveTextIsFinal: Bool
     var liveTextConfidence: Double?
+    var streamingText: String?
 
     static let hidden = Snapshot(
       phase: .hidden, headline: "", subheadline: nil, elapsed: 0,
-      liveText: nil, liveTextIsFinal: true, liveTextConfidence: nil
+      liveText: nil, liveTextIsFinal: true, liveTextConfidence: nil, streamingText: nil
     )
   }
 
@@ -66,6 +67,10 @@ final class HUDManager: ObservableObject {
 
   func beginPostProcessing() {
     transition(.postProcessing, headline: "Post-processing", subheadline: "Cleaning up transcript")
+  }
+
+  func updateStreamingText(_ text: String) {
+    snapshot.streamingText = text
   }
 
   func beginDelivering() {
@@ -103,7 +108,7 @@ final class HUDManager: ObservableObject {
     phaseStartDate = showsTimer ? Date() : nil
     snapshot = Snapshot(
       phase: phase, headline: headline, subheadline: subheadline, elapsed: 0,
-      liveText: nil, liveTextIsFinal: true, liveTextConfidence: nil
+      liveText: nil, liveTextIsFinal: true, liveTextConfidence: nil, streamingText: nil
     )
 
     guard showsTimer else { return }

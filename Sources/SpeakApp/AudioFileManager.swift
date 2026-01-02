@@ -53,6 +53,24 @@ actor AudioFileManager {
     self.audioDeviceManager = audioDeviceManager
   }
 
+  /// Returns the current audio level (0.0 to 1.0) if recording is active.
+  /// Call this periodically (~30fps) to get updated levels.
+  func getCurrentAudioLevel() -> Float {
+    guard let recorder = recorder, recorder.isRecording else { return 0 }
+    recorder.updateMeters()
+
+    let averagePower = recorder.averagePower(forChannel: 0)
+    let peakPower = recorder.peakPower(forChannel: 0)
+
+    // Combine average and peak for responsive meter
+    let combinedPower = (averagePower * 0.7) + (peakPower * 0.3)
+
+    // Convert decibels to normalized linear scale (0.0 to 1.0)
+    // -60 dB = silence threshold, 0 dB = maximum
+    let minDb: Float = -60
+    return max(0, min(1, (combinedPower - minDb) / (-minDb)))
+  }
+
   func startRecording() async throws -> URL {
     guard recorder == nil else { throw AudioFileManagerError.alreadyRecording }
 

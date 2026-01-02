@@ -26,8 +26,9 @@ struct HUDOverlay: View {
             .foregroundStyle(.secondary)
         }
       }
-      if let liveText = manager.snapshot.liveText, !liveText.isEmpty {
-        liveTranscriptionView(text: liveText)
+      if case .recording = manager.snapshot.phase {
+        AudioLevelMeterView(level: manager.audioLevel, width: 100, height: 4)
+          .padding(.top, 2)
       }
       if manager.snapshot.phase.isTerminal == false {
         Text(elapsedText)

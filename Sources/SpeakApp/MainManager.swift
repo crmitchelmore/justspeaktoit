@@ -35,6 +35,7 @@ final class MainManager: ObservableObject {
   private var cancellables: Set<AnyCancellable> = []
   private var hotKeyTokens: [HotKeyListenerToken] = []
   private var lastDoubleTapEventUptime: TimeInterval = 0
+  private var audioLevelTimer: Timer?
 
   init(
     appSettings: AppSettings,
@@ -202,6 +203,7 @@ final class MainManager: ObservableObject {
 
     do {
       _ = try await audioFileManager.startRecording()
+      startAudioLevelMonitoring()
       if appSettings.transcriptionMode == .liveNative {
         try await transcriptionManager.startLiveTranscription()
       }
@@ -219,6 +221,8 @@ final class MainManager: ObservableObject {
 
   private func endSession(trigger: SessionTriggerSource) async {
     guard let session = activeSession else { return }
+
+    stopAudioLevelMonitoring()
 
     let tailDuration = max(appSettings.postRecordingTailDuration, 0)
     if tailDuration > 0 {
@@ -766,6 +770,7 @@ final class MainManager: ObservableObject {
     lastErrorMessage = message
     hudManager.finishFailure(message: message)
     state = .failed(message)
+    stopAudioLevelMonitoring()
     Task {
       await audioFileManager.cancelRecording(deleteFile: !preserveFile)
       if let session = activeSession {
@@ -775,6 +780,27 @@ final class MainManager: ObservableObject {
     }
 
     activeSession = nil
+  }
+
+  private func startAudioLevelMonitoring() {
+    audioLevelTimer?.invalidate()
+    audioLevelTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) {
+      [weak self] _ in
+      Task { @MainActor [weak self] in
+        guard let self else { return }
+        let level = await self.audioFileManager.getCurrentAudioLevel()
+        self.hudManager.updateAudioLevel(level)
+      }
+    }
+    if let timer = audioLevelTimer {
+      RunLoop.main.add(timer, forMode: .common)
+    }
+  }
+
+  private func stopAudioLevelMonitoring() {
+    audioLevelTimer?.invalidate()
+    audioLevelTimer = nil
+    hudManager.updateAudioLevel(0)
   }
 }
 extension MainManager {

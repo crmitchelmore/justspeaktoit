@@ -139,6 +139,16 @@ struct PhaseTimestamps: Codable, Hashable {
   let postProcessingStarted: Date?
   let postProcessingEnded: Date?
   let outputDelivered: Date?
+
+  var postProcessingDurationMs: Int? {
+    guard let start = postProcessingStarted, let end = postProcessingEnded else { return nil }
+    return Int(end.timeIntervalSince(start) * 1000)
+  }
+
+  var transcriptionDurationMs: Int? {
+    guard let start = transcriptionStarted, let end = transcriptionEnded else { return nil }
+    return Int(end.timeIntervalSince(start) * 1000)
+  }
 }
 
 struct HistoryItem: Codable, Identifiable, Hashable {

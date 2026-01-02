@@ -1679,7 +1679,12 @@ private struct ModelPicker: View {
     VStack(alignment: .leading, spacing: 8) {
       Picker(title, selection: $selection) {
         ForEach(options) { option in
-          Text(option.displayName).tag(option.id)
+          HStack {
+            Text(option.displayName)
+            Spacer()
+            LatencyBadgeCompact(option: option)
+          }
+          .tag(option.id)
         }
         Text("Custom…").tag(ModelCatalog.customOptionID)
       }
@@ -1698,10 +1703,16 @@ private struct ModelPicker: View {
           .foregroundStyle(.secondary)
       }
 
-      if let description = selectedOption?.description {
-        Text(description)
-          .font(.caption)
-          .foregroundStyle(.secondary)
+      if let option = selectedOption {
+        HStack(spacing: 8) {
+          if let description = option.description {
+            Text(description)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+          Spacer()
+          LatencyBadge(option: option)
+        }
       }
 
       if selection == ModelCatalog.customOptionID {

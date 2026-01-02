@@ -9,6 +9,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
   case pronunciation
   case apiKeys
   case hotKeys
+  case shortcuts
   case permissions
 
   var id: String { rawValue }
@@ -22,6 +23,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
     case .pronunciation: return "Pronunciation"
     case .apiKeys: return "API Keys"
     case .hotKeys: return "Hotkeys"
+    case .shortcuts: return "Shortcuts"
     case .permissions: return "Permissions"
     }
   }
@@ -147,6 +149,8 @@ struct SettingsView: View {
       apiKeySettings
     case .hotKeys:
       hotKeySettings
+    case .shortcuts:
+      ShortcutsSettingsView(shortcutManager: environment.shortcuts)
     case .permissions:
       permissionsSettings
     }

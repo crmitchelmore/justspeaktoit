@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 @MainActor
@@ -7,6 +8,7 @@ final class AppEnvironment: ObservableObject {
   let history: HistoryManager
   let hud: HUDManager
   let hotKeys: HotKeyManager
+  let shortcuts: ShortcutManager
   let audioDevices: AudioInputDeviceManager
   let audio: AudioFileManager
   let transcription: TranscriptionManager
@@ -19,6 +21,13 @@ final class AppEnvironment: ObservableObject {
   private let hudPresenter: HUDWindowPresenter
 
   private(set) var statusBarController: StatusBarController?
+  private(set) var menuBarManager: MenuBarManager?
+  private(set) var dockMenuManager: DockMenuManager?
+  private(set) var servicesProvider: ServicesProvider?
+  #if canImport(AppKit)
+  @available(macOS 10.12.2, *)
+  private(set) var touchBarProvider: TouchBarProvider?
+  #endif
 
   init(
     settings: AppSettings,
@@ -26,6 +35,7 @@ final class AppEnvironment: ObservableObject {
     history: HistoryManager,
     hud: HUDManager,
     hotKeys: HotKeyManager,
+    shortcuts: ShortcutManager,
     audioDevices: AudioInputDeviceManager,
     audio: AudioFileManager,
     transcription: TranscriptionManager,
@@ -42,6 +52,7 @@ final class AppEnvironment: ObservableObject {
     self.history = history
     self.hud = hud
     self.hotKeys = hotKeys
+    self.shortcuts = shortcuts
     self.audioDevices = audioDevices
     self.audio = audio
     self.transcription = transcription
@@ -62,6 +73,128 @@ final class AppEnvironment: ObservableObject {
       mainManager: main,
       openMainWindow: openMainWindow
     )
+  }
+
+  func installMenuBar() {
+    guard menuBarManager == nil else { return }
+    menuBarManager = MenuBarManager(shortcutManager: shortcuts, appSettings: settings)
+    menuBarManager?.setupMainMenu()
+  }
+
+  func installDockMenu() {
+    guard dockMenuManager == nil else { return }
+    dockMenuManager = DockMenuManager(historyManager: history)
+  }
+
+  func installServices() {
+    guard servicesProvider == nil else { return }
+    servicesProvider = ServicesProvider(ttsManager: tts, appSettings: settings)
+    servicesProvider?.registerServices()
+  }
+
+  #if canImport(AppKit)
+  @available(macOS 10.12.2, *)
+  func installTouchBar() {
+    touchBarProvider = TouchBarProvider(mainManager: main, ttsManager: tts, appSettings: settings)
+  }
+  #endif
+
+  func createDockMenu() -> NSMenu? {
+    dockMenuManager?.createDockMenu()
+  }
+
+  func configureShortcutHandlers() {
+    shortcuts.register(action: .startStopRecording) { [weak self] in
+      self?.main.toggleRecordingFromUI()
+    }
+    shortcuts.register(action: .speakClipboard) { [weak self] in
+      guard let self else { return }
+      if let text = NSPasteboard.general.string(forType: .string), !text.isEmpty {
+        Task {
+          try? await self.tts.synthesize(text: text)
+        }
+      }
+    }
+    shortcuts.register(action: .speakSelectedText) { [weak self] in
+      guard let self else { return }
+      // Get selected text via accessibility or pasteboard simulation
+      Task {
+        if let text = await self.getSelectedText(), !text.isEmpty {
+          try? await self.tts.synthesize(text: text)
+        }
+      }
+    }
+    shortcuts.register(action: .pauseResumeTTS) { [weak self] in
+      guard let self else { return }
+      if self.tts.isPlaying {
+        self.tts.pause()
+      } else {
+        self.tts.resume()
+      }
+    }
+    shortcuts.register(action: .stopTTS) { [weak self] in
+      self?.tts.stop()
+    }
+    shortcuts.register(action: .quickVoice1) { [weak self] in
+      self?.switchToQuickVoice(1)
+    }
+    shortcuts.register(action: .quickVoice2) { [weak self] in
+      self?.switchToQuickVoice(2)
+    }
+    shortcuts.register(action: .quickVoice3) { [weak self] in
+      self?.switchToQuickVoice(3)
+    }
+    shortcuts.startMonitoring()
+  }
+
+  private func switchToQuickVoice(_ index: Int) {
+    let favorites = settings.ttsFavoriteVoices
+    let arrayIndex = index - 1
+    if arrayIndex < favorites.count {
+      settings.defaultTTSVoice = favorites[arrayIndex]
+    }
+  }
+
+  private func getSelectedText() async -> String? {
+    // Save current clipboard
+    let pasteboard = NSPasteboard.general
+    let savedContents = pasteboard.pasteboardItems?.compactMap { item -> [NSPasteboard.PasteboardType: Data]? in
+      var dict: [NSPasteboard.PasteboardType: Data] = [:]
+      for type in item.types {
+        if let data = item.data(forType: type) {
+          dict[type] = data
+        }
+      }
+      return dict.isEmpty ? nil : dict
+    }
+
+    // Simulate Cmd+C to copy selected text
+    let source = CGEventSource(stateID: .hidSystemState)
+    let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 0x08, keyDown: true)
+    let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 0x08, keyDown: false)
+    keyDown?.flags = .maskCommand
+    keyUp?.flags = .maskCommand
+    keyDown?.post(tap: .cghidEventTap)
+    keyUp?.post(tap: .cghidEventTap)
+
+    // Wait for clipboard to update
+    try? await Task.sleep(nanoseconds: 100_000_000)
+
+    let selectedText = pasteboard.string(forType: .string)
+
+    // Restore clipboard
+    pasteboard.clearContents()
+    if let savedContents {
+      for itemData in savedContents {
+        let item = NSPasteboardItem()
+        for (type, data) in itemData {
+          item.setData(data, forType: type)
+        }
+        pasteboard.writeObjects([item])
+      }
+    }
+
+    return selectedText
   }
 }
 
@@ -121,6 +254,7 @@ enum WireUp {
       openRouterClient: openRouter
     )
     let hudPresenter = HUDWindowPresenter(manager: hud)
+    let shortcuts = ShortcutManager(permissionsManager: permissions)
 
     let environment = AppEnvironment(
       settings: settings,
@@ -128,6 +262,7 @@ enum WireUp {
       history: history,
       hud: hud,
       hotKeys: hotKeys,
+      shortcuts: shortcuts,
       audioDevices: audioDevices,
       audio: audio,
       transcription: transcription,

@@ -540,18 +540,18 @@ struct SettingsView: View {
               .fill(Color.indigo.opacity(0.12))
           )
 
-          Text("Model used while recording continuously on-device. Provides instant feedback as you speak.")
+          Text("Model used while recording. Provides instant feedback as you speak.")
             .font(.caption)
             .foregroundStyle(.secondary)
           ModelPicker(
-            title: "On-device Model",
-            help: "These engines never leave your Mac and respond immediately.",
+            title: "Live Model",
+            help: "Choose between on-device (Apple) or streaming (Deepgram) transcription.",
             options: ModelCatalog.liveTranscription,
             value: settingsBinding(\AppSettings.liveTranscriptionModel)
           )
         }
       }
-      .speakTooltip("Pick the on-device model that keeps up with you during live recording.")
+      .speakTooltip("Pick the model that transcribes as you speak during live recording.")
 
       SettingsCard(
         title: "Batch transcription", systemImage: "folder.badge.clock", tint: Color.cyan

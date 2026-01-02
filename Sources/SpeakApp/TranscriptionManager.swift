@@ -36,6 +36,7 @@ final class TranscriptionManager: ObservableObject {
   private let secureStorage: SecureAppStorage
 
   private var continuation: CheckedContinuation<TranscriptionResult, Error>?
+  private var pendingError: Error?
 
   init(
     appSettings: AppSettings,
@@ -60,16 +61,26 @@ final class TranscriptionManager: ObservableObject {
 
   func startLiveTranscription() async throws {
     guard !isLiveTranscribing else { throw TranscriptionManagerError.liveSessionAlreadyRunning }
+    let model = appSettings.liveTranscriptionModel
+    let language = appSettings.preferredLocaleIdentifier
+    print("[TranscriptionManager] startLiveTranscription - model: \(model), language: \(language)")
     liveController.configure(
-      language: appSettings.preferredLocaleIdentifier,
-      model: appSettings.liveTranscriptionModel
+      language: language,
+      model: model
     )
     try await liveController.start()
     livePartialText = ""
+    pendingError = nil
     isLiveTranscribing = true
   }
 
   func stopLiveTranscription() async throws -> TranscriptionResult {
+    // If there was a mid-session error, throw it now
+    if let error = pendingError {
+      pendingError = nil
+      isLiveTranscribing = false
+      throw error
+    }
     guard isLiveTranscribing else { throw TranscriptionManagerError.liveSessionNotRunning }
     return try await withCheckedThrowingContinuation { continuation in
       self.continuation = continuation
@@ -180,9 +191,16 @@ extension TranscriptionManager: LiveTranscriptionSessionDelegate {
   }
 
   func liveTranscriber(_ session: any LiveTranscriptionController, didFail error: Error) {
-    isLiveTranscribing = false
-    continuation?.resume(throwing: error)
-    continuation = nil
+    if continuation != nil {
+      // We're in the middle of stopping - resume with the error
+      continuation?.resume(throwing: error)
+      continuation = nil
+      isLiveTranscribing = false
+    } else {
+      // Error happened mid-session - store it for when stop is called
+      pendingError = error
+      // Keep isLiveTranscribing true so stopLiveTranscription doesn't throw early
+    }
   }
 }
 
@@ -234,6 +252,10 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
 
     request = SFSpeechAudioBufferRecognitionRequest()
     request?.shouldReportPartialResults = true
+    // Prefer on-device recognition to avoid server errors
+    if recognizer.supportsOnDeviceRecognition {
+      request?.requiresOnDeviceRecognition = true
+    }
 
     let inputNode = audioEngine.inputNode
     inputNode.removeTap(onBus: 0)
@@ -370,6 +392,8 @@ extension SFSpeechRecognitionResult {
 
 // MARK: - Deepgram Live Controller
 
+import os.log
+
 /// Wraps DeepgramLiveTranscriber to conform to LiveTranscriptionController protocol.
 final class DeepgramLiveController: NSObject, LiveTranscriptionController {
   weak var delegate: LiveTranscriptionSessionDelegate?
@@ -385,6 +409,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
   private var startTime: Date?
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
   private let audioEngine = AVAudioEngine()
+  private let logger = Logger(subsystem: "com.speak.app", category: "DeepgramLiveController")
 
   init(
     permissionsManager: PermissionsManager,
@@ -399,10 +424,14 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
   func configure(language: String?, model: String) {
     currentLanguage = language
     currentModel = model
+    logger.info("Configured Deepgram with model: \(model), language: \(language ?? "default")")
   }
 
   func start() async throws {
+    print("[DeepgramLiveController] Starting Deepgram live transcription...")
+    
     guard await ensurePermissions() else {
+      print("[DeepgramLiveController] ERROR: Permissions missing")
       throw TranscriptionManagerError.permissionsMissing
     }
 
@@ -410,9 +439,12 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
     do {
       apiKey = try await secureStorage.secret(identifier: "deepgram.apiKey")
       guard !apiKey.isEmpty else {
+        print("[DeepgramLiveController] ERROR: Deepgram API key is empty")
         throw DeepgramError.missingAPIKey
       }
+      print("[DeepgramLiveController] API key retrieved (length: \(apiKey.count))")
     } catch {
+      print("[DeepgramLiveController] ERROR: Failed to retrieve API key: \(error.localizedDescription)")
       throw DeepgramError.missingAPIKey
     }
 
@@ -422,17 +454,27 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
     accumulatedText = ""
     startTime = Date()
 
+    // Get audio format to determine sample rate
+    let inputNode = audioEngine.inputNode
+    inputNode.removeTap(onBus: 0)
+    let format = inputNode.outputFormat(forBus: 0)
+    let sampleRate = Int(format.sampleRate)
+    print("[DeepgramLiveController] Audio format: \(format.sampleRate)Hz, \(format.channelCount) channels")
+
     let provider = DeepgramTranscriptionProvider()
+    print("[DeepgramLiveController] Creating transcriber with model: \(self.currentModel ?? "nova-2"), sampleRate: \(sampleRate)")
     transcriber = provider.createLiveTranscriber(
       apiKey: apiKey,
       model: currentModel ?? "nova-2",
-      language: currentLanguage
+      language: currentLanguage,
+      sampleRate: sampleRate
     )
 
     transcriber?.start(
       onTranscript: { [weak self] text, isFinal in
         Task { @MainActor [weak self] in
           guard let self else { return }
+          print("[DeepgramLiveController] Transcript: '\(text)' (final: \(isFinal))")
           if isFinal {
             self.accumulatedText = text
           }
@@ -448,15 +490,13 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
       onError: { [weak self] error in
         Task { @MainActor [weak self] in
           guard let self else { return }
+          print("[DeepgramLiveController] ERROR: \(error.localizedDescription)")
           self.delegate?.liveTranscriber(self, didFail: error)
         }
       }
     )
 
     // Set up audio capture
-    let inputNode = audioEngine.inputNode
-    inputNode.removeTap(onBus: 0)
-    let format = inputNode.outputFormat(forBus: 0)
     inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
       self?.transcriber?.sendAudio(from: buffer)
     }
@@ -464,9 +504,11 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
     audioEngine.prepare()
     try audioEngine.start()
     isRunning = true
+    print("[DeepgramLiveController] Started successfully")
   }
 
   func stop() async {
+    print("[DeepgramLiveController] Stopping...")
     guard isRunning else { return }
 
     audioEngine.stop()
@@ -549,17 +591,21 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
 
   func configure(language: String?, model: String) {
     currentModel = model
+    print("[SwitchingLiveTranscriber] Configured with model: \(model)")
     nativeController.configure(language: language, model: model)
     deepgramController.configure(language: language, model: model)
   }
 
   func start() async throws {
     let model = currentModel ?? appSettings.liveTranscriptionModel
-    activeController = model.contains("deepgram") ? deepgramController : nativeController
+    let useDeepgram = model.contains("deepgram")
+    print("[SwitchingLiveTranscriber] Starting with model: \(model), useDeepgram: \(useDeepgram)")
+    activeController = useDeepgram ? deepgramController : nativeController
     try await activeController?.start()
   }
 
   func stop() async {
+    print("[SwitchingLiveTranscriber] Stopping...")
     await activeController?.stop()
     activeController = nil
   }

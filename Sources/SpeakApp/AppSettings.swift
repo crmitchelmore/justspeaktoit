@@ -12,15 +12,15 @@ final class AppSettings: ObservableObject {
   }
 
   enum TranscriptionMode: String, CaseIterable, Identifiable {
-    case liveNative
-    case batchRemote
+    case liveNative = "liveNative"
+    case batchRemote = "batchRemote"
 
     var id: String { rawValue }
 
     var displayName: String {
       switch self {
       case .liveNative:
-        return "Live (On-device)"
+        return "Live (Streaming)"
       case .batchRemote:
         return "Batch (Remote)"
       }

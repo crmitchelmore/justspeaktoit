@@ -9,6 +9,7 @@ final class DeepgramLiveTranscriber: @unchecked Sendable {
     private let apiKey: String
     private let model: String
     private let language: String?
+    private let sampleRate: Int
     private var webSocketTask: URLSessionWebSocketTask?
     private let session: URLSession
     private let bufferPool: AudioBufferPool
@@ -21,12 +22,14 @@ final class DeepgramLiveTranscriber: @unchecked Sendable {
         apiKey: String,
         model: String = "nova-2",
         language: String? = nil,
+        sampleRate: Int = 16000,
         session: URLSession = .shared,
         bufferPool: AudioBufferPool = AudioBufferPool(poolSize: 10, bufferSize: 4096)
     ) {
         self.apiKey = apiKey
         self.model = model
         self.language = language
+        self.sampleRate = sampleRate
         self.session = session
         self.bufferPool = bufferPool
     }
@@ -48,7 +51,7 @@ final class DeepgramLiveTranscriber: @unchecked Sendable {
             URLQueryItem(name: "punctuate", value: "true"),
             URLQueryItem(name: "interim_results", value: "true"),
             URLQueryItem(name: "encoding", value: "linear16"),
-            URLQueryItem(name: "sample_rate", value: "16000")
+            URLQueryItem(name: "sample_rate", value: String(sampleRate))
         ]
 
         if let language {
@@ -339,12 +342,14 @@ struct DeepgramTranscriptionProvider: TranscriptionProvider {
     func createLiveTranscriber(
         apiKey: String,
         model: String = "nova-2",
-        language: String? = nil
+        language: String? = nil,
+        sampleRate: Int = 16000
     ) -> DeepgramLiveTranscriber {
         DeepgramLiveTranscriber(
             apiKey: apiKey,
             model: extractModelName(from: model),
             language: language,
+            sampleRate: sampleRate,
             session: session,
             bufferPool: bufferPool
         )

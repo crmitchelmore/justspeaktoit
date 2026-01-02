@@ -2,6 +2,7 @@ import AVFoundation
 import AppKit
 import Combine
 import Foundation
+import os.log
 
 @MainActor
 final class MainManager: ObservableObject {
@@ -27,6 +28,8 @@ final class MainManager: ObservableObject {
   private let historyManager: HistoryManager
   private let hudManager: HUDManager
   private let personalLexicon: PersonalLexiconService
+  private let openRouterClient: OpenRouterAPIClient
+  private let logger = Logger(subsystem: "com.github.speakapp", category: "MainManager")
 
   private var activeSession: ActiveSession?
   private var cancellables: Set<AnyCancellable> = []
@@ -42,7 +45,8 @@ final class MainManager: ObservableObject {
     postProcessingManager: PostProcessingManager,
     historyManager: HistoryManager,
     hudManager: HUDManager,
-    personalLexicon: PersonalLexiconService
+    personalLexicon: PersonalLexiconService,
+    openRouterClient: OpenRouterAPIClient
   ) {
     self.appSettings = appSettings
     self.permissionsManager = permissionsManager
@@ -53,6 +57,7 @@ final class MainManager: ObservableObject {
     self.historyManager = historyManager
     self.hudManager = hudManager
     self.personalLexicon = personalLexicon
+    self.openRouterClient = openRouterClient
 
     transcriptionManager.$livePartialText
       .receive(on: RunLoop.main)
@@ -144,10 +149,28 @@ final class MainManager: ObservableObject {
     )
 
     hotKeyManager.startMonitoring()
+
+    // Pre-warm LLM connection at app launch
+    warmUpConnectionIfEnabled()
+  }
+
+  /// Pre-warms the OpenRouter connection in the background if enabled.
+  /// This is called at app launch and when recording starts.
+  private func warmUpConnectionIfEnabled() {
+    guard appSettings.connectionPreWarmingEnabled else { return }
+    let client = openRouterClient
+    Task.detached {
+      await client.warmUp()
+    }
   }
 
   private func startSession(trigger: SessionTriggerSource) async {
     guard activeSession == nil else { return }
+
+    // Pre-warm connection when recording starts (if post-processing is enabled)
+    if appSettings.postProcessingEnabled {
+      warmUpConnectionIfEnabled()
+    }
 
     let gesture = trigger.historyGesture
     let session = ActiveSession(gesture: gesture, hotKeyDescription: "Fn")

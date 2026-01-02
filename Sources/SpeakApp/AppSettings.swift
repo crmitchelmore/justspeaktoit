@@ -117,6 +117,7 @@ final class AppSettings: ObservableObject {
     case ttsAutoPlay
     case ttsSaveToDirectory
     case ttsUseSSML
+    case connectionPreWarmingEnabled
   }
 
   private static let defaultBatchTranscriptionModel = "google/gemini-2.0-flash-001"
@@ -285,6 +286,10 @@ final class AppSettings: ObservableObject {
     didSet { store(ttsUseSSML, key: .ttsUseSSML) }
   }
 
+  @Published var connectionPreWarmingEnabled: Bool {
+    didSet { store(connectionPreWarmingEnabled, key: .connectionPreWarmingEnabled) }
+  }
+
   private let defaults: UserDefaults
 
   init(defaults: UserDefaults = .standard) {
@@ -371,6 +376,8 @@ final class AppSettings: ObservableObject {
     ttsSaveToDirectory =
       defaults.object(forKey: DefaultsKey.ttsSaveToDirectory.rawValue) as? Bool ?? false
     ttsUseSSML = defaults.object(forKey: DefaultsKey.ttsUseSSML.rawValue) as? Bool ?? false
+    connectionPreWarmingEnabled =
+      defaults.object(forKey: DefaultsKey.connectionPreWarmingEnabled.rawValue) as? Bool ?? true
 
     ensureRecordingsDirectoryExists()
   }

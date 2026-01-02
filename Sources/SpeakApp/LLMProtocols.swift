@@ -44,12 +44,23 @@ struct TranscriptionSegment: Codable, Hashable, Identifiable {
   let startTime: TimeInterval
   let endTime: TimeInterval
   let text: String
+  let isFinal: Bool
+  let confidence: Double?
 
-  init(id: UUID = UUID(), startTime: TimeInterval, endTime: TimeInterval, text: String) {
+  init(
+    id: UUID = UUID(),
+    startTime: TimeInterval,
+    endTime: TimeInterval,
+    text: String,
+    isFinal: Bool = true,
+    confidence: Double? = nil
+  ) {
     self.id = id
     self.startTime = startTime
     self.endTime = endTime
     self.text = text
+    self.isFinal = isFinal
+    self.confidence = confidence
   }
 }
 
@@ -78,9 +89,25 @@ protocol BatchTranscriptionClient {
     -> TranscriptionResult
 }
 
+struct LiveTranscriptionUpdate {
+  let text: String
+  let isFinal: Bool
+  let confidence: Double?
+
+  init(text: String, isFinal: Bool = false, confidence: Double? = nil) {
+    self.text = text
+    self.isFinal = isFinal
+    self.confidence = confidence
+  }
+}
+
 @MainActor
 protocol LiveTranscriptionSessionDelegate: AnyObject {
   func liveTranscriber(_ session: any LiveTranscriptionController, didUpdatePartial text: String)
+  func liveTranscriber(
+    _ session: any LiveTranscriptionController,
+    didUpdateWith update: LiveTranscriptionUpdate
+  )
   func liveTranscriber(
     _ session: any LiveTranscriptionController, didFinishWith result: TranscriptionResult)
   func liveTranscriber(_ session: any LiveTranscriptionController, didFail error: Error)

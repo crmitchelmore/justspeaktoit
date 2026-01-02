@@ -33,8 +33,14 @@ final class HUDManager: ObservableObject {
     var headline: String
     var subheadline: String?
     var elapsed: TimeInterval
+    var liveText: String?
+    var liveTextIsFinal: Bool
+    var liveTextConfidence: Double?
 
-    static let hidden = Snapshot(phase: .hidden, headline: "", subheadline: nil, elapsed: 0)
+    static let hidden = Snapshot(
+      phase: .hidden, headline: "", subheadline: nil, elapsed: 0,
+      liveText: nil, liveTextIsFinal: true, liveTextConfidence: nil
+    )
   }
 
   @Published private(set) var snapshot: Snapshot = .hidden
@@ -45,6 +51,13 @@ final class HUDManager: ObservableObject {
 
   func beginRecording() {
     transition(.recording, headline: "Recording", subheadline: "Capturing audio")
+  }
+
+  func updateLiveTranscription(text: String, isFinal: Bool, confidence: Double?) {
+    guard snapshot.phase == .recording else { return }
+    snapshot.liveText = text.isEmpty ? nil : text
+    snapshot.liveTextIsFinal = isFinal
+    snapshot.liveTextConfidence = confidence
   }
 
   func beginTranscribing() {
@@ -88,7 +101,10 @@ final class HUDManager: ObservableObject {
   ) {
     invalidateTimers()
     phaseStartDate = showsTimer ? Date() : nil
-    snapshot = Snapshot(phase: phase, headline: headline, subheadline: subheadline, elapsed: 0)
+    snapshot = Snapshot(
+      phase: phase, headline: headline, subheadline: subheadline, elapsed: 0,
+      liveText: nil, liveTextIsFinal: true, liveTextConfidence: nil
+    )
 
     guard showsTimer else { return }
 

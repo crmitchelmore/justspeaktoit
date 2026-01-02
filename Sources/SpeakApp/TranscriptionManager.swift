@@ -25,6 +25,8 @@ enum TranscriptionManagerError: LocalizedError {
 @MainActor
 final class TranscriptionManager: ObservableObject {
   @Published private(set) var livePartialText: String = ""
+  @Published private(set) var liveTextIsFinal: Bool = true
+  @Published private(set) var liveTextConfidence: Double?
   @Published private(set) var isLiveTranscribing: Bool = false
 
   private let appSettings: AppSettings
@@ -157,10 +159,21 @@ extension TranscriptionManager: LiveTranscriptionSessionDelegate {
 
   func liveTranscriber(
     _ session: any LiveTranscriptionController,
+    didUpdateWith update: LiveTranscriptionUpdate
+  ) {
+    livePartialText = update.text
+    liveTextIsFinal = update.isFinal
+    liveTextConfidence = update.confidence
+  }
+
+  func liveTranscriber(
+    _ session: any LiveTranscriptionController,
     didFinishWith result: TranscriptionResult
   ) {
     isLiveTranscribing = false
     livePartialText = result.text
+    liveTextIsFinal = true
+    liveTextConfidence = result.confidence
     continuation?.resume(returning: result)
     continuation = nil
   }
@@ -243,8 +256,17 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
         self.latestResult = result
         Task { @MainActor [weak self] in
           guard let self else { return }
-          self.delegate?.liveTranscriber(
-            self, didUpdatePartial: result.bestTranscription.formattedString)
+          let text = result.bestTranscription.formattedString
+          let confidence = result.bestTranscription.segments.isEmpty
+            ? nil
+            : result.transcriptionSegmentsConfidence
+          let update = LiveTranscriptionUpdate(
+            text: text,
+            isFinal: result.isFinal,
+            confidence: confidence
+          )
+          self.delegate?.liveTranscriber(self, didUpdateWith: update)
+          self.delegate?.liveTranscriber(self, didUpdatePartial: text)
           if result.isFinal {
             self.finish(with: result)
           }
@@ -294,7 +316,9 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
       TranscriptionSegment(
         startTime: segment.timestamp,
         endTime: segment.timestamp + segment.duration,
-        text: segment.substring
+        text: segment.substring,
+        isFinal: result.isFinal,
+        confidence: Double(segment.confidence)
       )
     }
 

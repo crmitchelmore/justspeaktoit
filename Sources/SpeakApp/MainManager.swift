@@ -66,6 +66,18 @@ final class MainManager: ObservableObject {
       }
       .store(in: &cancellables)
 
+    // Forward live transcription updates to HUD manager
+    Publishers.CombineLatest3(
+      transcriptionManager.$livePartialText,
+      transcriptionManager.$liveTextIsFinal,
+      transcriptionManager.$liveTextConfidence
+    )
+    .receive(on: RunLoop.main)
+    .sink { [weak self] text, isFinal, confidence in
+      self?.hudManager.updateLiveTranscription(text: text, isFinal: isFinal, confidence: confidence)
+    }
+    .store(in: &cancellables)
+
     configureHotKeys()
   }
 

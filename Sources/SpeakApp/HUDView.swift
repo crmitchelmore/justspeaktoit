@@ -26,6 +26,9 @@ struct HUDOverlay: View {
             .foregroundStyle(.secondary)
         }
       }
+      if let liveText = manager.snapshot.liveText, !liveText.isEmpty {
+        liveTranscriptionView(text: liveText)
+      }
       if manager.snapshot.phase.isTerminal == false {
         Text(elapsedText)
           .font(.caption.monospacedDigit())
@@ -46,6 +49,34 @@ struct HUDOverlay: View {
     .shadow(color: .black.opacity(0.25), radius: 18, x: 0, y: 12)
     .animation(.spring(response: 0.25, dampingFraction: 0.85), value: manager.snapshot)
     .padding(.horizontal, 60)
+  }
+
+  @ViewBuilder
+  private func liveTranscriptionView(text: String) -> some View {
+    let isFinal = manager.snapshot.liveTextIsFinal
+    let confidence = manager.snapshot.liveTextConfidence
+
+    HStack(spacing: 6) {
+      Text(text)
+        .font(isFinal ? .callout : .callout.italic())
+        .fontWeight(isFinal ? .regular : .light)
+        .foregroundStyle(isFinal ? .primary : .secondary)
+        .lineLimit(2)
+        .animation(.easeInOut(duration: 0.2), value: isFinal)
+
+      if let confidence, confidence > 0 {
+        Text("\(Int(confidence * 100))%")
+          .font(.caption2.monospacedDigit())
+          .foregroundStyle(.tertiary)
+          .padding(.horizontal, 4)
+          .padding(.vertical, 2)
+          .background(
+            Capsule()
+              .fill(.quaternary)
+          )
+      }
+    }
+    .frame(maxWidth: 300)
   }
 
   private var phaseColor: Color {

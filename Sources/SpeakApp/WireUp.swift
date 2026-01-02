@@ -116,7 +116,8 @@ enum WireUp {
       postProcessingManager: postProcessing,
       historyManager: history,
       hudManager: hud,
-      personalLexicon: personalLexicon
+      personalLexicon: personalLexicon,
+      openRouterClient: openRouter
     )
     let hudPresenter = HUDWindowPresenter(manager: hud)
 

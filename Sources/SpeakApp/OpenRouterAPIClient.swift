@@ -593,6 +593,30 @@ actor OpenRouterAPIClient: ChatLLMClient, BatchTranscriptionClient {
     if model.lowercased() == "on-device" { return true }
     return false
   }
+
+  /// Pre-warms the TCP/TLS connection to OpenRouter by making a lightweight HEAD request.
+  /// This establishes and caches the connection for subsequent API calls.
+  /// Failures are logged but do not throw - warming is best-effort.
+  func warmUp() async {
+    let startTime = CFAbsoluteTimeGetCurrent()
+    let url = baseURL.appendingPathComponent("models")
+    var request = URLRequest(url: url)
+    request.httpMethod = "HEAD"
+    applyBrandHeaders(&request)
+
+    do {
+      let (_, response) = try await session.data(for: request)
+      let elapsed = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
+      if let http = response as? HTTPURLResponse {
+        logger.info("Connection warm-up completed in \(elapsed, format: .fixed(precision: 1))ms (status: \(http.statusCode))")
+      } else {
+        logger.info("Connection warm-up completed in \(elapsed, format: .fixed(precision: 1))ms")
+      }
+    } catch {
+      let elapsed = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
+      logger.warning("Connection warm-up failed after \(elapsed, format: .fixed(precision: 1))ms: \(error.localizedDescription, privacy: .public)")
+    }
+  }
 }
 
 private struct OpenRouterChatRequest: Encodable {

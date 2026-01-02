@@ -93,9 +93,32 @@ enum HotKeyGesture: String, CaseIterable, Identifiable {
 	var id: String { rawValue }
 }
 
+enum KeyboardShortcut: Hashable {
+	case commandR
+
+	var keyCode: UInt16 {
+		switch self {
+		case .commandR:
+			return 15  // R key
+		}
+	}
+
+	var requiredModifiers: NSEvent.ModifierFlags {
+		switch self {
+		case .commandR:
+			return .command
+		}
+	}
+}
+
 struct HotKeyListenerToken: Hashable {
 	fileprivate let id: UUID
 	fileprivate let gesture: HotKeyGesture
+}
+
+struct ShortcutListenerToken: Hashable {
+	fileprivate let id: UUID
+	fileprivate let shortcut: KeyboardShortcut
 }
 
 // swiftlint:disable:next type_body_length
@@ -108,6 +131,7 @@ final class HotKeyManager: ObservableObject {
 	private let fnAllowedFlags: CGEventFlags = [.maskSecondaryFn, .maskNonCoalesced]
 
 	private var listeners: [HotKeyGesture: [UUID: () -> Void]] = [:]
+	private var shortcutListeners: [KeyboardShortcut: [UUID: () -> Void]] = [:]
 	private var globalMonitor: Any?
 	private var localMonitor: Any?
 	private var eventTap: CFMachPort?
@@ -185,12 +209,29 @@ final class HotKeyManager: ObservableObject {
 		listeners[token.gesture]?[token.id] = nil
 	}
 
+	@discardableResult
+	func register(shortcut: KeyboardShortcut, handler: @escaping () -> Void) -> ShortcutListenerToken {
+		let identifier = UUID()
+		var handlers = shortcutListeners[shortcut, default: [:]]
+		handlers[identifier] = handler
+		shortcutListeners[shortcut] = handlers
+		return ShortcutListenerToken(id: identifier, shortcut: shortcut)
+	}
+
+	func unregister(_ token: ShortcutListenerToken) {
+		shortcutListeners[token.shortcut]?[token.id] = nil
+	}
+
 	func updateTiming(holdThreshold: TimeInterval, doubleTapWindow: TimeInterval) {
 		appSettings.holdThreshold = holdThreshold
 		appSettings.doubleTapWindow = doubleTapWindow
 	}
 
 	private func handle(event: NSEvent) {
+		if event.type == .keyDown {
+			handleKeyboardShortcuts(event: event)
+		}
+
 		if event.type == .flagsChanged {
 			// rely on CGEvent tap for Fn modifier detection; fall back only if tap unavailable
 			guard eventTap == nil else { return }
@@ -210,6 +251,17 @@ final class HotKeyManager: ObservableObject {
 
 		default:
 			break
+		}
+	}
+
+	private func handleKeyboardShortcuts(event: NSEvent) {
+		for (shortcut, handlers) in shortcutListeners {
+			let modifiersMatch = event.modifierFlags.contains(shortcut.requiredModifiers)
+			let keyCodeMatch = event.keyCode == shortcut.keyCode
+			if modifiersMatch && keyCodeMatch {
+				log.debug("Firing keyboard shortcut: \(String(describing: shortcut))")
+				handlers.values.forEach { $0() }
+			}
 		}
 	}
 

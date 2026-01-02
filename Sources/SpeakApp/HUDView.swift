@@ -25,6 +25,12 @@ struct HUDOverlay: View {
             .font(.subheadline)
             .foregroundStyle(.secondary)
         }
+        if manager.snapshot.showRetryHint {
+          Text("Press ⌘R to retry")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.top, 4)
+        }
       }
       if case .recording = manager.snapshot.phase {
         AudioLevelMeterView(level: manager.audioLevel, width: 100, height: 4)

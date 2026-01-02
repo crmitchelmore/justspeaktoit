@@ -18,6 +18,9 @@ final class MainManager: ObservableObject {
   @Published private(set) var state: State = .idle
   @Published private(set) var livePreview: String = ""
   @Published private(set) var lastErrorMessage: String?
+  @Published private(set) var canRetryPostProcessing: Bool = false
+
+  private var cachedRetryData: RetryData?
 
   private let appSettings: AppSettings
   private let permissionsManager: PermissionsManager
@@ -34,8 +37,17 @@ final class MainManager: ObservableObject {
   private var activeSession: ActiveSession?
   private var cancellables: Set<AnyCancellable> = []
   private var hotKeyTokens: [HotKeyListenerToken] = []
+  private var shortcutTokens: [ShortcutListenerToken] = []
   private var lastDoubleTapEventUptime: TimeInterval = 0
   private var audioLevelTimer: Timer?
+
+  private struct RetryData {
+    let transcriptionResult: TranscriptionResult
+    let recordingSummary: RecordingSummary?
+    let personalCorrections: PersonalLexiconHistorySummary?
+    let lexiconContext: PersonalLexiconContext
+    let originalHistoryItemID: UUID?
+  }
 
   init(
     appSettings: AppSettings,
@@ -97,6 +109,17 @@ final class MainManager: ObservableObject {
     } else {
       Task { await endSession(trigger: .uiButton) }
     }
+  }
+
+  func retryPostProcessing() {
+    guard canRetryPostProcessing, let retryData = cachedRetryData else { return }
+    guard activeSession == nil else { return }
+    Task { await performRetryPostProcessing(with: retryData) }
+  }
+
+  private func clearRetryData() {
+    cachedRetryData = nil
+    canRetryPostProcessing = false
   }
 
   func userRequestedStopDueToError() {
@@ -161,6 +184,15 @@ final class MainManager: ObservableObject {
       }
     )
 
+    shortcutTokens.append(
+      hotKeyManager.register(shortcut: .commandR) { [weak self] in
+        Task { @MainActor in
+          guard let self else { return }
+          self.retryPostProcessing()
+        }
+      }
+    )
+
     hotKeyManager.startMonitoring()
 
     // Pre-warm LLM connection at app launch
@@ -180,10 +212,7 @@ final class MainManager: ObservableObject {
   private func startSession(trigger: SessionTriggerSource) async {
     guard activeSession == nil else { return }
 
-    // Pre-warm connection when recording starts (if post-processing is enabled)
-    if appSettings.postProcessingEnabled {
-      warmUpConnectionIfEnabled()
-    }
+    clearRetryData()
 
     let gesture = trigger.historyGesture
     let session = ActiveSession(gesture: gesture, hotKeyDescription: "Fn")
@@ -403,7 +432,20 @@ final class MainManager: ObservableObject {
           )
           session.events.append(HistoryEvent(kind: .error, description: friendly))
           postProcessingFailureNotice = (headline: "Post-processing failed", message: friendly)
-          hudManager.finishFailure(headline: "Post-processing failed", message: friendly)
+
+          if let transcriptionResult = session.transcriptionResult {
+            cachedRetryData = RetryData(
+              transcriptionResult: transcriptionResult,
+              recordingSummary: session.recordingSummary,
+              personalCorrections: session.personalCorrections,
+              lexiconContext: session.lexiconContext,
+              originalHistoryItemID: session.id
+            )
+            canRetryPostProcessing = true
+            hudManager.finishFailure(headline: "Post-processing failed", message: friendly, showRetryHint: true)
+          } else {
+            hudManager.finishFailure(headline: "Post-processing failed", message: friendly)
+          }
         }
       }
 
@@ -462,6 +504,135 @@ final class MainManager: ObservableObject {
       )
       cleanupAfterFailure(message: error.localizedDescription, preserveFile: true)
     }
+  }
+
+  private func performRetryPostProcessing(with retryData: RetryData) async {
+    state = .processing
+    lastErrorMessage = nil
+    hudManager.beginPostProcessing()
+
+    let session = ActiveSession(gesture: .uiButton, hotKeyDescription: "Fn")
+    activeSession = session
+    session.transcriptionResult = retryData.transcriptionResult
+    session.recordingSummary = retryData.recordingSummary
+    session.personalCorrections = retryData.personalCorrections
+    session.lexiconContext = retryData.lexiconContext
+    session.events.append(
+      HistoryEvent(kind: .postProcessingSubmitted, description: "Retry post-processing requested")
+    )
+
+    let baseText = retryData.transcriptionResult.text
+    var finalText = baseText
+    if let corrections = retryData.personalCorrections {
+      finalText = personalLexicon.apply(to: baseText, context: retryData.lexiconContext).transformedText
+    }
+
+    guard
+      await ensurePostProcessingAPIKeyAvailable(
+        for: session,
+        message: "Post-processing requires an OpenRouter API key. Add one in Settings › API Keys."
+      )
+    else {
+      return
+    }
+
+    let configuredModel = appSettings.postProcessingModel
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    let resolvedPostProcessingModel =
+      configuredModel.isEmpty ? "inception/mercury" : configuredModel
+    let postProcessingInput = finalText
+
+    session.postProcessingStarted = Date()
+    let outcomeResult = await postProcessingManager.process(
+      rawText: postProcessingInput,
+      context: retryData.lexiconContext,
+      corrections: retryData.personalCorrections
+    )
+
+    switch outcomeResult {
+    case .success(let outcome):
+      session.postProcessingEnded = Date()
+      session.postProcessingOutcome = outcome
+      finalText = outcome.processed
+
+      if let response = outcome.response {
+        session.events.append(
+          HistoryEvent(kind: .postProcessingReceived, description: "Retry post-processing complete")
+        )
+        if let payload = response.rawPayload {
+          session.networkExchanges.append(
+            HistoryNetworkExchange(
+              url: URL(string: "https://openrouter.ai/api/v1/chat/completions")!,
+              method: "POST",
+              requestHeaders: ["Model": resolvedPostProcessingModel],
+              requestBodyPreview: postProcessingRequestPreview(
+                systemPrompt: outcome.systemPrompt,
+                rawText: postProcessingInput
+              ),
+              responseCode: 200,
+              responseHeaders: [:],
+              responseBodyPreview: String(payload.prefix(800))
+            )
+          )
+        }
+        session.modelsUsed.insert(resolvedPostProcessingModel)
+        session.modelUsages.append(ModelUsage(modelIdentifier: resolvedPostProcessingModel, phase: .postProcessing))
+        if let cost = response.cost {
+          session.recordCostFragment(cost)
+        }
+      }
+
+      state = .delivering
+      hudManager.beginDelivering()
+      let output = SmartTextOutput(permissionsManager: permissionsManager, appSettings: appSettings)
+      let outputResult = output.output(text: finalText)
+      session.outputMethod = outputResult.method
+      session.outputDelivered = Date()
+
+      if let error = outputResult.error {
+        session.errors.append(
+          HistoryError(
+            phase: .output,
+            message: "Failed to deliver text",
+            debugDescription: error.localizedDescription
+          )
+        )
+        hudManager.finishFailure(headline: "Delivery failed", message: error.localizedDescription)
+        state = .failed(error.localizedDescription)
+        lastErrorMessage = error.localizedDescription
+      } else {
+        session.events.append(
+          HistoryEvent(kind: .outputDelivered, description: "Retry output delivered successfully")
+        )
+        let appName = NSWorkspace.shared.frontmostApplication?.localizedName
+        session.destination = appName
+        let historyItem = session.buildHistoryItem(finalText: finalText)
+        await historyManager.append(historyItem)
+        clearRetryData()
+        hudManager.finishSuccess(message: "Retry Delivered")
+        state = .completed(historyItem)
+      }
+
+    case .failure(let error):
+      session.postProcessingEnded = Date()
+      let friendly = Self.friendlyPostProcessingMessage(
+        for: error,
+        modelIdentifier: resolvedPostProcessingModel
+      )
+      session.errors.append(
+        HistoryError(
+          phase: .postProcessing,
+          message: friendly,
+          debugDescription: error.localizedDescription
+        )
+      )
+      session.events.append(HistoryEvent(kind: .error, description: friendly))
+      hudManager.finishFailure(headline: "Retry post-processing failed", message: friendly, showRetryHint: true)
+      state = .failed(friendly)
+      lastErrorMessage = friendly
+    }
+
+    activeSession = nil
   }
 
   func reprocessHistoryItem(_ item: HistoryItem) async {

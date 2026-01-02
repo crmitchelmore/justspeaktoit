@@ -395,6 +395,7 @@ extension SFSpeechRecognitionResult {
 import os.log
 
 /// Wraps DeepgramLiveTranscriber to conform to LiveTranscriptionController protocol.
+/// Resamples audio from device sample rate (typically 48kHz) to 16kHz for Deepgram.
 final class DeepgramLiveController: NSObject, LiveTranscriptionController {
   weak var delegate: LiveTranscriptionSessionDelegate?
   private(set) var isRunning: Bool = false
@@ -410,6 +411,10 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
   private let audioEngine = AVAudioEngine()
   private let logger = Logger(subsystem: "com.speak.app", category: "DeepgramLiveController")
+
+  /// Deepgram's preferred audio format: 16kHz mono PCM16
+  private let deepgramSampleRate: Double = 16000
+  private var deepgramFormat: AVAudioFormat?
 
   init(
     permissionsManager: PermissionsManager,
@@ -429,7 +434,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
 
   func start() async throws {
     print("[DeepgramLiveController] Starting Deepgram live transcription...")
-    
+
     guard await ensurePermissions() else {
       print("[DeepgramLiveController] ERROR: Permissions missing")
       throw TranscriptionManagerError.permissionsMissing
@@ -454,20 +459,33 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
     accumulatedText = ""
     startTime = Date()
 
-    // Get audio format to determine sample rate
+    // Get audio format from device
     let inputNode = audioEngine.inputNode
     inputNode.removeTap(onBus: 0)
-    let format = inputNode.outputFormat(forBus: 0)
-    let sampleRate = Int(format.sampleRate)
-    print("[DeepgramLiveController] Audio format: \(format.sampleRate)Hz, \(format.channelCount) channels")
+    let inputFormat = inputNode.outputFormat(forBus: 0)
+    print("[DeepgramLiveController] Input format: \(inputFormat.sampleRate)Hz, \(inputFormat.channelCount) channels")
 
+    // Deepgram prefers 16kHz mono PCM16
+    guard let outputFormat = AVAudioFormat(
+      commonFormat: .pcmFormatInt16,
+      sampleRate: deepgramSampleRate,
+      channels: 1,
+      interleaved: true
+    ) else {
+      print("[DeepgramLiveController] ERROR: Failed to create output format")
+      throw DeepgramError.connectionFailed
+    }
+    deepgramFormat = outputFormat
+    print("[DeepgramLiveController] Output format: \(deepgramSampleRate)Hz mono PCM16")
+
+    // Create transcriber with 16kHz sample rate (always)
     let provider = DeepgramTranscriptionProvider()
-    print("[DeepgramLiveController] Creating transcriber with model: \(self.currentModel ?? "nova-2"), sampleRate: \(sampleRate)")
+    print("[DeepgramLiveController] Creating transcriber with model: \(self.currentModel ?? "nova-2")")
     transcriber = provider.createLiveTranscriber(
       apiKey: apiKey,
       model: currentModel ?? "nova-2",
       language: currentLanguage,
-      sampleRate: sampleRate
+      sampleRate: 16000  // Always 16kHz - we resample before sending
     )
 
     transcriber?.start(
@@ -496,15 +514,61 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
       }
     )
 
-    // Set up audio capture
-    inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
-      self?.transcriber?.sendAudio(from: buffer)
+    // Set up audio capture with resampling to 16kHz
+    inputNode.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] buffer, _ in
+      guard let self, self.isRunning else { return }
+      // Process on background to avoid blocking audio thread
+      Task.detached { [weak self] in
+        await self?.processAndSendAudio(buffer, from: inputFormat, to: outputFormat)
+      }
     }
 
     audioEngine.prepare()
     try audioEngine.start()
     isRunning = true
     print("[DeepgramLiveController] Started successfully")
+  }
+
+  /// Resample audio buffer from input format to 16kHz PCM16 and send to Deepgram.
+  private func processAndSendAudio(
+    _ buffer: AVAudioPCMBuffer,
+    from inputFormat: AVAudioFormat,
+    to outputFormat: AVAudioFormat
+  ) async {
+    guard isRunning, let transcriber else { return }
+
+    // Create converter
+    guard let converter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
+      logger.error("Failed to create audio converter")
+      return
+    }
+
+    // Calculate output buffer size based on sample rate ratio
+    let ratio = outputFormat.sampleRate / inputFormat.sampleRate
+    let outputFrameCapacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio)
+    guard let outputBuffer = AVAudioPCMBuffer(
+      pcmFormat: outputFormat,
+      frameCapacity: outputFrameCapacity
+    ) else { return }
+
+    // Convert audio
+    var error: NSError?
+    let status = converter.convert(to: outputBuffer, error: &error) { inNumPackets, outStatus in
+      outStatus.pointee = .haveData
+      return buffer
+    }
+
+    guard status != .error, error == nil else {
+      logger.error("Audio conversion failed: \(error?.localizedDescription ?? "unknown")")
+      return
+    }
+
+    // Extract PCM16 data and send
+    guard let int16Data = outputBuffer.int16ChannelData else { return }
+    let frameLength = Int(outputBuffer.frameLength)
+    let data = Data(bytes: int16Data[0], count: frameLength * 2)
+
+    transcriber.sendAudio(data)
   }
 
   func stop() async {

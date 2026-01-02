@@ -339,7 +339,12 @@ final class MainManager: ObservableObject {
         let outcomeResult = await postProcessingManager.process(
           rawText: postProcessingInput,
           context: session.lexiconContext,
-          corrections: session.personalCorrections
+          corrections: session.personalCorrections,
+          onStreamingUpdate: { [weak self] accumulatedText in
+            Task { @MainActor in
+              self?.hudManager.updateStreamingText(accumulatedText)
+            }
+          }
         )
         switch outcomeResult {
         case .success(let outcome):
@@ -371,6 +376,13 @@ final class MainManager: ObservableObject {
             if let cost = response.cost {
               session.recordCostFragment(cost)
             }
+          } else {
+            // Streaming completed without ChatResponse, still mark completion
+            session.events.append(
+              HistoryEvent(kind: .postProcessingReceived, description: "Post-processing complete (streamed)")
+            )
+            session.modelsUsed.insert(resolvedPostProcessingModel)
+            session.modelUsages.append(ModelUsage(modelIdentifier: resolvedPostProcessingModel, phase: .postProcessing))
           }
         case .failure(let error):
           session.postProcessingEnded = Date()
@@ -532,7 +544,12 @@ final class MainManager: ObservableObject {
         let outcomeResult = await postProcessingManager.process(
           rawText: postProcessingInput,
           context: session.lexiconContext,
-          corrections: session.personalCorrections
+          corrections: session.personalCorrections,
+          onStreamingUpdate: { [weak self] accumulatedText in
+            Task { @MainActor in
+              self?.hudManager.updateStreamingText(accumulatedText)
+            }
+          }
         )
         switch outcomeResult {
         case .success(let outcome):
@@ -562,6 +579,15 @@ final class MainManager: ObservableObject {
             if let cost = response.cost {
               session.recordCostFragment(cost)
             }
+            if !appSettings.postProcessingModel.isEmpty {
+              session.modelsUsed.insert(appSettings.postProcessingModel)
+              session.modelUsages.append(ModelUsage(modelIdentifier: appSettings.postProcessingModel, phase: .postProcessing))
+            }
+          } else {
+            // Streaming completed without ChatResponse
+            session.events.append(
+              HistoryEvent(kind: .postProcessingReceived, description: "Post-processing complete (streamed)")
+            )
             if !appSettings.postProcessingModel.isEmpty {
               session.modelsUsed.insert(appSettings.postProcessingModel)
               session.modelUsages.append(ModelUsage(modelIdentifier: appSettings.postProcessingModel, phase: .postProcessing))

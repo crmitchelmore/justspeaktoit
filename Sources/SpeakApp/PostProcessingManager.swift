@@ -27,7 +27,8 @@ final class PostProcessingManager: ObservableObject {
   func process(
     rawText: String,
     context: PersonalLexiconContext,
-    corrections: PersonalLexiconHistorySummary?
+    corrections: PersonalLexiconHistorySummary?,
+    onStreamingUpdate: ((String) -> Void)? = nil
   ) async -> Result<PostProcessingOutcome, Error> {
     guard settings.postProcessingEnabled else {
       return .success(
@@ -40,14 +41,49 @@ final class PostProcessingManager: ObservableObject {
       )
     }
 
+    let systemPrompt = effectiveSystemPrompt(for: context, corrections: corrections)
+    let model = settings.postProcessingModel.isEmpty
+      ? "inception/mercury"
+      : settings.postProcessingModel
+
+    // Try streaming if enabled and client supports it
+    if settings.postProcessingStreamingEnabled,
+       let streamingClient = client as? StreamingChatLLMClient {
+      do {
+        var accumulated = ""
+        let stream = streamingClient.sendChatStreaming(
+          systemPrompt: systemPrompt,
+          messages: [ChatMessage(role: .user, content: rawText)],
+          model: model,
+          temperature: settings.postProcessingTemperature
+        )
+
+        for try await chunk in stream {
+          accumulated += chunk
+          onStreamingUpdate?(accumulated)
+        }
+
+        let cleaned = accumulated.isEmpty ? rawText : accumulated
+        return .success(
+          .init(
+            original: rawText,
+            processed: cleaned,
+            response: nil,
+            systemPrompt: systemPrompt
+          )
+        )
+      } catch {
+        log.warning("Streaming failed, falling back to non-streaming: \(error.localizedDescription, privacy: .public)")
+        // Fall through to non-streaming
+      }
+    }
+
+    // Non-streaming fallback
     do {
-      let systemPrompt = effectiveSystemPrompt(for: context, corrections: corrections)
       let response = try await client.sendChat(
         systemPrompt: systemPrompt,
         messages: [ChatMessage(role: .user, content: rawText)],
-        model: settings.postProcessingModel.isEmpty
-          ? "inception/mercury"
-          : settings.postProcessingModel,
+        model: model,
         temperature: settings.postProcessingTemperature
       )
 

@@ -39,6 +39,15 @@ protocol ChatLLMClient {
     async throws -> ChatResponse
 }
 
+protocol StreamingChatLLMClient: ChatLLMClient {
+  func sendChatStreaming(
+    systemPrompt: String?,
+    messages: [ChatMessage],
+    model: String,
+    temperature: Double
+  ) -> AsyncThrowingStream<String, Error>
+}
+
 struct TranscriptionSegment: Codable, Hashable, Identifiable {
   let id: UUID
   let startTime: TimeInterval

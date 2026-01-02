@@ -19,7 +19,7 @@ enum OpenRouterClientError: LocalizedError {
   }
 }
 
-actor OpenRouterAPIClient: ChatLLMClient, BatchTranscriptionClient {
+actor OpenRouterAPIClient: StreamingChatLLMClient, BatchTranscriptionClient {
   private let baseURL = URL(string: "https://openrouter.ai/api/v1")!
   private let session: URLSession
   private let secureStorage: SecureAppStorage
@@ -69,6 +69,77 @@ actor OpenRouterAPIClient: ChatLLMClient, BatchTranscriptionClient {
     }
 
     return performLocalChatFallback(systemPrompt: systemPrompt, messages: messages)
+  }
+
+  nonisolated func sendChatStreaming(
+    systemPrompt: String?,
+    messages: [ChatMessage],
+    model: String,
+    temperature: Double
+  ) -> AsyncThrowingStream<String, Error> {
+    AsyncThrowingStream { continuation in
+      Task {
+        do {
+          let key = try await self.secureStorage.secret(identifier: self.apiKeyIdentifier)
+          guard !key.isEmpty else {
+            continuation.finish(throwing: OpenRouterClientError.apiKeyMissing)
+            return
+          }
+
+          let url = await self.baseURL.appendingPathComponent("chat/completions")
+          var request = URLRequest(url: url)
+          request.httpMethod = "POST"
+          request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+          request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+          await self.applyBrandHeaders(&request)
+
+          let builtMessages = await self.buildMessages(systemPrompt: systemPrompt, messages: messages)
+          let streamingMessages = builtMessages.map { msg in
+            OpenRouterStreamingChatRequest.Message(role: msg.role, content: msg.content)
+          }
+          let payload = OpenRouterStreamingChatRequest(
+            model: model,
+            temperature: temperature,
+            messages: streamingMessages,
+            stream: true
+          )
+
+          request.httpBody = try JSONEncoder().encode(payload)
+
+          let (bytes, response) = try await URLSession.shared.bytes(for: request)
+          guard let http = response as? HTTPURLResponse else {
+            continuation.finish(throwing: OpenRouterClientError.invalidResponse)
+            return
+          }
+          guard (200..<300).contains(http.statusCode) else {
+            var body = ""
+            for try await line in bytes.lines {
+              body += line
+            }
+            continuation.finish(throwing: OpenRouterClientError.httpStatus(http.statusCode, body))
+            return
+          }
+
+          for try await line in bytes.lines {
+            guard !line.isEmpty else { continue }
+            guard line.hasPrefix("data: ") else { continue }
+
+            let jsonString = String(line.dropFirst(6))
+            if jsonString == "[DONE]" { break }
+
+            guard let data = jsonString.data(using: .utf8) else { continue }
+            if let chunk = try? JSONDecoder().decode(OpenRouterStreamChunk.self, from: data),
+               let delta = chunk.choices.first?.delta,
+               let content = delta.content, !content.isEmpty {
+              continuation.yield(content)
+            }
+          }
+          continuation.finish()
+        } catch {
+          continuation.finish(throwing: error)
+        }
+      }
+    }
   }
 
   func transcribeFile(at url: URL, model: String, language: String?) async throws
@@ -670,6 +741,30 @@ private struct OpenRouterValidationResponse: Decodable {
 
   let valid: Bool?
   let data: ValidationData?
+}
+
+private struct OpenRouterStreamingChatRequest: Encodable {
+  struct Message: Encodable {
+    let role: String
+    let content: String
+  }
+
+  let model: String
+  let temperature: Double
+  let messages: [Message]
+  let stream: Bool
+}
+
+private struct OpenRouterStreamChunk: Decodable {
+  struct Choice: Decodable {
+    struct Delta: Decodable {
+      let role: String?
+      let content: String?
+    }
+    let delta: Delta?
+    let finish_reason: String?
+  }
+  let choices: [Choice]
 }
 
 // @Implement: This class is responsible for interacting with the OpenRouter API and implements the LLMProtocols to do so. It takes the api key from SecureAppStorage

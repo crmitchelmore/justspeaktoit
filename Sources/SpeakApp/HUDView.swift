@@ -95,8 +95,8 @@ struct HUDOverlay: View {
 
   @ViewBuilder
   private var transcriptSection: some View {
-    let hasContent =
-      !manager.snapshot.finalTranscript.isEmpty || !manager.snapshot.interimTranscript.isEmpty
+    let transcriptText = manager.snapshot.liveText ?? ""
+    let hasContent = !transcriptText.isEmpty
 
     if hasContent || manager.isExpanded {
       VStack(spacing: 8) {
@@ -116,12 +116,15 @@ struct HUDOverlay: View {
           Divider()
             .padding(.horizontal, -12)
 
-          LiveTranscriptView(
-            finalText: manager.snapshot.finalTranscript,
-            interimText: manager.snapshot.interimTranscript,
-            maxHeight: 150,
-            showStats: true
-          )
+          ScrollView {
+            Text(transcriptText)
+              .font(.callout)
+              .foregroundStyle(manager.snapshot.liveTextIsFinal ? .primary : .secondary)
+              .italic(!manager.snapshot.liveTextIsFinal)
+              .frame(maxWidth: .infinity, alignment: .leading)
+              .textSelection(.enabled)
+          }
+          .frame(maxHeight: 150)
           .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
         }
       }
@@ -248,10 +251,12 @@ struct HUDOverlay_Previews: PreviewProvider {
   private static var expandedPreviewManager: HUDManager {
     let manager = HUDManager()
     manager.beginRecording()
-    manager.updateLiveTranscript(
-      final: "Hello, this is a test of the live transcription feature. It should scroll and show the text properly.",
-      interim: "And this is still being spoken..."
+    manager.updateLiveTranscription(
+      text: "Hello, this is a test of the live transcription feature. It should scroll and show the text properly. And this is still being spoken...",
+      isFinal: false,
+      confidence: 0.92
     )
+    manager.isExpanded = true
     return manager
   }
 }

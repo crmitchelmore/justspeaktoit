@@ -83,6 +83,25 @@ final class AppSettings: ObservableObject {
     }
   }
 
+  enum HUDSizePreference: String, CaseIterable, Identifiable {
+    case compact
+    case expanded
+    case autoExpand
+
+    var id: String { rawValue }
+
+    var displayName: String {
+      switch self {
+      case .compact:
+        return "Compact"
+      case .expanded:
+        return "Always Expanded"
+      case .autoExpand:
+        return "Auto-Expand"
+      }
+    }
+  }
+
   enum DefaultsKey: String {
     case appearance
     case transcriptionMode
@@ -119,6 +138,7 @@ final class AppSettings: ObservableObject {
     case ttsUseSSML
     case connectionPreWarmingEnabled
     case postProcessingStreamingEnabled
+    case hudSizePreference
   }
 
   private static let defaultBatchTranscriptionModel = "google/gemini-2.0-flash-001"
@@ -295,6 +315,11 @@ final class AppSettings: ObservableObject {
     didSet { store(postProcessingStreamingEnabled, key: .postProcessingStreamingEnabled) }
   }
 
+  // HUD Settings
+  @Published var hudSizePreference: HUDSizePreference {
+    didSet { store(hudSizePreference.rawValue, key: .hudSizePreference) }
+  }
+
   private let defaults: UserDefaults
 
   init(defaults: UserDefaults = .standard) {
@@ -385,6 +410,12 @@ final class AppSettings: ObservableObject {
       defaults.object(forKey: DefaultsKey.connectionPreWarmingEnabled.rawValue) as? Bool ?? true
     postProcessingStreamingEnabled =
       defaults.object(forKey: DefaultsKey.postProcessingStreamingEnabled.rawValue) as? Bool ?? true
+
+    // HUD Settings
+    hudSizePreference =
+      HUDSizePreference(
+        rawValue: defaults.string(forKey: DefaultsKey.hudSizePreference.rawValue)
+          ?? HUDSizePreference.autoExpand.rawValue) ?? .autoExpand
 
     ensureRecordingsDirectoryExists()
   }

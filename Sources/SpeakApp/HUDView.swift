@@ -34,6 +34,11 @@ struct HUDOverlay: View {
           .font(.caption.monospacedDigit())
           .foregroundStyle(.secondary)
       }
+
+      // Live transcript section (only during recording phase with content)
+      if case .recording = manager.snapshot.phase {
+        transcriptSection
+      }
     }
     .padding(.horizontal, 24)
     .padding(.vertical, 16)
@@ -48,6 +53,8 @@ struct HUDOverlay: View {
     )
     .shadow(color: .black.opacity(0.25), radius: 18, x: 0, y: 12)
     .animation(.spring(response: 0.25, dampingFraction: 0.85), value: manager.snapshot)
+    .animation(.spring(response: 0.25, dampingFraction: 0.85), value: manager.isExpanded)
+    .frame(maxWidth: manager.isExpanded ? 500 : 320)
     .padding(.horizontal, 60)
   }
 
@@ -77,6 +84,42 @@ struct HUDOverlay: View {
       }
     }
     .frame(maxWidth: 300)
+  }
+
+  @ViewBuilder
+  private var transcriptSection: some View {
+    let hasContent =
+      !manager.snapshot.finalTranscript.isEmpty || !manager.snapshot.interimTranscript.isEmpty
+
+    if hasContent || manager.isExpanded {
+      VStack(spacing: 8) {
+        // Expand/collapse button
+        Button(action: { manager.toggleExpanded() }) {
+          HStack(spacing: 4) {
+            Image(systemName: manager.isExpanded ? "chevron.down.circle.fill" : "chevron.up.circle.fill")
+              .font(.caption)
+            Text(manager.isExpanded ? "Collapse" : "Show Transcript")
+              .font(.caption)
+          }
+          .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.plain)
+
+        if manager.isExpanded {
+          Divider()
+            .padding(.horizontal, -12)
+
+          LiveTranscriptView(
+            finalText: manager.snapshot.finalTranscript,
+            interimText: manager.snapshot.interimTranscript,
+            maxHeight: 150,
+            showStats: true
+          )
+          .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
+        }
+      }
+      .padding(.top, 4)
+    }
   }
 
   private var phaseColor: Color {
@@ -176,13 +219,32 @@ struct HUDOverlay: View {
 
 struct HUDOverlay_Previews: PreviewProvider {
   static var previews: some View {
-    HUDOverlay(manager: previewManager)
-      .frame(width: 600, height: 400)
+    Group {
+      // Compact preview
+      HUDOverlay(manager: previewManager)
+        .frame(width: 600, height: 400)
+        .previewDisplayName("Compact")
+
+      // Expanded with transcript
+      HUDOverlay(manager: expandedPreviewManager)
+        .frame(width: 600, height: 500)
+        .previewDisplayName("Expanded with Transcript")
+    }
   }
 
   private static var previewManager: HUDManager {
     let manager = HUDManager()
     manager.beginRecording()
+    return manager
+  }
+
+  private static var expandedPreviewManager: HUDManager {
+    let manager = HUDManager()
+    manager.beginRecording()
+    manager.updateLiveTranscript(
+      final: "Hello, this is a test of the live transcription feature. It should scroll and show the text properly.",
+      interim: "And this is still being spoken..."
+    )
     return manager
   }
 }

@@ -37,12 +37,21 @@ final class HUDManager: ObservableObject {
     var liveTextIsFinal: Bool
     var liveTextConfidence: Double?
     var streamingText: String?
+    var finalTranscript: String
+    var interimTranscript: String
 
     static let hidden = Snapshot(
       phase: .hidden, headline: "", subheadline: nil, elapsed: 0,
-      liveText: nil, liveTextIsFinal: true, liveTextConfidence: nil, streamingText: nil
+      liveText: nil, liveTextIsFinal: true, liveTextConfidence: nil, streamingText: nil,
+      finalTranscript: "", interimTranscript: ""
     )
   }
+
+  /// Threshold for auto-expanding HUD when transcript exceeds this character count
+  static let autoExpandThreshold = 100
+
+  /// Whether the HUD is in expanded mode showing full transcript
+  @Published var isExpanded: Bool = false
 
   @Published private(set) var snapshot: Snapshot = .hidden
 
@@ -51,6 +60,7 @@ final class HUDManager: ObservableObject {
   private var autoHideTimer: Timer?
 
   func beginRecording() {
+    isExpanded = false
     transition(.recording, headline: "Recording", subheadline: "Capturing audio")
   }
 
@@ -59,6 +69,20 @@ final class HUDManager: ObservableObject {
     snapshot.liveText = text.isEmpty ? nil : text
     snapshot.liveTextIsFinal = isFinal
     snapshot.liveTextConfidence = confidence
+  }
+
+  func updateLiveTranscript(final: String, interim: String) {
+    snapshot.finalTranscript = final
+    snapshot.interimTranscript = interim
+    // Auto-expand if transcript exceeds threshold
+    let totalLength = final.count + interim.count
+    if totalLength > Self.autoExpandThreshold && !isExpanded {
+      isExpanded = true
+    }
+  }
+
+  func toggleExpanded() {
+    isExpanded.toggle()
   }
 
   func beginTranscribing() {
@@ -108,7 +132,8 @@ final class HUDManager: ObservableObject {
     phaseStartDate = showsTimer ? Date() : nil
     snapshot = Snapshot(
       phase: phase, headline: headline, subheadline: subheadline, elapsed: 0,
-      liveText: nil, liveTextIsFinal: true, liveTextConfidence: nil, streamingText: nil
+      liveText: nil, liveTextIsFinal: true, liveTextConfidence: nil, streamingText: nil,
+      finalTranscript: "", interimTranscript: ""
     )
 
     guard showsTimer else { return }

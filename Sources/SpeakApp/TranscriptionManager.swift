@@ -30,7 +30,7 @@ final class TranscriptionManager: ObservableObject {
   @Published private(set) var isLiveTranscribing: Bool = false
 
   private let appSettings: AppSettings
-  private let liveController: NativeOSXLiveTranscriber
+  private let liveController: SwitchingLiveTranscriber
   private let batchClient: BatchTranscriptionClient
   private let openRouter: OpenRouterAPIClient
   private let secureStorage: SecureAppStorage
@@ -46,10 +46,11 @@ final class TranscriptionManager: ObservableObject {
     secureStorage: SecureAppStorage
   ) {
     self.appSettings = appSettings
-    self.liveController = NativeOSXLiveTranscriber(
-      permissionsManager: permissionsManager,
+    self.liveController = SwitchingLiveTranscriber(
       appSettings: appSettings,
-      audioDeviceManager: audioDeviceManager
+      permissionsManager: permissionsManager,
+      audioDeviceManager: audioDeviceManager,
+      secureStorage: secureStorage
     )
     self.batchClient = batchClient
     self.openRouter = openRouter
@@ -364,5 +365,202 @@ extension SFSpeechRecognitionResult {
     let confidences = bestTranscription.segments.map { Double($0.confidence) }
     let total = confidences.reduce(0, +)
     return total / Double(confidences.count)
+  }
+}
+
+// MARK: - Deepgram Live Controller
+
+/// Wraps DeepgramLiveTranscriber to conform to LiveTranscriptionController protocol.
+final class DeepgramLiveController: NSObject, LiveTranscriptionController {
+  weak var delegate: LiveTranscriptionSessionDelegate?
+  private(set) var isRunning: Bool = false
+
+  private let permissionsManager: PermissionsManager
+  private let audioDeviceManager: AudioInputDeviceManager
+  private let secureStorage: SecureAppStorage
+  private var transcriber: DeepgramLiveTranscriber?
+  private var currentLanguage: String?
+  private var currentModel: String?
+  private var accumulatedText: String = ""
+  private var startTime: Date?
+  private var activeInputSession: AudioInputDeviceManager.SessionContext?
+  private let audioEngine = AVAudioEngine()
+
+  init(
+    permissionsManager: PermissionsManager,
+    audioDeviceManager: AudioInputDeviceManager,
+    secureStorage: SecureAppStorage
+  ) {
+    self.permissionsManager = permissionsManager
+    self.audioDeviceManager = audioDeviceManager
+    self.secureStorage = secureStorage
+  }
+
+  func configure(language: String?, model: String) {
+    currentLanguage = language
+    currentModel = model
+  }
+
+  func start() async throws {
+    guard await ensurePermissions() else {
+      throw TranscriptionManagerError.permissionsMissing
+    }
+
+    let apiKey: String
+    do {
+      apiKey = try await secureStorage.secret(identifier: "deepgram.apiKey")
+      guard !apiKey.isEmpty else {
+        throw DeepgramError.missingAPIKey
+      }
+    } catch {
+      throw DeepgramError.missingAPIKey
+    }
+
+    let sessionContext = await audioDeviceManager.beginUsingPreferredInput()
+    activeInputSession = sessionContext
+
+    accumulatedText = ""
+    startTime = Date()
+
+    let provider = DeepgramTranscriptionProvider()
+    transcriber = provider.createLiveTranscriber(
+      apiKey: apiKey,
+      model: currentModel ?? "nova-2",
+      language: currentLanguage
+    )
+
+    transcriber?.start(
+      onTranscript: { [weak self] text, isFinal in
+        Task { @MainActor [weak self] in
+          guard let self else { return }
+          if isFinal {
+            self.accumulatedText = text
+          }
+          let update = LiveTranscriptionUpdate(
+            text: text,
+            isFinal: isFinal,
+            confidence: nil
+          )
+          self.delegate?.liveTranscriber(self, didUpdateWith: update)
+          self.delegate?.liveTranscriber(self, didUpdatePartial: text)
+        }
+      },
+      onError: { [weak self] error in
+        Task { @MainActor [weak self] in
+          guard let self else { return }
+          self.delegate?.liveTranscriber(self, didFail: error)
+        }
+      }
+    )
+
+    // Set up audio capture
+    let inputNode = audioEngine.inputNode
+    inputNode.removeTap(onBus: 0)
+    let format = inputNode.outputFormat(forBus: 0)
+    inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
+      self?.transcriber?.sendAudio(from: buffer)
+    }
+
+    audioEngine.prepare()
+    try audioEngine.start()
+    isRunning = true
+  }
+
+  func stop() async {
+    guard isRunning else { return }
+
+    audioEngine.stop()
+    audioEngine.inputNode.removeTap(onBus: 0)
+    transcriber?.stop()
+    isRunning = false
+
+    let duration = startTime.map { Date().timeIntervalSince($0) } ?? 0
+    let result = TranscriptionResult(
+      text: accumulatedText,
+      segments: [],
+      confidence: nil,
+      duration: duration,
+      modelIdentifier: currentModel ?? "deepgram/nova-2-streaming",
+      cost: nil,
+      rawPayload: nil,
+      debugInfo: nil
+    )
+
+    await MainActor.run {
+      delegate?.liveTranscriber(self, didFinishWith: result)
+    }
+
+    await endActiveInputSession()
+    transcriber = nil
+  }
+
+  private func endActiveInputSession() async {
+    guard let session = activeInputSession else { return }
+    activeInputSession = nil
+    await audioDeviceManager.endUsingPreferredInput(session: session)
+  }
+
+  private func ensurePermissions() async -> Bool {
+    let microphone = await permissionsManager.request(.microphone)
+    let speech = await permissionsManager.request(.speechRecognition)
+    return microphone.isGranted && speech.isGranted
+  }
+}
+
+// MARK: - Switching Live Transcriber
+
+/// Routes to appropriate live transcription controller based on selected model.
+final class SwitchingLiveTranscriber: LiveTranscriptionController {
+  weak var delegate: LiveTranscriptionSessionDelegate? {
+    didSet {
+      nativeController.delegate = delegate
+      deepgramController.delegate = delegate
+    }
+  }
+
+  var isRunning: Bool {
+    activeController?.isRunning ?? false
+  }
+
+  private let appSettings: AppSettings
+  private let nativeController: NativeOSXLiveTranscriber
+  private let deepgramController: DeepgramLiveController
+  private var activeController: (any LiveTranscriptionController)?
+  private var currentModel: String?
+
+  init(
+    appSettings: AppSettings,
+    permissionsManager: PermissionsManager,
+    audioDeviceManager: AudioInputDeviceManager,
+    secureStorage: SecureAppStorage
+  ) {
+    self.appSettings = appSettings
+    self.nativeController = NativeOSXLiveTranscriber(
+      permissionsManager: permissionsManager,
+      appSettings: appSettings,
+      audioDeviceManager: audioDeviceManager
+    )
+    self.deepgramController = DeepgramLiveController(
+      permissionsManager: permissionsManager,
+      audioDeviceManager: audioDeviceManager,
+      secureStorage: secureStorage
+    )
+  }
+
+  func configure(language: String?, model: String) {
+    currentModel = model
+    nativeController.configure(language: language, model: model)
+    deepgramController.configure(language: language, model: model)
+  }
+
+  func start() async throws {
+    let model = currentModel ?? appSettings.liveTranscriptionModel
+    activeController = model.contains("deepgram") ? deepgramController : nativeController
+    try await activeController?.start()
+  }
+
+  func stop() async {
+    await activeController?.stop()
+    activeController = nil
   }
 }

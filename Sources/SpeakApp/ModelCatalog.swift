@@ -63,6 +63,10 @@ struct ModelCatalog {
       id: "apple/local/Dictation", displayName: "macOS Dictation",
       description: "Alternative on-device engine that mirrors system dictation.",
       estimatedLatencyMs: 100, latencyTier: .instant),
+    Option(
+      id: "deepgram/nova-2-streaming", displayName: "Deepgram Nova-2 (Streaming)",
+      description: "Real-time WebSocket streaming transcription with interim results.",
+      estimatedLatencyMs: 200, latencyTier: .fast),
   ]
 
   static let batchTranscription: [Option] = [

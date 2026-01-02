@@ -483,6 +483,7 @@ enum DeepgramError: LocalizedError {
     case invalidURL
     case connectionFailed
     case sendFailed
+    case missingAPIKey
 
     var errorDescription: String? {
         switch self {
@@ -492,6 +493,8 @@ enum DeepgramError: LocalizedError {
             return "Failed to establish WebSocket connection to Deepgram"
         case .sendFailed:
             return "Failed to send audio data to Deepgram"
+        case .missingAPIKey:
+            return "Deepgram API key is missing. Please configure it in Settings."
         }
     }
 }

@@ -113,13 +113,26 @@ final class AppSettings: ObservableObject {
     var displayName: String {
       switch self {
       case .instant:
-        return "Instant (Raw)"
+        return "Instant"
       case .livePolish:
-        return "Live Polish"
+        return "Auto-Clean"
       case .liveStructured:
-        return "Live Structured"
+        return "Auto-Format"
       case .utteranceFinalize:
-        return "Utterance Finalize"
+        return "Smart Pause"
+      }
+    }
+
+    var description: String {
+      switch self {
+      case .instant:
+        return "Raw transcription with no AI cleanup. Fastest output."
+      case .livePolish:
+        return "AI cleans up spelling and punctuation as you speak."
+      case .liveStructured:
+        return "AI adds formatting and structure in real-time."
+      case .utteranceFinalize:
+        return "AI processes text when you pause speaking."
       }
     }
 

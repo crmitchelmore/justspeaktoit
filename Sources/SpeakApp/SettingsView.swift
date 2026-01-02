@@ -238,6 +238,59 @@ struct SettingsView: View {
       }
       .speakTooltip("Set Speak's look to match your workspace with light, dark, or system themes.")
 
+      SettingsCard(title: "Processing Speed", systemImage: "gauge.with.dots.needle.67percent", tint: Color.cyan) {
+        VStack(alignment: .leading, spacing: 12) {
+          Text("Choose how Speak processes your transcriptions. Faster modes skip AI cleanup.")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+
+          VStack(spacing: 8) {
+            ForEach(AppSettings.SpeedMode.allCases) { mode in
+              Button {
+                settings.speedMode = mode
+              } label: {
+                HStack(spacing: 12) {
+                  Image(systemName: speedModeIcon(for: mode))
+                    .font(.title3)
+                    .foregroundStyle(settings.speedMode == mode ? .white : .cyan)
+                    .frame(width: 24)
+                  VStack(alignment: .leading, spacing: 2) {
+                    Text(mode.displayName)
+                      .font(.headline)
+                      .foregroundStyle(settings.speedMode == mode ? .white : .primary)
+                    Text(mode.description)
+                      .font(.caption)
+                      .foregroundStyle(settings.speedMode == mode ? .white.opacity(0.8) : .secondary)
+                  }
+                  Spacer()
+                  if settings.speedMode == mode {
+                    Image(systemName: "checkmark.circle.fill")
+                      .foregroundStyle(.white)
+                  }
+                }
+                .padding(12)
+                .background(
+                  RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(settings.speedMode == mode ? Color.cyan : Color(nsColor: .controlBackgroundColor))
+                )
+              }
+              .buttonStyle(.plain)
+            }
+          }
+
+          if settings.speedMode.usesLivePolish {
+            Divider()
+            settingsToggle(
+              "Skip post-processing when live cleanup is active",
+              isOn: settingsBinding(\AppSettings.skipPostProcessingWithLivePolish),
+              tint: .cyan
+            )
+            .speakTooltip("When enabled, the final post-processing step is skipped since text was already cleaned in real-time.")
+          }
+        }
+      }
+      .speakTooltip("Control the trade-off between speed and AI-powered text cleanup.")
+
       SettingsCard(title: "Output", systemImage: "textformat.alt", tint: Color.blue) {
         VStack(alignment: .leading, spacing: 12) {
           Picker("Text Output", selection: settingsBinding(\AppSettings.textOutputMethod)) {
@@ -1731,6 +1784,19 @@ struct SettingsView: View {
         RoundedRectangle(cornerRadius: 8, style: .continuous)
           .fill(Color(nsColor: .controlBackgroundColor))
       )
+  }
+
+  private func speedModeIcon(for mode: AppSettings.SpeedMode) -> String {
+    switch mode {
+    case .instant:
+      return "bolt.fill"
+    case .livePolish:
+      return "sparkles"
+    case .liveStructured:
+      return "list.bullet.rectangle"
+    case .utteranceFinalize:
+      return "pause.circle"
+    }
   }
 
   private func generateSystemPromptPreview() {

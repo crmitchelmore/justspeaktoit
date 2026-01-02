@@ -49,9 +49,13 @@ final class DeepgramLiveTranscriber: @unchecked Sendable {
         var queryItems = [
             URLQueryItem(name: "model", value: model),
             URLQueryItem(name: "punctuate", value: "true"),
+            URLQueryItem(name: "smart_format", value: "true"),
             URLQueryItem(name: "interim_results", value: "true"),
             URLQueryItem(name: "encoding", value: "linear16"),
-            URLQueryItem(name: "sample_rate", value: String(sampleRate))
+            URLQueryItem(name: "sample_rate", value: String(sampleRate)),
+            URLQueryItem(name: "channels", value: "1"),
+            URLQueryItem(name: "endpointing", value: "300"),
+            URLQueryItem(name: "vad_events", value: "true")
         ]
 
         if let language {
@@ -72,6 +76,7 @@ final class DeepgramLiveTranscriber: @unchecked Sendable {
         webSocketTask = session.webSocketTask(with: request)
         webSocketTask?.resume()
 
+        print("[DeepgramLiveTranscriber] WebSocket URL: \(url.absoluteString)")
         logger.info("Deepgram WebSocket connection started")
         receiveMessages()
     }
@@ -182,6 +187,7 @@ final class DeepgramLiveTranscriber: @unchecked Sendable {
     }
 
     private func parseTranscriptResponse(_ json: String) {
+        print("[DeepgramLiveTranscriber] Received: \(json.prefix(200))")
         guard let data = json.data(using: .utf8) else { return }
 
         do {
@@ -358,7 +364,12 @@ struct DeepgramTranscriptionProvider: TranscriptionProvider {
     // MARK: - Private Methods
 
     private func extractModelName(from model: String) -> String {
-        model.split(separator: "/").last.map(String.init) ?? model
+        // Extract the model name after the "/" and remove any "-streaming" suffix
+        var name = model.split(separator: "/").last.map(String.init) ?? model
+        if name.hasSuffix("-streaming") {
+            name = String(name.dropLast("-streaming".count))
+        }
+        return name
     }
 
     private func extractLanguageCode(from locale: String) -> String {

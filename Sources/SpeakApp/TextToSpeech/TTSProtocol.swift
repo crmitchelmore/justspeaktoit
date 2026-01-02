@@ -51,9 +51,17 @@ enum TTSQuality: String, Codable, CaseIterable, Identifiable {
 
   var displayName: String {
     switch self {
-    case .standard: return "Standard"
-    case .high: return "High"
-    case .highest: return "Highest"
+    case .standard: return "Fast (Low Latency)"
+    case .high: return "Balanced"
+    case .highest: return "Best Quality"
+    }
+  }
+
+  var description: String {
+    switch self {
+    case .standard: return "Optimized for speed, ~75ms latency"
+    case .high: return "Good balance of quality and speed"
+    case .highest: return "Maximum quality, higher latency"
     }
   }
 }
@@ -125,6 +133,8 @@ struct TTSVoice: Identifiable, Hashable, Codable {
     case warm
     case energetic
     case builtin
+    case lowLatency
+    case multilingual
   }
 }
 
@@ -203,39 +213,61 @@ protocol TextToSpeechClient {
 
 struct VoiceCatalog {
   static let elevenlabsVoices: [TTSVoice] = [
+    // Recommended voices
     TTSVoice(
       id: "elevenlabs/21m00Tcm4TlvDq8ikWAM",
       name: "Rachel",
       provider: .elevenlabs,
-      traits: [.female, .american, .professional, .clear],
+      traits: [.female, .american, .professional, .clear, .multilingual],
       previewURL: nil
     ),
     TTSVoice(
       id: "elevenlabs/pNInz6obpgDQGcFmaJgB",
       name: "Adam",
       provider: .elevenlabs,
-      traits: [.male, .american, .deep, .professional],
+      traits: [.male, .american, .deep, .professional, .multilingual],
       previewURL: nil
     ),
     TTSVoice(
       id: "elevenlabs/EXAVITQu4vr4xnSDxMaL",
       name: "Sarah",
       provider: .elevenlabs,
-      traits: [.female, .american, .warm],
+      traits: [.female, .american, .warm, .multilingual],
       previewURL: nil
     ),
     TTSVoice(
       id: "elevenlabs/ErXwobaYiN019PkySvjV",
       name: "Antoni",
       provider: .elevenlabs,
-      traits: [.male, .american, .clear],
+      traits: [.male, .american, .clear, .multilingual],
       previewURL: nil
     ),
     TTSVoice(
       id: "elevenlabs/TxGEqnHWrfWFTfGW9XjX",
       name: "Josh",
       provider: .elevenlabs,
-      traits: [.male, .american, .energetic],
+      traits: [.male, .american, .energetic, .multilingual],
+      previewURL: nil
+    ),
+    TTSVoice(
+      id: "elevenlabs/MF3mGyEYCl7XYWbV9V6O",
+      name: "Elli",
+      provider: .elevenlabs,
+      traits: [.female, .american, .warm, .casual],
+      previewURL: nil
+    ),
+    TTSVoice(
+      id: "elevenlabs/D38z5RcWu1voky8WS1ja",
+      name: "Fin",
+      provider: .elevenlabs,
+      traits: [.male, .british, .professional],
+      previewURL: nil
+    ),
+    TTSVoice(
+      id: "elevenlabs/jBpfuIE2acCO8z3wKNLl",
+      name: "Gigi",
+      provider: .elevenlabs,
+      traits: [.female, .american, .energetic, .casual],
       previewURL: nil
     ),
   ]
@@ -245,42 +277,77 @@ struct VoiceCatalog {
       id: "openai/alloy",
       name: "Alloy",
       provider: .openai,
-      traits: [.neutral, .professional],
+      traits: [.neutral, .professional, .multilingual],
+      previewURL: nil
+    ),
+    TTSVoice(
+      id: "openai/ash",
+      name: "Ash",
+      provider: .openai,
+      traits: [.male, .warm, .multilingual],
+      previewURL: nil
+    ),
+    TTSVoice(
+      id: "openai/ballad",
+      name: "Ballad",
+      provider: .openai,
+      traits: [.neutral, .warm, .multilingual],
+      previewURL: nil
+    ),
+    TTSVoice(
+      id: "openai/coral",
+      name: "Coral",
+      provider: .openai,
+      traits: [.female, .warm, .multilingual],
       previewURL: nil
     ),
     TTSVoice(
       id: "openai/echo",
       name: "Echo",
       provider: .openai,
-      traits: [.male, .clear],
+      traits: [.male, .clear, .multilingual],
       previewURL: nil
     ),
     TTSVoice(
       id: "openai/fable",
       name: "Fable",
       provider: .openai,
-      traits: [.british, .professional],
+      traits: [.british, .professional, .multilingual],
       previewURL: nil
     ),
     TTSVoice(
       id: "openai/onyx",
       name: "Onyx",
       provider: .openai,
-      traits: [.male, .deep],
+      traits: [.male, .deep, .multilingual],
       previewURL: nil
     ),
     TTSVoice(
       id: "openai/nova",
       name: "Nova",
       provider: .openai,
-      traits: [.female, .energetic],
+      traits: [.female, .energetic, .multilingual],
+      previewURL: nil
+    ),
+    TTSVoice(
+      id: "openai/sage",
+      name: "Sage",
+      provider: .openai,
+      traits: [.neutral, .professional, .multilingual],
       previewURL: nil
     ),
     TTSVoice(
       id: "openai/shimmer",
       name: "Shimmer",
       provider: .openai,
-      traits: [.female, .warm],
+      traits: [.female, .warm, .multilingual],
+      previewURL: nil
+    ),
+    TTSVoice(
+      id: "openai/verse",
+      name: "Verse",
+      provider: .openai,
+      traits: [.neutral, .clear, .multilingual],
       previewURL: nil
     ),
   ]
@@ -301,10 +368,38 @@ struct VoiceCatalog {
       previewURL: nil
     ),
     TTSVoice(
+      id: "azure/en-US-JennyNeural",
+      name: "Jenny",
+      provider: .azure,
+      traits: [.female, .american, .casual, .warm],
+      previewURL: nil
+    ),
+    TTSVoice(
+      id: "azure/en-US-DavisNeural",
+      name: "Davis",
+      provider: .azure,
+      traits: [.male, .american, .professional],
+      previewURL: nil
+    ),
+    TTSVoice(
       id: "azure/en-GB-SoniaNeural",
       name: "Sonia",
       provider: .azure,
       traits: [.female, .british, .professional],
+      previewURL: nil
+    ),
+    TTSVoice(
+      id: "azure/en-GB-RyanNeural",
+      name: "Ryan",
+      provider: .azure,
+      traits: [.male, .british, .professional],
+      previewURL: nil
+    ),
+    TTSVoice(
+      id: "azure/en-AU-NatashaNeural",
+      name: "Natasha",
+      provider: .azure,
+      traits: [.female, .australian, .professional],
       previewURL: nil
     ),
   ]
@@ -322,6 +417,20 @@ struct VoiceCatalog {
       name: "Alex",
       provider: .system,
       traits: [.male, .american, .builtin],
+      previewURL: nil
+    ),
+    TTSVoice(
+      id: "system/daniel",
+      name: "Daniel",
+      provider: .system,
+      traits: [.male, .british, .builtin],
+      previewURL: nil
+    ),
+    TTSVoice(
+      id: "system/karen",
+      name: "Karen",
+      provider: .system,
+      traits: [.female, .australian, .builtin],
       previewURL: nil
     ),
   ]

@@ -58,8 +58,14 @@ actor OpenAITTSClient: TextToSpeechClient {
     // Calculate duration
     let duration = try await getAudioDuration(url: outputURL)
 
-    // Estimate cost (OpenAI pricing: $15 per 1M characters for standard, $30 for HD)
-    let pricePerMillion: Decimal = settings.quality == .highest ? 30.0 : 15.0
+    // Estimate cost based on model
+    // gpt-4o-mini-tts: $0.60/1M, tts-1: $15/1M, tts-1-hd: $30/1M
+    let pricePerMillion: Decimal
+    switch settings.quality {
+    case .standard: pricePerMillion = 0.60
+    case .high: pricePerMillion = 15.0
+    case .highest: pricePerMillion = 30.0
+    }
     let cost = Decimal(text.count) * pricePerMillion / 1_000_000.0
 
     return TTSResult(
@@ -103,9 +109,14 @@ actor OpenAITTSClient: TextToSpeechClient {
 
   private func modelID(for quality: TTSQuality) -> String {
     switch quality {
-    case .standard, .high:
+    case .standard:
+      // gpt-4o-mini-tts - fast, affordable, good quality
+      return "gpt-4o-mini-tts"
+    case .high:
+      // tts-1 - standard OpenAI TTS
       return "tts-1"
     case .highest:
+      // tts-1-hd - highest quality
       return "tts-1-hd"
     }
   }

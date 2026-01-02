@@ -828,8 +828,12 @@ struct SettingsView: View {
               }
             }
             .pickerStyle(.segmented)
-            .speakTooltip("Higher quality produces better audio but takes longer")
+            
+            Text(settings.ttsQuality.description)
+              .font(.caption)
+              .foregroundStyle(.secondary)
           }
+          .speakTooltip("Fast uses low-latency models, Best Quality uses HD models")
 
           VStack(alignment: .leading, spacing: 8) {
             HStack {

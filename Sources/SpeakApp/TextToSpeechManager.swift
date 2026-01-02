@@ -178,12 +178,23 @@ final class TextToSpeechManager: ObservableObject {
 
     switch provider {
     case .elevenlabs:
+      // ElevenLabs: ~$0.30 per 1000 chars for standard, varies by plan
       return Decimal(characterCount) * 0.30 / 1000.0
     case .openai:
+      // OpenAI TTS pricing (2024):
+      // gpt-4o-mini-tts: $0.60 per 1M chars
+      // tts-1: $15 per 1M chars
+      // tts-1-hd: $30 per 1M chars
       let quality = appSettings.ttsQuality
-      let pricePerMillion: Decimal = quality == .highest ? 30.0 : 15.0
+      let pricePerMillion: Decimal
+      switch quality {
+      case .standard: pricePerMillion = 0.60  // gpt-4o-mini-tts
+      case .high: pricePerMillion = 15.0       // tts-1
+      case .highest: pricePerMillion = 30.0    // tts-1-hd
+      }
       return Decimal(characterCount) * pricePerMillion / 1_000_000.0
     case .azure:
+      // Azure: ~$16 per 1M chars for neural voices
       return Decimal(characterCount) * 16.0 / 1_000_000.0
     case .system:
       return nil

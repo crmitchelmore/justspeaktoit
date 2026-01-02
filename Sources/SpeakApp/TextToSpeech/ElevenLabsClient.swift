@@ -131,11 +131,14 @@ actor ElevenLabsClient: TextToSpeechClient {
   private func modelID(for quality: TTSQuality) -> String {
     switch quality {
     case .standard:
-      return "eleven_monolingual_v1"
+      // Flash v2.5 - fastest, ~75ms latency, great for real-time
+      return "eleven_flash_v2_5"
     case .high:
+      // Multilingual v2 - best quality for most use cases
       return "eleven_multilingual_v2"
     case .highest:
-      return "eleven_turbo_v2"
+      // Turbo v2.5 - balanced quality and speed
+      return "eleven_turbo_v2_5"
     }
   }
 

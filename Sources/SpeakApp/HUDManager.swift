@@ -9,6 +9,7 @@ final class HUDManager: ObservableObject {
     enum Phase: Equatable {
       case hidden
       case recording
+      case recordingSilenceCountdown(remaining: TimeInterval, total: TimeInterval)
       case transcribing
       case postProcessing
       case delivering
@@ -26,6 +27,15 @@ final class HUDManager: ObservableObject {
 
       var isVisible: Bool {
         self != .hidden
+      }
+
+      var isRecordingPhase: Bool {
+        switch self {
+        case .recording, .recordingSilenceCountdown:
+          return true
+        default:
+          return false
+        }
       }
     }
 
@@ -58,34 +68,39 @@ final class HUDManager: ObservableObject {
   private var timer: Timer?
   private var phaseStartDate: Date?
   private var autoHideTimer: Timer?
+  private var recordingStartDate: Date?
 
   func beginRecording() {
-    isExpanded = false
+    recordingStartDate = Date()
     transition(.recording, headline: "Recording", subheadline: "Capturing audio")
   }
 
-  func updateLiveTranscription(text: String, isFinal: Bool, confidence: Double?) {
-    guard snapshot.phase == .recording else { return }
-    snapshot.liveText = text.isEmpty ? nil : text
-    snapshot.liveTextIsFinal = isFinal
-    snapshot.liveTextConfidence = confidence
+  /// Update the HUD to show silence countdown
+  func showSilenceCountdown(remaining: TimeInterval, total: TimeInterval) {
+    guard snapshot.phase.isRecordingPhase else { return }
+    let elapsed = recordingStartDate.map { Date().timeIntervalSince($0) } ?? snapshot.elapsed
+    snapshot = Snapshot(
+      phase: .recordingSilenceCountdown(remaining: remaining, total: total),
+      headline: "Recording",
+      subheadline: "Stopping in \(Int(ceil(remaining)))...",
+      elapsed: elapsed
+    )
   }
 
-  func updateLiveTranscript(final: String, interim: String) {
-    snapshot.finalTranscript = final
-    snapshot.interimTranscript = interim
-    // Auto-expand if transcript exceeds threshold
-    let totalLength = final.count + interim.count
-    if totalLength > Self.autoExpandThreshold && !isExpanded {
-      isExpanded = true
-    }
-  }
-
-  func toggleExpanded() {
-    isExpanded.toggle()
+  /// Cancel the silence countdown and resume normal recording display
+  func cancelSilenceCountdown() {
+    guard case .recordingSilenceCountdown = snapshot.phase else { return }
+    let elapsed = recordingStartDate.map { Date().timeIntervalSince($0) } ?? snapshot.elapsed
+    snapshot = Snapshot(
+      phase: .recording,
+      headline: "Recording",
+      subheadline: "Capturing audio",
+      elapsed: elapsed
+    )
   }
 
   func beginTranscribing() {
+    recordingStartDate = nil
     transition(.transcribing, headline: "Transcribing", subheadline: "Preparing raw transcript")
   }
 
@@ -102,6 +117,7 @@ final class HUDManager: ObservableObject {
   }
 
   func finishSuccess(message: String) {
+    recordingStartDate = nil
     transition(
       .success(message: message), headline: "Completed", subheadline: message, showsTimer: false)
     scheduleAutoHide(after: 2.4)
@@ -112,6 +128,7 @@ final class HUDManager: ObservableObject {
   }
 
   func finishFailure(headline: String, message: String, displayDuration: TimeInterval = 6.0) {
+    recordingStartDate = nil
     transition(
       .failure(message: message), headline: headline, subheadline: message, showsTimer: false)
     scheduleAutoHide(after: displayDuration)
@@ -119,6 +136,7 @@ final class HUDManager: ObservableObject {
 
   func hide() {
     invalidateTimers()
+    recordingStartDate = nil
     snapshot = .hidden
   }
 
@@ -173,4 +191,3 @@ final class HUDManager: ObservableObject {
     autoHideTimer = nil
   }
 }
-// @Implement: This file is the state manager for the Heads-Up display. It exposes lifecycle functions so that another class can notify it when recording has started, transcribing has started, post-processing has started, etc. It has an enum for all the states it can be in and is a state machine. It also has the ability to surface errors in any of those things and it has an internal timer that shows the duration of each step.

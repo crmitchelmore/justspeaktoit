@@ -136,9 +136,9 @@ final class AppSettings: ObservableObject {
     case ttsAutoPlay
     case ttsSaveToDirectory
     case ttsUseSSML
-    case connectionPreWarmingEnabled
-    case postProcessingStreamingEnabled
-    case hudSizePreference
+    case autoStopOnSilence
+    case silenceThresholdDb
+    case silenceDurationSeconds
   }
 
   private static let defaultBatchTranscriptionModel = "google/gemini-2.0-flash-001"
@@ -307,17 +307,17 @@ final class AppSettings: ObservableObject {
     didSet { store(ttsUseSSML, key: .ttsUseSSML) }
   }
 
-  @Published var connectionPreWarmingEnabled: Bool {
-    didSet { store(connectionPreWarmingEnabled, key: .connectionPreWarmingEnabled) }
+  // Silence Detection Settings
+  @Published var autoStopOnSilence: Bool {
+    didSet { store(autoStopOnSilence, key: .autoStopOnSilence) }
   }
 
-  @Published var postProcessingStreamingEnabled: Bool {
-    didSet { store(postProcessingStreamingEnabled, key: .postProcessingStreamingEnabled) }
+  @Published var silenceThresholdDb: Double {
+    didSet { store(silenceThresholdDb, key: .silenceThresholdDb) }
   }
 
-  // HUD Settings
-  @Published var hudSizePreference: HUDSizePreference {
-    didSet { store(hudSizePreference.rawValue, key: .hudSizePreference) }
+  @Published var silenceDurationSeconds: Double {
+    didSet { store(silenceDurationSeconds, key: .silenceDurationSeconds) }
   }
 
   private let defaults: UserDefaults
@@ -416,6 +416,14 @@ final class AppSettings: ObservableObject {
       HUDSizePreference(
         rawValue: defaults.string(forKey: DefaultsKey.hudSizePreference.rawValue)
           ?? HUDSizePreference.autoExpand.rawValue) ?? .autoExpand
+
+    // Silence Detection Settings
+    autoStopOnSilence =
+      defaults.object(forKey: DefaultsKey.autoStopOnSilence.rawValue) as? Bool ?? false
+    silenceThresholdDb =
+      defaults.object(forKey: DefaultsKey.silenceThresholdDb.rawValue) as? Double ?? -40.0
+    silenceDurationSeconds =
+      defaults.object(forKey: DefaultsKey.silenceDurationSeconds.rawValue) as? Double ?? 3.0
 
     ensureRecordingsDirectoryExists()
   }

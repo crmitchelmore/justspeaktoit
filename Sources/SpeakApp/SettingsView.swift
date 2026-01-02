@@ -426,6 +426,67 @@ struct SettingsView: View {
       }
       .speakTooltip("Decide how much breathing room Speak gives you after releasing your shortcut.")
 
+      SettingsCard(title: "Smart silence detection", systemImage: "waveform.badge.minus", tint: Color.orange) {
+        VStack(alignment: .leading, spacing: 12) {
+          settingsToggle(
+            "Auto-stop on silence",
+            isOn: settingsBinding(\AppSettings.autoStopOnSilence),
+            tint: .orange
+          )
+          .speakTooltip("When enabled, recording automatically stops after a period of silence.")
+
+          Text("Automatically stop recording when you stop speaking. Resume by making any sound before the countdown completes.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+          VStack(alignment: .leading, spacing: 8) {
+            HStack {
+              Text("Silence threshold")
+              Spacer()
+              Text("\(Int(settings.silenceThresholdDb)) dB")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+            }
+            Slider(
+              value: settingsBinding(\AppSettings.silenceThresholdDb),
+              in: -60...(-20),
+              step: 1
+            )
+            .speakTooltip("Audio level below which sound is considered silence. Lower values are more sensitive.")
+            Text("Lower values detect quieter sounds as speech. -40 dB is typical for most environments.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+          .disabled(!settings.autoStopOnSilence)
+          .opacity(settings.autoStopOnSilence ? 1 : 0.5)
+
+          VStack(alignment: .leading, spacing: 8) {
+            HStack {
+              Text("Silence duration")
+              Spacer()
+              Text(
+                settings.silenceDurationSeconds,
+                format: .number.precision(.fractionLength(1))
+              )
+              .font(.caption.monospacedDigit())
+              .foregroundStyle(.secondary)
+              Text("sec")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            Slider(
+              value: settingsBinding(\AppSettings.silenceDurationSeconds),
+              in: 1...10,
+              step: 0.5
+            )
+            .speakTooltip("How long to wait in silence before auto-stopping the recording.")
+          }
+          .disabled(!settings.autoStopOnSilence)
+          .opacity(settings.autoStopOnSilence ? 1 : 0.5)
+        }
+      }
+      .speakTooltip("Configure automatic recording stop when you pause speaking.")
+
       SettingsCard(title: "Live transcription", systemImage: "mic.fill", tint: Color.indigo) {
         VStack(alignment: .leading, spacing: 12) {
           HStack(spacing: 8) {

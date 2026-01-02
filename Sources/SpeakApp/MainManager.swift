@@ -36,6 +36,11 @@ final class MainManager: ObservableObject {
   private var hotKeyTokens: [HotKeyListenerToken] = []
   private var lastDoubleTapEventUptime: TimeInterval = 0
 
+  // Silence detection state
+  private var silenceMonitorTask: Task<Void, Never>?
+  private var silenceStartTime: Date?
+  private var isSilenceCountdownActive: Bool = false
+
   init(
     appSettings: AppSettings,
     permissionsManager: PermissionsManager,
@@ -205,6 +210,10 @@ final class MainManager: ObservableObject {
       if appSettings.transcriptionMode == .liveNative {
         try await transcriptionManager.startLiveTranscription()
       }
+      // Start silence monitoring if enabled
+      if appSettings.autoStopOnSilence {
+        startSilenceMonitoring()
+      }
     } catch {
       session.errors.append(
         HistoryError(
@@ -217,8 +226,74 @@ final class MainManager: ObservableObject {
     }
   }
 
+  private func startSilenceMonitoring() {
+    silenceMonitorTask?.cancel()
+    silenceStartTime = nil
+    isSilenceCountdownActive = false
+
+    silenceMonitorTask = Task { [weak self] in
+      while !Task.isCancelled {
+        do {
+          try await Task.sleep(nanoseconds: 100_000_000) // 100ms interval
+        } catch {
+          break
+        }
+
+        guard let self else { break }
+        guard await self.audioFileManager.isRecording else { break }
+        guard self.state == .recording else { break }
+
+        let thresholdDb = Float(self.appSettings.silenceThresholdDb)
+        let silenceDuration = self.appSettings.silenceDurationSeconds
+        let isSilent = await self.audioFileManager.isSilent(thresholdDb: thresholdDb)
+
+        if isSilent {
+          if self.silenceStartTime == nil {
+            self.silenceStartTime = Date()
+          }
+
+          if let startTime = self.silenceStartTime {
+            let elapsed = Date().timeIntervalSince(startTime)
+            let remaining = silenceDuration - elapsed
+
+            if remaining <= 0 {
+              // Silence duration exceeded, trigger auto-stop
+              await self.endSession(trigger: .silenceAutoStop)
+              break
+            } else {
+              // Show countdown in HUD
+              if self.appSettings.showHUDDuringSessions {
+                self.hudManager.showSilenceCountdown(remaining: remaining, total: silenceDuration)
+                self.isSilenceCountdownActive = true
+              }
+            }
+          }
+        } else {
+          // Speech detected, reset silence timer
+          if self.silenceStartTime != nil {
+            self.silenceStartTime = nil
+            if self.isSilenceCountdownActive {
+              self.hudManager.cancelSilenceCountdown()
+              self.isSilenceCountdownActive = false
+            }
+          }
+        }
+      }
+    }
+  }
+
+  private func stopSilenceMonitoring() {
+    silenceMonitorTask?.cancel()
+    silenceMonitorTask = nil
+    silenceStartTime = nil
+    isSilenceCountdownActive = false
+  }
+
   private func endSession(trigger: SessionTriggerSource) async {
     guard let session = activeSession else { return }
+
+    // Stop silence monitoring before proceeding
+    stopSilenceMonitoring()
 
     let tailDuration = max(appSettings.postRecordingTailDuration, 0)
     if tailDuration > 0 {
@@ -763,6 +838,7 @@ final class MainManager: ObservableObject {
   }
 
   private func cleanupAfterFailure(message: String, preserveFile: Bool) {
+    stopSilenceMonitoring()
     lastErrorMessage = message
     hudManager.finishFailure(message: message)
     state = .failed(message)
@@ -801,6 +877,7 @@ private enum SessionTriggerSource {
   case doubleTap
   case singleTap
   case uiButton
+  case silenceAutoStop
 
   var historyGesture: HistoryTrigger.HotKeyGesture {
     switch self {
@@ -812,6 +889,8 @@ private enum SessionTriggerSource {
       return .singleTap
     case .uiButton:
       return .uiButton
+    case .silenceAutoStop:
+      return .silenceAutoStop
     }
   }
 }

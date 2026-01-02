@@ -11,6 +11,13 @@ struct RecordingSummary: Identifiable, Hashable {
   let fileSize: Int64
 }
 
+/// Represents the current audio level reading from the recorder
+struct AudioLevelReading: Sendable {
+  let averagePowerDb: Float
+  let peakPowerDb: Float
+  let timestamp: Date
+}
+
 enum AudioFileManagerError: LocalizedError {
   case alreadyRecording
   case noActiveRecording
@@ -51,6 +58,27 @@ actor AudioFileManager {
     self.appSettings = appSettings
     self.permissionsManager = permissionsManager
     self.audioDeviceManager = audioDeviceManager
+  }
+
+  /// Returns the current audio level reading, or nil if not recording
+  func currentAudioLevel() -> AudioLevelReading? {
+    guard let recorder, recorder.isRecording else { return nil }
+    recorder.updateMeters()
+    return AudioLevelReading(
+      averagePowerDb: recorder.averagePower(forChannel: 0),
+      peakPowerDb: recorder.peakPower(forChannel: 0),
+      timestamp: Date()
+    )
+  }
+
+  /// Checks if audio level is below the given threshold (silence)
+  func isSilent(thresholdDb: Float) -> Bool {
+    guard let reading = currentAudioLevel() else { return false }
+    return reading.averagePowerDb < thresholdDb
+  }
+
+  var isRecording: Bool {
+    recorder?.isRecording ?? false
   }
 
   func startRecording() async throws -> URL {

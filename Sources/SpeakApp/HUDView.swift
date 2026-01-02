@@ -126,6 +126,8 @@ struct HUDOverlay: View {
     switch manager.snapshot.phase {
     case .recording:
       return .red
+    case .recordingSilenceCountdown:
+      return .orange
     case .transcribing:
       return .blue
     case .postProcessing:
@@ -190,6 +192,8 @@ struct HUDOverlay: View {
         .font(.system(size: 28, weight: .semibold))
         .foregroundStyle(phaseColor)
         .shadow(color: phaseColor.opacity(0.3), radius: 6, x: 0, y: 4)
+    case .recordingSilenceCountdown(let remaining, let total):
+      silenceCountdownRing(remaining: remaining, total: total)
     default:
       TimelineView(.animation) { context in
         let progress = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1)
@@ -201,6 +205,25 @@ struct HUDOverlay: View {
           .shadow(color: phaseColor.opacity(0.4), radius: 6, x: 0, y: 4)
       }
     }
+  }
+
+  @ViewBuilder
+  private func silenceCountdownRing(remaining: TimeInterval, total: TimeInterval) -> some View {
+    let progress = total > 0 ? (1.0 - remaining / total) : 0
+    ZStack {
+      Circle()
+        .stroke(phaseColor.opacity(0.25), lineWidth: 4)
+        .frame(width: 36, height: 36)
+      Circle()
+        .trim(from: 0, to: CGFloat(progress))
+        .stroke(phaseColor.gradient, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+        .frame(width: 36, height: 36)
+        .rotationEffect(.degrees(-90))
+      Text("\(Int(ceil(remaining)))")
+        .font(.system(size: 14, weight: .bold).monospacedDigit())
+        .foregroundStyle(phaseColor)
+    }
+    .shadow(color: phaseColor.opacity(0.3), radius: 6, x: 0, y: 4)
   }
 
   private var elapsedText: String {

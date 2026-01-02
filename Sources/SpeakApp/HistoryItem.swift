@@ -95,6 +95,7 @@ struct HistoryTrigger: Codable, Hashable {
     case doubleTap
     case hold
     case uiButton
+    case silenceAutoStop
   }
 
   enum OutputMethod: String, Codable {

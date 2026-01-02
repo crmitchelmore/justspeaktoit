@@ -15,17 +15,20 @@ final class TextToSpeechManager: ObservableObject {
 
   private let appSettings: AppSettings
   private let secureStorage: SecureAppStorage
+  private let pronunciationManager: PronunciationManager?
   let clients: [TTSProvider: TextToSpeechClient]
   private var audioPlayer: AVAudioPlayer?
 
   init(
     appSettings: AppSettings,
     secureStorage: SecureAppStorage,
-    clients: [TTSProvider: TextToSpeechClient]
+    clients: [TTSProvider: TextToSpeechClient],
+    pronunciationManager: PronunciationManager? = nil
   ) {
     self.appSettings = appSettings
     self.secureStorage = secureStorage
     self.clients = clients
+    self.pronunciationManager = pronunciationManager
     loadUsageHistory()
   }
 
@@ -67,8 +70,11 @@ final class TextToSpeechManager: ObservableObject {
 
     synthesisProgress = 0.5
 
+    // Apply pronunciation replacements
+    let processedText = applyPronunciationProcessing(text: text, provider: provider, useSSML: settings.useSSML)
+
     do {
-      let result = try await client.synthesize(text: text, voice: effectiveVoice, settings: settings)
+      let result = try await client.synthesize(text: processedText, voice: effectiveVoice, settings: settings)
       synthesisProgress = 0.9
 
       lastResult = result
@@ -275,6 +281,23 @@ final class TextToSpeechManager: ObservableObject {
     let destinationURL = recordingsDir.appendingPathComponent(filename)
 
     try FileManager.default.copyItem(at: result.audioURL, to: destinationURL)
+  }
+
+  // MARK: - Pronunciation Processing
+
+  /// Apply pronunciation replacements based on provider capabilities.
+  private func applyPronunciationProcessing(text: String, provider: TTSProvider, useSSML: Bool) -> String {
+    guard let pronunciationManager = pronunciationManager else {
+      return text
+    }
+
+    if useSSML && provider.supportsSSMLPhonemes {
+      // Generate SSML with phoneme tags for supported providers
+      return pronunciationManager.generateSSML(for: text, provider: provider)
+    } else {
+      // Use simple text replacement for other providers
+      return pronunciationManager.applyReplacements(to: text)
+    }
   }
 
   private func loadUsageHistory() {

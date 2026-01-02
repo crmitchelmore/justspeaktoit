@@ -406,8 +406,6 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
   private var transcriber: DeepgramLiveTranscriber?
   private var currentLanguage: String?
   private var currentModel: String?
-  private var accumulatedText: String = ""
-  private var startTime: Date?
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
   private let audioEngine = AVAudioEngine()
   private let logger = Logger(subsystem: "com.speak.app", category: "DeepgramLiveController")
@@ -415,6 +413,13 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
   /// Deepgram's preferred audio format: 16kHz mono PCM16
   private let deepgramSampleRate: Double = 16000
   private var deepgramFormat: AVAudioFormat?
+
+  /// Accumulated final transcript segments
+  private var finalSegments: [TranscriptionSegment] = []
+  /// Current interim text (not yet final)
+  private var currentInterim: String = ""
+  /// Full transcript so far (all finalized segments joined)
+  private var fullTranscript: String = ""
 
   init(
     permissionsManager: PermissionsManager,
@@ -456,8 +461,10 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
     let sessionContext = await audioDeviceManager.beginUsingPreferredInput()
     activeInputSession = sessionContext
 
-    accumulatedText = ""
-    startTime = Date()
+    // Reset state
+    finalSegments = []
+    currentInterim = ""
+    fullTranscript = ""
 
     // Get audio format from device
     let inputNode = audioEngine.inputNode
@@ -492,17 +499,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
       onTranscript: { [weak self] text, isFinal in
         Task { @MainActor [weak self] in
           guard let self else { return }
-          print("[DeepgramLiveController] Transcript: '\(text)' (final: \(isFinal))")
-          if isFinal {
-            self.accumulatedText = text
-          }
-          let update = LiveTranscriptionUpdate(
-            text: text,
-            isFinal: isFinal,
-            confidence: nil
-          )
-          self.delegate?.liveTranscriber(self, didUpdateWith: update)
-          self.delegate?.liveTranscriber(self, didUpdatePartial: text)
+          self.handleTranscript(text: text, isFinal: isFinal)
         }
       },
       onError: { [weak self] error in
@@ -527,6 +524,35 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
     try audioEngine.start()
     isRunning = true
     print("[DeepgramLiveController] Started successfully")
+  }
+
+  /// Handle transcript from Deepgram - accumulate final segments, track interim
+  private func handleTranscript(text: String, isFinal: Bool) {
+    print("[DeepgramLiveController] Transcript: '\(text)' (final: \(isFinal))")
+
+    if isFinal {
+      // Commit this segment - create a basic segment (no timing from this callback)
+      let segment = TranscriptionSegment(
+        startTime: 0,
+        endTime: 0,
+        text: text
+      )
+      finalSegments.append(segment)
+      fullTranscript = finalSegments.map(\.text).joined(separator: " ")
+      currentInterim = ""
+      print("[DeepgramLiveController] Final segment #\(finalSegments.count): '\(text.prefix(50))' - fullTranscript: '\(fullTranscript.prefix(80))'")
+
+      // Notify delegate of updated full transcript
+      delegate?.liveTranscriber(self, didUpdatePartial: fullTranscript)
+    } else {
+      // Update interim - display full transcript + current interim
+      currentInterim = text
+      let displayText = fullTranscript.isEmpty
+        ? currentInterim
+        : fullTranscript + " " + currentInterim
+
+      delegate?.liveTranscriber(self, didUpdatePartial: displayText)
+    }
   }
 
   /// Resample audio buffer from input format to 16kHz PCM16 and send to Deepgram.
@@ -580,17 +606,9 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
     transcriber?.stop()
     isRunning = false
 
-    let duration = startTime.map { Date().timeIntervalSince($0) } ?? 0
-    let result = TranscriptionResult(
-      text: accumulatedText,
-      segments: [],
-      confidence: nil,
-      duration: duration,
-      modelIdentifier: currentModel ?? "deepgram/nova-2-streaming",
-      cost: nil,
-      rawPayload: nil,
-      debugInfo: nil
-    )
+    // Build final result including any unfinalised interim text
+    let result = buildFinalResult()
+    print("[DeepgramLiveController] Built result: '\(result.text.prefix(100))' (\(result.text.count) chars)")
 
     await MainActor.run {
       delegate?.liveTranscriber(self, didFinishWith: result)
@@ -598,6 +616,33 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
 
     await endActiveInputSession()
     transcriber = nil
+  }
+
+  /// Build the final transcription result from accumulated segments
+  private func buildFinalResult() -> TranscriptionResult {
+    // Include any remaining interim text that wasn't finalized
+    var text = finalSegments.map(\.text).joined(separator: " ")
+    let trimmedInterim = currentInterim.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !trimmedInterim.isEmpty {
+      if !text.isEmpty {
+        text += " "
+      }
+      text += trimmedInterim
+      print("[DeepgramLiveController] Including unfinalised interim: '\(trimmedInterim)'")
+    }
+
+    let duration = finalSegments.last?.endTime ?? 0
+
+    return TranscriptionResult(
+      text: text,
+      segments: finalSegments,
+      confidence: nil,
+      duration: duration,
+      modelIdentifier: currentModel ?? "deepgram/nova-2-streaming",
+      cost: nil,
+      rawPayload: nil,
+      debugInfo: nil
+    )
   }
 
   private func endActiveInputSession() async {

@@ -56,6 +56,7 @@ actor TranscriptionProviderRegistry {
     // Register all providers here - adding a new provider automatically makes it available
     providers["openai"] = OpenAITranscriptionProvider()
     providers["revai"] = RevAITranscriptionProvider()
+    providers["deepgram"] = DeepgramTranscriptionProvider()
   }
 
   func allProviders() -> [TranscriptionProviderMetadata] {

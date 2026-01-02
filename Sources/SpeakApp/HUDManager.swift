@@ -54,6 +54,8 @@ final class HUDManager: ObservableObject {
   @Published var isExpanded: Bool = false
 
   @Published private(set) var snapshot: Snapshot = .hidden
+  /// Normalized audio level (0.0 to 1.0) during recording phase
+  @Published private(set) var audioLevel: Float = 0
 
   private var timer: Timer?
   private var phaseStartDate: Date?
@@ -64,28 +66,14 @@ final class HUDManager: ObservableObject {
     transition(.recording, headline: "Recording", subheadline: "Capturing audio")
   }
 
-  func updateLiveTranscription(text: String, isFinal: Bool, confidence: Double?) {
-    guard snapshot.phase == .recording else { return }
-    snapshot.liveText = text.isEmpty ? nil : text
-    snapshot.liveTextIsFinal = isFinal
-    snapshot.liveTextConfidence = confidence
-  }
-
-  func updateLiveTranscript(final: String, interim: String) {
-    snapshot.finalTranscript = final
-    snapshot.interimTranscript = interim
-    // Auto-expand if transcript exceeds threshold
-    let totalLength = final.count + interim.count
-    if totalLength > Self.autoExpandThreshold && !isExpanded {
-      isExpanded = true
-    }
-  }
-
-  func toggleExpanded() {
-    isExpanded.toggle()
+  /// Update the current audio level during recording (0.0 to 1.0)
+  func updateAudioLevel(_ level: Float) {
+    guard case .recording = snapshot.phase else { return }
+    audioLevel = level
   }
 
   func beginTranscribing() {
+    audioLevel = 0
     transition(.transcribing, headline: "Transcribing", subheadline: "Preparing raw transcript")
   }
 
@@ -119,6 +107,7 @@ final class HUDManager: ObservableObject {
 
   func hide() {
     invalidateTimers()
+    audioLevel = 0
     snapshot = .hidden
   }
 

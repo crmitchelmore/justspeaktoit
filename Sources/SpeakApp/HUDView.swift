@@ -25,6 +25,12 @@ struct HUDOverlay: View {
             .font(.subheadline)
             .foregroundStyle(.secondary)
         }
+        if manager.snapshot.showRetryHint {
+          Text("Press ⌘R to retry")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.top, 4)
+        }
       }
       if let liveText = manager.snapshot.liveText, !liveText.isEmpty {
         liveTranscriptionView(text: liveText)

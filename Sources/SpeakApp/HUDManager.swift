@@ -33,18 +33,9 @@ final class HUDManager: ObservableObject {
     var headline: String
     var subheadline: String?
     var elapsed: TimeInterval
-    var liveText: String?
-    var liveTextIsFinal: Bool
-    var liveTextConfidence: Double?
-    var streamingText: String?
-    var finalTranscript: String
-    var interimTranscript: String
+    var showRetryHint: Bool
 
-    static let hidden = Snapshot(
-      phase: .hidden, headline: "", subheadline: nil, elapsed: 0,
-      liveText: nil, liveTextIsFinal: true, liveTextConfidence: nil, streamingText: nil,
-      finalTranscript: "", interimTranscript: ""
-    )
+    static let hidden = Snapshot(phase: .hidden, headline: "", subheadline: nil, elapsed: 0, showRetryHint: false)
   }
 
   /// Threshold for auto-expanding HUD when transcript exceeds this character count
@@ -108,12 +99,16 @@ final class HUDManager: ObservableObject {
   }
 
   func finishFailure(message: String) {
-    finishFailure(headline: "Something went wrong", message: message)
+    finishFailure(headline: "Something went wrong", message: message, showRetryHint: false)
   }
 
   func finishFailure(headline: String, message: String, displayDuration: TimeInterval = 6.0) {
+    finishFailure(headline: headline, message: message, showRetryHint: false, displayDuration: displayDuration)
+  }
+
+  func finishFailure(headline: String, message: String, showRetryHint: Bool, displayDuration: TimeInterval = 6.0) {
     transition(
-      .failure(message: message), headline: headline, subheadline: message, showsTimer: false)
+      .failure(message: message), headline: headline, subheadline: message, showsTimer: false, showRetryHint: showRetryHint)
     scheduleAutoHide(after: displayDuration)
   }
 
@@ -126,15 +121,12 @@ final class HUDManager: ObservableObject {
     _ phase: Snapshot.Phase,
     headline: String,
     subheadline: String?,
-    showsTimer: Bool = true
+    showsTimer: Bool = true,
+    showRetryHint: Bool = false
   ) {
     invalidateTimers()
     phaseStartDate = showsTimer ? Date() : nil
-    snapshot = Snapshot(
-      phase: phase, headline: headline, subheadline: subheadline, elapsed: 0,
-      liveText: nil, liveTextIsFinal: true, liveTextConfidence: nil, streamingText: nil,
-      finalTranscript: "", interimTranscript: ""
-    )
+    snapshot = Snapshot(phase: phase, headline: headline, subheadline: subheadline, elapsed: 0, showRetryHint: showRetryHint)
 
     guard showsTimer else { return }
 

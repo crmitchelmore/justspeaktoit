@@ -34,10 +34,10 @@ struct HUDOverlay: View {
           .font(.caption.monospacedDigit())
           .foregroundStyle(.secondary)
       }
-
-      // Live transcript section (only during recording phase with content)
       if case .recording = manager.snapshot.phase {
-        transcriptSection
+        Text("Press Esc to cancel")
+          .font(.caption2)
+          .foregroundStyle(.tertiary)
       }
     }
     .padding(.horizontal, 24)
@@ -136,6 +136,8 @@ struct HUDOverlay: View {
       return .green
     case .failure:
       return .red
+    case .cancelled:
+      return .orange
     case .hidden:
       return .gray
     }
@@ -187,6 +189,11 @@ struct HUDOverlay: View {
       }
     case .success:
       Image(systemName: "checkmark.circle.fill")
+        .font(.system(size: 28, weight: .semibold))
+        .foregroundStyle(phaseColor)
+        .shadow(color: phaseColor.opacity(0.3), radius: 6, x: 0, y: 4)
+    case .cancelled:
+      Image(systemName: "xmark.circle.fill")
         .font(.system(size: 28, weight: .semibold))
         .foregroundStyle(phaseColor)
         .shadow(color: phaseColor.opacity(0.3), radius: 6, x: 0, y: 4)

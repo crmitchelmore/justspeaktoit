@@ -14,10 +14,11 @@ final class HUDManager: ObservableObject {
       case delivering
       case success(message: String)
       case failure(message: String)
+      case cancelled
 
       var isTerminal: Bool {
         switch self {
-        case .success, .failure:
+        case .success, .failure, .cancelled:
           return true
         default:
           return false
@@ -105,6 +106,11 @@ final class HUDManager: ObservableObject {
     transition(
       .success(message: message), headline: "Completed", subheadline: message, showsTimer: false)
     scheduleAutoHide(after: 2.4)
+  }
+
+  func finishCancelled() {
+    transition(.cancelled, headline: "Cancelled", subheadline: nil, showsTimer: false)
+    scheduleAutoHide(after: 1.5)
   }
 
   func finishFailure(message: String) {

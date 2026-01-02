@@ -136,9 +136,7 @@ final class AppSettings: ObservableObject {
     case ttsAutoPlay
     case ttsSaveToDirectory
     case ttsUseSSML
-    case connectionPreWarmingEnabled
-    case postProcessingStreamingEnabled
-    case hudSizePreference
+    case escapeCancelEnabled
   }
 
   private static let defaultBatchTranscriptionModel = "google/gemini-2.0-flash-001"
@@ -307,17 +305,8 @@ final class AppSettings: ObservableObject {
     didSet { store(ttsUseSSML, key: .ttsUseSSML) }
   }
 
-  @Published var connectionPreWarmingEnabled: Bool {
-    didSet { store(connectionPreWarmingEnabled, key: .connectionPreWarmingEnabled) }
-  }
-
-  @Published var postProcessingStreamingEnabled: Bool {
-    didSet { store(postProcessingStreamingEnabled, key: .postProcessingStreamingEnabled) }
-  }
-
-  // HUD Settings
-  @Published var hudSizePreference: HUDSizePreference {
-    didSet { store(hudSizePreference.rawValue, key: .hudSizePreference) }
+  @Published var escapeCancelEnabled: Bool {
+    didSet { store(escapeCancelEnabled, key: .escapeCancelEnabled) }
   }
 
   private let defaults: UserDefaults
@@ -406,16 +395,8 @@ final class AppSettings: ObservableObject {
     ttsSaveToDirectory =
       defaults.object(forKey: DefaultsKey.ttsSaveToDirectory.rawValue) as? Bool ?? false
     ttsUseSSML = defaults.object(forKey: DefaultsKey.ttsUseSSML.rawValue) as? Bool ?? false
-    connectionPreWarmingEnabled =
-      defaults.object(forKey: DefaultsKey.connectionPreWarmingEnabled.rawValue) as? Bool ?? true
-    postProcessingStreamingEnabled =
-      defaults.object(forKey: DefaultsKey.postProcessingStreamingEnabled.rawValue) as? Bool ?? true
-
-    // HUD Settings
-    hudSizePreference =
-      HUDSizePreference(
-        rawValue: defaults.string(forKey: DefaultsKey.hudSizePreference.rawValue)
-          ?? HUDSizePreference.autoExpand.rawValue) ?? .autoExpand
+    escapeCancelEnabled =
+      defaults.object(forKey: DefaultsKey.escapeCancelEnabled.rawValue) as? Bool ?? true
 
     ensureRecordingsDirectoryExists()
   }

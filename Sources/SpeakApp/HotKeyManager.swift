@@ -98,9 +98,12 @@ struct HotKeyListenerToken: Hashable {
 	fileprivate let gesture: HotKeyGesture
 }
 
+typealias EscapeCancelHandler = () -> Void
+
 // swiftlint:disable:next type_body_length
 @MainActor
 final class HotKeyManager: ObservableObject {
+	private let escapeKeyCode: CGKeyCode = 53
 	private let functionKeyCode: CGKeyCode = 63
 	private let permissionsManager: PermissionsManager
 	private let appSettings: AppSettings
@@ -108,8 +111,12 @@ final class HotKeyManager: ObservableObject {
 	private let fnAllowedFlags: CGEventFlags = [.maskSecondaryFn, .maskNonCoalesced]
 
 	private var listeners: [HotKeyGesture: [UUID: () -> Void]] = [:]
+	private var escapeCancelHandler: EscapeCancelHandler?
+	private var escapeMonitorActive = false
 	private var globalMonitor: Any?
 	private var localMonitor: Any?
+	private var escapeGlobalMonitor: Any?
+	private var escapeLocalMonitor: Any?
 	private var eventTap: CFMachPort?
 	private var eventTapRunLoopSource: CFRunLoopSource?
 	private var holdTimer: DispatchSourceTimer?
@@ -188,6 +195,43 @@ final class HotKeyManager: ObservableObject {
 	func updateTiming(holdThreshold: TimeInterval, doubleTapWindow: TimeInterval) {
 		appSettings.holdThreshold = holdThreshold
 		appSettings.doubleTapWindow = doubleTapWindow
+	}
+
+	func setEscapeCancelHandler(_ handler: EscapeCancelHandler?) {
+		escapeCancelHandler = handler
+	}
+
+	func startEscapeMonitoring() {
+		guard !escapeMonitorActive, appSettings.escapeCancelEnabled else { return }
+		escapeMonitorActive = true
+
+		escapeGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+			self?.handleEscapeEvent(event)
+		}
+		escapeLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+			self?.handleEscapeEvent(event)
+			return event
+		}
+	}
+
+	func stopEscapeMonitoring() {
+		guard escapeMonitorActive else { return }
+		escapeMonitorActive = false
+
+		if let monitor = escapeGlobalMonitor {
+			NSEvent.removeMonitor(monitor)
+			escapeGlobalMonitor = nil
+		}
+		if let monitor = escapeLocalMonitor {
+			NSEvent.removeMonitor(monitor)
+			escapeLocalMonitor = nil
+		}
+	}
+
+	private func handleEscapeEvent(_ event: NSEvent) {
+		guard CGKeyCode(event.keyCode) == escapeKeyCode else { return }
+		log.debug("Escape key pressed - triggering cancel")
+		escapeCancelHandler?()
 	}
 
 	private func handle(event: NSEvent) {

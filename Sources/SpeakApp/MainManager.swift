@@ -106,7 +106,25 @@ final class MainManager: ObservableObject {
     cleanupAfterFailure(message: "Recording cancelled", preserveFile: false)
   }
 
+  func cancelRecording() {
+    guard activeSession != nil, state == .recording else { return }
+    hotKeyManager.stopEscapeMonitoring()
+    activeSession = nil
+    state = .idle
+    lastErrorMessage = nil
+    hudManager.finishCancelled()
+
+    Task {
+      await audioFileManager.cancelRecording(deleteFile: true)
+      transcriptionManager.cancelLiveTranscription()
+    }
+  }
+
   private func configureHotKeys() {
+    hotKeyManager.setEscapeCancelHandler { [weak self] in
+      self?.cancelRecording()
+    }
+
     hotKeyTokens.append(
       hotKeyManager.register(gesture: .holdStart) { [weak self] in
         Task { @MainActor in
@@ -196,6 +214,8 @@ final class MainManager: ObservableObject {
       )
     )
 
+    hotKeyManager.startEscapeMonitoring()
+
     if appSettings.showHUDDuringSessions {
       hudManager.beginRecording()
     }
@@ -219,6 +239,8 @@ final class MainManager: ObservableObject {
 
   private func endSession(trigger: SessionTriggerSource) async {
     guard let session = activeSession else { return }
+
+    hotKeyManager.stopEscapeMonitoring()
 
     let tailDuration = max(appSettings.postRecordingTailDuration, 0)
     if tailDuration > 0 {
@@ -763,6 +785,7 @@ final class MainManager: ObservableObject {
   }
 
   private func cleanupAfterFailure(message: String, preserveFile: Bool) {
+    hotKeyManager.stopEscapeMonitoring()
     lastErrorMessage = message
     hudManager.finishFailure(message: message)
     state = .failed(message)

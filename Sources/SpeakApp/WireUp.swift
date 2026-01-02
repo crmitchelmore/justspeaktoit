@@ -70,7 +70,7 @@ enum WireUp {
   static func bootstrap() -> AppEnvironment {
     let settings = AppSettings()
     let permissions = PermissionsManager()
-    let history = HistoryManager()
+    let history = HistoryManager(flushInterval: settings.historyFlushInterval)
     let hud = HUDManager()
     let hotKeys = HotKeyManager(permissionsManager: permissions, appSettings: settings)
     let audioDevices = AudioInputDeviceManager(appSettings: settings)

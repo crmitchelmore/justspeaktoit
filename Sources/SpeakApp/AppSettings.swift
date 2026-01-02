@@ -136,9 +136,7 @@ final class AppSettings: ObservableObject {
     case ttsAutoPlay
     case ttsSaveToDirectory
     case ttsUseSSML
-    case connectionPreWarmingEnabled
-    case postProcessingStreamingEnabled
-    case hudSizePreference
+    case historyFlushInterval
   }
 
   private static let defaultBatchTranscriptionModel = "google/gemini-2.0-flash-001"
@@ -307,17 +305,9 @@ final class AppSettings: ObservableObject {
     didSet { store(ttsUseSSML, key: .ttsUseSSML) }
   }
 
-  @Published var connectionPreWarmingEnabled: Bool {
-    didSet { store(connectionPreWarmingEnabled, key: .connectionPreWarmingEnabled) }
-  }
-
-  @Published var postProcessingStreamingEnabled: Bool {
-    didSet { store(postProcessingStreamingEnabled, key: .postProcessingStreamingEnabled) }
-  }
-
-  // HUD Settings
-  @Published var hudSizePreference: HUDSizePreference {
-    didSet { store(hudSizePreference.rawValue, key: .hudSizePreference) }
+  // History Settings
+  @Published var historyFlushInterval: TimeInterval {
+    didSet { store(historyFlushInterval, key: .historyFlushInterval) }
   }
 
   private let defaults: UserDefaults
@@ -416,6 +406,10 @@ final class AppSettings: ObservableObject {
       HUDSizePreference(
         rawValue: defaults.string(forKey: DefaultsKey.hudSizePreference.rawValue)
           ?? HUDSizePreference.autoExpand.rawValue) ?? .autoExpand
+
+    // History Settings
+    historyFlushInterval =
+      defaults.object(forKey: DefaultsKey.historyFlushInterval.rawValue) as? Double ?? 5.0
 
     ensureRecordingsDirectoryExists()
   }

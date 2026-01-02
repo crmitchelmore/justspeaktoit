@@ -58,6 +58,12 @@ final class HistoryManager: ObservableObject {
 
   let pageSize: Int
 
+  /// Full list of items loaded from disk (for pagination)
+  private var allItemsOnDisk: [HistoryItem] = []
+
+  /// Cached statistics to avoid recalculating
+  private var cachedStatistics: HistoryStatistics?
+
   private let storageURL: URL
   private let walURL: URL
   private let encoder: JSONEncoder
@@ -89,7 +95,8 @@ final class HistoryManager: ObservableObject {
   /// Flag to track if we're currently flushing
   private var isFlushing = false
 
-  init(fileManager: FileManager = .default, flushInterval: TimeInterval = defaultFlushInterval, batchSizeThreshold: Int = defaultBatchSizeThreshold) {
+  init(fileManager: FileManager = .default, flushInterval: TimeInterval = defaultFlushInterval, batchSizeThreshold: Int = defaultBatchSizeThreshold, pageSize: Int = 50) {
+    self.pageSize = pageSize
     let supportURL =
       fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
       ?? fileManager.homeDirectoryForCurrentUser

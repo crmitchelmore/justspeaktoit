@@ -95,11 +95,14 @@ enum HotKeyGesture: String, CaseIterable, Identifiable {
 
 enum KeyboardShortcut: Hashable {
 	case commandR
+	case escape
 
 	var keyCode: UInt16 {
 		switch self {
 		case .commandR:
 			return 15  // R key
+		case .escape:
+			return 53  // Escape key
 		}
 	}
 
@@ -107,6 +110,8 @@ enum KeyboardShortcut: Hashable {
 		switch self {
 		case .commandR:
 			return .command
+		case .escape:
+			return []  // No modifiers required for Escape
 		}
 	}
 }

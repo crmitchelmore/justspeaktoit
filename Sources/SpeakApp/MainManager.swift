@@ -40,6 +40,7 @@ final class MainManager: ObservableObject {
   private var shortcutTokens: [ShortcutListenerToken] = []
   private var lastDoubleTapEventUptime: TimeInterval = 0
   private var audioLevelTimer: Timer?
+  private var silenceStartTime: Date?
 
   private struct RetryData {
     let transcriptionResult: TranscriptionResult
@@ -130,6 +131,15 @@ final class MainManager: ObservableObject {
     cleanupAfterFailure(message: "Recording cancelled", preserveFile: false)
   }
 
+  func cancelRecordingWithEscape() {
+    guard state == .recording, activeSession != nil else { return }
+    logger.info("Cancelling recording via Escape key")
+    activeSession?.errors.append(
+      HistoryError(phase: .recording, message: "Cancelled by user (Escape)", debugDescription: nil)
+    )
+    cleanupAfterFailure(message: "Recording cancelled", preserveFile: false)
+  }
+
   private func configureHotKeys() {
     hotKeyTokens.append(
       hotKeyManager.register(gesture: .holdStart) { [weak self] in
@@ -189,6 +199,15 @@ final class MainManager: ObservableObject {
         Task { @MainActor in
           guard let self else { return }
           self.retryPostProcessing()
+        }
+      }
+    )
+
+    shortcutTokens.append(
+      hotKeyManager.register(shortcut: .escape) { [weak self] in
+        Task { @MainActor in
+          guard let self else { return }
+          self.cancelRecordingWithEscape()
         }
       }
     )
@@ -955,12 +974,14 @@ final class MainManager: ObservableObject {
 
   private func startAudioLevelMonitoring() {
     audioLevelTimer?.invalidate()
+    silenceStartTime = nil
     audioLevelTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) {
       [weak self] _ in
       Task { @MainActor [weak self] in
         guard let self else { return }
         let level = await self.audioFileManager.getCurrentAudioLevel()
         self.hudManager.updateAudioLevel(level)
+        self.checkSilenceDetection(level: level)
       }
     }
     if let timer = audioLevelTimer {
@@ -968,9 +989,41 @@ final class MainManager: ObservableObject {
     }
   }
 
+  private func checkSilenceDetection(level: Float) {
+    guard appSettings.silenceDetectionEnabled else {
+      silenceStartTime = nil
+      return
+    }
+    guard state == .recording, activeSession != nil else {
+      silenceStartTime = nil
+      return
+    }
+
+    let isSilent = level < appSettings.silenceThreshold
+
+    if isSilent {
+      if silenceStartTime == nil {
+        silenceStartTime = Date()
+      } else if let startTime = silenceStartTime {
+        let silentDuration = Date().timeIntervalSince(startTime)
+        if silentDuration >= appSettings.silenceDuration {
+          logger.info("Auto-stopping recording after \(silentDuration, privacy: .public)s of silence")
+          silenceStartTime = nil
+          Task {
+            await endSession(trigger: .silenceDetection)
+          }
+        }
+      }
+    } else {
+      // Reset silence timer when audio is detected
+      silenceStartTime = nil
+    }
+  }
+
   private func stopAudioLevelMonitoring() {
     audioLevelTimer?.invalidate()
     audioLevelTimer = nil
+    silenceStartTime = nil
     hudManager.updateAudioLevel(0)
   }
 }
@@ -998,6 +1051,7 @@ private enum SessionTriggerSource {
   case doubleTap
   case singleTap
   case uiButton
+  case silenceDetection
 
   var historyGesture: HistoryTrigger.HotKeyGesture {
     switch self {
@@ -1009,6 +1063,8 @@ private enum SessionTriggerSource {
       return .singleTap
     case .uiButton:
       return .uiButton
+    case .silenceDetection:
+      return .uiButton  // Treat as UI-initiated for history purposes
     }
   }
 }

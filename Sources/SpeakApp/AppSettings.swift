@@ -137,6 +137,12 @@ final class AppSettings: ObservableObject {
     case ttsSaveToDirectory
     case ttsUseSSML
     case historyFlushInterval
+    case silenceDetectionEnabled
+    case silenceThreshold
+    case silenceDuration
+    case connectionPreWarmingEnabled
+    case postProcessingStreamingEnabled
+    case hudSizePreference
   }
 
   private static let defaultBatchTranscriptionModel = "google/gemini-2.0-flash-001"
@@ -310,6 +316,35 @@ final class AppSettings: ObservableObject {
     didSet { store(historyFlushInterval, key: .historyFlushInterval) }
   }
 
+  // Silence Detection Settings
+  @Published var silenceDetectionEnabled: Bool {
+    didSet { store(silenceDetectionEnabled, key: .silenceDetectionEnabled) }
+  }
+
+  /// Silence threshold (0.0 to 1.0) - audio levels below this are considered silence
+  @Published var silenceThreshold: Float {
+    didSet { store(Double(silenceThreshold), key: .silenceThreshold) }
+  }
+
+  /// Duration of continuous silence (in seconds) before auto-stopping
+  @Published var silenceDuration: TimeInterval {
+    didSet { store(silenceDuration, key: .silenceDuration) }
+  }
+
+  // Performance Settings
+  @Published var connectionPreWarmingEnabled: Bool {
+    didSet { store(connectionPreWarmingEnabled, key: .connectionPreWarmingEnabled) }
+  }
+
+  @Published var postProcessingStreamingEnabled: Bool {
+    didSet { store(postProcessingStreamingEnabled, key: .postProcessingStreamingEnabled) }
+  }
+
+  // HUD Settings
+  @Published var hudSizePreference: HUDSizePreference {
+    didSet { store(hudSizePreference.rawValue, key: .hudSizePreference) }
+  }
+
   private let defaults: UserDefaults
 
   init(defaults: UserDefaults = .standard) {
@@ -410,6 +445,14 @@ final class AppSettings: ObservableObject {
     // History Settings
     historyFlushInterval =
       defaults.object(forKey: DefaultsKey.historyFlushInterval.rawValue) as? Double ?? 5.0
+
+    // Silence Detection Settings
+    silenceDetectionEnabled =
+      defaults.object(forKey: DefaultsKey.silenceDetectionEnabled.rawValue) as? Bool ?? false
+    silenceThreshold =
+      Float(defaults.object(forKey: DefaultsKey.silenceThreshold.rawValue) as? Double ?? 0.05)
+    silenceDuration =
+      defaults.object(forKey: DefaultsKey.silenceDuration.rawValue) as? Double ?? 2.0
 
     ensureRecordingsDirectoryExists()
   }

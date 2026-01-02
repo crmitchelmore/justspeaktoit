@@ -1,0 +1,105 @@
+import Foundation
+import os.log
+
+/// A thread-safe pool of reusable `Data` buffers for audio streaming.
+/// Reduces memory allocations during real-time audio processing.
+final class AudioBufferPool: @unchecked Sendable {
+    private let lock = NSLock()
+    private var availableBuffers: [Data]
+    private var bufferSize: Int
+    private let initialPoolSize: Int
+    private let logger = Logger(subsystem: "com.speak.app", category: "AudioBufferPool")
+
+    // Metrics
+    private(set) var poolHits: Int = 0
+    private(set) var poolMisses: Int = 0
+    private(set) var growthCount: Int = 0
+
+    /// Creates a new buffer pool.
+    /// - Parameters:
+    ///   - poolSize: Initial number of buffers to pre-allocate. Defaults to 10.
+    ///   - bufferSize: Capacity of each buffer in bytes. Defaults to 4096.
+    init(poolSize: Int = 10, bufferSize: Int = 4096) {
+        self.initialPoolSize = poolSize
+        self.bufferSize = bufferSize
+        self.availableBuffers = []
+        self.availableBuffers.reserveCapacity(poolSize)
+
+        for _ in 0..<poolSize {
+            var buffer = Data()
+            buffer.reserveCapacity(bufferSize)
+            availableBuffers.append(buffer)
+        }
+
+        logger.info("AudioBufferPool initialized with \(poolSize) buffers of \(bufferSize) bytes each")
+    }
+
+    /// Checks out a buffer from the pool. If the pool is exhausted, a new buffer is created.
+    /// - Returns: A `Data` buffer ready for use.
+    func checkout() -> Data {
+        lock.lock()
+        defer { lock.unlock() }
+
+        if let buffer = availableBuffers.popLast() {
+            poolHits += 1
+            return buffer
+        }
+
+        // Pool exhausted - grow by creating a new buffer
+        poolMisses += 1
+        growthCount += 1
+        logger.warning(
+            "AudioBufferPool exhausted, growing pool. Hits: \(self.poolHits), Misses: \(self.poolMisses), Growth: \(self.growthCount)"
+        )
+
+        var newBuffer = Data()
+        newBuffer.reserveCapacity(bufferSize)
+        return newBuffer
+    }
+
+    /// Returns a buffer to the pool after use.
+    /// The buffer contents are cleared for security before being returned to the pool.
+    /// - Parameter buffer: The buffer to return.
+    func returnBuffer(_ buffer: inout Data) {
+        // Clear buffer contents for security
+        buffer.resetBytes(in: 0..<buffer.count)
+        buffer.removeAll(keepingCapacity: true)
+
+        lock.lock()
+        defer { lock.unlock() }
+
+        availableBuffers.append(buffer)
+    }
+
+    /// Returns the current metrics as a dictionary for logging.
+    func metricsSnapshot() -> [String: Int] {
+        lock.lock()
+        defer { lock.unlock() }
+
+        return [
+            "poolHits": poolHits,
+            "poolMisses": poolMisses,
+            "growthCount": growthCount,
+            "availableBuffers": availableBuffers.count,
+            "initialPoolSize": initialPoolSize
+        ]
+    }
+
+    /// Resets metrics counters (useful for testing or periodic logging).
+    func resetMetrics() {
+        lock.lock()
+        defer { lock.unlock() }
+
+        poolHits = 0
+        poolMisses = 0
+        growthCount = 0
+    }
+
+    /// Logs current pool metrics.
+    func logMetrics() {
+        let metrics = metricsSnapshot()
+        logger.info(
+            "AudioBufferPool metrics - Hits: \(metrics["poolHits"] ?? 0), Misses: \(metrics["poolMisses"] ?? 0), Growth: \(metrics["growthCount"] ?? 0), Available: \(metrics["availableBuffers"] ?? 0)"
+        )
+    }
+}

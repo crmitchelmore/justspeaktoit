@@ -8,9 +8,9 @@ final class HUDWindowPresenter {
   private let windowController: HUDWindowController
   private var cancellable: AnyCancellable?
 
-  init(manager: HUDManager) {
+  init(manager: HUDManager, settings: AppSettings) {
     self.manager = manager
-    self.windowController = HUDWindowController(manager: manager)
+    self.windowController = HUDWindowController(manager: manager, settings: settings)
     observeSnapshot()
   }
 
@@ -32,8 +32,8 @@ final class HUDWindowPresenter {
 private final class HUDWindowController: NSWindowController {
   private let hostingController: NSHostingController<HUDWindowContent>
 
-  init(manager: HUDManager) {
-    let content = HUDWindowContent(manager: manager)
+  init(manager: HUDManager, settings: AppSettings) {
+    let content = HUDWindowContent(manager: manager, settings: settings)
     self.hostingController = NSHostingController(rootView: content)
 
     let frame = NSScreen.main?.frame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
@@ -79,11 +79,13 @@ private final class HUDWindowController: NSWindowController {
 
 private struct HUDWindowContent: View {
   @ObservedObject var manager: HUDManager
+  @ObservedObject var settings: AppSettings
 
   var body: some View {
     ZStack {
       Color.clear
       HUDOverlay(manager: manager)
+        .environmentObject(settings)
         .padding(.horizontal, 72)
         .padding(.bottom, 72)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)

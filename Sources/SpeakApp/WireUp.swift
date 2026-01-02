@@ -258,7 +258,7 @@ enum WireUp {
       personalLexicon: personalLexicon,
       openRouterClient: openRouter
     )
-    let hudPresenter = HUDWindowPresenter(manager: hud)
+    let hudPresenter = HUDWindowPresenter(manager: hud, settings: settings)
     let shortcuts = ShortcutManager(permissionsManager: permissions)
 
     let environment = AppEnvironment(

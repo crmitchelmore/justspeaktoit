@@ -4,33 +4,56 @@ import SwiftUI
 @main
 struct SpeakApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var environment = WireUp.bootstrap()
+    @StateObject private var environmentHolder = EnvironmentHolder()
 
     var body: some Scene {
         WindowGroup("Speak") {
-            MainView()
-                .environmentObject(environment)
-                .environmentObject(environment.settings)
-                .environmentObject(environment.history)
-                .environmentObject(environment.personalLexicon)
-                .environmentObject(environment.audioDevices)
-                .environmentObject(environment.tts)
-                .environmentObject(environment.shortcuts)
-                .onAppear {
-                    appDelegate.environment = environment
-                    environment.configureShortcutHandlers()
-                    environment.installMenuBar()
-                    environment.installDockMenu()
-                    environment.installServices()
-                    if #available(macOS 10.12.2, *) {
-                        environment.installTouchBar()
-                    }
+            Group {
+                if let environment = environmentHolder.environment {
+                    MainView()
+                        .environmentObject(environment)
+                        .environmentObject(environment.settings)
+                        .environmentObject(environment.history)
+                        .environmentObject(environment.personalLexicon)
+                        .environmentObject(environment.audioDevices)
+                        .environmentObject(environment.tts)
+                        .environmentObject(environment.shortcuts)
+                        .onAppear {
+                            appDelegate.environment = environment
+                            environment.configureShortcutHandlers()
+                            environment.installMenuBar()
+                            environment.installDockMenu()
+                            environment.installServices()
+                            if #available(macOS 10.12.2, *) {
+                                environment.installTouchBar()
+                            }
+                        }
+                } else {
+                    ProgressView("Loading...")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .task {
+                            environmentHolder.bootstrap()
+                        }
                 }
+            }
         }
         .defaultSize(width: 1080, height: 720)
         .commands {
-            SpeakCommands(environment: environment)
+            if let environment = environmentHolder.environment {
+                SpeakCommands(environment: environment)
+            }
         }
+    }
+}
+
+/// Holds the AppEnvironment and defers its creation until after SwiftUI's graph is ready.
+@MainActor
+final class EnvironmentHolder: ObservableObject {
+    @Published var environment: AppEnvironment?
+
+    func bootstrap() {
+        guard environment == nil else { return }
+        environment = WireUp.bootstrap()
     }
 }
 

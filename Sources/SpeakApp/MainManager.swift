@@ -305,16 +305,32 @@ final class MainManager: ObservableObject {
       session.recordingEnded = summary.startedAt.addingTimeInterval(summary.duration)
 
       if appSettings.transcriptionMode == .liveNative {
-        session.transcriptionStarted = Date()
-        hudManager.beginTranscribing()
-        let result = try await transcriptionManager.stopLiveTranscription()
-        session.transcriptionEnded = Date()
-        session.transcriptionResult = result
-        session.modelsUsed.insert(result.modelIdentifier)
-        session.modelUsages.append(ModelUsage(modelIdentifier: result.modelIdentifier, phase: .transcriptionLive))
-        session.events.append(
-          HistoryEvent(kind: .transcriptionReceived, description: "Live transcription complete")
-        )
+        if transcriptionManager.isLiveTranscribing {
+          session.transcriptionStarted = Date()
+          hudManager.beginTranscribing()
+          let result = try await transcriptionManager.stopLiveTranscription()
+          session.transcriptionEnded = Date()
+          session.transcriptionResult = result
+          session.modelsUsed.insert(result.modelIdentifier)
+          session.modelUsages.append(ModelUsage(modelIdentifier: result.modelIdentifier, phase: .transcriptionLive))
+          session.events.append(
+            HistoryEvent(kind: .transcriptionReceived, description: "Live transcription complete")
+          )
+        } else {
+          // Live transcription failed to start (e.g., missing API key)
+          session.errors.append(
+            HistoryError(
+              phase: .transcription,
+              message: "Live transcription was not running",
+              debugDescription: "The live transcription session failed to start. Check API keys and permissions."
+            )
+          )
+          cleanupAfterFailure(
+            message: "Live transcription failed to start. Please check your API key in Settings.",
+            preserveFile: true
+          )
+          return
+        }
       } else {
         hudManager.beginTranscribing()
         session.transcriptionStarted = Date()

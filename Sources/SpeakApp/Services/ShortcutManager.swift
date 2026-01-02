@@ -386,7 +386,7 @@ final class ShortcutManager: ObservableObject {
 
             var hotKeyRef: EventHotKeyRef?
             let carbonModifiers = carbonModifierFlags(from: binding.modifiers)
-            let hotKeyID = EventHotKeyID(signature: 0x5350_4B00, id: UInt32(action.hashValue))  // "SPK" signature
+            let hotKeyID = EventHotKeyID(signature: 0x5350_4B00, id: UInt32(bitPattern: Int32(truncatingIfNeeded: action.hashValue)))  // "SPK" signature
 
             let status = RegisterEventHotKey(
                 UInt32(binding.keyCode),
@@ -398,7 +398,7 @@ final class ShortcutManager: ObservableObject {
             )
 
             if status == noErr, let ref = hotKeyRef {
-                globalEventHandlers[UInt32(action.hashValue)] = ref
+                globalEventHandlers[UInt32(bitPattern: Int32(truncatingIfNeeded: action.hashValue))] = ref
             }
         }
     }

@@ -21,13 +21,26 @@ struct HistoryStatistics: Equatable {
   let sessionsWithErrors: Int
 }
 
-/// Lightweight metadata for calculating statistics without loading full items
-private struct HistoryItemMetadata: Codable {
+/// WAL entry representing a pending history operation
+private struct WALEntry: Codable {
+  enum Operation: String, Codable {
+    case append
+    case update
+    case remove
+    case removeAll
+  }
+
   let id: UUID
-  let createdAt: Date
-  let recordingDuration: TimeInterval
-  let costTotal: Decimal?
-  let hasErrors: Bool
+  let operation: Operation
+  let item: HistoryItem?
+  let timestamp: Date
+
+  init(operation: Operation, item: HistoryItem? = nil) {
+    self.id = UUID()
+    self.operation = operation
+    self.item = item
+    self.timestamp = Date()
+  }
 }
 
 @MainActor
@@ -46,18 +59,37 @@ final class HistoryManager: ObservableObject {
   let pageSize: Int
 
   private let storageURL: URL
+  private let walURL: URL
   private let encoder: JSONEncoder
   private let decoder: JSONDecoder
   private let log = Logger(subsystem: "com.github.speakapp", category: "HistoryManager")
 
-  /// All items stored on disk, sorted by createdAt descending
-  private var allItemsOnDisk: [HistoryItem] = []
-  /// Cached statistics calculated from all items
-  private var cachedStatistics: HistoryStatistics?
+  /// Pending writes waiting to be flushed
+  private var pendingWrites: [WALEntry] = []
 
-  init(fileManager: FileManager = .default, pageSize: Int = 50) {
-    self.pageSize = pageSize
+  /// Timer for periodic flushing
+  private var flushTimer: Timer?
 
+  /// Maximum number of pending writes before forcing a flush
+  nonisolated static let defaultBatchSizeThreshold = 10
+
+  /// Default flush interval in seconds
+  nonisolated static let defaultFlushInterval: TimeInterval = 5.0
+
+  /// Configurable flush interval
+  var flushInterval: TimeInterval {
+    didSet {
+      scheduleFlushTimer()
+    }
+  }
+
+  /// Batch size threshold for triggering flush
+  var batchSizeThreshold: Int
+
+  /// Flag to track if we're currently flushing
+  private var isFlushing = false
+
+  init(fileManager: FileManager = .default, flushInterval: TimeInterval = defaultFlushInterval, batchSizeThreshold: Int = defaultBatchSizeThreshold) {
     let supportURL =
       fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
       ?? fileManager.homeDirectoryForCurrentUser
@@ -67,19 +99,203 @@ final class HistoryManager: ObservableObject {
       try? fileManager.createDirectory(at: historyDir, withIntermediateDirectories: true)
     }
     storageURL = historyDir.appendingPathComponent("history-log.json", isDirectory: false)
+    walURL = historyDir.appendingPathComponent("history-wal.json", isDirectory: false)
 
     encoder = JSONEncoder()
     encoder.dateEncodingStrategy = .iso8601
     decoder = JSONDecoder()
     decoder.dateDecodingStrategy = .iso8601
 
+    self.flushInterval = flushInterval
+    self.batchSizeThreshold = batchSizeThreshold
+
     Task {
       await loadFromDisk()
+      scheduleFlushTimer()
+    }
+
+    registerForTerminationNotification()
+  }
+
+  deinit {
+    flushTimer?.invalidate()
+  }
+
+  // MARK: - Termination Handling
+
+  private func registerForTerminationNotification() {
+    NotificationCenter.default.addObserver(
+      forName: NSApplication.willTerminateNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      guard let self else { return }
+      Task { @MainActor in
+        await self.flushImmediately()
+      }
     }
   }
 
-  func loadFromDisk() async {
+  // MARK: - Flush Timer Management
+
+  private func scheduleFlushTimer() {
+    flushTimer?.invalidate()
+    flushTimer = Timer.scheduledTimer(withTimeInterval: flushInterval, repeats: true) { [weak self] _ in
+      guard let self else { return }
+      Task { @MainActor in
+        await self.flushIfNeeded()
+      }
+    }
+  }
+
+  // MARK: - WAL Operations
+
+  /// Append an entry to the WAL file
+  private func appendToWAL(_ entry: WALEntry) async {
+    pendingWrites.append(entry)
+
     do {
+      var walEntries: [WALEntry] = []
+      if FileManager.default.fileExists(atPath: walURL.path) {
+        let data = try Data(contentsOf: walURL)
+        walEntries = (try? decoder.decode([WALEntry].self, from: data)) ?? []
+      }
+      walEntries.append(entry)
+      let data = try encoder.encode(walEntries)
+      try data.write(to: walURL, options: [.atomic])
+    } catch {
+      log.error("Failed to append to WAL: \(error.localizedDescription, privacy: .public)")
+    }
+
+    // Check if we should flush based on batch size
+    if pendingWrites.count >= batchSizeThreshold {
+      await flushIfNeeded()
+    }
+  }
+
+  /// Replay WAL entries and merge into main storage
+  private func replayWAL() async -> [HistoryItem] {
+    guard FileManager.default.fileExists(atPath: walURL.path) else {
+      return []
+    }
+
+    do {
+      let data = try Data(contentsOf: walURL)
+      let walEntries = try decoder.decode([WALEntry].self, from: data)
+
+      if walEntries.isEmpty {
+        return []
+      }
+
+      log.info("Replaying \(walEntries.count) WAL entries")
+
+      // Load current items from disk
+      var currentItems: [HistoryItem] = []
+      if FileManager.default.fileExists(atPath: storageURL.path) {
+        let storageData = try Data(contentsOf: storageURL)
+        currentItems = (try? decoder.decode([HistoryItem].self, from: storageData)) ?? []
+      }
+
+      // Apply WAL entries
+      for entry in walEntries {
+        switch entry.operation {
+        case .append:
+          if let item = entry.item {
+            // Check for duplicates
+            if !currentItems.contains(where: { $0.id == item.id }) {
+              currentItems.insert(item, at: 0)
+            }
+          }
+        case .update:
+          if let item = entry.item,
+             let index = currentItems.firstIndex(where: { $0.id == item.id }) {
+            currentItems[index] = item
+          }
+        case .remove:
+          if let item = entry.item {
+            currentItems.removeAll { $0.id == item.id }
+          }
+        case .removeAll:
+          currentItems.removeAll()
+        }
+      }
+
+      // Persist merged state
+      let mergedData = try encoder.encode(currentItems)
+      try mergedData.write(to: storageURL, options: [.atomic])
+
+      // Clear WAL after successful merge
+      try FileManager.default.removeItem(at: walURL)
+
+      log.info("WAL replay complete, cleared WAL file")
+
+      return currentItems
+
+    } catch {
+      log.error("Failed to replay WAL: \(error.localizedDescription, privacy: .public)")
+      return []
+    }
+  }
+
+  /// Clear the WAL file
+  private func clearWAL() {
+    do {
+      if FileManager.default.fileExists(atPath: walURL.path) {
+        try FileManager.default.removeItem(at: walURL)
+      }
+    } catch {
+      log.error("Failed to clear WAL: \(error.localizedDescription, privacy: .public)")
+    }
+  }
+
+  // MARK: - Flush Operations
+
+  /// Flush pending writes if there are any
+  private func flushIfNeeded() async {
+    guard !pendingWrites.isEmpty, !isFlushing else { return }
+    await flushImmediately()
+  }
+
+  /// Force immediate flush of all pending writes
+  func flushImmediately() async {
+    guard !isFlushing else { return }
+    isFlushing = true
+    defer { isFlushing = false }
+
+    guard !pendingWrites.isEmpty else { return }
+
+    log.info("Flushing \(self.pendingWrites.count) pending writes to disk")
+
+    do {
+      let data = try encoder.encode(items)
+      try data.write(to: storageURL, options: [.atomic])
+
+      // Clear pending writes and WAL after successful persist
+      pendingWrites.removeAll()
+      clearWAL()
+
+      log.info("Flush complete")
+    } catch {
+      log.error("Failed to flush history: \(error.localizedDescription, privacy: .public)")
+    }
+  }
+
+  // MARK: - Public API
+
+  func loadFromDisk() async {
+    // First replay any WAL entries from a previous crash
+    let walItems = await replayWAL()
+
+    do {
+      if !walItems.isEmpty {
+        // WAL was replayed, use those items
+        await MainActor.run {
+          self.items = walItems.sorted { $0.createdAt > $1.createdAt }
+          self.statistics = self.calculateStatistics(for: walItems)
+        }
+        return
+      }
+
       guard FileManager.default.fileExists(atPath: storageURL.path) else {
         await MainActor.run {
           self.allItemsOnDisk = []
@@ -129,65 +345,43 @@ final class HistoryManager: ObservableObject {
   }
 
   func append(_ item: HistoryItem) async {
-    // Insert into full list at beginning
-    allItemsOnDisk.insert(item, at: 0)
+    var current = items
+    current.insert(item, at: 0)
+    items = current
+    statistics = calculateStatistics(for: current)
 
-    // Update displayed items (prepend to visible list)
-    items.insert(item, at: 0)
-
-    // Recalculate statistics incrementally
-    updateStatisticsForAppend(item)
-
-    // Update hasMoreItems based on new counts
-    hasMoreItems = items.count < allItemsOnDisk.count
-
-    await persist(items: allItemsOnDisk)
+    // Write to WAL instead of directly to disk
+    await appendToWAL(WALEntry(operation: .append, item: item))
   }
 
   func update(_ item: HistoryItem) async {
-    // Update in full list
-    if let diskIndex = allItemsOnDisk.firstIndex(where: { $0.id == item.id }) {
-      let oldItem = allItemsOnDisk[diskIndex]
-      allItemsOnDisk[diskIndex] = item
-      allItemsOnDisk.sort { $0.createdAt > $1.createdAt }
+    guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
+    var updated = items
+    updated[index] = item
+    items = updated.sorted { $0.createdAt > $1.createdAt }
+    statistics = calculateStatistics(for: updated)
 
-      // Update statistics incrementally
-      updateStatisticsForUpdate(oldItem: oldItem, newItem: item)
-    }
-
-    // Update in displayed items if visible
-    if let index = items.firstIndex(where: { $0.id == item.id }) {
-      items[index] = item
-      items.sort { $0.createdAt > $1.createdAt }
-    }
-
-    await persist(items: allItemsOnDisk)
+    // Write to WAL instead of directly to disk
+    await appendToWAL(WALEntry(operation: .update, item: item))
   }
 
   func remove(id: UUID) async {
-    // Remove from full list and update statistics
-    if let diskIndex = allItemsOnDisk.firstIndex(where: { $0.id == id }) {
-      let removedItem = allItemsOnDisk[diskIndex]
-      allItemsOnDisk.remove(at: diskIndex)
-      updateStatisticsForRemove(removedItem)
-    }
+    guard let item = items.first(where: { $0.id == id }) else { return }
+    let updated = items.filter { $0.id != id }
+    items = updated
+    statistics = calculateStatistics(for: updated)
 
-    // Remove from displayed items
-    items.removeAll { $0.id == id }
-
-    // Update hasMoreItems
-    hasMoreItems = items.count < allItemsOnDisk.count
-
-    await persist(items: allItemsOnDisk)
+    // Write to WAL instead of directly to disk
+    await appendToWAL(WALEntry(operation: .remove, item: item))
   }
 
   func removeAll() async {
     allItemsOnDisk = []
     items = []
-    hasMoreItems = false
-    cachedStatistics = calculateStatistics(for: [])
-    statistics = cachedStatistics!
-    await persist(items: [])
+    statistics = calculateStatistics(for: [])
+
+    // Write to WAL instead of directly to disk
+    await appendToWAL(WALEntry(operation: .removeAll))
   }
 
   func deleteHistoryItem(_ item: HistoryItem) async {
@@ -233,15 +427,6 @@ final class HistoryManager: ObservableObject {
       }
 
       return true
-    }
-  }
-
-  private func persist(items: [HistoryItem]) async {
-    do {
-      let data = try encoder.encode(items)
-      try data.write(to: storageURL, options: [.atomic])
-    } catch {
-      log.error("Failed to persist history: \(error.localizedDescription, privacy: .public)")
     }
   }
 

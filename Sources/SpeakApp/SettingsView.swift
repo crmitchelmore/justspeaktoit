@@ -361,6 +361,35 @@ struct SettingsView: View {
         }
       }
       .speakTooltip("Manage where your audio lives and tidy up archives when you're ready.")
+
+      SettingsCard(title: "Advanced", systemImage: "gearshape.2", tint: Color.gray) {
+        VStack(alignment: .leading, spacing: 12) {
+          VStack(alignment: .leading, spacing: 6) {
+            HStack {
+              Text("History Flush Interval")
+              Spacer()
+              Text(
+                settings.historyFlushInterval, format: .number.precision(.fractionLength(1))
+              )
+              .font(.caption.monospacedDigit())
+              .foregroundStyle(.secondary)
+              Text("sec")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            Slider(
+              value: settingsBinding(\AppSettings.historyFlushInterval),
+              in: 1...30,
+              step: 1
+            )
+            .speakTooltip("Control how often Speak writes history to disk. Lower values save more frequently but may impact performance.")
+            Text("How often pending history writes are flushed to disk. Lower values reduce potential data loss but increase I/O.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+        }
+      }
+      .speakTooltip("Fine-tune advanced performance settings for power users.")
     }
   }
 

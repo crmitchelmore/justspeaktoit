@@ -15,6 +15,8 @@ struct HistoryView: View {
     averageSessionLength: 0,
     sessionsWithErrors: 0
   )
+  @State private var hasMoreItems: Bool = false
+  @State private var isLoadingMore: Bool = false
 
   private var filteredItems: [HistoryItem] {
     var filter = HistoryFilter.none
@@ -35,6 +37,40 @@ struct HistoryView: View {
               ForEach(filteredItems) { item in
                 HistoryListRow(item: item)
                   .id(item.id)
+                  .onAppear {
+                    // Trigger loadMore when approaching the last item
+                    if item.id == filteredItems.last?.id {
+                      loadMoreIfNeeded()
+                    }
+                  }
+              }
+
+              // Loading indicator at the bottom
+              if isLoadingMore {
+                HStack {
+                  Spacer()
+                  ProgressView()
+                    .controlSize(.regular)
+                  Text("Loading more...")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                  Spacer()
+                }
+                .padding(.vertical, 16)
+              } else if hasMoreItems && !filteredItems.isEmpty {
+                // Show a "Load More" button as fallback
+                HStack {
+                  Spacer()
+                  Button {
+                    loadMoreIfNeeded()
+                  } label: {
+                    Label("Load More", systemImage: "arrow.down.circle")
+                  }
+                  .buttonStyle(.bordered)
+                  .controlSize(.regular)
+                  Spacer()
+                }
+                .padding(.vertical, 16)
               }
             }
             .animation(.spring(response: 0.28, dampingFraction: 0.88), value: filteredItems)
@@ -46,6 +82,8 @@ struct HistoryView: View {
       .onAppear {
         historyItems = environment.history.items
         historyStats = environment.history.statistics
+        hasMoreItems = environment.history.hasMoreItems
+        isLoadingMore = environment.history.isLoadingMore
       }
       .onReceive(environment.history.$items) { items in
         let previous = historyItems
@@ -67,6 +105,12 @@ struct HistoryView: View {
           historyStats = stats
         }
       }
+      .onReceive(environment.history.$hasMoreItems) { more in
+        hasMoreItems = more
+      }
+      .onReceive(environment.history.$isLoadingMore) { loading in
+        isLoadingMore = loading
+      }
     }
     .background(
       LinearGradient(
@@ -76,6 +120,13 @@ struct HistoryView: View {
       )
       .ignoresSafeArea()
     )
+  }
+
+  private func loadMoreIfNeeded() {
+    guard hasMoreItems, !isLoadingMore else { return }
+    Task {
+      await environment.history.loadMore()
+    }
   }
 
   private var header: some View {

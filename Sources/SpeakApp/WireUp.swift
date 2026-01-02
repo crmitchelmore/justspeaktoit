@@ -18,6 +18,8 @@ final class AppEnvironment: ObservableObject {
   let openRouter: OpenRouterAPIClient
   let personalLexicon: PersonalLexiconService
   let pronunciationManager: PronunciationManager
+  let livePolish: LivePolishManager
+  let liveTextInserter: LiveTextInserter
   let main: MainManager
   private let hudPresenter: HUDWindowPresenter
 
@@ -46,6 +48,8 @@ final class AppEnvironment: ObservableObject {
     openRouter: OpenRouterAPIClient,
     personalLexicon: PersonalLexiconService,
     pronunciationManager: PronunciationManager,
+    livePolish: LivePolishManager,
+    liveTextInserter: LiveTextInserter,
     main: MainManager,
     hudPresenter: HUDWindowPresenter
   ) {
@@ -64,6 +68,8 @@ final class AppEnvironment: ObservableObject {
     self.openRouter = openRouter
     self.personalLexicon = personalLexicon
     self.pronunciationManager = pronunciationManager
+    self.livePolish = livePolish
+    self.liveTextInserter = liveTextInserter
     self.main = main
     self.hudPresenter = hudPresenter
   }
@@ -246,6 +252,11 @@ enum WireUp {
       clients: ttsClients,
       pronunciationManager: pronunciationManager
     )
+    let livePolish = LivePolishManager(client: openRouter, settings: settings)
+    let liveTextInserter = LiveTextInserter(
+      permissionsManager: permissions,
+      appSettings: settings
+    )
     let main = MainManager(
       appSettings: settings,
       permissionsManager: permissions,
@@ -256,7 +267,9 @@ enum WireUp {
       historyManager: history,
       hudManager: hud,
       personalLexicon: personalLexicon,
-      openRouterClient: openRouter
+      openRouterClient: openRouter,
+      livePolishManager: livePolish,
+      liveTextInserter: liveTextInserter
     )
     let hudPresenter = HUDWindowPresenter(manager: hud, settings: settings)
     let shortcuts = ShortcutManager(permissionsManager: permissions)
@@ -277,6 +290,8 @@ enum WireUp {
       openRouter: openRouter,
       personalLexicon: personalLexicon,
       pronunciationManager: pronunciationManager,
+      livePolish: livePolish,
+      liveTextInserter: liveTextInserter,
       main: main,
       hudPresenter: hudPresenter
     )

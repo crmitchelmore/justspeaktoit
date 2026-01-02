@@ -102,6 +102,46 @@ final class AppSettings: ObservableObject {
     }
   }
 
+  enum SpeedMode: String, CaseIterable, Identifiable {
+    case instant       // Mode A: Raw, no LLM
+    case livePolish    // Mode B: Incremental tail rewrite
+    case liveStructured // Mode C: Lightweight formatting
+    case utteranceFinalize // Mode D: Boundary-triggered heavy pass
+
+    var id: String { rawValue }
+
+    var displayName: String {
+      switch self {
+      case .instant:
+        return "Instant (Raw)"
+      case .livePolish:
+        return "Live Polish"
+      case .liveStructured:
+        return "Live Structured"
+      case .utteranceFinalize:
+        return "Utterance Finalize"
+      }
+    }
+
+    var usesLivePolish: Bool {
+      switch self {
+      case .instant, .utteranceFinalize:
+        return false
+      case .livePolish, .liveStructured:
+        return true
+      }
+    }
+
+    var usesBoundaryFinalize: Bool {
+      switch self {
+      case .utteranceFinalize:
+        return true
+      case .instant, .livePolish, .liveStructured:
+        return false
+      }
+    }
+  }
+
   enum DefaultsKey: String {
     case appearance
     case transcriptionMode
@@ -146,6 +186,12 @@ final class AppSettings: ObservableObject {
     case postProcessingStreamingEnabled
     case hudSizePreference
     case showLiveTranscriptInHUD
+    case speedMode
+    case livePolishModel
+    case livePolishDebounceMs
+    case livePolishMinDeltaChars
+    case livePolishTailWindowChars
+    case skipPostProcessingWithLivePolish
   }
 
   private static let defaultBatchTranscriptionModel = "google/gemini-2.0-flash-001"
@@ -366,6 +412,31 @@ final class AppSettings: ObservableObject {
     didSet { store(hudSizePreference.rawValue, key: .hudSizePreference) }
   }
 
+  // Speed Mode Settings (Live Polish)
+  @Published var speedMode: SpeedMode {
+    didSet { store(speedMode.rawValue, key: .speedMode) }
+  }
+
+  @Published var livePolishModel: String {
+    didSet { store(livePolishModel, key: .livePolishModel) }
+  }
+
+  @Published var livePolishDebounceMs: Int {
+    didSet { store(livePolishDebounceMs, key: .livePolishDebounceMs) }
+  }
+
+  @Published var livePolishMinDeltaChars: Int {
+    didSet { store(livePolishMinDeltaChars, key: .livePolishMinDeltaChars) }
+  }
+
+  @Published var livePolishTailWindowChars: Int {
+    didSet { store(livePolishTailWindowChars, key: .livePolishTailWindowChars) }
+  }
+
+  @Published var skipPostProcessingWithLivePolish: Bool {
+    didSet { store(skipPostProcessingWithLivePolish, key: .skipPostProcessingWithLivePolish) }
+  }
+
   private let defaults: UserDefaults
 
   init(defaults: UserDefaults = .standard) {
@@ -473,6 +544,23 @@ final class AppSettings: ObservableObject {
       HUDSizePreference(
         rawValue: defaults.string(forKey: DefaultsKey.hudSizePreference.rawValue)
           ?? HUDSizePreference.autoExpand.rawValue) ?? .autoExpand
+
+    // Speed Mode Settings (Live Polish)
+    speedMode =
+      SpeedMode(
+        rawValue: defaults.string(forKey: DefaultsKey.speedMode.rawValue)
+          ?? SpeedMode.instant.rawValue) ?? .instant
+    livePolishModel =
+      defaults.string(forKey: DefaultsKey.livePolishModel.rawValue)
+        ?? ""
+    livePolishDebounceMs =
+      defaults.object(forKey: DefaultsKey.livePolishDebounceMs.rawValue) as? Int ?? 500
+    livePolishMinDeltaChars =
+      defaults.object(forKey: DefaultsKey.livePolishMinDeltaChars.rawValue) as? Int ?? 20
+    livePolishTailWindowChars =
+      defaults.object(forKey: DefaultsKey.livePolishTailWindowChars.rawValue) as? Int ?? 600
+    skipPostProcessingWithLivePolish =
+      defaults.object(forKey: DefaultsKey.skipPostProcessingWithLivePolish.rawValue) as? Bool ?? true
 
     // History Settings
     historyFlushInterval =

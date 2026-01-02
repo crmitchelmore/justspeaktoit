@@ -17,8 +17,15 @@ final class MainManager: ObservableObject {
 
   @Published private(set) var state: State = .idle
   @Published private(set) var livePreview: String = ""
+  @Published private(set) var polishedLivePreview: String = ""
+  @Published private(set) var isPolishing: Bool = false
   @Published private(set) var lastErrorMessage: String?
   @Published private(set) var canRetryPostProcessing: Bool = false
+
+  /// Whether live text insertion is enabled based on current settings
+  private var liveInsertionEnabled: Bool {
+    appSettings.speedMode.usesLivePolish && appSettings.textOutputMethod != .clipboardOnly
+  }
 
   private var cachedRetryData: RetryData?
 
@@ -32,6 +39,8 @@ final class MainManager: ObservableObject {
   private let hudManager: HUDManager
   private let personalLexicon: PersonalLexiconService
   private let openRouterClient: OpenRouterAPIClient
+  private let livePolishManager: LivePolishManager
+  private let liveTextInserter: LiveTextInserter
   private let logger = Logger(subsystem: "com.github.speakapp", category: "MainManager")
 
   private var activeSession: ActiveSession?
@@ -60,7 +69,9 @@ final class MainManager: ObservableObject {
     historyManager: HistoryManager,
     hudManager: HUDManager,
     personalLexicon: PersonalLexiconService,
-    openRouterClient: OpenRouterAPIClient
+    openRouterClient: OpenRouterAPIClient,
+    livePolishManager: LivePolishManager,
+    liveTextInserter: LiveTextInserter
   ) {
     self.appSettings = appSettings
     self.permissionsManager = permissionsManager
@@ -72,11 +83,13 @@ final class MainManager: ObservableObject {
     self.hudManager = hudManager
     self.personalLexicon = personalLexicon
     self.openRouterClient = openRouterClient
+    self.livePolishManager = livePolishManager
+    self.liveTextInserter = liveTextInserter
 
     transcriptionManager.$livePartialText
       .receive(on: RunLoop.main)
       .sink { [weak self] text in
-        self?.livePreview = text
+        self?.handleLiveTextUpdate(text)
       }
       .store(in: &cancellables)
 
@@ -92,7 +105,47 @@ final class MainManager: ObservableObject {
     }
     .store(in: &cancellables)
 
+    // Subscribe to live polish updates
+    livePolishManager.$polishedTail
+      .receive(on: RunLoop.main)
+      .sink { [weak self] polished in
+        self?.polishedLivePreview = polished
+      }
+      .store(in: &cancellables)
+
+    livePolishManager.$isPolishing
+      .receive(on: RunLoop.main)
+      .sink { [weak self] isPolishing in
+        self?.isPolishing = isPolishing
+      }
+      .store(in: &cancellables)
+
+    // Connect live polish completion to live text inserter
+    livePolishManager.onPolishComplete = { [weak self] polished in
+      guard let self, self.liveInsertionEnabled, self.liveTextInserter.isActive else { return }
+      self.liveTextInserter.update(with: polished)
+    }
+
     configureHotKeys()
+  }
+
+  /// Handle live text updates and trigger live polish if enabled
+  private func handleLiveTextUpdate(_ text: String) {
+    livePreview = text
+
+    // Live insertion during recording (for streaming + accessibility mode)
+    if state == .recording && liveInsertionEnabled {
+      liveTextInserter.update(with: text)
+    }
+
+    // Trigger live polish if speed mode uses it
+    guard appSettings.speedMode.usesLivePolish else { return }
+    guard state == .recording else { return }
+
+    livePolishManager.textDidChange(
+      stableContext: "",  // Simplified - no transcript state model yet
+      tailText: text
+    )
   }
 
   var isBusy: Bool {
@@ -238,12 +291,24 @@ final class MainManager: ObservableObject {
     activeSession = session
     state = .recording
     lastErrorMessage = nil
+    polishedLivePreview = ""
     session.events.append(
       HistoryEvent(
         kind: .recordingStarted,
         description: "Recording started via \(gesture.rawValue)"
       )
     )
+
+    // Reset live polish for new session
+    livePolishManager.reset()
+
+    // Start live text insertion if enabled
+    if liveInsertionEnabled {
+      liveTextInserter.begin()
+      if !liveTextInserter.isActive {
+        logger.warning("Live text insertion failed to start - will use clipboard fallback")
+      }
+    }
 
     if appSettings.showHUDDuringSessions {
       hudManager.beginRecording()
@@ -472,46 +537,61 @@ final class MainManager: ObservableObject {
       if postProcessingFailureNotice == nil {
         hudManager.beginDelivering()
       }
-      let output = SmartTextOutput(permissionsManager: permissionsManager, appSettings: appSettings)
-      let outputResult = output.output(text: finalText)
-      session.outputMethod = outputResult.method
-      session.outputDelivered = Date()
 
-      if let error = outputResult.error {
-        session.errors.append(
-          HistoryError(
-            phase: .output,
-            message: "Failed to deliver text",
-            debugDescription: error.localizedDescription
-          )
-        )
-        hudManager.finishFailure(headline: "Delivery failed", message: error.localizedDescription)
-        state = .failed(error.localizedDescription)
-        lastErrorMessage = error.localizedDescription
+      // Handle live text insertion finalization
+      if liveInsertionEnabled && liveTextInserter.isActive {
+        // Apply polished final text via live inserter
+        liveTextInserter.applyPolishedFinal(finalText)
+        liveTextInserter.end()
+        session.outputMethod = .accessibility
       } else {
-        session.events.append(
-          HistoryEvent(kind: .outputDelivered, description: "Output delivered successfully")
-        )
-        let appName = NSWorkspace.shared.frontmostApplication?.localizedName
-        session.destination = appName
-        session.lexiconContext = makeLexiconContext(for: finalText, destination: appName)
-        if let summary = session.personalCorrections {
-          session.personalCorrections = summary.updatingContext(
-            tags: Array(session.lexiconContext.tags).sorted(),
-            destination: appName
+        let output = SmartTextOutput(permissionsManager: permissionsManager, appSettings: appSettings)
+        let outputResult = output.output(text: finalText)
+        session.outputMethod = outputResult.method
+
+        if let error = outputResult.error {
+          session.errors.append(
+            HistoryError(
+              phase: .output,
+              message: "Failed to deliver text",
+              debugDescription: error.localizedDescription
+            )
           )
-        }
-        let historyItem = session.buildHistoryItem(finalText: finalText)
-        await historyManager.append(historyItem)
-        if let notice = postProcessingFailureNotice {
-          lastErrorMessage = notice.message
-          state = .failed(notice.message)
-        } else {
-          hudManager.finishSuccess(message: "Delivered")
-          state = .completed(historyItem)
+          hudManager.finishFailure(headline: "Delivery failed", message: error.localizedDescription)
+          state = .failed(error.localizedDescription)
+          lastErrorMessage = error.localizedDescription
+          livePolishManager.reset()
+          liveTextInserter.reset()
+          activeSession = nil
+          return
         }
       }
+      session.outputDelivered = Date()
 
+      session.events.append(
+        HistoryEvent(kind: .outputDelivered, description: "Output delivered successfully")
+      )
+      let appName = NSWorkspace.shared.frontmostApplication?.localizedName
+      session.destination = appName
+      session.lexiconContext = makeLexiconContext(for: finalText, destination: appName)
+      if let summary = session.personalCorrections {
+        session.personalCorrections = summary.updatingContext(
+          tags: Array(session.lexiconContext.tags).sorted(),
+          destination: appName
+        )
+      }
+      let historyItem = session.buildHistoryItem(finalText: finalText)
+      await historyManager.append(historyItem)
+      if let notice = postProcessingFailureNotice {
+        lastErrorMessage = notice.message
+        state = .failed(notice.message)
+      } else {
+        hudManager.finishSuccess(message: "Delivered")
+        state = .completed(historyItem)
+      }
+
+      livePolishManager.reset()
+      liveTextInserter.reset()
       activeSession = nil
     } catch {
       session.errors.append(
@@ -961,6 +1041,8 @@ final class MainManager: ObservableObject {
     hudManager.finishFailure(message: message)
     state = .failed(message)
     stopAudioLevelMonitoring()
+    livePolishManager.reset()
+    liveTextInserter.reset()
     Task {
       await audioFileManager.cancelRecording(deleteFile: !preserveFile)
       if let session = activeSession {

@@ -129,7 +129,7 @@ actor DeepgramTTSClient: TextToSpeechClient {
 
     private func containerFormat(for format: AudioFormat) -> String {
         switch format {
-        case .mp3: return "mp3"
+        case .mp3: return "none"  // Raw MP3 stream (Deepgram containers: wav|ogg|none)
         case .m4a: return "none"  // Raw AAC
         case .wav: return "wav"
         }

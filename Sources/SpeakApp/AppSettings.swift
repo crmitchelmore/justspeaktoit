@@ -180,6 +180,7 @@ final class AppSettings: ObservableObject {
     case trackedKeyIdentifiers
     case preferredLocale
     case postRecordingTailDuration
+    case deepgramStopGracePeriod
     case preferredAudioInputUID
     case defaultTTSVoice
     case ttsSpeed
@@ -351,6 +352,10 @@ final class AppSettings: ObservableObject {
 
   @Published var postRecordingTailDuration: TimeInterval {
     didSet { store(postRecordingTailDuration, key: .postRecordingTailDuration) }
+  }
+
+  @Published var deepgramStopGracePeriod: TimeInterval {
+    didSet { store(deepgramStopGracePeriod, key: .deepgramStopGracePeriod) }
   }
 
   @Published private(set) var trackedAPIKeyIdentifiers: [String] {
@@ -556,6 +561,8 @@ final class AppSettings: ObservableObject {
       defaults.object(forKey: DefaultsKey.doubleTapWindow.rawValue) as? Double ?? 0.4
     postRecordingTailDuration =
       defaults.object(forKey: DefaultsKey.postRecordingTailDuration.rawValue) as? Double ?? 0.5
+    deepgramStopGracePeriod =
+      defaults.object(forKey: DefaultsKey.deepgramStopGracePeriod.rawValue) as? Double ?? 0
     trackedAPIKeyIdentifiers =
       defaults.array(forKey: DefaultsKey.trackedKeyIdentifiers.rawValue) as? [String] ?? []
 

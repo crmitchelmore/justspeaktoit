@@ -400,6 +400,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
   weak var delegate: LiveTranscriptionSessionDelegate?
   private(set) var isRunning: Bool = false
 
+  private let appSettings: AppSettings
   private let permissionsManager: PermissionsManager
   private let audioDeviceManager: AudioInputDeviceManager
   private let secureStorage: SecureAppStorage
@@ -422,10 +423,12 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
   private var fullTranscript: String = ""
 
   init(
+    appSettings: AppSettings,
     permissionsManager: PermissionsManager,
     audioDeviceManager: AudioInputDeviceManager,
     secureStorage: SecureAppStorage
   ) {
+    self.appSettings = appSettings
     self.permissionsManager = permissionsManager
     self.audioDeviceManager = audioDeviceManager
     self.secureStorage = secureStorage
@@ -603,8 +606,18 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
 
     audioEngine.stop()
     audioEngine.inputNode.removeTap(onBus: 0)
-    transcriber?.stop()
     isRunning = false
+
+    let gracePeriod = max(appSettings.deepgramStopGracePeriod, 0)
+    if gracePeriod > 0 {
+      do {
+        try await Task.sleep(nanoseconds: UInt64(gracePeriod * 1_000_000_000))
+      } catch {
+        // Ignored: sleep cancellation simply means we stop immediately.
+      }
+    }
+
+    transcriber?.stop()
 
     // Build final result including any unfinalised interim text
     let result = buildFinalResult()
@@ -692,6 +705,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       audioDeviceManager: audioDeviceManager
     )
     self.deepgramController = DeepgramLiveController(
+      appSettings: appSettings,
       permissionsManager: permissionsManager,
       audioDeviceManager: audioDeviceManager,
       secureStorage: secureStorage

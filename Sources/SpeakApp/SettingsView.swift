@@ -525,6 +525,32 @@ struct SettingsView: View {
       }
       .speakTooltip("Decide how much breathing room Speak gives you after releasing your shortcut.")
 
+      SettingsCard(title: "Deepgram stop grace", systemImage: "waveform.and.mic", tint: Color.indigo) {
+        VStack(alignment: .leading, spacing: 12) {
+          Text("After stopping, keep the Deepgram stream open briefly to capture final words.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+          HStack {
+            Slider(
+              value: settingsBinding(\AppSettings.deepgramStopGracePeriod),
+              in: 0...2,
+              step: 0.1
+            )
+            .speakTooltip("Delay closing the Deepgram live stream after you stop recording.")
+            Text(
+              settings.deepgramStopGracePeriod,
+              format: .number.precision(.fractionLength(1))
+            )
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.secondary)
+            Text("sec")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+        }
+      }
+      .speakTooltip("Helps reduce last-word cutoffs with Deepgram live transcription.")
+
       SettingsCard(title: "Silence detection", systemImage: "waveform.slash", tint: Color.orange) {
         VStack(alignment: .leading, spacing: 12) {
           Toggle(

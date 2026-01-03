@@ -17,6 +17,7 @@ final class DeepgramLiveTranscriber: @unchecked Sendable {
 
     private var onTranscript: ((String, Bool) -> Void)?
     private var onError: ((Error) -> Void)?
+    private var isStopping: Bool = false
 
     init(
         apiKey: String,
@@ -42,6 +43,7 @@ final class DeepgramLiveTranscriber: @unchecked Sendable {
         onTranscript: @escaping (String, Bool) -> Void,
         onError: @escaping (Error) -> Void
     ) {
+        isStopping = false
         self.onTranscript = onTranscript
         self.onError = onError
 
@@ -103,6 +105,9 @@ final class DeepgramLiveTranscriber: @unchecked Sendable {
             self.bufferPool.returnBuffer(&returnBuffer)
 
             if let error {
+                if self.isStopping || self.shouldIgnoreSocketError(error) {
+                    return
+                }
                 self.logger.error("Failed to send audio: \(error.localizedDescription)")
                 self.onError?(error)
             }
@@ -143,6 +148,9 @@ final class DeepgramLiveTranscriber: @unchecked Sendable {
             self.bufferPool.returnBuffer(&returnBuffer)
 
             if let error {
+                if self.isStopping || self.shouldIgnoreSocketError(error) {
+                    return
+                }
                 self.logger.error("Failed to send audio: \(error.localizedDescription)")
                 self.onError?(error)
             }
@@ -151,10 +159,22 @@ final class DeepgramLiveTranscriber: @unchecked Sendable {
 
     /// Stops the transcription session and logs buffer pool metrics.
     func stop() {
+        isStopping = true
         bufferPool.logMetrics()
         webSocketTask?.cancel(with: .normalClosure, reason: nil)
         webSocketTask = nil
         logger.info("Deepgram WebSocket connection closed")
+    }
+
+    private func shouldIgnoreSocketError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        if nsError.domain == NSPOSIXErrorDomain, nsError.code == 57 { // ENOTCONN
+            return true
+        }
+        if nsError.localizedDescription.localizedCaseInsensitiveContains("socket is not connected") {
+            return true
+        }
+        return false
     }
 
     private func receiveMessages() {
@@ -167,6 +187,9 @@ final class DeepgramLiveTranscriber: @unchecked Sendable {
                 self.receiveMessages()
 
             case .failure(let error):
+                if self.isStopping || self.shouldIgnoreSocketError(error) {
+                    return
+                }
                 self.logger.error("WebSocket receive error: \(error.localizedDescription)")
                 self.onError?(error)
             }

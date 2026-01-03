@@ -508,6 +508,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
       onError: { [weak self] error in
         Task { @MainActor [weak self] in
           guard let self else { return }
+          if !self.isRunning { return }
           print("[DeepgramLiveController] ERROR: \(error.localizedDescription)")
           self.delegate?.liveTranscriber(self, didFail: error)
         }

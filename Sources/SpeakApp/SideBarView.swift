@@ -5,7 +5,7 @@ enum SidebarItem: Hashable, Identifiable {
   case history
   case voiceOutput
   case corrections
-  case settings
+  case settings(SettingsTab)
 
   var id: Self { self }
 
@@ -19,8 +19,8 @@ enum SidebarItem: Hashable, Identifiable {
       return "Voice Output"
     case .corrections:
       return "Corrections"
-    case .settings:
-      return "Settings"
+    case .settings(let tab):
+      return LocalizedStringKey(tab.title)
     }
   }
 
@@ -34,8 +34,8 @@ enum SidebarItem: Hashable, Identifiable {
       return "speaker.wave.3"
     case .corrections:
       return "character.book.closed"
-    case .settings:
-      return "gearshape"
+    case .settings(let tab):
+      return tab.systemImage
     }
   }
 
@@ -64,8 +64,8 @@ enum SidebarItem: Hashable, Identifiable {
       return "Convert text to natural speech with various voices and providers."
     case .corrections:
       return "Curate custom name and phrase corrections that stay private to your device."
-    case .settings:
-      return "Adjust Speak's recording, transcription, and shortcut preferences."
+    case .settings(let tab):
+      return "Adjust \(tab.title) preferences."
     }
   }
 }
@@ -76,7 +76,7 @@ struct SideBarView: View {
   var body: some View {
     List {
       Section("Speak") {
-        ForEach([SidebarItem.dashboard, .history, .voiceOutput, .corrections, .settings]) { item in
+        ForEach([SidebarItem.dashboard, .history, .voiceOutput, .corrections]) { item in
           Button {
             selection = item
           } label: {
@@ -99,6 +99,40 @@ struct SideBarView: View {
             selection == item
               ? RoundedRectangle(cornerRadius: 8)
                 .fill(item.color.opacity(0.15))
+              : nil
+          )
+          .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
+          .listRowBackground(Color.clear)
+          .speakTooltip(item.helpMessage)
+        }
+      }
+
+      Section("Settings") {
+        ForEach(SettingsTab.allCases) { tab in
+          let item = SidebarItem.settings(tab)
+          Button {
+            selection = item
+          } label: {
+            HStack(spacing: 12) {
+              Image(systemName: tab.systemImage)
+                .foregroundStyle(Color.orange)
+                .imageScale(.medium)
+                .frame(width: 20)
+              Text(LocalizedStringKey(tab.title))
+                .fontWeight(selection == item ? .semibold : .regular)
+                .foregroundStyle(.primary)
+              Spacer()
+            }
+            .contentShape(Rectangle())
+            .padding(.leading, 10)
+          }
+          .buttonStyle(.plain)
+          .padding(.horizontal, 12)
+          .padding(.vertical, 8)
+          .background(
+            selection == item
+              ? RoundedRectangle(cornerRadius: 8)
+                .fill(Color.orange.opacity(0.15))
               : nil
           )
           .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))

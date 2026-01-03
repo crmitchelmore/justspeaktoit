@@ -38,8 +38,8 @@ struct MainView: View {
     case .corrections:
       PersonalCorrectionsView()
         .environmentObject(personalLexicon)
-    case .settings:
-      SettingsView()
+    case .settings(let tab):
+      SettingsView(tab: tab)
     }
   }
 

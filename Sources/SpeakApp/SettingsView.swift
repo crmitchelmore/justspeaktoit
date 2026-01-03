@@ -1,14 +1,13 @@
 import AppKit
 import SwiftUI
 
-private enum SettingsTab: String, CaseIterable, Identifiable {
+enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
   case general
   case transcription
   case postProcessing
   case voiceOutput
   case pronunciation
   case apiKeys
-  case hotKeys
   case shortcuts
   case permissions
 
@@ -22,9 +21,21 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
     case .voiceOutput: return "Voice Output"
     case .pronunciation: return "Pronunciation"
     case .apiKeys: return "API Keys"
-    case .hotKeys: return "Hotkeys"
-    case .shortcuts: return "Shortcuts"
+    case .shortcuts: return "Keyboard"
     case .permissions: return "Permissions"
+    }
+  }
+
+  var systemImage: String {
+    switch self {
+    case .general: return "gearshape"
+    case .transcription: return "waveform"
+    case .postProcessing: return "wand.and.stars"
+    case .voiceOutput: return "speaker.wave.3"
+    case .pronunciation: return "character.book.closed"
+    case .apiKeys: return "key.fill"
+    case .shortcuts: return "keyboard"
+    case .permissions: return "hand.raised.fill"
     }
   }
 }
@@ -53,7 +64,7 @@ struct SettingsView: View {
     LocaleOption(displayName: "Russian (Russia)", identifier: "ru_RU")
   ]
 
-  @State private var selectedTab: SettingsTab = .general
+  let tab: SettingsTab
   @State private var newAPIKeyValue: String = ""
   @State private var apiKeyValidationState: ValidationViewState = .idle
   @State private var isDeletingRecordings: Bool = false
@@ -134,7 +145,7 @@ struct SettingsView: View {
 
   @ViewBuilder
   private var tabContent: some View {
-    switch selectedTab {
+    switch tab {
     case .general:
       generalSettings
     case .transcription:
@@ -147,10 +158,8 @@ struct SettingsView: View {
       pronunciationSettings
     case .apiKeys:
       apiKeySettings
-    case .hotKeys:
-      hotKeySettings
     case .shortcuts:
-      ShortcutsSettingsView(shortcutManager: environment.shortcuts)
+      keyboardSettings
     case .permissions:
       permissionsSettings
     }
@@ -169,6 +178,10 @@ struct SettingsView: View {
         }
       }
     )
+  }
+
+  init(tab: SettingsTab = .general) {
+    self.tab = tab
   }
 
   private func overviewChip(title: String, value: String, systemImage: String) -> some View {
@@ -191,16 +204,6 @@ struct SettingsView: View {
     ScrollView {
       VStack(alignment: .leading, spacing: 28) {
         overviewHeader
-
-        Picker("Settings", selection: $selectedTab) {
-          ForEach(SettingsTab.allCases) { tab in
-            Text(tab.title).tag(tab)
-          }
-        }
-        .pickerStyle(.segmented)
-        .padding(.horizontal, 6)
-        .speakTooltip("Switch between each area of Speak's preferences.")
-
         tabContent
       }
       .padding(24)
@@ -237,59 +240,6 @@ struct SettingsView: View {
         }
       }
       .speakTooltip("Set Speak's look to match your workspace with light, dark, or system themes.")
-
-      SettingsCard(title: "Processing Speed", systemImage: "gauge.with.dots.needle.67percent", tint: Color.cyan) {
-        VStack(alignment: .leading, spacing: 12) {
-          Text("Choose how Speak processes your transcriptions. Faster modes skip AI cleanup.")
-            .font(.callout)
-            .foregroundStyle(.secondary)
-
-          VStack(spacing: 8) {
-            ForEach(AppSettings.SpeedMode.allCases) { mode in
-              Button {
-                settings.speedMode = mode
-              } label: {
-                HStack(spacing: 12) {
-                  Image(systemName: speedModeIcon(for: mode))
-                    .font(.title3)
-                    .foregroundStyle(settings.speedMode == mode ? .white : .cyan)
-                    .frame(width: 24)
-                  VStack(alignment: .leading, spacing: 2) {
-                    Text(mode.displayName)
-                      .font(.headline)
-                      .foregroundStyle(settings.speedMode == mode ? .white : .primary)
-                    Text(mode.description)
-                      .font(.caption)
-                      .foregroundStyle(settings.speedMode == mode ? .white.opacity(0.8) : .secondary)
-                  }
-                  Spacer()
-                  if settings.speedMode == mode {
-                    Image(systemName: "checkmark.circle.fill")
-                      .foregroundStyle(.white)
-                  }
-                }
-                .padding(12)
-                .background(
-                  RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(settings.speedMode == mode ? Color.cyan : Color(nsColor: .controlBackgroundColor))
-                )
-              }
-              .buttonStyle(.plain)
-            }
-          }
-
-          if settings.speedMode.usesLivePolish {
-            Divider()
-            settingsToggle(
-              "Skip post-processing when live cleanup is active",
-              isOn: settingsBinding(\AppSettings.skipPostProcessingWithLivePolish),
-              tint: .cyan
-            )
-            .speakTooltip("When enabled, the final post-processing step is skipped since text was already cleaned in real-time.")
-          }
-        }
-      }
-      .speakTooltip("Control the trade-off between speed and AI-powered text cleanup.")
 
       SettingsCard(title: "Output", systemImage: "textformat.alt", tint: Color.blue) {
         VStack(alignment: .leading, spacing: 12) {
@@ -495,6 +445,59 @@ struct SettingsView: View {
       }
       .speakTooltip("Choose which transcription flow Speak uses and the locale it should prefer.")
 
+      SettingsCard(title: "Processing Speed", systemImage: "gauge.with.dots.needle.67percent", tint: Color.cyan) {
+        let speedModeAvailable = settings.transcriptionMode == .liveNative
+          && settings.liveTranscriptionModel.contains("streaming")
+
+        VStack(alignment: .leading, spacing: 12) {
+          Text("Auto-clean/format modes require a streaming live transcription model and disable post-processing.")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+
+          if !speedModeAvailable {
+            Text("To enable these modes, select a streaming Live Model (e.g., Deepgram Nova-2 Streaming).")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+
+          VStack(spacing: 8) {
+            ForEach(AppSettings.SpeedMode.allCases) { mode in
+              Button {
+                settings.speedMode = mode
+              } label: {
+                HStack(spacing: 12) {
+                  Image(systemName: speedModeIcon(for: mode))
+                    .font(.title3)
+                    .foregroundStyle(settings.speedMode == mode ? .white : .cyan)
+                    .frame(width: 24)
+                  VStack(alignment: .leading, spacing: 2) {
+                    Text(mode.displayName)
+                      .font(.headline)
+                      .foregroundStyle(settings.speedMode == mode ? .white : .primary)
+                    Text(mode.description)
+                      .font(.caption)
+                      .foregroundStyle(settings.speedMode == mode ? .white.opacity(0.8) : .secondary)
+                  }
+                  Spacer()
+                  if settings.speedMode == mode {
+                    Image(systemName: "checkmark.circle.fill")
+                      .foregroundStyle(.white)
+                  }
+                }
+                .padding(12)
+                .background(
+                  RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(settings.speedMode == mode ? Color.cyan : Color(nsColor: .controlBackgroundColor))
+                )
+              }
+              .buttonStyle(.plain)
+              .disabled(mode != .instant && !speedModeAvailable)
+              .opacity(mode != .instant && !speedModeAvailable ? 0.6 : 1.0)
+            }
+          }
+        }
+      }
+      .speakTooltip("Control the trade-off between speed and AI-powered text cleanup.")
 
       SettingsCard(title: "Recording buffer", systemImage: "waveform.path.ecg", tint: Color.cyan) {
         VStack(alignment: .leading, spacing: 12) {
@@ -672,7 +675,14 @@ struct SettingsView: View {
             isOn: settingsBinding(\AppSettings.postProcessingEnabled),
             tint: .pink
           )
+          .disabled(settings.speedMode != .instant)
           .speakTooltip("Let Speak clean and enhance transcripts automatically before they reach your clipboard.")
+
+          if settings.speedMode != .instant {
+            Text("Post-processing is disabled while Processing Speed is set to \(settings.speedMode.displayName).")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
 
           VStack(alignment: .leading, spacing: 8) {
             Picker("Output Language", selection: settingsBinding(\AppSettings.postProcessingOutputLanguage)) {
@@ -833,13 +843,18 @@ struct SettingsView: View {
                     .font(.caption.monospaced())
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
                 }
-                .frame(height: 200)
-                .padding(12)
+                .scrollIndicators(.visible)
+                .frame(minHeight: 200, maxHeight: 420)
                 .background(
                   RoundedRectangle(cornerRadius: 8)
                     .fill(Color.indigo.opacity(0.05))
                 )
+
+                Text("Scroll to view the full prompt.")
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
                 .overlay(
                   RoundedRectangle(cornerRadius: 8)
                     .stroke(Color.indigo.opacity(0.2), lineWidth: 1)
@@ -1613,6 +1628,13 @@ struct SettingsView: View {
   private func isValidationInFlight(_ state: ValidationViewState) -> Bool {
     if case .validating = state { return true }
     return false
+  }
+
+  private var keyboardSettings: some View {
+    VStack(spacing: 20) {
+      hotKeySettings
+      ShortcutsSettingsView(shortcutManager: environment.shortcuts)
+    }
   }
 
   private var hotKeySettings: some View {

@@ -224,11 +224,17 @@ final class AppSettings: ObservableObject {
   }
 
   @Published var transcriptionMode: TranscriptionMode {
-    didSet { store(transcriptionMode.rawValue, key: .transcriptionMode) }
+    didSet {
+      store(transcriptionMode.rawValue, key: .transcriptionMode)
+      enforceSpeedModeConstraints()
+    }
   }
 
   @Published var liveTranscriptionModel: String {
-    didSet { store(liveTranscriptionModel, key: .liveTranscriptionModel) }
+    didSet {
+      store(liveTranscriptionModel, key: .liveTranscriptionModel)
+      enforceSpeedModeConstraints()
+    }
   }
 
   @Published var batchTranscriptionModel: String {
@@ -258,7 +264,14 @@ final class AppSettings: ObservableObject {
   }
 
   @Published var postProcessingEnabled: Bool {
-    didSet { store(postProcessingEnabled, key: .postProcessingEnabled) }
+    didSet {
+      // Speed modes apply cleanup during recording; post-processing is disabled to avoid double-processing.
+      if postProcessingEnabled && speedMode != .instant {
+        postProcessingEnabled = false
+        return
+      }
+      store(postProcessingEnabled, key: .postProcessingEnabled)
+    }
   }
 
   @Published var postProcessingModel: String {
@@ -427,7 +440,16 @@ final class AppSettings: ObservableObject {
 
   // Speed Mode Settings (Live Polish)
   @Published var speedMode: SpeedMode {
-    didSet { store(speedMode.rawValue, key: .speedMode) }
+    didSet {
+      if speedMode != .instant && !supportsSpeedModeProcessing {
+        speedMode = .instant
+        return
+      }
+      if speedMode != .instant {
+        postProcessingEnabled = false
+      }
+      store(speedMode.rawValue, key: .speedMode)
+    }
   }
 
   @Published var livePolishModel: String {
@@ -448,6 +470,19 @@ final class AppSettings: ObservableObject {
 
   @Published var skipPostProcessingWithLivePolish: Bool {
     didSet { store(skipPostProcessingWithLivePolish, key: .skipPostProcessingWithLivePolish) }
+  }
+
+  private var supportsSpeedModeProcessing: Bool {
+    transcriptionMode == .liveNative && liveTranscriptionModel.contains("streaming")
+  }
+
+  private func enforceSpeedModeConstraints() {
+    if speedMode != .instant && !supportsSpeedModeProcessing {
+      speedMode = .instant
+    }
+    if speedMode != .instant {
+      postProcessingEnabled = false
+    }
   }
 
   private let defaults: UserDefaults

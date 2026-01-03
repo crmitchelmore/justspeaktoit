@@ -151,6 +151,10 @@ struct PhaseTimestamps: Codable, Hashable {
   }
 }
 
+enum HistoryItemSource: String, Codable, Hashable {
+  case importedFile
+}
+
 struct HistoryItem: Codable, Identifiable, Hashable {
   let id: UUID
   let createdAt: Date
@@ -168,6 +172,7 @@ struct HistoryItem: Codable, Identifiable, Hashable {
   let trigger: HistoryTrigger
   let personalCorrections: PersonalLexiconHistorySummary?
   let errors: [HistoryError]
+  let source: HistoryItemSource?
 
   init(
     id: UUID = UUID(), createdAt: Date = .init(), updatedAt: Date = .init(), modelsUsed: [String],
@@ -175,7 +180,8 @@ struct HistoryItem: Codable, Identifiable, Hashable {
     rawTranscription: String?, postProcessedTranscription: String?, recordingDuration: TimeInterval,
     cost: HistoryCost?, audioFileURL: URL?, networkExchanges: [HistoryNetworkExchange],
     events: [HistoryEvent], phaseTimestamps: PhaseTimestamps, trigger: HistoryTrigger,
-    personalCorrections: PersonalLexiconHistorySummary?, errors: [HistoryError]
+    personalCorrections: PersonalLexiconHistorySummary?, errors: [HistoryError],
+    source: HistoryItemSource? = nil
   ) {
     self.id = id
     self.createdAt = createdAt
@@ -193,6 +199,7 @@ struct HistoryItem: Codable, Identifiable, Hashable {
     self.trigger = trigger
     self.personalCorrections = personalCorrections
     self.errors = errors
+    self.source = source
   }
 
   static let placeholder: HistoryItem = .init(

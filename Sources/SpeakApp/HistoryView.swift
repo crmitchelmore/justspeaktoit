@@ -2,6 +2,7 @@ import AVFoundation
 import AppKit
 import Combine
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct HistoryView: View {
   @EnvironmentObject private var environment: AppEnvironment
@@ -20,6 +21,10 @@ struct HistoryView: View {
   )
   @State private var showClearAllConfirmation: Bool = false
   @State private var isClearingAll: Bool = false
+  @State private var showImportFiles: Bool = false
+  @State private var isImportingFiles: Bool = false
+  @State private var showImportAlert: Bool = false
+  @State private var importAlertMessage: String?
 
   private func clearAllHistory(deleteRecordings: Bool) async {
     await MainActor.run { isClearingAll = true }
@@ -31,6 +36,76 @@ struct HistoryView: View {
     }
     await environment.history.removeAll()
     await MainActor.run { isClearingAll = false }
+  }
+
+  @MainActor
+  private func presentImportError(_ message: String) {
+    importAlertMessage = message
+    showImportAlert = true
+  }
+
+  private func importAudioFiles(_ urls: [URL]) async {
+    await MainActor.run { isImportingFiles = true }
+    defer {
+      Task { @MainActor in
+        isImportingFiles = false
+      }
+    }
+
+    guard await environment.transcription.hasValidBatchAPIKey() else {
+      await MainActor.run {
+        presentImportError("Batch transcription requires an API key. Add one in Settings › API Keys.")
+      }
+      return
+    }
+
+    for url in urls {
+      let accessed = url.startAccessingSecurityScopedResource()
+      defer {
+        if accessed {
+          url.stopAccessingSecurityScopedResource()
+        }
+      }
+
+      do {
+        let importedURL = try await environment.audio.importRecording(from: url)
+        let duration = (try? AVAudioPlayer(contentsOf: importedURL).duration) ?? 0
+        let trigger = HistoryTrigger(
+          gesture: .uiButton,
+          hotKeyDescription: "Import",
+          outputMethod: .none,
+          destinationApplication: nil
+        )
+        let placeholder = HistoryItem(
+          modelsUsed: [],
+          rawTranscription: nil,
+          postProcessedTranscription: nil,
+          recordingDuration: duration,
+          cost: nil,
+          audioFileURL: importedURL,
+          networkExchanges: [],
+          events: [],
+          phaseTimestamps: PhaseTimestamps(
+            recordingStarted: nil,
+            recordingEnded: nil,
+            transcriptionStarted: nil,
+            transcriptionEnded: nil,
+            postProcessingStarted: nil,
+            postProcessingEnded: nil,
+            outputDelivered: nil
+          ),
+          trigger: trigger,
+          personalCorrections: nil,
+          errors: [],
+          source: .importedFile
+        )
+        await environment.main.reprocessHistoryItem(placeholder)
+      } catch {
+        await MainActor.run {
+          presentImportError("Failed to import \(url.lastPathComponent): \(error.localizedDescription)")
+        }
+      }
+    }
   }
 
   private var filteredItems: [HistoryItem] {
@@ -120,6 +195,23 @@ struct HistoryView: View {
     } message: {
       Text("This will remove all history entries. You can also delete all saved recordings. This action cannot be undone.")
     }
+    .fileImporter(
+      isPresented: $showImportFiles,
+      allowedContentTypes: [.audio],
+      allowsMultipleSelection: true
+    ) { result in
+      switch result {
+      case .success(let urls):
+        Task { await importAudioFiles(urls) }
+      case .failure(let error):
+        presentImportError(error.localizedDescription)
+      }
+    }
+    .alert("Import", isPresented: $showImportAlert) {
+      Button("OK", role: .cancel) {}
+    } message: {
+      Text(importAlertMessage ?? "")
+    }
   }
 
 
@@ -175,6 +267,22 @@ struct HistoryView: View {
 
         Spacer()
 
+        if isImportingFiles {
+          ProgressView()
+            .controlSize(.small)
+        }
+
+        Button {
+          showImportFiles = true
+        } label: {
+          Label("Import…", systemImage: "square.and.arrow.down")
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(.white.opacity(0.92))
+        .foregroundStyle(Color.purple)
+        .disabled(isClearingAll || isImportingFiles || environment.main.isBusy)
+        .speakTooltip("Import existing audio files into history and transcribe them with your current settings.")
+
         Button {
           showClearAllConfirmation = true
         } label: {
@@ -183,7 +291,7 @@ struct HistoryView: View {
         .buttonStyle(.borderedProminent)
         .tint(.white)
         .foregroundStyle(Color.purple)
-        .disabled(historyItems.isEmpty || isClearingAll)
+        .disabled(historyItems.isEmpty || isClearingAll || isImportingFiles)
         .speakTooltip("Clear every saved session entry from this history view.")
       }
 
@@ -595,6 +703,15 @@ private struct HistoryListRow: View {
       title: "Created",
       value: formattedCreatedAt
     )
+
+    if item.source == .importedFile {
+      historyBadge(
+        icon: "tray.and.arrow.down",
+        title: "Source",
+        value: "Imported",
+        tint: .blue
+      )
+    }
 
     if item.recordingDuration > 0 {
       historyBadge(

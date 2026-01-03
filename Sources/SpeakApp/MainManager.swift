@@ -749,8 +749,15 @@ final class MainManager: ObservableObject {
     session.recordingSummary = summary
     session.recordingStarted = summary.startedAt
     session.recordingEnded = summary.startedAt.addingTimeInterval(summary.duration)
+    let reprocessDescription: String
+    if item.source == .importedFile {
+      reprocessDescription = "Import requested: \(url.lastPathComponent)"
+    } else {
+      reprocessDescription = "Reprocess requested"
+    }
+
     session.events.append(
-      HistoryEvent(kind: .recordingStarted, description: "Reprocess requested")
+      HistoryEvent(kind: .recordingStarted, description: reprocessDescription)
     )
 
     do {
@@ -889,7 +896,7 @@ final class MainManager: ObservableObject {
         HistoryEvent(kind: .outputDelivered, description: "Reprocess stored in history")
       )
       session.outputMethod = .none
-      let historyItem = session.buildHistoryItem(finalText: finalText)
+      let historyItem = session.buildHistoryItem(finalText: finalText, source: item.source)
       state = .completed(historyItem)
       await historyManager.append(historyItem)
 
@@ -904,7 +911,10 @@ final class MainManager: ObservableObject {
       )
       hudManager.finishFailure(message: error.localizedDescription)
       state = .failed(error.localizedDescription)
-      let historyItem = session.buildHistoryItem(finalText: session.transcriptionResult?.text)
+      let historyItem = session.buildHistoryItem(
+        finalText: session.transcriptionResult?.text,
+        source: item.source
+      )
       await historyManager.append(historyItem)
       activeSession = nil
     }
@@ -1193,7 +1203,7 @@ private final class ActiveSession {
     )
   }
 
-  func buildHistoryItem(finalText: String?) -> HistoryItem {
+  func buildHistoryItem(finalText: String?, source: HistoryItemSource? = nil) -> HistoryItem {
     let models = Array(modelsUsed)
     let cost: HistoryCost?
     if totalCost > 0, let breakdown = costBreakdown {
@@ -1235,7 +1245,8 @@ private final class ActiveSession {
       phaseTimestamps: timestamps,
       trigger: trigger,
       personalCorrections: personalCorrections,
-      errors: errors
+      errors: errors,
+      source: source
     )
   }
 }

@@ -175,18 +175,20 @@ actor AudioFileManager {
       return []
     }
 
+    let allowedExtensions: Set<String> = ["m4a", "wav", "mp3", "aac", "m4b", "caf"]
+
     var summaries: [RecordingSummary] = []
     while let next = enumerator.nextObject() as? URL {
       let url = next
-      guard url.pathExtension.lowercased() == "m4a" else { continue }
+      guard allowedExtensions.contains(url.pathExtension.lowercased()) else { continue }
       do {
         let resource = try url.resourceValues(forKeys: [.creationDateKey, .fileSizeKey])
         let creationDate = resource.creationDate ?? Date()
         let fileSize = Int64(resource.fileSize ?? 0)
-        let id =
-          UUID(
-            uuidString: url.deletingPathExtension().lastPathComponent.replacingOccurrences(
-              of: "Recording-", with: "")) ?? UUID()
+        let stem = url.deletingPathExtension().lastPathComponent
+          .replacingOccurrences(of: "Recording-", with: "")
+          .replacingOccurrences(of: "Imported-", with: "")
+        let id = UUID(uuidString: stem) ?? UUID()
         let duration = try AVAudioPlayer(contentsOf: url).duration
         summaries.append(
           RecordingSummary(
@@ -206,5 +208,14 @@ actor AudioFileManager {
 
   func removeRecording(at url: URL) {
     try? FileManager.default.removeItem(at: url)
+  }
+
+  func importRecording(from url: URL) async throws -> URL {
+    let directory = await MainActor.run { appSettings.recordingsDirectory }
+    let ext = url.pathExtension.isEmpty ? "m4a" : url.pathExtension
+    let id = UUID()
+    let destination = directory.appendingPathComponent("Imported-\(id.uuidString).\(ext)")
+    try FileManager.default.copyItem(at: url, to: destination)
+    return destination
   }
 }

@@ -261,8 +261,9 @@ final class TextToSpeechManager: ObservableObject {
       return migratedID
     }
 
-    // Validate the voice exists
-    if VoiceCatalog.voice(forID: voiceID) != nil {
+    // Validate the voice ID. Some providers return dynamic voice IDs (not in VoiceCatalog).
+    let knownPrefixes = ["elevenlabs/", "openai/", "azure/", "deepgram/", "system/"]
+    if VoiceCatalog.voice(forID: voiceID) != nil || knownPrefixes.contains(where: { voiceID.hasPrefix($0) }) {
       return voiceID
     }
 

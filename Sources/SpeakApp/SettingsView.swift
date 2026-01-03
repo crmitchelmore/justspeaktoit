@@ -822,7 +822,9 @@ struct SettingsView: View {
             Button {
               showSystemPromptPreview.toggle()
               if showSystemPromptPreview {
-                generateSystemPromptPreview()
+                DispatchQueue.main.async {
+                  generateSystemPromptPreview()
+                }
               }
             } label: {
               HStack {
@@ -1821,52 +1823,51 @@ struct SettingsView: View {
     }
   }
 
+  @MainActor
   private func generateSystemPromptPreview() {
-    Task { @MainActor in
-      var sections: [String] = []
+    var sections: [String] = []
 
-      // Base prompt
-      let trimmed = self.settings.postProcessingSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-      let basePrompt = trimmed.isEmpty ? PostProcessingManager.defaultPrompt : trimmed
+    // Base prompt
+    let trimmed = self.settings.postProcessingSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+    let basePrompt = trimmed.isEmpty ? PostProcessingManager.defaultPrompt : trimmed
 
-      let rawLanguage = self.settings.postProcessingOutputLanguage.trimmingCharacters(in: .whitespacesAndNewlines)
-      let language: String
-      if rawLanguage.uppercased() == "ENGB" || rawLanguage.lowercased() == "en_gb" {
-        language = "British English"
-      } else {
-        language = rawLanguage
-      }
-
-      var finalBasePrompt = basePrompt
-      if !language.isEmpty {
-        finalBasePrompt = "Always output using \(language). \(basePrompt)"
-      }
-
-      // Lexicon directives section
-      if self.settings.postProcessingIncludeLexiconDirectives {
-        let lexiconCount = self.environment.personalLexicon.rules.count
-        let lexiconSection = """
-        Personal lexicon directives (internal use only):
-        - [Example: \(lexiconCount) active correction rules will be inserted here]
-        Apply these silently and never repeat or reference them in the response.
-        """
-        sections.append(lexiconSection)
-      }
-
-      // Context tags section (shown in base prompt)
-      if self.settings.postProcessingIncludeContextTags {
-        sections.append(finalBasePrompt + "\nContext tags: [Tags will be inserted based on active app context].")
-      } else {
-        sections.append(finalBasePrompt)
-      }
-
-      // Final instruction
-      if self.settings.postProcessingIncludeFinalInstruction {
-        sections.append("Return only the processed text and nothing else. The following message is a raw transcript:")
-      }
-
-      self.systemPromptPreview = sections.joined(separator: "\n\n")
+    let rawLanguage = self.settings.postProcessingOutputLanguage.trimmingCharacters(in: .whitespacesAndNewlines)
+    let language: String
+    if rawLanguage.uppercased() == "ENGB" || rawLanguage.lowercased() == "en_gb" {
+      language = "British English"
+    } else {
+      language = rawLanguage
     }
+
+    var finalBasePrompt = basePrompt
+    if !language.isEmpty {
+      finalBasePrompt = "Always output using \(language). \(basePrompt)"
+    }
+
+    // Lexicon directives section
+    if self.settings.postProcessingIncludeLexiconDirectives {
+      let lexiconCount = self.environment.personalLexicon.rules.count
+      let lexiconSection = """
+      Personal lexicon directives (internal use only):
+      - [Example: \(lexiconCount) active correction rules will be inserted here]
+      Apply these silently and never repeat or reference them in the response.
+      """
+      sections.append(lexiconSection)
+    }
+
+    // Context tags section (shown in base prompt)
+    if self.settings.postProcessingIncludeContextTags {
+      sections.append(finalBasePrompt + "\nContext tags: [Tags will be inserted based on active app context].")
+    } else {
+      sections.append(finalBasePrompt)
+    }
+
+    // Final instruction
+    if self.settings.postProcessingIncludeFinalInstruction {
+      sections.append("Return only the processed text and nothing else. The following message is a raw transcript:")
+    }
+
+    self.systemPromptPreview = sections.joined(separator: "\n\n")
   }
 }
 

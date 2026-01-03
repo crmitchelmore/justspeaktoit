@@ -97,39 +97,10 @@ struct HUDOverlay: View {
   @ViewBuilder
   private var transcriptSection: some View {
     let transcriptText = manager.snapshot.liveText ?? ""
-    let hasContent = !transcriptText.isEmpty
-
-    if hasContent || manager.isExpanded {
-      VStack(spacing: 8) {
-        // Expand/collapse button
-        Button(action: { manager.toggleExpanded() }) {
-          HStack(spacing: 4) {
-            Image(systemName: manager.isExpanded ? "chevron.down.circle.fill" : "chevron.up.circle.fill")
-              .font(.caption)
-            Text(manager.isExpanded ? "Collapse" : "Show Transcript")
-              .font(.caption)
-          }
-          .foregroundStyle(.secondary)
-        }
-        .buttonStyle(.plain)
-
-        if manager.isExpanded {
-          Divider()
-            .padding(.horizontal, -12)
-
-          ScrollView {
-            Text(transcriptText)
-              .font(.callout)
-              .foregroundStyle(manager.snapshot.liveTextIsFinal ? .primary : .secondary)
-              .italic(!manager.snapshot.liveTextIsFinal)
-              .frame(maxWidth: .infinity, alignment: .leading)
-              .textSelection(.enabled)
-          }
-          .frame(maxHeight: 150)
-          .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
-        }
-      }
-      .padding(.top, 4)
+    if !transcriptText.isEmpty {
+      // Show the live transcript inline (no disclosure/expand UI).
+      liveTranscriptionView(text: transcriptText)
+        .padding(.top, 4)
     }
   }
 

@@ -748,7 +748,8 @@ struct SettingsView: View {
             title: "Post-processing Model",
             help: "We clean up the transcript before delivery using this model.",
             options: ModelCatalog.postProcessing,
-            value: settingsBinding(\AppSettings.postProcessingModel)
+            value: settingsBinding(\AppSettings.postProcessingModel),
+            usesDetailedChooser: true
           )
 
           VStack(alignment: .leading) {
@@ -1964,6 +1965,7 @@ private struct ModelPicker: View {
   let title: String
   let help: String?
   let options: [ModelCatalog.Option]
+  let usesDetailedChooser: Bool
   @Binding var value: String
 
   private struct ModelTagBadges: View {
@@ -2009,13 +2011,163 @@ private struct ModelPicker: View {
     }
   }
 
+  private struct ModelPricingBadges: View {
+    let option: ModelCatalog.Option
+    let compact: Bool
+
+    var body: some View {
+      if let pricing = option.pricing {
+        HStack(spacing: 8) {
+          if !compact, let contextLength = option.contextLength {
+            Text(formatContext(contextLength))
+              .font(.caption2.monospacedDigit())
+              .foregroundStyle(.secondary)
+          }
+          Text(pricing.compactDisplay)
+            .font(.caption2.monospacedDigit())
+            .foregroundStyle(.secondary)
+        }
+      }
+    }
+
+    private func formatContext(_ contextLength: Int) -> String {
+      if contextLength >= 1_000_000 {
+        return "\(Int(Double(contextLength) / 1_000_000.0))M ctx"
+      }
+      return "\(Int(Double(contextLength) / 1_000.0))k ctx"
+    }
+  }
+
+  private struct ModelChooserSheet: View {
+    let title: String
+    let options: [ModelCatalog.Option]
+    @Binding var selection: String
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var query: String = ""
+    @State private var selectedTag: ModelCatalog.Tag? = nil
+
+    var body: some View {
+      VStack(alignment: .leading, spacing: 12) {
+        HStack {
+          Text(title)
+            .font(.headline)
+          Spacer()
+          Button("Done") { dismiss() }
+        }
+
+        Picker("Filter", selection: $selectedTag) {
+          Text("All").tag(ModelCatalog.Tag?.none)
+          ForEach(ModelCatalog.Tag.allCases, id: \.self) { tag in
+            Text(tag.displayName).tag(ModelCatalog.Tag?.some(tag))
+          }
+        }
+        .pickerStyle(.segmented)
+
+        List {
+          ForEach(filteredOptions) { option in
+            Button {
+              selection = option.id
+              dismiss()
+            } label: {
+              VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 10) {
+                  Text(option.displayName)
+                    .font(.body)
+                  Spacer()
+                  if let contextLength = option.contextLength {
+                    Text(formatContext(contextLength))
+                      .font(.caption.monospacedDigit())
+                      .foregroundStyle(.secondary)
+                  }
+                  if let pricing = option.pricing {
+                    Text(pricing.compactDisplay)
+                      .font(.caption.monospacedDigit())
+                      .foregroundStyle(.secondary)
+                  }
+                  ModelTagBadges(tags: option.tags, compact: true)
+                  LatencyBadgeCompact(option: option)
+                }
+
+                if let description = option.description, !description.isEmpty {
+                  Text(description)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+              }
+              .padding(.vertical, 4)
+            }
+            .buttonStyle(.plain)
+          }
+
+          Divider()
+
+          Button {
+            selection = ModelCatalog.customOptionID
+            dismiss()
+          } label: {
+            Text("Custom…")
+          }
+          .buttonStyle(.plain)
+        }
+        .searchable(text: $query)
+      }
+      .padding(16)
+      .frame(minWidth: 780, minHeight: 520)
+    }
+
+    private var filteredOptions: [ModelCatalog.Option] {
+      var result = options
+      if let selectedTag {
+        result = result.filter { $0.tags.contains(selectedTag) }
+      }
+      let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+      if !trimmed.isEmpty {
+        let lowered = trimmed.lowercased()
+        result = result.filter {
+          $0.displayName.lowercased().contains(lowered)
+            || $0.id.lowercased().contains(lowered)
+            || ($0.description?.lowercased().contains(lowered) ?? false)
+        }
+      }
+      result.sort { lhs, rhs in
+        let lhsLeading = lhs.tags.contains(.leading)
+        let rhsLeading = rhs.tags.contains(.leading)
+        if lhsLeading != rhsLeading { return lhsLeading && !rhsLeading }
+        let lhsCheap = lhs.tags.contains(.cheap)
+        let rhsCheap = rhs.tags.contains(.cheap)
+        if lhsCheap != rhsCheap { return lhsCheap && !rhsCheap }
+        let lhsFast = lhs.tags.contains(.fast)
+        let rhsFast = rhs.tags.contains(.fast)
+        if lhsFast != rhsFast { return lhsFast && !rhsFast }
+        return lhs.displayName < rhs.displayName
+      }
+      return result
+    }
+
+    private func formatContext(_ contextLength: Int) -> String {
+      if contextLength >= 1_000_000 {
+        return "\(Int(Double(contextLength) / 1_000_000.0))M ctx"
+      }
+      return "\(Int(Double(contextLength) / 1_000.0))k ctx"
+    }
+  }
+
   @State private var selection: String
   @State private var customValue: String
+  @State private var isShowingChooser: Bool = false
 
-  init(title: String, help: String? = nil, options: [ModelCatalog.Option], value: Binding<String>) {
+  init(
+    title: String,
+    help: String? = nil,
+    options: [ModelCatalog.Option],
+    value: Binding<String>,
+    usesDetailedChooser: Bool = false
+  ) {
     self.title = title
     self.help = help
     self.options = options
+    self.usesDetailedChooser = usesDetailedChooser
     _value = value
 
     let trimmed = value.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2036,26 +2188,57 @@ private struct ModelPicker: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      Picker(title, selection: $selection) {
-        ForEach(options) { option in
+      if usesDetailedChooser {
+        Button {
+          isShowingChooser = true
+        } label: {
           HStack {
-            Text(option.displayName)
+            Text(selectedOption?.displayName ?? (customValue.isEmpty ? "Custom…" : customValue))
             Spacer()
-            ModelTagBadges(tags: option.tags, compact: true)
-            LatencyBadgeCompact(option: option)
+            if let option = selectedOption {
+              ModelPricingBadges(option: option, compact: true)
+              ModelTagBadges(tags: option.tags, compact: true)
+              LatencyBadgeCompact(option: option)
+            }
+            Image(systemName: "chevron.up.chevron.down")
+              .imageScale(.small)
+              .foregroundStyle(.secondary)
           }
-          .tag(option.id)
         }
-        Text("Custom…").tag(ModelCatalog.customOptionID)
+        .buttonStyle(.plain)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+          RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .speakTooltip(tooltipText)
+        .sheet(isPresented: $isShowingChooser) {
+          ModelChooserSheet(title: title, options: options, selection: $selection)
+        }
+      } else {
+        Picker(title, selection: $selection) {
+          ForEach(options) { option in
+            HStack {
+              Text(option.displayName)
+              Spacer()
+              ModelPricingBadges(option: option, compact: true)
+              ModelTagBadges(tags: option.tags, compact: true)
+              LatencyBadgeCompact(option: option)
+            }
+            .tag(option.id)
+          }
+          Text("Custom…").tag(ModelCatalog.customOptionID)
+        }
+        .pickerStyle(.menu)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+          RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .speakTooltip(tooltipText)
       }
-      .pickerStyle(.menu)
-      .padding(.horizontal, 12)
-      .padding(.vertical, 8)
-      .background(
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
-          .fill(Color(nsColor: .controlBackgroundColor))
-      )
-      .speakTooltip(tooltipText)
 
       if let help {
         Text(help)
@@ -2071,6 +2254,7 @@ private struct ModelPicker: View {
               .foregroundStyle(.secondary)
           }
           Spacer()
+          ModelPricingBadges(option: option, compact: false)
           ModelTagBadges(tags: option.tags, compact: false)
           LatencyBadge(option: option)
         }

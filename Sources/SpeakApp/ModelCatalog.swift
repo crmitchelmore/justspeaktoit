@@ -46,6 +46,28 @@ struct ModelCatalog {
     }
   }
 
+  struct Pricing: Hashable {
+    /// Dollars per 1M input tokens.
+    let promptPerMTokens: Double
+    /// Dollars per 1M output tokens.
+    let completionPerMTokens: Double
+
+    var compactDisplay: String {
+      "\(Self.formatDollars(promptPerMTokens))/\(Self.formatDollars(completionPerMTokens))"
+    }
+
+    var displayName: String {
+      "\(compactDisplay) / 1M"
+    }
+
+    private static func formatDollars(_ value: Double) -> String {
+      if value >= 10 { return String(format: "$%.0f", value) }
+      if value >= 0.1 { return String(format: "$%.2f", value) }
+      if value > 0 { return String(format: "$%.3f", value) }
+      return "$0"
+    }
+  }
+
   struct Option: Identifiable, Hashable {
     let id: String
     let displayName: String
@@ -53,6 +75,8 @@ struct ModelCatalog {
     let estimatedLatencyMs: Int?
     let latencyTier: LatencyTier
     let tags: [Tag]
+    let pricing: Pricing?
+    let contextLength: Int?
 
     init(
       id: String,
@@ -60,7 +84,9 @@ struct ModelCatalog {
       description: String? = nil,
       estimatedLatencyMs: Int? = nil,
       latencyTier: LatencyTier = .medium,
-      tags: [Tag] = []
+      tags: [Tag] = [],
+      pricing: Pricing? = nil,
+      contextLength: Int? = nil
     ) {
       self.id = id
       self.displayName = displayName
@@ -68,6 +94,8 @@ struct ModelCatalog {
       self.estimatedLatencyMs = estimatedLatencyMs
       self.latencyTier = latencyTier
       self.tags = tags
+      self.pricing = pricing
+      self.contextLength = contextLength
     }
   }
 
@@ -124,67 +152,104 @@ struct ModelCatalog {
       estimatedLatencyMs: 1800, latencyTier: .medium),
   ]
 
-  // Curated, static "top" set (OpenRouter + first-party) with simple attribute tags.
+  // Curated, static "top" set (OpenRouter) with pricing + attribute tags.
+  // Pricing is based on OpenRouter's /api/v1/models at time of writing.
   static let postProcessing: [Option] = [
-    // Speed / cheap
-    Option(
-      id: "google/gemini-2.0-flash-lite-001",
-      displayName: "Gemini 2.0 Flash Lite (OpenRouter)",
-      description: "Great for fast cleanup at low cost.",
-      estimatedLatencyMs: 450,
-      latencyTier: .fast,
-      tags: [.fast, .cheap]),
-    Option(
-      id: "google/gemini-2.0-flash-001",
-      displayName: "Gemini 2.0 Flash (OpenRouter)",
-      description: "Fast general-purpose cleanup.",
-      estimatedLatencyMs: 650,
-      latencyTier: .fast,
-      tags: [.fast]),
+    // Leading fast / cheap
     Option(
       id: "openai/gpt-4o-mini",
-      displayName: "GPT-4o mini (OpenAI via OpenRouter)",
-      description: "Great balance of quality and speed.",
+      displayName: "GPT-4o mini",
+      description: "Great balance of quality, speed, and cost.",
       estimatedLatencyMs: 500,
       latencyTier: .fast,
-      tags: [.fast, .cheap]),
+      tags: [.fast, .cheap],
+      pricing: Pricing(promptPerMTokens: 0.15, completionPerMTokens: 0.6),
+      contextLength: 128_000
+    ),
     Option(
-      id: "anthropic/claude-3.5-haiku",
-      displayName: "Claude 3.5 Haiku (OpenRouter)",
-      description: "Very fast with solid formatting.",
+      id: "google/gemini-3-flash-preview",
+      displayName: "Gemini 3 Flash (Preview)",
+      description: "High-speed, high-value model for agentic workflows.",
+      estimatedLatencyMs: 650,
+      latencyTier: .fast,
+      tags: [.fast, .leading],
+      pricing: Pricing(promptPerMTokens: 0.5, completionPerMTokens: 3.0),
+      contextLength: 1_048_576
+    ),
+    Option(
+      id: "bytedance-seed/seed-1.6-flash",
+      displayName: "Seed 1.6 Flash",
+      description: "Ultra-fast and very cheap.",
+      estimatedLatencyMs: 350,
+      latencyTier: .fast,
+      tags: [.fast, .cheap],
+      pricing: Pricing(promptPerMTokens: 0.075, completionPerMTokens: 0.3),
+      contextLength: 262_144
+    ),
+    Option(
+      id: "anthropic/claude-haiku-4.5",
+      displayName: "Claude Haiku 4.5",
+      description: "Fast, reliable formatting with strong instruction following.",
       estimatedLatencyMs: 900,
       latencyTier: .fast,
-      tags: [.fast]),
+      tags: [.fast],
+      pricing: Pricing(promptPerMTokens: 1.0, completionPerMTokens: 5.0),
+      contextLength: 200_000
+    ),
 
-    // Quality / leading
+    // Leading quality
     Option(
-      id: "openai/gpt-4o",
-      displayName: "GPT-4o (OpenAI via OpenRouter)",
-      description: "Flagship quality.",
-      estimatedLatencyMs: 1200,
+      id: "openai/gpt-5.2",
+      displayName: "GPT-5.2",
+      description: "Frontier-grade quality for the toughest cleanup.",
+      estimatedLatencyMs: 1600,
       latencyTier: .medium,
-      tags: [.quality, .leading]),
+      tags: [.quality, .leading],
+      pricing: Pricing(promptPerMTokens: 1.75, completionPerMTokens: 14.0),
+      contextLength: 400_000
+    ),
     Option(
-      id: "anthropic/claude-3.5-sonnet",
-      displayName: "Claude 3.5 Sonnet",
-      description: "Strong reasoning and tone preservation.",
-      estimatedLatencyMs: 1500,
-      latencyTier: .medium,
-      tags: [.quality, .leading]),
-    Option(
-      id: "google/gemini-1.5-pro-latest",
-      displayName: "Gemini 1.5 Pro",
-      description: "Strong long-context cleanup.",
-      estimatedLatencyMs: 2500,
-      latencyTier: .slow,
-      tags: [.quality]),
-    Option(
-      id: "mistral/mistral-large",
-      displayName: "Mistral Large",
-      description: "Low-latency alternative with good quality.",
-      estimatedLatencyMs: 700,
+      id: "openai/gpt-5.2-chat",
+      displayName: "GPT-5.2 Chat",
+      description: "Faster GPT-5.2 variant tuned for low-latency chat.",
+      estimatedLatencyMs: 900,
       latencyTier: .fast,
-      tags: [.fast, .quality]),
+      tags: [.fast, .quality, .leading],
+      pricing: Pricing(promptPerMTokens: 1.75, completionPerMTokens: 14.0),
+      contextLength: 128_000
+    ),
+    Option(
+      id: "anthropic/claude-sonnet-4.5",
+      displayName: "Claude Sonnet 4.5",
+      description: "Excellent structure + tone preservation.",
+      estimatedLatencyMs: 1400,
+      latencyTier: .medium,
+      tags: [.quality, .leading],
+      pricing: Pricing(promptPerMTokens: 3.0, completionPerMTokens: 15.0),
+      contextLength: 1_000_000
+    ),
+
+    // Strong value alternatives
+    Option(
+      id: "minimax/minimax-m2.1",
+      displayName: "MiniMax M2.1",
+      description: "Strong agentic workflow model at a good price.",
+      estimatedLatencyMs: 900,
+      latencyTier: .fast,
+      tags: [.quality],
+      pricing: Pricing(promptPerMTokens: 0.3, completionPerMTokens: 1.2),
+      contextLength: 204_800
+    ),
+    Option(
+      id: "z-ai/glm-4.7",
+      displayName: "GLM 4.7",
+      description: "Good reasoning and stable multi-step execution.",
+      estimatedLatencyMs: 1100,
+      latencyTier: .medium,
+      tags: [.quality],
+      pricing: Pricing(promptPerMTokens: 0.4, completionPerMTokens: 1.5),
+      contextLength: 202_752
+    ),
   ]
 
   static var allOptions: [Option] {

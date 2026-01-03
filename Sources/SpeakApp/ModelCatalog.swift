@@ -30,25 +30,44 @@ enum LatencyTier: String, Codable, CaseIterable, Comparable {
 }
 
 struct ModelCatalog {
+  enum Tag: String, Codable, CaseIterable, Hashable {
+    case fast
+    case cheap
+    case quality
+    case leading
+
+    var displayName: String {
+      switch self {
+      case .fast: return "Fast"
+      case .cheap: return "Cheap"
+      case .quality: return "Quality"
+      case .leading: return "Leading"
+      }
+    }
+  }
+
   struct Option: Identifiable, Hashable {
     let id: String
     let displayName: String
     let description: String?
     let estimatedLatencyMs: Int?
     let latencyTier: LatencyTier
+    let tags: [Tag]
 
     init(
       id: String,
       displayName: String,
       description: String? = nil,
       estimatedLatencyMs: Int? = nil,
-      latencyTier: LatencyTier = .medium
+      latencyTier: LatencyTier = .medium,
+      tags: [Tag] = []
     ) {
       self.id = id
       self.displayName = displayName
       self.description = description
       self.estimatedLatencyMs = estimatedLatencyMs
       self.latencyTier = latencyTier
+      self.tags = tags
     }
   }
 
@@ -105,27 +124,67 @@ struct ModelCatalog {
       estimatedLatencyMs: 1800, latencyTier: .medium),
   ]
 
+  // Curated, static "top" set (OpenRouter + first-party) with simple attribute tags.
   static let postProcessing: [Option] = [
+    // Speed / cheap
     Option(
-      id: "openai/gpt-4o-mini", displayName: "GPT-4o mini (OpenAI via OpenRouter)",
+      id: "google/gemini-2.0-flash-lite-001",
+      displayName: "Gemini 2.0 Flash Lite (OpenRouter)",
+      description: "Great for fast cleanup at low cost.",
+      estimatedLatencyMs: 450,
+      latencyTier: .fast,
+      tags: [.fast, .cheap]),
+    Option(
+      id: "google/gemini-2.0-flash-001",
+      displayName: "Gemini 2.0 Flash (OpenRouter)",
+      description: "Fast general-purpose cleanup.",
+      estimatedLatencyMs: 650,
+      latencyTier: .fast,
+      tags: [.fast]),
+    Option(
+      id: "openai/gpt-4o-mini",
+      displayName: "GPT-4o mini (OpenAI via OpenRouter)",
       description: "Great balance of quality and speed.",
-      estimatedLatencyMs: 500, latencyTier: .fast),
+      estimatedLatencyMs: 500,
+      latencyTier: .fast,
+      tags: [.fast, .cheap]),
     Option(
-      id: "openai/gpt-4o", displayName: "GPT-4o (OpenAI via OpenRouter)",
+      id: "anthropic/claude-3.5-haiku",
+      displayName: "Claude 3.5 Haiku (OpenRouter)",
+      description: "Very fast with solid formatting.",
+      estimatedLatencyMs: 900,
+      latencyTier: .fast,
+      tags: [.fast]),
+
+    // Quality / leading
+    Option(
+      id: "openai/gpt-4o",
+      displayName: "GPT-4o (OpenAI via OpenRouter)",
       description: "Flagship quality.",
-      estimatedLatencyMs: 1200, latencyTier: .medium),
+      estimatedLatencyMs: 1200,
+      latencyTier: .medium,
+      tags: [.quality, .leading]),
     Option(
-      id: "anthropic/claude-3.5-sonnet", displayName: "Claude 3.5 Sonnet",
+      id: "anthropic/claude-3.5-sonnet",
+      displayName: "Claude 3.5 Sonnet",
       description: "Strong reasoning and tone preservation.",
-      estimatedLatencyMs: 1500, latencyTier: .medium),
+      estimatedLatencyMs: 1500,
+      latencyTier: .medium,
+      tags: [.quality, .leading]),
     Option(
-      id: "google/gemini-1.5-pro-latest", displayName: "Gemini 1.5 Pro",
-      description: "Google's multimodal assistant.",
-      estimatedLatencyMs: 2500, latencyTier: .slow),
+      id: "google/gemini-1.5-pro-latest",
+      displayName: "Gemini 1.5 Pro",
+      description: "Strong long-context cleanup.",
+      estimatedLatencyMs: 2500,
+      latencyTier: .slow,
+      tags: [.quality]),
     Option(
-      id: "mistral/mistral-large", displayName: "Mistral Large",
-      description: "European alternative with low latency.",
-      estimatedLatencyMs: 700, latencyTier: .fast),
+      id: "mistral/mistral-large",
+      displayName: "Mistral Large",
+      description: "Low-latency alternative with good quality.",
+      estimatedLatencyMs: 700,
+      latencyTier: .fast,
+      tags: [.fast, .quality]),
   ]
 
   static var allOptions: [Option] {

@@ -1927,6 +1927,49 @@ private struct ModelPicker: View {
   let options: [ModelCatalog.Option]
   @Binding var value: String
 
+  private struct ModelTagBadges: View {
+    let tags: [ModelCatalog.Tag]
+    let compact: Bool
+
+    var body: some View {
+      if tags.isEmpty {
+        EmptyView()
+      } else {
+        HStack(spacing: 6) {
+          ForEach(tags.prefix(compact ? 2 : tags.count), id: \.self) { tag in
+            Text(tag.displayName)
+              .font(.caption2.weight(.semibold))
+              .foregroundStyle(tagForegroundColor(tag))
+              .padding(.horizontal, 8)
+              .padding(.vertical, 3)
+              .background(
+                Capsule(style: .continuous)
+                  .fill(tagBackgroundColor(tag))
+              )
+          }
+        }
+      }
+    }
+
+    private func tagBackgroundColor(_ tag: ModelCatalog.Tag) -> Color {
+      switch tag {
+      case .fast: return Color.blue.opacity(0.12)
+      case .cheap: return Color.green.opacity(0.14)
+      case .quality: return Color.purple.opacity(0.12)
+      case .leading: return Color.orange.opacity(0.14)
+      }
+    }
+
+    private func tagForegroundColor(_ tag: ModelCatalog.Tag) -> Color {
+      switch tag {
+      case .fast: return .blue
+      case .cheap: return .green
+      case .quality: return .purple
+      case .leading: return .orange
+      }
+    }
+  }
+
   @State private var selection: String
   @State private var customValue: String
 
@@ -1959,6 +2002,7 @@ private struct ModelPicker: View {
           HStack {
             Text(option.displayName)
             Spacer()
+            ModelTagBadges(tags: option.tags, compact: true)
             LatencyBadgeCompact(option: option)
           }
           .tag(option.id)
@@ -1988,6 +2032,7 @@ private struct ModelPicker: View {
               .foregroundStyle(.secondary)
           }
           Spacer()
+          ModelTagBadges(tags: option.tags, compact: false)
           LatencyBadge(option: option)
         }
       }

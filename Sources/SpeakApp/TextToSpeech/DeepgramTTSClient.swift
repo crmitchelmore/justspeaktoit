@@ -27,14 +27,21 @@ actor DeepgramTTSClient: TextToSpeechClient {
         components.queryItems = [
             URLQueryItem(name: "model", value: voiceID),
             URLQueryItem(name: "encoding", value: encodingFormat(for: settings.format)),
-            URLQueryItem(name: "container", value: containerFormat(for: settings.format)),
         ]
 
-        // Add sample rate for better quality
-        if settings.quality == .highest {
-            components.queryItems?.append(URLQueryItem(name: "sample_rate", value: "48000"))
-        } else if settings.quality == .high {
-            components.queryItems?.append(URLQueryItem(name: "sample_rate", value: "24000"))
+        // `container` is not applicable for MP3 (and can trigger HTTP 400).
+        if settings.format == .wav {
+            components.queryItems?.append(URLQueryItem(name: "container", value: containerFormat(for: settings.format)))
+        }
+
+        // `sample_rate` is not applicable for MP3 (and can trigger HTTP 400).
+        if settings.format == .wav {
+            // Add sample rate for better quality
+            if settings.quality == .highest {
+                components.queryItems?.append(URLQueryItem(name: "sample_rate", value: "48000"))
+            } else if settings.quality == .high {
+                components.queryItems?.append(URLQueryItem(name: "sample_rate", value: "24000"))
+            }
         }
 
         guard let url = components.url else {

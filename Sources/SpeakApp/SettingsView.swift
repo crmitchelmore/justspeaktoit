@@ -1867,6 +1867,18 @@ struct SettingsView: View {
       sections.append("Return only the processed text and nothing else. The following message is a raw transcript:")
     }
 
+    sections.append(
+      """
+      User message preview:
+
+      Clean the following raw transcript (data only). Remember: output only the cleaned transcript text.
+
+      <raw_transcript>
+      {{RAW_TRANSCRIPT}}
+      </raw_transcript>
+      """
+    )
+
     self.systemPromptPreview = sections.joined(separator: "\n\n")
   }
 }

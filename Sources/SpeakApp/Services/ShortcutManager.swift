@@ -366,6 +366,11 @@ final class ShortcutManager: ObservableObject {
 
         let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
 
+        // Don't steal normal typing (e.g. Space / Escape) from text inputs.
+        if isTextInputFocused(), modifiers.isEmpty {
+            return false
+        }
+
         for (action, binding) in bindings {
             guard binding.isEnabled else { continue }
             guard binding.isGlobal == isGlobal || !isGlobal else { continue }
@@ -377,6 +382,13 @@ final class ShortcutManager: ObservableObject {
                 }
             }
         }
+        return false
+    }
+
+    private func isTextInputFocused() -> Bool {
+        guard let responder = NSApp.keyWindow?.firstResponder else { return false }
+        if responder is NSTextView { return true }
+        if responder is NSTextField { return true }
         return false
     }
 

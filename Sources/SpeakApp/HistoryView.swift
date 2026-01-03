@@ -7,6 +7,9 @@ struct HistoryView: View {
   @EnvironmentObject private var environment: AppEnvironment
   @State private var searchText: String = ""
   @State private var showErrorsOnly: Bool = false
+  @State private var dateRangeEnabled: Bool = false
+  @State private var startDate: Date = Calendar.current.startOfDay(for: Date().addingTimeInterval(-7 * 24 * 60 * 60))
+  @State private var endDate: Date = Date()
   @State private var historyItems: [HistoryItem] = []
   @State private var historyStats: HistoryStatistics = .init(
     totalSessions: 0,
@@ -15,14 +18,36 @@ struct HistoryView: View {
     averageSessionLength: 0,
     sessionsWithErrors: 0
   )
-  @State private var hasMoreItems: Bool = false
-  @State private var isLoadingMore: Bool = false
+  @State private var showClearAllConfirmation: Bool = false
+  @State private var isClearingAll: Bool = false
+
+  private func clearAllHistory(deleteRecordings: Bool) async {
+    await MainActor.run { isClearingAll = true }
+    if deleteRecordings {
+      let recordings = await environment.audio.listRecordings()
+      for recording in recordings {
+        await environment.audio.removeRecording(at: recording.url)
+      }
+    }
+    await environment.history.removeAll()
+    await MainActor.run { isClearingAll = false }
+  }
 
   private var filteredItems: [HistoryItem] {
     var filter = HistoryFilter.none
     filter.searchText = searchText.isEmpty ? nil : searchText
     filter.includeErrorsOnly = showErrorsOnly
+    if dateRangeEnabled {
+      filter.dateRange = normalizedDateRange
+    }
     return apply(filter: filter, to: historyItems)
+  }
+
+  private var normalizedDateRange: ClosedRange<Date> {
+    let calendar = Calendar.current
+    let start = calendar.startOfDay(for: startDate)
+    let end = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: endDate) ?? endDate
+    return start...end
   }
 
   var body: some View {
@@ -37,40 +62,6 @@ struct HistoryView: View {
               ForEach(filteredItems) { item in
                 HistoryListRow(item: item)
                   .id(item.id)
-                  .onAppear {
-                    // Trigger loadMore when approaching the last item
-                    if item.id == filteredItems.last?.id {
-                      loadMoreIfNeeded()
-                    }
-                  }
-              }
-
-              // Loading indicator at the bottom
-              if isLoadingMore {
-                HStack {
-                  Spacer()
-                  ProgressView()
-                    .controlSize(.regular)
-                  Text("Loading more...")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                  Spacer()
-                }
-                .padding(.vertical, 16)
-              } else if hasMoreItems && !filteredItems.isEmpty {
-                // Show a "Load More" button as fallback
-                HStack {
-                  Spacer()
-                  Button {
-                    loadMoreIfNeeded()
-                  } label: {
-                    Label("Load More", systemImage: "arrow.down.circle")
-                  }
-                  .buttonStyle(.bordered)
-                  .controlSize(.regular)
-                  Spacer()
-                }
-                .padding(.vertical, 16)
               }
             }
             .animation(.spring(response: 0.28, dampingFraction: 0.88), value: filteredItems)
@@ -80,15 +71,14 @@ struct HistoryView: View {
         .frame(maxWidth: 1100, alignment: .center)
       }
       .onAppear {
-        historyItems = environment.history.items
+        historyItems = environment.history.allItems
         historyStats = environment.history.statistics
-        hasMoreItems = environment.history.hasMoreItems
-        isLoadingMore = environment.history.isLoadingMore
       }
       .onReceive(environment.history.$items) { items in
         let previous = historyItems
+        let updated = environment.history.allItems
         withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
-          historyItems = items
+          historyItems = updated
         }
         guard let newest = items.first else { return }
         let wasPresent = previous.contains(where: { $0.id == newest.id })
@@ -105,12 +95,7 @@ struct HistoryView: View {
           historyStats = stats
         }
       }
-      .onReceive(environment.history.$hasMoreItems) { more in
-        hasMoreItems = more
-      }
-      .onReceive(environment.history.$isLoadingMore) { loading in
-        isLoadingMore = loading
-      }
+
     }
     .background(
       LinearGradient(
@@ -120,14 +105,23 @@ struct HistoryView: View {
       )
       .ignoresSafeArea()
     )
-  }
-
-  private func loadMoreIfNeeded() {
-    guard hasMoreItems, !isLoadingMore else { return }
-    Task {
-      await environment.history.loadMore()
+    .confirmationDialog(
+      "Clear All History",
+      isPresented: $showClearAllConfirmation,
+      titleVisibility: .visible
+    ) {
+      Button("Clear History", role: .destructive) {
+        Task { await clearAllHistory(deleteRecordings: false) }
+      }
+      Button("Clear History and Delete Recordings", role: .destructive) {
+        Task { await clearAllHistory(deleteRecordings: true) }
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text("This will remove all history entries. You can also delete all saved recordings. This action cannot be undone.")
     }
   }
+
 
   private var header: some View {
     return VStack(alignment: .leading, spacing: 18) {
@@ -164,18 +158,33 @@ struct HistoryView: View {
           .foregroundStyle(.white)
           .speakTooltip("Show only sessions where Speak spotted issues, making it easy to focus on what needs attention.")
 
+        Toggle("Date range", isOn: $dateRangeEnabled)
+          .toggleStyle(.switch)
+          .tint(.white)
+          .foregroundStyle(.white)
+          .speakTooltip("Filter sessions to a specific date range.")
+
+        if dateRangeEnabled {
+          DatePicker("From", selection: $startDate, displayedComponents: .date)
+            .labelsHidden()
+            .datePickerStyle(.compact)
+          DatePicker("To", selection: $endDate, in: startDate..., displayedComponents: .date)
+            .labelsHidden()
+            .datePickerStyle(.compact)
+        }
+
         Spacer()
 
         Button {
-          Task { await environment.history.removeAll() }
+          showClearAllConfirmation = true
         } label: {
           Label("Clear All", systemImage: "trash")
         }
         .buttonStyle(.borderedProminent)
         .tint(.white)
         .foregroundStyle(Color.purple)
-        .disabled(historyItems.isEmpty)
-        .speakTooltip("Clear every saved session entry from this history view. Your original audio files stay where you left them.")
+        .disabled(historyItems.isEmpty || isClearingAll)
+        .speakTooltip("Clear every saved session entry from this history view.")
       }
 
       HStack(spacing: 16) {

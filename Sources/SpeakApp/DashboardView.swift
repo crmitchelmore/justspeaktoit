@@ -426,7 +426,7 @@ struct DashboardView: View {
 
   private var dailyUsageChartSection: some View {
     DashboardCard(title: "Daily Usage", systemImage: "chart.bar.fill", tint: Color.cyan) {
-      DailyRecordingsChart(data: history.items.dailyUsageForLastMonth())
+      DailyRecordingsChart(data: history.allItems.dailyUsageForLastMonth())
     }
     .speakTooltip("See when you rely on Speak the most so you can plan deep work and reviews thoughtfully.")
   }
@@ -435,7 +435,7 @@ struct DashboardView: View {
     DashboardCard(title: "Transcription Models", systemImage: "waveform", tint: Color.green) {
       ModelUsageChart(
         title: "Transcription Model Usage",
-        data: history.items.modelUsage(for: .transcription),
+        data: history.allItems.modelUsage(for: .transcription),
         color: .green
       )
     }
@@ -446,7 +446,7 @@ struct DashboardView: View {
     DashboardCard(title: "Post-Processing Models", systemImage: "wand.and.stars", tint: Color.purple) {
       ModelUsageChart(
         title: "Post-Processing Model Usage",
-        data: history.items.modelUsage(for: .postProcessing),
+        data: history.allItems.modelUsage(for: .postProcessing),
         color: .purple
       )
     }

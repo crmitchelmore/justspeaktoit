@@ -61,6 +61,11 @@ final class HistoryManager: ObservableObject {
   /// Full list of items loaded from disk (for pagination)
   private var allItemsOnDisk: [HistoryItem] = []
 
+  /// All known items (used for charts / totals). Falls back to the currently loaded page during startup.
+  var allItems: [HistoryItem] {
+    allItemsOnDisk.isEmpty ? items : allItemsOnDisk
+  }
+
   /// Cached statistics to avoid recalculating
   private var cachedStatistics: HistoryStatistics?
 
@@ -274,7 +279,9 @@ final class HistoryManager: ObservableObject {
     log.info("Flushing \(self.pendingWrites.count) pending writes to disk")
 
     do {
-      let data = try encoder.encode(items)
+      // Persist the full history, not just the currently loaded page.
+      let snapshot = allItemsOnDisk.isEmpty ? items : allItemsOnDisk
+      let data = try encoder.encode(snapshot)
       try data.write(to: storageURL, options: [.atomic])
 
       // Clear pending writes and WAL after successful persist
@@ -295,10 +302,14 @@ final class HistoryManager: ObservableObject {
 
     do {
       if !walItems.isEmpty {
-        // WAL was replayed, use those items
+        let sorted = walItems.sorted { $0.createdAt > $1.createdAt }
+        let stats = calculateStatistics(for: sorted)
         await MainActor.run {
-          self.items = walItems.sorted { $0.createdAt > $1.createdAt }
-          self.statistics = self.calculateStatistics(for: walItems)
+          self.allItemsOnDisk = sorted
+          self.items = Array(sorted.prefix(self.pageSize))
+          self.hasMoreItems = sorted.count > self.pageSize
+          self.cachedStatistics = stats
+          self.statistics = stats
         }
         return
       }
@@ -352,40 +363,62 @@ final class HistoryManager: ObservableObject {
   }
 
   func append(_ item: HistoryItem) async {
+    allItemsOnDisk.insert(item, at: 0)
+
     var current = items
     current.insert(item, at: 0)
     items = current
-    statistics = calculateStatistics(for: current)
+
+    let stats = calculateStatistics(for: allItemsOnDisk)
+    cachedStatistics = stats
+    statistics = stats
 
     // Write to WAL instead of directly to disk
     await appendToWAL(WALEntry(operation: .append, item: item))
   }
 
   func update(_ item: HistoryItem) async {
-    guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
-    var updated = items
-    updated[index] = item
-    items = updated.sorted { $0.createdAt > $1.createdAt }
-    statistics = calculateStatistics(for: updated)
+    if let diskIndex = allItemsOnDisk.firstIndex(where: { $0.id == item.id }) {
+      allItemsOnDisk[diskIndex] = item
+      allItemsOnDisk.sort { $0.createdAt > $1.createdAt }
+    }
+
+    if let index = items.firstIndex(where: { $0.id == item.id }) {
+      var updated = items
+      updated[index] = item
+      items = updated.sorted { $0.createdAt > $1.createdAt }
+    }
+
+    let stats = calculateStatistics(for: allItemsOnDisk)
+    cachedStatistics = stats
+    statistics = stats
 
     // Write to WAL instead of directly to disk
     await appendToWAL(WALEntry(operation: .update, item: item))
   }
 
   func remove(id: UUID) async {
-    guard let item = items.first(where: { $0.id == id }) else { return }
-    let updated = items.filter { $0.id != id }
-    items = updated
-    statistics = calculateStatistics(for: updated)
+    let diskItem = allItemsOnDisk.first(where: { $0.id == id })
+    allItemsOnDisk.removeAll { $0.id == id }
+
+    items.removeAll { $0.id == id }
+
+    let stats = calculateStatistics(for: allItemsOnDisk)
+    cachedStatistics = stats
+    statistics = stats
 
     // Write to WAL instead of directly to disk
-    await appendToWAL(WALEntry(operation: .remove, item: item))
+    if let diskItem {
+      await appendToWAL(WALEntry(operation: .remove, item: diskItem))
+    }
   }
 
   func removeAll() async {
     allItemsOnDisk = []
     items = []
-    statistics = calculateStatistics(for: [])
+    let stats = calculateStatistics(for: [])
+    cachedStatistics = stats
+    statistics = stats
 
     // Write to WAL instead of directly to disk
     await appendToWAL(WALEntry(operation: .removeAll))
@@ -444,7 +477,15 @@ final class HistoryManager: ObservableObject {
         sessionsWithErrors: 0)
     }
 
-    let totalDuration = items.reduce(0) { $0 + $1.recordingDuration }
+    let totalDuration = items.reduce(0) { partial, item in
+      if item.recordingDuration > 0 {
+        return partial + item.recordingDuration
+      }
+      if let start = item.phaseTimestamps.recordingStarted, let end = item.phaseTimestamps.recordingEnded {
+        return partial + max(0, end.timeIntervalSince(start))
+      }
+      return partial
+    }
     let totalErrors = items.filter { !$0.errors.isEmpty }.count
     let totalSpend = items.reduce(Decimal(0)) { partial, item in
       if let cost = item.cost?.total {

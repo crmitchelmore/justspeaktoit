@@ -152,28 +152,28 @@ struct ModelCatalog {
       estimatedLatencyMs: 1800, latencyTier: .medium),
   ]
 
-  // Curated, static "top" set (OpenRouter) with pricing + attribute tags.
+  // Curated, static set for transcript cleanup (OpenRouter) with pricing + tags.
   // Pricing is based on OpenRouter's /api/v1/models at time of writing.
   static let postProcessing: [Option] = [
-    // Leading fast / cheap
+    // Fast / cheap cleanup
     Option(
       id: "openai/gpt-4o-mini",
       displayName: "GPT-4o mini",
-      description: "Great balance of quality, speed, and cost.",
+      description: "Fast, reliable transcript cleanup and formatting.",
       estimatedLatencyMs: 500,
       latencyTier: .fast,
-      tags: [.fast, .cheap],
+      tags: [.fast, .cheap, .leading],
       pricing: Pricing(promptPerMTokens: 0.15, completionPerMTokens: 0.6),
       contextLength: 128_000
     ),
     Option(
-      id: "google/gemini-3-flash-preview",
-      displayName: "Gemini 3 Flash (Preview)",
-      description: "High-speed, high-value model for agentic workflows.",
-      estimatedLatencyMs: 650,
+      id: "google/gemini-2.0-flash-lite-001",
+      displayName: "Gemini 2.0 Flash Lite",
+      description: "Very fast and inexpensive for everyday cleanup.",
+      estimatedLatencyMs: 450,
       latencyTier: .fast,
-      tags: [.fast, .leading],
-      pricing: Pricing(promptPerMTokens: 0.5, completionPerMTokens: 3.0),
+      tags: [.fast, .cheap],
+      pricing: Pricing(promptPerMTokens: 0.075, completionPerMTokens: 0.3),
       contextLength: 1_048_576
     ),
     Option(
@@ -187,35 +187,47 @@ struct ModelCatalog {
       contextLength: 262_144
     ),
     Option(
+      id: "mistralai/mistral-small-creative",
+      displayName: "Mistral Small Creative",
+      description: "Budget-friendly rewrites and formatting for shorter transcripts.",
+      estimatedLatencyMs: 500,
+      latencyTier: .fast,
+      tags: [.cheap],
+      pricing: Pricing(promptPerMTokens: 0.1, completionPerMTokens: 0.3),
+      contextLength: 32_768
+    ),
+
+    // Fast / quality cleanup
+    Option(
       id: "anthropic/claude-haiku-4.5",
       displayName: "Claude Haiku 4.5",
       description: "Fast, reliable formatting with strong instruction following.",
       estimatedLatencyMs: 900,
       latencyTier: .fast,
-      tags: [.fast],
+      tags: [.fast, .quality],
       pricing: Pricing(promptPerMTokens: 1.0, completionPerMTokens: 5.0),
       contextLength: 200_000
+    ),
+    Option(
+      id: "google/gemini-2.0-flash-001",
+      displayName: "Gemini 2.0 Flash",
+      description: "Great speed and quality for large transcript cleanup.",
+      estimatedLatencyMs: 650,
+      latencyTier: .fast,
+      tags: [.fast],
+      pricing: Pricing(promptPerMTokens: 0.1, completionPerMTokens: 0.4),
+      contextLength: 1_048_576
     ),
 
     // Leading quality
     Option(
-      id: "openai/gpt-5.2",
-      displayName: "GPT-5.2",
-      description: "Frontier-grade quality for the toughest cleanup.",
-      estimatedLatencyMs: 1600,
+      id: "openai/gpt-4o",
+      displayName: "GPT-4o",
+      description: "High-quality cleanup with excellent structure and tone preservation.",
+      estimatedLatencyMs: 1200,
       latencyTier: .medium,
       tags: [.quality, .leading],
-      pricing: Pricing(promptPerMTokens: 1.75, completionPerMTokens: 14.0),
-      contextLength: 400_000
-    ),
-    Option(
-      id: "openai/gpt-5.2-chat",
-      displayName: "GPT-5.2 Chat",
-      description: "Faster GPT-5.2 variant tuned for low-latency chat.",
-      estimatedLatencyMs: 900,
-      latencyTier: .fast,
-      tags: [.fast, .quality, .leading],
-      pricing: Pricing(promptPerMTokens: 1.75, completionPerMTokens: 14.0),
+      pricing: Pricing(promptPerMTokens: 2.5, completionPerMTokens: 10.0),
       contextLength: 128_000
     ),
     Option(
@@ -228,27 +240,15 @@ struct ModelCatalog {
       pricing: Pricing(promptPerMTokens: 3.0, completionPerMTokens: 15.0),
       contextLength: 1_000_000
     ),
-
-    // Strong value alternatives
     Option(
-      id: "minimax/minimax-m2.1",
-      displayName: "MiniMax M2.1",
-      description: "Strong agentic workflow model at a good price.",
+      id: "openai/gpt-5.2-chat",
+      displayName: "GPT-5.2 Chat",
+      description: "Top-tier cleanup quality with low-latency responses.",
       estimatedLatencyMs: 900,
       latencyTier: .fast,
-      tags: [.quality],
-      pricing: Pricing(promptPerMTokens: 0.3, completionPerMTokens: 1.2),
-      contextLength: 204_800
-    ),
-    Option(
-      id: "z-ai/glm-4.7",
-      displayName: "GLM 4.7",
-      description: "Good reasoning and stable multi-step execution.",
-      estimatedLatencyMs: 1100,
-      latencyTier: .medium,
-      tags: [.quality],
-      pricing: Pricing(promptPerMTokens: 0.4, completionPerMTokens: 1.5),
-      contextLength: 202_752
+      tags: [.fast, .quality, .leading],
+      pricing: Pricing(promptPerMTokens: 1.75, completionPerMTokens: 14.0),
+      contextLength: 128_000
     ),
   ]
 

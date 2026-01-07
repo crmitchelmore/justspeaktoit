@@ -3,8 +3,9 @@ import os.log
 
 /// A thread-safe pool of reusable `Data` buffers for audio streaming.
 /// Reduces memory allocations during real-time audio processing.
+/// Uses os_unfair_lock for minimal overhead on the audio hot path.
 final class AudioBufferPool: @unchecked Sendable {
-    private let lock = NSLock()
+    private var unfairLock = os_unfair_lock()
     private var availableBuffers: [Data]
     private var bufferSize: Int
     private let initialPoolSize: Int
@@ -37,8 +38,8 @@ final class AudioBufferPool: @unchecked Sendable {
     /// Checks out a buffer from the pool. If the pool is exhausted, a new buffer is created.
     /// - Returns: A `Data` buffer ready for use.
     func checkout() -> Data {
-        lock.lock()
-        defer { lock.unlock() }
+        os_unfair_lock_lock(&unfairLock)
+        defer { os_unfair_lock_unlock(&unfairLock) }
 
         if let buffer = availableBuffers.popLast() {
             poolHits += 1
@@ -65,16 +66,16 @@ final class AudioBufferPool: @unchecked Sendable {
         buffer.resetBytes(in: 0..<buffer.count)
         buffer.removeAll(keepingCapacity: true)
 
-        lock.lock()
-        defer { lock.unlock() }
+        os_unfair_lock_lock(&unfairLock)
+        defer { os_unfair_lock_unlock(&unfairLock) }
 
         availableBuffers.append(buffer)
     }
 
     /// Returns the current metrics as a dictionary for logging.
     func metricsSnapshot() -> [String: Int] {
-        lock.lock()
-        defer { lock.unlock() }
+        os_unfair_lock_lock(&unfairLock)
+        defer { os_unfair_lock_unlock(&unfairLock) }
 
         return [
             "poolHits": poolHits,
@@ -87,8 +88,8 @@ final class AudioBufferPool: @unchecked Sendable {
 
     /// Resets metrics counters (useful for testing or periodic logging).
     func resetMetrics() {
-        lock.lock()
-        defer { lock.unlock() }
+        os_unfair_lock_lock(&unfairLock)
+        defer { os_unfair_lock_unlock(&unfairLock) }
 
         poolHits = 0
         poolMisses = 0

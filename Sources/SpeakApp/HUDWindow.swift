@@ -31,8 +31,13 @@ final class HUDWindowPresenter {
 @MainActor
 private final class HUDWindowController: NSWindowController {
   private let hostingController: NSHostingController<HUDWindowContent>
+  // Retain references to prevent deallocation while window is alive
+  private let manager: HUDManager
+  private let settings: AppSettings
 
   init(manager: HUDManager, settings: AppSettings) {
+    self.manager = manager
+    self.settings = settings
     let content = HUDWindowContent(manager: manager, settings: settings)
     self.hostingController = NSHostingController(rootView: content)
 

@@ -257,6 +257,7 @@ enum WireUp {
       permissionsManager: permissions,
       appSettings: settings
     )
+    let textProcessor = TranscriptionTextProcessor(appSettings: settings)
     let main = MainManager(
       appSettings: settings,
       permissionsManager: permissions,
@@ -269,7 +270,8 @@ enum WireUp {
       personalLexicon: personalLexicon,
       openRouterClient: openRouter,
       livePolishManager: livePolish,
-      liveTextInserter: liveTextInserter
+      liveTextInserter: liveTextInserter,
+      textProcessor: textProcessor
     )
     let hudPresenter = HUDWindowPresenter(manager: hud, settings: settings)
     let shortcuts = ShortcutManager(permissionsManager: permissions)

@@ -181,6 +181,8 @@ final class AppSettings: ObservableObject {
     case preferredLocale
     case postRecordingTailDuration
     case deepgramStopGracePeriod
+    case whisperServerHost
+    case whisperServerPort
     case preferredAudioInputUID
     case defaultTTSVoice
     case ttsSpeed
@@ -206,6 +208,8 @@ final class AppSettings: ObservableObject {
     case livePolishMinDeltaChars
     case livePolishTailWindowChars
     case skipPostProcessingWithLivePolish
+    case voiceCommandsEnabled
+    case clipboardInsertionTriggers
   }
 
   private static let defaultBatchTranscriptionModel = "google/gemini-2.0-flash-001"
@@ -358,6 +362,15 @@ final class AppSettings: ObservableObject {
     didSet { store(deepgramStopGracePeriod, key: .deepgramStopGracePeriod) }
   }
 
+  // Nemotron local server settings
+  @Published var whisperServerHost: String {
+    didSet { store(whisperServerHost, key: .whisperServerHost) }
+  }
+
+  @Published var whisperServerPort: Int {
+    didSet { store(whisperServerPort, key: .whisperServerPort) }
+  }
+
   @Published private(set) var trackedAPIKeyIdentifiers: [String] {
     didSet { store(trackedAPIKeyIdentifiers, key: .trackedKeyIdentifiers) }
   }
@@ -477,6 +490,16 @@ final class AppSettings: ObservableObject {
     didSet { store(skipPostProcessingWithLivePolish, key: .skipPostProcessingWithLivePolish) }
   }
 
+  // Voice Commands Settings
+  @Published var voiceCommandsEnabled: Bool {
+    didSet { store(voiceCommandsEnabled, key: .voiceCommandsEnabled) }
+  }
+
+  /// Custom triggers for clipboard insertion (comma-separated), in addition to built-in triggers
+  @Published var clipboardInsertionTriggers: String {
+    didSet { store(clipboardInsertionTriggers, key: .clipboardInsertionTriggers) }
+  }
+
   private var supportsSpeedModeProcessing: Bool {
     transcriptionMode == .liveNative && liveTranscriptionModel.contains("streaming")
   }
@@ -563,6 +586,10 @@ final class AppSettings: ObservableObject {
       defaults.object(forKey: DefaultsKey.postRecordingTailDuration.rawValue) as? Double ?? 0.5
     deepgramStopGracePeriod =
       defaults.object(forKey: DefaultsKey.deepgramStopGracePeriod.rawValue) as? Double ?? 0
+    whisperServerHost =
+      defaults.string(forKey: DefaultsKey.whisperServerHost.rawValue) ?? "localhost"
+    whisperServerPort =
+      defaults.object(forKey: DefaultsKey.whisperServerPort.rawValue) as? Int ?? 9876
     trackedAPIKeyIdentifiers =
       defaults.array(forKey: DefaultsKey.trackedKeyIdentifiers.rawValue) as? [String] ?? []
 
@@ -616,6 +643,12 @@ final class AppSettings: ObservableObject {
       defaults.object(forKey: DefaultsKey.livePolishTailWindowChars.rawValue) as? Int ?? 600
     skipPostProcessingWithLivePolish =
       defaults.object(forKey: DefaultsKey.skipPostProcessingWithLivePolish.rawValue) as? Bool ?? true
+
+    // Voice Commands Settings
+    voiceCommandsEnabled =
+      defaults.object(forKey: DefaultsKey.voiceCommandsEnabled.rawValue) as? Bool ?? true
+    clipboardInsertionTriggers =
+      defaults.string(forKey: DefaultsKey.clipboardInsertionTriggers.rawValue) ?? ""
 
     // History Settings
     historyFlushInterval =

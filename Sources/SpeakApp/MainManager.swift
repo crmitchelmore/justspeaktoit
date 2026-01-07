@@ -41,6 +41,7 @@ final class MainManager: ObservableObject {
   private let openRouterClient: OpenRouterAPIClient
   private let livePolishManager: LivePolishManager
   private let liveTextInserter: LiveTextInserter
+  private let textProcessor: TranscriptionTextProcessor
   private let logger = Logger(subsystem: "com.github.speakapp", category: "MainManager")
 
   private var activeSession: ActiveSession?
@@ -71,7 +72,8 @@ final class MainManager: ObservableObject {
     personalLexicon: PersonalLexiconService,
     openRouterClient: OpenRouterAPIClient,
     livePolishManager: LivePolishManager,
-    liveTextInserter: LiveTextInserter
+    liveTextInserter: LiveTextInserter,
+    textProcessor: TranscriptionTextProcessor
   ) {
     self.appSettings = appSettings
     self.permissionsManager = permissionsManager
@@ -85,6 +87,7 @@ final class MainManager: ObservableObject {
     self.openRouterClient = openRouterClient
     self.livePolishManager = livePolishManager
     self.liveTextInserter = liveTextInserter
+    self.textProcessor = textProcessor
 
     transcriptionManager.$livePartialText
       .receive(on: RunLoop.main)
@@ -421,7 +424,8 @@ final class MainManager: ObservableObject {
         }
       }
 
-      let baseText = session.transcriptionResult?.text ?? ""
+      // Process voice commands (e.g., "copy pasta" → clipboard content)
+      let baseText = textProcessor.process(session.transcriptionResult?.text ?? "")
       let lexiconContext = makeLexiconContext(for: baseText, destination: nil)
       let corrections = personalLexicon.apply(to: baseText, context: lexiconContext)
       session.personalCorrections = PersonalLexiconHistorySummary(
@@ -794,7 +798,8 @@ final class MainManager: ObservableObject {
         session.recordCostFragment(cost)
       }
 
-      let baseText = result.text
+      // Process voice commands (e.g., "copy pasta" → clipboard content)
+      let baseText = textProcessor.process(result.text)
       let lexiconContext = makeLexiconContext(for: baseText, destination: nil)
       let corrections = personalLexicon.apply(to: baseText, context: lexiconContext)
       session.personalCorrections = PersonalLexiconHistorySummary(

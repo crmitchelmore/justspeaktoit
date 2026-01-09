@@ -1,3 +1,4 @@
+import SpeakCore
 import Foundation
 
 enum TTSProvider: String, Codable, CaseIterable, Identifiable {

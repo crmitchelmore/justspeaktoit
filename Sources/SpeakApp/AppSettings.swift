@@ -210,6 +210,7 @@ final class AppSettings: ObservableObject {
     case skipPostProcessingWithLivePolish
     case voiceCommandsEnabled
     case clipboardInsertionTriggers
+    case enableSendToMac
   }
 
   private static let defaultBatchTranscriptionModel = "google/gemini-2.0-flash-001"
@@ -499,6 +500,13 @@ final class AppSettings: ObservableObject {
   @Published var clipboardInsertionTriggers: String {
     didSet { store(clipboardInsertionTriggers, key: .clipboardInsertionTriggers) }
   }
+  
+  // MARK: - Transport (Send to Mac)
+  
+  /// Enable "Send to Mac" transport server
+  @Published var enableSendToMac: Bool {
+    didSet { store(enableSendToMac, key: .enableSendToMac) }
+  }
 
   private var supportsSpeedModeProcessing: Bool {
     transcriptionMode == .liveNative && liveTranscriptionModel.contains("streaming")
@@ -649,6 +657,10 @@ final class AppSettings: ObservableObject {
       defaults.object(forKey: DefaultsKey.voiceCommandsEnabled.rawValue) as? Bool ?? true
     clipboardInsertionTriggers =
       defaults.string(forKey: DefaultsKey.clipboardInsertionTriggers.rawValue) ?? ""
+    
+    // Transport Settings
+    enableSendToMac =
+      defaults.object(forKey: DefaultsKey.enableSendToMac.rawValue) as? Bool ?? false
 
     // History Settings
     historyFlushInterval =

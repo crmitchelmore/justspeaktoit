@@ -1,3 +1,4 @@
+import SpeakCore
 import AppKit
 import SwiftUI
 
@@ -336,6 +337,120 @@ struct SettingsView: View {
         }
       }
       .speakTooltip("Pick the microphone Speak should use. We fall back to the system default if a device disconnects.")
+      
+      SettingsCard(title: "Send to Mac", systemImage: "iphone.and.arrow.forward", tint: Color.green) {
+        VStack(alignment: .leading, spacing: 12) {
+          Text("Allow iOS devices to send transcripts to this Mac over your local network.")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+          
+          settingsToggle(
+            "Enable Send to Mac",
+            isOn: Binding(
+              get: { settings.enableSendToMac },
+              set: { newValue in
+                settings.enableSendToMac = newValue
+                if newValue {
+                  try? environment.transportServer.start()
+                } else {
+                  environment.transportServer.stop()
+                }
+              }
+            ),
+            tint: .green
+          )
+          .speakTooltip("When enabled, your Mac will advertise itself on the local network and accept connections from the Speak iOS app.")
+          
+          if settings.enableSendToMac {
+            Divider()
+            
+            VStack(alignment: .leading, spacing: 8) {
+              HStack {
+                Text("Pairing Code:")
+                  .font(.headline)
+                Spacer()
+                Text(PairingManager.shared.pairingCode)
+                  .font(.system(.title2, design: .monospaced))
+                  .fontWeight(.bold)
+                  .foregroundStyle(.green)
+                Button {
+                  NSPasteboard.general.clearContents()
+                  NSPasteboard.general.setString(PairingManager.shared.pairingCode, forType: .string)
+                } label: {
+                  Image(systemName: "doc.on.doc")
+                }
+                .buttonStyle(.borderless)
+                .speakTooltip("Copy pairing code to clipboard")
+              }
+              
+              Text("Enter this code on your iPhone when pairing.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+              
+              Button("Regenerate Code") {
+                _ = PairingManager.shared.regeneratePairingCode()
+              }
+              .buttonStyle(.bordered)
+              .speakTooltip("Generate a new pairing code. This will disconnect all paired devices.")
+            }
+            .padding()
+            .background(
+              RoundedRectangle(cornerRadius: 8)
+                .fill(Color.green.opacity(0.1))
+            )
+            
+            if environment.transportServer.isRunning {
+              HStack(spacing: 6) {
+                Circle()
+                  .fill(.green)
+                  .frame(width: 8, height: 8)
+                Text("Server running, ready for connections")
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+              }
+            }
+            
+            if !environment.transportServer.connectedDevices.isEmpty {
+              Divider()
+              
+              VStack(alignment: .leading, spacing: 8) {
+                Text("Connected Devices:")
+                  .font(.headline)
+                
+                ForEach(environment.transportServer.connectedDevices) { device in
+                  HStack {
+                    Image(systemName: "iphone")
+                      .foregroundStyle(.blue)
+                    VStack(alignment: .leading, spacing: 2) {
+                      Text(device.name)
+                        .font(.subheadline)
+                      Text("Connected \(device.connectedAt, style: .relative) ago")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button {
+                      environment.transportServer.disconnectDevice(id: device.id)
+                    } label: {
+                      Image(systemName: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.secondary)
+                    .speakTooltip("Disconnect this device")
+                  }
+                  .padding(8)
+                  .background(
+                    RoundedRectangle(cornerRadius: 6)
+                      .fill(Color(nsColor: .controlBackgroundColor))
+                  )
+                }
+              }
+            }
+          }
+        }
+      }
+      .speakTooltip("Use your iPhone as a wireless microphone for your Mac. Transcribe on iPhone, text appears on Mac.")
+
 
       SettingsCard(title: "Housekeeping", systemImage: "tray.full", tint: Color.orange) {
         VStack(alignment: .leading, spacing: 12) {

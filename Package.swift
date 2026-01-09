@@ -5,9 +5,12 @@ let package = Package(
     name: "SpeakApp",
     defaultLocalization: "en",
     platforms: [
-        .macOS(.v14)
+        .macOS(.v14),
+        .iOS(.v17)
     ],
     products: [
+        .library(name: "SpeakCore", targets: ["SpeakCore"]),
+        .library(name: "SpeakiOSLib", targets: ["SpeakiOSLib"]),
         .executable(name: "SpeakApp", targets: ["SpeakApp"])
     ],
     dependencies: [
@@ -15,8 +18,18 @@ let package = Package(
         .package(url: "https://github.com/nicklockwood/SwiftFormat.git", from: "0.53.6")
     ],
     targets: [
+        .target(
+            name: "SpeakCore"
+        ),
+        .target(
+            name: "SpeakiOSLib",
+            dependencies: ["SpeakCore"],
+            path: "Sources/SpeakiOS",
+            exclude: ["SpeakiOSApp.swift"]
+        ),
         .executableTarget(
-            name: "SpeakApp"
+            name: "SpeakApp",
+            dependencies: ["SpeakCore"]
         ),
         .testTarget(
             name: "SpeakAppTests",

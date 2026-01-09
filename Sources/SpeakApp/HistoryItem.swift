@@ -1,3 +1,4 @@
+import SpeakCore
 //@Implement This represents the full details of an item to write to the history, and it includes:
 // - What models were used
 // - The raw transcription

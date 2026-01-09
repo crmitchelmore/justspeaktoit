@@ -1,21 +1,50 @@
 # SpeakApp
 
-Native macOS SwiftUI starter project with standard tooling and automation to support everyday development and release workflows.
+Native macOS and iOS SwiftUI transcription app with modular Swift packages.
+
+## Project Structure
+
+```
+Sources/
+├── SpeakCore/      # Shared cross-platform library (types, protocols, secure storage)
+├── SpeakApp/       # macOS application
+└── SpeakiOS/       # iOS library (live transcription, views)
+SpeakiOSApp/        # iOS app entry point
+SpeakiOS.xcodeproj/ # Xcode project for iOS builds
+```
+
+### Swift Packages
+
+- **SpeakCore** - Cross-platform types, protocols, keychain storage, model catalog
+- **SpeakiOSLib** - iOS-specific live transcription with Apple Speech, views
+- **SpeakApp** - macOS executable
 
 ## Prerequisites
 
 - macOS 14 or newer with Xcode 15 (ships Swift toolchain 5.9) or a standalone Swift 5.9+ toolchain installed.
+- iOS 17+ for the iOS app
 - SwiftPM handles dependencies; no manual installations are required for linting/formatting.
 
 ## Key Commands
 
 All automation is exposed via `make` targets. Use `make help` to list them.
 
-- `make` / `make run` – Build if needed and launch the SwiftUI app.
+- `make` / `make run` – Build if needed and launch the macOS SwiftUI app.
 - `make build` – Compile the app in debug configuration.
 - `make rebuild` – Clean and then perform a fresh build.
 - `make clean` – Remove build artefacts.
 - `make test` – Execute the package test suite.
+
+### Building iOS
+
+```bash
+# Build SpeakiOSLib (verifies iOS code compiles)
+swift build --target SpeakiOSLib
+
+# Build with Xcode
+open SpeakiOS.xcodeproj
+# Select iOS device/simulator and build (Cmd+B)
+```
 
 ## Versioning
 
@@ -63,6 +92,16 @@ security add-generic-password \
 
 At launch the app hydrates this blob into memory and serves typed accessors to the rest of the codebase, so end users still interact through the Settings UI while developers can keep credentials consolidated.
 
+## iOS App
+
+The iOS app uses Apple Speech for on-device live transcription:
+
+- **AudioSessionManager** - iOS audio session lifecycle management
+- **iOSLiveTranscriber** - SFSpeechRecognizer integration with partial results
+- **ContentView** - Start/Stop recording, live transcript display, copy to clipboard
+
+Open `SpeakiOS.xcodeproj` in Xcode to build and run on device/simulator.
+
 ## Next Steps
 
-Open the project in Xcode with `xed .` or continue iterating purely with SwiftPM. The root `SpeakApp.swift` contains a “Hello, Speak” window ready for extension.
+Open the project in Xcode with `xed .` or continue iterating purely with SwiftPM. The root `SpeakApp.swift` contains a "Hello, Speak" window ready for extension.

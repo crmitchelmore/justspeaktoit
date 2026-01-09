@@ -21,6 +21,7 @@ final class AppEnvironment: ObservableObject {
   let livePolish: LivePolishManager
   let liveTextInserter: LiveTextInserter
   let main: MainManager
+  let transportServer: TransportServer
   private let hudPresenter: HUDWindowPresenter
 
   private(set) var statusBarController: StatusBarController?
@@ -51,6 +52,7 @@ final class AppEnvironment: ObservableObject {
     livePolish: LivePolishManager,
     liveTextInserter: LiveTextInserter,
     main: MainManager,
+    transportServer: TransportServer,
     hudPresenter: HUDWindowPresenter
   ) {
     self.settings = settings
@@ -71,6 +73,7 @@ final class AppEnvironment: ObservableObject {
     self.livePolish = livePolish
     self.liveTextInserter = liveTextInserter
     self.main = main
+    self.transportServer = transportServer
     self.hudPresenter = hudPresenter
   }
 
@@ -275,6 +278,9 @@ enum WireUp {
     )
     let hudPresenter = HUDWindowPresenter(manager: hud, settings: settings)
     let shortcuts = ShortcutManager(permissionsManager: permissions)
+    
+    // Transport server for "Send to Mac" from iOS
+    let transportServer = TransportServer()
 
     let environment = AppEnvironment(
       settings: settings,
@@ -295,8 +301,22 @@ enum WireUp {
       livePolish: livePolish,
       liveTextInserter: liveTextInserter,
       main: main,
+      transportServer: transportServer,
       hudPresenter: hudPresenter
     )
+    
+    // Configure transport server callbacks
+    transportServer.onTranscriptReceived = { sessionId, text in
+      Task { @MainActor in
+        // Insert received text into active app using existing LiveTextInserter
+        environment.liveTextInserter.update(with: text)
+      }
+    }
+    
+    // Auto-start transport server if enabled
+    if settings.enableSendToMac {
+      try? transportServer.start()
+    }
 
     Task { await secureStorage.preloadTrackedSecrets() }
 

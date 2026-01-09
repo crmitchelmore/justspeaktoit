@@ -1,3 +1,4 @@
+import SpeakCore
 import Charts
 import SwiftUI
 

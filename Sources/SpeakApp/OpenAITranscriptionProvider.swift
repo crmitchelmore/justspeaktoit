@@ -1,3 +1,4 @@
+import SpeakCore
 import AVFoundation
 import Foundation
 

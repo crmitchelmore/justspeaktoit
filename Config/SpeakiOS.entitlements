@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Keychain Sharing: Enables shared keychain access between iOS and macOS apps -->
+    <!-- The access group should match across both platforms -->
+    <key>keychain-access-groups</key>
+    <array>
+        <!-- Default app keychain group -->
+        <string>$(AppIdentifierPrefix)com.speak.shared</string>
+    </array>
+    
+    <!-- iCloud: Enables iCloud Key-Value Store for settings sync -->
+    <key>com.apple.developer.ubiquity-kvstore-identifier</key>
+    <string>$(TeamIdentifierPrefix)com.speak.ios</string>
+    
+    <!-- App Groups: Enables shared container for widget extension -->
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>group.com.speak.ios</string>
+    </array>
+    
+    <!-- Background Modes: Required for audio recording -->
+    <!-- Note: Also add to Info.plist UIBackgroundModes array -->
+</dict>
+</plist>

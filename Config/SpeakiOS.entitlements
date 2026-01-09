@@ -10,9 +10,10 @@
         <string>$(AppIdentifierPrefix)com.speak.shared</string>
     </array>
     
-    <!-- iCloud: Enables iCloud Key-Value Store for settings sync -->
-    <key>com.apple.developer.ubiquity-kvstore-identifier</key>
-    <string>$(TeamIdentifierPrefix)com.speak.ios</string>
+    <!-- iCloud: Disabled - requires Apple Developer subscription -->
+    <!-- Uncomment if you have a subscription and want iCloud settings sync -->
+    <!-- <key>com.apple.developer.ubiquity-kvstore-identifier</key> -->
+    <!-- <string>$(TeamIdentifierPrefix)com.speak.ios</string> -->
     
     <!-- App Groups: Enables shared container for widget extension -->
     <key>com.apple.security.application-groups</key>

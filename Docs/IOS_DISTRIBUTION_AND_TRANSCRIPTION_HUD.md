@@ -1,8 +1,8 @@
-# iOS distribution + signing checklist (and HUD/transcription notes)
+# iOS provisioning + signing (Mac)
 
 _Last updated: 2026-01-14_
 
-## 1) Bundle/sign so it installs on devices
+## Bundle/sign so it installs on devices
 
 ### A. Identifiers
 - App target bundle id: currently `com.justspeaktoit.ios`
@@ -57,42 +57,3 @@ That’s enough to avoid the “missing usage description” crash when requesti
 ### F. Known install blocker fixed
 The widget extension deployment target was incorrectly set to **iOS 26.2**; it’s now **iOS 17.0** so it can install on real devices.
 
----
-
-## 2) Bug: “transcription session already started”, HUD disappears, can’t stop
-
-### Symptoms
-- Starting a new session shows an error like: **"A live transcription session is already running."**
-- Logs show transcription is still running.
-- HUD is gone, and stop controls no longer work; app restart required.
-
-### Root cause (code)
-`MainManager.cleanupAfterFailure(...)` would:
-- mark the session failed,
-- cancel audio recording,
-- set `activeSession = nil`,
-
-…but **did not stop/cancel live transcription**. That can leave `TranscriptionManager.isLiveTranscribing == true` with no active session/UI attached to it.
-
-### Fix implemented
-- `cleanupAfterFailure(...)` now calls `transcriptionManager.cancelLiveTranscription()` when `transcriptionMode == .liveNative`.
-- `startSession(...)` now has a failsafe: if live transcription is running with no active session, it cancels it so the app can recover without restart.
-
-### How to verify
-1. Start a live session.
-2. Trigger a failure path (e.g. simulate an error that calls `cleanupAfterFailure`).
-3. Confirm live transcription stops and the next start works (no “already running” state).
-
----
-
-## 3) HUD live transcript preview shows the *start* of the transcript
-
-### Desired behavior
-Show the most recent content (the last bit that fits on screen / last couple sentences), not the initial sentences.
-
-### Fix implemented
-In `HUDView.swift`, the live transcript `Text(...)` now uses:
-- `.lineLimit(2)`
-- `.truncationMode(.head)`
-
-This makes the HUD preview keep the tail of the transcript visible as it grows.

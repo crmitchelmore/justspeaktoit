@@ -28,6 +28,25 @@ The iOS target uses `SpeakiOS.entitlements`.
 - TestFlight: Xcode **Product → Archive → Distribute App → TestFlight** (requires App Store Connect record).
 - Ad Hoc: archive + export with an Ad Hoc profile (requires collecting device UDIDs).
 
+#### Automation (what can be automated)
+You generally **can’t fully automate initial certificate enrollment** (Apple login / 2FA / accepting agreements is a one-time manual step), but you *can* automate:
+- creating/updating provisioning profiles on the build machine (via Xcode automatic signing)
+- building an `.xcarchive` and exporting an `.ipa`
+
+This repo includes `scripts/ios-build-ipa.sh` which runs `xcodebuild archive` + `xcodebuild -exportArchive` using **automatic signing**:
+
+```bash
+# Development IPA
+EXPORT_METHOD=development ./scripts/ios-build-ipa.sh
+
+# Ad Hoc IPA (requires you to have an Ad Hoc profile + registered device UDIDs)
+EXPORT_METHOD=ad-hoc ./scripts/ios-build-ipa.sh
+```
+
+Notes:
+- It uses `-allowProvisioningUpdates`, so you must be logged into Xcode on that machine.
+- For CI, the usual approach is **fastlane match** (store certs/profiles in an encrypted repo) or manually installing a distribution cert + provisioning profile as CI secrets.
+
 ### E. Permissions strings
 The iOS app target is using **generated Info.plist** keys:
 - `NSMicrophoneUsageDescription`

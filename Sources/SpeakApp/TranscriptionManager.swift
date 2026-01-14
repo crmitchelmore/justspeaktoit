@@ -411,16 +411,11 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
   private let audioEngine = AVAudioEngine()
   private let logger = Logger(subsystem: "com.speak.app", category: "DeepgramLiveController")
+  private let audioProcessor = DeepgramAudioProcessor()
 
   /// Deepgram's preferred audio format: 16kHz mono PCM16
   private let deepgramSampleRate: Double = 16000
   private var deepgramFormat: AVAudioFormat?
-
-  /// Cached audio converter to avoid recreation per buffer (perf optimization)
-  private var cachedConverter: AVAudioConverter?
-  private var cachedInputFormat: AVAudioFormat?
-  /// Reusable output buffer for audio conversion (perf optimization)
-  private var reusableOutputBuffer: AVAudioPCMBuffer?
 
   /// Accumulated final transcript segments
   private var finalSegments: [TranscriptionSegment] = []
@@ -522,13 +517,23 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
       }
     )
 
-    // Set up audio capture with resampling to 16kHz
-    inputNode.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] buffer, _ in
-      guard let self, self.isRunning else { return }
-      // Process on background to avoid blocking audio thread
-      Task.detached { [weak self] in
-        await self?.processAndSendAudio(buffer, from: inputFormat, to: outputFormat)
-      }
+    guard let transcriber else {
+      throw DeepgramError.connectionFailed
+    }
+
+    // Set up audio capture with resampling to 16kHz.
+    // IMPORTANT: Copy the buffer before leaving the audio tap callback.
+    audioProcessor.setRunning(true)
+    let processor = audioProcessor
+    let log = logger
+    inputNode.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { buffer, _ in
+      processor.handleAudioTap(
+        buffer,
+        inputFormat: inputFormat,
+        outputFormat: outputFormat,
+        transcriber: transcriber,
+        logger: log
+      )
     }
 
     audioEngine.prepare()
@@ -566,66 +571,122 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
     }
   }
 
-  /// Resample audio buffer from input format to 16kHz PCM16 and send to Deepgram.
-  /// Uses cached converter and reusable output buffer to minimize allocations.
-  private func processAndSendAudio(
-    _ buffer: AVAudioPCMBuffer,
-    from inputFormat: AVAudioFormat,
-    to outputFormat: AVAudioFormat
-  ) async {
-    guard isRunning, let transcriber else { return }
+  private final class DeepgramAudioProcessor: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "com.speak.app.deepgram.audioProcessing")
+    private var isRunning: Bool = false
 
-    // Get or create cached converter (avoids ~30 allocations/sec)
-    let converter: AVAudioConverter
-    if let cached = cachedConverter, cachedInputFormat == inputFormat {
-      converter = cached
-    } else {
-      guard let newConverter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
-        logger.error("Failed to create audio converter")
+    private var cachedConverter: AVAudioConverter?
+    private var cachedInputFormat: AVAudioFormat?
+    private var reusableOutputBuffer: AVAudioPCMBuffer?
+
+    func setRunning(_ running: Bool) {
+      queue.sync {
+        isRunning = running
+        if !running {
+          cachedConverter = nil
+          cachedInputFormat = nil
+          reusableOutputBuffer = nil
+        }
+      }
+    }
+
+    func handleAudioTap(
+      _ buffer: AVAudioPCMBuffer,
+      inputFormat: AVAudioFormat,
+      outputFormat: AVAudioFormat,
+      transcriber: DeepgramLiveTranscriber,
+      logger: Logger
+    ) {
+      guard let copied = copyPCMBuffer(buffer) else { return }
+      queue.async { [weak self] in
+        guard let self, self.isRunning else { return }
+        self.processAndSendAudio(
+          copied,
+          from: inputFormat,
+          to: outputFormat,
+          transcriber: transcriber,
+          logger: logger
+        )
+      }
+    }
+
+    private func copyPCMBuffer(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+      let frameLength = buffer.frameLength
+      guard let copy = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: frameLength) else {
+        return nil
+      }
+      copy.frameLength = frameLength
+
+      let src = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: buffer.audioBufferList))
+      let dst = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: copy.audioBufferList))
+      for idx in 0..<min(src.count, dst.count) {
+        let srcBuffer = src[idx]
+        guard let srcData = srcBuffer.mData, let dstData = dst[idx].mData else { continue }
+        dstData.copyMemory(from: srcData, byteCount: Int(srcBuffer.mDataByteSize))
+        dst[idx].mDataByteSize = srcBuffer.mDataByteSize
+      }
+      return copy
+    }
+
+    private func processAndSendAudio(
+      _ buffer: AVAudioPCMBuffer,
+      from inputFormat: AVAudioFormat,
+      to outputFormat: AVAudioFormat,
+      transcriber: DeepgramLiveTranscriber,
+      logger: Logger
+    ) {
+      // Get or create cached converter (avoids ~30 allocations/sec)
+      let converter: AVAudioConverter
+      if let cached = cachedConverter, cachedInputFormat == inputFormat {
+        converter = cached
+      } else {
+        guard let newConverter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
+          logger.error("Failed to create audio converter")
+          return
+        }
+        cachedConverter = newConverter
+        cachedInputFormat = inputFormat
+        converter = newConverter
+      }
+
+      // Calculate output buffer size based on sample rate ratio
+      let ratio = outputFormat.sampleRate / inputFormat.sampleRate
+      let outputFrameCapacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio)
+
+      // Reuse output buffer if possible (avoids allocation per chunk)
+      let outputBuffer: AVAudioPCMBuffer
+      if let reusable = reusableOutputBuffer, reusable.frameCapacity >= outputFrameCapacity {
+        reusable.frameLength = 0  // Reset for reuse
+        outputBuffer = reusable
+      } else {
+        guard let newBuffer = AVAudioPCMBuffer(
+          pcmFormat: outputFormat,
+          frameCapacity: outputFrameCapacity
+        ) else { return }
+        reusableOutputBuffer = newBuffer
+        outputBuffer = newBuffer
+      }
+
+      // Convert audio
+      converter.reset()
+      var error: NSError?
+      let status = converter.convert(to: outputBuffer, error: &error) { _, outStatus in
+        outStatus.pointee = .haveData
+        return buffer
+      }
+
+      guard status != .error, error == nil else {
+        let errorDescription = error?.localizedDescription ?? "unknown"
+        logger.error("Audio conversion failed: \(errorDescription, privacy: .public)")
         return
       }
-      cachedConverter = newConverter
-      cachedInputFormat = inputFormat
-      converter = newConverter
+
+      // Extract PCM16 data and send
+      guard let int16Data = outputBuffer.int16ChannelData else { return }
+      let frameLength = Int(outputBuffer.frameLength)
+      let data = Data(bytes: int16Data[0], count: frameLength * 2)
+      transcriber.sendAudio(data)
     }
-
-    // Calculate output buffer size based on sample rate ratio
-    let ratio = outputFormat.sampleRate / inputFormat.sampleRate
-    let outputFrameCapacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio)
-
-    // Reuse output buffer if possible (avoids allocation per chunk)
-    let outputBuffer: AVAudioPCMBuffer
-    if let reusable = reusableOutputBuffer, reusable.frameCapacity >= outputFrameCapacity {
-      reusable.frameLength = 0  // Reset for reuse
-      outputBuffer = reusable
-    } else {
-      guard let newBuffer = AVAudioPCMBuffer(
-        pcmFormat: outputFormat,
-        frameCapacity: outputFrameCapacity
-      ) else { return }
-      reusableOutputBuffer = newBuffer
-      outputBuffer = newBuffer
-    }
-
-    // Convert audio
-    converter.reset()  // Reset converter state for clean conversion
-    var error: NSError?
-    let status = converter.convert(to: outputBuffer, error: &error) { inNumPackets, outStatus in
-      outStatus.pointee = .haveData
-      return buffer
-    }
-
-    guard status != .error, error == nil else {
-      logger.error("Audio conversion failed: \(error?.localizedDescription ?? "unknown")")
-      return
-    }
-
-    // Extract PCM16 data and send
-    guard let int16Data = outputBuffer.int16ChannelData else { return }
-    let frameLength = Int(outputBuffer.frameLength)
-    let data = Data(bytes: int16Data[0], count: frameLength * 2)
-
-    transcriber.sendAudio(data)
   }
 
   func stop() async {
@@ -636,10 +697,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
     audioEngine.inputNode.removeTap(onBus: 0)
     isRunning = false
 
-    // Clear cached audio processing resources
-    cachedConverter = nil
-    cachedInputFormat = nil
-    reusableOutputBuffer = nil
+    audioProcessor.setRunning(false)
 
     let gracePeriod = max(appSettings.deepgramStopGracePeriod, 0)
     if gracePeriod > 0 {

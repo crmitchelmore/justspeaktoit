@@ -77,6 +77,7 @@ struct HUDOverlay: View {
         .fontWeight(isFinal ? .regular : .light)
         .foregroundStyle(isFinal ? .primary : .secondary)
         .lineLimit(2)
+        .truncationMode(.head)
         .animation(.easeInOut(duration: 0.2), value: isFinal)
 
       if let confidence, confidence > 0 {

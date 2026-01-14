@@ -288,6 +288,13 @@ final class MainManager: ObservableObject {
   private func startSession(trigger: SessionTriggerSource) async {
     guard activeSession == nil else { return }
 
+    // Failsafe: if live transcription is still running but we have no activeSession,
+    // cancel it so the app can always recover without requiring a restart.
+    if transcriptionManager.isLiveTranscribing {
+      logger.warning("Live transcription still running without an active session; cancelling to recover")
+      transcriptionManager.cancelLiveTranscription()
+    }
+
     clearRetryData()
 
     let gesture = trigger.historyGesture
@@ -1059,6 +1066,11 @@ final class MainManager: ObservableObject {
     stopAudioLevelMonitoring()
     livePolishManager.reset()
     liveTextInserter.reset()
+
+    if appSettings.transcriptionMode == .liveNative {
+      transcriptionManager.cancelLiveTranscription()
+    }
+
     Task {
       await audioFileManager.cancelRecording(deleteFile: !preserveFile)
       if let session = activeSession {

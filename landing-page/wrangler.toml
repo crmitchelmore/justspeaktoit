@@ -1,0 +1,13 @@
+# Cloudflare Pages Build Configuration
+# This file configures the build settings for Cloudflare Pages deployment
+
+[build]
+command = "echo 'Static site - no build needed'"
+output = "."
+
+# Alternatively, if you want a build step:
+# command = "bun run build"
+# output = "dist"
+
+[build.environment]
+NODE_VERSION = "18"

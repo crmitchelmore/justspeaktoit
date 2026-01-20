@@ -1,4 +1,6 @@
 SWIFT_FLAGS ?=
+ARCHIVE_PATH ?= ~/Desktop/JustSpeakToIt.xcarchive
+EXPORT_PATH ?= ~/Desktop/JustSpeakToIt-AppStore
 
 .DEFAULT_GOAL := run
 
@@ -26,3 +28,35 @@ rebuild: ## Clean and then build from scratch
 .PHONY: test
 test: ## Execute the test suite
 	swift test $(SWIFT_FLAGS)
+
+.PHONY: release
+release: ## Build optimized release binary
+	swift build -c release $(SWIFT_FLAGS)
+
+.PHONY: xcode
+xcode: ## Generate and open Xcode workspace
+	tuist generate
+	open "Just Speak to It.xcworkspace"
+
+.PHONY: archive
+archive: ## Create Xcode archive for App Store
+	@echo "Creating archive at $(ARCHIVE_PATH)..."
+	xcodebuild -workspace "Just Speak to It.xcworkspace" \
+		-scheme "SpeakApp" \
+		-configuration Release \
+		-archivePath $(ARCHIVE_PATH) \
+		archive
+	@echo "Archive created at $(ARCHIVE_PATH)"
+
+.PHONY: export-appstore
+export-appstore: ## Export archive for App Store submission
+	@echo "Exporting for App Store..."
+	xcodebuild -exportArchive \
+		-archivePath $(ARCHIVE_PATH) \
+		-exportOptionsPlist Config/ExportOptions-AppStore.plist \
+		-exportPath $(EXPORT_PATH)
+	@echo "Exported to $(EXPORT_PATH)"
+
+.PHONY: version
+version: ## Display current version
+	@cat VERSION

@@ -73,6 +73,16 @@ struct MainView: View {
             .foregroundStyle(.tertiary)
         }
       }
+      .padding(.horizontal, 12)
+      .padding(.vertical, 6)
+      .background(
+        Capsule()
+          .fill(.ultraThinMaterial)
+      )
+      .overlay(
+        Capsule()
+          .strokeBorder(.secondary.opacity(0.3), lineWidth: 0.5)
+      )
     }
   }
 }

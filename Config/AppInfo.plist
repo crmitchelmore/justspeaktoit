@@ -5,13 +5,15 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleExecutable</key>
-	<string>SpeakApp</string>
+	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.speak.app</string>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>Speak</string>
+	<string>Just Speak to It</string>
+	<key>CFBundleDisplayName</key>
+	<string>Just Speak to It</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -19,13 +21,13 @@
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Speak uses the microphone to capture audio for transcription.</string>
+	<string>Just Speak to It uses the microphone to capture audio for transcription.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Speak transcribes your speech into text using speech recognition.</string>
+	<string>Just Speak to It transcribes your speech into text using speech recognition.</string>
 	<key>NSAccessibilityUsageDescription</key>
-	<string>Speak needs Accessibility access to observe the Fn key for global shortcuts.</string>
+	<string>Just Speak to It needs Accessibility access to observe the Fn key for global shortcuts.</string>
 	<key>NSInputMonitoringUsageDescription</key>
-	<string>Speak needs Input Monitoring access to detect your Fn key presses for shortcuts.</string>
+	<string>Just Speak to It needs Input Monitoring access to detect your Fn key presses for shortcuts.</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<key>NSPrincipalClass</key>

@@ -7,7 +7,7 @@
     <key>keychain-access-groups</key>
     <array>
         <!-- Default app keychain group -->
-        <string>$(AppIdentifierPrefix)com.speak.shared</string>
+    <string>$(AppIdentifierPrefix)com.justspeaktoit.shared</string>
     </array>
     
     <!-- iCloud: Disabled - requires Apple Developer subscription -->
@@ -18,7 +18,7 @@
     <!-- App Groups: Enables shared container for widget extension -->
     <key>com.apple.security.application-groups</key>
     <array>
-        <string>group.com.speak.ios</string>
+        <string>group.com.justspeaktoit.ios</string>
     </array>
     
     <!-- Background Modes: Required for audio recording -->

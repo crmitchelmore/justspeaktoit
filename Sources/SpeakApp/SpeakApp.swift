@@ -7,7 +7,7 @@ struct SpeakApp: App {
     @StateObject private var environmentHolder = EnvironmentHolder()
 
     var body: some Scene {
-        WindowGroup("Speak") {
+        WindowGroup("Just Speak to It") {
             Group {
                 if let environment = environmentHolder.environment {
                     MainView()
@@ -36,6 +36,7 @@ struct SpeakApp: App {
                         }
                 }
             }
+            .tint(.brandAccent)
         }
         .defaultSize(width: 1080, height: 720)
         .commands {
@@ -70,7 +71,7 @@ struct SpeakCommands: Commands {
         }
 
         CommandGroup(replacing: .help) {
-            Button("Speak Help") {
+            Button("Just Speak to It Help") {
                 if let url = URL(string: "https://github.com/speak-app/speak") {
                     NSWorkspace.shared.open(url)
                 }
@@ -199,4 +200,3 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 }
-

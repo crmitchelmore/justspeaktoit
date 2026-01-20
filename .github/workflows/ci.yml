@@ -1,5 +1,10 @@
 name: CI
 
+# Note: macOS runners require either:
+# - Public repository (free)
+# - GitHub Team/Enterprise plan (paid)
+# - Self-hosted runners
+
 on:
   push:
     branches: [main]

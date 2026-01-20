@@ -250,44 +250,22 @@ public struct ContentView: View {
     
     @ViewBuilder
     private var floatingControls: some View {
+        #if compiler(>=6.1) && canImport(SwiftUI, _version: 7.0)
         if #available(iOS 26.0, *) {
-            GlassEffectContainer(spacing: 16) {
-                HStack(spacing: 16) {
-                    // Primary action - Start/Stop
-                    Button {
-                        Task {
-                            await toggleRecording()
-                        }
-                    } label: {
-                        Image(systemName: coordinator.isRunning ? "stop.fill" : "mic.fill")
-                            .font(.system(size: 28))
-                            .frame(width: 64, height: 64)
-                    }
-                    .buttonStyle(.glassProminent)
-                    .tint(coordinator.isRunning ? .red : .brandAccent)
-                    .clipShape(Circle())
-                    .accessibilityLabel(coordinator.isRunning ? "Stop recording" : "Start recording")
-                    
-                    // Secondary action - Copy (only visible when there's text)
-                    if !coordinator.partialText.isEmpty {
-                        Button {
-                            copyToClipboard()
-                        } label: {
-                            Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                                .font(.system(size: 20))
-                                .frame(width: 48, height: 48)
-                        }
-                        .buttonStyle(.glass)
-                        .tint(.brandAccentWarm)
-                        .clipShape(Circle())
-                        .accessibilityLabel(copied ? "Copied to clipboard" : "Copy transcript")
-                        .transition(.scale.combined(with: .opacity))
-                    }
-                }
-            }
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: coordinator.partialText.isEmpty)
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: coordinator.isRunning)
+            floatingControlsGlass
         } else {
+            floatingControlsFallback
+        }
+        #else
+        floatingControlsFallback
+        #endif
+    }
+    
+    #if compiler(>=6.1) && canImport(SwiftUI, _version: 7.0)
+    @available(iOS 26.0, *)
+    @ViewBuilder
+    private var floatingControlsGlass: some View {
+        GlassEffectContainer(spacing: 16) {
             HStack(spacing: 16) {
                 // Primary action - Start/Stop
                 Button {
@@ -299,8 +277,8 @@ public struct ContentView: View {
                         .font(.system(size: 28))
                         .frame(width: 64, height: 64)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(coordinator.isRunning ? .red : .accentColor)
+                .buttonStyle(.glassProminent)
+                .tint(coordinator.isRunning ? .red : .brandAccent)
                 .clipShape(Circle())
                 .accessibilityLabel(coordinator.isRunning ? "Stop recording" : "Start recording")
                 
@@ -313,15 +291,54 @@ public struct ContentView: View {
                             .font(.system(size: 20))
                             .frame(width: 48, height: 48)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.glass)
+                    .tint(.brandAccentWarm)
                     .clipShape(Circle())
                     .accessibilityLabel(copied ? "Copied to clipboard" : "Copy transcript")
                     .transition(.scale.combined(with: .opacity))
                 }
             }
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: coordinator.partialText.isEmpty)
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: coordinator.isRunning)
         }
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: coordinator.partialText.isEmpty)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: coordinator.isRunning)
+    }
+    #endif
+    
+    @ViewBuilder
+    private var floatingControlsFallback: some View {
+        HStack(spacing: 16) {
+            // Primary action - Start/Stop
+            Button {
+                Task {
+                    await toggleRecording()
+                }
+            } label: {
+                Image(systemName: coordinator.isRunning ? "stop.fill" : "mic.fill")
+                    .font(.system(size: 28))
+                    .frame(width: 64, height: 64)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(coordinator.isRunning ? .red : .accentColor)
+            .clipShape(Circle())
+            .accessibilityLabel(coordinator.isRunning ? "Stop recording" : "Start recording")
+            
+            // Secondary action - Copy (only visible when there's text)
+            if !coordinator.partialText.isEmpty {
+                Button {
+                    copyToClipboard()
+                } label: {
+                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                        .font(.system(size: 20))
+                        .frame(width: 48, height: 48)
+                }
+                .buttonStyle(.bordered)
+                .clipShape(Circle())
+                .accessibilityLabel(copied ? "Copied to clipboard" : "Copy transcript")
+                .transition(.scale.combined(with: .opacity))
+            }
+        }
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: coordinator.partialText.isEmpty)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: coordinator.isRunning)
     }
     
     // MARK: - Actions

@@ -61,20 +61,29 @@ struct HUDOverlay: View {
   @ViewBuilder
   private func hudShell<Content: View>(_ view: Content) -> some View {
     let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
+    #if compiler(>=6.1) && canImport(SwiftUI, _version: 7.0)
     if #available(macOS 26.0, *) {
       view
         .background(phaseTint)
         .glassEffect(.regular.tint(phaseColor.opacity(0.18)).interactive(), in: .rect(cornerRadius: 20))
         .overlay(shape.stroke(phaseColor.opacity(0.35), lineWidth: strokeWidth))
     } else {
-      view
-        .background(
-          shape
-            .fill(.thickMaterial)
-            .overlay(phaseTint)
-        )
-        .overlay(shape.stroke(phaseColor.opacity(0.45), lineWidth: strokeWidth))
+      hudShellFallback(view, shape: shape)
     }
+    #else
+    hudShellFallback(view, shape: shape)
+    #endif
+  }
+
+  @ViewBuilder
+  private func hudShellFallback<Content: View>(_ view: Content, shape: RoundedRectangle) -> some View {
+    view
+      .background(
+        shape
+          .fill(.thickMaterial)
+          .overlay(phaseTint)
+      )
+      .overlay(shape.stroke(phaseColor.opacity(0.45), lineWidth: strokeWidth))
   }
 
   @ViewBuilder

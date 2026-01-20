@@ -12,7 +12,9 @@ import SwiftUI
 struct JustSpeakToItWidgetExtensionBundle: WidgetBundle {
     var body: some Widget {
         JustSpeakToItWidgetExtension()
-        JustSpeakToItWidgetExtensionControl()
+        if #available(iOS 18.0, *) {
+            JustSpeakToItWidgetExtensionControl()
+        }
         JustSpeakToItWidgetExtensionLiveActivity()
     }
 }

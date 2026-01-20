@@ -9,6 +9,7 @@ import AppIntents
 import SwiftUI
 import WidgetKit
 
+@available(iOS 18.0, *)
 struct JustSpeakToItWidgetExtensionControl: ControlWidget {
     static let kind: String = "com.justspeaktoit.ios.JustSpeakToItWidgetExtension"
 
@@ -30,12 +31,14 @@ struct JustSpeakToItWidgetExtensionControl: ControlWidget {
     }
 }
 
+@available(iOS 18.0, *)
 extension JustSpeakToItWidgetExtensionControl {
     struct Value {
         var isRunning: Bool
         var name: String
     }
 
+    @available(iOS 18.0, *)
     struct Provider: AppIntentControlValueProvider {
         func previewValue(configuration: TimerConfiguration) -> Value {
             JustSpeakToItWidgetExtensionControl.Value(isRunning: false, name: configuration.timerName)
@@ -48,6 +51,7 @@ extension JustSpeakToItWidgetExtensionControl {
     }
 }
 
+@available(iOS 18.0, *)
 struct TimerConfiguration: ControlConfigurationIntent {
     static let title: LocalizedStringResource = "Timer Name Configuration"
 
@@ -55,6 +59,7 @@ struct TimerConfiguration: ControlConfigurationIntent {
     var timerName: String
 }
 
+@available(iOS 18.0, *)
 struct StartTimerIntent: SetValueIntent {
     static let title: LocalizedStringResource = "Start a timer"
 

@@ -9,6 +9,9 @@ import ActivityKit
 import WidgetKit
 import SwiftUI
 
+private let brandAccent = Color(red: 1.0, green: 0.42, blue: 0.24)
+private let brandSurface = Color(red: 0.08, green: 0.11, blue: 0.16)
+
 struct JustSpeakToItWidgetExtensionAttributes: ActivityAttributes {
     public struct ContentState: Codable, Hashable {
         // Dynamic stateful properties about your activity go here!
@@ -26,8 +29,8 @@ struct JustSpeakToItWidgetExtensionLiveActivity: Widget {
             VStack {
                 Text("Hello \(context.state.emoji)")
             }
-            .activityBackgroundTint(Color.cyan)
-            .activitySystemActionForegroundColor(Color.black)
+            .activityBackgroundTint(brandSurface)
+            .activitySystemActionForegroundColor(.white)
 
         } dynamicIsland: { context in
             DynamicIsland {
@@ -51,7 +54,7 @@ struct JustSpeakToItWidgetExtensionLiveActivity: Widget {
                 Text(context.state.emoji)
             }
             .widgetURL(URL(string: "http://www.apple.com"))
-            .keylineTint(Color.red)
+            .keylineTint(brandAccent)
         }
     }
 }

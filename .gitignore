@@ -1,6 +1,11 @@
 .build/
 .swiftpm/
 DerivedData/
+Derived/
 .DS_Store
 xcuserdata/
 logs/
+
+# Tuist generated
+*.xcodeproj
+*.xcworkspace

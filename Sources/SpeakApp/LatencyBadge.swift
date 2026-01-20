@@ -18,7 +18,7 @@ struct LatencyBadge: View {
   private var badgeColor: Color {
     switch tier {
     case .instant: return .green
-    case .fast: return .blue
+    case .fast: return .brandLagoon
     case .medium: return .yellow
     case .slow: return .orange
     }
@@ -76,7 +76,7 @@ struct LatencyBadgeCompact: View {
   private var badgeColor: Color {
     switch tier {
     case .instant: return .green
-    case .fast: return .blue
+    case .fast: return .brandLagoon
     case .medium: return .yellow
     case .slow: return .orange
     }

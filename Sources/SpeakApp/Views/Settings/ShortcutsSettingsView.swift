@@ -9,7 +9,7 @@ struct ShortcutsSettingsView: View {
 
     var body: some View {
         LazyVStack(spacing: 20) {
-            ShortcutSettingsCard(title: "Global Shortcuts", systemImage: "globe", tint: .blue) {
+            ShortcutSettingsCard(title: "Global Shortcuts", systemImage: "globe", tint: .brandLagoon) {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("These shortcuts work system-wide, even when Speak is not focused.")
                         .font(.caption)
@@ -22,7 +22,7 @@ struct ShortcutsSettingsView: View {
             }
             .speakTooltip("Configure shortcuts that work anywhere in macOS.")
 
-            ShortcutSettingsCard(title: "App Shortcuts", systemImage: "app.badge", tint: .orange) {
+            ShortcutSettingsCard(title: "App Shortcuts", systemImage: "app.badge", tint: .brandAccentWarm) {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("These shortcuts only work when Speak is the active app.")
                         .font(.caption)
@@ -55,7 +55,7 @@ struct ShortcutsSettingsView: View {
                 }
             }
 
-            ShortcutSettingsCard(title: "Actions", systemImage: "arrow.counterclockwise", tint: .purple) {
+            ShortcutSettingsCard(title: "Actions", systemImage: "arrow.counterclockwise", tint: .brandAccent) {
                 HStack(spacing: 12) {
                     Button("Reset to Defaults") {
                         shortcutManager.resetToDefaults()

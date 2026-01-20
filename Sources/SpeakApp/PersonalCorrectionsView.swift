@@ -28,7 +28,7 @@ struct PersonalCorrectionsView: View {
       .frame(maxWidth: 1100, alignment: .center)
     }
     .background(
-      LinearGradient(colors: [Color.pink.opacity(0.08), .clear], startPoint: .top, endPoint: .center)
+      LinearGradient(colors: [Color.brandAccentWarm.opacity(0.08), .clear], startPoint: .top, endPoint: .center)
     )
     .alert("Unable to Save", isPresented: Binding<Bool>(
       get: { alertMessage != nil },
@@ -62,12 +62,12 @@ struct PersonalCorrectionsView: View {
     .padding(32)
     .background(
       LinearGradient(
-        colors: [Color.pink, Color.purple.opacity(0.85)],
+        colors: [Color.brandAccentWarm, Color.brandAccent.opacity(0.85)],
         startPoint: .topLeading,
         endPoint: .bottomTrailing
       )
       .cornerRadius(32)
-      .shadow(color: Color.pink.opacity(0.28), radius: 24, x: 0, y: 12)
+      .shadow(color: Color.brandAccentWarm.opacity(0.28), radius: 24, x: 0, y: 12)
     )
   }
 
@@ -75,7 +75,7 @@ struct PersonalCorrectionsView: View {
     HStack(alignment: .top, spacing: 16) {
       Image(systemName: "info.circle.fill")
         .font(.title2)
-        .foregroundStyle(.blue)
+        .foregroundStyle(Color.brandLagoon)
       VStack(alignment: .leading, spacing: 8) {
         Text("How corrections work")
           .font(.headline)
@@ -89,7 +89,7 @@ struct PersonalCorrectionsView: View {
           }
           HStack(alignment: .top, spacing: 8) {
             Image(systemName: "sparkles")
-              .foregroundStyle(.purple)
+              .foregroundStyle(Color.brandAccent)
               .imageScale(.small)
             Text("When post-processing is enabled, your correction rules are also shared with the LLM for enhanced context")
               .font(.callout)
@@ -107,11 +107,11 @@ struct PersonalCorrectionsView: View {
     .padding(20)
     .background(
       RoundedRectangle(cornerRadius: 16, style: .continuous)
-        .fill(Color.blue.opacity(0.08))
+        .fill(Color.brandLagoon.opacity(0.08))
     )
     .overlay(
       RoundedRectangle(cornerRadius: 16, style: .continuous)
-        .stroke(Color.blue.opacity(0.2), lineWidth: 1)
+        .stroke(Color.brandLagoon.opacity(0.2), lineWidth: 1)
     )
   }
 
@@ -180,7 +180,7 @@ struct PersonalCorrectionsView: View {
     )
     .overlay(
       RoundedRectangle(cornerRadius: 26, style: .continuous)
-        .stroke(Color.pink.opacity(0.15), lineWidth: 1)
+        .stroke(Color.brandAccentWarm.opacity(0.15), lineWidth: 1)
     )
   }
 

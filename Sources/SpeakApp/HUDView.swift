@@ -15,7 +15,7 @@ struct HUDOverlay: View {
   }
 
   private var content: some View {
-    VStack(spacing: 12) {
+    let base = VStack(spacing: 12) {
       animatedGlyph
       VStack(spacing: 4) {
         Text(manager.snapshot.headline)
@@ -50,20 +50,31 @@ struct HUDOverlay: View {
     }
     .padding(.horizontal, 24)
     .padding(.vertical, 16)
-    .background(
-      RoundedRectangle(cornerRadius: 20, style: .continuous)
-        .fill(.thickMaterial)
-        .overlay(phaseTint)
-    )
-    .overlay(
-      RoundedRectangle(cornerRadius: 20, style: .continuous)
-        .stroke(phaseColor.opacity(0.45), lineWidth: strokeWidth)
-    )
-    .shadow(color: .black.opacity(0.25), radius: 18, x: 0, y: 12)
-    .animation(.spring(response: 0.25, dampingFraction: 0.85), value: manager.snapshot)
-    .animation(.spring(response: 0.25, dampingFraction: 0.85), value: manager.isExpanded)
-    .frame(maxWidth: manager.isExpanded ? 500 : 320)
-    .padding(.horizontal, 60)
+    return hudShell(base)
+      .shadow(color: .black.opacity(0.25), radius: 18, x: 0, y: 12)
+      .animation(.spring(response: 0.25, dampingFraction: 0.85), value: manager.snapshot)
+      .animation(.spring(response: 0.25, dampingFraction: 0.85), value: manager.isExpanded)
+      .frame(maxWidth: manager.isExpanded ? 500 : 320)
+      .padding(.horizontal, 60)
+  }
+
+  @ViewBuilder
+  private func hudShell<Content: View>(_ view: Content) -> some View {
+    let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
+    if #available(macOS 26.0, *) {
+      view
+        .background(phaseTint)
+        .glassEffect(.regular.tint(phaseColor.opacity(0.18)).interactive(), in: .rect(cornerRadius: 20))
+        .overlay(shape.stroke(phaseColor.opacity(0.35), lineWidth: strokeWidth))
+    } else {
+      view
+        .background(
+          shape
+            .fill(.thickMaterial)
+            .overlay(phaseTint)
+        )
+        .overlay(shape.stroke(phaseColor.opacity(0.45), lineWidth: strokeWidth))
+    }
   }
 
   @ViewBuilder
@@ -110,9 +121,9 @@ struct HUDOverlay: View {
     case .recording:
       return .red
     case .transcribing:
-      return .blue
+      return .brandLagoon
     case .postProcessing:
-      return .purple
+      return .brandAccent
     case .delivering:
       return .green
     case .success:

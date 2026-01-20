@@ -158,7 +158,7 @@ struct DailyRecordingsChart: View {
             x: .value("Date", item.date, unit: .day),
             y: .value(showDuration ? "Duration" : "Count", showDuration ? item.totalDuration / 60 : Double(item.count))
           )
-          .foregroundStyle(Color.cyan.gradient)
+          .foregroundStyle(Color.brandLagoon.gradient)
         }
         .chartYAxis {
           AxisMarks(position: .leading)

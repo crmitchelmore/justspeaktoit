@@ -15,9 +15,9 @@ enum AppIconProvider {
 
     let backgroundGradient = NSGradient(
       colors: [
-        NSColor(calibratedRed: 0.30, green: 0.36, blue: 0.98, alpha: 1.0),
-        NSColor(calibratedRed: 0.54, green: 0.27, blue: 0.94, alpha: 1.0),
-        NSColor(calibratedRed: 0.98, green: 0.30, blue: 0.61, alpha: 1.0),
+        NSColor(calibratedRed: 1.00, green: 0.42, blue: 0.24, alpha: 1.0),
+        NSColor(calibratedRed: 1.00, green: 0.61, blue: 0.29, alpha: 1.0),
+        NSColor(calibratedRed: 1.00, green: 0.48, blue: 0.36, alpha: 1.0),
       ]
     )
     backgroundGradient?.draw(in: rect, angle: 220)
@@ -43,7 +43,7 @@ enum AppIconProvider {
     let barWidth = barSpacing
     let maxBarHeight = waveRect.height
     let heights: [CGFloat] = [0.45, 0.8, 1.0, 0.72, 0.5]
-    let barColor = NSColor(calibratedRed: 0.24, green: 0.20, blue: 0.50, alpha: 1.0)
+    let barColor = NSColor(calibratedRed: 0.35, green: 0.18, blue: 0.12, alpha: 1.0)
     for index in 0..<barCount {
       let heightFactor = index < heights.count ? heights[index] : 0.6
       let barHeight = maxBarHeight * heightFactor

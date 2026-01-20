@@ -175,7 +175,7 @@ struct HistoryView: View {
     }
     .background(
       LinearGradient(
-        colors: [Color.purple.opacity(0.08), Color(nsColor: .windowBackgroundColor)],
+        colors: [Color.brandAccent.opacity(0.06), Color(nsColor: .windowBackgroundColor)],
         startPoint: .top,
         endPoint: .bottom
       )
@@ -247,13 +247,13 @@ struct HistoryView: View {
 
         Toggle("Errors only", isOn: $showErrorsOnly)
           .toggleStyle(.switch)
-          .tint(.white)
+          .tint(.brandAccentWarm)
           .foregroundStyle(.white)
           .speakTooltip("Show only sessions where Speak spotted issues, making it easy to focus on what needs attention.")
 
         Toggle("Date range", isOn: $dateRangeEnabled)
           .toggleStyle(.switch)
-          .tint(.white)
+          .tint(.brandAccentWarm)
           .foregroundStyle(.white)
           .speakTooltip("Filter sessions to a specific date range.")
 
@@ -279,8 +279,8 @@ struct HistoryView: View {
           Label("Import…", systemImage: "square.and.arrow.down")
         }
         .buttonStyle(.borderedProminent)
-        .tint(.white.opacity(0.92))
-        .foregroundStyle(Color.purple)
+        .tint(.brandAccentWarm)
+        .foregroundStyle(Color.brandAccentDeep)
         .disabled(isClearingAll || isImportingFiles || environment.main.isBusy)
         .speakTooltip("Import existing audio files into history and transcribe them with your current settings.")
 
@@ -290,8 +290,8 @@ struct HistoryView: View {
           Label("Clear All", systemImage: "trash")
         }
         .buttonStyle(.borderedProminent)
-        .tint(.white)
-        .foregroundStyle(Color.purple)
+        .tint(.brandAccentWarm)
+        .foregroundStyle(Color.brandAccentDeep)
         .disabled(historyItems.isEmpty || isClearingAll || isImportingFiles)
         .speakTooltip("Clear every saved session entry from this history view.")
       }
@@ -309,7 +309,7 @@ struct HistoryView: View {
     .padding(24)
     .background(
       LinearGradient(
-        colors: [Color.purple, Color.indigo.opacity(0.8)],
+        colors: [Color.brandAccentDeep, Color.brandAccentWarm.opacity(0.9)],
         startPoint: .topLeading,
         endPoint: .bottomTrailing
       )
@@ -319,14 +319,14 @@ struct HistoryView: View {
       RoundedRectangle(cornerRadius: 32, style: .continuous)
         .stroke(Color.white.opacity(0.15), lineWidth: 1)
     )
-    .shadow(color: Color.purple.opacity(0.3), radius: 24, x: 0, y: 16)
+    .shadow(color: Color.brandAccent.opacity(0.3), radius: 24, x: 0, y: 16)
   }
 
   private var emptyState: some View {
     VStack(spacing: 18) {
       Image(systemName: "waveform")
         .font(.system(size: 44, weight: .medium))
-        .foregroundStyle(Color.purple)
+        .foregroundStyle(Color.brandAccent)
       Text("No history yet")
         .font(.title2.bold())
       Text("Record a session to see transcripts, costs, and network activity appear here.")
@@ -346,7 +346,7 @@ struct HistoryView: View {
     )
     .overlay(
       RoundedRectangle(cornerRadius: 28, style: .continuous)
-        .stroke(Color.purple.opacity(0.15), lineWidth: 1)
+        .stroke(Color.brandAccent.opacity(0.15), lineWidth: 1)
     )
   }
 
@@ -504,7 +504,7 @@ private struct HistoryListRow: View {
             Image(systemName: isExpanded ? "chevron.up.circle.fill" : "chevron.down.circle")
               .imageScale(.large)
               .symbolRenderingMode(.palette)
-              .foregroundStyle(Color.purple, Color.purple.opacity(0.3))
+              .foregroundStyle(Color.brandAccent, Color.brandAccentWarm.opacity(0.35))
           }
 
           if let transcript = bestTranscript {
@@ -682,7 +682,7 @@ private struct HistoryListRow: View {
   }
 
   private var borderColor: Color {
-    item.errors.isEmpty ? Color.purple.opacity(0.15) : Color.orange.opacity(0.35)
+    item.errors.isEmpty ? Color.brandAccent.opacity(0.15) : Color.orange.opacity(0.35)
   }
 
   private var metaColumns: [GridItem] {
@@ -710,7 +710,7 @@ private struct HistoryListRow: View {
         icon: "tray.and.arrow.down",
         title: "Source",
         value: "Imported",
-        tint: .blue
+        tint: .brandLagoon
       )
     }
 
@@ -727,7 +727,7 @@ private struct HistoryListRow: View {
         icon: "bolt.fill",
         title: "Prompt",
         value: formatDuration(prompt),
-        tint: .purple
+        tint: .brandAccent
       )
     }
 
@@ -1051,7 +1051,7 @@ private struct HistoryListRow: View {
       HStack(alignment: .firstTextBaseline, spacing: 6) {
         Image(systemName: icon)
           .imageScale(.small)
-          .foregroundStyle(Color.purple.opacity(0.8))
+          .foregroundStyle(Color.brandAccent.opacity(0.8))
         Text(title.uppercased())
           .font(.caption2.weight(.semibold))
           .foregroundStyle(.secondary)
@@ -1068,7 +1068,7 @@ private struct HistoryListRow: View {
     )
     .overlay(
       RoundedRectangle(cornerRadius: 14, style: .continuous)
-        .stroke(Color.purple.opacity(0.1), lineWidth: 1)
+        .stroke(Color.brandAccent.opacity(0.1), lineWidth: 1)
     )
   }
 
@@ -1177,7 +1177,7 @@ private struct HistoryListRow: View {
         )
         .overlay(
           RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .stroke(Color.purple.opacity(0.15), lineWidth: 1)
+            .stroke(Color.brandAccent.opacity(0.15), lineWidth: 1)
         )
       }
     }
@@ -1221,11 +1221,11 @@ private struct HistoryListRow: View {
       .padding(.vertical, 10)
       .background(
         RoundedRectangle(cornerRadius: 16, style: .continuous)
-          .fill(Color.purple.opacity(0.09))
+          .fill(Color.brandAccent.opacity(0.09))
       )
       .overlay(
         RoundedRectangle(cornerRadius: 16, style: .continuous)
-          .stroke(Color.purple.opacity(0.2), lineWidth: 1)
+          .stroke(Color.brandAccent.opacity(0.2), lineWidth: 1)
       )
     }
     .buttonStyle(.plain)
@@ -1265,7 +1265,7 @@ private struct HistoryListRow: View {
     }
     .buttonStyle(.borderedProminent)
     .controlSize(.small)
-    .tint(Color.purple)
+    .tint(.accentColor)
   }
 
   private func copyToPasteboard(_ text: String) {

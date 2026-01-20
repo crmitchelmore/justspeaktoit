@@ -17,7 +17,7 @@ struct DashboardView: View {
     }
     .background(
       LinearGradient(
-        colors: [Color.cyan.opacity(0.08), Color(nsColor: .windowBackgroundColor)],
+        colors: [Color.brandAccent.opacity(0.06), Color(nsColor: .windowBackgroundColor)],
         startPoint: .topLeading,
         endPoint: .bottomTrailing
       )
@@ -98,7 +98,7 @@ struct DashboardView: View {
     .padding(24)
     .background(
       LinearGradient(
-        colors: [Color.cyan, Color.blue.opacity(0.8)],
+        colors: [Color.brandAccentDeep, Color.brandAccentWarm.opacity(0.9)],
         startPoint: .topLeading,
         endPoint: .bottomTrailing
       )
@@ -108,7 +108,7 @@ struct DashboardView: View {
       RoundedRectangle(cornerRadius: 32, style: .continuous)
         .stroke(Color.white.opacity(0.1), lineWidth: 1)
     )
-    .shadow(color: Color.cyan.opacity(0.35), radius: 24, x: 0, y: 16)
+    .shadow(color: Color.brandAccent.opacity(0.35), radius: 24, x: 0, y: 16)
   }
 
   private var dashboardSections: some View {
@@ -248,7 +248,7 @@ struct DashboardView: View {
   }
 
   private var permissionsSection: some View {
-    DashboardCard(title: "Permissions", systemImage: "lock.shield", tint: Color.pink) {
+    DashboardCard(title: "Permissions", systemImage: "lock.shield", tint: Color.brandAccentWarm) {
       LazyVGrid(
         columns: Array(repeating: GridItem(.flexible(), spacing: 16), count: 2), spacing: 16
       ) {
@@ -331,7 +331,7 @@ struct DashboardView: View {
 
   private var statisticsSection: some View {
     let stats = history.statistics
-    return DashboardCard(title: "Insights", systemImage: "chart.xyaxis.line", tint: Color.indigo) {
+    return DashboardCard(title: "Insights", systemImage: "chart.xyaxis.line", tint: Color.brandAccentDeep) {
       LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 16)], spacing: 16) {
         statCard(title: "Sessions", value: "\(stats.totalSessions)")
         statCard(
@@ -377,7 +377,7 @@ struct DashboardView: View {
   }
 
   private var recentSection: some View {
-    DashboardCard(title: "Recent Session", systemImage: "clock.arrow.circlepath", tint: Color.cyan)
+    DashboardCard(title: "Recent Session", systemImage: "clock.arrow.circlepath", tint: Color.brandLagoon)
     {
       if let item = history.items.first {
         recentItemView(item)
@@ -426,7 +426,7 @@ struct DashboardView: View {
   }
 
   private var dailyUsageChartSection: some View {
-    DashboardCard(title: "Daily Usage", systemImage: "chart.bar.fill", tint: Color.cyan) {
+    DashboardCard(title: "Daily Usage", systemImage: "chart.bar.fill", tint: Color.brandLagoon) {
       DailyRecordingsChart(data: history.allItems.dailyUsageForLastMonth())
     }
     .speakTooltip("See when you rely on Speak the most so you can plan deep work and reviews thoughtfully.")
@@ -444,18 +444,18 @@ struct DashboardView: View {
   }
 
   private var postProcessingModelChartSection: some View {
-    DashboardCard(title: "Post-Processing Models", systemImage: "wand.and.stars", tint: Color.purple) {
+    DashboardCard(title: "Post-Processing Models", systemImage: "wand.and.stars", tint: Color.brandAccent) {
       ModelUsageChart(
         title: "Post-Processing Model Usage",
         data: history.allItems.modelUsage(for: .postProcessing),
-        color: .purple
+        color: .brandAccent
       )
     }
     .speakTooltip("Understand which refinement models polish your transcripts after the first pass.")
   }
 
   private var ttsUsageChartSection: some View {
-    DashboardCard(title: "Voice Output Usage", systemImage: "speaker.wave.3", tint: Color.blue) {
+    DashboardCard(title: "Voice Output Usage", systemImage: "speaker.wave.3", tint: Color.brandLagoonDeep) {
       VStack(alignment: .leading, spacing: 12) {
         let totalCharacters = environment.tts.totalCharactersThisMonth()
         let totalCost = environment.tts.totalCostThisMonth()
@@ -467,7 +467,7 @@ struct DashboardView: View {
               .foregroundStyle(.secondary)
             Text("\(totalCharacters)")
               .font(.title2.bold())
-              .foregroundStyle(.blue)
+              .foregroundStyle(Color.brandLagoonDeep)
           }
           Spacer()
           VStack(alignment: .trailing, spacing: 4) {
@@ -476,7 +476,7 @@ struct DashboardView: View {
               .foregroundStyle(.secondary)
             Text("$\(totalCost, format: .number.precision(.fractionLength(2)))")
               .font(.title2.bold())
-              .foregroundStyle(.blue)
+              .foregroundStyle(Color.brandLagoonDeep)
           }
         }
 
@@ -497,7 +497,7 @@ struct DashboardView: View {
   }
 
   private var ttsProviderChartSection: some View {
-    DashboardCard(title: "TTS Providers", systemImage: "waveform.circle", tint: Color.purple) {
+    DashboardCard(title: "TTS Providers", systemImage: "waveform.circle", tint: Color.brandAccent) {
       let now = Date()
       let monthAgo = Calendar.current.date(byAdding: .month, value: -1, to: now)!
       let usage = environment.tts.usageByProvider(since: monthAgo)
@@ -535,10 +535,10 @@ struct DashboardView: View {
 
   private func providerColor(_ provider: TTSProvider) -> Color {
     switch provider {
-    case .elevenlabs: return .purple
+    case .elevenlabs: return .brandAccent
     case .openai: return .green
-    case .azure: return .blue
-    case .deepgram: return .orange
+    case .azure: return .brandLagoonDeep
+    case .deepgram: return .brandAccentWarm
     case .system: return .gray
     }
   }

@@ -212,7 +212,7 @@ struct SettingsView: View {
     }
     .background(
       LinearGradient(
-        colors: [Color.orange.opacity(0.08), .clear], startPoint: .top, endPoint: .center))
+        colors: [Color.brandAccentWarm.opacity(0.08), .clear], startPoint: .top, endPoint: .center))
     .task {
       transcriptionProviders = await TranscriptionProviderRegistry.shared.allProviders()
     }
@@ -220,7 +220,7 @@ struct SettingsView: View {
 
   private var generalSettings: some View {
     LazyVStack(spacing: 20) {
-      SettingsCard(title: "Appearance", systemImage: "paintpalette", tint: Color.purple) {
+      SettingsCard(title: "Appearance", systemImage: "paintpalette", tint: Color.brandAccent) {
         VStack(alignment: .leading, spacing: 12) {
           Text("Choose how Speak looks across light, dark, or system themes.")
             .font(.callout)
@@ -242,7 +242,7 @@ struct SettingsView: View {
       }
       .speakTooltip("Set Speak's look to match your workspace with light, dark, or system themes.")
 
-      SettingsCard(title: "Output", systemImage: "textformat.alt", tint: Color.blue) {
+      SettingsCard(title: "Output", systemImage: "textformat.alt", tint: Color.brandLagoon) {
         VStack(alignment: .leading, spacing: 12) {
           Picker("Text Output", selection: settingsBinding(\AppSettings.textOutputMethod)) {
             ForEach(AppSettings.TextOutputMethod.allCases) { method in
@@ -262,31 +262,31 @@ struct SettingsView: View {
             settingsToggle(
               "Restore clipboard after paste",
               isOn: settingsBinding(\AppSettings.restoreClipboardAfterPaste),
-              tint: .blue
+              tint: .brandLagoon
             )
             .speakTooltip("After Speak pastes your transcript, we put your original clipboard content back automatically.")
             settingsToggle(
               "Show HUD during sessions",
               isOn: settingsBinding(\AppSettings.showHUDDuringSessions),
-              tint: .blue
+              tint: .brandLagoon
             )
             .speakTooltip("Display a small heads-up display so you always know when Speak is listening.")
             settingsToggle(
               "Show live transcript in HUD",
               isOn: settingsBinding(\AppSettings.showLiveTranscriptInHUD),
-              tint: .blue
+              tint: .brandLagoon
             )
             .speakTooltip("Show real-time transcription text in the HUD while recording.")
             settingsToggle(
               "Show status bar only",
               isOn: settingsBinding(\AppSettings.showStatusBarOnly),
-              tint: .blue
+              tint: .brandLagoon
             )
             .speakTooltip("Keep Speak tucked into the menu bar while still being ready when you need it.")
             settingsToggle(
               "Launch at login",
               isOn: settingsBinding(\AppSettings.runAtLogin),
-              tint: .blue
+              tint: .brandLagoon
             )
             .speakTooltip("Have Speak start alongside macOS so recording is always one shortcut away.")
           }
@@ -294,7 +294,7 @@ struct SettingsView: View {
       }
       .speakTooltip("Control how Speak delivers transcripts and how gently we touch your clipboard and interface.")
 
-      SettingsCard(title: "Microphone", systemImage: "mic.circle", tint: Color.orange) {
+      SettingsCard(title: "Microphone", systemImage: "mic.circle", tint: Color.brandAccentWarm) {
         VStack(alignment: .leading, spacing: 12) {
           Picker("Input Device", selection: audioInputSelectionBinding) {
             Text("System Default (\(audioDevices.systemDefaultDisplayName))")
@@ -318,10 +318,10 @@ struct SettingsView: View {
               .foregroundStyle(.secondary)
           }
 
-          HStack(spacing: 8) {
-            Image(systemName: "waveform")
-              .foregroundStyle(.orange)
-            Text("Currently active: \(audioDevices.systemDefaultDisplayName)")
+            HStack(spacing: 8) {
+              Image(systemName: "waveform")
+                .foregroundStyle(Color.brandAccentWarm)
+              Text("Currently active: \(audioDevices.systemDefaultDisplayName)")
               .font(.caption)
               .foregroundStyle(.secondary)
             Spacer()
@@ -420,7 +420,7 @@ struct SettingsView: View {
                 ForEach(environment.transportServer.connectedDevices) { device in
                   HStack {
                     Image(systemName: "iphone")
-                      .foregroundStyle(.blue)
+                      .foregroundStyle(Color.brandLagoon)
                     VStack(alignment: .leading, spacing: 2) {
                       Text(device.name)
                         .font(.subheadline)
@@ -452,11 +452,11 @@ struct SettingsView: View {
       .speakTooltip("Use your iPhone as a wireless microphone for your Mac. Transcribe on iPhone, text appears on Mac.")
 
 
-      SettingsCard(title: "Housekeeping", systemImage: "tray.full", tint: Color.orange) {
+      SettingsCard(title: "Housekeeping", systemImage: "tray.full", tint: Color.brandAccentWarm) {
         VStack(alignment: .leading, spacing: 12) {
           HStack(alignment: .top, spacing: 12) {
             Image(systemName: "folder")
-              .foregroundStyle(.orange)
+              .foregroundStyle(Color.brandAccentWarm)
             VStack(alignment: .leading, spacing: 6) {
               Text("Recordings directory")
                 .font(.headline)
@@ -560,7 +560,7 @@ struct SettingsView: View {
       }
       .speakTooltip("Choose which transcription flow Speak uses and the locale it should prefer.")
 
-      SettingsCard(title: "Processing Speed", systemImage: "gauge.with.dots.needle.67percent", tint: Color.cyan) {
+      SettingsCard(title: "Processing Speed", systemImage: "gauge.with.dots.needle.67percent", tint: Color.brandLagoon) {
         let speedModeAvailable = settings.transcriptionMode == .liveNative
           && settings.liveTranscriptionModel.contains("streaming")
 
@@ -583,7 +583,7 @@ struct SettingsView: View {
                 HStack(spacing: 12) {
                   Image(systemName: speedModeIcon(for: mode))
                     .font(.title3)
-                    .foregroundStyle(settings.speedMode == mode ? .white : .cyan)
+                    .foregroundStyle(settings.speedMode == mode ? .white : .brandLagoon)
                     .frame(width: 24)
                   VStack(alignment: .leading, spacing: 2) {
                     Text(mode.displayName)
@@ -602,7 +602,7 @@ struct SettingsView: View {
                 .padding(12)
                 .background(
                   RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(settings.speedMode == mode ? Color.cyan : Color(nsColor: .controlBackgroundColor))
+                    .fill(settings.speedMode == mode ? Color.brandLagoon : Color(nsColor: .controlBackgroundColor))
                 )
               }
               .buttonStyle(.plain)
@@ -614,7 +614,7 @@ struct SettingsView: View {
       }
       .speakTooltip("Control the trade-off between speed and AI-powered text cleanup.")
 
-      SettingsCard(title: "Recording buffer", systemImage: "waveform.path.ecg", tint: Color.cyan) {
+      SettingsCard(title: "Recording buffer", systemImage: "waveform.path.ecg", tint: Color.brandLagoon) {
         VStack(alignment: .leading, spacing: 12) {
           Text("Keep recording for a moment after you let go to capture trailing words.")
             .font(.caption)
@@ -640,7 +640,7 @@ struct SettingsView: View {
       }
       .speakTooltip("Decide how much breathing room Speak gives you after releasing your shortcut.")
 
-      SettingsCard(title: "Deepgram stop grace", systemImage: "waveform.and.mic", tint: Color.indigo) {
+      SettingsCard(title: "Deepgram stop grace", systemImage: "waveform.and.mic", tint: Color.brandAccentDeep) {
         VStack(alignment: .leading, spacing: 12) {
           Text("After stopping, keep the Deepgram stream open briefly to capture final words.")
             .font(.caption)
@@ -666,7 +666,7 @@ struct SettingsView: View {
       }
       .speakTooltip("Helps reduce last-word cutoffs with Deepgram live transcription.")
 
-      SettingsCard(title: "Silence detection", systemImage: "waveform.slash", tint: Color.orange) {
+      SettingsCard(title: "Silence detection", systemImage: "waveform.slash", tint: Color.brandAccentWarm) {
         VStack(alignment: .leading, spacing: 12) {
           Toggle(
             "Auto-stop on silence",
@@ -720,21 +720,21 @@ struct SettingsView: View {
       }
       .speakTooltip("Configure automatic recording stop based on silence detection.")
 
-      SettingsCard(title: "Live transcription", systemImage: "mic.fill", tint: Color.indigo) {
+      SettingsCard(title: "Live transcription", systemImage: "mic.fill", tint: Color.brandAccentDeep) {
         VStack(alignment: .leading, spacing: 12) {
           HStack(spacing: 8) {
             Image(systemName: "bolt.fill")
-              .foregroundStyle(.indigo)
+              .foregroundStyle(Color.brandAccentDeep)
               .imageScale(.small)
             Text("Fastest - Real-time Response")
               .font(.subheadline.weight(.semibold))
-              .foregroundStyle(.indigo)
+              .foregroundStyle(Color.brandAccentDeep)
           }
           .padding(.horizontal, 12)
           .padding(.vertical, 6)
           .background(
             Capsule()
-              .fill(Color.indigo.opacity(0.12))
+              .fill(Color.brandAccentDeep.opacity(0.12))
           )
 
           Text("Model used while recording. Provides instant feedback as you speak.")
@@ -751,22 +751,22 @@ struct SettingsView: View {
       .speakTooltip("Pick the model that transcribes as you speak during live recording.")
 
       SettingsCard(
-        title: "Batch transcription", systemImage: "folder.badge.clock", tint: Color.cyan
+        title: "Batch transcription", systemImage: "folder.badge.clock", tint: Color.brandLagoon
       ) {
         VStack(alignment: .leading, spacing: 12) {
           HStack(spacing: 8) {
             Image(systemName: "star.fill")
-              .foregroundStyle(.cyan)
+              .foregroundStyle(Color.brandLagoon)
               .imageScale(.small)
             Text("Best Quality - Most Accurate")
               .font(.subheadline.weight(.semibold))
-              .foregroundStyle(.cyan)
+              .foregroundStyle(Color.brandLagoon)
           }
           .padding(.horizontal, 12)
           .padding(.vertical, 6)
           .background(
             Capsule()
-              .fill(Color.cyan.opacity(0.12))
+              .fill(Color.brandLagoon.opacity(0.12))
           )
 
           Text("Model used when the recording is uploaded after it finishes. Delivers the highest accuracy.")
@@ -809,12 +809,12 @@ struct SettingsView: View {
 
   private var postProcessingSettings: some View {
     LazyVStack(spacing: 20) {
-      SettingsCard(title: "Cleanup", systemImage: "wand.and.stars", tint: Color.pink) {
+      SettingsCard(title: "Cleanup", systemImage: "wand.and.stars", tint: Color.brandAccentWarm) {
         VStack(alignment: .leading, spacing: 12) {
           settingsToggle(
             "Enable Post-processing",
             isOn: settingsBinding(\AppSettings.postProcessingEnabled),
-            tint: .pink
+            tint: .brandAccentWarm
           )
           .disabled(settings.speedMode != .instant)
           .speakTooltip("Let Speak clean and enhance transcripts automatically before they reach your clipboard.")
@@ -907,7 +907,7 @@ struct SettingsView: View {
       }
       .speakTooltip("Guide the cleanup model with your own instructions for tone and formatting.")
 
-      SettingsCard(title: "System-Generated Parts", systemImage: "gearshape.2", tint: Color.indigo) {
+      SettingsCard(title: "System-Generated Parts", systemImage: "gearshape.2", tint: Color.brandAccentDeep) {
         VStack(alignment: .leading, spacing: 16) {
           Text("Control which system-generated instructions are added to the prompt.")
             .font(.caption)
@@ -917,7 +917,7 @@ struct SettingsView: View {
             settingsToggle(
               "Include Personal Lexicon Directives",
               isOn: settingsBinding(\AppSettings.postProcessingIncludeLexiconDirectives),
-              tint: .indigo
+              tint: .brandAccentDeep
             )
             .onChange(of: settings.postProcessingIncludeLexiconDirectives) { _, _ in
               generateSystemPromptPreview()
@@ -932,7 +932,7 @@ struct SettingsView: View {
             settingsToggle(
               "Include Context Tags",
               isOn: settingsBinding(\AppSettings.postProcessingIncludeContextTags),
-              tint: .indigo
+              tint: .brandAccentDeep
             )
             .onChange(of: settings.postProcessingIncludeContextTags) { _, _ in
               generateSystemPromptPreview()
@@ -947,7 +947,7 @@ struct SettingsView: View {
             settingsToggle(
               "Include Final Processing Instruction",
               isOn: settingsBinding(\AppSettings.postProcessingIncludeFinalInstruction),
-              tint: .indigo
+              tint: .brandAccentDeep
             )
             .onChange(of: settings.postProcessingIncludeFinalInstruction) { _, _ in
               generateSystemPromptPreview()
@@ -993,7 +993,7 @@ struct SettingsView: View {
                 .frame(minHeight: 200, maxHeight: 420)
                 .background(
                   RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.indigo.opacity(0.05))
+                    .fill(Color.brandAccentWarm.opacity(0.05))
                 )
 
                 Text("Scroll to view the full prompt.")
@@ -1001,7 +1001,7 @@ struct SettingsView: View {
                   .foregroundStyle(.secondary)
                 .overlay(
                   RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.indigo.opacity(0.2), lineWidth: 1)
+                    .stroke(Color.brandAccentWarm.opacity(0.2), lineWidth: 1)
                 )
               }
             }
@@ -1014,7 +1014,7 @@ struct SettingsView: View {
 
   private var voiceOutputSettings: some View {
     LazyVStack(spacing: 20) {
-      SettingsCard(title: "Default Voice", systemImage: "speaker.wave.3", tint: Color.blue) {
+      SettingsCard(title: "Default Voice", systemImage: "speaker.wave.3", tint: Color.brandLagoonDeep) {
         VStack(alignment: .leading, spacing: 12) {
           VStack(alignment: .leading, spacing: 8) {
             Picker("Voice", selection: settingsBinding(\AppSettings.defaultTTSVoice)) {
@@ -1082,7 +1082,7 @@ struct SettingsView: View {
       }
       .speakTooltip("Control audio quality, playback speed, and voice pitch for generated speech.")
 
-      SettingsCard(title: "Output & Export", systemImage: "arrow.down.circle", tint: Color.orange) {
+      SettingsCard(title: "Output & Export", systemImage: "arrow.down.circle", tint: Color.brandAccentWarm) {
         VStack(alignment: .leading, spacing: 12) {
           VStack(alignment: .leading, spacing: 8) {
             Picker("File Format", selection: settingsBinding(\AppSettings.ttsOutputFormat)) {
@@ -1097,21 +1097,21 @@ struct SettingsView: View {
           settingsToggle(
             "Auto-play after synthesis",
             isOn: settingsBinding(\AppSettings.ttsAutoPlay),
-            tint: .orange
+            tint: .brandAccentWarm
           )
           .speakTooltip("Automatically play audio after synthesis completes")
 
           settingsToggle(
             "Save to recordings directory",
             isOn: settingsBinding(\AppSettings.ttsSaveToDirectory),
-            tint: .orange
+            tint: .brandAccentWarm
           )
           .speakTooltip("Automatically save generated speech files to your recordings folder")
 
           settingsToggle(
             "Enable SSML support",
             isOn: settingsBinding(\AppSettings.ttsUseSSML),
-            tint: .orange
+            tint: .brandAccentWarm
           )
           .speakTooltip("Enable Speech Synthesis Markup Language for advanced voice control")
         }
@@ -1152,7 +1152,7 @@ struct SettingsView: View {
       }
       .speakTooltip("Manage your favorite voices for quick access.")
 
-      SettingsCard(title: "Pronunciation Dictionary", systemImage: "text.book.closed", tint: Color.purple) {
+      SettingsCard(title: "Pronunciation Dictionary", systemImage: "text.book.closed", tint: Color.brandAccent) {
         VStack(alignment: .leading, spacing: 12) {
           Text("Custom pronunciations for words the TTS mispronounces")
             .font(.caption)
@@ -1301,10 +1301,10 @@ struct SettingsView: View {
 
     let tintColor: Color = {
       switch provider {
-      case .elevenlabs: return .purple
+      case .elevenlabs: return .brandAccent
       case .openai: return .green
-      case .azure: return .blue
-      case .deepgram: return .orange
+      case .azure: return .brandLagoonDeep
+      case .deepgram: return .brandAccentWarm
       case .system: return .gray
       }
     }()
@@ -1479,14 +1479,14 @@ struct SettingsView: View {
   private func colorFromString(_ name: String) -> Color {
     switch name.lowercased() {
     case "green": return .green
-    case "blue": return .blue
-    case "purple": return .purple
-    case "orange": return .orange
+    case "blue": return .brandLagoon
+    case "purple": return .brandAccent
+    case "orange": return .brandAccentWarm
     case "red": return .red
-    case "pink": return .pink
+    case "pink": return .brandAccentWarm
     case "yellow": return .yellow
-    case "cyan": return .cyan
-    case "indigo": return .indigo
+    case "cyan": return .brandLagoon
+    case "indigo": return .brandAccentDeep
     case "mint": return .mint
     case "teal": return .teal
     default: return .accentColor
@@ -2109,19 +2109,19 @@ private struct ModelPicker: View {
 
     private func tagBackgroundColor(_ tag: ModelCatalog.Tag) -> Color {
       switch tag {
-      case .fast: return Color.blue.opacity(0.12)
+      case .fast: return Color.brandLagoon.opacity(0.12)
       case .cheap: return Color.green.opacity(0.14)
-      case .quality: return Color.purple.opacity(0.12)
-      case .leading: return Color.orange.opacity(0.14)
+      case .quality: return Color.brandAccent.opacity(0.12)
+      case .leading: return Color.brandAccentWarm.opacity(0.14)
       }
     }
 
     private func tagForegroundColor(_ tag: ModelCatalog.Tag) -> Color {
       switch tag {
-      case .fast: return .blue
+      case .fast: return .brandLagoon
       case .cheap: return .green
-      case .quality: return .purple
-      case .leading: return .orange
+      case .quality: return .brandAccent
+      case .leading: return .brandAccentWarm
       }
     }
   }

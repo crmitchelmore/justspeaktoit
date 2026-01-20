@@ -192,14 +192,27 @@ struct VoiceOutputView: View {
   }
 
   private var inputSourceCard: some View {
-    SettingsCard(title: "Input Source", systemImage: "arrow.down.doc", tint: .blue) {
+    SettingsCard(title: "Input Source", systemImage: "arrow.down.doc", tint: .brandLagoon) {
       VStack(alignment: .leading, spacing: 12) {
-        Picker("Source", selection: $inputSource) {
-          ForEach(TTSInputSource.allCases) { source in
-            Label(source.displayName, systemImage: source.icon).tag(source)
+        ViewThatFits(in: .horizontal) {
+          Picker("Source", selection: $inputSource) {
+            ForEach(TTSInputSource.allCases) { source in
+              Label(source.displayName, systemImage: source.icon).tag(source)
+            }
           }
+          .pickerStyle(.segmented)
+          .labelsHidden()
+          .frame(maxWidth: .infinity)
+
+          Picker("Source", selection: $inputSource) {
+            ForEach(TTSInputSource.allCases) { source in
+              Label(source.displayName, systemImage: source.icon).tag(source)
+            }
+          }
+          .pickerStyle(.menu)
+          .labelsHidden()
+          .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .pickerStyle(.segmented)
         .onChange(of: inputSource) { _, newValue in
           handleInputSourceChange(newValue)
         }
@@ -220,7 +233,7 @@ struct VoiceOutputView: View {
   }
 
   private var voiceSelectionCard: some View {
-    SettingsCard(title: "Voice", systemImage: "person.wave.2", tint: .purple) {
+    SettingsCard(title: "Voice", systemImage: "person.wave.2", tint: .brandAccent) {
       VStack(alignment: .leading, spacing: 12) {
         if availableVoices.isEmpty {
           HStack {

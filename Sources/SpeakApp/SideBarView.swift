@@ -42,15 +42,15 @@ enum SidebarItem: Hashable, Identifiable {
   var color: Color {
     switch self {
     case .dashboard:
-      return .cyan
+      return .brandLagoon
     case .history:
-      return .purple
+      return .brandAccent
     case .voiceOutput:
       return .green
     case .corrections:
-      return .pink
+      return .brandAccentWarm
     case .settings:
-      return .orange
+      return .brandAccentWarm
     }
   }
 
@@ -115,7 +115,7 @@ struct SideBarView: View {
           } label: {
             HStack(spacing: 12) {
               Image(systemName: tab.systemImage)
-                .foregroundStyle(Color.orange)
+                .foregroundStyle(Color.brandAccentWarm)
                 .imageScale(.medium)
                 .frame(width: 20)
               Text(LocalizedStringKey(tab.title))
@@ -132,7 +132,7 @@ struct SideBarView: View {
           .background(
             selection == item
               ? RoundedRectangle(cornerRadius: 8)
-                .fill(Color.orange.opacity(0.15))
+                .fill(Color.brandAccentWarm.opacity(0.15))
               : nil
           )
           .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))

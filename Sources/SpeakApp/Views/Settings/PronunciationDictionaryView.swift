@@ -217,7 +217,7 @@ struct PronunciationDictionaryView: View {
                         } label: {
                             Label("Edit", systemImage: "pencil")
                         }
-                        .tint(.blue)
+                        .tint(.accentColor)
                     }
             }
         }
@@ -370,9 +370,9 @@ private struct PronunciationEntryRow: View {
                             .padding(.vertical, 2)
                             .background(
                                 Capsule()
-                                    .fill(Color.blue.opacity(0.2))
+                                    .fill(Color.brandLagoon.opacity(0.2))
                             )
-                            .foregroundStyle(.blue)
+                            .foregroundStyle(Color.brandLagoon)
                     }
                 }
 

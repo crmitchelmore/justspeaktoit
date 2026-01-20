@@ -1,6 +1,6 @@
 # Xcode Project Setup Guide
 
-This guide explains how to finalize the iOS app in Xcode after completing the Swift Package Manager development phase.
+This guide explains how to generate and configure the iOS app in Xcode using Tuist.
 
 ## Prerequisites
 
@@ -12,27 +12,29 @@ This guide explains how to finalize the iOS app in Xcode after completing the Sw
 
 ```bash
 cd /Users/cm/work/speak-claude-s
-open SpeakiOS.xcodeproj
+tuist generate
+open "Just Speak to It.xcworkspace"
 ```
 
-The project is already created and links to the Swift packages. You should see:
-- **SpeakiOSApp** target (main iOS app)
+The project is generated from Tuist and links to the Swift packages. You should see:
+- **SpeakiOS** target (main iOS app)
+- **JustSpeakToItWidgetExtension** target (Live Activity + widgets)
 - Package dependencies: SpeakCore, SpeakiOSLib
 
 ## Step 2: Configure Entitlements
 
 ### iOS App Target
 
-1. Select **SpeakiOSApp** target in project navigator
+1. Select **SpeakiOS** target in project navigator
 2. Go to **Signing & Capabilities** tab
 3. Add capabilities:
    - **Keychain Sharing**
-     - Add keychain group: `$(AppIdentifierPrefix)com.speak.shared`
+     - Add keychain group: `$(AppIdentifierPrefix)com.justspeaktoit.shared`
    - **iCloud**
      - Enable Key-Value Storage
-     - Container: `iCloud.com.speak.ios`
+     - Container: `iCloud.com.justspeaktoit.ios`
    - **App Groups**
-     - Add group: `group.com.speak.ios`
+     - Add group: `group.com.justspeaktoit.ios`
    - **Background Modes** (optional for Live Activity)
      - Enable: Audio, AirPlay, and Picture in Picture
 
@@ -40,39 +42,12 @@ The project is already created and links to the Swift packages. You should see:
    - Build Settings → Code Signing Entitlements
    - Set to: `Config/SpeakiOS.entitlements`
 
-## Step 3: Add Widget Extension Target (for Live Activity)
+## Step 3: Verify Widget Extension Target (Live Activity)
 
-### Create Widget Extension
-
-1. File → New → Target
-2. Choose **Widget Extension**
-3. Name: `SpeakWidgetExtension`
-4. Language: Swift
-5. **Do not** include configuration intent
-
-### Configure Widget Target
-
-1. **General** tab:
-   - Deployment Target: iOS 17.0
-   - Bundle Identifier: `com.speak.ios.widget`
-
-2. **Build Phases** → Link Binary with Libraries:
-   - Add `SpeakCore` (from Package Dependencies)
-
-3. **Build Settings**:
-   - Code Signing Entitlements: `Config/SpeakiOS.entitlements` (share with main app)
-
-4. **Replace** widget source files:
-   - Delete auto-generated Swift files
-   - Add files from `SpeakWidgetExtension/` directory:
-     - `TranscriptionLiveActivity.swift`
-   - Add `Info.plist` from `SpeakWidgetExtension/Info.plist`
-
-5. **Info.plist** additions to main app:
-   ```xml
-   <key>NSSupportsLiveActivities</key>
-   <true/>
-   ```
+The Tuist project already includes `JustSpeakToItWidgetExtension`. Confirm:
+1. The target exists under the generated workspace.
+2. Bundle identifier: `com.justspeaktoit.ios.JustSpeakToItWidgetExtension`.
+3. Dependencies include `SpeakCore`.
 
 ## Step 4: Configure Info.plist (Main App)
 
@@ -80,13 +55,13 @@ Add privacy usage descriptions to `Info.plist`:
 
 ```xml
 <key>NSMicrophoneUsageDescription</key>
-<string>Speak needs microphone access to transcribe your speech in real-time.</string>
+<string>Just Speak to It needs microphone access to transcribe your speech in real-time.</string>
 
 <key>NSSpeechRecognitionUsageDescription</key>
-<string>Speak uses on-device speech recognition to provide fast, private transcription.</string>
+<string>Just Speak to It uses on-device speech recognition to provide fast, private transcription.</string>
 
 <key>NSLocalNetworkUsageDescription</key>
-<string>Speak uses your local network to connect to your Mac for the "Send to Mac" feature.</string>
+<string>Just Speak to It uses your local network to connect to your Mac for the "Send to Mac" feature.</string>
 
 <key>NSBonjourServices</key>
 <array>
@@ -94,7 +69,7 @@ Add privacy usage descriptions to `Info.plist`:
 </array>
 
 <key>NSCameraUsageDescription</key>
-<string>Speak needs camera access to scan QR codes for configuration transfer.</string>
+<string>Just Speak to It needs camera access to scan QR codes for configuration transfer.</string>
 
 <key>NSSupportsLiveActivities</key>
 <true/>
@@ -104,16 +79,16 @@ Add privacy usage descriptions to `Info.plist`:
 
 ### Development Signing
 
-1. Select **SpeakiOSApp** target
+1. Select **SpeakiOS** target
 2. Signing & Capabilities → Automatically manage signing
 3. Select your Team
 4. Xcode will provision automatically
 
 ### Widget Extension Signing
 
-1. Select **SpeakWidgetExtension** target
+1. Select **JustSpeakToItWidgetExtension** target
 2. Same team as main app
-3. Bundle ID must be: `<main-app-bundle-id>.widget`
+3. Bundle ID must be: `com.justspeaktoit.ios.JustSpeakToItWidgetExtension`
 
 ## Step 6: Build and Run
 
@@ -197,7 +172,7 @@ On first run, device will prompt for:
 
 **Keychain errors**
 - Ensure keychain sharing entitlement is enabled
-- Check access group matches: `$(AppIdentifierPrefix)com.speak.shared`
+- Check access group matches: `$(AppIdentifierPrefix)com.justspeaktoit.shared`
 
 **Widget not appearing**
 - Verify `NSSupportsLiveActivities` in Info.plist

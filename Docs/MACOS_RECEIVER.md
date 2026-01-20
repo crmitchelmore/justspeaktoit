@@ -102,7 +102,7 @@ To test the complete flow:
    - Note the 6-digit pairing code
 
 2. **iOS Setup** (requires Xcode):
-   - Open `SpeakiOS.xcodeproj`
+    - Run `tuist generate` and open `"Just Speak to It.xcworkspace"`
    - Build and run on physical iPhone (same Wi-Fi as Mac)
    - Settings → Send to Mac → Configure
    - Should discover your Mac

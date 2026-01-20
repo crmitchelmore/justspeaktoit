@@ -1,4 +1,4 @@
-# SpeakApp
+# Just Speak to It
 
 Native macOS and iOS SwiftUI transcription app with modular Swift packages.
 
@@ -10,7 +10,7 @@ Sources/
 ├── SpeakApp/       # macOS application
 └── SpeakiOS/       # iOS library (live transcription, views)
 SpeakiOSApp/        # iOS app entry point
-SpeakiOS.xcodeproj/ # Xcode project for iOS builds
+Just Speak to It.xcodeproj/ # Generated via Tuist (iOS + macOS)
 ```
 
 ### Swift Packages
@@ -41,8 +41,9 @@ All automation is exposed via `make` targets. Use `make help` to list them.
 # Build SpeakiOSLib (verifies iOS code compiles)
 swift build --target SpeakiOSLib
 
-# Build with Xcode
-open SpeakiOS.xcodeproj
+# Generate Xcode project with Tuist
+tuist generate
+open "Just Speak to It.xcworkspace"
 # Select iOS device/simulator and build (Cmd+B)
 ```
 
@@ -100,8 +101,8 @@ The iOS app uses Apple Speech for on-device live transcription:
 - **iOSLiveTranscriber** - SFSpeechRecognizer integration with partial results
 - **ContentView** - Start/Stop recording, live transcript display, copy to clipboard
 
-Open `SpeakiOS.xcodeproj` in Xcode to build and run on device/simulator.
+Open `"Just Speak to It.xcworkspace"` in Xcode to build and run on device/simulator.
 
 ## Next Steps
 
-Open the project in Xcode with `xed .` or continue iterating purely with SwiftPM. The root `SpeakApp.swift` contains a "Hello, Speak" window ready for extension.
+Open the project in Xcode with `xed .` or continue iterating purely with SwiftPM. The root `SpeakApp.swift` contains a "Hello, Just Speak to It" window ready for extension.

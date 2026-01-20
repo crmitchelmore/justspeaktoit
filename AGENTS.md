@@ -11,7 +11,9 @@ Sources/
 ├── SpeakApp/           # macOS application (executable)
 └── SpeakiOS/           # iOS library (views, services, with #if os(iOS) guards)
 SpeakiOSApp/            # iOS app entry point (@main)
-SpeakiOS.xcodeproj/     # Xcode project for iOS builds (links SpeakCore + SpeakiOSLib)
+Project.swift           # Tuist manifest (Xcode project generation)
+Workspace.swift         # Tuist workspace manifest
+Just Speak to It.xcodeproj/ # Generated Xcode project
 Tests/                  # XCTest suite
 ```
 
@@ -28,14 +30,14 @@ Tests/                  # XCTest suite
 1. **Shared code in SpeakCore**: Types, protocols, and utilities that work on both platforms
 2. **Platform guards**: Use `#if os(iOS)` / `#if os(macOS)` for platform-specific code
 3. **Public APIs for libraries**: Types in `SpeakiOSLib` must be `public` for Xcode project to access
-4. **Xcode project links packages**: `SpeakiOS.xcodeproj` references the local Swift package
+4. **Tuist links packages**: `Project.swift` references the local Swift package for Xcode generation
 
 ### iOS App Structure
 
 The iOS app is built via Xcode but sources come from Swift packages:
 - `SpeakiOSApp/SpeakiOSApp.swift` - Entry point with `@main`
 - Links `SpeakCore` and `SpeakiOSLib` as package dependencies
-- Open `SpeakiOS.xcodeproj` in Xcode to build/run on device
+- Run `tuist generate` and open `"Just Speak to It.xcworkspace"` in Xcode to build/run on device
 
 ## Build, Test, and Development Commands
 
@@ -47,7 +49,8 @@ The iOS app is built via Xcode but sources come from Swift packages:
 - `swift build --target SpeakiOSLib` – Verify iOS library compiles
 
 ### iOS (Xcode)
-- `open SpeakiOS.xcodeproj` – Open in Xcode
+- `tuist generate` – Generate the Xcode workspace
+- `open "Just Speak to It.xcworkspace"` – Open in Xcode
 - Select device/simulator and build (Cmd+B)
 - Or use xcodebuild MCP for automation (see below)
 

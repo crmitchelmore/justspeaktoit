@@ -1,6 +1,30 @@
 # Just Speak to It
 
-Native macOS and iOS SwiftUI transcription app with modular Swift packages.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20iOS-lightgrey.svg)](https://developer.apple.com/swift/)
+[![Swift 5.9+](https://img.shields.io/badge/Swift-5.9+-orange.svg)](https://swift.org)
+
+Native macOS and iOS voice transcription app built with SwiftUI. Speak naturally and get accurate text - on-device or via cloud APIs.
+
+## Features
+
+- 🎤 **Live transcription** with real-time display
+- 🔒 **Privacy-first** - on-device processing available
+- ⌨️ **Global hotkey** - start/stop from anywhere
+- 📋 **Auto-paste** - transcribed text goes where you need it
+- 🎯 **Personal corrections** - teach it your vocabulary
+- 📊 **Usage insights** - track your transcription habits
+
+## Quick Start
+
+```bash
+# Clone and run (macOS)
+git clone https://github.com/chrismitchelmore/just-speak-to-it.git
+cd just-speak-to-it
+make run
+```
+
+That's it! The app will launch and guide you through granting microphone permissions.
 
 ## Project Structure
 
@@ -103,6 +127,14 @@ The iOS app uses Apple Speech for on-device live transcription:
 
 Open `"Just Speak to It.xcworkspace"` in Xcode to build and run on device/simulator.
 
-## Next Steps
+## Contributing
 
-Open the project in Xcode with `xed .` or continue iterating purely with SwiftPM. The root `SpeakApp.swift` contains a "Hello, Just Speak to It" window ready for extension.
+We welcome contributions! Please see [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines.
+
+- 🐛 [Report bugs](https://github.com/chrismitchelmore/just-speak-to-it/issues/new?template=bug_report.md)
+- 💡 [Request features](https://github.com/chrismitchelmore/just-speak-to-it/issues/new?template=feature_request.md)
+- 📖 [Read the docs](./Docs/)
+
+## License
+
+This project is licensed under the MIT License - see [LICENSE](./LICENSE) for details.

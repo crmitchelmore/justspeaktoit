@@ -22,9 +22,12 @@ public final class AppSettings: ObservableObject {
     }
     
     private init() {
-        self.selectedModel = UserDefaults.standard.string(forKey: "selectedModel") ?? "apple/local/SFSpeechRecognizer"
-        self.deepgramAPIKey = loadFromKeychain(for: "deepgram.apiKey") ?? ""
-        self.openRouterAPIKey = loadFromKeychain(for: "openrouter.apiKey") ?? ""
+        let selected = UserDefaults.standard.string(forKey: "selectedModel") ?? "apple/local/SFSpeechRecognizer"
+        let deepgram = Self.loadFromKeychain(for: "deepgram.apiKey") ?? ""
+        let openRouter = Self.loadFromKeychain(for: "openrouter.apiKey") ?? ""
+        self.selectedModel = selected
+        self.deepgramAPIKey = deepgram
+        self.openRouterAPIKey = openRouter
     }
     
     public var hasDeepgramKey: Bool { !deepgramAPIKey.isEmpty }
@@ -55,7 +58,7 @@ public final class AppSettings: ObservableObject {
         SecItemAdd(addQuery as CFDictionary, nil)
     }
     
-    private func loadFromKeychain(for account: String) -> String? {
+    private static func loadFromKeychain(for account: String) -> String? {
         let service = "com.speak.ios.credentials"
         
         let query: [String: Any] = [
@@ -192,10 +195,11 @@ public struct SettingsView: View {
                 )) {
                     Label("Debug Logging", systemImage: "ant")
                 }
-            } footer: {
+
                 if SpeakLogger.isDebugMode {
                     Text("Debug mode logs additional details for troubleshooting.")
                         .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
             
@@ -303,12 +307,12 @@ struct APIKeysView: View {
                 let validator = DeepgramAPIKeyValidator()
                 let result = await validator.validate(deepgramKey)
                 
-                switch result {
+                switch result.outcome {
                 case .success:
                     settings.deepgramAPIKey = deepgramKey
                     deepgramKey = ""
                     messages.append("✓ Deepgram key validated and saved")
-                case .failure(let message, _):
+                case .failure(let message):
                     messages.append("✗ Deepgram: \(message)")
                 }
             }
@@ -409,7 +413,7 @@ struct FeatureRow: View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: icon)
                 .font(.title3)
-                .foregroundStyle(.blue)
+                .foregroundStyle(Color.brandLagoon)
                 .frame(width: 24)
             
             VStack(alignment: .leading, spacing: 4) {
@@ -458,7 +462,7 @@ struct PermissionRow: View {
         HStack {
             Image(systemName: icon)
                 .font(.body)
-                .foregroundStyle(.blue)
+                .foregroundStyle(Color.brandLagoon)
                 .frame(width: 24)
             Text(name)
                 .font(.caption)

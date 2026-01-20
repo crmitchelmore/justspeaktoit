@@ -6,6 +6,7 @@ struct SpeakiOSApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .tint(.brandAccent)
         }
     }
 }

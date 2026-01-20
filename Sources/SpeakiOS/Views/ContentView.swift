@@ -205,7 +205,7 @@ public struct ContentView: View {
                         .padding(.bottom, 30)
                 }
             }
-            .navigationTitle("Speak")
+            .navigationTitle("Just Speak to It")
             .toolbar {
                 // Status indicator in toolbar (system handles glass)
                 if coordinator.isRunning {
@@ -250,39 +250,78 @@ public struct ContentView: View {
     
     @ViewBuilder
     private var floatingControls: some View {
-        HStack(spacing: 16) {
-            // Primary action - Start/Stop
-            Button {
-                Task {
-                    await toggleRecording()
+        if #available(iOS 26.0, *) {
+            GlassEffectContainer(spacing: 16) {
+                HStack(spacing: 16) {
+                    // Primary action - Start/Stop
+                    Button {
+                        Task {
+                            await toggleRecording()
+                        }
+                    } label: {
+                        Image(systemName: coordinator.isRunning ? "stop.fill" : "mic.fill")
+                            .font(.system(size: 28))
+                            .frame(width: 64, height: 64)
+                    }
+                    .buttonStyle(.glassProminent)
+                    .tint(coordinator.isRunning ? .red : .brandAccent)
+                    .clipShape(Circle())
+                    .accessibilityLabel(coordinator.isRunning ? "Stop recording" : "Start recording")
+                    
+                    // Secondary action - Copy (only visible when there's text)
+                    if !coordinator.partialText.isEmpty {
+                        Button {
+                            copyToClipboard()
+                        } label: {
+                            Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                                .font(.system(size: 20))
+                                .frame(width: 48, height: 48)
+                        }
+                        .buttonStyle(.glass)
+                        .tint(.brandAccentWarm)
+                        .clipShape(Circle())
+                        .accessibilityLabel(copied ? "Copied to clipboard" : "Copy transcript")
+                        .transition(.scale.combined(with: .opacity))
+                    }
                 }
-            } label: {
-                Image(systemName: coordinator.isRunning ? "stop.fill" : "mic.fill")
-                    .font(.system(size: 28))
-                    .frame(width: 64, height: 64)
             }
-            .buttonStyle(.borderedProminent)
-            .tint(coordinator.isRunning ? .red : .accentColor)
-            .clipShape(Circle())
-            .accessibilityLabel(coordinator.isRunning ? "Stop recording" : "Start recording")
-            
-            // Secondary action - Copy (only visible when there's text)
-            if !coordinator.partialText.isEmpty {
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: coordinator.partialText.isEmpty)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: coordinator.isRunning)
+        } else {
+            HStack(spacing: 16) {
+                // Primary action - Start/Stop
                 Button {
-                    copyToClipboard()
+                    Task {
+                        await toggleRecording()
+                    }
                 } label: {
-                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                        .font(.system(size: 20))
-                        .frame(width: 48, height: 48)
+                    Image(systemName: coordinator.isRunning ? "stop.fill" : "mic.fill")
+                        .font(.system(size: 28))
+                        .frame(width: 64, height: 64)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.borderedProminent)
+                .tint(coordinator.isRunning ? .red : .accentColor)
                 .clipShape(Circle())
-                .accessibilityLabel(copied ? "Copied to clipboard" : "Copy transcript")
-                .transition(.scale.combined(with: .opacity))
+                .accessibilityLabel(coordinator.isRunning ? "Stop recording" : "Start recording")
+                
+                // Secondary action - Copy (only visible when there's text)
+                if !coordinator.partialText.isEmpty {
+                    Button {
+                        copyToClipboard()
+                    } label: {
+                        Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                            .font(.system(size: 20))
+                            .frame(width: 48, height: 48)
+                    }
+                    .buttonStyle(.bordered)
+                    .clipShape(Circle())
+                    .accessibilityLabel(copied ? "Copied to clipboard" : "Copy transcript")
+                    .transition(.scale.combined(with: .opacity))
+                }
             }
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: coordinator.partialText.isEmpty)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: coordinator.isRunning)
         }
-        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: coordinator.partialText.isEmpty)
-        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: coordinator.isRunning)
     }
     
     // MARK: - Actions

@@ -9,3 +9,4 @@ logs/
 # Tuist generated
 *.xcodeproj
 *.xcworkspace
+.env

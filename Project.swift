@@ -6,6 +6,12 @@ let project = Project(
     packages: [
         .package(path: .relativeToRoot("."))
     ],
+    settings: .settings(
+        base: [
+            "DEVELOPMENT_TEAM": "8X4ZN58TYH",
+            "CODE_SIGN_STYLE": "Automatic"
+        ]
+    ),
     targets: [
         .target(
             name: "SpeakApp",
@@ -19,7 +25,13 @@ let project = Project(
             entitlements: .file(path: "Config/SpeakMacOS.entitlements"),
             dependencies: [
                 .package(product: "SpeakCore")
-            ]
+            ],
+            settings: .settings(base: [
+                "DEVELOPMENT_TEAM": "8X4ZN58TYH",
+                "CODE_SIGN_STYLE": "Automatic",
+                "CODE_SIGN_IDENTITY": "Apple Development",
+                "PRODUCT_BUNDLE_IDENTIFIER": "com.justspeaktoit.mac"
+            ])
         ),
         .target(
             name: "SpeakiOS",

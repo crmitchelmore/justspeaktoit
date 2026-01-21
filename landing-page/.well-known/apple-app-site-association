@@ -1,0 +1,21 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "8X4ZN58TYH.com.justspeaktoit.mac",
+        "paths": ["*"]
+      },
+      {
+        "appID": "8X4ZN58TYH.com.justspeaktoit.ios",
+        "paths": ["*"]
+      }
+    ]
+  },
+  "webcredentials": {
+    "apps": [
+      "8X4ZN58TYH.com.justspeaktoit.mac",
+      "8X4ZN58TYH.com.justspeaktoit.ios"
+    ]
+  }
+}

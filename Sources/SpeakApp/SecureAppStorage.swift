@@ -69,10 +69,10 @@ actor SecureAppStorage {
         self.appSettings = appSettings
         
         let configuration = SecureStorageConfiguration(
-            service: "com.github.speakapp.credentials",
+            service: "com.justspeaktoit.credentials",
             masterAccount: "speak-app-secrets",
-            accessGroup: nil,  // Will be set when enabling sync
-            synchronizable: false
+            accessGroup: "com.justspeaktoit.shared",  // Shared keychain for macOS/iOS
+            synchronizable: true  // Enable iCloud Keychain sync
         )
         
         self.storage = SecureStorage(

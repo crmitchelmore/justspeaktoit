@@ -2,30 +2,30 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- Keychain Sharing: Must match iOS app for cross-platform sync -->
-    <key>keychain-access-groups</key>
-    <array>
-        <string>$(AppIdentifierPrefix)com.speak.shared</string>
-    </array>
-    
-    <!-- iCloud: Enables iCloud Key-Value Store for settings sync -->
-    <key>com.apple.developer.ubiquity-kvstore-identifier</key>
-    <string>$(TeamIdentifierPrefix)com.github.speakapp</string>
-    
-    <!-- App Sandbox: Required for Mac App Store distribution -->
-    <key>com.apple.security.app-sandbox</key>
-    <true/>
-    
-    <!-- Microphone: Required for transcription -->
-    <key>com.apple.security.device.audio-input</key>
-    <true/>
-    
-    <!-- Network: Required for cloud transcription APIs -->
-    <key>com.apple.security.network.client</key>
-    <true/>
-    
-    <!-- User-selected files: For saving transcripts -->
-    <key>com.apple.security.files.user-selected.read-write</key>
-    <true/>
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:justspeaktoit.com</string>
+		<string>webcredentials:justspeaktoit.com</string>
+	</array>
+	<key>com.apple.developer.ubiquity-kvstore-identifier</key>
+	<string>$(TeamIdentifierPrefix)com.justspeaktoit</string>
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<key>com.apple.security.temporary-exception.apple-events</key>
+	<array>
+		<string>com.apple.systemevents</string>
+	</array>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)com.justspeaktoit.shared</string>
+	</array>
 </dict>
 </plist>

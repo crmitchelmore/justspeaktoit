@@ -283,6 +283,19 @@
       border-color: rgba(255, 255, 255, 0.2);
     }
 
+    .btn--ghost {
+      background: transparent;
+      color: var(--color-text-muted);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+    }
+
+    .btn--ghost:hover {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--color-text);
+      transform: translateY(-2px);
+      border-color: rgba(255, 255, 255, 0.25);
+    }
+
     .btn__icon {
       font-size: 1.2em;
     }
@@ -817,7 +830,7 @@
   <section class="hero">
     <div class="hero__badge">
       <span class="hero__badge-dot"></span>
-      Now available for Mac & iOS
+      Open Source · MIT Licensed
     </div>
     <h1 class="hero__title">
       <span class="hero__title-accent">Speak.</span> We'll handle the rest.
@@ -833,6 +846,10 @@
       <a href="#download" class="btn btn--secondary">
         <span class="btn__icon">📱</span>
         Get iOS App
+      </a>
+      <a href="https://github.com/chrismitchelmore/just-speak-to-it" class="btn btn--ghost" target="_blank" rel="noopener">
+        <span class="btn__icon">⭐</span>
+        Star on GitHub
       </a>
     </div>
     
@@ -1109,7 +1126,7 @@
       <a href="#" class="footer__link">Privacy Policy</a>
       <a href="#" class="footer__link">Terms of Service</a>
       <a href="mailto:hello@justspeaktoit.com" class="footer__link">Contact</a>
-      <a href="https://github.com" class="footer__link">GitHub</a>
+      <a href="https://github.com/chrismitchelmore/just-speak-to-it" class="footer__link">GitHub</a>
     </div>
     <p class="footer__text" style="margin-top: 2rem; opacity: 0.5;">
       © 2026 JustSpeakToIt. All rights reserved.

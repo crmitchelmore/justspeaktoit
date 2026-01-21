@@ -1,18 +1,34 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS Entitlements for Developer ID (non-App Store) distribution.
+  
+  APP STORE MIGRATION: To re-enable sandboxing for Mac App Store, uncomment:
+  - com.apple.security.app-sandbox
+  - com.apple.security.device.audio-input
+  - com.apple.security.files.user-selected.read-write
+  - com.apple.security.network.client
+  - com.apple.security.temporary-exception.apple-events
+  - keychain-access-groups
+  - com.apple.developer.associated-domains
+  - com.apple.developer.ubiquity-kvstore-identifier
+  
+  Note: Sandboxed apps require users to manually add them to Accessibility
+  in System Settings. Non-sandboxed apps appear automatically when calling
+  AXIsProcessTrustedWithOptions with kAXTrustedCheckOptionPrompt.
+-->
 <plist version="1.0">
 <dict>
-	<key>com.apple.developer.associated-domains</key>
-	<array>
-		<string>applinks:justspeaktoit.com</string>
-		<string>webcredentials:justspeaktoit.com</string>
-	</array>
-	<key>com.apple.developer.ubiquity-kvstore-identifier</key>
-	<string>$(TeamIdentifierPrefix)com.justspeaktoit</string>
+	<!-- ============================================================
+	     APP STORE ONLY - Uncomment these for Mac App Store builds
+	     ============================================================ -->
+	
+	<!-- Sandbox (REQUIRED for App Store)
 	<key>com.apple.security.app-sandbox</key>
 	<true/>
-	<key>com.apple.security.automation.apple-events</key>
-	<true/>
+	-->
+	
+	<!-- Sandbox capabilities - only needed when sandboxed
 	<key>com.apple.security.device.audio-input</key>
 	<true/>
 	<key>com.apple.security.files.user-selected.read-write</key>
@@ -23,9 +39,38 @@
 	<array>
 		<string>com.apple.systemevents</string>
 	</array>
+	-->
+	
+	<!-- iCloud Key-Value Storage - requires managed profile
+	<key>com.apple.developer.ubiquity-kvstore-identifier</key>
+	<string>$(TeamIdentifierPrefix)com.justspeaktoit</string>
+	-->
+	
+	<!-- Associated Domains - requires managed profile
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:justspeaktoit.com</string>
+		<string>webcredentials:justspeaktoit.com</string>
+	</array>
+	-->
+	
+	<!-- Keychain sharing - requires managed profile
 	<key>keychain-access-groups</key>
 	<array>
 		<string>$(AppIdentifierPrefix)com.justspeaktoit.shared</string>
 	</array>
+	-->
+	
+	<!-- ============================================================
+	     ACTIVE ENTITLEMENTS - Used for Developer ID distribution
+	     ============================================================ -->
+	
+	<!-- AppleScript/Automation - send events to other apps -->
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+	
+	<!-- Hardened Runtime: Allow loading unsigned dylibs (for plugins) -->
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
 </dict>
 </plist>

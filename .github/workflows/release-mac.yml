@@ -64,14 +64,11 @@ jobs:
         run: |
           tuist generate --no-open
 
-      - name: Strip Managed Entitlements for Developer ID
+      - name: Verify Entitlements for Developer ID
         run: |
-          # Remove entitlements that require managed provisioning profiles
-          # These are kept for App Store builds but Developer ID doesn't need them
-          /usr/libexec/PlistBuddy -c "Delete :com.apple.developer.associated-domains" Config/SpeakMacOS.entitlements 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Delete :com.apple.developer.ubiquity-kvstore-identifier" Config/SpeakMacOS.entitlements 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Delete :keychain-access-groups" Config/SpeakMacOS.entitlements 2>/dev/null || true
-          echo "Entitlements after stripping:"
+          # Entitlements file is pre-configured for Developer ID (non-sandboxed).
+          # Sandbox and managed entitlements are commented out for future App Store builds.
+          echo "Using Developer ID entitlements (non-sandboxed):"
           cat Config/SpeakMacOS.entitlements
 
       - name: Determine Version

@@ -75,6 +75,9 @@ jobs:
         run: |
           tuist generate --no-open
 
+      # NOTE: Before using this workflow, re-enable sandbox in Config/SpeakMacOS.entitlements
+      # by uncommenting the App Store entitlements section. Mac App Store REQUIRES sandbox.
+
       - name: Update Version
         run: |
           VERSION="${{ github.event.inputs.version }}"

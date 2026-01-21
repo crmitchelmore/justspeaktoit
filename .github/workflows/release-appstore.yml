@@ -1,0 +1,164 @@
+name: Release to Mac App Store
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 0.1.0)'
+        required: true
+
+env:
+  SCHEME: SpeakApp
+  PRODUCT_NAME: JustSpeakToIt
+  WORKSPACE: "Just Speak to It.xcworkspace"
+  BUNDLE_ID: com.justspeaktoit.mac
+
+jobs:
+  build-and-upload:
+    runs-on: macos-15
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Install Tuist
+        run: |
+          brew install tuist
+
+      - name: Import Code Signing Certificates
+        env:
+          MAC_APP_DISTRIBUTION_P12: ${{ secrets.MAC_APP_DISTRIBUTION_P12 }}
+          MAC_APP_DISTRIBUTION_PASSWORD: ${{ secrets.MAC_APP_DISTRIBUTION_PASSWORD }}
+          MAC_INSTALLER_DISTRIBUTION_P12: ${{ secrets.MAC_INSTALLER_DISTRIBUTION_P12 }}
+          MAC_INSTALLER_DISTRIBUTION_PASSWORD: ${{ secrets.MAC_INSTALLER_DISTRIBUTION_PASSWORD }}
+        run: |
+          # Create temporary keychain
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+          
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          
+          # Import Mac App Distribution certificate
+          if [ -n "$MAC_APP_DISTRIBUTION_P12" ]; then
+            echo -n "$MAC_APP_DISTRIBUTION_P12" | base64 --decode -o $RUNNER_TEMP/mac-app-dist.p12
+            security import $RUNNER_TEMP/mac-app-dist.p12 -P "$MAC_APP_DISTRIBUTION_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+            rm -f $RUNNER_TEMP/mac-app-dist.p12
+          fi
+          
+          # Import Mac Installer Distribution certificate (optional, for pkg)
+          if [ -n "$MAC_INSTALLER_DISTRIBUTION_P12" ]; then
+            echo -n "$MAC_INSTALLER_DISTRIBUTION_P12" | base64 --decode -o $RUNNER_TEMP/mac-installer-dist.p12
+            security import $RUNNER_TEMP/mac-installer-dist.p12 -P "$MAC_INSTALLER_DISTRIBUTION_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+            rm -f $RUNNER_TEMP/mac-installer-dist.p12
+          fi
+          
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+
+      - name: Install Provisioning Profile
+        env:
+          MAC_APP_STORE_PROFILE: ${{ secrets.MAC_APP_STORE_PROFILE }}
+        run: |
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          echo -n "$MAC_APP_STORE_PROFILE" | base64 --decode -o ~/Library/MobileDevice/Provisioning\ Profiles/mac-app-store.provisionprofile
+
+      - name: Generate Xcode Project
+        run: |
+          tuist generate --no-open
+
+      - name: Update Version
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          # Update VERSION file
+          echo "$VERSION" > VERSION
+          
+          # Update Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" Config/AppInfo.plist
+          
+          # Increment build number based on run number
+          BUILD_NUMBER=${{ github.run_number }}
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" Config/AppInfo.plist
+
+      - name: Build Release Archive
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          xcodebuild archive \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -archivePath $RUNNER_TEMP/$PRODUCT_NAME.xcarchive \
+            -destination "generic/platform=macOS" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            CODE_SIGN_STYLE=Automatic \
+            PRODUCT_BUNDLE_IDENTIFIER=$BUNDLE_ID \
+            -allowProvisioningUpdates
+
+      - name: Export for App Store
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          # Create export options plist for App Store
+          cat > $RUNNER_TEMP/ExportOptions.plist << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>app-store-connect</string>
+              <key>teamID</key>
+              <string>$APPLE_TEAM_ID</string>
+              <key>signingStyle</key>
+              <string>automatic</string>
+              <key>uploadSymbols</key>
+              <true/>
+              <key>destination</key>
+              <string>upload</string>
+          </dict>
+          </plist>
+          EOF
+          
+          xcodebuild -exportArchive \
+            -archivePath $RUNNER_TEMP/$PRODUCT_NAME.xcarchive \
+            -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist \
+            -exportPath $RUNNER_TEMP/export \
+            -allowProvisioningUpdates
+
+      - name: Upload to App Store Connect
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          # Find the pkg or app
+          if [ -f "$RUNNER_TEMP/export/$PRODUCT_NAME.pkg" ]; then
+            UPLOAD_FILE="$RUNNER_TEMP/export/$PRODUCT_NAME.pkg"
+          else
+            UPLOAD_FILE="$RUNNER_TEMP/export/$PRODUCT_NAME.app"
+          fi
+          
+          xcrun notarytool store-credentials "AC_PASSWORD" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_ID_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID"
+          
+          xcrun altool --upload-app \
+            --file "$UPLOAD_FILE" \
+            --type macos \
+            --apiKey "$APPLE_ID" \
+            --apiIssuer "$APPLE_TEAM_ID" \
+            || echo "Upload via altool - check App Store Connect for status"
+
+      - name: Cleanup Keychain
+        if: always()
+        run: |
+          security delete-keychain $RUNNER_TEMP/app-signing.keychain-db || true

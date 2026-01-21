@@ -68,11 +68,17 @@ actor SecureAppStorage {
         self.permissionsManager = permissionsManager
         self.appSettings = appSettings
         
+        // Check if we have the keychain-access-groups entitlement
+        // Developer ID builds may not have it (stripped for CI)
+        let hasAccessGroupEntitlement = Self.hasKeychainAccessGroupEntitlement()
+        
         let configuration = SecureStorageConfiguration(
             service: "com.justspeaktoit.credentials",
             masterAccount: "speak-app-secrets",
-            accessGroup: "com.justspeaktoit.shared",  // Shared keychain for macOS/iOS
-            synchronizable: true  // Enable iCloud Keychain sync
+            // Only use access group if we have the entitlement
+            accessGroup: hasAccessGroupEntitlement ? "8X4ZN58TYH.com.justspeaktoit.shared" : nil,
+            // Only enable sync if we have access group
+            synchronizable: hasAccessGroupEntitlement
         )
         
         self.storage = SecureStorage(
@@ -80,6 +86,32 @@ actor SecureAppStorage {
             permissionsChecker: PermissionsManagerBridge(permissionsManager: permissionsManager),
             identifierRegistry: appSettings
         )
+    }
+    
+    /// Check if the app has keychain-access-groups entitlement
+    private static func hasKeychainAccessGroupEntitlement() -> Bool {
+        // Try a test keychain operation with access group
+        // If it fails with errSecMissingEntitlement (-34018), we don't have the entitlement
+        let testQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "com.justspeaktoit.entitlement-check",
+            kSecAttrAccount as String: "test",
+            kSecAttrAccessGroup as String: "8X4ZN58TYH.com.justspeaktoit.shared",
+            kSecReturnData as String: false
+        ]
+        
+        let status = SecItemCopyMatching(testQuery as CFDictionary, nil)
+        
+        // errSecMissingEntitlement = -34018 means we don't have the entitlement
+        // errSecItemNotFound = -25300 means we have the entitlement but no item exists
+        // Other errors also indicate we can likely proceed without access group
+        if status == errSecMissingEntitlement {
+            print("[SecureAppStorage] No keychain-access-groups entitlement, using app-local keychain")
+            return false
+        }
+        
+        print("[SecureAppStorage] Keychain access group entitlement available")
+        return true
     }
 
     func storeSecret(_ value: String, identifier: String, label _: String? = nil) async throws {

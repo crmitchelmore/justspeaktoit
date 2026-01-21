@@ -90,6 +90,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           # Build without signing first, sign during export
+          # Enable hardened runtime (required for notarization)
           xcodebuild archive \
             -workspace "$WORKSPACE" \
             -scheme "$SCHEME" \
@@ -98,7 +99,8 @@ jobs:
             -destination "generic/platform=macOS" \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="-" \
-            PRODUCT_BUNDLE_IDENTIFIER=com.justspeaktoit.mac
+            PRODUCT_BUNDLE_IDENTIFIER=com.justspeaktoit.mac \
+            ENABLE_HARDENED_RUNTIME=YES
 
       - name: Export App (Developer ID / Ad-Hoc)
         run: |

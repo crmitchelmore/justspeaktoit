@@ -136,23 +136,52 @@ jobs:
           # Create ZIP for notarization
           ditto -c -k --keepParent "$APP_PATH" "$RUNNER_TEMP/$PRODUCT_NAME.zip"
           
-          # Submit for notarization and capture submission ID
+          # Submit for notarization (don't wait, use polling to avoid timeout)
           SUBMIT_OUTPUT=$(xcrun notarytool submit "$RUNNER_TEMP/$PRODUCT_NAME.zip" \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_ID_PASSWORD" \
-            --team-id "$APPLE_TEAM_ID" \
-            --wait 2>&1) || true
+            --team-id "$APPLE_TEAM_ID" 2>&1)
           
           echo "$SUBMIT_OUTPUT"
           
-          # Extract submission ID and get detailed log if failed
           SUBMISSION_ID=$(echo "$SUBMIT_OUTPUT" | grep -E "^\s*id:" | head -1 | awk '{print $2}')
-          if echo "$SUBMIT_OUTPUT" | grep -q "Invalid"; then
-            echo "=== Notarization Failed - Getting detailed log ==="
-            xcrun notarytool log "$SUBMISSION_ID" \
+          echo "Submission ID: $SUBMISSION_ID"
+          
+          # Poll for completion with retries
+          MAX_ATTEMPTS=120  # 60 minutes max (30s intervals)
+          ATTEMPT=0
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            ATTEMPT=$((ATTEMPT + 1))
+            echo "Checking status (attempt $ATTEMPT/$MAX_ATTEMPTS)..."
+            
+            STATUS_OUTPUT=$(xcrun notarytool info "$SUBMISSION_ID" \
               --apple-id "$APPLE_ID" \
               --password "$APPLE_ID_PASSWORD" \
-              --team-id "$APPLE_TEAM_ID"
+              --team-id "$APPLE_TEAM_ID" 2>&1) || true
+            
+            echo "$STATUS_OUTPUT"
+            
+            if echo "$STATUS_OUTPUT" | grep -q "status: Accepted"; then
+              echo "Notarization accepted!"
+              break
+            elif echo "$STATUS_OUTPUT" | grep -q "status: Invalid"; then
+              echo "=== Notarization Failed ==="
+              xcrun notarytool log "$SUBMISSION_ID" \
+                --apple-id "$APPLE_ID" \
+                --password "$APPLE_ID_PASSWORD" \
+                --team-id "$APPLE_TEAM_ID" || true
+              exit 1
+            elif echo "$STATUS_OUTPUT" | grep -q "status: In Progress"; then
+              echo "Still in progress, waiting 30s..."
+              sleep 30
+            else
+              echo "Unknown status or network error, retrying in 30s..."
+              sleep 30
+            fi
+          done
+          
+          if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
+            echo "Notarization timed out after $MAX_ATTEMPTS attempts"
             exit 1
           fi
           

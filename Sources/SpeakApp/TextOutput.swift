@@ -156,6 +156,54 @@ struct SmartTextOutput: TextOutputting {
   let permissionsManager: PermissionsManager
   let appSettings: AppSettings
 
+  /// Apps known to not support accessibility text insertion properly.
+  /// These apps will always use clipboard fallback when in "smart" mode.
+  private static let problematicApps: Set<String> = [
+    // Chromium-based browsers
+    "Google Chrome",
+    "Google Chrome Canary",
+    "Chromium",
+    "Microsoft Edge",
+    "Brave Browser",
+    "Opera",
+    "Vivaldi",
+    "Arc",
+    // Electron apps
+    "Slack",
+    "Discord",
+    "Visual Studio Code",
+    "VS Code",
+    "Code",
+    "Cursor",
+    "Atom",
+    "Notion",
+    "Figma",
+    "Obsidian",
+    "Postman",
+    "Insomnia",
+    "GitHub Desktop",
+    "Hyper",
+    "Terminus",
+    "1Password",
+    "Bitwarden",
+    "Spotify",
+    "Teams",
+    "Microsoft Teams",
+    "Zoom",
+    "Webex",
+    // Other apps with known issues
+    "Microsoft Word",
+    "Microsoft Excel",
+    "Microsoft PowerPoint",
+    "Firefox",
+    "iTerm2",
+    "iTerm",
+    "Alacritty",
+    "kitty",
+    "Warp",
+    "Terminal", // Some secure input issues
+  ]
+
   private var accessibilityOutput: AccessibilityTextOutput {
     AccessibilityTextOutput(permissionsManager: permissionsManager, appSettings: appSettings)
   }
@@ -171,23 +219,69 @@ struct SmartTextOutput: TextOutputting {
     case .clipboardOnly:
       return clipboardOutput.output(text: text)
     case .smart:
+      // Skip accessibility for known problematic apps
+      if isCurrentAppProblematic() {
+        print("[SmartTextOutput] Skipping accessibility for problematic app, using clipboard")
+        return clipboardOutput.output(text: text)
+      }
+
       // Only try accessibility if permission is granted AND there's a focused element
       if permissionsManager.status(for: .accessibility).isGranted,
-         hasFocusedElement() {
+         let focusedElement = getFocusedElement() {
+
+        // Check if the attribute is settable
+        var settable: DarwinBoolean = false
+        let isSettable = AXUIElementIsAttributeSettable(
+          focusedElement, kAXValueAttribute as CFString, &settable)
+        guard isSettable == .success && settable.boolValue else {
+          print("[SmartTextOutput] Value attribute not settable, falling back to clipboard")
+          return clipboardOutput.output(text: text)
+        }
+
+        // Try accessibility insertion
         let result = accessibilityOutput.output(text: text)
         if result.error == nil {
-          return result
+          // Verify the text was actually inserted by re-reading the value
+          if verifyTextInserted(text: text, element: focusedElement) {
+            return result
+          } else {
+            print("[SmartTextOutput] Text insertion not verified, falling back to clipboard")
+          }
         }
       }
       return clipboardOutput.output(text: text)
     }
   }
 
-  private func hasFocusedElement() -> Bool {
+  private func isCurrentAppProblematic() -> Bool {
+    guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
+      return false
+    }
+    let appName = frontmostApp.localizedName ?? ""
+    return Self.problematicApps.contains(appName)
+  }
+
+  private func getFocusedElement() -> AXUIElement? {
     let systemWideElement = AXUIElementCreateSystemWide()
     var rawFocused: CFTypeRef?
     let copyStatus = AXUIElementCopyAttributeValue(
       systemWideElement, kAXFocusedUIElementAttribute as CFString, &rawFocused)
-    return copyStatus == .success && rawFocused != nil
+    guard copyStatus == .success, let rawFocused else {
+      return nil
+    }
+    return unsafeBitCast(rawFocused, to: AXUIElement.self)
+  }
+
+  /// Verify that the text was actually inserted into the focused element.
+  /// Some apps return success from AXUIElementSetAttributeValue but don't actually update.
+  private func verifyTextInserted(text: String, element: AXUIElement) -> Bool {
+    var currentValue: CFTypeRef?
+    let getStatus = AXUIElementCopyAttributeValue(
+      element, kAXValueAttribute as CFString, &currentValue)
+    guard getStatus == .success, let currentString = currentValue as? String else {
+      return false
+    }
+    // Check if the text appears at the end (it should have been appended or set)
+    return currentString.hasSuffix(text) || currentString == text
   }
 }

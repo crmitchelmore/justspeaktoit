@@ -322,8 +322,44 @@ enum WireUp {
     }
 
     Task { await secureStorage.preloadTrackedSecrets() }
+    
+    // Configure default transcription provider based on available API keys
+    Task {
+      await configureDefaultTranscriptionProvider(settings: settings, secureStorage: secureStorage)
+    }
 
     return environment
+  }
+  
+  /// Configure the default live transcription model based on available API keys.
+  /// Priority: Deepgram > Apple (fallback)
+  /// Called on app launch and after onboarding completes.
+  static func configureDefaultTranscriptionProvider(
+    settings: AppSettings,
+    secureStorage: SecureAppStorage
+  ) async {
+    // Only configure if user hasn't explicitly set a preference
+    // Check if it's still the default Apple value
+    let currentModel = settings.liveTranscriptionModel
+    let isDefaultApple = currentModel == "apple/local/SFSpeechRecognizer"
+    
+    // If user has already changed from default, respect their choice
+    guard isDefaultApple else {
+      print("[WireUp] User has custom transcription model, skipping auto-config")
+      return
+    }
+    
+    // Check for Deepgram API key
+    let hasDeepgramKey = await secureStorage.hasSecret(identifier: "deepgram.apiKey")
+    
+    if hasDeepgramKey {
+      await MainActor.run {
+        settings.liveTranscriptionModel = "deepgram/nova-2-streaming"
+        print("[WireUp] Deepgram API key found, setting as default transcription provider")
+      }
+    } else {
+      print("[WireUp] No Deepgram API key found, using Apple SFSpeechRecognizer as default")
+    }
   }
 }
 // @Implement: This file should wire up and configure all app dependencies based on the approach laid out in this talk https://www.infoq.com/presentations/8-lines-code-refactoring/

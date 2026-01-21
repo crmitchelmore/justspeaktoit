@@ -13,6 +13,7 @@ struct HistoryView: View {
   @State private var startDate: Date = Calendar.current.startOfDay(for: Date().addingTimeInterval(-7 * 24 * 60 * 60))
   @State private var endDate: Date = Date()
   @State private var historyItems: [HistoryItem] = []
+  @State private var selectedModelFilter: String? = nil
   @State private var historyStats: HistoryStatistics = .init(
     totalSessions: 0,
     cumulativeRecordingDuration: 0,
@@ -113,10 +114,20 @@ struct HistoryView: View {
     var filter = HistoryFilter.none
     filter.searchText = searchText.isEmpty ? nil : searchText
     filter.includeErrorsOnly = showErrorsOnly
+    if let model = selectedModelFilter {
+      filter.modelIdentifiers = [model]
+    }
     if dateRangeEnabled {
       filter.dateRange = normalizedDateRange
     }
     return apply(filter: filter, to: historyItems)
+  }
+
+  /// All unique models used across history items
+  private var availableModels: [String] {
+    let allModels = historyItems.flatMap { $0.modelsUsed }
+    let unique = Set(allModels)
+    return unique.sorted { ModelCatalog.friendlyName(for: $0) < ModelCatalog.friendlyName(for: $1) }
   }
 
   private var normalizedDateRange: ClosedRange<Date> {
@@ -266,6 +277,19 @@ struct HistoryView: View {
             .datePickerStyle(.compact)
         }
 
+        if !availableModels.isEmpty {
+          Picker("Model", selection: $selectedModelFilter) {
+            Text("All Models").tag(String?.none)
+            Divider()
+            ForEach(availableModels, id: \.self) { model in
+              Text(ModelCatalog.friendlyName(for: model)).tag(String?.some(model))
+            }
+          }
+          .pickerStyle(.menu)
+          .tint(.white)
+          .speakTooltip("Filter sessions by the transcription or processing model used.")
+        }
+
         Spacer()
 
         if isImportingFiles {
@@ -390,9 +414,15 @@ struct HistoryView: View {
   private func apply(filter: HistoryFilter, to items: [HistoryItem]) -> [HistoryItem] {
     items.filter { item in
       if let text = filter.searchText?.lowercased(), !text.isEmpty {
-        let combined = [item.rawTranscription, item.postProcessedTranscription]
+        // Search in transcriptions
+        let transcriptions = [item.rawTranscription, item.postProcessedTranscription]
           .compactMap { $0?.lowercased() }
           .joined(separator: "\n")
+        // Search in model names (both raw IDs and friendly names)
+        let modelNames = item.modelsUsed.map { model in
+          "\(model.lowercased()) \(ModelCatalog.friendlyName(for: model).lowercased())"
+        }.joined(separator: " ")
+        let combined = transcriptions + " " + modelNames
         if !combined.contains(text) {
           return false
         }

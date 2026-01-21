@@ -564,7 +564,7 @@ final class AppSettings: ObservableObject {
     textOutputMethod =
       TextOutputMethod(
         rawValue: defaults.string(forKey: DefaultsKey.textOutputMethod.rawValue)
-          ?? TextOutputMethod.smart.rawValue) ?? .smart
+          ?? TextOutputMethod.clipboardOnly.rawValue) ?? .clipboardOnly
     restoreClipboardAfterPaste =
       defaults.object(forKey: DefaultsKey.restoreClipboard.rawValue) as? Bool ?? true
     showHUDDuringSessions = defaults.object(forKey: DefaultsKey.showHUD.rawValue) as? Bool ?? true

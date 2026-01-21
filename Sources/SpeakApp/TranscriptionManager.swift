@@ -417,6 +417,9 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
   private let deepgramSampleRate: Double = 16000
   private var deepgramFormat: AVAudioFormat?
 
+  /// Track streaming session start time for cost estimation
+  private var streamingStartTime: Date?
+
   /// Accumulated final transcript segments
   private var finalSegments: [TranscriptionSegment] = []
   /// Current interim text (not yet final)
@@ -470,6 +473,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
     finalSegments = []
     currentInterim = ""
     fullTranscript = ""
+    streamingStartTime = nil
 
     // Get audio format from device
     let inputNode = audioEngine.inputNode
@@ -539,6 +543,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
     audioEngine.prepare()
     try audioEngine.start()
     isRunning = true
+    streamingStartTime = Date()
     print("[DeepgramLiveController] Started successfully")
   }
 
@@ -735,17 +740,68 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
       print("[DeepgramLiveController] Including unfinalised interim: '\(trimmedInterim)'")
     }
 
-    let duration = finalSegments.last?.endTime ?? 0
+    // Calculate duration from streaming session
+    let streamingDuration: TimeInterval
+    if let startTime = streamingStartTime {
+      streamingDuration = Date().timeIntervalSince(startTime)
+    } else {
+      streamingDuration = finalSegments.last?.endTime ?? 0
+    }
+
+    // Estimate cost based on Deepgram pricing
+    // Nova-2 streaming: $0.0043/minute ($0.0059 with smart formatting)
+    // Using $0.0059 since we have smart_format enabled
+    let cost = estimateDeepgramCost(durationSeconds: streamingDuration, model: currentModel)
 
     return TranscriptionResult(
       text: text,
       segments: finalSegments,
       confidence: nil,
-      duration: duration,
+      duration: streamingDuration,
       modelIdentifier: currentModel ?? "deepgram/nova-2-streaming",
-      cost: nil,
+      cost: cost,
       rawPayload: nil,
       debugInfo: nil
+    )
+  }
+
+  /// Estimate Deepgram streaming cost based on duration and model
+  /// Pricing as of 2024: https://deepgram.com/pricing
+  private func estimateDeepgramCost(durationSeconds: TimeInterval, model: String?) -> ChatCostBreakdown? {
+    guard durationSeconds > 0 else { return nil }
+
+    let minutes = durationSeconds / 60.0
+
+    // Deepgram pricing per minute (with smart formatting enabled)
+    // Nova-2: $0.0043 base + $0.0016 smart_format = $0.0059/min
+    // Nova: $0.0041 base + $0.0016 smart_format = $0.0057/min
+    // Enhanced: $0.0145/min + $0.0016 = $0.0161/min
+    // Base: $0.0125/min + $0.0016 = $0.0141/min
+    let pricePerMinute: Decimal
+    let modelName = model?.lowercased() ?? "nova-2"
+
+    if modelName.contains("nova-2") {
+      pricePerMinute = Decimal(string: "0.0059")!
+    } else if modelName.contains("nova") {
+      pricePerMinute = Decimal(string: "0.0057")!
+    } else if modelName.contains("enhanced") {
+      pricePerMinute = Decimal(string: "0.0161")!
+    } else if modelName.contains("base") {
+      pricePerMinute = Decimal(string: "0.0141")!
+    } else {
+      // Default to Nova-2 pricing
+      pricePerMinute = Decimal(string: "0.0059")!
+    }
+
+    let totalCost = Decimal(minutes) * pricePerMinute
+
+    // Deepgram doesn't use tokens, but we can represent duration as "input" for display
+    // Using seconds as "tokens" for the breakdown display
+    return ChatCostBreakdown(
+      inputTokens: Int(durationSeconds),
+      outputTokens: 0,
+      totalCost: totalCost,
+      currency: "USD"
     )
   }
 

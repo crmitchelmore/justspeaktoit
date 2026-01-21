@@ -391,6 +391,42 @@ final class MainManager: ObservableObject {
         session.events.append(
           HistoryEvent(kind: .transcriptionReceived, description: "Live transcription complete")
         )
+        if let cost = result.cost {
+          session.recordCostFragment(cost)
+        }
+        // Log network exchange for live transcription
+        let durationStr = String(format: "%.1f", result.duration)
+        if result.modelIdentifier.contains("deepgram") {
+          session.networkExchanges.append(
+            HistoryNetworkExchange(
+              url: URL(string: "wss://api.deepgram.com/v1/listen")!,
+              method: "WebSocket",
+              requestHeaders: [
+                "Model": result.modelIdentifier,
+                "Duration": "\(durationStr)s",
+              ],
+              requestBodyPreview: "Streaming audio (\(durationStr) seconds)",
+              responseCode: 200,
+              responseHeaders: [:],
+              responseBodyPreview: result.rawPayload ?? "Transcript: \(String(result.text.prefix(500)))"
+            )
+          )
+        } else if result.modelIdentifier.contains("apple") {
+          session.networkExchanges.append(
+            HistoryNetworkExchange(
+              url: URL(string: "local://SFSpeechRecognizer")!,
+              method: "On-Device",
+              requestHeaders: [
+                "Model": result.modelIdentifier,
+                "Duration": "\(durationStr)s",
+              ],
+              requestBodyPreview: "On-device speech recognition (\(durationStr) seconds)",
+              responseCode: 200,
+              responseHeaders: [:],
+              responseBodyPreview: "Transcript: \(String(result.text.prefix(500)))"
+            )
+          )
+        }
       } else {
         hudManager.beginTranscribing()
         session.transcriptionStarted = Date()

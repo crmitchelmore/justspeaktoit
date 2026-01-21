@@ -39,6 +39,18 @@ struct SpeakApp: App {
                         .onAppear {
                             appDelegate.environment = environment
                         }
+                        .onChange(of: hasCompletedOnboarding) { _, completed in
+                            if completed {
+                                // Re-run transcription provider config after onboarding
+                                // to pick up any API keys the user just set
+                                Task {
+                                    await WireUp.configureDefaultTranscriptionProvider(
+                                        settings: environment.settings,
+                                        secureStorage: environment.secureStorage
+                                    )
+                                }
+                            }
+                        }
                     }
                 } else {
                     ProgressView("Loading...")

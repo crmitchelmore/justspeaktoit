@@ -86,8 +86,8 @@ jobs:
             -archivePath $RUNNER_TEMP/$PRODUCT_NAME.xcarchive \
             -destination "generic/platform=macOS" \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="Apple Distribution" \
+            CODE_SIGN_STYLE=Automatic \
+            CODE_SIGN_IDENTITY="Developer ID Application" \
             PRODUCT_BUNDLE_IDENTIFIER=com.justspeaktoit.mac \
             -allowProvisioningUpdates
 

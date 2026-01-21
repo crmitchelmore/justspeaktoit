@@ -28,6 +28,32 @@ public final class AppSettings: ObservableObject {
         self.selectedModel = selected
         self.deepgramAPIKey = deepgram
         self.openRouterAPIKey = openRouter
+        
+        // Auto-configure default provider on first launch or when saved model requires missing key
+        configureDefaultProviderIfNeeded()
+    }
+    
+    /// Configure default transcription provider based on available API keys.
+    /// Prefers Deepgram if API key is available, otherwise falls back to Apple Speech.
+    private func configureDefaultProviderIfNeeded() {
+        let isFirstLaunch = !UserDefaults.standard.bool(forKey: "hasLaunchedBefore")
+        let needsDeepgramKey = selectedModel.hasPrefix("deepgram") && !hasDeepgramKey
+        
+        if isFirstLaunch || needsDeepgramKey {
+            if hasDeepgramKey {
+                selectedModel = "deepgram/nova-2"
+            } else {
+                selectedModel = "apple/local/SFSpeechRecognizer"
+            }
+            UserDefaults.standard.set(true, forKey: "hasLaunchedBefore")
+        }
+    }
+    
+    /// Re-configure provider after onboarding or API key changes.
+    public func reconfigureDefaultProvider() {
+        if hasDeepgramKey {
+            selectedModel = "deepgram/nova-2"
+        }
     }
     
     public var hasDeepgramKey: Bool { !deepgramAPIKey.isEmpty }
@@ -312,6 +338,8 @@ struct APIKeysView: View {
                     settings.deepgramAPIKey = deepgramKey
                     deepgramKey = ""
                     messages.append("✓ Deepgram key validated and saved")
+                    // Auto-select Deepgram as the provider now that we have a key
+                    settings.reconfigureDefaultProvider()
                 case .failure(let message):
                     messages.append("✗ Deepgram: \(message)")
                 }

@@ -45,6 +45,11 @@ final class TranscriberCoordinator: ObservableObject {
         startTime = Date()
         sharedState.clear()
         
+        // Fallback to Apple Speech if Deepgram selected but no API key
+        if currentModel.hasPrefix("deepgram") && !settings.hasDeepgramKey {
+            currentModel = "apple/local/SFSpeechRecognizer"
+        }
+        
         // Start Live Activity
         activityManager.startActivity(provider: modelDisplayName)
         

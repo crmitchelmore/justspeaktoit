@@ -88,30 +88,40 @@ actor SecureAppStorage {
         )
     }
     
-    /// Check if the app has keychain-access-groups entitlement
+    /// Check if the app has keychain-access-groups entitlement by attempting a write
     private static func hasKeychainAccessGroupEntitlement() -> Bool {
-        // Try a test keychain operation with access group
-        // If it fails with errSecMissingEntitlement (-34018), we don't have the entitlement
-        let testQuery: [String: Any] = [
+        let testService = "com.justspeaktoit.entitlement-check"
+        let testAccount = "entitlement-test-\(UUID().uuidString)"
+        let accessGroup = "8X4ZN58TYH.com.justspeaktoit.shared"
+        
+        // Try to add a test item with access group
+        let addQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "com.justspeaktoit.entitlement-check",
-            kSecAttrAccount as String: "test",
-            kSecAttrAccessGroup as String: "8X4ZN58TYH.com.justspeaktoit.shared",
-            kSecReturnData as String: false
+            kSecAttrService as String: testService,
+            kSecAttrAccount as String: testAccount,
+            kSecAttrAccessGroup as String: accessGroup,
+            kSecValueData as String: "test".data(using: .utf8)!
         ]
         
-        let status = SecItemCopyMatching(testQuery as CFDictionary, nil)
+        let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
         
-        // errSecMissingEntitlement = -34018 means we don't have the entitlement
-        // errSecItemNotFound = -25300 means we have the entitlement but no item exists
-        // Other errors also indicate we can likely proceed without access group
-        if status == errSecMissingEntitlement {
-            print("[SecureAppStorage] No keychain-access-groups entitlement, using app-local keychain")
-            return false
+        // Clean up if we succeeded
+        if addStatus == errSecSuccess {
+            let deleteQuery: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: testService,
+                kSecAttrAccount as String: testAccount,
+                kSecAttrAccessGroup as String: accessGroup
+            ]
+            SecItemDelete(deleteQuery as CFDictionary)
+            print("[SecureAppStorage] Keychain access group entitlement available")
+            return true
         }
         
-        print("[SecureAppStorage] Keychain access group entitlement available")
-        return true
+        // errSecMissingEntitlement (-34018) means we don't have the entitlement
+        // Also treat other errors as "no entitlement" to be safe
+        print("[SecureAppStorage] No keychain-access-groups entitlement (status: \(addStatus)), using app-local keychain")
+        return false
     }
 
     func storeSecret(_ value: String, identifier: String, label _: String? = nil) async throws {

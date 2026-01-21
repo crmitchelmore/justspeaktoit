@@ -74,7 +74,8 @@ tell application "Finder"
         set current view of container window to icon view
         set toolbar visible of container window to false
         set statusbar visible of container window to false
-        set the bounds of container window to {100, 100, 760, 500}
+        -- Window size matches background: 660x520
+        set the bounds of container window to {100, 100, 760, 620}
         set viewOptions to the icon view options of container window
         set arrangement of viewOptions to not arranged
         set icon size of viewOptions to 100
@@ -85,9 +86,9 @@ tell application "Finder"
             set background picture of viewOptions to file ".background:background.png"
         end try
         
-        -- Position icons
-        set position of item "JustSpeakToIt.app" of container window to {145, 200}
-        set position of item "Applications" of container window to {515, 200}
+        -- Position icons (centered in the layout)
+        set position of item "JustSpeakToIt.app" of container window to {145, 220}
+        set position of item "Applications" of container window to {515, 220}
         
         close
         open

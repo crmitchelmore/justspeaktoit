@@ -117,17 +117,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.showMoveToApplicationsAlert()
             }
         } else if bundlePath.hasPrefix("/Applications") {
-            // Running from Applications - check if this is first launch after install
-            let defaults = UserDefaults.standard
-            let hasShownDMGCleanup = defaults.bool(forKey: "hasShownDMGCleanupPrompt")
-            
-            if !hasShownDMGCleanup {
-                defaults.set(true, forKey: "hasShownDMGCleanupPrompt")
-                
-                // Check for mounted DMG volumes
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                    self.checkForMountedDMG()
-                }
+            // Running from Applications - always check for mounted DMG on first launch of this session
+            // This handles the case where user drags to Applications, then launches
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                self.checkForMountedDMG()
             }
         }
     }

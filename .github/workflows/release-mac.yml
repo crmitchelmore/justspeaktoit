@@ -64,9 +64,13 @@ jobs:
 
       - name: Strip Managed Entitlements for Developer ID
         run: |
-          # Remove Associated Domains (requires App Store provisioning profile)
-          # Keep it for App Store builds, but Developer ID doesn't need it
+          # Remove entitlements that require managed provisioning profiles
+          # These are kept for App Store builds but Developer ID doesn't need them
           /usr/libexec/PlistBuddy -c "Delete :com.apple.developer.associated-domains" Config/SpeakMacOS.entitlements 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Delete :com.apple.developer.ubiquity-kvstore-identifier" Config/SpeakMacOS.entitlements 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Delete :keychain-access-groups" Config/SpeakMacOS.entitlements 2>/dev/null || true
+          echo "Entitlements after stripping:"
+          cat Config/SpeakMacOS.entitlements
 
       - name: Determine Version
         id: version
@@ -85,16 +89,16 @@ jobs:
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          # Build without signing first, sign during export
           xcodebuild archive \
             -workspace "$WORKSPACE" \
             -scheme "$SCHEME" \
             -configuration Release \
             -archivePath $RUNNER_TEMP/$PRODUCT_NAME.xcarchive \
             -destination "generic/platform=macOS" \
-            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
-            CODE_SIGN_STYLE=Automatic \
-            PRODUCT_BUNDLE_IDENTIFIER=com.justspeaktoit.mac \
-            -allowProvisioningUpdates
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="-" \
+            PRODUCT_BUNDLE_IDENTIFIER=com.justspeaktoit.mac
 
       - name: Export App (Developer ID / Ad-Hoc)
         run: |
@@ -109,7 +113,9 @@ jobs:
               <key>teamID</key>
               <string>${{ secrets.APPLE_TEAM_ID }}</string>
               <key>signingStyle</key>
-              <string>automatic</string>
+              <string>manual</string>
+              <key>signingCertificate</key>
+              <string>Developer ID Application</string>
           </dict>
           </plist>
           EOF
@@ -117,8 +123,7 @@ jobs:
           xcodebuild -exportArchive \
             -archivePath $RUNNER_TEMP/$PRODUCT_NAME.xcarchive \
             -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist \
-            -exportPath $RUNNER_TEMP/export \
-            -allowProvisioningUpdates
+            -exportPath $RUNNER_TEMP/export
 
       - name: Notarize App
         env:

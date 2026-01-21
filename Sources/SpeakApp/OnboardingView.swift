@@ -6,6 +6,7 @@ import SwiftUI
 enum OnboardingProvider: String, CaseIterable, Identifiable {
     case deepgram
     case openai
+    case openrouter
     case revai
     
     var id: String { rawValue }
@@ -14,6 +15,7 @@ enum OnboardingProvider: String, CaseIterable, Identifiable {
         switch self {
         case .deepgram: return "Deepgram"
         case .openai: return "OpenAI Whisper"
+        case .openrouter: return "OpenRouter"
         case .revai: return "Rev.ai"
         }
     }
@@ -22,6 +24,7 @@ enum OnboardingProvider: String, CaseIterable, Identifiable {
         switch self {
         case .deepgram: return URL(string: "https://console.deepgram.com/signup")!
         case .openai: return URL(string: "https://platform.openai.com/signup")!
+        case .openrouter: return URL(string: "https://openrouter.ai/keys")!
         case .revai: return URL(string: "https://www.rev.ai/auth/signup")!
         }
     }
@@ -30,6 +33,7 @@ enum OnboardingProvider: String, CaseIterable, Identifiable {
         switch self {
         case .deepgram: return "Go to Settings → API Keys → Create Key"
         case .openai: return "Go to API Keys → Create new secret key"
+        case .openrouter: return "Go to Keys → Create Key"
         case .revai: return "Go to Access Token → Generate Token"
         }
     }
@@ -38,6 +42,7 @@ enum OnboardingProvider: String, CaseIterable, Identifiable {
         switch self {
         case .deepgram: return "Free tier includes $200 credit"
         case .openai: return nil
+        case .openrouter: return "Pay-as-you-go with many model options"
         case .revai: return "Free tier includes 5 hours"
         }
     }
@@ -108,6 +113,22 @@ final class OnboardingState: ObservableObject {
                 
             case .openai:
                 let url = URL(string: "https://api.openai.com/v1/models")!
+                var request = URLRequest(url: url)
+                request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+                let (_, response) = try await URLSession.shared.data(for: request)
+                if let httpResponse = response as? HTTPURLResponse {
+                    if httpResponse.statusCode == 200 {
+                        isValidating = false
+                        return true
+                    } else if httpResponse.statusCode == 401 {
+                        validationError = "Invalid API key"
+                    } else {
+                        validationError = "Unexpected response (\(httpResponse.statusCode))"
+                    }
+                }
+                
+            case .openrouter:
+                let url = URL(string: "https://openrouter.ai/api/v1/models")!
                 var request = URLRequest(url: url)
                 request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
                 let (_, response) = try await URLSession.shared.data(for: request)

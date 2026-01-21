@@ -328,8 +328,13 @@ public actor SecureStorage {
         var attributesToUpdate: [String: Any] = [
             kSecValueData as String: data,
             kSecAttrLabel as String: configuration.masterAccount,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
         ]
+        
+        // Only set accessibility when using access groups (which implies data protection keychain)
+        // For non-entitled apps, omit this to use the default legacy keychain
+        if configuration.accessGroup != nil {
+            attributesToUpdate[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        }
         
         if configuration.synchronizable {
             attributesToUpdate[kSecAttrSynchronizable as String] = kCFBooleanTrue
@@ -340,7 +345,10 @@ public actor SecureStorage {
             var addQuery = query
             addQuery[kSecValueData as String] = data
             addQuery[kSecAttrLabel as String] = configuration.masterAccount
-            addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+            // Only set accessibility for apps with keychain entitlements
+            if configuration.accessGroup != nil {
+                addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+            }
             if configuration.synchronizable {
                 addQuery[kSecAttrSynchronizable as String] = kCFBooleanTrue
             }

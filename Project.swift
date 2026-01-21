@@ -22,6 +22,9 @@ let project = Project(
             deploymentTargets: .macOS("14.0"),
             infoPlist: .file(path: "Config/AppInfo.plist"),
             sources: ["Sources/SpeakApp/**"],
+            resources: [
+                .glob(pattern: "Resources/AppIcon.icns")
+            ],
             entitlements: .file(path: "Config/SpeakMacOS.entitlements"),
             dependencies: [
                 .package(product: "SpeakCore")

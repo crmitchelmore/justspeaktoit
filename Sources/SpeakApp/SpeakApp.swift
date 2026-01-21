@@ -90,6 +90,173 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.activate(ignoringOtherApps: true)
             NSApp.windows.first?.makeKeyAndOrderFront(nil)
         }
+        
+        // Check if running from DMG and offer to move to Applications
+        checkAndOfferDMGCleanup()
+    }
+    
+    private func checkAndOfferDMGCleanup() {
+        let bundlePath = Bundle.main.bundlePath
+        
+        // Check if running from a DMG (mounted volume that's not /Applications)
+        if bundlePath.hasPrefix("/Volumes/") && !bundlePath.hasPrefix("/Applications") {
+            // Running from DMG - suggest moving to Applications
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                self.showMoveToApplicationsAlert()
+            }
+        } else if bundlePath.hasPrefix("/Applications") {
+            // Running from Applications - check if this is first launch after install
+            let defaults = UserDefaults.standard
+            let hasShownDMGCleanup = defaults.bool(forKey: "hasShownDMGCleanupPrompt")
+            
+            if !hasShownDMGCleanup {
+                defaults.set(true, forKey: "hasShownDMGCleanupPrompt")
+                
+                // Check for mounted DMG volumes
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    self.checkForMountedDMG()
+                }
+            }
+        }
+    }
+    
+    private func showMoveToApplicationsAlert() {
+        let alert = NSAlert()
+        alert.messageText = "Move to Applications?"
+        alert.informativeText = "Just Speak to It is running from a disk image. Would you like to move it to your Applications folder for better performance?"
+        alert.addButton(withTitle: "Move to Applications")
+        alert.addButton(withTitle: "Not Now")
+        alert.alertStyle = .informational
+        
+        if alert.runModal() == .alertFirstButtonReturn {
+            moveToApplications()
+        }
+    }
+    
+    private func moveToApplications() {
+        let bundlePath = Bundle.main.bundlePath
+        let appName = (bundlePath as NSString).lastPathComponent
+        let destinationPath = "/Applications/\(appName)"
+        
+        do {
+            // Remove existing app if present
+            if FileManager.default.fileExists(atPath: destinationPath) {
+                try FileManager.default.removeItem(atPath: destinationPath)
+            }
+            
+            // Copy to Applications
+            try FileManager.default.copyItem(atPath: bundlePath, toPath: destinationPath)
+            
+            // Launch from new location
+            let url = URL(fileURLWithPath: destinationPath)
+            let config = NSWorkspace.OpenConfiguration()
+            config.activates = true
+            
+            NSWorkspace.shared.openApplication(at: url, configuration: config) { _, _ in
+                // Quit the current instance
+                DispatchQueue.main.async {
+                    NSApp.terminate(nil)
+                }
+            }
+        } catch {
+            let errorAlert = NSAlert()
+            errorAlert.messageText = "Could not move application"
+            errorAlert.informativeText = "Please manually drag Just Speak to It to your Applications folder. Error: \(error.localizedDescription)"
+            errorAlert.runModal()
+        }
+    }
+    
+    private func checkForMountedDMG() {
+        let fileManager = FileManager.default
+        
+        do {
+            let volumes = try fileManager.contentsOfDirectory(atPath: "/Volumes")
+            
+            for volume in volumes {
+                let volumePath = "/Volumes/\(volume)"
+                let appPath = "\(volumePath)/JustSpeakToIt.app"
+                
+                // Check if this looks like our DMG
+                if volume.contains("Just Speak") || fileManager.fileExists(atPath: appPath) {
+                    showEjectDMGAlert(volumeName: volume)
+                    break
+                }
+            }
+        } catch {
+            // Ignore errors reading volumes
+        }
+    }
+    
+    private func showEjectDMGAlert(volumeName: String) {
+        let alert = NSAlert()
+        alert.messageText = "Eject Installer?"
+        alert.informativeText = "Just Speak to It has been installed. Would you like to eject the installer disk image and move it to Trash?"
+        alert.addButton(withTitle: "Eject & Trash")
+        alert.addButton(withTitle: "Just Eject")
+        alert.addButton(withTitle: "Keep Mounted")
+        alert.alertStyle = .informational
+        
+        let response = alert.runModal()
+        
+        if response == .alertFirstButtonReturn {
+            // Eject and trash
+            ejectAndTrashDMG(volumeName: volumeName)
+        } else if response == .alertSecondButtonReturn {
+            // Just eject
+            ejectDMG(volumeName: volumeName)
+        }
+    }
+    
+    private func ejectDMG(volumeName: String) {
+        let volumePath = "/Volumes/\(volumeName)"
+        NSWorkspace.shared.unmountAndEjectDevice(atPath: volumePath)
+    }
+    
+    private func ejectAndTrashDMG(volumeName: String) {
+        // First, find the DMG file path before ejecting
+        let volumePath = "/Volumes/\(volumeName)"
+        
+        // Get disk info to find source DMG
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
+        task.arguments = ["info", "-plist"]
+        
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        
+        do {
+            try task.run()
+            task.waitUntilExit()
+            
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            if let plist = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+               let images = plist["images"] as? [[String: Any]] {
+                
+                for image in images {
+                    if let systemEntities = image["system-entities"] as? [[String: Any]] {
+                        for entity in systemEntities {
+                            if let mountPoint = entity["mount-point"] as? String,
+                               mountPoint == volumePath,
+                               let imagePath = image["image-path"] as? String {
+                                
+                                // Eject first
+                                NSWorkspace.shared.unmountAndEjectDevice(atPath: volumePath)
+                                
+                                // Then trash the DMG
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                                    let dmgURL = URL(fileURLWithPath: imagePath)
+                                    try? FileManager.default.trashItem(at: dmgURL, resultingItemURL: nil)
+                                }
+                                return
+                            }
+                        }
+                    }
+                }
+            }
+        } catch {
+            // Fallback: just eject
+            ejectDMG(volumeName: volumeName)
+        }
     }
 
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {

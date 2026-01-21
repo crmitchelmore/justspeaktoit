@@ -196,16 +196,11 @@ jobs:
         run: |
           APP_PATH="$RUNNER_TEMP/export/$PRODUCT_NAME.app"
           DMG_PATH="$RUNNER_TEMP/$PRODUCT_NAME-${{ steps.version.outputs.version }}.dmg"
+          VERSION="${{ steps.version.outputs.version }}"
           
-          # Create DMG with Applications symlink
-          mkdir -p $RUNNER_TEMP/dmg-contents
-          cp -R "$APP_PATH" $RUNNER_TEMP/dmg-contents/
-          ln -s /Applications $RUNNER_TEMP/dmg-contents/Applications
-          
-          hdiutil create -volname "$PRODUCT_NAME" \
-            -srcfolder $RUNNER_TEMP/dmg-contents \
-            -ov -format UDZO \
-            "$DMG_PATH"
+          # Use custom DMG creation script for beautiful installer
+          chmod +x scripts/create-dmg.sh
+          ./scripts/create-dmg.sh "$APP_PATH" "$DMG_PATH" "$VERSION"
           
           # Notarize the DMG
           xcrun notarytool submit "$DMG_PATH" \

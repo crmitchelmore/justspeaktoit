@@ -308,8 +308,13 @@ final class HistoryManager: ObservableObject {
 
     do {
       if !walItems.isEmpty {
-        let sorted = walItems.sorted { $0.createdAt > $1.createdAt }
-        let stats = calculateStatistics(for: sorted)
+        // Sort and calculate stats in background
+        let (sorted, stats) = await Task.detached(priority: .userInitiated) {
+          let sorted = walItems.sorted { $0.createdAt > $1.createdAt }
+          let stats = Self.calculateStatistics(for: sorted)
+          return (sorted, stats)
+        }.value
+        
         await MainActor.run {
           self.allItemsOnDisk = sorted
           self.items = Array(sorted.prefix(self.pageSize))
@@ -325,15 +330,21 @@ final class HistoryManager: ObservableObject {
           self.allItemsOnDisk = []
           self.items = []
           self.hasMoreItems = false
-          self.cachedStatistics = self.calculateStatistics(for: [])
+          self.cachedStatistics = Self.calculateStatistics(for: [])
           self.statistics = self.cachedStatistics!
         }
         return
       }
-      let data = try Data(contentsOf: storageURL)
-      let decoded = try decoder.decode([HistoryItem].self, from: data)
-      let sorted = decoded.sorted { $0.createdAt > $1.createdAt }
-      let stats = calculateStatistics(for: sorted)
+      
+      // Load and decode in background to avoid blocking UI
+      let url = storageURL
+      let (sorted, stats) = try await Task.detached(priority: .userInitiated) { [decoder] in
+        let data = try Data(contentsOf: url)
+        let decoded = try decoder.decode([HistoryItem].self, from: data)
+        let sorted = decoded.sorted { $0.createdAt > $1.createdAt }
+        let stats = Self.calculateStatistics(for: sorted)
+        return (sorted, stats)
+      }.value
 
       await MainActor.run {
         self.allItemsOnDisk = sorted
@@ -375,7 +386,7 @@ final class HistoryManager: ObservableObject {
     current.insert(item, at: 0)
     items = current
 
-    let stats = calculateStatistics(for: allItemsOnDisk)
+    let stats = Self.calculateStatistics(for: allItemsOnDisk)
     cachedStatistics = stats
     statistics = stats
 
@@ -395,7 +406,7 @@ final class HistoryManager: ObservableObject {
       items = updated.sorted { $0.createdAt > $1.createdAt }
     }
 
-    let stats = calculateStatistics(for: allItemsOnDisk)
+    let stats = Self.calculateStatistics(for: allItemsOnDisk)
     cachedStatistics = stats
     statistics = stats
 
@@ -409,7 +420,7 @@ final class HistoryManager: ObservableObject {
 
     items.removeAll { $0.id == id }
 
-    let stats = calculateStatistics(for: allItemsOnDisk)
+    let stats = Self.calculateStatistics(for: allItemsOnDisk)
     cachedStatistics = stats
     statistics = stats
 
@@ -422,7 +433,7 @@ final class HistoryManager: ObservableObject {
   func removeAll() async {
     allItemsOnDisk = []
     items = []
-    let stats = calculateStatistics(for: [])
+    let stats = Self.calculateStatistics(for: [])
     cachedStatistics = stats
     statistics = stats
 
@@ -476,7 +487,7 @@ final class HistoryManager: ObservableObject {
     }
   }
 
-  private func calculateStatistics(for items: [HistoryItem]) -> HistoryStatistics {
+  private nonisolated static func calculateStatistics(for items: [HistoryItem]) -> HistoryStatistics {
     guard !items.isEmpty else {
       return .init(
         totalSessions: 0, cumulativeRecordingDuration: 0, totalSpend: 0, averageSessionLength: 0,
@@ -514,7 +525,7 @@ final class HistoryManager: ObservableObject {
 
   private func updateStatisticsForAppend(_ item: HistoryItem) {
     guard let cached = cachedStatistics else {
-      cachedStatistics = calculateStatistics(for: allItemsOnDisk)
+      cachedStatistics = Self.calculateStatistics(for: allItemsOnDisk)
       statistics = cachedStatistics!
       return
     }
@@ -538,7 +549,7 @@ final class HistoryManager: ObservableObject {
 
   private func updateStatisticsForRemove(_ item: HistoryItem) {
     guard let cached = cachedStatistics else {
-      cachedStatistics = calculateStatistics(for: allItemsOnDisk)
+      cachedStatistics = Self.calculateStatistics(for: allItemsOnDisk)
       statistics = cachedStatistics!
       return
     }
@@ -562,7 +573,7 @@ final class HistoryManager: ObservableObject {
 
   private func updateStatisticsForUpdate(oldItem: HistoryItem, newItem: HistoryItem) {
     guard let cached = cachedStatistics else {
-      cachedStatistics = calculateStatistics(for: allItemsOnDisk)
+      cachedStatistics = Self.calculateStatistics(for: allItemsOnDisk)
       statistics = cachedStatistics!
       return
     }

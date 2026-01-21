@@ -222,6 +222,7 @@ struct PronunciationDictionaryView: View {
             }
         }
         .listStyle(.inset)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - Empty State

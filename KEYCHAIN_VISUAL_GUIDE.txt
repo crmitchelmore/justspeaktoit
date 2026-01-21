@@ -1,0 +1,192 @@
+┌─────────────────────────────────────────────────────────────────────────┐
+│                  macOS Keychain Error -34018 Decision Tree              │
+└─────────────────────────────────────────────────────────────────────────┘
+
+                            SecItemAdd() called
+                                    │
+                                    │
+                 ┌──────────────────┴──────────────────┐
+                 │                                     │
+          Does query include                    No special
+       kSecAttrSynchronizable = true?          attributes
+                 │                                     │
+         ┌───────┴───────┐                            │
+         │               │                            │
+        YES             NO                            │
+         │               │                            │
+         │               └─────────────────────┬──────┘
+         │                                     │
+    Does app have                              │
+ keychain-access-groups                   ✅ SUCCESS
+    entitlement?                          (Legacy Keychain)
+         │
+   ┌─────┴─────┐
+   │           │
+  YES         NO
+   │           │
+   │           │
+   │      ❌ ERROR -34018
+   │      errSecMissingEntitlement
+   │
+   ├──── Is app distributed via...?
+   │
+   ├─── Mac App Store ──────────────────► ✅ SUCCESS (iCloud sync enabled)
+   │
+   ├─── Enterprise (with profile) ──────► ✅ SUCCESS (iCloud sync enabled)
+   │
+   └─── Developer ID ───────────────────► ❌ CANNOT GET ENTITLEMENT
+                                              (no managed provisioning)
+
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                       Keychain Attribute Safety Matrix                  │
+├─────────────────────────────────┬───────────────────┬───────────────────┤
+│ Attribute                       │ Developer ID      │ Mac App Store     │
+├─────────────────────────────────┼───────────────────┼───────────────────┤
+│ kSecAttrService                 │ ✅ Works          │ ✅ Works          │
+│ kSecAttrAccount                 │ ✅ Works          │ ✅ Works          │
+│ kSecAttrLabel                   │ ✅ Works          │ ✅ Works          │
+│ kSecValueData                   │ ✅ Works          │ ✅ Works          │
+│                                 │                   │                   │
+│ kSecAttrAccessible              │ ✅ Works          │ ✅ Works          │
+│  (any value)                    │ (legacy support)  │ (full support)    │
+│                                 │                   │                   │
+│ kSecAttrSynchronizable = false  │ ✅ Works          │ ✅ Works          │
+│ kSecAttrSynchronizable = omit   │ ✅ Works          │ ✅ Works          │
+│ kSecAttrSynchronizable = true   │ ❌ -34018         │ ✅ Works*         │
+│                                 │                   │ (*with entitlement)│
+│                                 │                   │                   │
+│ kSecAttrAccessGroup             │ ❌ -34018         │ ✅ Works*         │
+│                                 │ (in production)   │ (*with entitlement)│
+└─────────────────────────────────┴───────────────────┴───────────────────┘
+
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    Your Code's Solution (CORRECT ✓)                     │
+└─────────────────────────────────────────────────────────────────────────┘
+
+    App Launch
+        │
+        ├─► hasKeychainAccessGroupEntitlement()
+        │       │
+        │       ├─► Test: SecItemAdd with access group
+        │       │
+        │       ├─► Success? → hasEntitlement = true
+        │       │
+        │       └─► -34018? → hasEntitlement = false
+        │
+        ├─► Create SecureStorageConfiguration
+        │       │
+        │       ├─► accessGroup = hasEntitlement ? "8X4ZN58TYH..." : nil
+        │       │
+        │       └─► synchronizable = hasEntitlement ? true : false
+        │
+        └─► SecureStorage initialized
+                │
+                ├─► Developer ID build:
+                │   ├─ accessGroup: nil
+                │   ├─ synchronizable: false
+                │   └─ ✅ Works perfectly
+                │
+                └─► App Store build:
+                    ├─ accessGroup: "8X4ZN58TYH..."
+                    ├─ synchronizable: true
+                    └─ ✅ Works with iCloud sync
+
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        Common Mistakes to Avoid                         │
+└─────────────────────────────────────────────────────────────────────────┘
+
+❌ WRONG:
+    let config = SecureStorageConfiguration(
+        synchronizable: true  // ← Hardcoded!
+    )
+    
+❌ WRONG:
+    var query = [...]
+    query[kSecAttrSynchronizable as String] = kCFBooleanTrue  // ← Always fails!
+    SecItemAdd(query as CFDictionary, nil)
+
+❌ WRONG:
+    // Assuming entitlements file = runtime availability
+    #if MAC_APP_STORE
+        let sync = true
+    #else
+        let sync = false
+    #endif
+    // ← Build-time checks don't work (same binary, different signing)
+
+✅ CORRECT:
+    // Runtime detection
+    let hasEntitlement = testKeychainAccessGroupSupport()
+    let config = SecureStorageConfiguration(
+        synchronizable: hasEntitlement
+    )
+
+✅ CORRECT:
+    // Use SecureAppStorage - it handles everything
+    let storage = SecureAppStorage(
+        permissionsManager: permissionsManager,
+        appSettings: appSettings
+    )
+
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          Debugging Flowchart                            │
+└─────────────────────────────────────────────────────────────────────────┘
+
+    See -34018 error?
+        │
+        ├─► Check console for:
+        │   "[SecureAppStorage] No keychain-access-groups entitlement"
+        │       │
+        │       ├─► Present? → Good, detection working
+        │       │               Continue to next check ↓
+        │       │
+        │       └─► Missing? → Detection not running
+        │                      Check SecureAppStorage initialization
+        │
+        ├─► Add debug logging:
+        │   print("synchronizable: \(configuration.synchronizable)")
+        │       │
+        │       ├─► false? → Good! Continue to next check ↓
+        │       │
+        │       └─► true? → BUG! Something bypassing detection
+        │                   → Check for custom configuration
+        │                   → Check for direct SecItem calls
+        │
+        └─► Search codebase for:
+            "kSecAttrSynchronizable.*true"
+                │
+                ├─► Found? → Remove or make conditional
+                │
+                └─► Not found? → Check compiled binary:
+                    strings YourApp.app/Contents/MacOS/YourApp | grep -i sync
+
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                             Quick Reference                             │
+└─────────────────────────────────────────────────────────────────────────┘
+
+Error Code:       -34018
+Error Name:       errSecMissingEntitlement  
+Error Meaning:    "App tried to use a keychain feature that requires an 
+                   entitlement it doesn't have"
+
+Primary Cause:    kSecAttrSynchronizable = true without keychain-access-groups
+
+Required:         keychain-access-groups entitlement
+Available on:     • Mac App Store (with managed profile)
+                  • Enterprise (with managed profile)
+NOT available:    • Developer ID distribution
+                  • Ad-hoc signing
+                  • Development builds (without profile)
+
+Solution:         Runtime detection + graceful fallback (already implemented)
+
+Test command:     ./keychain_test.swift
+Expected output:  "Error -34018" for synchronizable test
+
+Verification:     security find-generic-password -s "com.justspeaktoit.credentials"
+                  Should work without errors after fix

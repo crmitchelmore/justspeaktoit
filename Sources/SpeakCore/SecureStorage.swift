@@ -318,6 +318,11 @@ public actor SecureStorage {
         let payload = serialize(cache: cache)
 
         let query = baseQuery()
+        
+        // DEBUG: Log the query to verify no synchronizable
+        print("[SecureStorage] writeCacheToKeychain - baseQuery keys: \(query.keys)")
+        print("[SecureStorage] configuration.synchronizable: \(configuration.synchronizable)")
+        print("[SecureStorage] configuration.accessGroup: \(configuration.accessGroup ?? "nil")")
 
         if payload.isEmpty {
             SecItemDelete(query as CFDictionary)
@@ -330,33 +335,40 @@ public actor SecureStorage {
             kSecAttrLabel as String: configuration.masterAccount,
         ]
         
-        // Only set accessibility when using access groups (which implies data protection keychain)
-        // For non-entitled apps, omit this to use the default legacy keychain
-        if configuration.accessGroup != nil {
+        // IMPORTANT: Only set these attributes when we have the entitlement
+        // kSecAttrSynchronizable requires keychain-access-groups entitlement
+        // kSecAttrAccessible with certain values may also require it on some configs
+        if configuration.accessGroup != nil && configuration.synchronizable {
             attributesToUpdate[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        }
-        
-        if configuration.synchronizable {
             attributesToUpdate[kSecAttrSynchronizable as String] = kCFBooleanTrue
         }
+        
+        print("[SecureStorage] attributesToUpdate keys: \(attributesToUpdate.keys)")
 
         let status = SecItemUpdate(query as CFDictionary, attributesToUpdate as CFDictionary)
+        print("[SecureStorage] SecItemUpdate status: \(status)")
+        
         if status == errSecItemNotFound {
             var addQuery = query
             addQuery[kSecValueData as String] = data
             addQuery[kSecAttrLabel as String] = configuration.masterAccount
-            // Only set accessibility for apps with keychain entitlements
-            if configuration.accessGroup != nil {
+            
+            // Only set these for entitled apps
+            if configuration.accessGroup != nil && configuration.synchronizable {
                 addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-            }
-            if configuration.synchronizable {
                 addQuery[kSecAttrSynchronizable as String] = kCFBooleanTrue
             }
+            
+            print("[SecureStorage] SecItemAdd query keys: \(addQuery.keys)")
             let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+            print("[SecureStorage] SecItemAdd status: \(addStatus)")
+            
             guard addStatus == errSecSuccess else {
+                print("[SecureStorage] ERROR: SecItemAdd failed with \(addStatus)")
                 throw SecureStorageError.unexpectedStatus(addStatus)
             }
         } else if status != errSecSuccess {
+            print("[SecureStorage] ERROR: SecItemUpdate failed with \(status)")
             throw SecureStorageError.unexpectedStatus(status)
         }
     }

@@ -68,18 +68,29 @@ actor SecureAppStorage {
         self.permissionsManager = permissionsManager
         self.appSettings = appSettings
         
-        // Check if we have the keychain-access-groups entitlement
-        // Developer ID builds may not have it (stripped for CI)
-        let hasAccessGroupEntitlement = Self.hasKeychainAccessGroupEntitlement()
+        // Check if we can use iCloud Keychain sync (kSecAttrSynchronizable)
+        // Developer ID builds cannot use this - it requires keychain-access-groups entitlement
+        let canUseSync = Self.hasKeychainSyncEntitlement()
         
+        // IMPORTANT: For Developer ID (non-App Store) builds, we MUST NOT use:
+        // - kSecAttrSynchronizable (requires keychain-access-groups entitlement) - causes -34018
+        // - kSecAttrAccessGroup (requires keychain-access-groups entitlement in some cases)
         let configuration = SecureStorageConfiguration(
             service: "com.justspeaktoit.credentials",
             masterAccount: "speak-app-secrets",
-            // Only use access group if we have the entitlement
-            accessGroup: hasAccessGroupEntitlement ? "8X4ZN58TYH.com.justspeaktoit.shared" : nil,
-            // Only enable sync if we have access group
-            synchronizable: hasAccessGroupEntitlement
+            // Don't use access group for Developer ID - not needed and may cause issues
+            accessGroup: nil,
+            // Only enable sync if we verified the entitlement exists
+            synchronizable: canUseSync
         )
+        
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print("[SecureAppStorage] Keychain Configuration:")
+        print("  canUseSync: \(canUseSync)")
+        print("  accessGroup: \(configuration.accessGroup ?? "nil")")
+        print("  synchronizable: \(configuration.synchronizable)")
+        print("  service: \(configuration.service)")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         
         self.storage = SecureStorage(
             configuration: configuration,
@@ -88,18 +99,18 @@ actor SecureAppStorage {
         )
     }
     
-    /// Check if the app has keychain-access-groups entitlement by attempting a write
-    private static func hasKeychainAccessGroupEntitlement() -> Bool {
+    /// Check if the app can use iCloud keychain sync by testing kSecAttrSynchronizable.
+    /// Developer ID (non-App Store) builds cannot use synchronizable items.
+    private static func hasKeychainSyncEntitlement() -> Bool {
         let testService = "com.justspeaktoit.entitlement-check"
-        let testAccount = "entitlement-test-\(UUID().uuidString)"
-        let accessGroup = "8X4ZN58TYH.com.justspeaktoit.shared"
+        let testAccount = "sync-test-\(UUID().uuidString)"
         
-        // Try to add a test item with access group
+        // Test with kSecAttrSynchronizable - THIS is what requires the entitlement
         let addQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: testService,
             kSecAttrAccount as String: testAccount,
-            kSecAttrAccessGroup as String: accessGroup,
+            kSecAttrSynchronizable as String: kCFBooleanTrue!,
             kSecValueData as String: "test".data(using: .utf8)!
         ]
         
@@ -111,16 +122,15 @@ actor SecureAppStorage {
                 kSecClass as String: kSecClassGenericPassword,
                 kSecAttrService as String: testService,
                 kSecAttrAccount as String: testAccount,
-                kSecAttrAccessGroup as String: accessGroup
+                kSecAttrSynchronizable as String: kCFBooleanTrue!
             ]
             SecItemDelete(deleteQuery as CFDictionary)
-            print("[SecureAppStorage] Keychain access group entitlement available")
+            print("[SecureAppStorage] iCloud Keychain sync entitlement available")
             return true
         }
         
-        // errSecMissingEntitlement (-34018) means we don't have the entitlement
-        // Also treat other errors as "no entitlement" to be safe
-        print("[SecureAppStorage] No keychain-access-groups entitlement (status: \(addStatus)), using app-local keychain")
+        // errSecMissingEntitlement (-34018) means we can't use synchronizable
+        print("[SecureAppStorage] No iCloud Keychain sync entitlement (status: \(addStatus)), disabling sync")
         return false
     }
 

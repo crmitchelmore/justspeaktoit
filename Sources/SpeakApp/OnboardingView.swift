@@ -1,12 +1,57 @@
 import AppKit
 import SwiftUI
 
+// MARK: - Provider Info for Onboarding
+
+enum OnboardingProvider: String, CaseIterable, Identifiable {
+    case deepgram
+    case openai
+    case revai
+    
+    var id: String { rawValue }
+    
+    var displayName: String {
+        switch self {
+        case .deepgram: return "Deepgram"
+        case .openai: return "OpenAI Whisper"
+        case .revai: return "Rev.ai"
+        }
+    }
+    
+    var signupURL: URL {
+        switch self {
+        case .deepgram: return URL(string: "https://console.deepgram.com/signup")!
+        case .openai: return URL(string: "https://platform.openai.com/signup")!
+        case .revai: return URL(string: "https://www.rev.ai/auth/signup")!
+        }
+    }
+    
+    var apiKeyInstructions: String {
+        switch self {
+        case .deepgram: return "Go to Settings → API Keys → Create Key"
+        case .openai: return "Go to API Keys → Create new secret key"
+        case .revai: return "Go to Access Token → Generate Token"
+        }
+    }
+    
+    var freeCredits: String? {
+        switch self {
+        case .deepgram: return "Free tier includes $200 credit"
+        case .openai: return nil
+        case .revai: return "Free tier includes 5 hours"
+        }
+    }
+    
+    var keychainIdentifier: String { rawValue }
+}
+
 // MARK: - Onboarding State
 
 @MainActor
 final class OnboardingState: ObservableObject {
     @Published var currentStep: OnboardingStep = .welcome
-    @Published var deepgramKey = ""
+    @Published var selectedProvider: OnboardingProvider = .deepgram
+    @Published var apiKey = ""
     @Published var isValidating = false
     @Published var validationError: String?
     @Published var permissionsGranted: Set<PermissionType> = []
@@ -34,8 +79,8 @@ final class OnboardingState: ObservableObject {
         permissionsGranted.contains(.accessibility)
     }
     
-    func validateDeepgramKey() async -> Bool {
-        guard !deepgramKey.isEmpty else {
+    func validateAPIKey() async -> Bool {
+        guard !apiKey.isEmpty else {
             validationError = "Please enter an API key"
             return false
         }
@@ -43,37 +88,66 @@ final class OnboardingState: ObservableObject {
         isValidating = true
         validationError = nil
         
-        // Simple validation - try to connect to Deepgram
-        let url = URL(string: "https://api.deepgram.com/v1/projects")!
-        var request = URLRequest(url: url)
-        request.setValue("Token \(deepgramKey)", forHTTPHeaderField: "Authorization")
-        
         do {
-            let (_, response) = try await URLSession.shared.data(for: request)
-            if let httpResponse = response as? HTTPURLResponse {
-                isValidating = false
-                if httpResponse.statusCode == 200 {
-                    return true
-                } else if httpResponse.statusCode == 401 {
-                    validationError = "Invalid API key"
-                    return false
-                } else {
-                    validationError = "Unexpected response (\(httpResponse.statusCode))"
-                    return false
+            switch selectedProvider {
+            case .deepgram:
+                let url = URL(string: "https://api.deepgram.com/v1/projects")!
+                var request = URLRequest(url: url)
+                request.setValue("Token \(apiKey)", forHTTPHeaderField: "Authorization")
+                let (_, response) = try await URLSession.shared.data(for: request)
+                if let httpResponse = response as? HTTPURLResponse {
+                    if httpResponse.statusCode == 200 {
+                        isValidating = false
+                        return true
+                    } else if httpResponse.statusCode == 401 {
+                        validationError = "Invalid API key"
+                    } else {
+                        validationError = "Unexpected response (\(httpResponse.statusCode))"
+                    }
+                }
+                
+            case .openai:
+                let url = URL(string: "https://api.openai.com/v1/models")!
+                var request = URLRequest(url: url)
+                request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+                let (_, response) = try await URLSession.shared.data(for: request)
+                if let httpResponse = response as? HTTPURLResponse {
+                    if httpResponse.statusCode == 200 {
+                        isValidating = false
+                        return true
+                    } else if httpResponse.statusCode == 401 {
+                        validationError = "Invalid API key"
+                    } else {
+                        validationError = "Unexpected response (\(httpResponse.statusCode))"
+                    }
+                }
+                
+            case .revai:
+                let url = URL(string: "https://api.rev.ai/speechtotext/v1/account")!
+                var request = URLRequest(url: url)
+                request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+                let (_, response) = try await URLSession.shared.data(for: request)
+                if let httpResponse = response as? HTTPURLResponse {
+                    if httpResponse.statusCode == 200 {
+                        isValidating = false
+                        return true
+                    } else if httpResponse.statusCode == 401 {
+                        validationError = "Invalid API key"
+                    } else {
+                        validationError = "Unexpected response (\(httpResponse.statusCode))"
+                    }
                 }
             }
         } catch {
-            isValidating = false
             validationError = "Network error: \(error.localizedDescription)"
-            return false
         }
         
         isValidating = false
         return false
     }
     
-    func saveDeepgramKey() async throws {
-        try await secureStorage.storeSecret(deepgramKey, identifier: "deepgram")
+    func saveAPIKey() async throws {
+        try await secureStorage.storeSecret(apiKey, identifier: selectedProvider.keychainIdentifier)
     }
 }
 
@@ -152,6 +226,16 @@ struct OnboardingView: View {
                 
                 Spacer()
                 
+                if state.currentStep == .apiKey {
+                    Button("Skip for Now") {
+                        withAnimation {
+                            state.currentStep = .complete
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(.secondary)
+                }
+                
                 if state.currentStep == .complete {
                     Button("Get Started") {
                         isComplete = true
@@ -159,7 +243,7 @@ struct OnboardingView: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
                 } else {
-                    Button(state.currentStep == .apiKey ? "Continue" : "Next") {
+                    Button(state.currentStep == .apiKey ? "Save & Continue" : "Next") {
                         Task {
                             await advanceStep()
                         }
@@ -172,7 +256,7 @@ struct OnboardingView: View {
             .padding(.horizontal, 40)
             .padding(.bottom, 30)
         }
-        .frame(width: 600, height: 500)
+        .frame(width: 600, height: 550)
     }
     
     private var canAdvance: Bool {
@@ -182,7 +266,7 @@ struct OnboardingView: View {
         case .permissions:
             return state.permissionsGranted.contains(.microphone)
         case .apiKey:
-            return !state.deepgramKey.isEmpty && !state.isValidating
+            return !state.apiKey.isEmpty && !state.isValidating
         case .complete:
             return true
         }
@@ -192,10 +276,10 @@ struct OnboardingView: View {
         switch state.currentStep {
         case .apiKey:
             // Validate and save API key
-            let valid = await state.validateDeepgramKey()
+            let valid = await state.validateAPIKey()
             if valid {
                 do {
-                    try await state.saveDeepgramKey()
+                    try await state.saveAPIKey()
                     withAnimation {
                         state.currentStep = .complete
                     }
@@ -486,95 +570,101 @@ struct APIKeyStepView: View {
     @ObservedObject var state: OnboardingState
     
     var body: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "key.fill")
-                .font(.system(size: 60))
-                .foregroundColor(.accentColor)
-            
-            Text("Set Up Transcription")
-                .font(.title)
-                .fontWeight(.bold)
-            
-            Text("We recommend **Deepgram** for fast, accurate transcription")
-                .multilineTextAlignment(.center)
-            
-            VStack(alignment: .leading, spacing: 16) {
+        ScrollView {
+            VStack(spacing: 20) {
+                Image(systemName: "key.fill")
+                    .font(.system(size: 50))
+                    .foregroundColor(.accentColor)
+                
+                Text("Set Up Transcription")
+                    .font(.title)
+                    .fontWeight(.bold)
+                
+                // Provider selector
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("1. Create a free Deepgram account")
-                        .font(.headline)
+                    Text("Choose your transcription provider:")
+                        .font(.subheadline)
                     
-                    Link(destination: URL(string: "https://console.deepgram.com/signup")!) {
-                        HStack {
-                            Text("Sign up at deepgram.com")
-                            Image(systemName: "arrow.up.right.square")
+                    Picker("Provider", selection: $state.selectedProvider) {
+                        ForEach(OnboardingProvider.allCases) { provider in
+                            Text(provider.displayName).tag(provider)
                         }
                     }
-                    .font(.subheadline)
-                    
-                    Text("Free tier includes $200 credit")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    .pickerStyle(.segmented)
+                    .onChange(of: state.selectedProvider) { _, _ in
+                        state.apiKey = ""
+                        state.validationError = nil
+                    }
                 }
+                .padding(.horizontal, 40)
                 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("2. Create an API key")
-                        .font(.headline)
-                    
-                    Text("Go to Settings → API Keys → Create Key")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("3. Paste your API key below")
-                        .font(.headline)
-                    
-                    SecureField("Deepgram API Key", text: $state.deepgramKey)
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit {
-                            Task {
-                                _ = await state.validateDeepgramKey()
+                VStack(alignment: .leading, spacing: 14) {
+                    // Step 1: Sign up
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("1. Create a free account")
+                            .font(.headline)
+                        
+                        Link(destination: state.selectedProvider.signupURL) {
+                            HStack {
+                                Text("Sign up for \(state.selectedProvider.displayName)")
+                                Image(systemName: "arrow.up.right.square")
                             }
                         }
-                    
-                    if state.isValidating {
-                        HStack {
-                            ProgressView()
-                                .scaleEffect(0.7)
-                            Text("Validating...")
+                        .font(.subheadline)
+                        
+                        if let credits = state.selectedProvider.freeCredits {
+                            Text(credits)
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
-                    } else if let error = state.validationError {
-                        Text(error)
-                            .font(.caption)
-                            .foregroundColor(.red)
+                    }
+                    
+                    // Step 2: Create key
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("2. Create an API key")
+                            .font(.headline)
+                        
+                        Text(state.selectedProvider.apiKeyInstructions)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    // Step 3: Paste key
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("3. Paste your API key below")
+                            .font(.headline)
+                        
+                        SecureField("\(state.selectedProvider.displayName) API Key", text: $state.apiKey)
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit {
+                                Task {
+                                    _ = await state.validateAPIKey()
+                                }
+                            }
+                        
+                        if state.isValidating {
+                            HStack {
+                                ProgressView()
+                                    .scaleEffect(0.7)
+                                Text("Validating...")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        } else if let error = state.validationError {
+                            Text(error)
+                                .font(.caption)
+                                .foregroundColor(.red)
+                        }
                     }
                 }
-            }
-            .padding(.horizontal, 40)
-            .padding(.top, 10)
-            
-            Divider()
                 .padding(.horizontal, 40)
-            
-            VStack(spacing: 8) {
-                Text("Other providers available")
+                
+                Text("You can add more providers or change settings later")
                     .font(.caption)
                     .foregroundColor(.secondary)
-                
-                HStack(spacing: 16) {
-                    Text("OpenAI Whisper")
-                    Text("•")
-                    Text("Rev.ai")
-                }
-                .font(.caption)
-                .foregroundColor(.secondary)
-                
-                Text("Configure in Settings after setup")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                    .padding(.top, 8)
             }
+            .padding(.vertical, 10)
         }
     }
 }

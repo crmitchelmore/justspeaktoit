@@ -634,7 +634,7 @@ final class MainManager: ObservableObject {
 
     let baseText = retryData.transcriptionResult.text
     var finalText = baseText
-    if let corrections = retryData.personalCorrections {
+    if retryData.personalCorrections != nil {
       finalText = personalLexicon.apply(to: baseText, context: retryData.lexiconContext).transformedText
     }
 

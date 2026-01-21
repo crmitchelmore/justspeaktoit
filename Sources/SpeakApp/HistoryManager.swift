@@ -99,6 +99,9 @@ final class HistoryManager: ObservableObject {
 
   /// Flag to track if we're currently flushing
   private var isFlushing = false
+  
+  /// Observer for app termination notification
+  private var terminationObserver: NSObjectProtocol?
 
   init(fileManager: FileManager = .default, flushInterval: TimeInterval = defaultFlushInterval, batchSizeThreshold: Int = defaultBatchSizeThreshold, pageSize: Int = 50) {
     self.pageSize = pageSize
@@ -131,12 +134,15 @@ final class HistoryManager: ObservableObject {
 
   deinit {
     flushTimer?.invalidate()
+    if let observer = terminationObserver {
+      NotificationCenter.default.removeObserver(observer)
+    }
   }
 
   // MARK: - Termination Handling
 
   private func registerForTerminationNotification() {
-    NotificationCenter.default.addObserver(
+    terminationObserver = NotificationCenter.default.addObserver(
       forName: NSApplication.willTerminateNotification,
       object: nil,
       queue: .main

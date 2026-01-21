@@ -62,6 +62,12 @@ jobs:
         run: |
           tuist generate --no-open
 
+      - name: Strip Managed Entitlements for Developer ID
+        run: |
+          # Remove Associated Domains (requires App Store provisioning profile)
+          # Keep it for App Store builds, but Developer ID doesn't need it
+          /usr/libexec/PlistBuddy -c "Delete :com.apple.developer.associated-domains" Config/SpeakMacOS.entitlements 2>/dev/null || true
+
       - name: Determine Version
         id: version
         run: |

@@ -5,29 +5,41 @@ import SwiftUI
 struct SpeakApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var environmentHolder = EnvironmentHolder()
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
 
     var body: some Scene {
         WindowGroup("Just Speak to It") {
             Group {
                 if let environment = environmentHolder.environment {
-                    MainView()
-                        .environmentObject(environment)
-                        .environmentObject(environment.settings)
-                        .environmentObject(environment.history)
-                        .environmentObject(environment.personalLexicon)
-                        .environmentObject(environment.audioDevices)
-                        .environmentObject(environment.tts)
-                        .environmentObject(environment.shortcuts)
+                    if hasCompletedOnboarding {
+                        MainView()
+                            .environmentObject(environment)
+                            .environmentObject(environment.settings)
+                            .environmentObject(environment.history)
+                            .environmentObject(environment.personalLexicon)
+                            .environmentObject(environment.audioDevices)
+                            .environmentObject(environment.tts)
+                            .environmentObject(environment.shortcuts)
+                            .onAppear {
+                                appDelegate.environment = environment
+                                environment.configureShortcutHandlers()
+                                environment.installMenuBar()
+                                environment.installDockMenu()
+                                environment.installServices()
+                                if #available(macOS 10.12.2, *) {
+                                    environment.installTouchBar()
+                                }
+                            }
+                    } else {
+                        OnboardingView(
+                            permissionsManager: environment.permissionsManager,
+                            secureStorage: environment.secureStorage,
+                            isComplete: $hasCompletedOnboarding
+                        )
                         .onAppear {
                             appDelegate.environment = environment
-                            environment.configureShortcutHandlers()
-                            environment.installMenuBar()
-                            environment.installDockMenu()
-                            environment.installServices()
-                            if #available(macOS 10.12.2, *) {
-                                environment.installTouchBar()
-                            }
                         }
+                    }
                 } else {
                     ProgressView("Loading...")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)

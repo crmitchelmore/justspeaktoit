@@ -127,6 +127,29 @@ The iOS app uses Apple Speech for on-device live transcription:
 
 Open `"Just Speak to It.xcworkspace"` in Xcode to build and run on device/simulator.
 
+## Troubleshooting
+
+### Permissions Not Appearing in System Settings
+
+If the app shows permissions as "denied" but doesn't appear in System Settings → Privacy & Security, you may need to reset the TCC (Transparency, Consent, and Control) database:
+
+```bash
+# Reset accessibility permission for the app
+tccutil reset Accessibility com.justspeaktoit.mac
+
+# Reset microphone permission
+tccutil reset Microphone com.justspeaktoit.mac
+
+# Reset input monitoring
+tccutil reset ListenEvent com.justspeaktoit.mac
+```
+
+After running these commands, restart the app - it will prompt for permissions again.
+
+### Keychain Errors
+
+If you see "A required entitlement isn't present" when saving API keys, this may occur with Developer ID builds from GitHub Releases. The app will automatically fall back to app-local keychain storage (without iCloud sync). This is expected behavior for non-App-Store builds.
+
 ## Contributing
 
 We welcome contributions! Please see [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines.

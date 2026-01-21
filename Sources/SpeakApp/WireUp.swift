@@ -77,6 +77,9 @@ final class AppEnvironment: ObservableObject {
     self.hudPresenter = hudPresenter
   }
 
+  /// Alias for permissions manager (for API consistency)
+  var permissionsManager: PermissionsManager { permissions }
+
   func installStatusBarIfNeeded(openMainWindow: @escaping () -> Void) {
     guard statusBarController == nil else { return }
     statusBarController = StatusBarController(

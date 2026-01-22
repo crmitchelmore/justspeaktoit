@@ -34,6 +34,7 @@ struct SpeakApp: App {
                         OnboardingView(
                             permissionsManager: environment.permissionsManager,
                             secureStorage: environment.secureStorage,
+                            settings: environment.settings,
                             isComplete: $hasCompletedOnboarding
                         )
                         .onAppear {

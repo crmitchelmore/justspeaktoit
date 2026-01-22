@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>Just Speak to It Updates</title>
+    <link>https://justspeaktoit.com/appcast.xml</link>
+    <description>Most recent updates to Just Speak to It</description>
+    <language>en</language>
+    <!-- This file is automatically updated by the release workflow -->
+    <!-- Items will be added here when new versions are released -->
+  </channel>
+</rss>

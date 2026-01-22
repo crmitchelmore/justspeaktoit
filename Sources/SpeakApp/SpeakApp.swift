@@ -1,4 +1,5 @@
 import AppKit
+import Sparkle
 import SwiftUI
 
 @main
@@ -85,9 +86,12 @@ final class EnvironmentHolder: ObservableObject {
 /// Custom menu commands for Speak.
 struct SpeakCommands: Commands {
     let environment: AppEnvironment
+    @ObservedObject private var updaterManager = UpdaterManager.shared
 
     var body: some Commands {
         CommandGroup(after: .appInfo) {
+            CheckForUpdatesView(updater: updaterManager.updater)
+            Divider()
             Button("Start/Stop Recording") {
                 environment.main.toggleRecordingFromUI()
             }
@@ -101,6 +105,40 @@ struct SpeakCommands: Commands {
                 }
             }
         }
+    }
+}
+
+/// SwiftUI view that wraps Sparkle's check for updates action
+struct CheckForUpdatesView: View {
+    @ObservedObject private var checkForUpdatesViewModel: CheckForUpdatesViewModel
+    
+    init(updater: SPUUpdater) {
+        self.checkForUpdatesViewModel = CheckForUpdatesViewModel(updater: updater)
+    }
+    
+    var body: some View {
+        Button("Check for Updates…") {
+            checkForUpdatesViewModel.checkForUpdates()
+        }
+        .disabled(!checkForUpdatesViewModel.canCheckForUpdates)
+    }
+}
+
+/// View model that observes Sparkle's canCheckForUpdates state
+@MainActor
+final class CheckForUpdatesViewModel: ObservableObject {
+    @Published var canCheckForUpdates = false
+    
+    private let updater: SPUUpdater
+    
+    init(updater: SPUUpdater) {
+        self.updater = updater
+        updater.publisher(for: \.canCheckForUpdates)
+            .assign(to: &$canCheckForUpdates)
+    }
+    
+    func checkForUpdates() {
+        updater.checkForUpdates()
     }
 }
 

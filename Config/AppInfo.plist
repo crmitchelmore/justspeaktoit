@@ -51,7 +51,7 @@
 	<key>SUFeedURL</key>
 	<string>https://justspeaktoit.com/appcast.xml</string>
 	<key>SUPublicEDKey</key>
-	<string>SPARKLE_PUBLIC_KEY_PLACEHOLDER</string>
+	<string>amLMkCNmSNgwrbpuN+cW6RFxKApcZL/ylhCS5JZLXRE=</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>SUScheduledCheckInterval</key>

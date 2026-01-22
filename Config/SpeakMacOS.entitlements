@@ -5,13 +5,14 @@
   
   APP STORE MIGRATION: To re-enable sandboxing for Mac App Store, uncomment:
   - com.apple.security.app-sandbox
-  - com.apple.security.device.audio-input
   - com.apple.security.files.user-selected.read-write
   - com.apple.security.network.client
   - com.apple.security.temporary-exception.apple-events
   - keychain-access-groups
   - com.apple.developer.associated-domains
   - com.apple.developer.ubiquity-kvstore-identifier
+  
+  Note: com.apple.security.device.audio-input is ALWAYS required (hardened runtime + sandbox).
   
   Note: Sandboxed apps require users to manually add them to Accessibility
   in System Settings. Non-sandboxed apps appear automatically when calling
@@ -28,9 +29,7 @@
 	<true/>
 	-->
 	
-	<!-- Sandbox capabilities - only needed when sandboxed
-	<key>com.apple.security.device.audio-input</key>
-	<true/>
+	<!-- Sandbox capabilities - only these additional ones needed when sandboxed
 	<key>com.apple.security.files.user-selected.read-write</key>
 	<true/>
 	<key>com.apple.security.network.client</key>
@@ -64,6 +63,10 @@
 	<!-- ============================================================
 	     ACTIVE ENTITLEMENTS - Used for Developer ID distribution
 	     ============================================================ -->
+	
+	<!-- Microphone access - REQUIRED for hardened runtime to prompt for permission -->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
 	
 	<!-- AppleScript/Automation - send events to other apps -->
 	<key>com.apple.security.automation.apple-events</key>

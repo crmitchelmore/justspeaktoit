@@ -23,13 +23,10 @@ PRIVATE_KEY_FILE=$(mktemp)
 # Ensure private key is cleaned up on exit (success or failure)
 trap 'rm -f "$PRIVATE_KEY_FILE"' EXIT
 
-# Try to decode as base64; if it fails, assume it's already plain text
-if echo "$PRIVATE_KEY_BASE64" | base64 --decode > "$PRIVATE_KEY_FILE" 2>/dev/null; then
-    echo "Private key decoded from base64" >&2
-else
-    echo "Private key appears to be plain text" >&2
-    echo "$PRIVATE_KEY_BASE64" > "$PRIVATE_KEY_FILE"
-fi
+# The Sparkle private key is a base64-encoded string (44 chars)
+# sign_update expects the raw string, NOT base64-decoded bytes
+echo "$PRIVATE_KEY_BASE64" > "$PRIVATE_KEY_FILE"
+echo "Private key written (raw, not decoded)" >&2
 
 # Find Sparkle's sign_update tool
 SIGN_UPDATE=""

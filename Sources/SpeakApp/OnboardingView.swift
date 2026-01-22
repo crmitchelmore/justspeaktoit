@@ -47,7 +47,7 @@ enum OnboardingProvider: String, CaseIterable, Identifiable {
         }
     }
     
-    var keychainIdentifier: String { rawValue }
+    var keychainIdentifier: String { "\(rawValue).apiKey" }
 }
 
 // MARK: - Onboarding State
@@ -63,10 +63,12 @@ final class OnboardingState: ObservableObject {
     
     let permissionsManager: PermissionsManager
     let secureStorage: SecureAppStorage
+    let settings: AppSettings
     
-    init(permissionsManager: PermissionsManager, secureStorage: SecureAppStorage) {
+    init(permissionsManager: PermissionsManager, secureStorage: SecureAppStorage, settings: AppSettings) {
         self.permissionsManager = permissionsManager
         self.secureStorage = secureStorage
+        self.settings = settings
         refreshPermissions()
     }
     
@@ -169,6 +171,8 @@ final class OnboardingState: ObservableObject {
     
     func saveAPIKey() async throws {
         try await secureStorage.storeSecret(apiKey, identifier: selectedProvider.keychainIdentifier)
+        // Register the key identifier so it shows up in settings
+        settings.registerAPIKeyIdentifier(selectedProvider.keychainIdentifier)
     }
 }
 
@@ -194,10 +198,11 @@ struct OnboardingView: View {
     @StateObject private var state: OnboardingState
     @Binding var isComplete: Bool
     
-    init(permissionsManager: PermissionsManager, secureStorage: SecureAppStorage, isComplete: Binding<Bool>) {
+    init(permissionsManager: PermissionsManager, secureStorage: SecureAppStorage, settings: AppSettings, isComplete: Binding<Bool>) {
         _state = StateObject(wrappedValue: OnboardingState(
             permissionsManager: permissionsManager,
-            secureStorage: secureStorage
+            secureStorage: secureStorage,
+            settings: settings
         ))
         _isComplete = isComplete
     }
@@ -744,12 +749,15 @@ struct TipRow: View {
 #if DEBUG
 struct OnboardingView_Previews: PreviewProvider {
     static var previews: some View {
+        let permissionsManager = PermissionsManager()
+        let settings = AppSettings()
         OnboardingView(
-            permissionsManager: PermissionsManager(),
+            permissionsManager: permissionsManager,
             secureStorage: SecureAppStorage(
-                permissionsManager: PermissionsManager(),
-                appSettings: AppSettings()
+                permissionsManager: permissionsManager,
+                appSettings: settings
             ),
+            settings: settings,
             isComplete: .constant(false)
         )
     }

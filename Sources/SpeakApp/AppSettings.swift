@@ -586,7 +586,7 @@ final class AppSettings: ObservableObject {
     hotKeyActivationStyle =
       HotKeyActivationStyle(
         rawValue: defaults.string(forKey: DefaultsKey.hotKeyActivation.rawValue)
-          ?? HotKeyActivationStyle.holdToRecord.rawValue) ?? .holdToRecord
+          ?? HotKeyActivationStyle.holdAndDoubleTap.rawValue) ?? .holdAndDoubleTap
     holdThreshold = defaults.object(forKey: DefaultsKey.holdThreshold.rawValue) as? Double ?? 0.35
     doubleTapWindow =
       defaults.object(forKey: DefaultsKey.doubleTapWindow.rawValue) as? Double ?? 0.4

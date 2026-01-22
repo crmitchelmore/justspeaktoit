@@ -109,22 +109,23 @@ jobs:
         run: |
           NEW_VERSION="${{ steps.version.outputs.new_version }}"
           
-          # Update VERSION file
-          echo "$NEW_VERSION" > VERSION
+          # Save the current commit SHA (the one that triggered this workflow)
+          # We'll tag THIS commit, not a version bump commit
+          RELEASE_SHA=$(git rev-parse HEAD)
+          echo "Will tag commit: $RELEASE_SHA"
           
           # Configure git
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
-          # Commit version bump
+          # Create and push tag FIRST on the triggering commit
+          # This ensures the tag points to a commit that exists on main
+          git tag "v$NEW_VERSION" "$RELEASE_SHA"
+          git push origin "v$NEW_VERSION"
+          echo "🚀 Created tag v$NEW_VERSION on commit ${RELEASE_SHA:0:7}"
+          
+          # Now try to update VERSION file (best effort, may fail due to branch protection)
+          echo "$NEW_VERSION" > VERSION
           git add VERSION
           git commit -m "chore: bump version to $NEW_VERSION"
-          
-          # Push to main (may fail due to branch protection, that's ok)
-          git push origin main || echo "⚠️ Could not push version bump to main (branch protection). Please update VERSION manually."
-          
-          # Create and push tag (tags aren't protected)
-          git tag "v$NEW_VERSION"
-          git push origin "v$NEW_VERSION"
-          
-          echo "🚀 Created release v$NEW_VERSION"
+          git push origin main || echo "⚠️ Could not push version bump to main (branch protection). VERSION file may be out of sync."

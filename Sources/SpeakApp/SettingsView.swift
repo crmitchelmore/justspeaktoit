@@ -1913,7 +1913,7 @@ struct SettingsView: View {
               Text("Voice-to-text made simple")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-              Text("Built by Chris Mitchell Moore")
+              Text("Built by Chris Mitchelmore")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
             }
@@ -1974,7 +1974,7 @@ struct SettingsView: View {
 
       SettingsCard(title: "Legal", systemImage: "doc.text", tint: Color.gray) {
         VStack(alignment: .leading, spacing: 8) {
-          Text("© 2024-2026 Chris Mitchell Moore. All rights reserved.")
+          Text("© 2024-2026 Chris Mitchelmore. All rights reserved.")
             .font(.callout)
             .foregroundStyle(.secondary)
 

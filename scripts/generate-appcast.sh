@@ -38,7 +38,9 @@ else
 fi
 
 # Generate EdDSA signature
-SIGNATURE=$("$SIGN_UPDATE" --sign "$PRIVATE_KEY_FILE" "$DMG_PATH" | grep "sparkle:edSignature" | sed 's/.*sparkle:edSignature="\([^"]*\)".*/\1/')
+# For newer Sparkle keys, use --ed-key-file with stdin (-) as recommended
+# sign_update outputs the signature attributes that need to be extracted
+SIGNATURE=$(cat "$PRIVATE_KEY_FILE" | "$SIGN_UPDATE" --ed-key-file - "$DMG_PATH" | grep "sparkle:edSignature" | sed 's/.*sparkle:edSignature="\([^"]*\)".*/\1/')
 
 if [ -z "$SIGNATURE" ]; then
     echo "Error: Failed to generate signature" >&2

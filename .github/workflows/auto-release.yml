@@ -14,12 +14,15 @@ jobs:
     runs-on: macos-15
     # Don't run on version bump commits or appcast updates
     if: "!contains(github.event.head_commit.message, 'chore: bump version') && !contains(github.event.head_commit.message, 'chore: update appcast')"
+    permissions:
+      contents: write
     
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: true
 
       - name: Check for releasable changes
         id: check
@@ -116,9 +119,11 @@ jobs:
           # Commit version bump
           git add VERSION
           git commit -m "chore: bump version to $NEW_VERSION"
-          git push origin main
           
-          # Create and push tag
+          # Push to main (may fail due to branch protection, that's ok)
+          git push origin main || echo "⚠️ Could not push version bump to main (branch protection). Please update VERSION manually."
+          
+          # Create and push tag (tags aren't protected)
           git tag "v$NEW_VERSION"
           git push origin "v$NEW_VERSION"
           

@@ -90,6 +90,17 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Building version: $VERSION"
 
+      - name: Stamp Version in Info.plist
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          # Update CFBundleShortVersionString (marketing version like 0.2.3)
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" Config/AppInfo.plist
+          # Update CFBundleVersion (build number - use timestamp for uniqueness)
+          BUILD_NUMBER=$(date +%Y%m%d%H%M)
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" Config/AppInfo.plist
+          echo "Stamped version: $VERSION (build $BUILD_NUMBER)"
+          grep -A1 "CFBundleShortVersionString\|CFBundleVersion" Config/AppInfo.plist
+
       - name: Build Release Archive
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}

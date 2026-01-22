@@ -1,0 +1,125 @@
+name: Auto Release
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '*.md'
+      - 'Docs/**'
+      - 'landing-page/**'
+      - '.github/workflows/auto-release.yml'
+
+jobs:
+  check-and-release:
+    runs-on: macos-15
+    # Don't run on version bump commits or appcast updates
+    if: "!contains(github.event.head_commit.message, 'chore: bump version') && !contains(github.event.head_commit.message, 'chore: update appcast')"
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check for releasable changes
+        id: check
+        run: |
+          # Get commits since last tag
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          
+          if [ -z "$LAST_TAG" ]; then
+            echo "No previous tag found, will create initial release"
+            echo "should_release=true" >> $GITHUB_OUTPUT
+            echo "bump_type=minor" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "Last tag: $LAST_TAG"
+          
+          # Check commits since last tag for conventional commit types
+          COMMITS=$(git log $LAST_TAG..HEAD --pretty=format:"%s" 2>/dev/null || echo "")
+          
+          if [ -z "$COMMITS" ]; then
+            echo "No new commits since $LAST_TAG"
+            echo "should_release=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "Commits since $LAST_TAG:"
+          echo "$COMMITS"
+          
+          # Determine bump type based on conventional commits
+          BUMP_TYPE="patch"
+          
+          if echo "$COMMITS" | grep -qE "^feat(\(.+\))?!:|^fix(\(.+\))?!:|BREAKING CHANGE"; then
+            BUMP_TYPE="major"
+          elif echo "$COMMITS" | grep -qE "^feat(\(.+\))?:"; then
+            BUMP_TYPE="minor"
+          elif echo "$COMMITS" | grep -qE "^fix(\(.+\))?:|^perf(\(.+\))?:"; then
+            BUMP_TYPE="patch"
+          else
+            # No releasable commits (only chore, docs, style, etc.)
+            echo "No releasable commits found"
+            echo "should_release=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "Bump type: $BUMP_TYPE"
+          echo "should_release=true" >> $GITHUB_OUTPUT
+          echo "bump_type=$BUMP_TYPE" >> $GITHUB_OUTPUT
+
+      - name: Calculate new version
+        if: steps.check.outputs.should_release == 'true'
+        id: version
+        run: |
+          CURRENT_VERSION=$(cat VERSION)
+          echo "Current version: $CURRENT_VERSION"
+          
+          # Parse version components
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+          
+          BUMP_TYPE="${{ steps.check.outputs.bump_type }}"
+          
+          case $BUMP_TYPE in
+            major)
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              ;;
+            minor)
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              ;;
+            patch)
+              PATCH=$((PATCH + 1))
+              ;;
+          esac
+          
+          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          echo "New version: $NEW_VERSION"
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Bump version and create tag
+        if: steps.check.outputs.should_release == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NEW_VERSION="${{ steps.version.outputs.new_version }}"
+          
+          # Update VERSION file
+          echo "$NEW_VERSION" > VERSION
+          
+          # Configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Commit version bump
+          git add VERSION
+          git commit -m "chore: bump version to $NEW_VERSION"
+          git push origin main
+          
+          # Create and push tag
+          git tag "v$NEW_VERSION"
+          git push origin "v$NEW_VERSION"
+          
+          echo "🚀 Created release v$NEW_VERSION"

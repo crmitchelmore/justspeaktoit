@@ -5,7 +5,17 @@
     <link>https://justspeaktoit.com/appcast.xml</link>
     <description>Most recent updates to Just Speak to It</description>
     <language>en</language>
-    <!-- This file is automatically updated by the release workflow -->
-    <!-- Items will be added here when new versions are released -->
+    <item>
+      <title>Version 0.2.3</title>
+      <sparkle:version>0.2.3</sparkle:version>
+      <sparkle:shortVersionString>0.2.3</sparkle:shortVersionString>
+      <pubDate>Thu, 22 Jan 2026 22:27:05 +0000</pubDate>
+      <enclosure
+        url="https://github.com/crmitchelmore/justspeaktoit/releases/download/v0.2.3/JustSpeakToIt-0.2.3.dmg"
+        sparkle:edSignature="v8zBsKOIOR579lU43IwCB9uSL5rxVEH6IPZJE0/QFynEpkWcjCsx4Xel99X54Z7RCE8m6FVE5mnXNGmAuIl5CQ=="
+        length="5907854"
+        type="application/octet-stream"/>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+    </item>
   </channel>
 </rss>

@@ -22,7 +22,14 @@ DMG_NAME=$(basename "$DMG_PATH")
 PRIVATE_KEY_FILE=$(mktemp)
 # Ensure private key is cleaned up on exit (success or failure)
 trap 'rm -f "$PRIVATE_KEY_FILE"' EXIT
-echo "$PRIVATE_KEY_BASE64" | base64 --decode > "$PRIVATE_KEY_FILE"
+
+# Try to decode as base64; if it fails, assume it's already plain text
+if echo "$PRIVATE_KEY_BASE64" | base64 --decode > "$PRIVATE_KEY_FILE" 2>/dev/null; then
+    echo "Private key decoded from base64" >&2
+else
+    echo "Private key appears to be plain text" >&2
+    echo "$PRIVATE_KEY_BASE64" > "$PRIVATE_KEY_FILE"
+fi
 
 # Find Sparkle's sign_update tool
 SIGN_UPDATE=""
@@ -40,7 +47,13 @@ fi
 # Generate EdDSA signature
 # For newer Sparkle keys, use --ed-key-file with stdin (-) as recommended
 # sign_update outputs the signature attributes that need to be extracted
-SIGNATURE=$(cat "$PRIVATE_KEY_FILE" | "$SIGN_UPDATE" --ed-key-file - "$DMG_PATH" | grep "sparkle:edSignature" | sed 's/.*sparkle:edSignature="\([^"]*\)".*/\1/')
+echo "Running sign_update..." >&2
+SIGN_OUTPUT=$(cat "$PRIVATE_KEY_FILE" | "$SIGN_UPDATE" --ed-key-file - "$DMG_PATH" 2>&1)
+SIGN_EXIT_CODE=$?
+echo "sign_update exit code: $SIGN_EXIT_CODE" >&2
+echo "sign_update output: $SIGN_OUTPUT" >&2
+
+SIGNATURE=$(echo "$SIGN_OUTPUT" | grep "sparkle:edSignature" | sed 's/.*sparkle:edSignature="\([^"]*\)".*/\1/')
 
 if [ -z "$SIGNATURE" ]; then
     echo "Error: Failed to generate signature" >&2

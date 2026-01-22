@@ -56,5 +56,7 @@
 	<true/>
 	<key>SUScheduledCheckInterval</key>
 	<integer>86400</integer>
+	<key>GitCommitSHA</key>
+	<string></string>
 </dict>
 </plist>

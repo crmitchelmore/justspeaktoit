@@ -11,6 +11,7 @@ enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
   case apiKeys
   case shortcuts
   case permissions
+  case about
 
   var id: String { rawValue }
 
@@ -24,6 +25,7 @@ enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
     case .apiKeys: return "API Keys"
     case .shortcuts: return "Keyboard"
     case .permissions: return "Permissions"
+    case .about: return "About"
     }
   }
 
@@ -37,6 +39,7 @@ enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
     case .apiKeys: return "key.fill"
     case .shortcuts: return "keyboard"
     case .permissions: return "hand.raised.fill"
+    case .about: return "info.circle"
     }
   }
 }
@@ -163,6 +166,8 @@ struct SettingsView: View {
       keyboardSettings
     case .permissions:
       permissionsSettings
+    case .about:
+      aboutSettings
     }
   }
 
@@ -1888,6 +1893,133 @@ struct SettingsView: View {
     case .denied: return .red
     case .restricted: return .orange
     case .notDetermined: return .yellow
+    }
+  }
+
+  private var aboutSettings: some View {
+    LazyVStack(spacing: 20) {
+      SettingsCard(title: "Just Speak to It", systemImage: "info.circle", tint: Color.blue) {
+        VStack(alignment: .leading, spacing: 16) {
+          HStack(alignment: .top, spacing: 16) {
+            if let appIcon = NSImage(named: "AppIcon") {
+              Image(nsImage: appIcon)
+                .resizable()
+                .frame(width: 64, height: 64)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            VStack(alignment: .leading, spacing: 4) {
+              Text("Just Speak to It")
+                .font(.title2.bold())
+              Text("Voice-to-text made simple")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+              Text("Built by Chris Mitchell Moore")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+            }
+          }
+
+          Divider()
+
+          VStack(alignment: .leading, spacing: 8) {
+            Label("Version \(appVersion)", systemImage: "tag")
+            Label("Build \(buildNumber)", systemImage: "hammer")
+            if let commit = commitRef, !commit.isEmpty {
+              Label("Commit \(String(commit.prefix(7)))", systemImage: "arrow.triangle.branch")
+            }
+          }
+          .font(.callout)
+          .foregroundStyle(.secondary)
+        }
+      }
+
+      SettingsCard(title: "Feedback & Support", systemImage: "bubble.left.and.bubble.right", tint: Color.green) {
+        VStack(alignment: .leading, spacing: 12) {
+          Text("Have a bug to report or a feature to request? Visit our GitHub repository.")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+
+          HStack(spacing: 12) {
+            Link(destination: URL(string: "https://github.com/AuroraToolkit/JustSpeakToIt/issues")!) {
+              Label("Report Issue", systemImage: "ladybug")
+            }
+            .buttonStyle(.bordered)
+
+            Link(destination: URL(string: "https://github.com/AuroraToolkit/JustSpeakToIt/issues/new?template=feature_request.md")!) {
+              Label("Request Feature", systemImage: "lightbulb")
+            }
+            .buttonStyle(.bordered)
+
+            Link(destination: URL(string: "https://github.com/AuroraToolkit/JustSpeakToIt")!) {
+              Label("View on GitHub", systemImage: "link")
+            }
+            .buttonStyle(.bordered)
+          }
+        }
+      }
+
+      SettingsCard(title: "Dependencies", systemImage: "shippingbox", tint: Color.orange) {
+        VStack(alignment: .leading, spacing: 8) {
+          Text("This app is built with the following open-source libraries:")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+
+          VStack(alignment: .leading, spacing: 6) {
+            dependencyRow(name: "Sparkle", version: "2.6.0+", url: "https://sparkle-project.org", description: "Auto-update framework")
+            dependencyRow(name: "SwiftLint", version: "0.55.0+", url: "https://github.com/realm/SwiftLint", description: "Swift linting tool")
+            dependencyRow(name: "SwiftFormat", version: "0.53.6+", url: "https://github.com/nicklockwood/SwiftFormat", description: "Code formatting")
+          }
+        }
+      }
+
+      SettingsCard(title: "Legal", systemImage: "doc.text", tint: Color.gray) {
+        VStack(alignment: .leading, spacing: 8) {
+          Text("© 2024-2026 Chris Mitchell Moore. All rights reserved.")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+
+          Link(destination: URL(string: "https://github.com/AuroraToolkit/JustSpeakToIt/blob/main/LICENSE")!) {
+            Label("View License (MIT)", systemImage: "doc.plaintext")
+          }
+          .buttonStyle(.bordered)
+        }
+      }
+    }
+  }
+
+  private var appVersion: String {
+    Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
+  }
+
+  private var buildNumber: String {
+    Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "Unknown"
+  }
+
+  private var commitRef: String? {
+    Bundle.main.object(forInfoDictionaryKey: "GitCommitSHA") as? String
+  }
+
+  private func dependencyRow(name: String, version: String, url: String, description: String) -> some View {
+    HStack {
+      VStack(alignment: .leading, spacing: 2) {
+        Text(name)
+          .font(.callout.bold())
+        Text(description)
+          .font(.caption)
+          .foregroundStyle(.tertiary)
+      }
+      Spacer()
+      Text(version)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Color.secondary.opacity(0.1), in: Capsule())
+      Link(destination: URL(string: url)!) {
+        Image(systemName: "arrow.up.right.square")
+      }
+      .buttonStyle(.plain)
+      .foregroundStyle(.blue)
     }
   }
 

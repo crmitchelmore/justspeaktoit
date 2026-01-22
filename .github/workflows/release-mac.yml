@@ -98,8 +98,11 @@ jobs:
           # Update CFBundleVersion (build number - use timestamp for uniqueness)
           BUILD_NUMBER=$(date +%Y%m%d%H%M)
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" Config/AppInfo.plist
-          echo "Stamped version: $VERSION (build $BUILD_NUMBER)"
-          grep -A1 "CFBundleShortVersionString\|CFBundleVersion" Config/AppInfo.plist
+          # Stamp the git commit SHA
+          COMMIT_SHA="${{ github.sha }}"
+          /usr/libexec/PlistBuddy -c "Set :GitCommitSHA $COMMIT_SHA" Config/AppInfo.plist
+          echo "Stamped version: $VERSION (build $BUILD_NUMBER, commit ${COMMIT_SHA:0:7})"
+          grep -A1 "CFBundleShortVersionString\|CFBundleVersion\|GitCommitSHA" Config/AppInfo.plist
 
       - name: Build Release Archive
         env:

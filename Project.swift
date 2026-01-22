@@ -4,7 +4,8 @@ let project = Project(
     name: "Just Speak to It",
     organizationName: "Just Speak to It",
     packages: [
-        .package(path: .relativeToRoot("."))
+        .package(path: .relativeToRoot(".")),
+        .remote(url: "https://github.com/sparkle-project/Sparkle.git", requirement: .upToNextMajor(from: "2.6.0"))
     ],
     settings: .settings(
         base: [
@@ -27,7 +28,8 @@ let project = Project(
             ],
             entitlements: .file(path: "Config/SpeakMacOS.entitlements"),
             dependencies: [
-                .package(product: "SpeakCore")
+                .package(product: "SpeakCore"),
+                .package(product: "Sparkle")
             ],
             settings: .settings(base: [
                 "DEVELOPMENT_TEAM": "8X4ZN58TYH",

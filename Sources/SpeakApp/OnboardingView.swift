@@ -749,11 +749,12 @@ struct TipRow: View {
 #if DEBUG
 struct OnboardingView_Previews: PreviewProvider {
     static var previews: some View {
+        let permissionsManager = PermissionsManager()
         let settings = AppSettings()
         OnboardingView(
-            permissionsManager: PermissionsManager(),
+            permissionsManager: permissionsManager,
             secureStorage: SecureAppStorage(
-                permissionsManager: PermissionsManager(),
+                permissionsManager: permissionsManager,
                 appSettings: settings
             ),
             settings: settings,

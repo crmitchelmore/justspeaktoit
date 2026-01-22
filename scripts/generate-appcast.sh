@@ -48,12 +48,21 @@ fi
 # For newer Sparkle keys, use --ed-key-file with stdin (-) as recommended
 # sign_update outputs the signature attributes that need to be extracted
 echo "Running sign_update..." >&2
-SIGN_OUTPUT=$(cat "$PRIVATE_KEY_FILE" | "$SIGN_UPDATE" --ed-key-file - "$DMG_PATH" 2>&1)
-SIGN_EXIT_CODE=$?
-echo "sign_update exit code: $SIGN_EXIT_CODE" >&2
-echo "sign_update output: $SIGN_OUTPUT" >&2
+echo "SIGN_UPDATE path: $SIGN_UPDATE" >&2
+echo "DMG_PATH: $DMG_PATH" >&2
+ls -la "$SIGN_UPDATE" >&2 || echo "sign_update not found" >&2
 
-SIGNATURE=$(echo "$SIGN_OUTPUT" | grep "sparkle:edSignature" | sed 's/.*sparkle:edSignature="\([^"]*\)".*/\1/')
+# Run sign_update and capture output
+set +e
+"$SIGN_UPDATE" --ed-key-file "$PRIVATE_KEY_FILE" "$DMG_PATH" > /tmp/sign_output.txt 2>&1
+SIGN_EXIT_CODE=$?
+set -e
+
+echo "sign_update exit code: $SIGN_EXIT_CODE" >&2
+echo "sign_update output:" >&2
+cat /tmp/sign_output.txt >&2
+
+SIGNATURE=$(grep "sparkle:edSignature" /tmp/sign_output.txt | sed 's/.*sparkle:edSignature="\([^"]*\)".*/\1/' || true)
 
 if [ -z "$SIGNATURE" ]; then
     echo "Error: Failed to generate signature" >&2

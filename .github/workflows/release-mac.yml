@@ -64,6 +64,12 @@ jobs:
         run: |
           tuist generate --no-open
 
+      - name: Resolve Swift Package Dependencies
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME"
+
       - name: Verify Entitlements for Developer ID
         run: |
           # Entitlements file is pre-configured for Developer ID (non-sandboxed).

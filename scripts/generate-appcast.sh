@@ -20,6 +20,8 @@ DMG_NAME=$(basename "$DMG_PATH")
 
 # Create temp file for private key
 PRIVATE_KEY_FILE=$(mktemp)
+# Ensure private key is cleaned up on exit (success or failure)
+trap 'rm -f "$PRIVATE_KEY_FILE"' EXIT
 echo "$PRIVATE_KEY_BASE64" | base64 --decode > "$PRIVATE_KEY_FILE"
 
 # Find Sparkle's sign_update tool
@@ -29,20 +31,17 @@ if [ -f ".build/artifacts/sparkle/Sparkle/bin/sign_update" ]; then
 elif command -v sign_update &> /dev/null; then
     SIGN_UPDATE="sign_update"
 else
-    echo "Warning: sign_update not found, downloading Sparkle tools..."
+    echo "Warning: sign_update not found, downloading Sparkle tools..." >&2
     SPARKLE_VERSION="2.8.1"
     curl -sL "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz" | tar xJ -C /tmp
-    SIGN_UPDATE="/tmp/Sparkle.framework/Resources/bin/sign_update"
+    SIGN_UPDATE="/tmp/bin/sign_update"
 fi
 
 # Generate EdDSA signature
 SIGNATURE=$("$SIGN_UPDATE" --sign "$PRIVATE_KEY_FILE" "$DMG_PATH" | grep "sparkle:edSignature" | sed 's/.*sparkle:edSignature="\([^"]*\)".*/\1/')
 
-# Clean up private key
-rm -f "$PRIVATE_KEY_FILE"
-
 if [ -z "$SIGNATURE" ]; then
-    echo "Error: Failed to generate signature"
+    echo "Error: Failed to generate signature" >&2
     exit 1
 fi
 

@@ -284,7 +284,7 @@ struct SmartTextOutput: TextOutputting {
     Thread.sleep(forTimeInterval: 0.05)
 
     var currentValue: CFTypeRef?
-    defer { if currentValue != nil { currentValue = nil } }
+    defer { if let currentValue { CFRelease(currentValue) } }
     let getStatus = AXUIElementCopyAttributeValue(
       element, kAXValueAttribute as CFString, &currentValue)
     guard getStatus == .success, let currentString = currentValue as? String else {
@@ -297,11 +297,10 @@ struct SmartTextOutput: TextOutputting {
   /// Log information about the focused element for debugging
   private func logFocusedElementInfo(_ element: AXUIElement) {
     var role: CFTypeRef?
+    defer { if let role { CFRelease(role) } }
     var roleDesc: CFTypeRef?
-    defer {
-      if role != nil { role = nil }
-      if roleDesc != nil { roleDesc = nil }
-    }
+    defer { if let roleDesc { CFRelease(roleDesc) } }
+
     AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
     AXUIElementCopyAttributeValue(element, kAXRoleDescriptionAttribute as CFString, &roleDesc)
     let roleStr = (role as? String) ?? "unknown"

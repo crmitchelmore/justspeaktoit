@@ -4,6 +4,7 @@ import Foundation
 
 /// Handles live incremental text insertion during streaming transcription.
 /// Tracks what's been inserted and handles updates/replacements.
+/// Falls back to clipboard mode if accessibility insertion isn't available.
 @MainActor
 final class LiveTextInserter: ObservableObject {
   /// The text that has been successfully inserted
@@ -11,6 +12,9 @@ final class LiveTextInserter: ObservableObject {
 
   /// Whether live insertion is active
   @Published private(set) var isActive: Bool = false
+
+  /// Whether we're using clipboard fallback mode (accessibility not available)
+  @Published private(set) var usingClipboardFallback: Bool = false
 
   /// The last error encountered
   @Published private(set) var lastError: Error?
@@ -23,6 +27,9 @@ final class LiveTextInserter: ObservableObject {
 
   /// Character count we've successfully inserted (for incremental updates)
   private var confirmedCharCount: Int = 0
+
+  /// Whether first insertion was verified successfully
+  private var firstInsertionVerified: Bool = false
 
   init(permissionsManager: PermissionsManager, appSettings: AppSettings) {
     self.permissionsManager = permissionsManager
@@ -44,26 +51,31 @@ final class LiveTextInserter: ObservableObject {
       return
     }
 
-    // Log info about the focused element for debugging
-    var role: CFTypeRef?
-    AXUIElementCopyAttributeValue(focusedElement, kAXRoleAttribute as CFString, &role)
-    let roleStr = (role as? String) ?? "unknown"
+    // Log detailed info about the focused element for debugging
+    logFocusedElementInfo(focusedElement)
 
+    // Check if the value attribute is settable
     var settable: DarwinBoolean = false
     let isSettable = AXUIElementIsAttributeSettable(focusedElement, kAXValueAttribute as CFString, &settable)
     let canSetValue = isSettable == .success && settable.boolValue
 
-    print("[LiveTextInserter] Focused element role: \(roleStr), value settable: \(canSetValue)")
-
-    // Even if not reported as settable, try anyway - many apps don't report correctly
-    // We'll detect actual failures when we try to insert
+    // If not settable, use clipboard fallback mode
+    if !canSetValue {
+      print("[LiveTextInserter] Value not settable, will use clipboard fallback")
+      usingClipboardFallback = true
+    } else {
+      usingClipboardFallback = false
+    }
 
     insertedText = ""
     confirmedCharCount = 0
+    firstInsertionVerified = false
     isActive = true
     lastError = nil
     initialFocusedApp = NSWorkspace.shared.frontmostApplication?.localizedName
-    print("[LiveTextInserter] Started live insertion session, target app: \(initialFocusedApp ?? "unknown")")
+    print(
+      "[LiveTextInserter] Started live insertion session, target app: \(initialFocusedApp ?? "unknown"), clipboard fallback: \(usingClipboardFallback)"
+    )
   }
 
   /// End the live insertion session
@@ -78,6 +90,8 @@ final class LiveTextInserter: ObservableObject {
   func reset() {
     insertedText = ""
     confirmedCharCount = 0
+    firstInsertionVerified = false
+    usingClipboardFallback = false
     isActive = false
     lastError = nil
     initialFocusedApp = nil
@@ -160,6 +174,18 @@ final class LiveTextInserter: ObservableObject {
     )
 
     if setResult == .success {
+      // Verify first insertion to ensure accessibility is actually working
+      if !firstInsertionVerified {
+        if verifyInsertion(expected: newValue, element: focusedElement) {
+          firstInsertionVerified = true
+          print("[LiveTextInserter] First insertion verified successfully")
+        } else {
+          print("[LiveTextInserter] First insertion verification failed, switching to clipboard fallback")
+          usingClipboardFallback = true
+          return
+        }
+      }
+
       insertedText += text
       confirmedCharCount = insertedText.count
       print("[LiveTextInserter] Appended \(text.count) chars, total: \(insertedText.count)")
@@ -250,5 +276,37 @@ final class LiveTextInserter: ObservableObject {
     }
 
     return unsafeBitCast(rawFocused, to: AXUIElement.self)
+  }
+
+  /// Log detailed information about the focused element for debugging
+  private func logFocusedElementInfo(_ element: AXUIElement) {
+    var role: CFTypeRef?
+    defer { if let role { CFRelease(role) } }
+    var roleDesc: CFTypeRef?
+    defer { if let roleDesc { CFRelease(roleDesc) } }
+
+    AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
+    AXUIElementCopyAttributeValue(element, kAXRoleDescriptionAttribute as CFString, &roleDesc)
+    let roleStr = (role as? String) ?? "unknown"
+    let roleDescStr = (roleDesc as? String) ?? "unknown"
+    print("[LiveTextInserter] Focused element - role: \(roleStr), description: \(roleDescStr)")
+  }
+
+  /// Verify that text was actually inserted by re-reading the value after a short delay.
+  /// Uses a synchronous delay as this is a quick verification check.
+  private func verifyInsertion(expected: String, element: AXUIElement) -> Bool {
+    // Wait 50ms for the target app to process the accessibility change
+    // Note: Using Thread.sleep as this is a brief, necessary delay for AX sync
+    Thread.sleep(forTimeInterval: 0.05)
+
+    var currentValue: CFTypeRef?
+    defer { if let currentValue { CFRelease(currentValue) } }
+    let getStatus = AXUIElementCopyAttributeValue(
+      element, kAXValueAttribute as CFString, &currentValue
+    )
+    guard getStatus == .success, let currentString = currentValue as? String else {
+      return false
+    }
+    return currentString == expected || currentString.hasSuffix(expected)
   }
 }

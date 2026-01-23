@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// Centralised configuration model backed by `UserDefaults` and published to SwiftUI.
@@ -80,6 +81,34 @@ final class AppSettings: ObservableObject {
       case .holdToRecord:
         return false
       }
+    }
+  }
+
+  /// Controls where the app appears in the system UI
+  enum AppVisibility: String, CaseIterable, Identifiable {
+    case dockAndMenuBar
+    case menuBarOnly
+    case dockOnly
+
+    var id: String { rawValue }
+
+    var displayName: String {
+      switch self {
+      case .dockAndMenuBar:
+        return "Dock & Menu Bar"
+      case .menuBarOnly:
+        return "Menu Bar Only"
+      case .dockOnly:
+        return "Dock Only"
+      }
+    }
+
+    var showInDock: Bool {
+      self == .dockAndMenuBar || self == .dockOnly
+    }
+
+    var showInMenuBar: Bool {
+      self == .dockAndMenuBar || self == .menuBarOnly
     }
   }
 
@@ -171,7 +200,7 @@ final class AppSettings: ObservableObject {
     case textOutputMethod
     case restoreClipboard
     case showHUD
-    case showStatusBarOnly
+    case appVisibility
     case runAtLogin
     case recordingsDirectory
     case hotKeyActivation
@@ -333,8 +362,11 @@ final class AppSettings: ObservableObject {
     didSet { store(showLiveTranscriptInHUD, key: .showLiveTranscriptInHUD) }
   }
 
-  @Published var showStatusBarOnly: Bool {
-    didSet { store(showStatusBarOnly, key: .showStatusBarOnly) }
+  @Published var appVisibility: AppVisibility {
+    didSet {
+      store(appVisibility.rawValue, key: .appVisibility)
+      applyAppVisibility()
+    }
   }
 
   @Published var runAtLogin: Bool {
@@ -584,8 +616,10 @@ final class AppSettings: ObservableObject {
     showHUDDuringSessions = defaults.object(forKey: DefaultsKey.showHUD.rawValue) as? Bool ?? true
     showLiveTranscriptInHUD =
       defaults.object(forKey: DefaultsKey.showLiveTranscriptInHUD.rawValue) as? Bool ?? true
-    showStatusBarOnly =
-      defaults.object(forKey: DefaultsKey.showStatusBarOnly.rawValue) as? Bool ?? false
+    appVisibility =
+      AppVisibility(
+        rawValue: defaults.string(forKey: DefaultsKey.appVisibility.rawValue)
+          ?? AppVisibility.dockAndMenuBar.rawValue) ?? .dockAndMenuBar
     runAtLogin = defaults.object(forKey: DefaultsKey.runAtLogin.rawValue) as? Bool ?? false
 
     let defaultDirectory = Self.defaultRecordingsDirectory()
@@ -695,6 +729,7 @@ final class AppSettings: ObservableObject {
       defaults.object(forKey: DefaultsKey.autoCorrectionsPromotionThreshold.rawValue) as? Int ?? 2
 
     ensureRecordingsDirectoryExists()
+    applyAppVisibility()
   }
 
   func registerAPIKeyIdentifier(_ identifier: String) {
@@ -720,6 +755,12 @@ final class AppSettings: ObservableObject {
     default:
       defaults.set(value, forKey: key.rawValue)
     }
+  }
+
+  /// Applies the current app visibility setting to show/hide dock icon
+  func applyAppVisibility() {
+    let policy: NSApplication.ActivationPolicy = appVisibility.showInDock ? .regular : .accessory
+    NSApplication.shared.setActivationPolicy(policy)
   }
 
   private static func normalizedBatchModel(_ identifier: String?) -> String {

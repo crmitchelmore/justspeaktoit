@@ -282,22 +282,44 @@ struct SettingsView: View {
               tint: .brandLagoon
             )
             .speakTooltip("Show real-time transcription text in the HUD while recording.")
-            settingsToggle(
-              "Show status bar only",
-              isOn: settingsBinding(\AppSettings.showStatusBarOnly),
-              tint: .brandLagoon
-            )
-            .speakTooltip("Keep Speak tucked into the menu bar while still being ready when you need it.")
+          }
+        }
+      }
+      .speakTooltip("Control how Speak delivers transcripts and how gently we touch your clipboard and interface.")
+
+      SettingsCard(title: "App Behaviour", systemImage: "gearshape.2", tint: Color.brandAccentWarm) {
+        VStack(alignment: .leading, spacing: 12) {
+          VStack(alignment: .leading, spacing: 4) {
+            Text("Show App In")
+              .font(.subheadline)
+              .foregroundStyle(.secondary)
+            Picker("Show App In", selection: settingsBinding(\AppSettings.appVisibility)) {
+              ForEach(AppSettings.AppVisibility.allCases) { visibility in
+                Text(visibility.displayName).tag(visibility)
+              }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+          }
+          .padding(.horizontal, 12)
+          .padding(.vertical, 8)
+          .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+              .fill(Color(nsColor: .controlBackgroundColor))
+          )
+          .speakTooltip("Choose where Speak appears—in the Dock, menu bar, or both. Menu bar only keeps it out of the way while staying accessible.")
+
+          VStack(alignment: .leading, spacing: 8) {
             settingsToggle(
               "Launch at login",
               isOn: settingsBinding(\AppSettings.runAtLogin),
-              tint: .brandLagoon
+              tint: .brandAccentWarm
             )
             .speakTooltip("Have Speak start alongside macOS so recording is always one shortcut away.")
           }
         }
       }
-      .speakTooltip("Control how Speak delivers transcripts and how gently we touch your clipboard and interface.")
+      .speakTooltip("Configure how Speak integrates with your Mac—where it appears and when it starts.")
 
       SettingsCard(title: "Microphone", systemImage: "mic.circle", tint: Color.brandAccentWarm) {
         VStack(alignment: .leading, spacing: 12) {

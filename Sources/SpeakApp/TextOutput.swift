@@ -229,6 +229,9 @@ struct SmartTextOutput: TextOutputting {
       if permissionsManager.status(for: .accessibility).isGranted,
          let focusedElement = getFocusedElement() {
 
+        // Log element info for debugging
+        logFocusedElementInfo(focusedElement)
+
         // Check if the attribute is settable
         var settable: DarwinBoolean = false
         let isSettable = AXUIElementIsAttributeSettable(
@@ -274,7 +277,11 @@ struct SmartTextOutput: TextOutputting {
 
   /// Verify that the text was actually inserted into the focused element.
   /// Some apps return success from AXUIElementSetAttributeValue but don't actually update.
+  /// Includes a 50ms delay to allow the target app to process the change.
   private func verifyTextInserted(text: String, element: AXUIElement) -> Bool {
+    // Wait 50ms for the target app to process the accessibility change
+    Thread.sleep(forTimeInterval: 0.05)
+
     var currentValue: CFTypeRef?
     let getStatus = AXUIElementCopyAttributeValue(
       element, kAXValueAttribute as CFString, &currentValue)
@@ -283,5 +290,16 @@ struct SmartTextOutput: TextOutputting {
     }
     // Check if the text appears at the end (it should have been appended or set)
     return currentString.hasSuffix(text) || currentString == text
+  }
+
+  /// Log information about the focused element for debugging
+  private func logFocusedElementInfo(_ element: AXUIElement) {
+    var role: CFTypeRef?
+    var roleDesc: CFTypeRef?
+    AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
+    AXUIElementCopyAttributeValue(element, kAXRoleDescriptionAttribute as CFString, &roleDesc)
+    let roleStr = (role as? String) ?? "unknown"
+    let roleDescStr = (roleDesc as? String) ?? "unknown"
+    print("[SmartTextOutput] Focused element - role: \(roleStr), description: \(roleDescStr)")
   }
 }

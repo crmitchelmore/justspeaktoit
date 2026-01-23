@@ -6,23 +6,20 @@
     <description>Most recent updates to Just Speak to It</description>
     <language>en</language>
     <item>
-      <title>Version 0.4.0</title>
-      <sparkle:version>0.4.0</sparkle:version>
-      <sparkle:shortVersionString>0.4.0</sparkle:shortVersionString>
-      <pubDate>Fri, 23 Jan 2026 00:08:42 +0000</pubDate>
+      <title>Version 0.5.0</title>
+      <sparkle:version>0.5.0</sparkle:version>
+      <sparkle:shortVersionString>0.5.0</sparkle:shortVersionString>
+      <pubDate>Fri, 23 Jan 2026 02:15:24 +0000</pubDate>
       <description><![CDATA[
-        <h2>What's New in 0.4.0</h2>
+        <h2>What's New in 0.5.0</h2>
         <ul>
-          <li>Improved accessibility text insertion reliability</li>
-          <li>Added auto-corrections feature - learns from your edits</li>
-          <li>Better verification of text insertion</li>
-          <li>Fixed memory management in accessibility APIs</li>
+          <li>Bug fixes and improvements</li>
         </ul>
       ]]></description>
       <enclosure
-        url="https://github.com/crmitchelmore/justspeaktoit/releases/download/v0.4.0/JustSpeakToIt-0.4.0.dmg"
-        sparkle:edSignature="K7RYZqC2eNKZAxY4AUufwewfvOexXx0AEp1Fn3WBrQYSXuHS73Q/ZlRMFNPsMjp7psJXOifb66+IS5H1DWCKBQ=="
-        length="5936269"
+        url="https://github.com/crmitchelmore/justspeaktoit/releases/download/v0.5.0/JustSpeakToIt-0.5.0.dmg"
+        sparkle:edSignature="Hj5I3mlCQG9kRonCIBm8KSrEwAI3JFcqplBvYyVzn9WmRv/EBkaNnqip8D3cXUrhyVH3qLXpoH3CKI/Cbj/1Bg=="
+        length="6042256"
         type="application/octet-stream"/>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
     </item>

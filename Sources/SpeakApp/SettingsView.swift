@@ -1,5 +1,6 @@
 import SpeakCore
 import AppKit
+import Sparkle
 import SwiftUI
 
 enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
@@ -48,6 +49,7 @@ struct SettingsView: View {
   @EnvironmentObject private var environment: AppEnvironment
   @EnvironmentObject private var settings: AppSettings
   @EnvironmentObject private var audioDevices: AudioInputDeviceManager
+  @ObservedObject private var updaterManager = UpdaterManager.shared
   private static let localeOptions: [LocaleOption] = [
     LocaleOption(displayName: "English (United States)", identifier: "en_US"),
     LocaleOption(displayName: "English (United Kingdom)", identifier: "en_GB"),
@@ -316,6 +318,10 @@ struct SettingsView: View {
               tint: .brandAccentWarm
             )
             .speakTooltip("Have Speak start alongside macOS so recording is always one shortcut away.")
+            Toggle("Automatically check for updates", isOn: $updaterManager.automaticallyChecksForUpdates)
+              .toggleStyle(.switch)
+              .tint(.brandAccentWarm)
+              .speakTooltip("Periodically check for new versions and notify you when updates are available.")
           }
         }
       }
@@ -1952,6 +1958,23 @@ struct SettingsView: View {
           }
           .font(.callout)
           .foregroundStyle(.secondary)
+
+          Divider()
+
+          HStack(spacing: 12) {
+            Button {
+              updaterManager.checkForUpdates()
+            } label: {
+              Label("Check for Updates", systemImage: "arrow.triangle.2.circlepath")
+            }
+            .buttonStyle(.bordered)
+            .disabled(!updaterManager.canCheckForUpdates)
+
+            Link(destination: URL(string: "https://github.com/crmitchelmore/justspeaktoit/releases")!) {
+              Label("View Releases", systemImage: "shippingbox")
+            }
+            .buttonStyle(.bordered)
+          }
         }
       }
 
@@ -1962,17 +1985,17 @@ struct SettingsView: View {
             .foregroundStyle(.secondary)
 
           HStack(spacing: 12) {
-            Link(destination: URL(string: "https://github.com/AuroraToolkit/JustSpeakToIt/issues")!) {
+            Link(destination: URL(string: "https://github.com/crmitchelmore/justspeaktoit/issues")!) {
               Label("Report Issue", systemImage: "ladybug")
             }
             .buttonStyle(.bordered)
 
-            Link(destination: URL(string: "https://github.com/AuroraToolkit/JustSpeakToIt/issues/new?template=feature_request.md")!) {
+            Link(destination: URL(string: "https://github.com/crmitchelmore/justspeaktoit/issues/new?template=feature_request.md")!) {
               Label("Request Feature", systemImage: "lightbulb")
             }
             .buttonStyle(.bordered)
 
-            Link(destination: URL(string: "https://github.com/AuroraToolkit/JustSpeakToIt")!) {
+            Link(destination: URL(string: "https://github.com/crmitchelmore/justspeaktoit")!) {
               Label("View on GitHub", systemImage: "link")
             }
             .buttonStyle(.bordered)
@@ -2000,7 +2023,7 @@ struct SettingsView: View {
             .font(.callout)
             .foregroundStyle(.secondary)
 
-          Link(destination: URL(string: "https://github.com/AuroraToolkit/JustSpeakToIt/blob/main/LICENSE")!) {
+          Link(destination: URL(string: "https://github.com/crmitchelmore/justspeaktoit/blob/main/LICENSE")!) {
             Label("View License (MIT)", systemImage: "doc.plaintext")
           }
           .buttonStyle(.bordered)

@@ -1130,22 +1130,29 @@ final class MainManager: ObservableObject {
   private func startAudioLevelMonitoring() {
     audioLevelTimer?.invalidate()
     silenceStartTime = nil
+    
+    // Cache silence detection settings to avoid repeated @Published property access
+    // during high-frequency timer callbacks (30Hz)
+    let silenceEnabled = appSettings.silenceDetectionEnabled
+    let threshold = appSettings.silenceThreshold
+    let duration = appSettings.silenceDuration
+    
     audioLevelTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) {
       [weak self] _ in
-      Task { @MainActor [weak self] in
-        guard let self else { return }
-        let level = await self.audioFileManager.getCurrentAudioLevel()
-        self.hudManager.updateAudioLevel(level)
-        self.checkSilenceDetection(level: level)
-      }
+      guard let self else { return }
+      // Timer runs on RunLoop.main, so we're already on MainActor
+      // Call methods directly without creating a Task to avoid race conditions
+      let level = self.audioFileManager.getCurrentAudioLevel()
+      self.hudManager.updateAudioLevel(level)
+      self.checkSilenceDetection(level: level, enabled: silenceEnabled, threshold: threshold, duration: duration)
     }
     if let timer = audioLevelTimer {
       RunLoop.main.add(timer, forMode: .common)
     }
   }
 
-  private func checkSilenceDetection(level: Float) {
-    guard appSettings.silenceDetectionEnabled else {
+  private func checkSilenceDetection(level: Float, enabled: Bool, threshold: Float, duration: TimeInterval) {
+    guard enabled else {
       silenceStartTime = nil
       return
     }
@@ -1154,14 +1161,14 @@ final class MainManager: ObservableObject {
       return
     }
 
-    let isSilent = level < appSettings.silenceThreshold
+    let isSilent = level < threshold
 
     if isSilent {
       if silenceStartTime == nil {
         silenceStartTime = Date()
       } else if let startTime = silenceStartTime {
         let silentDuration = Date().timeIntervalSince(startTime)
-        if silentDuration >= appSettings.silenceDuration {
+        if silentDuration >= duration {
           logger.info("Auto-stopping recording after \(silentDuration, privacy: .public)s of silence")
           silenceStartTime = nil
           Task {

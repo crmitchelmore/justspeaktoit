@@ -72,15 +72,15 @@ struct WordChange: Equatable, Hashable {
     // Skip if either is very short (likely noise)
     guard original.count >= 2, corrected.count >= 2 else { return false }
 
-    // Skip if they're identical
-    guard origLower != corrLower else { return false }
+    // Skip if they're exactly identical (including case)
+    guard original != corrected else { return false }
 
     switch type {
     case .replacement:
       // For replacements, check similarity (at least some overlap)
       let similarity = stringSimilarity(origLower, corrLower)
       // Accept if >30% similar (catches typos like Suzy→Susie)
-      // or if it's a case-only change
+      // or if it's a case-only change (speak → Speak)
       return similarity > 0.3 || origLower == corrLower
 
     case .split:

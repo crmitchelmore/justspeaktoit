@@ -596,11 +596,6 @@ final class MainManager: ObservableObject {
         liveTextInserter.applyPolishedFinal(finalText)
         liveTextInserter.end()
         session.outputMethod = .accessibility
-
-        // Start monitoring for user corrections (auto-corrections feature)
-        let focusedElement = getFocusedElement()
-        let appName = NSWorkspace.shared.frontmostApplication?.localizedName
-        autoCorrectionTracker.startMonitoring(insertedText: finalText, element: focusedElement, app: appName)
       } else {
         let output = SmartTextOutput(permissionsManager: permissionsManager, appSettings: appSettings)
         let outputResult = output.output(text: finalText)
@@ -622,18 +617,18 @@ final class MainManager: ObservableObject {
           activeSession = nil
           return
         }
-
-        // Start monitoring for user corrections (auto-corrections feature)
-        let focusedElement = getFocusedElement()
-        let appName = NSWorkspace.shared.frontmostApplication?.localizedName
-        autoCorrectionTracker.startMonitoring(insertedText: finalText, element: focusedElement, app: appName)
       }
+
+      // Start monitoring for user corrections (auto-corrections feature)
+      let focusedElement = getFocusedElement()
+      let appName = NSWorkspace.shared.frontmostApplication?.localizedName
+      autoCorrectionTracker.startMonitoring(insertedText: finalText, element: focusedElement, app: appName)
+
       session.outputDelivered = Date()
 
       session.events.append(
         HistoryEvent(kind: .outputDelivered, description: "Output delivered successfully")
       )
-      let appName = NSWorkspace.shared.frontmostApplication?.localizedName
       session.destination = appName
       session.lexiconContext = makeLexiconContext(for: finalText, destination: appName)
       if let summary = session.personalCorrections {

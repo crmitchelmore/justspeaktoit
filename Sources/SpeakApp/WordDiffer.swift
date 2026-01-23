@@ -71,7 +71,8 @@ struct WordDiffer {
     if original.count == edited.count {
       // Same word count - look for 1:1 replacements
       for (orig, edit) in zip(original, edited) {
-        if orig.lowercased() != edit.lowercased() && orig.count >= minimumWordLength
+        // Detect any change including case-only changes (speak → Speak)
+        if orig != edit && orig.count >= minimumWordLength
           && edit.count >= minimumWordLength
         {
           let change = WordChange(type: .replacement, original: orig, corrected: edit)

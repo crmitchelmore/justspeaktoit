@@ -3,6 +3,9 @@ import os.log
 
 /// Persists auto-correction candidates to disk.
 actor AutoCorrectionStore {
+  /// Candidates older than this with only 1 occurrence are auto-expired
+  private static let candidateExpirationInterval: TimeInterval = 30 * 24 * 60 * 60  // 30 days
+
   private let fileURL: URL
   private let encoder: JSONEncoder
   private let decoder: JSONDecoder
@@ -42,9 +45,9 @@ actor AutoCorrectionStore {
     let candidates = try decoder.decode([AutoCorrectionCandidate].self, from: data)
 
     // Filter out expired candidates (older than 30 days with only 1 occurrence)
-    let thirtyDaysAgo = Date().addingTimeInterval(-30 * 24 * 60 * 60)
+    let expirationDate = Date().addingTimeInterval(-Self.candidateExpirationInterval)
     return candidates.filter { candidate in
-      candidate.seenCount > 1 || candidate.lastSeenAt > thirtyDaysAgo
+      candidate.seenCount > 1 || candidate.lastSeenAt > expirationDate
     }
   }
 

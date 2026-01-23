@@ -4,59 +4,58 @@
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>Just Speak to It</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
-	<key>CFBundleIconFile</key>
-	<string>AppIcon</string>
 	<key>CFBundleName</key>
-	<string>Just Speak to It</string>
-	<key>CFBundleDisplayName</key>
 	<string>Just Speak to It</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.1.0</string>
+	<string>0.5.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Just Speak to It uses the microphone to capture audio for transcription.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Just Speak to It transcribes your speech into text using speech recognition.</string>
-	<key>NSAccessibilityUsageDescription</key>
-	<string>Just Speak to It needs Accessibility access to observe the Fn key for global shortcuts.</string>
-	<key>NSInputMonitoringUsageDescription</key>
-	<string>Just Speak to It needs Input Monitoring access to detect your Fn key presses for shortcuts.</string>
-	<key>LSMinimumSystemVersion</key>
-	<string>14.0</string>
-	<key>NSPrincipalClass</key>
-	<string>NSApplication</string>
-	<key>NSHumanReadableCopyright</key>
-	<string>Copyright © 2024-2026 Chris Mitchelmore. All rights reserved.</string>
+	<key>GitCommitSHA</key>
+	<string></string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.productivity</string>
-	<key>NSSupportsAutomaticTermination</key>
-	<true/>
-	<key>NSSupportsSuddenTermination</key>
-	<false/>
 	<key>LSArchitecturePriority</key>
 	<array>
 		<string>arm64</string>
 		<string>x86_64</string>
 	</array>
-	<!-- Sparkle Auto-Update Configuration -->
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>NSAccessibilityUsageDescription</key>
+	<string>Just Speak to It needs Accessibility access to observe the Fn key for global shortcuts.</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>Copyright © 2024-2026 Chris Mitchelmore. All rights reserved.</string>
+	<key>NSInputMonitoringUsageDescription</key>
+	<string>Just Speak to It needs Input Monitoring access to detect your Fn key presses for shortcuts.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Just Speak to It uses the microphone to capture audio for transcription.</string>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Just Speak to It transcribes your speech into text using speech recognition.</string>
+	<key>NSSupportsAutomaticTermination</key>
+	<true/>
+	<key>NSSupportsSuddenTermination</key>
+	<false/>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
 	<key>SUFeedURL</key>
 	<string>https://justspeaktoit.com/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>amLMkCNmSNgwrbpuN+cW6RFxKApcZL/ylhCS5JZLXRE=</string>
-	<key>SUEnableAutomaticChecks</key>
-	<true/>
 	<key>SUScheduledCheckInterval</key>
 	<integer>86400</integer>
-	<key>GitCommitSHA</key>
-	<string></string>
 </dict>
 </plist>

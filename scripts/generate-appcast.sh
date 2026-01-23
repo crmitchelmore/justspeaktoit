@@ -69,6 +69,20 @@ fi
 # GitHub release download URL
 DOWNLOAD_URL="https://github.com/crmitchelmore/justspeaktoit/releases/download/v${VERSION}/${DMG_NAME}"
 
+# Generate release notes from git commits since last tag
+LAST_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+if [ -n "$LAST_TAG" ]; then
+    echo "Generating release notes from commits since $LAST_TAG" >&2
+    RELEASE_NOTES=$(git log $LAST_TAG..HEAD --pretty=format:"<li>%s</li>" --grep="^feat\|^fix\|^perf" --extended-regexp 2>/dev/null | head -20 || echo "<li>Bug fixes and improvements</li>")
+else
+    RELEASE_NOTES="<li>Initial release</li>"
+fi
+
+# If no meaningful commits found, use a default
+if [ -z "$RELEASE_NOTES" ]; then
+    RELEASE_NOTES="<li>Bug fixes and improvements</li>"
+fi
+
 # Generate appcast XML
 cat << EOF
 <?xml version="1.0" encoding="utf-8"?>
@@ -83,6 +97,12 @@ cat << EOF
       <sparkle:version>${VERSION}</sparkle:version>
       <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
       <pubDate>${PUB_DATE}</pubDate>
+      <description><![CDATA[
+        <h2>What's New in ${VERSION}</h2>
+        <ul>
+          ${RELEASE_NOTES}
+        </ul>
+      ]]></description>
       <enclosure
         url="${DOWNLOAD_URL}"
         sparkle:edSignature="${SIGNATURE}"

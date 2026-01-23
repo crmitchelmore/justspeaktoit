@@ -257,46 +257,38 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Update Landing Page Appcast via PR
+      - name: Update Landing Page Appcast
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          BRANCH_NAME="chore/appcast-v${VERSION}"
           
           # Configure git
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
-          # Fetch main and create branch from it
+          # Checkout main and update appcast
           git fetch origin main
-          git checkout -b "$BRANCH_NAME" origin/main
+          git checkout main
+          git pull origin main
           
           # Copy the generated appcast to landing page
           cp "$RUNNER_TEMP/appcast.xml" landing-page/appcast.xml
           
-          # Commit and push the branch
+          # Commit and push directly (will trigger deploy-landing-page workflow)
           git add landing-page/appcast.xml
-          git commit -m "chore: update appcast.xml for v${VERSION}"
-          git push origin "$BRANCH_NAME"
-          
-          # Create PR with auto-merge enabled
-          PR_URL=$(gh pr create \
-            --title "chore: update appcast.xml for v${VERSION}" \
-            --body "Auto-generated PR to update the Sparkle appcast for v${VERSION} release.
+          git commit -m "chore: update appcast.xml for v${VERSION}" || echo "No changes to commit"
+          git push origin main || echo "⚠️ Could not push appcast update (branch protection)"
 
-This updates the landing page appcast.xml so users can receive the update via Sparkle.
-
----
-_This PR was created automatically by the release workflow._" \
-            --base main \
-            --head "$BRANCH_NAME")
-          
-          echo "Created PR: $PR_URL"
-          
-          # Enable auto-merge (will merge once CI passes)
-          gh pr merge "$PR_URL" --auto --squash || echo "Auto-merge not available, PR needs manual merge"
+      - name: Deploy Landing Page
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy landing-page --project-name=justspeaktoit
+          workingDirectory: ${{ github.workspace }}
 
       - name: Upload Artifact (for manual builds)
         if: "!startsWith(github.ref, 'refs/tags/')"

@@ -31,7 +31,8 @@ final class PersonalLexiconService: ObservableObject {
     activation: PersonalLexiconRule.Activation,
     contextTags: Set<String>,
     confidence: PersonalLexiconConfidence,
-    notes: String?
+    notes: String?,
+    source: PersonalLexiconRuleSource = .manual
   ) async throws -> PersonalLexiconRule {
     var rule = PersonalLexiconRule(
       displayName: displayName,
@@ -40,7 +41,8 @@ final class PersonalLexiconService: ObservableObject {
       activation: activation,
       contextTags: contextTags,
       confidence: confidence,
-      notes: notes
+      notes: notes,
+      source: source
     ).sanitised()
 
     guard !rule.canonical.isEmpty else {

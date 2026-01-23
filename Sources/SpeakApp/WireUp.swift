@@ -20,6 +20,7 @@ final class AppEnvironment: ObservableObject {
   let pronunciationManager: PronunciationManager
   let livePolish: LivePolishManager
   let liveTextInserter: LiveTextInserter
+  let autoCorrectionTracker: AutoCorrectionTracker
   let main: MainManager
   let transportServer: TransportServer
   private let hudPresenter: HUDWindowPresenter
@@ -51,6 +52,7 @@ final class AppEnvironment: ObservableObject {
     pronunciationManager: PronunciationManager,
     livePolish: LivePolishManager,
     liveTextInserter: LiveTextInserter,
+    autoCorrectionTracker: AutoCorrectionTracker,
     main: MainManager,
     transportServer: TransportServer,
     hudPresenter: HUDWindowPresenter
@@ -72,6 +74,7 @@ final class AppEnvironment: ObservableObject {
     self.pronunciationManager = pronunciationManager
     self.livePolish = livePolish
     self.liveTextInserter = liveTextInserter
+    self.autoCorrectionTracker = autoCorrectionTracker
     self.main = main
     self.transportServer = transportServer
     self.hudPresenter = hudPresenter
@@ -264,6 +267,12 @@ enum WireUp {
       appSettings: settings
     )
     let textProcessor = TranscriptionTextProcessor(appSettings: settings)
+    let autoCorrectionStore = AutoCorrectionStore()
+    let autoCorrectionTracker = AutoCorrectionTracker(
+      store: autoCorrectionStore,
+      lexiconService: personalLexicon,
+      appSettings: settings
+    )
     let main = MainManager(
       appSettings: settings,
       permissionsManager: permissions,
@@ -277,7 +286,8 @@ enum WireUp {
       openRouterClient: openRouter,
       livePolishManager: livePolish,
       liveTextInserter: liveTextInserter,
-      textProcessor: textProcessor
+      textProcessor: textProcessor,
+      autoCorrectionTracker: autoCorrectionTracker
     )
     let hudPresenter = HUDWindowPresenter(manager: hud, settings: settings)
     let shortcuts = ShortcutManager(permissionsManager: permissions)
@@ -303,6 +313,7 @@ enum WireUp {
       pronunciationManager: pronunciationManager,
       livePolish: livePolish,
       liveTextInserter: liveTextInserter,
+      autoCorrectionTracker: autoCorrectionTracker,
       main: main,
       transportServer: transportServer,
       hudPresenter: hudPresenter

@@ -1,11 +1,17 @@
 import XCTest
 
-/// Tests for version string comparison logic used by Sparkle updates.
-/// This ensures version comparison works correctly for semantic versions.
+/// Tests for version string comparison logic.
+///
+/// NOTE: These tests verify semantic version comparison logic conceptually.
+/// Sparkle uses `SUStandardVersionComparator` internally which follows similar
+/// semver rules. These tests document expected behavior and catch regressions
+/// in our understanding of version ordering. They are reference tests, not
+/// integration tests against Sparkle's actual comparator.
 final class VersionComparisonTests: XCTestCase {
   
-  /// Compare two semantic version strings.
+  /// Compare two semantic version strings using standard semver rules.
   /// Returns negative if v1 < v2, positive if v1 > v2, zero if equal.
+  /// This mirrors the logic Sparkle uses for version comparison.
   private func compareVersions(_ v1: String, _ v2: String) -> Int {
     let c1 = v1.split(separator: ".").compactMap { Int($0) }
     let c2 = v2.split(separator: ".").compactMap { Int($0) }

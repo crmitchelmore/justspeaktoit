@@ -280,9 +280,11 @@ struct SmartTextOutput: TextOutputting {
   /// Includes a 50ms delay to allow the target app to process the change.
   private func verifyTextInserted(text: String, element: AXUIElement) -> Bool {
     // Wait 50ms for the target app to process the accessibility change
+    // Note: Using Thread.sleep as this is a brief, necessary delay for AX sync
     Thread.sleep(forTimeInterval: 0.05)
 
     var currentValue: CFTypeRef?
+    defer { if currentValue != nil { currentValue = nil } }
     let getStatus = AXUIElementCopyAttributeValue(
       element, kAXValueAttribute as CFString, &currentValue)
     guard getStatus == .success, let currentString = currentValue as? String else {
@@ -296,6 +298,10 @@ struct SmartTextOutput: TextOutputting {
   private func logFocusedElementInfo(_ element: AXUIElement) {
     var role: CFTypeRef?
     var roleDesc: CFTypeRef?
+    defer {
+      if role != nil { role = nil }
+      if roleDesc != nil { roleDesc = nil }
+    }
     AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
     AXUIElementCopyAttributeValue(element, kAXRoleDescriptionAttribute as CFString, &roleDesc)
     let roleStr = (role as? String) ?? "unknown"

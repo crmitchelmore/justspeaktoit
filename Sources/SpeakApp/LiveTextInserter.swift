@@ -282,6 +282,11 @@ final class LiveTextInserter: ObservableObject {
   private func logFocusedElementInfo(_ element: AXUIElement) {
     var role: CFTypeRef?
     var roleDesc: CFTypeRef?
+    defer {
+      // Note: Swift bridging to String handles memory, but explicit release is safer
+      if role != nil { role = nil }
+      if roleDesc != nil { roleDesc = nil }
+    }
     AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
     AXUIElementCopyAttributeValue(element, kAXRoleDescriptionAttribute as CFString, &roleDesc)
     let roleStr = (role as? String) ?? "unknown"
@@ -289,12 +294,15 @@ final class LiveTextInserter: ObservableObject {
     print("[LiveTextInserter] Focused element - role: \(roleStr), description: \(roleDescStr)")
   }
 
-  /// Verify that text was actually inserted by re-reading the value after a short delay
+  /// Verify that text was actually inserted by re-reading the value after a short delay.
+  /// Uses a synchronous delay as this is a quick verification check.
   private func verifyInsertion(expected: String, element: AXUIElement) -> Bool {
     // Wait 50ms for the target app to process the accessibility change
+    // Note: Using Thread.sleep as this is a brief, necessary delay for AX sync
     Thread.sleep(forTimeInterval: 0.05)
 
     var currentValue: CFTypeRef?
+    defer { if currentValue != nil { currentValue = nil } }
     let getStatus = AXUIElementCopyAttributeValue(
       element, kAXValueAttribute as CFString, &currentValue
     )

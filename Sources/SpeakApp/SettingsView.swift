@@ -1955,6 +1955,8 @@ struct SettingsView: View {
             if let commit = commitRef, !commit.isEmpty {
               Label("Commit \(String(commit.prefix(7)))", systemImage: "arrow.triangle.branch")
             }
+            Label(buildType, systemImage: buildType == "Release" ? "checkmark.seal" : "wrench.and.screwdriver")
+              .foregroundStyle(buildType == "Release" ? .green : .orange)
           }
           .font(.callout)
           .foregroundStyle(.secondary)
@@ -2042,6 +2044,21 @@ struct SettingsView: View {
 
   private var commitRef: String? {
     Bundle.main.object(forInfoDictionaryKey: "GitCommitSHA") as? String
+  }
+
+  private var buildType: String {
+    // DEBUG builds are development, RELEASE builds check location
+    #if DEBUG
+    return "Development"
+    #else
+    // Release builds typically run from /Applications
+    let bundlePath = Bundle.main.bundlePath
+    if bundlePath.hasPrefix("/Applications") {
+      return "Release"
+    } else {
+      return "Development"
+    }
+    #endif
   }
 
   private func dependencyRow(name: String, version: String, url: String, description: String) -> some View {

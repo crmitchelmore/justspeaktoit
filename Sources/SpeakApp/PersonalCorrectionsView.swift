@@ -2,6 +2,8 @@ import SwiftUI
 
 struct PersonalCorrectionsView: View {
   @EnvironmentObject private var lexicon: PersonalLexiconService
+  @EnvironmentObject private var autoCorrectionTracker: AutoCorrectionTracker
+  @EnvironmentObject private var settings: AppSettings
   @State private var draft = RuleDraft()
   @State private var alertMessage: String?
   @State private var showAdvancedOptions: Bool = false
@@ -19,6 +21,7 @@ struct PersonalCorrectionsView: View {
     ScrollView {
       VStack(alignment: .leading, spacing: 28) {
         hero
+        autoCorrectionsSection
         postProcessingInfoBanner
         editorCard
         existingRulesSection
@@ -112,6 +115,151 @@ struct PersonalCorrectionsView: View {
     .overlay(
       RoundedRectangle(cornerRadius: 16, style: .continuous)
         .stroke(Color.brandLagoon.opacity(0.2), lineWidth: 1)
+    )
+  }
+
+  // MARK: - Auto-Corrections Section
+
+  private var autoCorrectionsSection: some View {
+    VStack(alignment: .leading, spacing: 16) {
+      HStack {
+        VStack(alignment: .leading, spacing: 4) {
+          HStack(spacing: 8) {
+            Image(systemName: "wand.and.stars")
+              .foregroundStyle(Color.brandAccent)
+            Text("Auto-Corrections")
+              .font(.headline)
+          }
+          Text("Learn from your edits after transcription")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+        }
+        Spacer()
+        Toggle("", isOn: $settings.autoCorrectionsEnabled)
+          .labelsHidden()
+      }
+
+      if settings.autoCorrectionsEnabled {
+        VStack(alignment: .leading, spacing: 12) {
+          HStack {
+            Text("Promotion threshold:")
+              .font(.callout)
+            Stepper(
+              "\(settings.autoCorrectionsPromotionThreshold) occurrences",
+              value: $settings.autoCorrectionsPromotionThreshold,
+              in: 2...10
+            )
+            .font(.callout)
+          }
+
+          if !autoCorrectionTracker.candidates.isEmpty {
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+              HStack {
+                Text("Candidate Corrections")
+                  .font(.subheadline.bold())
+                Text("(\(autoCorrectionTracker.candidates.count))")
+                  .font(.subheadline)
+                  .foregroundStyle(.secondary)
+                Spacer()
+                if autoCorrectionTracker.candidates.count > 0 {
+                  Button("Clear All", role: .destructive) {
+                    autoCorrectionTracker.clearAllCandidates()
+                  }
+                  .font(.caption)
+                  .buttonStyle(.borderless)
+                }
+              }
+
+              ForEach(autoCorrectionTracker.candidates.prefix(10)) { candidate in
+                candidateRow(candidate)
+              }
+
+              if autoCorrectionTracker.candidates.count > 10 {
+                Text("...and \(autoCorrectionTracker.candidates.count - 10) more")
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+              }
+            }
+          } else if autoCorrectionTracker.isMonitoring {
+            HStack(spacing: 8) {
+              ProgressView()
+                .scaleEffect(0.7)
+              Text("Monitoring for corrections...")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+          }
+        }
+      }
+    }
+    .padding(20)
+    .background(
+      RoundedRectangle(cornerRadius: 16, style: .continuous)
+        .fill(Color.brandAccent.opacity(0.06))
+    )
+    .overlay(
+      RoundedRectangle(cornerRadius: 16, style: .continuous)
+        .stroke(Color.brandAccent.opacity(0.15), lineWidth: 1)
+    )
+  }
+
+  private func candidateRow(_ candidate: AutoCorrectionCandidate) -> some View {
+    HStack(spacing: 12) {
+      VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: 6) {
+          Text(candidate.original)
+            .strikethrough()
+            .foregroundStyle(.secondary)
+          Image(systemName: "arrow.right")
+            .font(.caption)
+            .foregroundStyle(.tertiary)
+          Text(candidate.corrected)
+            .fontWeight(.medium)
+        }
+        .font(.callout)
+
+        HStack(spacing: 8) {
+          Text("Seen \(candidate.seenCount)×")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+          if !candidate.sourceApps.isEmpty {
+            Text("in \(candidate.sourceApps.joined(separator: ", "))")
+              .font(.caption2)
+              .foregroundStyle(.tertiary)
+          }
+        }
+      }
+
+      Spacer()
+
+      HStack(spacing: 8) {
+        Button {
+          Task {
+            await autoCorrectionTracker.promoteCandidate(candidate)
+          }
+        } label: {
+          Image(systemName: "checkmark.circle")
+        }
+        .buttonStyle(.borderless)
+        .help("Add as correction rule")
+
+        Button {
+          autoCorrectionTracker.dismissCandidate(id: candidate.id)
+        } label: {
+          Image(systemName: "xmark.circle")
+        }
+        .buttonStyle(.borderless)
+        .foregroundStyle(.secondary)
+        .help("Dismiss")
+      }
+    }
+    .padding(.vertical, 6)
+    .padding(.horizontal, 10)
+    .background(
+      RoundedRectangle(cornerRadius: 8, style: .continuous)
+        .fill(Color(nsColor: .controlBackgroundColor))
     )
   }
 
@@ -221,8 +369,18 @@ struct PersonalCorrectionsView: View {
     VStack(alignment: .leading, spacing: 10) {
       HStack(alignment: .top) {
         VStack(alignment: .leading, spacing: 4) {
-          Text(rule.canonical)
-            .font(.headline)
+          HStack(spacing: 6) {
+            Text(rule.canonical)
+              .font(.headline)
+            if rule.source == .automatic {
+              Text("AUTO")
+                .font(.caption2.bold())
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Capsule().fill(Color.brandAccent.opacity(0.15)))
+                .foregroundStyle(Color.brandAccent)
+            }
+          }
           if !rule.aliases.isEmpty {
             Text("Heard as: \(rule.aliases.joined(separator: ", "))")
               .font(.subheadline)

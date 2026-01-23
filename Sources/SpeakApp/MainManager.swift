@@ -1,4 +1,5 @@
 import SpeakCore
+import ApplicationServices
 import AVFoundation
 import AppKit
 import Combine
@@ -43,6 +44,7 @@ final class MainManager: ObservableObject {
   private let livePolishManager: LivePolishManager
   private let liveTextInserter: LiveTextInserter
   private let textProcessor: TranscriptionTextProcessor
+  private let autoCorrectionTracker: AutoCorrectionTracker
   private let logger = Logger(subsystem: "com.github.speakapp", category: "MainManager")
 
   private var activeSession: ActiveSession?
@@ -74,7 +76,8 @@ final class MainManager: ObservableObject {
     openRouterClient: OpenRouterAPIClient,
     livePolishManager: LivePolishManager,
     liveTextInserter: LiveTextInserter,
-    textProcessor: TranscriptionTextProcessor
+    textProcessor: TranscriptionTextProcessor,
+    autoCorrectionTracker: AutoCorrectionTracker
   ) {
     self.appSettings = appSettings
     self.permissionsManager = permissionsManager
@@ -89,6 +92,7 @@ final class MainManager: ObservableObject {
     self.livePolishManager = livePolishManager
     self.liveTextInserter = liveTextInserter
     self.textProcessor = textProcessor
+    self.autoCorrectionTracker = autoCorrectionTracker
 
     transcriptionManager.$livePartialText
       .receive(on: RunLoop.main)
@@ -614,12 +618,17 @@ final class MainManager: ObservableObject {
           return
         }
       }
+
+      // Start monitoring for user corrections (auto-corrections feature)
+      let focusedElement = getFocusedElement()
+      let appName = NSWorkspace.shared.frontmostApplication?.localizedName
+      autoCorrectionTracker.startMonitoring(insertedText: finalText, element: focusedElement, app: appName)
+
       session.outputDelivered = Date()
 
       session.events.append(
         HistoryEvent(kind: .outputDelivered, description: "Output delivered successfully")
       )
-      let appName = NSWorkspace.shared.frontmostApplication?.localizedName
       session.destination = appName
       session.lexiconContext = makeLexiconContext(for: finalText, destination: appName)
       if let summary = session.personalCorrections {
@@ -1171,6 +1180,18 @@ final class MainManager: ObservableObject {
     audioLevelTimer = nil
     silenceStartTime = nil
     hudManager.updateAudioLevel(0)
+  }
+
+  private func getFocusedElement() -> AXUIElement? {
+    let systemWideElement = AXUIElementCreateSystemWide()
+    var rawFocused: CFTypeRef?
+    let copyStatus = AXUIElementCopyAttributeValue(
+      systemWideElement, kAXFocusedUIElementAttribute as CFString, &rawFocused
+    )
+    guard copyStatus == .success, let rawFocused else {
+      return nil
+    }
+    return unsafeBitCast(rawFocused, to: AXUIElement.self)
   }
 }
 extension MainManager {

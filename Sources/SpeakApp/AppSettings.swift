@@ -211,6 +211,8 @@ final class AppSettings: ObservableObject {
     case voiceCommandsEnabled
     case clipboardInsertionTriggers
     case enableSendToMac
+    case autoCorrectionsEnabled
+    case autoCorrectionsPromotionThreshold
   }
 
   private static let defaultBatchTranscriptionModel = "google/gemini-2.0-flash-001"
@@ -508,6 +510,18 @@ final class AppSettings: ObservableObject {
     didSet { store(enableSendToMac, key: .enableSendToMac) }
   }
 
+  // MARK: - Auto-Corrections
+
+  /// Enable automatic detection of user corrections after transcription
+  @Published var autoCorrectionsEnabled: Bool {
+    didSet { store(autoCorrectionsEnabled, key: .autoCorrectionsEnabled) }
+  }
+
+  /// Number of times a correction must be seen before auto-promoting to a rule
+  @Published var autoCorrectionsPromotionThreshold: Int {
+    didSet { store(autoCorrectionsPromotionThreshold, key: .autoCorrectionsPromotionThreshold) }
+  }
+
   private var supportsSpeedModeProcessing: Bool {
     transcriptionMode == .liveNative && liveTranscriptionModel.contains("streaming")
   }
@@ -673,6 +687,12 @@ final class AppSettings: ObservableObject {
       Float(defaults.object(forKey: DefaultsKey.silenceThreshold.rawValue) as? Double ?? 0.05)
     silenceDuration =
       defaults.object(forKey: DefaultsKey.silenceDuration.rawValue) as? Double ?? 2.0
+
+    // Auto-Corrections Settings
+    autoCorrectionsEnabled =
+      defaults.object(forKey: DefaultsKey.autoCorrectionsEnabled.rawValue) as? Bool ?? true
+    autoCorrectionsPromotionThreshold =
+      defaults.object(forKey: DefaultsKey.autoCorrectionsPromotionThreshold.rawValue) as? Int ?? 2
 
     ensureRecordingsDirectoryExists()
   }

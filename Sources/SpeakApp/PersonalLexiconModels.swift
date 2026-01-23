@@ -18,6 +18,7 @@ struct PersonalLexiconRule: Identifiable, Codable, Equatable {
   var contextTags: Set<String>
   var confidence: PersonalLexiconConfidence
   var notes: String?
+  var source: PersonalLexiconRuleSource
   var createdAt: Date
   var updatedAt: Date
 
@@ -30,6 +31,7 @@ struct PersonalLexiconRule: Identifiable, Codable, Equatable {
     contextTags: Set<String>,
     confidence: PersonalLexiconConfidence,
     notes: String?,
+    source: PersonalLexiconRuleSource = .manual,
     createdAt: Date = Date(),
     updatedAt: Date = Date()
   ) {
@@ -41,6 +43,7 @@ struct PersonalLexiconRule: Identifiable, Codable, Equatable {
     self.contextTags = contextTags
     self.confidence = confidence
     self.notes = notes
+    self.source = source
     self.createdAt = createdAt
     self.updatedAt = updatedAt
   }
@@ -66,6 +69,7 @@ struct PersonalLexiconRule: Identifiable, Codable, Equatable {
       contextTags: Set(contextTags.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }),
       confidence: confidence,
       notes: notes?.trimmingCharacters(in: .whitespacesAndNewlines),
+      source: source,
       createdAt: createdAt,
       updatedAt: updatedAt
     )

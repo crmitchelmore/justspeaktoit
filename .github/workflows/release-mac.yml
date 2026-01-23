@@ -95,8 +95,9 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           # Update CFBundleShortVersionString (marketing version like 0.2.3)
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" Config/AppInfo.plist
-          # Update CFBundleVersion (build number - use timestamp for uniqueness)
-          BUILD_NUMBER=$(date +%Y%m%d%H%M)
+          # Update CFBundleVersion (build number - use GITHUB_RUN_NUMBER for consistency)
+          # IMPORTANT: This must match sparkle:version in appcast.xml for Sparkle update detection
+          BUILD_NUMBER="${{ github.run_number }}"
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" Config/AppInfo.plist
           # Stamp the git commit SHA
           COMMIT_SHA="${{ github.sha }}"
@@ -236,12 +237,16 @@ jobs:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
           VERSION="${{ steps.version.outputs.version }}"
+          # Use GITHUB_RUN_NUMBER as monotonically increasing build number
+          # This ensures sparkle:version matches CFBundleVersion for proper update detection
+          BUILD_NUMBER="${{ github.run_number }}"
           DMG_PATH="${{ env.DMG_PATH }}"
           
           chmod +x scripts/generate-appcast.sh
-          ./scripts/generate-appcast.sh "$VERSION" "$DMG_PATH" "$SPARKLE_PRIVATE_KEY" > "$RUNNER_TEMP/appcast.xml"
+          ./scripts/generate-appcast.sh "$VERSION" "$BUILD_NUMBER" "$DMG_PATH" "$SPARKLE_PRIVATE_KEY" > "$RUNNER_TEMP/appcast.xml"
           
           echo "APPCAST_PATH=$RUNNER_TEMP/appcast.xml" >> "$GITHUB_ENV"
+          echo "BUILD_NUMBER=$BUILD_NUMBER" >> "$GITHUB_ENV"
           echo "Generated appcast.xml:"
           cat "$RUNNER_TEMP/appcast.xml"
 

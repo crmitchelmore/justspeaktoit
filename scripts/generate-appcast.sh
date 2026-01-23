@@ -1,15 +1,18 @@
 #!/bin/bash
 # Generate Sparkle appcast.xml from GitHub release
-# Usage: ./scripts/generate-appcast.sh <version> <dmg-path> <private-key-base64>
+# Usage: ./scripts/generate-appcast.sh <version> <build-number> <dmg-path> <private-key-base64>
 
 set -e
 
 VERSION="$1"
-DMG_PATH="$2"
-PRIVATE_KEY_BASE64="$3"
+BUILD_NUMBER="$2"
+DMG_PATH="$3"
+PRIVATE_KEY_BASE64="$4"
 
-if [ -z "$VERSION" ] || [ -z "$DMG_PATH" ] || [ -z "$PRIVATE_KEY_BASE64" ]; then
-    echo "Usage: $0 <version> <dmg-path> <private-key-base64>"
+if [ -z "$VERSION" ] || [ -z "$BUILD_NUMBER" ] || [ -z "$DMG_PATH" ] || [ -z "$PRIVATE_KEY_BASE64" ]; then
+    echo "Usage: $0 <version> <build-number> <dmg-path> <private-key-base64>"
+    echo "  version: Marketing version (e.g., 0.5.0) for display"
+    echo "  build-number: Build number (e.g., 43) for Sparkle comparison"
     exit 1
 fi
 
@@ -84,6 +87,8 @@ if [ -z "$RELEASE_NOTES" ]; then
 fi
 
 # Generate appcast XML
+# IMPORTANT: sparkle:version MUST match the app's CFBundleVersion (build number)
+# for Sparkle to correctly detect updates. sparkle:shortVersionString is for display only.
 cat << EOF
 <?xml version="1.0" encoding="utf-8"?>
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
@@ -94,7 +99,7 @@ cat << EOF
     <language>en</language>
     <item>
       <title>Version ${VERSION}</title>
-      <sparkle:version>${VERSION}</sparkle:version>
+      <sparkle:version>${BUILD_NUMBER}</sparkle:version>
       <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
       <pubDate>${PUB_DATE}</pubDate>
       <description><![CDATA[

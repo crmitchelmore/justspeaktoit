@@ -257,25 +257,46 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Update Landing Page Appcast
+      - name: Update Landing Page Appcast via PR
         if: startsWith(github.ref, 'refs/tags/')
-        continue-on-error: true  # Don't fail release if branch protection blocks push
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Fetch and checkout main branch (we're on a detached tag checkout)
+          VERSION="${{ steps.version.outputs.version }}"
+          BRANCH_NAME="chore/appcast-v${VERSION}"
+          
+          # Configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Fetch main and create branch from it
           git fetch origin main
-          git checkout main
+          git checkout -b "$BRANCH_NAME" origin/main
           
           # Copy the generated appcast to landing page
           cp "$RUNNER_TEMP/appcast.xml" landing-page/appcast.xml
           
-          # Commit and push the updated appcast
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Commit and push the branch
           git add landing-page/appcast.xml
-          git commit -m "chore: update appcast.xml for v${{ steps.version.outputs.version }}" || echo "No changes to commit"
-          git push origin main || echo "⚠️ Could not push appcast update (branch protection). Please update landing-page/appcast.xml manually."
+          git commit -m "chore: update appcast.xml for v${VERSION}"
+          git push origin "$BRANCH_NAME"
+          
+          # Create PR with auto-merge enabled
+          PR_URL=$(gh pr create \
+            --title "chore: update appcast.xml for v${VERSION}" \
+            --body "Auto-generated PR to update the Sparkle appcast for v${VERSION} release.
+
+This updates the landing page appcast.xml so users can receive the update via Sparkle.
+
+---
+_This PR was created automatically by the release workflow._" \
+            --base main \
+            --head "$BRANCH_NAME")
+          
+          echo "Created PR: $PR_URL"
+          
+          # Enable auto-merge (will merge once CI passes)
+          gh pr merge "$PR_URL" --auto --squash || echo "Auto-merge not available, PR needs manual merge"
 
       - name: Upload Artifact (for manual builds)
         if: "!startsWith(github.ref, 'refs/tags/')"

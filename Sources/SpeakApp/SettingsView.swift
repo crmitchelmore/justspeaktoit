@@ -2005,6 +2005,29 @@ struct SettingsView: View {
         }
       }
 
+      SettingsCard(title: "Support Development", systemImage: "heart.fill", tint: Color.pink) {
+        VStack(alignment: .leading, spacing: 12) {
+          Text("If you find this app useful, consider leaving a tip to support continued development.")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+
+          TipJarView()
+            .frame(maxWidth: .infinity)
+
+          HStack(spacing: 12) {
+            Link(destination: URL(string: "https://github.com/sponsors/crmitchelmore")!) {
+              Label("GitHub Sponsors", systemImage: "heart")
+            }
+            .buttonStyle(.bordered)
+
+            Link(destination: URL(string: "https://ko-fi.com/crmitchelmore")!) {
+              Label("Ko-fi", systemImage: "cup.and.saucer")
+            }
+            .buttonStyle(.bordered)
+          }
+        }
+      }
+
       SettingsCard(title: "Dependencies", systemImage: "shippingbox", tint: Color.orange) {
         VStack(alignment: .leading, spacing: 8) {
           Text("This app is built with the following open-source libraries:")

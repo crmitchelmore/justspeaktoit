@@ -3,8 +3,7 @@ import SwiftUI
 
 /// A view presenting tip jar options for supporting development.
 struct TipJarView: View {
-    @StateObject private var store = TipStore.shared
-    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var store = TipStore.shared
 
     var body: some View {
         VStack(spacing: 20) {
@@ -43,7 +42,7 @@ struct TipJarView: View {
         } else {
             VStack(spacing: 12) {
                 ForEach(store.products, id: \.id) { product in
-                    TipButton(product: product, store: store)
+                    TipButton(product: product, isPurchasing: store.purchaseState == .purchasing)
                 }
             }
         }
@@ -55,10 +54,9 @@ struct TipJarView: View {
         case .purchased:
             Label("Thank you!", systemImage: "checkmark.circle.fill")
                 .foregroundStyle(.green)
-                .onAppear {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                        store.resetState()
-                    }
+                .task {
+                    try? await Task.sleep(for: .seconds(2))
+                    store.resetState()
                 }
         case .failed(let message):
             Label(message, systemImage: "xmark.circle.fill")
@@ -78,7 +76,7 @@ struct TipJarView: View {
 
 private struct TipButton: View {
     let product: Product
-    @ObservedObject var store: TipStore
+    let isPurchasing: Bool
 
     private var emoji: String {
         switch product.id {
@@ -91,7 +89,9 @@ private struct TipButton: View {
 
     var body: some View {
         Button {
-            Task { await store.purchase(product) }
+            Task { @MainActor in
+                await TipStore.shared.purchase(product)
+            }
         } label: {
             HStack {
                 Text(emoji)
@@ -106,7 +106,7 @@ private struct TipButton: View {
             .clipShape(RoundedRectangle(cornerRadius: 12))
         }
         .buttonStyle(.plain)
-        .disabled(store.purchaseState == .purchasing)
+        .disabled(isPurchasing)
     }
 }
 

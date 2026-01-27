@@ -24,16 +24,23 @@ final class AudioLevelMonitor: ObservableObject {
         self.recorder = recorder
         isMonitoring = true
 
-        // Poll at ~30fps (33ms interval)
-        pollingTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) {
-            [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.updateLevel()
-            }
-        }
+        // Use target-selector Timer pattern to completely bypass Swift concurrency runtime.
+        // Block-based timers with [weak self] can crash in swift_getObjectType during
+        // executor verification if the object is deallocating.
+        pollingTimer = Timer.scheduledTimer(
+            timeInterval: 1.0 / 30.0,
+            target: self,
+            selector: #selector(pollingTimerFired),
+            userInfo: nil,
+            repeats: true
+        )
         if let timer = pollingTimer {
             RunLoop.main.add(timer, forMode: .common)
         }
+    }
+    
+    @objc private func pollingTimerFired() {
+        updateLevel()
     }
 
     /// Stop monitoring audio levels.

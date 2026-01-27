@@ -155,32 +155,47 @@ final class HUDManager: ObservableObject {
 
     guard showsTimer else { return }
 
-    timer = Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { [weak self] _ in
-      MainActor.assumeIsolated {
-        guard let self, let start = self.phaseStartDate else { return }
-        let elapsed = Date().timeIntervalSince(start)
-        self.snapshot.elapsed = elapsed
-      }
-    }
+    // Use target-selector Timer pattern to completely bypass Swift concurrency runtime.
+    // Block-based timers with [weak self] can crash in swift_getObjectType during
+    // executor verification if the object is deallocating.
+    timer = Timer.scheduledTimer(
+      timeInterval: 0.02,
+      target: self,
+      selector: #selector(elapsedTimerFired),
+      userInfo: nil,
+      repeats: true
+    )
     if let timer {
       RunLoop.main.add(timer, forMode: .common)
     }
+  }
+  
+  @objc private func elapsedTimerFired() {
+    guard let start = phaseStartDate else { return }
+    let elapsed = Date().timeIntervalSince(start)
+    snapshot.elapsed = elapsed
   }
 
   private func scheduleAutoHide(after delay: TimeInterval) {
     autoHideTimer?.invalidate()
     guard delay > 0 else { return }
-    autoHideTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
-      MainActor.assumeIsolated {
-        guard let self else { return }
-        defer { self.autoHideTimer = nil }
-        guard self.snapshot.phase.isTerminal else { return }
-        self.hide()
-      }
-    }
+    // Use target-selector Timer pattern to completely bypass Swift concurrency runtime.
+    autoHideTimer = Timer.scheduledTimer(
+      timeInterval: delay,
+      target: self,
+      selector: #selector(autoHideTimerFired),
+      userInfo: nil,
+      repeats: false
+    )
     if let autoHideTimer {
       RunLoop.main.add(autoHideTimer, forMode: .common)
     }
+  }
+  
+  @objc private func autoHideTimerFired() {
+    defer { autoHideTimer = nil }
+    guard snapshot.phase.isTerminal else { return }
+    hide()
   }
 
   private func invalidateTimers() {

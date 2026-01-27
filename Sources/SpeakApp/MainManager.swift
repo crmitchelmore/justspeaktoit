@@ -54,6 +54,10 @@ final class MainManager: ObservableObject {
   private var lastDoubleTapEventUptime: TimeInterval = 0
   private var audioLevelTimer: Timer?
   private var silenceStartTime: Date?
+  // Cached silence settings for timer callback (avoids @Published access in hot path)
+  private var cachedSilenceEnabled: Bool = false
+  private var cachedSilenceThreshold: Float = 0
+  private var cachedSilenceDuration: TimeInterval = 0
 
   private struct RetryData {
     let transcriptionResult: TranscriptionResult
@@ -1133,23 +1137,35 @@ final class MainManager: ObservableObject {
     
     // Cache silence detection settings to avoid repeated @Published property access
     // during high-frequency timer callbacks (30Hz)
-    let silenceEnabled = appSettings.silenceDetectionEnabled
-    let threshold = appSettings.silenceThreshold
-    let duration = appSettings.silenceDuration
+    cachedSilenceEnabled = appSettings.silenceDetectionEnabled
+    cachedSilenceThreshold = appSettings.silenceThreshold
+    cachedSilenceDuration = appSettings.silenceDuration
     
-    audioLevelTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) {
-      [weak self] _ in
-      MainActor.assumeIsolated {
-        guard let self else { return }
-        // Timer runs on RunLoop.main, so we're already on MainActor
-        let level = self.audioFileManager.getCurrentAudioLevel()
-        self.hudManager.updateAudioLevel(level)
-        self.checkSilenceDetection(level: level, enabled: silenceEnabled, threshold: threshold, duration: duration)
-      }
-    }
+    // Use target-selector Timer pattern to completely bypass Swift concurrency runtime.
+    // Block-based timers with [weak self] can crash in swift_getObjectType during
+    // executor verification if the object is deallocating.
+    audioLevelTimer = Timer.scheduledTimer(
+      timeInterval: 1.0 / 30.0,
+      target: self,
+      selector: #selector(audioLevelTimerFired),
+      userInfo: nil,
+      repeats: true
+    )
     if let timer = audioLevelTimer {
       RunLoop.main.add(timer, forMode: .common)
     }
+  }
+  
+  @objc private func audioLevelTimerFired() {
+    // This runs on main thread via RunLoop.main. No Swift concurrency checks.
+    let level = audioFileManager.getCurrentAudioLevel()
+    hudManager.updateAudioLevel(level)
+    checkSilenceDetection(
+      level: level,
+      enabled: cachedSilenceEnabled,
+      threshold: cachedSilenceThreshold,
+      duration: cachedSilenceDuration
+    )
   }
 
   private func checkSilenceDetection(level: Float, enabled: Bool, threshold: Float, duration: TimeInterval) {

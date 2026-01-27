@@ -183,20 +183,27 @@ extension TranscriptionManager: LiveTranscriptionSessionDelegate {
     _ session: any LiveTranscriptionController,
     didFinishWith result: TranscriptionResult
   ) {
+    // Guard against double-resume of continuation - the controllers have their own
+    // guards but this is belt-and-suspenders safety
+    guard let cont = continuation else {
+      // Already finished or no continuation - log but don't crash
+      print("[TranscriptionManager] didFinishWith called but no continuation (already finished?)")
+      return
+    }
+    continuation = nil
     isLiveTranscribing = false
     livePartialText = result.text
     liveTextIsFinal = true
     liveTextConfidence = result.confidence
-    continuation?.resume(returning: result)
-    continuation = nil
+    cont.resume(returning: result)
   }
 
   func liveTranscriber(_ session: any LiveTranscriptionController, didFail error: Error) {
-    if continuation != nil {
+    if let cont = continuation {
       // We're in the middle of stopping - resume with the error
-      continuation?.resume(throwing: error)
       continuation = nil
       isLiveTranscribing = false
+      cont.resume(throwing: error)
     } else {
       // Error happened mid-session - store it for when stop is called
       pendingError = error
@@ -220,6 +227,8 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
   private var currentModel: String?
   private var latestResult: SFSpeechRecognitionResult?
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
+  /// Guards against calling finish() more than once per session.
+  private var hasFinished: Bool = false
 
   init(
     permissionsManager: PermissionsManager,
@@ -274,6 +283,7 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
     }
 
     latestResult = nil
+    hasFinished = false
     recognitionTask = recognizer.recognitionTask(with: request!) { [weak self] result, error in
       guard let self else { return }
       if let result {
@@ -334,6 +344,11 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
   }
 
   private func finish(with result: SFSpeechRecognitionResult) {
+    // Guard against double finish - can happen if recognition callback delivers
+    // a final result at the same time stop() is called
+    guard !hasFinished else { return }
+    hasFinished = true
+    
     Task { await self.endActiveInputSession() }
 
     let segments = result.bestTranscription.segments.map { segment in
@@ -412,6 +427,8 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
   private let audioEngine = AVAudioEngine()
   private let logger = Logger(subsystem: "com.speak.app", category: "DeepgramLiveController")
   private let audioProcessor = DeepgramAudioProcessor()
+  /// Guards against calling didFinishWith more than once per session.
+  private var hasFinished: Bool = false
 
   /// Deepgram's preferred audio format: 16kHz mono PCM16
   private let deepgramSampleRate: Double = 16000
@@ -474,6 +491,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
     currentInterim = ""
     fullTranscript = ""
     streamingStartTime = nil
+    hasFinished = false
 
     // Get audio format from device
     let inputNode = audioEngine.inputNode
@@ -697,6 +715,12 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
   func stop() async {
     print("[DeepgramLiveController] Stopping...")
     guard isRunning else { return }
+    // Guard against double finish - this should only be called once per session
+    guard !hasFinished else {
+      print("[DeepgramLiveController] Already finished, skipping duplicate stop")
+      return
+    }
+    hasFinished = true
 
     audioEngine.stop()
     audioEngine.inputNode.removeTap(onBus: 0)

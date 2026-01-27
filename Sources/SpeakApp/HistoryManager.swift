@@ -148,9 +148,8 @@ final class HistoryManager: ObservableObject {
       queue: .main
     ) { [weak self] _ in
       guard let self else { return }
-      Task { @MainActor in
-        await self.flushImmediately()
-      }
+      // Termination notifications run on main thread - call sync wrapper
+      self.flushImmediatelySync()
     }
   }
 
@@ -160,9 +159,7 @@ final class HistoryManager: ObservableObject {
     flushTimer?.invalidate()
     flushTimer = Timer.scheduledTimer(withTimeInterval: flushInterval, repeats: true) { [weak self] _ in
       guard let self else { return }
-      Task { @MainActor in
-        await self.flushIfNeeded()
-      }
+      self.flushIfNeededSync()
     }
   }
 
@@ -272,6 +269,25 @@ final class HistoryManager: ObservableObject {
   private func flushIfNeeded() async {
     guard !pendingWrites.isEmpty, !isFlushing else { return }
     await flushImmediately()
+  }
+
+  /// Sync wrapper for timer callback - timer already runs on main thread
+  private func flushIfNeededSync() {
+    guard !pendingWrites.isEmpty, !isFlushing else { return }
+    Task.detached { [weak self] in
+      await self?.flushImmediately()
+    }
+  }
+
+  /// Sync wrapper for termination - uses semaphore to block until complete
+  private func flushImmediatelySync() {
+    guard !pendingWrites.isEmpty, !isFlushing else { return }
+    let semaphore = DispatchSemaphore(value: 0)
+    Task.detached { [weak self] in
+      await self?.flushImmediately()
+      semaphore.signal()
+    }
+    _ = semaphore.wait(timeout: .now() + 5.0)
   }
 
   /// Force immediate flush of all pending writes

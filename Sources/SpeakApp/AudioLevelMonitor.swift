@@ -27,7 +27,7 @@ final class AudioLevelMonitor: ObservableObject {
         // Poll at ~30fps (33ms interval)
         pollingTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) {
             [weak self] _ in
-            Task { @MainActor [weak self] in
+            MainActor.assumeIsolated {
                 self?.updateLevel()
             }
         }

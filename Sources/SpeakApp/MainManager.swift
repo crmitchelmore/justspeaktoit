@@ -1139,12 +1139,13 @@ final class MainManager: ObservableObject {
     
     audioLevelTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) {
       [weak self] _ in
-      guard let self else { return }
-      // Timer runs on RunLoop.main, so we're already on MainActor
-      // Call methods directly without creating a Task to avoid race conditions
-      let level = self.audioFileManager.getCurrentAudioLevel()
-      self.hudManager.updateAudioLevel(level)
-      self.checkSilenceDetection(level: level, enabled: silenceEnabled, threshold: threshold, duration: duration)
+      MainActor.assumeIsolated {
+        guard let self else { return }
+        // Timer runs on RunLoop.main, so we're already on MainActor
+        let level = self.audioFileManager.getCurrentAudioLevel()
+        self.hudManager.updateAudioLevel(level)
+        self.checkSilenceDetection(level: level, enabled: silenceEnabled, threshold: threshold, duration: duration)
+      }
     }
     if let timer = audioLevelTimer {
       RunLoop.main.add(timer, forMode: .common)

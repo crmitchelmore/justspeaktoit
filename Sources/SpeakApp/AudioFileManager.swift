@@ -38,7 +38,9 @@ actor AudioFileManager {
   private let appSettings: AppSettings
   private let permissionsManager: PermissionsManager
   private let audioDeviceManager: AudioInputDeviceManager
-  private var recorder: AVAudioRecorder?
+  // nonisolated(unsafe) allows thread-safe metering access from timer callbacks
+  // AVAudioRecorder metering methods are documented as thread-safe
+  nonisolated(unsafe) private var recorder: AVAudioRecorder?
   private var currentRecordingID: UUID?
   private var currentRecordingStart: Date?
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
@@ -55,8 +57,11 @@ actor AudioFileManager {
 
   /// Returns the current audio level (0.0 to 1.0) if recording is active.
   /// Call this periodically (~30fps) to get updated levels.
-  func getCurrentAudioLevel() -> Float {
-    guard let recorder = recorder, recorder.isRecording else { return 0 }
+  /// Note: nonisolated because it only reads from AVAudioRecorder which is thread-safe for metering
+  nonisolated func getCurrentAudioLevel() -> Float {
+    // AVAudioRecorder metering methods are documented as thread-safe
+    // We access recorder directly without actor isolation for 30fps polling performance
+    guard let recorder = self.recorder, recorder.isRecording else { return 0 }
     recorder.updateMeters()
 
     let averagePower = recorder.averagePower(forChannel: 0)

@@ -156,7 +156,7 @@ final class HUDManager: ObservableObject {
     guard showsTimer else { return }
 
     timer = Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { [weak self] _ in
-      Task { @MainActor [weak self] in
+      MainActor.assumeIsolated {
         guard let self, let start = self.phaseStartDate else { return }
         let elapsed = Date().timeIntervalSince(start)
         self.snapshot.elapsed = elapsed
@@ -171,7 +171,7 @@ final class HUDManager: ObservableObject {
     autoHideTimer?.invalidate()
     guard delay > 0 else { return }
     autoHideTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
-      Task { @MainActor [weak self] in
+      MainActor.assumeIsolated {
         guard let self else { return }
         defer { self.autoHideTimer = nil }
         guard self.snapshot.phase.isTerminal else { return }

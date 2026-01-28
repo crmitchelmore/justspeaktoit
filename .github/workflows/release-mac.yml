@@ -295,6 +295,59 @@ jobs:
           command: pages deploy landing-page --project-name=justspeaktoit
           workingDirectory: ${{ github.workspace }}
 
+      - name: Update Homebrew Tap
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          DMG_PATH="${{ env.DMG_PATH }}"
+          SHA256=$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')
+          
+          echo "==> Updating Homebrew tap for version $VERSION"
+          echo "    SHA256: $SHA256"
+          
+          # Clone the tap repo
+          git clone https://x-access-token:${GH_TOKEN}@github.com/crmitchelmore/homebrew-justspeaktoit.git /tmp/homebrew-tap
+          cd /tmp/homebrew-tap
+          
+          # Update the cask file
+          cat > Casks/justspeaktoit.rb << EOF
+          cask "justspeaktoit" do
+            version "$VERSION"
+            sha256 "$SHA256"
+
+            url "https://github.com/crmitchelmore/justspeaktoit/releases/download/v#{version}/JustSpeakToIt-#{version}.dmg"
+            name "Just Speak to It"
+            desc "Native macOS voice transcription with on-device or cloud processing"
+            homepage "https://justspeaktoit.com"
+
+            livecheck do
+              url :url
+              strategy :github_latest
+            end
+
+            depends_on macos: ">= :sonoma"
+
+            app "JustSpeakToIt.app"
+
+            zap trash: [
+              "~/Library/Application Support/JustSpeakToIt",
+              "~/Library/Caches/com.justspeaktoit.app",
+              "~/Library/Preferences/com.justspeaktoit.app.plist",
+            ]
+          end
+          EOF
+          
+          # Commit and push
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Casks/justspeaktoit.rb
+          git commit -m "Update Just Speak to It to v$VERSION"
+          git push
+          
+          echo "==> Homebrew tap updated successfully"
+
       - name: Upload Artifact (for manual builds)
         if: "!startsWith(github.ref, 'refs/tags/')"
         uses: actions/upload-artifact@v4

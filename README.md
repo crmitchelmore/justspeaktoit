@@ -19,10 +19,19 @@ Native macOS and iOS voice transcription app built with SwiftUI. Speak naturally
 
 ## Quick Start
 
+### Homebrew (Recommended)
+
+```bash
+brew tap crmitchelmore/justspeaktoit
+brew install --cask justspeaktoit
+```
+
+### Build from Source
+
 ```bash
 # Clone and run (macOS)
-git clone https://github.com/chrismitchelmore/just-speak-to-it.git
-cd just-speak-to-it
+git clone https://github.com/crmitchelmore/justspeaktoit.git
+cd justspeaktoit
 make run
 ```
 

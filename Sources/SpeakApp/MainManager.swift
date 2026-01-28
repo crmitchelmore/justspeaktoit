@@ -46,6 +46,7 @@ final class MainManager: ObservableObject {
   private let textProcessor: TranscriptionTextProcessor
   private let autoCorrectionTracker: AutoCorrectionTracker
   private let logger = Logger(subsystem: "com.github.speakapp", category: "MainManager")
+  private let recordingSoundPlayer = RecordingSoundPlayer()
 
   private var activeSession: ActiveSession?
   private var cancellables: Set<AnyCancellable> = []
@@ -138,6 +139,7 @@ final class MainManager: ObservableObject {
       self.liveTextInserter.update(with: polished)
     }
 
+    recordingSoundPlayer.preload()
     configureHotKeys()
   }
 
@@ -309,6 +311,8 @@ final class MainManager: ObservableObject {
     let session = ActiveSession(gesture: gesture, hotKeyDescription: "Fn")
     activeSession = session
     state = .recording
+
+    recordingSoundPlayer.play(.start, volume: 0.9)
     lastErrorMessage = nil
     polishedLivePreview = ""
     session.events.append(
@@ -364,6 +368,8 @@ final class MainManager: ObservableObject {
         // Ignored: sleep cancellation simply means we stop immediately.
       }
     }
+
+    recordingSoundPlayer.play(.stop, volume: 0.9)
 
     state = .processing
     session.recordingEnded = Date()

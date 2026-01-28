@@ -24,7 +24,8 @@ let project = Project(
             infoPlist: .file(path: "Config/AppInfo.plist"),
             sources: ["Sources/SpeakApp/**"],
             resources: [
-                .glob(pattern: "Resources/AppIcon.icns")
+                .glob(pattern: "Resources/AppIcon.icns"),
+                .glob(pattern: "Resources/Sounds/**")
             ],
             entitlements: .file(path: "Config/SpeakMacOS.entitlements"),
             dependencies: [

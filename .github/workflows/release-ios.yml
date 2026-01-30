@@ -11,9 +11,12 @@ on:
         description: 'Build number (auto-increments if empty)'
         required: false
 
+env:
+  APP_STORE_CONNECT_KEY_ID: S747NJ9DZY
+
 jobs:
   build-and-upload:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
@@ -23,44 +26,49 @@ jobs:
           xcode-version: latest-stable
 
       - name: Install Tuist
-        run: |
-          curl -Ls https://install.tuist.io | bash
-          tuist version
+        run: brew install tuist
 
       - name: Install App Store Connect API Key
         env:
           APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
         run: |
           mkdir -p ~/.appstoreconnect/private_keys
-          echo "$APP_STORE_CONNECT_API_KEY" | base64 --decode > ~/.appstoreconnect/private_keys/AuthKey_S747NJ9DZY.p8
+          echo "$APP_STORE_CONNECT_API_KEY" | base64 --decode > ~/.appstoreconnect/private_keys/AuthKey_${{ env.APP_STORE_CONNECT_KEY_ID }}.p8
 
       - name: Generate Xcode Project
         run: tuist generate --no-open
 
       - name: Determine Build Number
         id: build_number
+        env:
+          INPUT_BUILD_NUMBER: ${{ github.event.inputs.build_number }}
+          RUN_NUMBER: ${{ github.run_number }}
         run: |
-          if [ -n "${{ github.event.inputs.build_number }}" ]; then
-            echo "build=${{ github.event.inputs.build_number }}" >> $GITHUB_OUTPUT
+          if [ -n "$INPUT_BUILD_NUMBER" ]; then
+            echo "build=$INPUT_BUILD_NUMBER" >> $GITHUB_OUTPUT
           else
-            echo "build=${{ github.run_number }}" >> $GITHUB_OUTPUT
+            echo "build=$RUN_NUMBER" >> $GITHUB_OUTPUT
           fi
 
       - name: Build and Archive
         env:
           VERSION: ${{ github.event.inputs.version }}
           BUILD_NUMBER: ${{ steps.build_number.outputs.build }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           xcodebuild archive \
+            -workspace "Just Speak to It.xcworkspace" \
             -scheme SpeakiOS \
             -destination 'generic/platform=iOS' \
             -archivePath build/SpeakiOS.xcarchive \
-            MARKETING_VERSION=$VERSION \
-            CURRENT_PROJECT_VERSION=$BUILD_NUMBER \
+            MARKETING_VERSION="$VERSION" \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
             CODE_SIGN_STYLE=Automatic \
-            DEVELOPMENT_TEAM=${{ secrets.APPLE_TEAM_ID }}
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID"
 
       - name: Export IPA
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           cat > ExportOptions.plist << PLIST
           <?xml version="1.0" encoding="UTF-8"?>
@@ -70,7 +78,7 @@ jobs:
               <key>method</key>
               <string>app-store-connect</string>
               <key>teamID</key>
-              <string>${{ secrets.APPLE_TEAM_ID }}</string>
+              <string>${APPLE_TEAM_ID}</string>
               <key>uploadSymbols</key>
               <true/>
               <key>destination</key>
@@ -88,8 +96,15 @@ jobs:
         env:
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         run: |
+          xcrun notarytool submit build/export/JustSpeakToIt.ipa \
+            --key ~/.appstoreconnect/private_keys/AuthKey_${{ env.APP_STORE_CONNECT_KEY_ID }}.p8 \
+            --key-id ${{ env.APP_STORE_CONNECT_KEY_ID }} \
+            --issuer $APP_STORE_CONNECT_ISSUER_ID \
+            --wait || true
+          
+          # Also use altool for TestFlight upload (notarytool is for notarization)
           xcrun altool --upload-app \
-            -f build/export/*.ipa \
+            -f build/export/JustSpeakToIt.ipa \
             -t ios \
-            --apiKey S747NJ9DZY \
+            --apiKey ${{ env.APP_STORE_CONNECT_KEY_ID }} \
             --apiIssuer $APP_STORE_CONNECT_ISSUER_ID

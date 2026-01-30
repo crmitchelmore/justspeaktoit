@@ -1,4 +1,14 @@
 import ProjectDescription
+import Foundation
+
+// Read version from VERSION file
+let version: String = {
+    let versionFile = URL(fileURLWithPath: #file)
+        .deletingLastPathComponent()
+        .appendingPathComponent("VERSION")
+    return (try? String(contentsOf: versionFile, encoding: .utf8))?
+        .trimmingCharacters(in: .whitespacesAndNewlines) ?? "0.1.0"
+}()
 
 let project = Project(
     name: "Just Speak to It",
@@ -67,7 +77,7 @@ let project = Project(
             settings: .settings(base: [
                 "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
                 "CURRENT_PROJECT_VERSION": "1",
-                "MARKETING_VERSION": "0.1.0"
+                "MARKETING_VERSION": "\(version)"
             ])
         ),
         .target(
@@ -83,7 +93,7 @@ let project = Project(
             ],
             settings: .settings(base: [
                 "CURRENT_PROJECT_VERSION": "1",
-                "MARKETING_VERSION": "0.1.0"
+                "MARKETING_VERSION": "\(version)"
             ])
         )
     ]

@@ -48,7 +48,7 @@ let project = Project(
             deploymentTargets: .iOS("17.0"),
             infoPlist: .extendingDefault(with: [
                 "UILaunchStoryboardName": "LaunchScreen",
-                "UIRequiresFullScreen": true,
+                "UIRequiresFullScreen": false,
                 "CFBundleDisplayName": "Just Speak to It",
                 "NSMicrophoneUsageDescription": "Just Speak to It needs microphone access for voice transcription.",
                 "NSSpeechRecognitionUsageDescription": "Just Speak to It uses speech recognition to transcribe your voice."

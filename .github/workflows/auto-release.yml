@@ -108,6 +108,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           NEW_VERSION="${{ steps.version.outputs.new_version }}"
+
+          if git rev-parse "v$NEW_VERSION" >/dev/null 2>&1; then
+            echo "Tag v$NEW_VERSION already exists. Skipping release."
+            exit 0
+          fi
           
           # Save the current commit SHA (the one that triggered this workflow)
           # We'll tag THIS commit, not a version bump commit

@@ -50,8 +50,10 @@ final class TranscriberCoordinator: ObservableObject {
             currentModel = "apple/local/SFSpeechRecognizer"
         }
         
-        // Start Live Activity
-        activityManager.startActivity(provider: modelDisplayName)
+        // Start Live Activity (if enabled)
+        if settings.liveActivitiesEnabled {
+            activityManager.startActivity(provider: modelDisplayName)
+        }
         
         if currentModel.hasPrefix("deepgram") {
             // Use Deepgram
@@ -98,26 +100,32 @@ final class TranscriberCoordinator: ObservableObject {
         // Update shared state for copy actions
         sharedState.updateTranscript(text)
         
-        // Update Live Activity
-        activityManager.updateActivity(
-            status: .listening,
-            lastSnippet: text,
-            wordCount: wordCount,
-            duration: elapsedSeconds
-        )
+        // Update Live Activity (if enabled)
+        if AppSettings.shared.liveActivitiesEnabled {
+            activityManager.updateActivity(
+                status: .listening,
+                lastSnippet: text,
+                wordCount: wordCount,
+                duration: elapsedSeconds
+            )
+        }
     }
     
     private func handleError(_ error: Error) {
         self.error = error
-        activityManager.reportError(error.localizedDescription)
+        if AppSettings.shared.liveActivitiesEnabled {
+            activityManager.reportError(error.localizedDescription)
+        }
     }
     
     func stop() async -> TranscriptionResult {
         isRunning = false
         let duration = elapsedSeconds
         
-        // Complete Live Activity
-        activityManager.completeActivity(finalWordCount: wordCount, duration: duration)
+        // Complete Live Activity (if enabled)
+        if AppSettings.shared.liveActivitiesEnabled {
+            activityManager.completeActivity(finalWordCount: wordCount, duration: duration)
+        }
         
         if let deepgram = deepgramTranscriber {
             let result = await deepgram.stop()
@@ -167,7 +175,9 @@ final class TranscriberCoordinator: ObservableObject {
         appleTranscriber = nil
         isRunning = false
         startTime = nil
-        activityManager.endActivity()
+        if AppSettings.shared.liveActivitiesEnabled {
+            activityManager.endActivity()
+        }
         sharedState.clear()
     }
 }
@@ -271,6 +281,17 @@ public struct ContentView: View {
                 if let error = newError {
                     errorMessage = error
                     showingError = true
+                }
+            }
+            .task {
+                // Auto-start recording if enabled
+                if AppSettings.shared.autoStartRecording && !coordinator.isRunning {
+                    do {
+                        try await coordinator.start()
+                    } catch {
+                        errorMessage = error.localizedDescription
+                        showingError = true
+                    }
                 }
             }
         }

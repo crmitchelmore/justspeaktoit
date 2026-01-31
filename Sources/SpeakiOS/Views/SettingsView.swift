@@ -21,13 +21,28 @@ public final class AppSettings: ObservableObject {
         didSet { saveToKeychain(key: openRouterAPIKey, for: "openrouter.apiKey") }
     }
     
+    @Published public var liveActivitiesEnabled: Bool {
+        didSet { UserDefaults.standard.set(liveActivitiesEnabled, forKey: "liveActivitiesEnabled") }
+    }
+    
+    @Published public var autoStartRecording: Bool {
+        didSet { UserDefaults.standard.set(autoStartRecording, forKey: "autoStartRecording") }
+    }
+    
     private init() {
         let selected = UserDefaults.standard.string(forKey: "selectedModel") ?? "apple/local/SFSpeechRecognizer"
         let deepgram = Self.loadFromKeychain(for: "deepgram.apiKey") ?? ""
         let openRouter = Self.loadFromKeychain(for: "openrouter.apiKey") ?? ""
+        
+        // Default Live Activities to true if not set
+        let liveActivities = UserDefaults.standard.object(forKey: "liveActivitiesEnabled") as? Bool ?? true
+        let autoStart = UserDefaults.standard.bool(forKey: "autoStartRecording")
+        
         self.selectedModel = selected
         self.deepgramAPIKey = deepgram
         self.openRouterAPIKey = openRouter
+        self.liveActivitiesEnabled = liveActivities
+        self.autoStartRecording = autoStart
         
         // Auto-configure default provider on first launch or when saved model requires missing key
         configureDefaultProviderIfNeeded()
@@ -137,6 +152,28 @@ public struct SettingsView: View {
                 
                 LabeledContent("Language") {
                     Text(Locale.current.identifier)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            
+            Section("Behavior") {
+                Toggle(isOn: $settings.autoStartRecording) {
+                    Label("Auto-Start Recording", systemImage: "mic.badge.plus")
+                }
+                
+                if settings.autoStartRecording {
+                    Text("Recording starts automatically when you open the app.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                
+                Toggle(isOn: $settings.liveActivitiesEnabled) {
+                    Label("Live Activities", systemImage: "platter.filled.bottom.iphone")
+                }
+                
+                if settings.liveActivitiesEnabled {
+                    Text("Shows transcription progress on Lock Screen and Dynamic Island.")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }

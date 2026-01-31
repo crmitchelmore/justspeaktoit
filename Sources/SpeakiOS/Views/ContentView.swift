@@ -184,9 +184,12 @@ final class TranscriberCoordinator: ObservableObject {
 
 public struct ContentView: View {
     @StateObject private var coordinator = TranscriberCoordinator()
+    @ObservedObject private var settings = AppSettings.shared
     @State private var showingError = false
     @State private var errorMessage = ""
     @State private var copied = false
+    @State private var showingPostProcessing = false
+    @State private var displayText = ""  // Text shown in UI (may be post-processed)
     @Namespace private var controlsNamespace
     
     public init() {}
@@ -199,14 +202,14 @@ public struct ContentView: View {
                     ScrollViewReader { proxy in
                         ScrollView {
                             VStack(alignment: .leading, spacing: 12) {
-                                if coordinator.partialText.isEmpty {
+                                if displayText.isEmpty && coordinator.partialText.isEmpty {
                                     Text("Tap the microphone to start transcription")
                                         .font(.title3)
                                         .foregroundStyle(.secondary)
                                         .frame(maxWidth: .infinity, alignment: .center)
                                         .padding(.top, 100)
                                 } else {
-                                    Text(coordinator.partialText)
+                                    Text(displayText.isEmpty ? coordinator.partialText : displayText)
                                         .font(.title3)
                                         .foregroundStyle(.primary)
                                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -216,7 +219,11 @@ public struct ContentView: View {
                             .padding()
                             .id("transcript")
                         }
-                        .onChange(of: coordinator.partialText) { _, _ in
+                        .onChange(of: coordinator.partialText) { _, newText in
+                            // Update display text when recording (unless we have post-processed text)
+                            if coordinator.isRunning {
+                                displayText = ""  // Clear post-processed text during new recording
+                            }
                             withAnimation(.easeOut(duration: 0.2)) {
                                 proxy.scrollTo("transcript", anchor: .bottom)
                             }
@@ -294,6 +301,11 @@ public struct ContentView: View {
                     }
                 }
             }
+            .sheet(isPresented: $showingPostProcessing) {
+                PostProcessingView(initialText: currentText) { processedResult in
+                    displayText = processedResult
+                }
+            }
         }
     }
     
@@ -333,8 +345,23 @@ public struct ContentView: View {
                 .clipShape(Circle())
                 .accessibilityLabel(coordinator.isRunning ? "Stop recording" : "Start recording")
                 
-                // Secondary action - Copy (only visible when there's text)
-                if !coordinator.partialText.isEmpty {
+                // Secondary actions (only visible when there's text and not recording)
+                if hasTextToShow && !coordinator.isRunning {
+                    // Polish/Post-process button
+                    Button {
+                        showingPostProcessing = true
+                    } label: {
+                        Image(systemName: "wand.and.stars")
+                            .font(.system(size: 20))
+                            .frame(width: 48, height: 48)
+                    }
+                    .buttonStyle(.glass)
+                    .tint(.purple)
+                    .clipShape(Circle())
+                    .accessibilityLabel("Polish transcript")
+                    .transition(.scale.combined(with: .opacity))
+                    
+                    // Copy button
                     Button {
                         copyToClipboard()
                     } label: {
@@ -350,7 +377,7 @@ public struct ContentView: View {
                 }
             }
         }
-        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: coordinator.partialText.isEmpty)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: hasTextToShow)
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: coordinator.isRunning)
     }
     #endif
@@ -373,8 +400,23 @@ public struct ContentView: View {
             .clipShape(Circle())
             .accessibilityLabel(coordinator.isRunning ? "Stop recording" : "Start recording")
             
-            // Secondary action - Copy (only visible when there's text)
-            if !coordinator.partialText.isEmpty {
+            // Secondary actions (only visible when there's text and not recording)
+            if hasTextToShow && !coordinator.isRunning {
+                // Polish/Post-process button
+                Button {
+                    showingPostProcessing = true
+                } label: {
+                    Image(systemName: "wand.and.stars")
+                        .font(.system(size: 20))
+                        .frame(width: 48, height: 48)
+                }
+                .buttonStyle(.bordered)
+                .tint(.purple)
+                .clipShape(Circle())
+                .accessibilityLabel("Polish transcript")
+                .transition(.scale.combined(with: .opacity))
+                
+                // Copy button
                 Button {
                     copyToClipboard()
                 } label: {
@@ -388,8 +430,18 @@ public struct ContentView: View {
                 .transition(.scale.combined(with: .opacity))
             }
         }
-        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: coordinator.partialText.isEmpty)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: hasTextToShow)
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: coordinator.isRunning)
+    }
+    
+    // MARK: - Computed Properties
+    
+    private var hasTextToShow: Bool {
+        !displayText.isEmpty || !coordinator.partialText.isEmpty
+    }
+    
+    private var currentText: String {
+        displayText.isEmpty ? coordinator.partialText : displayText
     }
     
     // MARK: - Actions
@@ -398,7 +450,14 @@ public struct ContentView: View {
         if coordinator.isRunning {
             let result = await coordinator.stop()
             print("[ContentView] Final result: \(result.text.count) chars, duration: \(result.duration)s")
+            
+            // Auto post-process if enabled
+            if settings.autoPostProcess && settings.hasOpenRouterKey && !result.text.isEmpty {
+                showingPostProcessing = true
+            }
         } else {
+            // Clear previous text when starting new recording
+            displayText = ""
             do {
                 try await coordinator.start()
             } catch {
@@ -409,7 +468,7 @@ public struct ContentView: View {
     }
     
     private func copyToClipboard() {
-        UIPasteboard.general.string = coordinator.partialText
+        UIPasteboard.general.string = currentText
         copied = true
         Task {
             try? await Task.sleep(for: .seconds(2))

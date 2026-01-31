@@ -137,15 +137,13 @@ public struct SettingsView: View {
                     // Apple Speech (free, on-device)
                     Text("Apple Speech (On-Device)").tag("apple/local/SFSpeechRecognizer")
                     
-                    // Deepgram (requires API key)
-                    if settings.hasDeepgramKey {
-                        Text("Deepgram Nova-2").tag("deepgram/nova-2")
-                        Text("Deepgram Nova").tag("deepgram/nova")
-                    }
+                    // Deepgram options (always shown, but warn if no key)
+                    Text("Deepgram Nova-2").tag("deepgram/nova-2")
+                    Text("Deepgram Nova").tag("deepgram/nova")
                 }
                 
                 if settings.selectedModel.hasPrefix("deepgram") && !settings.hasDeepgramKey {
-                    Label("Deepgram requires API key", systemImage: "exclamationmark.triangle")
+                    Label("Add Deepgram API key below to use this model", systemImage: "exclamationmark.triangle")
                         .foregroundStyle(.orange)
                         .font(.caption)
                 }

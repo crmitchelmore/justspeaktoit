@@ -62,7 +62,8 @@ let project = Project(
                 "CFBundleDisplayName": "Just Speak to It",
                 "NSMicrophoneUsageDescription": "Just Speak to It needs microphone access for voice transcription.",
                 "NSSpeechRecognitionUsageDescription": "Just Speak to It uses speech recognition to transcribe your voice.",
-                "NSCameraUsageDescription": "Just Speak to It does not use the camera, but a linked library requires this declaration."
+                "NSCameraUsageDescription": "Just Speak to It does not use the camera, but a linked library requires this declaration.",
+                "ITSAppUsesNonExemptEncryption": false
             ]),
             sources: ["SpeakiOSApp/**"],
             resources: [

@@ -81,6 +81,7 @@ struct SettingsView: View {
   @State private var ttsProviderValidationStates: [String: ValidationViewState] = [:]
   @State private var showSystemPromptPreview = false
   @State private var systemPromptPreview = ""
+  @State private var showingConfigTransfer = false
   private let openRouterKeyIdentifier = "openrouter.apiKey"
 
   enum ValidationViewState {
@@ -2003,6 +2004,24 @@ struct SettingsView: View {
             .buttonStyle(.bordered)
           }
         }
+      }
+
+      SettingsCard(title: "Transfer to iOS", systemImage: "iphone.and.arrow.forward", tint: Color.cyan) {
+        VStack(alignment: .leading, spacing: 12) {
+          Text("Transfer your API keys and settings to the iOS app by scanning a QR code.")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+          
+          Button {
+            showingConfigTransfer = true
+          } label: {
+            Label("Generate QR Code", systemImage: "qrcode")
+          }
+          .buttonStyle(.bordered)
+        }
+      }
+      .sheet(isPresented: $showingConfigTransfer) {
+        ConfigTransferView(secureStorage: environment.secureStorage)
       }
 
       SettingsCard(title: "Support Development", systemImage: "heart.fill", tint: Color.pink) {

@@ -122,11 +122,27 @@ final class TranscriberCoordinator: ObservableObject {
         if let deepgram = deepgramTranscriber {
             let result = await deepgram.stop()
             deepgramTranscriber = nil
+            
+            // Record to history
+            iOSHistoryManager.shared.recordTranscription(
+                text: result.text,
+                model: currentModel,
+                duration: result.duration
+            )
+            
             startTime = nil
             return result
         } else if let apple = appleTranscriber {
             let result = await apple.stop()
             appleTranscriber = nil
+            
+            // Record to history
+            iOSHistoryManager.shared.recordTranscription(
+                text: result.text,
+                model: currentModel,
+                duration: result.duration
+            )
+            
             startTime = nil
             return result
         }
@@ -229,12 +245,21 @@ public struct ContentView: View {
                 }
                 
                 ToolbarItem(placement: .topBarTrailing) {
-                    NavigationLink {
-                        SettingsView()
-                    } label: {
-                        Image(systemName: "gear")
+                    HStack(spacing: 16) {
+                        NavigationLink {
+                            HistoryView()
+                        } label: {
+                            Image(systemName: "clock.arrow.circlepath")
+                        }
+                        .accessibilityLabel("History")
+                        
+                        NavigationLink {
+                            SettingsView()
+                        } label: {
+                            Image(systemName: "gear")
+                        }
+                        .accessibilityLabel("Settings")
                     }
-                    .accessibilityLabel("Settings")
                 }
             }
             .alert("Error", isPresented: $showingError) {

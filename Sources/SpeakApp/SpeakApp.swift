@@ -1,4 +1,5 @@
 import AppKit
+import Sentry
 import Sparkle
 import SwiftUI
 
@@ -7,6 +8,11 @@ struct SpeakApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var environmentHolder = EnvironmentHolder()
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
+
+    init() {
+        // Initialize Sentry as early as possible
+        SentryManager.start()
+    }
 
     var body: some Scene {
         WindowGroup("Just Speak to It") {

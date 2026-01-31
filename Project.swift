@@ -1,4 +1,14 @@
 import ProjectDescription
+import Foundation
+
+// Read version from VERSION file
+let version: String = {
+    let versionFile = URL(fileURLWithPath: #file)
+        .deletingLastPathComponent()
+        .appendingPathComponent("VERSION")
+    return (try? String(contentsOf: versionFile, encoding: .utf8))?
+        .trimmingCharacters(in: .whitespacesAndNewlines) ?? "0.1.0"
+}()
 
 let project = Project(
     name: "Just Speak to It",
@@ -46,8 +56,18 @@ let project = Project(
             productName: "JustSpeakToIt",
             bundleId: "com.justspeaktoit.ios",
             deploymentTargets: .iOS("17.0"),
-            infoPlist: .default,
+            infoPlist: .extendingDefault(with: [
+                "UILaunchStoryboardName": "LaunchScreen",
+                "UIRequiresFullScreen": false,
+                "CFBundleDisplayName": "Just Speak to It",
+                "NSMicrophoneUsageDescription": "Just Speak to It needs microphone access for voice transcription.",
+                "NSSpeechRecognitionUsageDescription": "Just Speak to It uses speech recognition to transcribe your voice."
+            ]),
             sources: ["SpeakiOSApp/**"],
+            resources: [
+                "SpeakiOSApp/Assets.xcassets",
+                "SpeakiOSApp/Resources/LaunchScreen.storyboard"
+            ],
             entitlements: .file(path: "SpeakiOS.entitlements"),
             dependencies: [
                 .package(product: "SpeakCore"),
@@ -55,16 +75,9 @@ let project = Project(
                 .target(name: "JustSpeakToItWidgetExtension")
             ],
             settings: .settings(base: [
+                "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
                 "CURRENT_PROJECT_VERSION": "1",
-                "INFOPLIST_KEY_CFBundleDisplayName": "Just Speak to It",
-                "MARKETING_VERSION": "0.1.0",
-                "INFOPLIST_KEY_NSMicrophoneUsageDescription": "Just Speak to It needs microphone access for voice transcription.",
-                "INFOPLIST_KEY_NSSpeechRecognitionUsageDescription": "Just Speak to It uses speech recognition to transcribe your voice.",
-                "INFOPLIST_KEY_UIApplicationSceneManifest_Generation": "YES",
-                "INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents": "YES",
-                "INFOPLIST_KEY_UILaunchScreen_Generation": "YES",
-                "INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad": "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight",
-                "INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone": "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+                "MARKETING_VERSION": "\(version)"
             ])
         ),
         .target(
@@ -80,7 +93,7 @@ let project = Project(
             ],
             settings: .settings(base: [
                 "CURRENT_PROJECT_VERSION": "1",
-                "MARKETING_VERSION": "0.1.0"
+                "MARKETING_VERSION": "\(version)"
             ])
         )
     ]

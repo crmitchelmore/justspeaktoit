@@ -2,6 +2,15 @@
 import SwiftUI
 import SpeakCore
 
+// MARK: - Post-Processing Model
+
+/// Model info for post-processing provider selection.
+public struct PostProcessingModelInfo: Identifiable {
+    public let id: String
+    public let name: String
+    public let description: String
+}
+
 // MARK: - Settings Storage
 
 /// Simple UserDefaults-based settings for iOS app.
@@ -63,12 +72,12 @@ public final class AppSettings: ObservableObject {
         Edits forbidden: Add content, delete unless obvious stutter/duplicate
         """
     
-    public static let postProcessingModels: [(id: String, name: String, description: String)] = [
-        ("openai/gpt-4o-mini", "GPT-4o Mini", "Fast & cheap, reliable cleanup"),
-        ("google/gemini-2.0-flash-lite-001", "Gemini Flash Lite", "Ultra-fast, budget option"),
-        ("openai/gpt-4o", "GPT-4o", "Premium quality cleanup"),
-        ("anthropic/claude-3.5-haiku", "Claude Haiku", "Great instruction following"),
-        ("anthropic/claude-sonnet-4", "Claude Sonnet", "Best structure preservation"),
+    public static let postProcessingModels: [PostProcessingModelInfo] = [
+        PostProcessingModelInfo(id: "openai/gpt-4o-mini", name: "GPT-4o Mini", description: "Fast & cheap, reliable cleanup"),
+        PostProcessingModelInfo(id: "google/gemini-2.0-flash-lite-001", name: "Gemini Flash Lite", description: "Ultra-fast, budget option"),
+        PostProcessingModelInfo(id: "openai/gpt-4o", name: "GPT-4o", description: "Premium quality cleanup"),
+        PostProcessingModelInfo(id: "anthropic/claude-3.5-haiku", name: "Claude Haiku", description: "Great instruction following"),
+        PostProcessingModelInfo(id: "anthropic/claude-sonnet-4", name: "Claude Sonnet", description: "Best structure preservation"),
     ]
     
     private init() {

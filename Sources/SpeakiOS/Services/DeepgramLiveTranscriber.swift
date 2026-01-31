@@ -115,17 +115,56 @@ public final class DeepgramLiveTranscriber: ObservableObject {
         
         // Setup audio engine
         let inputNode = audioEngine.inputNode
-        let recordingFormat = AVAudioFormat(
+        
+        // Get the native format from the input node - we must use this format for the tap
+        let nativeFormat = inputNode.outputFormat(forBus: 0)
+        
+        // Create a format converter for resampling to 16kHz mono (Deepgram requirement)
+        guard let targetFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
             sampleRate: 16000,
             channels: 1,
             interleaved: false
-        )!
+        ) else {
+            let error = iOSTranscriptionError.audioSessionFailed(
+                NSError(domain: "DeepgramLiveTranscriber", code: -1, 
+                       userInfo: [NSLocalizedDescriptionKey: "Failed to create target audio format"])
+            )
+            self.error = error
+            throw error
+        }
         
-        // Install tap on input node
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
-            guard let channelData = buffer.floatChannelData?[0] else { return }
-            let frameCount = Int(buffer.frameLength)
+        // Create converter for resampling
+        guard let converter = AVAudioConverter(from: nativeFormat, to: targetFormat) else {
+            let error = iOSTranscriptionError.audioSessionFailed(
+                NSError(domain: "DeepgramLiveTranscriber", code: -2, 
+                       userInfo: [NSLocalizedDescriptionKey: "Failed to create audio converter"])
+            )
+            self.error = error
+            throw error
+        }
+        
+        // Install tap on input node using native format, then convert
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) { [weak self] buffer, _ in
+            // Calculate output frame capacity based on sample rate ratio
+            let ratio = 16000.0 / nativeFormat.sampleRate
+            let outputFrameCapacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio)
+            
+            guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: outputFrameCapacity) else {
+                return
+            }
+            
+            var error: NSError?
+            let status = converter.convert(to: outputBuffer, error: &error) { inNumPackets, outStatus in
+                outStatus.pointee = .haveData
+                return buffer
+            }
+            
+            guard status != .error, let channelData = outputBuffer.floatChannelData?[0] else {
+                return
+            }
+            
+            let frameCount = Int(outputBuffer.frameLength)
             self?.deepgramClient?.sendAudioSamples(channelData, frameCount: frameCount)
         }
         

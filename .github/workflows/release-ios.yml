@@ -61,6 +61,7 @@ jobs:
             -scheme SpeakiOS \
             -destination 'generic/platform=iOS' \
             -archivePath build/SpeakiOS.xcarchive \
+            -allowProvisioningUpdates \
             MARKETING_VERSION="$VERSION" \
             CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
             CODE_SIGN_STYLE=Automatic \
@@ -90,7 +91,8 @@ jobs:
           xcodebuild -exportArchive \
             -archivePath build/SpeakiOS.xcarchive \
             -exportOptionsPlist ExportOptions.plist \
-            -exportPath build/export
+            -exportPath build/export \
+            -allowProvisioningUpdates
 
       - name: Upload to TestFlight
         env:

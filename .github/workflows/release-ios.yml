@@ -103,14 +103,6 @@ jobs:
             -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_${{ env.APP_STORE_CONNECT_KEY_ID }}.p8 \
             -authenticationKeyID ${{ env.APP_STORE_CONNECT_KEY_ID }} \
             -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID"
-
-      - name: Upload to TestFlight
-        env:
-          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-        run: |
-          # Use altool for TestFlight upload
-          xcrun altool --upload-app \
-            -f build/export/JustSpeakToIt.ipa \
-            -t ios \
-            --apiKey ${{ env.APP_STORE_CONNECT_KEY_ID }} \
-            --apiIssuer $APP_STORE_CONNECT_ISSUER_ID
+          
+          echo "✅ Build exported and uploaded to App Store Connect"
+          echo "The build will appear in TestFlight after Apple's processing (5-30 minutes)"

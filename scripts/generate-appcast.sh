@@ -76,7 +76,7 @@ DOWNLOAD_URL="https://github.com/crmitchelmore/justspeaktoit/releases/download/m
 LAST_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
 if [ -n "$LAST_TAG" ]; then
     echo "Generating release notes from commits since $LAST_TAG" >&2
-    RELEASE_NOTES=$(git log $LAST_TAG..HEAD --pretty=format:"<li>%s</li>" --grep="^feat\|^fix\|^perf" --extended-regexp 2>/dev/null | head -20 || echo "<li>Bug fixes and improvements</li>")
+    RELEASE_NOTES=$(git log "$LAST_TAG"..HEAD --pretty=format:"<li>%s</li>" --grep="\\[mac\\]" --extended-regexp 2>/dev/null | head -20 || echo "<li>Bug fixes and improvements</li>")
 else
     RELEASE_NOTES="<li>Initial release</li>"
 fi

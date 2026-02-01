@@ -22,3 +22,7 @@ Project-specific patterns and conventions for AI-assisted development.
 ### Async Delays in SwiftUI
 - Prefer `.task { try? await Task.sleep(for: .seconds(2)) }` over `DispatchQueue.asyncAfter`
 - The `.task` modifier properly handles view lifecycle and cancellation
+
+## Commit Message Tagging
+- Prefix commit messages with a platform tag: `[mac]` or `[ios]` (e.g., `fix: [mac] add recording sound picker`).
+- These tags feed the Sparkle release notes generator so macOS updates only list mac-specific changes.

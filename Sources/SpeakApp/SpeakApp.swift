@@ -1,5 +1,7 @@
 import AppKit
+#if canImport(Sentry)
 import Sentry
+#endif
 import Sparkle
 import SwiftUI
 

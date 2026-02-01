@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import SpeakCore
 
 /// Centralised configuration model backed by `UserDefaults` and published to SwiftUI.
 @MainActor
@@ -242,6 +243,8 @@ final class AppSettings: ObservableObject {
     case enableSendToMac
     case autoCorrectionsEnabled
     case autoCorrectionsPromotionThreshold
+    case recordingSoundsEnabled
+    case recordingSoundProfile
   }
 
   private static let defaultBatchTranscriptionModel = "google/gemini-2.0-flash-001"
@@ -554,6 +557,14 @@ final class AppSettings: ObservableObject {
     didSet { store(autoCorrectionsPromotionThreshold, key: .autoCorrectionsPromotionThreshold) }
   }
 
+  @Published var recordingSoundsEnabled: Bool {
+    didSet { store(recordingSoundsEnabled, key: .recordingSoundsEnabled) }
+  }
+
+  @Published var recordingSoundProfile: RecordingSoundPlayer.SoundProfile {
+    didSet { store(recordingSoundProfile.rawValue, key: .recordingSoundProfile) }
+  }
+
   private var supportsSpeedModeProcessing: Bool {
     transcriptionMode == .liveNative && liveTranscriptionModel.contains("streaming")
   }
@@ -727,6 +738,14 @@ final class AppSettings: ObservableObject {
       defaults.object(forKey: DefaultsKey.autoCorrectionsEnabled.rawValue) as? Bool ?? true
     autoCorrectionsPromotionThreshold =
       defaults.object(forKey: DefaultsKey.autoCorrectionsPromotionThreshold.rawValue) as? Int ?? 2
+
+    recordingSoundsEnabled =
+      defaults.object(forKey: DefaultsKey.recordingSoundsEnabled.rawValue) as? Bool ?? true
+    recordingSoundProfile =
+      RecordingSoundPlayer.SoundProfile(
+        rawValue: defaults.string(forKey: DefaultsKey.recordingSoundProfile.rawValue)
+          ?? RecordingSoundPlayer.SoundProfile.classic.rawValue
+      ) ?? .classic
 
     ensureRecordingsDirectoryExists()
     applyAppVisibility()

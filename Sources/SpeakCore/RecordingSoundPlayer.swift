@@ -21,7 +21,43 @@ public final class RecordingSoundPlayer {
     var fileExtension: String { "m4a" }
   }
 
+  public enum SoundProfile: String, CaseIterable, Identifiable, Sendable {
+    case classic
+    case bubbly
+    case futuristic
+    case soft
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+      switch self {
+      case .classic: return "Classic"
+      case .bubbly: return "Bubbly"
+      case .futuristic: return "Futuristic"
+      case .soft: return "Soft"
+      }
+    }
+
+    var suffix: String? {
+      switch self {
+      case .classic: return nil
+      case .bubbly: return "bubbly"
+      case .futuristic: return "futuristic"
+      case .soft: return "soft"
+      }
+    }
+  }
+
   private let logger = Logger(subsystem: "com.github.speakapp", category: "RecordingSoundPlayer")
+
+  public var profile: SoundProfile = .classic {
+    didSet {
+      if profile != oldValue {
+        players.removeAll()
+        preload()
+      }
+    }
+  }
 
   private var players: [RecordingSound: AVAudioPlayer] = [:]
 
@@ -35,7 +71,7 @@ public final class RecordingSoundPlayer {
 
   public func play(_ sound: RecordingSound, volume: Float = 1.0) {
     guard let p = player(for: sound) else {
-      logger.debug("Recording sound missing: \(sound.resourceName).\(sound.fileExtension)")
+      logger.debug("Recording sound missing: \(self.resourceName(for: sound)).\(sound.fileExtension)")
       return
     }
 
@@ -51,7 +87,8 @@ public final class RecordingSoundPlayer {
       return existing
     }
 
-    guard let url = Bundle.main.url(forResource: sound.resourceName, withExtension: sound.fileExtension) else {
+    let resource = resourceName(for: sound)
+    guard let url = Bundle.main.url(forResource: resource, withExtension: sound.fileExtension) else {
       return nil
     }
 
@@ -64,5 +101,12 @@ public final class RecordingSoundPlayer {
       logger.warning("Failed to init AVAudioPlayer for \(sound.resourceName).\(sound.fileExtension): \(error.localizedDescription)")
       return nil
     }
+  }
+
+  private func resourceName(for sound: RecordingSound) -> String {
+    guard let suffix = profile.suffix else {
+      return sound.resourceName
+    }
+    return "\(sound.resourceName)_\(suffix)"
   }
 }

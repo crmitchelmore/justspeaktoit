@@ -370,7 +370,7 @@ public struct PostProcessingView: View {
     private var modelPickerSheet: some View {
         NavigationStack {
             List {
-                ForEach(AppSettings.postProcessingModels, id: \.id) { model in
+                ForEach(Array(AppSettings.postProcessingModels.enumerated()), id: \.offset) { _, model in
                     Button {
                         settings.postProcessingModel = model.id
                         showingModelPicker = false
@@ -388,7 +388,7 @@ public struct PostProcessingView: View {
                             
                             if settings.postProcessingModel == model.id {
                                 Image(systemName: "checkmark")
-                                    .foregroundStyle(.accentColor)
+                                    .foregroundStyle(Color.accentColor)
                             }
                         }
                     }

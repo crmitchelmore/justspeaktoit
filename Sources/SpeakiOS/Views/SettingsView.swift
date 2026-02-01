@@ -383,7 +383,7 @@ struct PostProcessingSettingsView: View {
     var body: some View {
         Form {
             Section("Model") {
-                ForEach(AppSettings.postProcessingModels, id: \.id) { model in
+                ForEach(Array(AppSettings.postProcessingModels.enumerated()), id: \.offset) { _, model in
                     Button {
                         settings.postProcessingModel = model.id
                     } label: {
@@ -400,7 +400,7 @@ struct PostProcessingSettingsView: View {
                             
                             if settings.postProcessingModel == model.id {
                                 Image(systemName: "checkmark")
-                                    .foregroundStyle(.accentColor)
+                                    .foregroundStyle(Color.accentColor)
                             }
                         }
                     }

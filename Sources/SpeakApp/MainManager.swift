@@ -99,6 +99,14 @@ final class MainManager: ObservableObject {
     self.textProcessor = textProcessor
     self.autoCorrectionTracker = autoCorrectionTracker
 
+    recordingSoundPlayer.profile = appSettings.recordingSoundProfile
+    appSettings.$recordingSoundProfile
+      .receive(on: RunLoop.main)
+      .sink { [weak self] profile in
+        self?.recordingSoundPlayer.profile = profile
+      }
+      .store(in: &cancellables)
+
     transcriptionManager.$livePartialText
       .receive(on: RunLoop.main)
       .sink { [weak self] text in
@@ -312,7 +320,9 @@ final class MainManager: ObservableObject {
     activeSession = session
     state = .recording
 
-    recordingSoundPlayer.play(.start, volume: 0.9)
+    if appSettings.recordingSoundsEnabled {
+      recordingSoundPlayer.play(.start, volume: 0.9)
+    }
     lastErrorMessage = nil
     polishedLivePreview = ""
     session.events.append(
@@ -369,7 +379,9 @@ final class MainManager: ObservableObject {
       }
     }
 
-    recordingSoundPlayer.play(.stop, volume: 0.9)
+    if appSettings.recordingSoundsEnabled {
+      recordingSoundPlayer.play(.stop, volume: 0.9)
+    }
 
     state = .processing
     session.recordingEnded = Date()

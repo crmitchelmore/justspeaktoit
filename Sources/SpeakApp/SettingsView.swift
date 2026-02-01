@@ -209,6 +209,12 @@ struct SettingsView: View {
       Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
   }
 
+  private func previewRecordingSound(_ sound: RecordingSoundPlayer.RecordingSound) {
+    let player = RecordingSoundPlayer()
+    player.profile = settings.recordingSoundProfile
+    player.play(sound, volume: 0.9)
+  }
+
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 28) {
@@ -371,7 +377,49 @@ struct SettingsView: View {
         }
       }
       .speakTooltip("Pick the microphone Speak should use. We fall back to the system default if a device disconnects.")
-      
+
+      SettingsCard(title: "Recording Sounds", systemImage: "speaker.wave.2", tint: Color.brandLagoon) {
+        VStack(alignment: .leading, spacing: 12) {
+          settingsToggle(
+            "Play start/stop sounds",
+            isOn: settingsBinding(\AppSettings.recordingSoundsEnabled),
+            tint: .brandLagoon
+          )
+          .speakTooltip("Play a short sound when recording starts or ends.")
+
+          VStack(alignment: .leading, spacing: 6) {
+            Text("Sound profile")
+              .font(.subheadline)
+              .foregroundStyle(.secondary)
+            Picker("Sound profile", selection: settingsBinding(\AppSettings.recordingSoundProfile)) {
+              ForEach(RecordingSoundPlayer.SoundProfile.allCases) { profile in
+                Text(profile.displayName).tag(profile)
+              }
+            }
+            .pickerStyle(.menu)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+              RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor))
+            )
+          }
+
+          HStack(spacing: 12) {
+            Button("Preview Start") {
+              previewRecordingSound(.start)
+            }
+            .buttonStyle(.bordered)
+
+            Button("Preview Stop") {
+              previewRecordingSound(.stop)
+            }
+            .buttonStyle(.bordered)
+          }
+        }
+      }
+      .speakTooltip("Choose the sound that plays when Speak starts or stops recording.")
+
       SettingsCard(title: "Send to Mac", systemImage: "iphone.and.arrow.forward", tint: Color.green) {
         VStack(alignment: .leading, spacing: 12) {
           Text("Allow iOS devices to send transcripts to this Mac over your local network.")

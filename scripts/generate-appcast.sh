@@ -70,7 +70,7 @@ if [ -z "$SIGNATURE" ]; then
 fi
 
 # GitHub release download URL
-DOWNLOAD_URL="https://github.com/crmitchelmore/justspeaktoit/releases/download/v${VERSION}/${DMG_NAME}"
+DOWNLOAD_URL="https://github.com/crmitchelmore/justspeaktoit/releases/download/mac-v${VERSION}/${DMG_NAME}"
 
 # Generate release notes from git commits since last tag
 LAST_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")

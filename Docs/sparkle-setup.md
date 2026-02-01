@@ -72,7 +72,7 @@ The appcast is hosted at `https://justspeaktoit.com/appcast.xml` via Cloudflare 
 
 To test the full flow:
 1. Set up the secrets as described above
-2. Create a test release tag
+2. Create a test release tag (mac-vX.Y.Z)
 3. Verify the appcast.xml is generated and deployed
 4. Install an older version and verify it detects the update
 

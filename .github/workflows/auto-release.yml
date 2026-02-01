@@ -1,13 +1,7 @@
-name: Auto Release
+name: Auto Release (Disabled)
 
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - '*.md'
-      - 'Docs/**'
-      - 'landing-page/**'
-      - '.github/workflows/auto-release.yml'
+  workflow_dispatch: {}
 
 jobs:
   check-and-release:

@@ -35,6 +35,35 @@ jobs:
           mkdir -p ~/.appstoreconnect/private_keys
           echo "$APP_STORE_CONNECT_API_KEY" | base64 --decode > ~/.appstoreconnect/private_keys/AuthKey_${{ env.APP_STORE_CONNECT_KEY_ID }}.p8
 
+      - name: Install iOS Signing Certificate & Profiles
+        env:
+          IOS_DISTRIBUTION_P12: ${{ secrets.IOS_DISTRIBUTION_P12 }}
+          IOS_DISTRIBUTION_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_PASSWORD }}
+          IOS_APPSTORE_PROFILE: ${{ secrets.IOS_APPSTORE_PROFILE }}
+          IOS_WIDGET_APPSTORE_PROFILE: ${{ secrets.IOS_WIDGET_APPSTORE_PROFILE }}
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/ios-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+
+          if [ -n "$IOS_DISTRIBUTION_P12" ]; then
+            CERT_PATH=$RUNNER_TEMP/ios-distribution.p12
+            echo -n "$IOS_DISTRIBUTION_P12" | base64 --decode -o "$CERT_PATH"
+            security import "$CERT_PATH" -P "$IOS_DISTRIBUTION_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+            rm -f "$CERT_PATH"
+          fi
+
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          if [ -n "$IOS_APPSTORE_PROFILE" ]; then
+            echo -n "$IOS_APPSTORE_PROFILE" | base64 --decode -o ~/Library/MobileDevice/Provisioning\ Profiles/ios-appstore.provisionprofile
+          fi
+          if [ -n "$IOS_WIDGET_APPSTORE_PROFILE" ]; then
+            echo -n "$IOS_WIDGET_APPSTORE_PROFILE" | base64 --decode -o ~/Library/MobileDevice/Provisioning\ Profiles/ios-widget-appstore.provisionprofile
+          fi
+
       - name: Generate Xcode Project
         run: tuist generate --no-open
 
@@ -68,7 +97,7 @@ jobs:
             -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID" \
             MARKETING_VERSION="$VERSION" \
             CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
-            CODE_SIGN_STYLE=Automatic \
+            CODE_SIGN_STYLE=Manual \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID"
 
       - name: Export IPA

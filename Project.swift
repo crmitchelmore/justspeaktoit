@@ -19,7 +19,7 @@ var iosAppSettings: [String: SettingValue] = [
     "MARKETING_VERSION": "\(version)"
 ]
 if let appProfileName {
-    iosAppSettings["PROVISIONING_PROFILE_SPECIFIER"] = appProfileName
+    iosAppSettings["PROVISIONING_PROFILE_SPECIFIER"] = .string(appProfileName)
 }
 
 var iosWidgetSettings: [String: SettingValue] = [
@@ -27,7 +27,7 @@ var iosWidgetSettings: [String: SettingValue] = [
     "MARKETING_VERSION": "\(version)"
 ]
 if let widgetProfileName {
-    iosWidgetSettings["PROVISIONING_PROFILE_SPECIFIER"] = widgetProfileName
+    iosWidgetSettings["PROVISIONING_PROFILE_SPECIFIER"] = .string(widgetProfileName)
 }
 
 let project = Project(

@@ -8,7 +8,13 @@ final class UpdaterManager: ObservableObject {
     static let shared = UpdaterManager()
 
     /// The Sparkle updater controller
-    private let updaterController: SPUStandardUpdaterController
+    private lazy var updaterController: SPUStandardUpdaterController = {
+        SPUStandardUpdaterController(
+            startingUpdater: true,
+            updaterDelegate: self,
+            userDriverDelegate: nil
+        )
+    }()
 
     /// Whether automatic update checks are enabled
     @Published var automaticallyChecksForUpdates: Bool {
@@ -22,44 +28,18 @@ final class UpdaterManager: ObservableObject {
 
     @Published private(set) var latestVersion: String?
 
-    private var updateObserver: NSObjectProtocol?
-    private var noUpdateObserver: NSObjectProtocol?
-
     private var currentVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
     }
 
     private init() {
-        // Initialize Sparkle updater
-        // startingUpdater: true means it will automatically check on launch per settings
-        updaterController = SPUStandardUpdaterController(
-            startingUpdater: true,
-            updaterDelegate: nil,
-            userDriverDelegate: nil
-        )
+        _ = updaterController
 
         automaticallyChecksForUpdates = updaterController.updater.automaticallyChecksForUpdates
 
         // Observe canCheckForUpdates changes
         updaterController.updater.publisher(for: \.canCheckForUpdates)
             .assign(to: &$canCheckForUpdates)
-
-        updateObserver = NotificationCenter.default.addObserver(
-            forName: NSNotification.Name.SUUpdaterDidFindValidUpdate,
-            object: updaterController.updater,
-            queue: .main
-        ) { [weak self] notification in
-            guard let update = notification.userInfo?[SPUUpdaterAppcastItemKey] as? SUAppcastItem else { return }
-            self?.latestVersion = update.displayVersionString
-        }
-
-        noUpdateObserver = NotificationCenter.default.addObserver(
-            forName: NSNotification.Name.SUUpdaterDidNotFindUpdate,
-            object: updaterController.updater,
-            queue: .main
-        ) { [weak self] _ in
-            self?.latestVersion = self?.currentVersion
-        }
     }
 
     /// Manually trigger an update check
@@ -71,13 +51,18 @@ final class UpdaterManager: ObservableObject {
     var updater: SPUUpdater {
         updaterController.updater
     }
+}
 
-    deinit {
-        if let updateObserver {
-            NotificationCenter.default.removeObserver(updateObserver)
+extension UpdaterManager: SPUUpdaterDelegate {
+    nonisolated func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        Task { @MainActor in
+            self.latestVersion = item.displayVersionString
         }
-        if let noUpdateObserver {
-            NotificationCenter.default.removeObserver(noUpdateObserver)
+    }
+
+    nonisolated func updaterDidNotFindUpdate(_ updater: SPUUpdater) {
+        Task { @MainActor in
+            self.latestVersion = self.currentVersion
         }
     }
 }

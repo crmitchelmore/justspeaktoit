@@ -97,11 +97,8 @@ jobs:
             -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID" \
             MARKETING_VERSION="$VERSION" \
             CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
-            CODE_SIGN_STYLE=Manual \
-            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
-            PROVISIONING_PROFILE_SPECIFIER="iOS Team Store Provisioning Profile: com.justspeaktoit.ios" \
-            PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]="iOS Team Store Provisioning Profile: com.justspeaktoit.ios" \
-            PROVISIONING_PROFILE_SPECIFIER[com.justspeaktoit.ios.JustSpeakToItWidgetExtension]="iOS Team Store Provisioning Profile: com.justspeaktoit.ios.JustSpeakToItWidgetExtension"
+            CODE_SIGN_STYLE=Automatic \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID"
 
       - name: Export IPA
         env:

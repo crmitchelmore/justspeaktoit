@@ -89,6 +89,7 @@ jobs:
           xcodebuild archive \
             -workspace "Just Speak to It.xcworkspace" \
             -scheme SpeakiOS \
+            -configuration Release \
             -destination 'generic/platform=iOS' \
             -archivePath build/SpeakiOS.xcarchive \
             -allowProvisioningUpdates \
@@ -98,6 +99,7 @@ jobs:
             MARKETING_VERSION="$VERSION" \
             CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
             CODE_SIGN_STYLE=Automatic \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID"
 
       - name: Export IPA

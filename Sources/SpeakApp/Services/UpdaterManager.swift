@@ -44,7 +44,7 @@ final class UpdaterManager: ObservableObject {
             object: updaterController.updater,
             queue: .main
         ) { [weak self] notification in
-            guard let update = notification.userInfo?[SPUUpdaterUpdateKey] as? SUAppcastItem else { return }
+            guard let update = notification.userInfo?[SPUUpdaterAppcastItemKey] as? SUAppcastItem else { return }
             self?.latestVersion = update.displayVersionString
         }
     }

@@ -76,6 +76,68 @@ jobs:
 
       - name: Generate Xcode Project
         run: tuist generate --no-open
+      
+      - name: Patch iOS Signing Settings
+        env:
+          APP_PROFILE_NAME: ${{ env.APP_PROFILE_NAME }}
+          WIDGET_PROFILE_NAME: ${{ env.WIDGET_PROFILE_NAME }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import os
+          import re
+
+          app_profile = os.environ.get("APP_PROFILE_NAME", "")
+          widget_profile = os.environ.get("WIDGET_PROFILE_NAME", "")
+          team_id = os.environ.get("APPLE_TEAM_ID", "")
+
+          if not app_profile or not widget_profile:
+              raise SystemExit("Missing app/widget provisioning profile names")
+
+          pbx_path = Path("Just Speak to It.xcodeproj/project.pbxproj")
+          text = pbx_path.read_text()
+
+          def upsert_setting(lines, key, value):
+              for i, line in enumerate(lines):
+                  if line.strip().startswith(f"{key} ="):
+                      indent = line.split(key, 1)[0]
+                      lines[i] = f"{indent}{key} = {value};"
+                      return
+              for i, line in enumerate(lines):
+                  if "PRODUCT_BUNDLE_IDENTIFIER" in line:
+                      indent = re.match(r"(\\s*)", line).group(1)
+                      lines.insert(i + 1, f\"{indent}{key} = {value};\")
+                      return
+              indent = re.match(r"(\\s*)", lines[0]).group(1) if lines else "\\t\\t\\t\\t"
+              lines.append(f\"{indent}{key} = {value};\")
+
+          def patch_release_block(settings, profile):
+              lines = settings.splitlines()
+              upsert_setting(lines, "CODE_SIGN_STYLE", "Manual")
+              upsert_setting(lines, "CODE_SIGN_IDENTITY", "\"Apple Distribution\"")
+              if team_id:
+                  upsert_setting(lines, "DEVELOPMENT_TEAM", team_id)
+              upsert_setting(lines, "PROVISIONING_PROFILE_SPECIFIER", f"\"{profile}\"")
+              return "\\n".join(lines)
+
+          def patch_blocks(text):
+              pattern = re.compile(
+                  r'(?P<prefix>[A-F0-9]{24} /\\* Release \\*/ = \\{\\n\\t\\t\\tisa = XCBuildConfiguration;\\n\\t\\t\\tbuildSettings = \\{\\n)(?P<settings>.*?)(?P<suffix>\\n\\t\\t\\t\\};\\n\\t\\t\\tname = Release;\\n\\t\\t\\};)',
+                  re.S,
+              )
+              def repl(match):
+                  settings = match.group("settings")
+                  if "PRODUCT_BUNDLE_IDENTIFIER = com.justspeaktoit.ios.JustSpeakToItWidgetExtension;" in settings:
+                      settings = patch_release_block(settings, widget_profile)
+                  elif "PRODUCT_BUNDLE_IDENTIFIER = com.justspeaktoit.ios;" in settings:
+                      settings = patch_release_block(settings, app_profile)
+                  return f\"{match.group('prefix')}{settings}{match.group('suffix')}\"
+              return pattern.sub(repl, text)
+
+          updated = patch_blocks(text)
+          pbx_path.write_text(updated)
+          PY
 
       - name: Determine Build Number
         id: build_number
@@ -102,18 +164,15 @@ jobs:
             -destination 'generic/platform=iOS' \
             -archivePath build/SpeakiOS.xcarchive \
             MARKETING_VERSION="$VERSION" \
-            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="Apple Distribution" \
-            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
-            "PROVISIONING_PROFILE_SPECIFIER=$APP_PROFILE_NAME" \
-            "PROVISIONING_PROFILE_SPECIFIER_JustSpeakToItWidgetExtension=$WIDGET_PROFILE_NAME"
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
 
       - name: Export IPA
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         run: |
+          APP_PROFILE_UUID=$(security cms -D -i ~/Library/MobileDevice/Provisioning\\ Profiles/ios-appstore.provisionprofile | plutil -extract UUID raw -)
+          WIDGET_PROFILE_UUID=$(security cms -D -i ~/Library/MobileDevice/Provisioning\\ Profiles/ios-widget-appstore.provisionprofile | plutil -extract UUID raw -)
           cat > ExportOptions.plist << 'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -130,9 +189,9 @@ jobs:
               <key>provisioningProfiles</key>
               <dict>
                   <key>com.justspeaktoit.ios</key>
-                  <string>APP_PROFILE_NAME_PLACEHOLDER</string>
+                  <string>APP_PROFILE_UUID_PLACEHOLDER</string>
                   <key>com.justspeaktoit.ios.JustSpeakToItWidgetExtension</key>
-                  <string>WIDGET_PROFILE_NAME_PLACEHOLDER</string>
+                  <string>WIDGET_PROFILE_UUID_PLACEHOLDER</string>
               </dict>
               <key>uploadSymbols</key>
               <true/>
@@ -143,9 +202,8 @@ jobs:
           PLIST
 
           sed -i '' "s/APPLE_TEAM_ID_PLACEHOLDER/${APPLE_TEAM_ID}/g" ExportOptions.plist
-          sed -i '' "s/APP_PROFILE_NAME_PLACEHOLDER/${APP_PROFILE_NAME}/g" ExportOptions.plist
-          sed -i '' "s/WIDGET_PROFILE_NAME_PLACEHOLDER/${WIDGET_PROFILE_NAME}/g" ExportOptions.plist
-          
+          sed -i '' "s/APP_PROFILE_UUID_PLACEHOLDER/${APP_PROFILE_UUID}/g" ExportOptions.plist
+          sed -i '' "s/WIDGET_PROFILE_UUID_PLACEHOLDER/${WIDGET_PROFILE_UUID}/g" ExportOptions.plist
           
           xcodebuild -exportArchive \
             -archivePath build/SpeakiOS.xcarchive \

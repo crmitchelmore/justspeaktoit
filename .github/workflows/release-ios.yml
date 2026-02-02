@@ -120,13 +120,20 @@ jobs:
           <plist version="1.0">
           <dict>
               <key>method</key>
-              <string>app-store-connect</string>
+              <string>app-store</string>
               <key>teamID</key>
               <string>APPLE_TEAM_ID_PLACEHOLDER</string>
               <key>signingStyle</key>
               <string>manual</string>
               <key>signingCertificate</key>
               <string>Apple Distribution</string>
+              <key>provisioningProfiles</key>
+              <dict>
+                  <key>com.justspeaktoit.ios</key>
+                  <string>APP_PROFILE_NAME_PLACEHOLDER</string>
+                  <key>com.justspeaktoit.ios.JustSpeakToItWidgetExtension</key>
+                  <string>WIDGET_PROFILE_NAME_PLACEHOLDER</string>
+              </dict>
               <key>uploadSymbols</key>
               <true/>
               <key>destination</key>
@@ -136,6 +143,8 @@ jobs:
           PLIST
 
           sed -i '' "s/APPLE_TEAM_ID_PLACEHOLDER/${APPLE_TEAM_ID}/g" ExportOptions.plist
+          sed -i '' "s/APP_PROFILE_NAME_PLACEHOLDER/${APP_PROFILE_NAME}/g" ExportOptions.plist
+          sed -i '' "s/WIDGET_PROFILE_NAME_PLACEHOLDER/${WIDGET_PROFILE_NAME}/g" ExportOptions.plist
           
           
           xcodebuild -exportArchive \

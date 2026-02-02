@@ -58,10 +58,20 @@ jobs:
 
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           if [ -n "$IOS_APPSTORE_PROFILE" ]; then
-            echo -n "$IOS_APPSTORE_PROFILE" | base64 --decode -o ~/Library/MobileDevice/Provisioning\ Profiles/ios-appstore.provisionprofile
+            APP_PROFILE_PATH=~/Library/MobileDevice/Provisioning\ Profiles/ios-appstore.provisionprofile
+            echo -n "$IOS_APPSTORE_PROFILE" | base64 --decode -o "$APP_PROFILE_PATH"
+            APP_PROFILE_UUID=$(security cms -D -i "$APP_PROFILE_PATH" | plutil -extract UUID raw -)
+            APP_PROFILE_NAME=$(security cms -D -i "$APP_PROFILE_PATH" | plutil -extract Name raw -)
+            echo "APP_PROFILE_UUID=$APP_PROFILE_UUID" >> $GITHUB_ENV
+            echo "APP_PROFILE_NAME=$APP_PROFILE_NAME" >> $GITHUB_ENV
           fi
           if [ -n "$IOS_WIDGET_APPSTORE_PROFILE" ]; then
-            echo -n "$IOS_WIDGET_APPSTORE_PROFILE" | base64 --decode -o ~/Library/MobileDevice/Provisioning\ Profiles/ios-widget-appstore.provisionprofile
+            WIDGET_PROFILE_PATH=~/Library/MobileDevice/Provisioning\ Profiles/ios-widget-appstore.provisionprofile
+            echo -n "$IOS_WIDGET_APPSTORE_PROFILE" | base64 --decode -o "$WIDGET_PROFILE_PATH"
+            WIDGET_PROFILE_UUID=$(security cms -D -i "$WIDGET_PROFILE_PATH" | plutil -extract UUID raw -)
+            WIDGET_PROFILE_NAME=$(security cms -D -i "$WIDGET_PROFILE_PATH" | plutil -extract Name raw -)
+            echo "WIDGET_PROFILE_UUID=$WIDGET_PROFILE_UUID" >> $GITHUB_ENV
+            echo "WIDGET_PROFILE_NAME=$WIDGET_PROFILE_NAME" >> $GITHUB_ENV
           fi
 
       - name: Generate Xcode Project
@@ -84,7 +94,6 @@ jobs:
           VERSION: ${{ github.event.inputs.version }}
           BUILD_NUMBER: ${{ steps.build_number.outputs.build }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         run: |
           xcodebuild archive \
             -workspace "Just Speak to It.xcworkspace" \
@@ -92,13 +101,10 @@ jobs:
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -archivePath build/SpeakiOS.xcarchive \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_${{ env.APP_STORE_CONNECT_KEY_ID }}.p8 \
-            -authenticationKeyID ${{ env.APP_STORE_CONNECT_KEY_ID }} \
-            -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID" \
             MARKETING_VERSION="$VERSION" \
             CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
-            CODE_SIGN_STYLE=Automatic \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID"
 
       - name: Export IPA
@@ -106,7 +112,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         run: |
-          cat > ExportOptions.plist << PLIST
+          cat > ExportOptions.plist << 'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -114,9 +120,18 @@ jobs:
               <key>method</key>
               <string>app-store-connect</string>
               <key>teamID</key>
-              <string>${APPLE_TEAM_ID}</string>
+              <string>APPLE_TEAM_ID_PLACEHOLDER</string>
               <key>signingStyle</key>
-              <string>automatic</string>
+              <string>manual</string>
+              <key>signingCertificate</key>
+              <string>Apple Distribution</string>
+              <key>provisioningProfiles</key>
+              <dict>
+                  <key>com.justspeaktoit.ios</key>
+                  <string>APP_PROFILE_NAME_PLACEHOLDER</string>
+                  <key>com.justspeaktoit.ios.JustSpeakToItWidgetExtension</key>
+                  <string>WIDGET_PROFILE_NAME_PLACEHOLDER</string>
+              </dict>
               <key>uploadSymbols</key>
               <true/>
               <key>destination</key>
@@ -124,12 +139,15 @@ jobs:
           </dict>
           </plist>
           PLIST
+
+          sed -i '' "s/APPLE_TEAM_ID_PLACEHOLDER/${APPLE_TEAM_ID}/g" ExportOptions.plist
+          sed -i '' "s/APP_PROFILE_NAME_PLACEHOLDER/${APP_PROFILE_NAME}/g" ExportOptions.plist
+          sed -i '' "s/WIDGET_PROFILE_NAME_PLACEHOLDER/${WIDGET_PROFILE_NAME}/g" ExportOptions.plist
           
           xcodebuild -exportArchive \
             -archivePath build/SpeakiOS.xcarchive \
             -exportOptionsPlist ExportOptions.plist \
             -exportPath build/export \
-            -allowProvisioningUpdates \
             -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_${{ env.APP_STORE_CONNECT_KEY_ID }}.p8 \
             -authenticationKeyID ${{ env.APP_STORE_CONNECT_KEY_ID }} \
             -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID"

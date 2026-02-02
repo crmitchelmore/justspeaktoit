@@ -10,6 +10,26 @@ let version: String = {
         .trimmingCharacters(in: .whitespacesAndNewlines) ?? "0.1.0"
 }()
 
+let appProfileName = ProcessInfo.processInfo.environment["APP_PROFILE_NAME"]
+let widgetProfileName = ProcessInfo.processInfo.environment["WIDGET_PROFILE_NAME"]
+
+var iosAppSettings: [String: SettingValue] = [
+    "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
+    "CURRENT_PROJECT_VERSION": "1",
+    "MARKETING_VERSION": "\(version)"
+]
+if let appProfileName {
+    iosAppSettings["PROVISIONING_PROFILE_SPECIFIER"] = appProfileName
+}
+
+var iosWidgetSettings: [String: SettingValue] = [
+    "CURRENT_PROJECT_VERSION": "1",
+    "MARKETING_VERSION": "\(version)"
+]
+if let widgetProfileName {
+    iosWidgetSettings["PROVISIONING_PROFILE_SPECIFIER"] = widgetProfileName
+}
+
 let project = Project(
     name: "Just Speak to It",
     organizationName: "Just Speak to It",
@@ -78,11 +98,7 @@ let project = Project(
                 .package(product: "SpeakiOSLib"),
                 .target(name: "JustSpeakToItWidgetExtension")
             ],
-            settings: .settings(base: [
-                "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
-                "CURRENT_PROJECT_VERSION": "1",
-                "MARKETING_VERSION": "\(version)"
-            ])
+            settings: .settings(base: iosAppSettings)
         ),
         .target(
             name: "JustSpeakToItWidgetExtension",
@@ -95,10 +111,7 @@ let project = Project(
             dependencies: [
                 .package(product: "SpeakCore")
             ],
-            settings: .settings(base: [
-                "CURRENT_PROJECT_VERSION": "1",
-                "MARKETING_VERSION": "\(version)"
-            ])
+            settings: .settings(base: iosWidgetSettings)
         )
     ]
 )

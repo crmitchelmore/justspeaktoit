@@ -23,6 +23,11 @@ final class UpdaterManager: ObservableObject {
     @Published private(set) var latestVersion: String?
 
     private var updateObserver: NSObjectProtocol?
+    private var noUpdateObserver: NSObjectProtocol?
+
+    private var currentVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
+    }
 
     private init() {
         // Initialize Sparkle updater
@@ -47,6 +52,14 @@ final class UpdaterManager: ObservableObject {
             guard let update = notification.userInfo?[SPUUpdaterAppcastItemKey] as? SUAppcastItem else { return }
             self?.latestVersion = update.displayVersionString
         }
+
+        noUpdateObserver = NotificationCenter.default.addObserver(
+            forName: NSNotification.Name.SUUpdaterDidNotFindUpdate,
+            object: updaterController.updater,
+            queue: .main
+        ) { [weak self] _ in
+            self?.latestVersion = self?.currentVersion
+        }
     }
 
     /// Manually trigger an update check
@@ -62,6 +75,9 @@ final class UpdaterManager: ObservableObject {
     deinit {
         if let updateObserver {
             NotificationCenter.default.removeObserver(updateObserver)
+        }
+        if let noUpdateObserver {
+            NotificationCenter.default.removeObserver(noUpdateObserver)
         }
     }
 }

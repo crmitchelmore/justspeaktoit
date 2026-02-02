@@ -20,6 +20,10 @@ final class UpdaterManager: ObservableObject {
     /// Whether the updater can check for updates (e.g., not already checking)
     @Published private(set) var canCheckForUpdates = false
 
+    @Published private(set) var latestVersion: String?
+
+    private var updateObserver: NSObjectProtocol?
+
     private init() {
         // Initialize Sparkle updater
         // startingUpdater: true means it will automatically check on launch per settings
@@ -34,6 +38,15 @@ final class UpdaterManager: ObservableObject {
         // Observe canCheckForUpdates changes
         updaterController.updater.publisher(for: \.canCheckForUpdates)
             .assign(to: &$canCheckForUpdates)
+
+        updateObserver = NotificationCenter.default.addObserver(
+            forName: NSNotification.Name.SUUpdaterDidFindValidUpdate,
+            object: updaterController.updater,
+            queue: .main
+        ) { [weak self] notification in
+            guard let update = notification.userInfo?[SPUUpdaterUpdateKey] as? SUAppcastItem else { return }
+            self?.latestVersion = update.displayVersionString
+        }
     }
 
     /// Manually trigger an update check
@@ -44,5 +57,11 @@ final class UpdaterManager: ObservableObject {
     /// Access the underlying updater for SwiftUI integration
     var updater: SPUUpdater {
         updaterController.updater
+    }
+
+    deinit {
+        if let updateObserver {
+            NotificationCenter.default.removeObserver(updateObserver)
+        }
     }
 }

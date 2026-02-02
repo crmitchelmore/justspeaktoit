@@ -2001,6 +2001,12 @@ struct SettingsView: View {
           VStack(alignment: .leading, spacing: 8) {
             Label("Version \(appVersion)", systemImage: "tag")
             Label("Build \(buildNumber)", systemImage: "hammer")
+            if let latest = updaterManager.latestVersion {
+              Label("Latest \(latest)", systemImage: "arrow.up.circle")
+            } else {
+              Label("Latest unknown", systemImage: "arrow.up.circle")
+            }
+
             if let commit = commitRef, !commit.isEmpty {
               Label("Commit \(String(commit.prefix(7)))", systemImage: "arrow.triangle.branch")
             }

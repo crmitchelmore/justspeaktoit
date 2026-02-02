@@ -73,10 +73,12 @@ fi
 DOWNLOAD_URL="https://github.com/crmitchelmore/justspeaktoit/releases/download/mac-v${VERSION}/${DMG_NAME}"
 
 # Generate release notes from git commits since last tag
+# Match either "[mac]" tags or "(mac)" conventional commit scopes
+MAC_RELEASE_NOTES_PATTERN="\\[mac\\]|\\(mac\\)"
 LAST_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
 if [ -n "$LAST_TAG" ]; then
     echo "Generating release notes from commits since $LAST_TAG" >&2
-    RELEASE_NOTES=$(git log "$LAST_TAG"..HEAD --pretty=format:"<li>%s</li>" --grep="\\[mac\\]" --extended-regexp 2>/dev/null | head -20 || echo "<li>Bug fixes and improvements</li>")
+    RELEASE_NOTES=$(git log "$LAST_TAG"..HEAD --pretty=format:"<li>%s</li>" --grep="$MAC_RELEASE_NOTES_PATTERN" --extended-regexp 2>/dev/null | head -20 || echo "<li>Bug fixes and improvements</li>")
 else
     RELEASE_NOTES="<li>Initial release</li>"
 fi

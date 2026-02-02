@@ -24,5 +24,5 @@ Project-specific patterns and conventions for AI-assisted development.
 - The `.task` modifier properly handles view lifecycle and cancellation
 
 ## Commit Message Tagging
-- Prefix commit messages with a platform tag: `[mac]` or `[ios]` (e.g., `fix: [mac] add recording sound picker`).
-- These tags feed the Sparkle release notes generator so macOS updates only list mac-specific changes.
+- Prefix commit messages with a platform tag or scope: `[mac]`/`[ios]` or `(mac)`/`(ios)` (e.g., `fix: [mac] add recording sound picker` or `fix(mac): add recording sound picker`).
+- These tags/scopes feed the Sparkle release notes generator so macOS updates only list mac-specific changes.

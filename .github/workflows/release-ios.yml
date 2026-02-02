@@ -105,7 +105,9 @@ jobs:
             CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="Apple Distribution" \
-            DEVELOPMENT_TEAM="$APPLE_TEAM_ID"
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            PROVISIONING_PROFILE_SPECIFIER="$APP_PROFILE_NAME" \
+            PROVISIONING_PROFILE_SPECIFIER[com.justspeaktoit.ios.JustSpeakToItWidgetExtension]="$WIDGET_PROFILE_NAME"
 
       - name: Export IPA
         env:

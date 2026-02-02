@@ -33,6 +33,7 @@ final class UpdaterManager: NSObject, ObservableObject {
     }
 
     private override init() {
+        automaticallyChecksForUpdates = false
         super.init()
         _ = updaterController
 

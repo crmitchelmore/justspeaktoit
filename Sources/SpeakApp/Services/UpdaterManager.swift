@@ -3,7 +3,7 @@ import Sparkle
 
 /// Manages automatic updates using Sparkle framework
 @MainActor
-final class UpdaterManager: ObservableObject {
+final class UpdaterManager: NSObject, ObservableObject {
     /// Shared instance for app-wide access
     static let shared = UpdaterManager()
 
@@ -32,7 +32,8 @@ final class UpdaterManager: ObservableObject {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
     }
 
-    private init() {
+    private override init() {
+        super.init()
         _ = updaterController
 
         automaticallyChecksForUpdates = updaterController.updater.automaticallyChecksForUpdates

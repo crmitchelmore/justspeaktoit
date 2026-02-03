@@ -252,6 +252,7 @@ struct SettingsView: View {
               .fill(Color(nsColor: .controlBackgroundColor))
           )
           .speakTooltip("Choose whether Speak follows macOS appearance or stays in light or dark mode all the time.")
+          .accessibilityLabel("Appearance theme picker")
         }
       }
       .speakTooltip("Set Speak's look to match your workspace with light, dark, or system themes.")
@@ -271,6 +272,7 @@ struct SettingsView: View {
               .fill(Color(nsColor: .controlBackgroundColor))
           )
           .speakTooltip("Decide how Speak returns transcripts—typed for you, placed on the clipboard, or saved for later.")
+          .accessibilityLabel("Text output method picker")
 
           VStack(alignment: .leading, spacing: 8) {
             settingsToggle(
@@ -309,6 +311,7 @@ struct SettingsView: View {
             }
             .labelsHidden()
             .pickerStyle(.segmented)
+            .accessibilityLabel("App visibility picker")
           }
           .padding(.horizontal, 12)
           .padding(.vertical, 8)
@@ -351,6 +354,7 @@ struct SettingsView: View {
               .fill(Color(nsColor: .controlBackgroundColor))
           )
           .speakTooltip("Choose which microphone Speak listens to when recording or transcribing.")
+          .accessibilityLabel("Audio input device picker")
 
           if let details = audioDevices.currentSelectionDetails {
             Text(details)
@@ -373,6 +377,7 @@ struct SettingsView: View {
             }
             .buttonStyle(.bordered)
             .speakTooltip("Reload the list of connected microphones.")
+            .accessibilityLabel("Refresh audio devices")
           }
         }
       }
@@ -403,6 +408,7 @@ struct SettingsView: View {
               RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color(nsColor: .controlBackgroundColor))
             )
+            .accessibilityLabel("Recording sound profile picker")
           }
 
           VStack(alignment: .leading, spacing: 6) {
@@ -424,7 +430,9 @@ struct SettingsView: View {
                 value: settingsBinding(\AppSettings.recordingSoundVolume),
                 in: 0.1...1.0,
                 step: 0.1
+              .accessibilityLabel("Recording sound volume")
               )
+              .accessibilityValue("\(Int(settings.recordingSoundVolume * 100)) percent")
               Image(systemName: "speaker.wave.3.fill")
                 .foregroundStyle(.secondary)
                 .font(.caption)
@@ -436,10 +444,12 @@ struct SettingsView: View {
               previewRecordingSound(.start)
             }
             .buttonStyle(.bordered)
+            .accessibilityLabel("Preview start recording sound")
 
             Button("Preview Stop") {
               previewRecordingSound(.stop)
             }
+            .accessibilityLabel("Preview stop recording sound")
             .buttonStyle(.bordered)
           }
         }
@@ -489,6 +499,7 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.borderless)
                 .speakTooltip("Copy pairing code to clipboard")
+                .accessibilityLabel("Copy pairing code")
               }
               
               Text("Enter this code on your iPhone when pairing.")
@@ -500,7 +511,9 @@ struct SettingsView: View {
               }
               .buttonStyle(.bordered)
               .speakTooltip("Generate a new pairing code. This will disconnect all paired devices.")
+              .accessibilityLabel("Regenerate pairing code")
             }
+              .accessibilityHint("Generates a new code and disconnects all paired devices")
             .padding()
             .background(
               RoundedRectangle(cornerRadius: 8)
@@ -653,6 +666,7 @@ struct SettingsView: View {
 
           Picker("Preferred Locale", selection: settingsBinding(\AppSettings.preferredLocaleIdentifier)) {
             ForEach(resolvedLocaleOptions) { option in
+          .accessibilityLabel("Transcription mode picker")
               Text(option.displayName).tag(option.identifier)
             }
           }
@@ -668,6 +682,7 @@ struct SettingsView: View {
       }
       .speakTooltip("Choose which transcription flow Speak uses and the locale it should prefer.")
 
+          .accessibilityLabel("Preferred locale picker")
       SettingsCard(title: "Processing Speed", systemImage: "gauge.with.dots.needle.67percent", tint: Color.brandLagoon) {
         let speedModeAvailable = settings.transcriptionMode == .liveNative
           && settings.liveTranscriptionModel.contains("streaming")
@@ -957,6 +972,7 @@ struct SettingsView: View {
             )
             .speakTooltip("Let Speak know which language you want your polished transcript delivered in.")
             .onChange(of: settings.postProcessingOutputLanguage) { _, _ in
+            .accessibilityLabel("Post-processing output language picker")
               if showSystemPromptPreview {
                 generateSystemPromptPreview()
               }
@@ -1140,6 +1156,7 @@ struct SettingsView: View {
             .speakTooltip("Choose your preferred voice for text-to-speech synthesis")
 
             Text("Your default voice for converting text to speech")
+            .accessibilityLabel("Default TTS voice picker")
               .font(.caption)
               .foregroundStyle(.secondary)
           }
@@ -1158,6 +1175,7 @@ struct SettingsView: View {
             .pickerStyle(.segmented)
             
             Text(settings.ttsQuality.description)
+            .accessibilityLabel("TTS quality picker")
               .font(.caption)
               .foregroundStyle(.secondary)
           }
@@ -1176,7 +1194,9 @@ struct SettingsView: View {
           }
 
           VStack(alignment: .leading, spacing: 8) {
+              .accessibilityLabel("TTS playback speed")
             HStack {
+              .accessibilityValue(String(format: "%.2fx", settings.ttsSpeed))
               Text("Pitch")
               Spacer()
               Text("\(settings.ttsPitch > 0 ? "+" : "")\(Int(settings.ttsPitch)) semitones")
@@ -1188,7 +1208,9 @@ struct SettingsView: View {
           }
         }
       }
+              .accessibilityLabel("TTS voice pitch")
       .speakTooltip("Control audio quality, playback speed, and voice pitch for generated speech.")
+              .accessibilityValue("\(settings.ttsPitch > 0 ? "plus " : "")\(Int(settings.ttsPitch)) semitones")
 
       SettingsCard(title: "Output & Export", systemImage: "arrow.down.circle", tint: Color.brandAccentWarm) {
         VStack(alignment: .leading, spacing: 12) {
@@ -1207,6 +1229,7 @@ struct SettingsView: View {
             isOn: settingsBinding(\AppSettings.ttsAutoPlay),
             tint: .brandAccentWarm
           )
+            .accessibilityLabel("TTS output file format picker")
           .speakTooltip("Automatically play audio after synthesis completes")
 
           settingsToggle(
@@ -1917,6 +1940,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 16) {
           VStack(alignment: .leading, spacing: 6) {
             HStack {
+          .accessibilityLabel("Hotkey activation style picker")
               Text("Hold Threshold")
               Spacer()
               Text(
@@ -1935,7 +1959,9 @@ struct SettingsView: View {
               Spacer()
               Text(
                 settings.doubleTapWindow, format: .number.precision(.fractionLength(2))
+            .accessibilityLabel("Hold threshold")
               )
+            .accessibilityValue(String(format: "%.2f seconds", settings.holdThreshold))
               .font(.caption.monospacedDigit())
               .foregroundStyle(.secondary)
             }
@@ -1952,7 +1978,9 @@ struct SettingsView: View {
     LazyVStack(spacing: 20) {
       SettingsCard(title: "System permissions", systemImage: "lock.shield", tint: Color.red) {
         VStack(alignment: .leading, spacing: 12) {
+            .accessibilityLabel("Double tap window")
           ForEach(PermissionType.allCases) { permission in
+            .accessibilityValue(String(format: "%.2f seconds", settings.doubleTapWindow))
             let status = environment.permissions.status(for: permission)
             HStack(spacing: 12) {
               Label(permission.displayName, systemImage: permission.systemIconName)
@@ -1965,6 +1993,7 @@ struct SettingsView: View {
               Button("Request") {
                 Task { await environment.permissions.request(permission) }
               }
+              .accessibilityLabel("Request \(permission.displayName) permission")
               .buttonStyle(.bordered)
               .speakTooltip("Ask macOS to prompt again for \(permission.displayName) access.")
             }
@@ -1973,6 +2002,7 @@ struct SettingsView: View {
           Button("Refresh Statuses") {
             environment.permissions.refreshAll()
           }
+          .accessibilityLabel("Refresh permission statuses")
           .buttonStyle(.borderedProminent)
           .speakTooltip("Re-check what the system currently allows without leaving Speak.")
         }

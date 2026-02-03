@@ -171,8 +171,8 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         run: |
-          APP_PROFILE_UUID=$(security cms -D -i ~/Library/MobileDevice/Provisioning\\ Profiles/ios-appstore.provisionprofile | plutil -extract UUID raw -)
-          WIDGET_PROFILE_UUID=$(security cms -D -i ~/Library/MobileDevice/Provisioning\\ Profiles/ios-widget-appstore.provisionprofile | plutil -extract UUID raw -)
+          APP_PROFILE_UUID=$(security cms -D -i "$HOME/Library/MobileDevice/Provisioning Profiles/ios-appstore.provisionprofile" | plutil -extract UUID raw -)
+          WIDGET_PROFILE_UUID=$(security cms -D -i "$HOME/Library/MobileDevice/Provisioning Profiles/ios-widget-appstore.provisionprofile" | plutil -extract UUID raw -)
           cat > ExportOptions.plist << 'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

@@ -350,7 +350,7 @@ jobs:
 
       - name: Upload Artifact (for manual builds)
         if: "!startsWith(github.ref, 'refs/tags/mac-v')"
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ env.PRODUCT_NAME }}-${{ steps.version.outputs.version }}
           path: ${{ env.DMG_PATH }}

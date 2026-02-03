@@ -212,7 +212,7 @@ struct SettingsView: View {
   private func previewRecordingSound(_ sound: RecordingSoundPlayer.RecordingSound) {
     let player = RecordingSoundPlayer()
     player.profile = settings.recordingSoundProfile
-    player.play(sound, volume: 0.9)
+    player.play(sound, volume: settings.recordingSoundVolume)
   }
 
   var body: some View {
@@ -403,6 +403,32 @@ struct SettingsView: View {
               RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color(nsColor: .controlBackgroundColor))
             )
+          }
+
+          VStack(alignment: .leading, spacing: 6) {
+            HStack {
+              Text("Volume")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+              Spacer()
+              Text(volumeLabel(for: settings.recordingSoundVolume))
+                .font(.subheadline)
+                .foregroundStyle(.tertiary)
+                .monospacedDigit()
+            }
+            HStack(spacing: 8) {
+              Image(systemName: "speaker.fill")
+                .foregroundStyle(.secondary)
+                .font(.caption)
+              Slider(
+                value: settingsBinding(\AppSettings.recordingSoundVolume),
+                in: 0.1...1.0,
+                step: 0.1
+              )
+              Image(systemName: "speaker.wave.3.fill")
+                .foregroundStyle(.secondary)
+                .font(.caption)
+            }
           }
 
           HStack(spacing: 12) {
@@ -1961,6 +1987,16 @@ struct SettingsView: View {
     case .denied: return "Denied"
     case .restricted: return "Restricted"
     case .notDetermined: return "Pending"
+    }
+  }
+
+  private func volumeLabel(for volume: Float) -> String {
+    switch volume {
+    case 0..<0.2: return "Very Quiet"
+    case 0.2..<0.4: return "Quiet"
+    case 0.4..<0.6: return "Medium"
+    case 0.6..<0.8: return "Loud"
+    default: return "Very Loud"
     }
   }
 

@@ -321,7 +321,7 @@ final class MainManager: ObservableObject {
     state = .recording
 
     if appSettings.recordingSoundsEnabled {
-      recordingSoundPlayer.play(.start, volume: 0.9)
+      recordingSoundPlayer.play(.start, volume: appSettings.recordingSoundVolume)
     }
     lastErrorMessage = nil
     polishedLivePreview = ""
@@ -380,7 +380,7 @@ final class MainManager: ObservableObject {
     }
 
     if appSettings.recordingSoundsEnabled {
-      recordingSoundPlayer.play(.stop, volume: 0.9)
+      recordingSoundPlayer.play(.stop, volume: appSettings.recordingSoundVolume)
     }
 
     state = .processing

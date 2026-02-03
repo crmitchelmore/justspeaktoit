@@ -245,6 +245,7 @@ final class AppSettings: ObservableObject {
     case autoCorrectionsPromotionThreshold
     case recordingSoundsEnabled
     case recordingSoundProfile
+    case recordingSoundVolume
   }
 
   private static let defaultBatchTranscriptionModel = "google/gemini-2.0-flash-001"
@@ -565,6 +566,11 @@ final class AppSettings: ObservableObject {
     didSet { store(recordingSoundProfile.rawValue, key: .recordingSoundProfile) }
   }
 
+  /// Volume level for recording sounds (0.0 = silent, 1.0 = full volume)
+  @Published var recordingSoundVolume: Float {
+    didSet { store(Double(recordingSoundVolume), key: .recordingSoundVolume) }
+  }
+
   private var supportsSpeedModeProcessing: Bool {
     transcriptionMode == .liveNative && liveTranscriptionModel.contains("streaming")
   }
@@ -746,6 +752,8 @@ final class AppSettings: ObservableObject {
         rawValue: defaults.string(forKey: DefaultsKey.recordingSoundProfile.rawValue)
           ?? RecordingSoundPlayer.SoundProfile.classic.rawValue
       ) ?? .classic
+    recordingSoundVolume =
+      Float(defaults.object(forKey: DefaultsKey.recordingSoundVolume.rawValue) as? Double ?? 0.7)
 
     ensureRecordingsDirectoryExists()
     applyAppVisibility()

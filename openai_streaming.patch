@@ -1,0 +1,64 @@
+--- a/Sources/SpeakApp/OpenAITranscriptionProvider.swift
++++ b/Sources/SpeakApp/OpenAITranscriptionProvider.swift
+@@ -25,28 +25,36 @@
+     language: String?
+   ) async throws -> TranscriptionResult {
+     let endpoint = baseURL.appendingPathComponent("audio/transcriptions")
+-    var request = URLRequest(url: endpoint)
+-    request.httpMethod = "POST"
+-
++    
+     let boundary = "Boundary-\(UUID().uuidString)"
+-    request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+-    request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+-
+-    let audioData = try Data(contentsOf: url)
+-    var body = Data()
+-
++    
++    // Build multipart form data by streaming to a temporary file
++    let multipartBuilder = try StreamingMultipartFormData(boundary: boundary)
++    defer { multipartBuilder.cleanup() }
++    
+     // Extract model name without provider prefix
+     let modelName = model.split(separator: "/").last.map(String.init) ?? model
+-
+-    body.appendFormField(named: "model", value: modelName, boundary: boundary)
+-    body.appendFormField(named: "response_format", value: "verbose_json", boundary: boundary)
+-
++    
++    try multipartBuilder.appendFormField(named: "model", value: modelName)
++    try multipartBuilder.appendFormField(named: "response_format", value: "verbose_json")
++
+     if let language {
+       // OpenAI expects ISO-639-1 (2-letter code), not full locale (e.g., "en" not "en_GB")
+       let languageCode = extractLanguageCode(from: language)
+-      body.appendFormField(named: "language", value: languageCode, boundary: boundary)
++      try multipartBuilder.appendFormField(named: "language", value: languageCode)
+     }
+-
+-    body.appendFileField(
++
++    try multipartBuilder.appendFileField(
+       named: "file",
+       filename: url.lastPathComponent,
+       mimeType: "audio/m4a",
+-      fileData: audioData,
+-      boundary: boundary
++      fileURL: url
+     )
+-    body.appendString("--\(boundary)--\r\n")
+-    request.httpBody = body
+-
+-    let (data, response) = try await session.data(for: request)
++    try multipartBuilder.finalize()
++    
++    // Create request with streaming upload
++    var request = URLRequest(url: endpoint)
++    request.httpMethod = "POST"
++    request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
++    request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
++
++    let (data, response) = try await session.upload(for: request, fromFile: multipartBuilder.fileURL)
+     guard let http = response as? HTTPURLResponse else {
+       throw TranscriptionProviderError.invalidResponse

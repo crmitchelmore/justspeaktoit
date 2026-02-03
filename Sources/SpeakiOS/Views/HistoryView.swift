@@ -124,12 +124,15 @@ public final class iOSHistoryManager: ObservableObject {
 public struct HistoryView: View {
     @StateObject private var historyManager = iOSHistoryManager.shared
     @State private var showingClearConfirmation = false
+    @State private var showSkeletonLoading = false
     
     public init() {}
     
     public var body: some View {
         Group {
-            if historyManager.isLoading {
+            if showSkeletonLoading {
+                skeletonLoadingView
+            } else if historyManager.isLoading {
                 ProgressView("Loading history...")
             } else if historyManager.items.isEmpty {
                 emptyState
@@ -160,6 +163,34 @@ public struct HistoryView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This will permanently delete all \(historyManager.items.count) transcriptions.")
+        }
+        .onAppear {
+            // Show skeleton loading briefly for improved perceived performance
+            if historyManager.items.isEmpty && !historyManager.isLoading {
+                showSkeletonLoading = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        showSkeletonLoading = false
+                    }
+                }
+            }
+        }
+    }
+    
+    private var skeletonLoadingView: some View {
+        List {
+            // Stats header skeleton
+            Section {
+                HistoryStatsSkeleton()
+                    .listRowInsets(EdgeInsets())
+            }
+            
+            // History items skeleton
+            Section {
+                ForEach(0..<5, id: \.self) { _ in
+                    iOSHistoryItemSkeleton()
+                }
+            }
         }
     }
     

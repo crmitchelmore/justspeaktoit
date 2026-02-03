@@ -1,0 +1,69 @@
+--- a/Sources/SpeakApp/RevAITranscriptionProvider.swift
++++ b/Sources/SpeakApp/RevAITranscriptionProvider.swift
+@@ -89,25 +89,28 @@
+  
+   private func submitJob(url: URL, apiKey: String, language: String?) async throws -> String {
+     let endpoint = baseURL.appendingPathComponent("jobs")
+-    var request = URLRequest(url: endpoint)
+-    request.httpMethod = "POST"
+-
++    
+     let boundary = "Boundary-\(UUID().uuidString)"
+-    request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+-    request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+-
+-    let audioData = try Data(contentsOf: url)
+-    var body = Data()
+-
++    
++    // Build multipart form data by streaming to a temporary file
++    let multipartBuilder = try StreamingMultipartFormData(boundary: boundary)
++    defer { multipartBuilder.cleanup() }
++
+     // Add metadata
+     var metadata: [String: Any] = [:]
+     if let language {
+       // Rev.ai accepts language codes like "en", but also accepts locale-specific codes
+       // Normalize to just language code for consistency
+       let languageCode = extractLanguageCode(from: language)
+       metadata["language"] = languageCode
+     }
+     metadata["skip_diarization"] = false
+     metadata["skip_punctuation"] = false
+-
++
+     if let metadataJSON = try? JSONSerialization.data(withJSONObject: metadata) {
+-      body.appendFormField(
++      try multipartBuilder.appendFormField(
+         named: "metadata",
+-        value: String(data: metadataJSON, encoding: .utf8) ?? "{}",
+-        boundary: boundary
++        value: String(data: metadataJSON, encoding: .utf8) ?? "{}"
+       )
+     }
+-
+-    body.appendFileField(
++
++    try multipartBuilder.appendFileField(
+       named: "media",
+       filename: url.lastPathComponent,
+       mimeType: "audio/m4a",
+-      fileData: audioData,
+-      boundary: boundary
++      fileURL: url
+     )
+-    body.appendString("--\(boundary)--\r\n")
+-    request.httpBody = body
+-
+-    let (data, response) = try await session.data(for: request)
++    try multipartBuilder.finalize()
++    
++    // Create request with streaming upload
++    var request = URLRequest(url: endpoint)
++    request.httpMethod = "POST"
++    request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
++    request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
++
++    let (data, response) = try await session.upload(for: request, fromFile: multipartBuilder.fileURL)
+     guard let http = response as? HTTPURLResponse else {
+       throw TranscriptionProviderError.invalidResponse

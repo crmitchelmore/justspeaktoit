@@ -13,7 +13,7 @@ This project maintains **separate version tracks** for macOS and iOS:
 gh release list --repo crmitchelmore/justspeaktoit | grep "mac-v" | head -1
 
 # Or check GitHub releases page for mac-v* tags
-# Current latest: mac-v0.7.6 → next should be mac-v0.7.7
+# Example: if latest is mac-v0.9.1 → next should be mac-v0.9.2
 
 # The VERSION file is NOT authoritative for releases - always check GitHub tags
 ```

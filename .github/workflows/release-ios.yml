@@ -106,10 +106,10 @@ jobs:
                       return
               for i, line in enumerate(lines):
                   if "PRODUCT_BUNDLE_IDENTIFIER" in line:
-                      indent = re.match(r"(\\s*)", line).group(1)
+                      indent = re.match(r"(\s*)", line).group(1)
                       lines.insert(i + 1, "{}{} = {};".format(indent, key, value))
                       return
-              indent = re.match(r"(\\s*)", lines[0]).group(1) if lines else "\\t\\t\\t\\t"
+              indent = re.match(r"(\s*)", lines[0]).group(1) if lines else "\t\t\t\t"
               lines.append("{}{} = {};".format(indent, key, value))
 
           def patch_release_block(settings, profile):
@@ -119,11 +119,11 @@ jobs:
               if team_id:
                   upsert_setting(lines, "DEVELOPMENT_TEAM", team_id)
               upsert_setting(lines, "PROVISIONING_PROFILE_SPECIFIER", '"{}"'.format(profile))
-              return "\\n".join(lines)
+              return "\n".join(lines)
 
           def patch_blocks(text):
               pattern = re.compile(
-                  r'(?P<prefix>[A-F0-9]{24} /\\* Release \\*/ = \\{\\n\\t\\t\\tisa = XCBuildConfiguration;\\n\\t\\t\\tbuildSettings = \\{\\n)(?P<settings>.*?)(?P<suffix>\\n\\t\\t\\t\\};\\n\\t\\t\\tname = Release;\\n\\t\\t\\};)',
+                  r'(?P<prefix>[A-F0-9]{24} /\* Release \*/ = \{\n\t\t\tisa = XCBuildConfiguration;\n\t\t\tbuildSettings = \{\n)(?P<settings>.*?)(?P<suffix>\n\t\t\t\};\n\t\t\tname = Release;\n\t\t\};)',
                   re.S,
               )
               def repl(match):
@@ -132,7 +132,7 @@ jobs:
                       settings = patch_release_block(settings, widget_profile)
                   elif "PRODUCT_BUNDLE_IDENTIFIER = com.justspeaktoit.ios;" in settings:
                       settings = patch_release_block(settings, app_profile)
-                  return f\"{match.group('prefix')}{settings}{match.group('suffix')}\"
+                  return "{}{}{}".format(match.group("prefix"), settings, match.group("suffix"))
               return pattern.sub(repl, text)
 
           updated = patch_blocks(text)

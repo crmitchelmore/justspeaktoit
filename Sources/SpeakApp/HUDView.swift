@@ -94,7 +94,7 @@ struct HUDOverlay: View {
     guard #available(macOS 26.0, *) else { return false }
     let version = ProcessInfo.processInfo.operatingSystemVersion
     let isSequoiaDotZero = version.majorVersion == 26 && version.minorVersion == 0 && version.patchVersion == 0
-    return isSequoiaDotZero == false
+    return !isSequoiaDotZero
   }
   #else
   private var shouldUseGlassEffect: Bool { false }

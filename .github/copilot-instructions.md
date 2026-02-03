@@ -28,8 +28,8 @@ Project-specific patterns and conventions for AI-assisted development.
 - These tags/scopes feed the Sparkle release notes generator so macOS updates only list mac-specific changes.
 
 ## App Store Connect / iOS Signing (sensitive)
-- App Store Connect API Key ID: `S747NJ9DZY`
-- App Store Connect Issuer ID: `69a6de77-8954-47e3-e053-5b8c7c11a4d1`
+- App Store Connect API Key ID: stored in secure notes (do not commit)
+- App Store Connect Issuer ID: stored in secure notes (do not commit)
 - App Store Connect API key: store base64 in `.env` as `APP_STORE_CONNECT_API_KEY` (do not commit)
 - iOS distribution cert: store base64 in `.env` as `IOS_DISTRIBUTION_P12` (password in `.env` as `IOS_DISTRIBUTION_PASSWORD`)
 - GitHub secrets used by CI: `APP_STORE_CONNECT_API_KEY`, `APP_STORE_CONNECT_ISSUER_ID`, `APPLE_TEAM_ID`, `IOS_DISTRIBUTION_P12`, `IOS_DISTRIBUTION_PASSWORD`, `IOS_APPSTORE_PROFILE`, `IOS_WIDGET_APPSTORE_PROFILE`

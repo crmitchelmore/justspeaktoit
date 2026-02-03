@@ -18,20 +18,23 @@ var iosAppSettings: [String: SettingValue] = [
     "CURRENT_PROJECT_VERSION": "1",
     "MARKETING_VERSION": "\(version)"
 ]
-if let appProfileName {
-    iosAppSettings["PROVISIONING_PROFILE_SPECIFIER"] = .string(appProfileName)
-    iosAppSettings["CODE_SIGN_STYLE"] = "Manual"
-    iosAppSettings["CODE_SIGN_IDENTITY"] = "Apple Distribution"
-}
-
 var iosWidgetSettings: [String: SettingValue] = [
     "CURRENT_PROJECT_VERSION": "1",
     "MARKETING_VERSION": "\(version)"
 ]
+
+func configureManualSigning(for settings: inout [String: SettingValue], profileName: String) {
+    settings["PROVISIONING_PROFILE_SPECIFIER"] = .string(profileName)
+    settings["CODE_SIGN_STYLE"] = "Manual"
+    settings["CODE_SIGN_IDENTITY"] = "Apple Distribution"
+}
+
+if let appProfileName {
+    configureManualSigning(for: &iosAppSettings, profileName: appProfileName)
+}
+
 if let widgetProfileName {
-    iosWidgetSettings["PROVISIONING_PROFILE_SPECIFIER"] = .string(widgetProfileName)
-    iosWidgetSettings["CODE_SIGN_STYLE"] = "Manual"
-    iosWidgetSettings["CODE_SIGN_IDENTITY"] = "Apple Distribution"
+    configureManualSigning(for: &iosWidgetSettings, profileName: widgetProfileName)
 }
 
 let project = Project(

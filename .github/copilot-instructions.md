@@ -26,3 +26,12 @@ Project-specific patterns and conventions for AI-assisted development.
 ## Commit Message Tagging
 - Prefix commit messages with a platform tag or scope: `[mac]`/`[ios]` or `(mac)`/`(ios)` (e.g., `fix: [mac] add recording sound picker` or `fix(mac): add recording sound picker`).
 - These tags/scopes feed the Sparkle release notes generator so macOS updates only list mac-specific changes.
+
+## App Store Connect / iOS Signing (sensitive)
+- App Store Connect API Key ID: stored in secure notes (do not commit)
+- App Store Connect Issuer ID: stored in secure notes (do not commit)
+- App Store Connect API key: store base64 in `.env` as `APP_STORE_CONNECT_API_KEY` (do not commit)
+- iOS distribution cert: store base64 in `.env` as `IOS_DISTRIBUTION_P12` (password in `.env` as `IOS_DISTRIBUTION_PASSWORD`)
+- GitHub secrets used by CI: `APP_STORE_CONNECT_API_KEY`, `APP_STORE_CONNECT_ISSUER_ID`, `APPLE_TEAM_ID`, `IOS_DISTRIBUTION_P12`, `IOS_DISTRIBUTION_PASSWORD`, `IOS_APPSTORE_PROFILE`, `IOS_WIDGET_APPSTORE_PROFILE`
+- Required entitlements: App Group `group.com.justspeaktoit.ios` and iCloud container `iCloud.com.justspeaktoit.ios`
+- Never commit private keys or provisioning profile contents.

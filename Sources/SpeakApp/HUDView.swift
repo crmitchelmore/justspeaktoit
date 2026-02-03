@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 struct HUDOverlay: View {
@@ -62,7 +63,7 @@ struct HUDOverlay: View {
   private func hudShell<Content: View>(_ view: Content) -> some View {
     let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
     #if compiler(>=6.1) && canImport(SwiftUI, _version: 7.0)
-    if #available(macOS 26.0, *) {
+    if #available(macOS 26.0, *), shouldUseGlassEffect {
       view
         .background(phaseTint)
         .glassEffect(.regular.tint(phaseColor.opacity(0.18)).interactive(), in: .rect(cornerRadius: 20))
@@ -85,6 +86,19 @@ struct HUDOverlay: View {
       )
       .overlay(shape.stroke(phaseColor.opacity(0.45), lineWidth: strokeWidth))
   }
+
+  #if os(macOS)
+  /// Returns `true` when glassEffect is safe to use on the current OS build.
+  /// macOS 26.0 exhibits a SwiftUI bug inside DesignLibrary that leads to EXC_BAD_ACCESS.
+  private var shouldUseGlassEffect: Bool {
+    guard #available(macOS 26.0, *) else { return false }
+    let version = ProcessInfo.processInfo.operatingSystemVersion
+    let isSequoiaDotZero = version.majorVersion == 26 && version.minorVersion == 0 && version.patchVersion == 0
+    return !isSequoiaDotZero
+  }
+  #else
+  private var shouldUseGlassEffect: Bool { false }
+  #endif
 
   @ViewBuilder
   private func liveTranscriptionView(text: String) -> some View {

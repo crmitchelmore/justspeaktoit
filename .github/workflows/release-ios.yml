@@ -107,10 +107,10 @@ jobs:
               for i, line in enumerate(lines):
                   if "PRODUCT_BUNDLE_IDENTIFIER" in line:
                       indent = re.match(r"(\\s*)", line).group(1)
-                      lines.insert(i + 1, f\"{indent}{key} = {value};\")
+                      lines.insert(i + 1, "{}{} = {};".format(indent, key, value))
                       return
               indent = re.match(r"(\\s*)", lines[0]).group(1) if lines else "\\t\\t\\t\\t"
-              lines.append(f\"{indent}{key} = {value};\")
+              lines.append("{}{} = {};".format(indent, key, value))
 
           def patch_release_block(settings, profile):
               lines = settings.splitlines()
@@ -118,7 +118,7 @@ jobs:
               upsert_setting(lines, "CODE_SIGN_IDENTITY", "\"Apple Distribution\"")
               if team_id:
                   upsert_setting(lines, "DEVELOPMENT_TEAM", team_id)
-              upsert_setting(lines, "PROVISIONING_PROFILE_SPECIFIER", f"\"{profile}\"")
+              upsert_setting(lines, "PROVISIONING_PROFILE_SPECIFIER", '"{}"'.format(profile))
               return "\\n".join(lines)
 
           def patch_blocks(text):

@@ -1,5 +1,53 @@
 # Repository Guidelines
 
+## Versioning & Release Process
+
+This project maintains **separate version tracks** for macOS and iOS:
+
+### Version Discovery
+
+**CRITICAL: Always check the ACTUAL latest release before creating a new version.**
+
+```bash
+# Find the latest macOS release version:
+gh release list --repo crmitchelmore/justspeaktoit | grep "mac-v" | head -1
+
+# Or check GitHub releases page for mac-v* tags
+# Current latest: mac-v0.7.6 → next should be mac-v0.7.7
+
+# The VERSION file is NOT authoritative for releases - always check GitHub tags
+```
+
+### Tag Conventions
+
+| Platform | Tag Format | Example | Workflow Triggered |
+|----------|------------|---------|-------------------|
+| macOS | `mac-v*` | `mac-v0.7.7` | `.github/workflows/release-mac.yml` |
+| iOS | `ios-v*` | `ios-v0.9.1` | `.github/workflows/release-ios.yml` (manual) |
+| Legacy | `v*` | `v0.7.5` | None (deprecated) |
+
+### macOS Release Process
+
+1. **Check current version**: `gh release list | grep mac-v | head -1`
+2. **Commit changes** with `[mac]` tag: `git commit -m "feat: [mac] description"`
+3. **Push to main**: `git push origin main`
+4. **Create and push tag**: 
+   ```bash
+   git tag mac-v0.7.7  # Use NEXT version after latest mac-v* tag
+   git push origin mac-v0.7.7
+   ```
+5. The workflow builds, notarizes, and publishes to GitHub Releases + updates appcast.xml
+
+### iOS Release Process
+
+1. iOS uses **manual workflow dispatch** (not tag-triggered)
+2. Go to Actions → "Release iOS (TestFlight)" → Run workflow
+3. Enter version number (check App Store Connect for current version)
+
+### VERSION File
+
+The `VERSION` file is a **hint** used as fallback when no tag is present. It does NOT control the release version - the **tag determines the version**. Keep it updated but always verify against actual releases.
+
 ## Project Structure & Module Organization
 
 This project uses **Swift Package Manager** for modularization with cross-platform support:

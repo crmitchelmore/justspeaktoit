@@ -254,6 +254,7 @@ struct SettingsView: View {
               .fill(Color(nsColor: .controlBackgroundColor))
           )
           .speakTooltip("Choose whether Speak follows macOS appearance or stays in light or dark mode all the time.")
+          .accessibilityLabel("Appearance theme picker")
         }
       }
       .speakTooltip("Set Speak's look to match your workspace with light, dark, or system themes.")
@@ -274,6 +275,7 @@ struct SettingsView: View {
           )
           .speakTooltip("Decide how Speak returns transcripts—typed for you, placed on the clipboard, or saved for later.")
 
+          .accessibilityLabel("Text output method picker")
           VStack(alignment: .leading, spacing: 8) {
             settingsToggle(
               "Restore clipboard after paste",
@@ -353,6 +355,7 @@ struct SettingsView: View {
               .fill(Color(nsColor: .controlBackgroundColor))
           )
           .speakTooltip("Choose which microphone Speak listens to when recording or transcribing.")
+          .accessibilityLabel("Audio input device picker")
 
           if let details = audioDevices.currentSelectionDetails {
             Text(details)
@@ -655,6 +658,7 @@ struct SettingsView: View {
 
           Picker("Preferred Locale", selection: settingsBinding(\AppSettings.preferredLocaleIdentifier)) {
             ForEach(resolvedLocaleOptions) { option in
+          .accessibilityLabel("Transcription mode picker")
               Text(option.displayName).tag(option.identifier)
             }
           }
@@ -670,6 +674,7 @@ struct SettingsView: View {
       }
       .speakTooltip("Choose which transcription flow Speak uses and the locale it should prefer.")
 
+          .accessibilityLabel("Preferred locale picker")
       SettingsCard(title: "Processing Speed", systemImage: "gauge.with.dots.needle.67percent", tint: Color.brandLagoon) {
         let speedModeAvailable = settings.transcriptionMode == .liveNative
           && settings.liveTranscriptionModel.contains("streaming")

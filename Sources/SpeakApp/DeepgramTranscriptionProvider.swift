@@ -211,7 +211,7 @@ final class DeepgramLiveTranscriber: @unchecked Sendable {
     }
 
     private func parseTranscriptResponse(_ json: String) {
-        print("[DeepgramLiveTranscriber] Received: \(json.prefix(200))")
+        logger.debug("Received Deepgram response (length: \(json.count))")
         guard let data = json.data(using: .utf8) else { return }
 
         do {

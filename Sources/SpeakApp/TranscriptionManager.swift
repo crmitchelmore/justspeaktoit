@@ -567,7 +567,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
 
   /// Handle transcript from Deepgram - accumulate final segments, track interim
   private func handleTranscript(text: String, isFinal: Bool) {
-    print("[DeepgramLiveController] Transcript: '\(text)' (final: \(isFinal))")
+    print("[DeepgramLiveController] Transcript received (length: \(text.count), final: \(isFinal))")
 
     if isFinal {
       // Commit this segment - create a basic segment (no timing from this callback)
@@ -579,7 +579,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
       finalSegments.append(segment)
       fullTranscript = finalSegments.map(\.text).joined(separator: " ")
       currentInterim = ""
-      print("[DeepgramLiveController] Final segment #\(finalSegments.count): '\(text.prefix(50))' - fullTranscript: '\(fullTranscript.prefix(80))'")
+      print("[DeepgramLiveController] Final segment #\(finalSegments.count) (length: \(text.count)) - fullTranscript length: \(fullTranscript.count)")
 
       // Notify delegate of updated full transcript
       delegate?.liveTranscriber(self, didUpdatePartial: fullTranscript)
@@ -741,7 +741,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
 
     // Build final result including any unfinalised interim text
     let result = buildFinalResult()
-    print("[DeepgramLiveController] Built result: '\(result.text.prefix(100))' (\(result.text.count) chars)")
+    print("[DeepgramLiveController] Built result (\(result.text.count) chars)")
 
     await MainActor.run {
       delegate?.liveTranscriber(self, didFinishWith: result)
@@ -761,7 +761,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
         text += " "
       }
       text += trimmedInterim
-      print("[DeepgramLiveController] Including unfinalised interim: '\(trimmedInterim)'")
+      print("[DeepgramLiveController] Including unfinalised interim (length: \(trimmedInterim.count))")
     }
 
     // Calculate duration from streaming session

@@ -2823,15 +2823,30 @@ private struct APIKeyValidationDebugDetailsView: View {
   @ViewBuilder
   private func headersSection(title: String, headers: [String: String]) -> some View {
     VStack(alignment: .leading, spacing: 4) {
-      Text(title)
-        .font(.caption)
-        .foregroundStyle(.secondary)
+      HStack(spacing: 4) {
+        Text(title)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        if headers.values.contains(where: { $0.contains("...") || $0 == "[REDACTED]" }) {
+          Image(systemName: "eye.slash.fill")
+            .font(.caption2)
+            .foregroundStyle(.orange)
+            .help("Sensitive values are redacted for security")
+        }
+      }
       VStack(alignment: .leading, spacing: 2) {
         ForEach(headers.sorted(by: { $0.key < $1.key }), id: \.key) { entry in
-          Text("\(entry.key): \(entry.value)")
-            .font(.caption2.monospaced())
-            .foregroundStyle(.secondary)
-            .textSelection(.enabled)
+          HStack(spacing: 4) {
+            Text("\(entry.key): \(entry.value)")
+              .font(.caption2.monospaced())
+              .foregroundStyle(.secondary)
+              .textSelection(.enabled)
+            if entry.value.contains("...") || entry.value == "[REDACTED]" {
+              Image(systemName: "lock.fill")
+                .font(.system(size: 8))
+                .foregroundStyle(.orange)
+            }
+          }
         }
       }
       .padding(8)

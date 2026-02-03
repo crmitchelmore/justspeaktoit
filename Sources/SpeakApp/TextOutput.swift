@@ -280,17 +280,25 @@ struct SmartTextOutput: TextOutputting {
   /// Includes a 50ms delay to allow the target app to process the change.
   private func verifyTextInserted(text: String, element: AXUIElement) -> Bool {
     // Wait 50ms for the target app to process the accessibility change
-    // Note: Using Thread.sleep as this is a brief, necessary delay for AX sync
-    Thread.sleep(forTimeInterval: 0.05)
-
-    var currentValue: CFTypeRef?
-    let getStatus = AXUIElementCopyAttributeValue(
-      element, kAXValueAttribute as CFString, &currentValue)
-    guard getStatus == .success, let currentString = currentValue as? String else {
-      return false
+    // Using async Task.sleep to prevent UI blocking
+    let semaphore = DispatchSemaphore(value: 0)
+    var result = false
+    
+    Task { @MainActor in
+      try? await Task.sleep(for: .milliseconds(50))
+      
+      var currentValue: CFTypeRef?
+      let getStatus = AXUIElementCopyAttributeValue(
+        element, kAXValueAttribute as CFString, &currentValue)
+      if getStatus == .success, let currentString = currentValue as? String {
+        // Check if the text appears at the end (it should have been appended or set)
+        result = currentString.hasSuffix(text) || currentString == text
+      }
+      semaphore.signal()
     }
-    // Check if the text appears at the end (it should have been appended or set)
-    return currentString.hasSuffix(text) || currentString == text
+    
+    semaphore.wait()
+    return result
   }
 
   /// Log information about the focused element for debugging

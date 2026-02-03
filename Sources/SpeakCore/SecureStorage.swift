@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import os
 
 // MARK: - Error Types
 
@@ -80,6 +81,8 @@ public struct SecureStorageConfiguration: Sendable {
 /// Cross-platform secure storage for API keys and secrets.
 /// Uses Keychain Services on both macOS and iOS.
 public actor SecureStorage {
+    private static let logger = Logger(subsystem: "com.justspeaktoit", category: "SecureStorage")
+    
     private let configuration: SecureStorageConfiguration
     private let permissionsChecker: any KeychainPermissionsChecking
     private let identifierRegistry: (any APIKeyIdentifierRegistry)?
@@ -320,9 +323,9 @@ public actor SecureStorage {
         let query = baseQuery()
         
         // DEBUG: Log the query to verify no synchronizable
-        print("[SecureStorage] writeCacheToKeychain - baseQuery keys: \(query.keys)")
-        print("[SecureStorage] configuration.synchronizable: \(configuration.synchronizable)")
-        print("[SecureStorage] configuration.accessGroup: \(configuration.accessGroup ?? "nil")")
+        Self.logger.debug("writeCacheToKeychain - baseQuery keys: \(query.keys, privacy: .private)")
+        Self.logger.debug("configuration.synchronizable: \(self.configuration.synchronizable, privacy: .private)")
+        Self.logger.debug("configuration.accessGroup: \(self.configuration.accessGroup ?? "nil", privacy: .private)")
 
         if payload.isEmpty {
             SecItemDelete(query as CFDictionary)
@@ -343,10 +346,10 @@ public actor SecureStorage {
             attributesToUpdate[kSecAttrSynchronizable as String] = kCFBooleanTrue
         }
         
-        print("[SecureStorage] attributesToUpdate keys: \(attributesToUpdate.keys)")
+        Self.logger.debug("attributesToUpdate keys: \(attributesToUpdate.keys, privacy: .private)")
 
         let status = SecItemUpdate(query as CFDictionary, attributesToUpdate as CFDictionary)
-        print("[SecureStorage] SecItemUpdate status: \(status)")
+        Self.logger.debug("SecItemUpdate status: \(status, privacy: .private)")
         
         if status == errSecItemNotFound {
             var addQuery = query
@@ -359,16 +362,16 @@ public actor SecureStorage {
                 addQuery[kSecAttrSynchronizable as String] = kCFBooleanTrue
             }
             
-            print("[SecureStorage] SecItemAdd query keys: \(addQuery.keys)")
+            Self.logger.debug("SecItemAdd query keys: \(addQuery.keys, privacy: .private)")
             let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
-            print("[SecureStorage] SecItemAdd status: \(addStatus)")
+            Self.logger.debug("SecItemAdd status: \(addStatus, privacy: .private)")
             
             guard addStatus == errSecSuccess else {
-                print("[SecureStorage] ERROR: SecItemAdd failed with \(addStatus)")
+                Self.logger.debug("ERROR: SecItemAdd failed with \(addStatus, privacy: .private)")
                 throw SecureStorageError.unexpectedStatus(addStatus)
             }
         } else if status != errSecSuccess {
-            print("[SecureStorage] ERROR: SecItemUpdate failed with \(status)")
+            Self.logger.debug("ERROR: SecItemUpdate failed with \(status, privacy: .private)")
             throw SecureStorageError.unexpectedStatus(status)
         }
     }

@@ -32,6 +32,7 @@ This app follows these security practices:
 - **No telemetry**: The app does not collect or transmit user data
 - **Local processing**: Transcription can be performed entirely on-device
 - **Minimal permissions**: Only requests necessary permissions (microphone, accessibility)
+- **Debug UI redaction**: API keys and sensitive headers are automatically redacted in debug displays to prevent accidental exposure in screenshots or screen sharing
 
 ## Scope
 

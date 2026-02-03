@@ -20,6 +20,8 @@ var iosAppSettings: [String: SettingValue] = [
 ]
 if let appProfileName {
     iosAppSettings["PROVISIONING_PROFILE_SPECIFIER"] = .string(appProfileName)
+    iosAppSettings["CODE_SIGN_STYLE"] = "Manual"
+    iosAppSettings["CODE_SIGN_IDENTITY"] = "Apple Distribution"
 }
 
 var iosWidgetSettings: [String: SettingValue] = [
@@ -28,6 +30,8 @@ var iosWidgetSettings: [String: SettingValue] = [
 ]
 if let widgetProfileName {
     iosWidgetSettings["PROVISIONING_PROFILE_SPECIFIER"] = .string(widgetProfileName)
+    iosWidgetSettings["CODE_SIGN_STYLE"] = "Manual"
+    iosWidgetSettings["CODE_SIGN_IDENTITY"] = "Apple Distribution"
 }
 
 let project = Project(

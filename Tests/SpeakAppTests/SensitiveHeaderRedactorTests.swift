@@ -58,7 +58,7 @@ final class SensitiveHeaderRedactorTests: XCTestCase {
         let apiKey = "AbCd1234567890XyZ9876543210MnOpQrSt"
         let redacted = SensitiveHeaderRedactor.redactValue(apiKey)
         
-        XCTAssertEqual(redacted, "AbC...rSt", "Long key should show first 3 and last 4 chars")
+        XCTAssertEqual(redacted, "AbC...QrSt", "Long key should show first 3 and last 4 chars")
         XCTAssertTrue(redacted.contains("..."), "Redacted value should contain ellipsis")
     }
     

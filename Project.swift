@@ -43,7 +43,7 @@ let project = Project(
     packages: [
         .package(path: .relativeToRoot(".")),
         .remote(url: "https://github.com/sparkle-project/Sparkle.git", requirement: .upToNextMajor(from: "2.6.0")),
-        .remote(url: "https://github.com/getsentry/sentry-cocoa.git", requirement: .upToNextMajor(from: "8.40.0"))
+        .remote(url: "https://github.com/getsentry/sentry-cocoa.git", requirement: .upToNextMajor(from: "9.3.0"))
     ],
     settings: .settings(
         base: [

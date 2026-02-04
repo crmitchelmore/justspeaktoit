@@ -82,6 +82,7 @@ struct SettingsView: View {
   @State private var showSystemPromptPreview = false
   @State private var systemPromptPreview = ""
   @State private var showingConfigTransfer = false
+  @State private var soundPreviewPlayer: RecordingSoundPlayer?
   private let openRouterKeyIdentifier = "openrouter.apiKey"
 
   enum ValidationViewState {
@@ -213,6 +214,7 @@ struct SettingsView: View {
     let player = RecordingSoundPlayer()
     player.profile = settings.recordingSoundProfile
     player.play(sound, volume: settings.recordingSoundVolume)
+    soundPreviewPlayer = player
   }
 
   var body: some View {

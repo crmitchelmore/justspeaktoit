@@ -157,10 +157,19 @@ final class HistoryManager: ObservableObject {
 
   private func scheduleFlushTimer() {
     flushTimer?.invalidate()
-    flushTimer = Timer.scheduledTimer(withTimeInterval: flushInterval, repeats: true) { [weak self] _ in
-      guard let self else { return }
-      self.flushIfNeededSync()
-    }
+    // Use target-selector Timer pattern to avoid swift_getObjectType crash during deallocation.
+    // Block-based timers with [weak self] can crash in swift concurrency runtime.
+    flushTimer = Timer.scheduledTimer(
+      timeInterval: flushInterval,
+      target: self,
+      selector: #selector(flushTimerFired),
+      userInfo: nil,
+      repeats: true
+    )
+  }
+
+  @objc private func flushTimerFired() {
+    flushIfNeededSync()
   }
 
   // MARK: - WAL Operations

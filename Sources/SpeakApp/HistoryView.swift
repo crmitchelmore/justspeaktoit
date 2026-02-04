@@ -1464,16 +1464,26 @@ private final class AudioPlaybackController: NSObject, ObservableObject, AVAudio
 
   private func startTimer() {
     timer?.invalidate()
-    timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
-      guard let self, let player else { return }
-      self.currentTime = player.currentTime
-      if !player.isPlaying {
-        self.state = .idle
-        self.timer?.invalidate()
-      }
-    }
+    // Use target-selector Timer pattern to avoid swift_getObjectType crash during deallocation.
+    // Block-based timers with [weak self] can crash in swift concurrency runtime.
+    timer = Timer.scheduledTimer(
+      timeInterval: 0.05,
+      target: self,
+      selector: #selector(timerFired),
+      userInfo: nil,
+      repeats: true
+    )
     if let timer {
       RunLoop.main.add(timer, forMode: .common)
+    }
+  }
+
+  @objc private func timerFired() {
+    guard let player else { return }
+    currentTime = player.currentTime
+    if !player.isPlaying {
+      state = .idle
+      timer?.invalidate()
     }
   }
 

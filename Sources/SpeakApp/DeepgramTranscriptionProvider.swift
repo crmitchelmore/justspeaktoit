@@ -11,6 +11,7 @@ final class DeepgramLiveTranscriber: @unchecked Sendable {
     private let model: String
     private let language: String?
     private let sampleRate: Int
+    private var unfairLock = os_unfair_lock()
     private var webSocketTask: URLSessionWebSocketTask?
     private let session: URLSession
     private let bufferPool: AudioBufferPool
@@ -179,7 +180,13 @@ final class DeepgramLiveTranscriber: @unchecked Sendable {
     }
 
     private func receiveMessages() {
-        webSocketTask?.receive { [weak self] result in
+        os_unfair_lock_lock(&unfairLock)
+        let task = webSocketTask
+        let stopping = isStopping
+        let errorHandler = onError
+        os_unfair_lock_unlock(&unfairLock)
+        
+        task?.receive { [weak self] result in
             guard let self else { return }
 
             switch result {
@@ -188,11 +195,11 @@ final class DeepgramLiveTranscriber: @unchecked Sendable {
                 self.receiveMessages()
 
             case .failure(let error):
-                if self.isStopping || self.shouldIgnoreSocketError(error) {
+                if stopping || self.shouldIgnoreSocketError(error) {
                     return
                 }
                 self.logger.error("WebSocket receive error: \(error.localizedDescription)")
-                self.onError?(error)
+                errorHandler?(error)
             }
         }
     }

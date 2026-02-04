@@ -115,15 +115,35 @@ final class SensitiveHeaderRedactorTests: XCTestCase {
     
     func testRedactsOnlyWhenValueMatchesSensitivePattern() {
         let headers = [
-            "Authorization": "Basic user:pass",  // Will be redacted due to long alphanumeric
+            "Authorization": "Basic user:pass",  // Will be redacted due to sensitive key
             "Content-Type": "text/plain",        // Won't be redacted
             "Custom-Header": "short"             // Won't be redacted (too short)
         ]
         
         let redacted = SensitiveHeaderRedactor.redactSensitiveHeaders(headers)
         
+        // Authorization should be redacted because the key is sensitive
+        XCTAssertEqual(redacted["Authorization"], "Bas...pass", "Authorization header should be redacted (sensitive key)")
         XCTAssertEqual(redacted["Content-Type"], "text/plain", "Non-sensitive header should not change")
         XCTAssertEqual(redacted["Custom-Header"], "short", "Short non-pattern value should not change")
+    }
+    
+    func testRedactsSensitiveKeyWithShortValue() {
+        // This test specifically covers the bug fix: sensitive keys with short values
+        let headers = [
+            "Authorization": "short",        // Sensitive key, short value - should be redacted
+            "x-api-key": "tiny",            // Sensitive key, short value - should be redacted  
+            "token": "test123",             // Sensitive key, short value - should be redacted
+            "Content-Type": "application/json"  // Non-sensitive key - should not be redacted
+        ]
+        
+        let redacted = SensitiveHeaderRedactor.redactSensitiveHeaders(headers)
+        
+        // All sensitive keys should be redacted regardless of value length/pattern
+        XCTAssertEqual(redacted["Authorization"], "[REDACTED]", "Authorization should be redacted (sensitive key)")
+        XCTAssertEqual(redacted["x-api-key"], "[REDACTED]", "x-api-key should be redacted (sensitive key)")
+        XCTAssertEqual(redacted["token"], "[REDACTED]", "token should be redacted (sensitive key)")
+        XCTAssertEqual(redacted["Content-Type"], "application/json", "Non-sensitive header should not change")
     }
     
     // MARK: - Integration with APIKeyValidationDebugSnapshot

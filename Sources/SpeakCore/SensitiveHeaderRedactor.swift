@@ -20,13 +20,16 @@ public enum SensitiveHeaderRedactor {
     /// - Parameter headers: Dictionary of HTTP headers
     /// - Returns: Dictionary with sensitive values redacted
     public static func redactSensitiveHeaders(_ headers: [String: String]) -> [String: String] {
-        headers.mapValues { value in
-            // Check if this is likely a sensitive value based on common patterns
-            if isSensitiveValue(value) {
-                return redactValue(value)
+        var result: [String: String] = [:]
+        for (key, value) in headers {
+            // Check if this is a sensitive key OR a sensitive value pattern
+            if isSensitiveKey(key) || isSensitiveValue(value) {
+                result[key] = redactValue(value)
+            } else {
+                result[key] = value
             }
-            return value
         }
+        return result
     }
     
     /// Determines if a header key is sensitive

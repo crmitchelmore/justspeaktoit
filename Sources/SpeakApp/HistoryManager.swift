@@ -146,7 +146,7 @@ final class HistoryManager: ObservableObject {
       forName: NSApplication.willTerminateNotification,
       object: nil,
       queue: .main
-    ) { [weak self] _ in
+    ) { @MainActor [weak self] _ in
       guard let self else { return }
       // Termination notifications run on main thread - call sync wrapper
       self.flushImmediatelySync()

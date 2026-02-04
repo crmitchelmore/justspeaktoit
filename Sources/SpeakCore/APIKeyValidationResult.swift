@@ -10,6 +10,16 @@ public struct APIKeyValidationDebugSnapshot: Sendable, Equatable {
     public let responseBody: String?
     public let errorDescription: String?
 
+    /// Creates a debug snapshot with automatic redaction of sensitive headers
+    /// - Parameters:
+    ///   - url: Request URL
+    ///   - method: HTTP method
+    ///   - requestHeaders: Request headers (will be redacted)
+    ///   - requestBody: Request body
+    ///   - statusCode: HTTP status code
+    ///   - responseHeaders: Response headers (will be redacted)
+    ///   - responseBody: Response body
+    ///   - errorDescription: Error description if any
     public init(
         url: String,
         method: String,
@@ -22,10 +32,11 @@ public struct APIKeyValidationDebugSnapshot: Sendable, Equatable {
     ) {
         self.url = url
         self.method = method
-        self.requestHeaders = requestHeaders
+        // Automatically redact sensitive headers to prevent exposure in debug UI
+        self.requestHeaders = SensitiveHeaderRedactor.redactSensitiveHeaders(requestHeaders)
         self.requestBody = requestBody
         self.statusCode = statusCode
-        self.responseHeaders = responseHeaders
+        self.responseHeaders = SensitiveHeaderRedactor.redactSensitiveHeaders(responseHeaders)
         self.responseBody = responseBody
         self.errorDescription = errorDescription
     }

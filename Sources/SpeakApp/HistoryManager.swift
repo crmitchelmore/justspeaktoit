@@ -157,8 +157,9 @@ final class HistoryManager: ObservableObject {
 
   private func scheduleFlushTimer() {
     flushTimer?.invalidate()
-    // Use target-selector Timer pattern to avoid swift_getObjectType crash during deallocation.
-    // Block-based timers with [weak self] can crash in swift concurrency runtime.
+    // Use target-selector pattern to avoid Swift concurrency crashes during deallocation.
+    // Block-based timers with [weak self] can crash in swift_getObjectType during executor
+    // verification when the object is deallocating.
     flushTimer = Timer.scheduledTimer(
       timeInterval: flushInterval,
       target: self,

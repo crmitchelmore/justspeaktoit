@@ -20,6 +20,11 @@ final class TranscriptionTextProcessor {
         "insert clipboard",
         "insertclipboard"
     ]
+    
+    /// Maximum recursion depth for clipboard expansion to prevent DoS attacks
+    /// when clipboard content contains trigger phrases. Set to 10 to allow
+    /// reasonable legitimate nested triggers while preventing infinite loops.
+    private static let maxClipboardExpansionDepth = 10
 
     init(appSettings: AppSettings) {
         self.appSettings = appSettings
@@ -46,7 +51,7 @@ final class TranscriptionTextProcessor {
 
     /// Expand clipboard insertion triggers with depth limit to prevent infinite recursion
     private func expandClipboardCommands(in text: String, depth: Int) -> String {
-        guard depth < 10 else { return text }
+        guard depth < Self.maxClipboardExpansionDepth else { return text }
 
         let clipboardContent = NSPasteboard.general.string(forType: .string) ?? ""
         guard !clipboardContent.isEmpty else { return text }

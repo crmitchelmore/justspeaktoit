@@ -276,6 +276,7 @@ struct SettingsView: View {
           .speakTooltip("Decide how Speak returns transcripts—typed for you, placed on the clipboard, or saved for later.")
           .accessibilityLabel("Text output method picker")
 
+          .accessibilityLabel("Text output method picker")
           VStack(alignment: .leading, spacing: 8) {
             settingsToggle(
               "Restore clipboard after paste",
@@ -669,6 +670,7 @@ struct SettingsView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
               .fill(Color(nsColor: .controlBackgroundColor))
           )
+          .accessibilityLabel("Preferred locale picker")
           .speakTooltip("Choose from supported locales so Speak uses the right accent while transcribing.")
           .accessibilityLabel("Preferred locale picker")
         }

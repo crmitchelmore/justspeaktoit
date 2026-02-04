@@ -27,6 +27,7 @@ struct HistoryView: View {
   @State private var isImportingFiles: Bool = false
   @State private var showImportAlert: Bool = false
   @State private var importAlertMessage: String?
+  @State private var isInitialLoad: Bool = true
 
   private func clearAllHistory(deleteRecordings: Bool) async {
     await MainActor.run { isClearingAll = true }
@@ -142,7 +143,9 @@ struct HistoryView: View {
       ScrollView {
         VStack(alignment: .leading, spacing: 24) {
           header
-          if filteredItems.isEmpty {
+          if isInitialLoad {
+            skeletonLoadingView
+          } else if filteredItems.isEmpty {
             emptyState
           } else {
             LazyVStack(spacing: 20) {
@@ -160,6 +163,12 @@ struct HistoryView: View {
       .onAppear {
         historyItems = environment.history.allItems
         historyStats = environment.history.statistics
+        // Delay to show skeleton briefly for improved perceived performance
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+          withAnimation(.easeOut(duration: 0.3)) {
+            isInitialLoad = false
+          }
+        }
       }
       .onReceive(environment.history.$items) { items in
         let previous = historyItems
@@ -372,6 +381,29 @@ struct HistoryView: View {
       RoundedRectangle(cornerRadius: 28, style: .continuous)
         .stroke(Color.brandAccent.opacity(0.15), lineWidth: 1)
     )
+  }
+
+  private var skeletonLoadingView: some View {
+    VStack(spacing: 20) {
+      // Stats header skeleton
+      HistoryStatsSkeleton()
+        .padding(.bottom, 8)
+      
+      // History items skeleton
+      ForEach(0..<3, id: \.self) { _ in
+        HistoryItemSkeleton()
+          .padding(16)
+          .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+              .fill(.ultraThinMaterial)
+          )
+          .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+              .stroke(Color.brandAccent.opacity(0.1), lineWidth: 1)
+          )
+      }
+    }
+    .frame(maxWidth: .infinity)
   }
 
   private func historyChip(title: String, value: String) -> some View {

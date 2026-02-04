@@ -254,6 +254,7 @@ struct SettingsView: View {
               .fill(Color(nsColor: .controlBackgroundColor))
           )
           .speakTooltip("Choose whether Speak follows macOS appearance or stays in light or dark mode all the time.")
+          .accessibilityLabel("Appearance theme picker")
         }
       }
       .speakTooltip("Set Speak's look to match your workspace with light, dark, or system themes.")
@@ -273,6 +274,7 @@ struct SettingsView: View {
               .fill(Color(nsColor: .controlBackgroundColor))
           )
           .speakTooltip("Decide how Speak returns transcripts—typed for you, placed on the clipboard, or saved for later.")
+          .accessibilityLabel("Text output method picker")
 
           VStack(alignment: .leading, spacing: 8) {
             settingsToggle(
@@ -353,6 +355,7 @@ struct SettingsView: View {
               .fill(Color(nsColor: .controlBackgroundColor))
           )
           .speakTooltip("Choose which microphone Speak listens to when recording or transcribing.")
+          .accessibilityLabel("Audio input device picker")
 
           if let details = audioDevices.currentSelectionDetails {
             Text(details)
@@ -652,6 +655,7 @@ struct SettingsView: View {
               .fill(Color(nsColor: .controlBackgroundColor))
           )
           .speakTooltip("Pick the recording flow that best matches how you speak—continuous live captions or hold-to-talk batches.")
+          .accessibilityLabel("Transcription mode picker")
 
           Picker("Preferred Locale", selection: settingsBinding(\AppSettings.preferredLocaleIdentifier)) {
             ForEach(resolvedLocaleOptions) { option in
@@ -666,10 +670,10 @@ struct SettingsView: View {
               .fill(Color(nsColor: .controlBackgroundColor))
           )
           .speakTooltip("Choose from supported locales so Speak uses the right accent while transcribing.")
+          .accessibilityLabel("Preferred locale picker")
         }
       }
       .speakTooltip("Choose which transcription flow Speak uses and the locale it should prefer.")
-
       SettingsCard(title: "Processing Speed", systemImage: "gauge.with.dots.needle.67percent", tint: Color.brandLagoon) {
         let speedModeAvailable = settings.transcriptionMode == .liveNative
           && settings.liveTranscriptionModel.contains("streaming")

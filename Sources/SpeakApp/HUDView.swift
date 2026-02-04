@@ -22,26 +22,32 @@ struct HUDOverlay: View {
         Text(manager.snapshot.headline)
           .font(.headline)
           .foregroundStyle(headlineColor)
+          .accessibilityLabel("Status: \(manager.snapshot.headline)")
         if let sub = manager.snapshot.subheadline {
           Text(sub)
             .font(.subheadline)
             .foregroundStyle(.secondary)
+            .accessibilityLabel(sub)
         }
         if manager.snapshot.showRetryHint {
           Text("Press ⌘R to retry")
             .font(.caption)
             .foregroundStyle(.secondary)
             .padding(.top, 4)
+            .accessibilityHint("Press Command-R to retry the operation")
         }
       }
       if case .recording = manager.snapshot.phase {
         AudioLevelMeterView(level: manager.audioLevel, width: 100, height: 4)
           .padding(.top, 2)
+          .accessibilityLabel("Audio level meter")
+          .accessibilityValue("\(Int(manager.audioLevel * 100)) percent")
       }
       if manager.snapshot.phase.isTerminal == false {
         Text(elapsedText)
           .font(.caption.monospacedDigit())
           .foregroundStyle(.secondary)
+          .accessibilityLabel("Elapsed time: \(elapsedText)")
       }
 
       // Live transcript section (only during recording phase with content)
@@ -113,6 +119,7 @@ struct HUDOverlay: View {
         .lineLimit(2)
         .truncationMode(.head)
         .animation(.easeInOut(duration: 0.2), value: isFinal)
+        .accessibilityLabel(isFinal ? "Transcript: \(text)" : "Partial transcript: \(text)")
 
       if let confidence, confidence > 0 {
         Text("\(Int(confidence * 100))%")
@@ -124,6 +131,7 @@ struct HUDOverlay: View {
             Capsule()
               .fill(.quaternary)
           )
+          .accessibilityLabel("Confidence: \(Int(confidence * 100)) percent")
       }
     }
     .frame(maxWidth: 300)
@@ -136,6 +144,7 @@ struct HUDOverlay: View {
       // Show the live transcript inline (no disclosure/expand UI).
       liveTranscriptionView(text: transcriptText)
         .padding(.top, 4)
+            .accessibilityHint("Press Command-R to retry the operation")
     }
   }
 
@@ -201,12 +210,14 @@ struct HUDOverlay: View {
           .foregroundStyle(phaseColor.gradient)
           .scaleEffect(scale)
           .shadow(color: phaseColor.opacity(0.45), radius: 10, x: 0, y: 6)
+          .accessibilityLabel("Error indicator")
       }
     case .success:
       Image(systemName: "checkmark.circle.fill")
         .font(.system(size: 28, weight: .semibold))
         .foregroundStyle(phaseColor)
         .shadow(color: phaseColor.opacity(0.3), radius: 6, x: 0, y: 4)
+        .accessibilityLabel("Success indicator")
     default:
       TimelineView(.animation) { context in
         let progress = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1)
@@ -216,6 +227,7 @@ struct HUDOverlay: View {
           .frame(width: 18, height: 18)
           .scaleEffect(scale)
           .shadow(color: phaseColor.opacity(0.4), radius: 6, x: 0, y: 4)
+          .accessibilityLabel("Recording status indicator")
       }
     }
   }

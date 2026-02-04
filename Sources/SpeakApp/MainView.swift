@@ -63,6 +63,7 @@ struct MainView: View {
       }
       .keyboardShortcut(.space, modifiers: [.command, .shift])
       .speakTooltip("Start or stop a recording from anywhere in Speak. We'll let you know when we're listening.")
+      .accessibilityLabel(accessibilityLabelForRecordButton)
     }
     ToolbarItem(placement: .status) {
       VStack(alignment: .trailing, spacing: 2) {
@@ -85,6 +86,21 @@ struct MainView: View {
         Capsule()
           .strokeBorder(.secondary.opacity(0.3), lineWidth: 0.5)
       )
+      .accessibilityLabel("Current mode: \(environment.settings.transcriptionMode.displayName)")
+    }
+  }
+
+  
+  private var accessibilityLabelForRecordButton: String {
+    switch environment.main.state {
+    case .idle, .completed(_), .failed(_):
+      return "Start recording"
+    case .recording:
+      return "Stop recording"
+    case .processing:
+      return "Processing recording"
+    case .delivering:
+      return "Delivering transcription"
     }
   }
 }

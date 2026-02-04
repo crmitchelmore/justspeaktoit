@@ -1393,6 +1393,7 @@ private struct AudioPlaybackControls: View {
   }
 }
 
+@MainActor
 private final class AudioPlaybackController: NSObject, ObservableObject, AVAudioPlayerDelegate {
   enum PlaybackState {
     case idle
@@ -1464,8 +1465,9 @@ private final class AudioPlaybackController: NSObject, ObservableObject, AVAudio
 
   private func startTimer() {
     timer?.invalidate()
-    // Use target-selector Timer pattern to avoid swift_getObjectType crash during deallocation.
-    // Block-based timers with [weak self] can crash in swift concurrency runtime.
+    // Use target-selector pattern to avoid Swift concurrency crashes during deallocation.
+    // Block-based timers with [weak self] can crash in swift_getObjectType during executor
+    // verification when the object is deallocating.
     timer = Timer.scheduledTimer(
       timeInterval: 0.05,
       target: self,

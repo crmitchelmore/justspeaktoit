@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>UILaunchStoryboardName</key>
+    <string>LaunchScreen</string>
+    <key>UIRequiresFullScreen</key>
+    <true/>
+    <key>CFBundleDisplayName</key>
+    <string>Just Speak to It</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Just Speak to It needs microphone access for voice transcription.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Just Speak to It uses speech recognition to transcribe your voice.</string>
+</dict>
+</plist>

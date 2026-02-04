@@ -274,8 +274,8 @@ struct SettingsView: View {
               .fill(Color(nsColor: .controlBackgroundColor))
           )
           .speakTooltip("Decide how Speak returns transcripts—typed for you, placed on the clipboard, or saved for later.")
-
           .accessibilityLabel("Text output method picker")
+
           VStack(alignment: .leading, spacing: 8) {
             settingsToggle(
               "Restore clipboard after paste",
@@ -655,10 +655,10 @@ struct SettingsView: View {
               .fill(Color(nsColor: .controlBackgroundColor))
           )
           .speakTooltip("Pick the recording flow that best matches how you speak—continuous live captions or hold-to-talk batches.")
+          .accessibilityLabel("Transcription mode picker")
 
           Picker("Preferred Locale", selection: settingsBinding(\AppSettings.preferredLocaleIdentifier)) {
             ForEach(resolvedLocaleOptions) { option in
-          .accessibilityLabel("Transcription mode picker")
               Text(option.displayName).tag(option.identifier)
             }
           }
@@ -670,11 +670,10 @@ struct SettingsView: View {
               .fill(Color(nsColor: .controlBackgroundColor))
           )
           .speakTooltip("Choose from supported locales so Speak uses the right accent while transcribing.")
+          .accessibilityLabel("Preferred locale picker")
         }
       }
       .speakTooltip("Choose which transcription flow Speak uses and the locale it should prefer.")
-
-          .accessibilityLabel("Preferred locale picker")
       SettingsCard(title: "Processing Speed", systemImage: "gauge.with.dots.needle.67percent", tint: Color.brandLagoon) {
         let speedModeAvailable = settings.transcriptionMode == .liveNative
           && settings.liveTranscriptionModel.contains("streaming")

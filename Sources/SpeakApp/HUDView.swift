@@ -95,11 +95,11 @@ struct HUDOverlay: View {
 
   #if os(macOS)
   /// Returns `true` when glassEffect is safe to use on the current OS build.
-  /// macOS 26.0 exhibits a SwiftUI bug inside DesignLibrary that leads to EXC_BAD_ACCESS.
+  /// macOS 26.0.x exhibits a SwiftUI bug inside DesignLibrary that leads to EXC_BAD_ACCESS.
   private var shouldUseGlassEffect: Bool {
     guard #available(macOS 26.0, *) else { return false }
     let version = ProcessInfo.processInfo.operatingSystemVersion
-    let isSequoiaDotZero = version.majorVersion == 26 && version.minorVersion == 0 && version.patchVersion == 0
+    let isSequoiaDotZero = version.majorVersion == 26 && version.minorVersion == 0
     return !isSequoiaDotZero
   }
   #else

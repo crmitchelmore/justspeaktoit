@@ -428,8 +428,8 @@ struct SettingsView: View {
                 .font(.caption)
               Slider(
                 value: settingsBinding(\AppSettings.recordingSoundVolume),
-                in: 0.1...1.0,
-                step: 0.1
+                in: 0.02...1.0,
+                step: 0.02
               )
               Image(systemName: "speaker.wave.3.fill")
                 .foregroundStyle(.secondary)
@@ -1999,13 +1999,8 @@ struct SettingsView: View {
   }
 
   private func volumeLabel(for volume: Float) -> String {
-    switch volume {
-    case 0..<0.2: return "Very Quiet"
-    case 0.2..<0.4: return "Quiet"
-    case 0.4..<0.6: return "Medium"
-    case 0.6..<0.8: return "Loud"
-    default: return "Very Loud"
-    }
+    let percent = Int(volume * 100)
+    return "\(percent)%"
   }
 
   private func statusColor(_ status: PermissionStatus) -> Color {

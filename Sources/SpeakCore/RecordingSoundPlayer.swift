@@ -75,9 +75,14 @@ public final class RecordingSoundPlayer {
       return
     }
 
+    // Apply exponential curve for more control at low volumes.
+    // volume² gives finer control in the quiet range while preserving full range.
+    let linearVolume = max(0, min(1, volume))
+    let curvedVolume = linearVolume * linearVolume
+
     // Restart from the beginning for reliable feedback.
     p.currentTime = 0
-    p.volume = max(0, min(1, volume))
+    p.volume = curvedVolume
     p.prepareToPlay()
     p.play()
   }

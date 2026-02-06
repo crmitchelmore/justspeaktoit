@@ -88,6 +88,16 @@ final class TranscriptionManager: ObservableObject {
       Task {
         await self.liveController.stop()
       }
+      // Safety timeout: if the delegate never calls back, resume with an error
+      // rather than hanging forever.
+      Task { @MainActor [weak self] in
+        try? await Task.sleep(nanoseconds: 10_000_000_000)
+        guard let self, let cont = self.continuation else { return }
+        print("[TranscriptionManager] Safety timeout: continuation not resumed after 10s, forcing error")
+        self.continuation = nil
+        self.isLiveTranscribing = false
+        cont.resume(throwing: TranscriptionManagerError.liveSessionNotRunning)
+      }
     }
   }
 
@@ -328,9 +338,29 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
     recognitionTask = nil
     isRunning = false
 
-    if let result = latestResult, !result.isFinal {
-      await MainActor.run {
-        finish(with: result)
+    // Always ensure the delegate is called so the continuation in
+    // TranscriptionManager is resumed.  If a recognition callback Task
+    // already dispatched finish(), the hasFinished guard prevents a
+    // double-resume.
+    await MainActor.run {
+      guard !self.hasFinished else { return }
+      if let result = self.latestResult {
+        self.finish(with: result)
+      } else {
+        // No results received (e.g. very short recording / silence).
+        // Synthesise an empty result so the continuation isn't orphaned.
+        self.hasFinished = true
+        let empty = TranscriptionResult(
+          text: "",
+          segments: [],
+          confidence: nil,
+          duration: 0,
+          modelIdentifier: self.currentModel ?? "apple/local/SFSpeechRecognizer",
+          cost: nil,
+          rawPayload: nil,
+          debugInfo: nil
+        )
+        self.delegate?.liveTranscriber(self, didFinishWith: empty)
       }
     }
 

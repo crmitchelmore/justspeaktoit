@@ -49,6 +49,8 @@ final class MainManager: ObservableObject {
   private let recordingSoundPlayer = RecordingSoundPlayer()
 
   private var activeSession: ActiveSession?
+  /// Guards against re-entrant calls to endSession (e.g. silence detection + user hotkey racing).
+  private var isEndingSession = false
   private var cancellables: Set<AnyCancellable> = []
   private var hotKeyTokens: [HotKeyListenerToken] = []
   private var shortcutTokens: [ShortcutListenerToken] = []
@@ -366,7 +368,10 @@ final class MainManager: ObservableObject {
   }
 
   private func endSession(trigger: SessionTriggerSource) async {
+    guard !isEndingSession else { return }
     guard let session = activeSession else { return }
+    isEndingSession = true
+    defer { isEndingSession = false }
 
     stopAudioLevelMonitoring()
 

@@ -179,8 +179,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.showMoveToApplicationsAlert()
             }
         } else if bundlePath.hasPrefix("/Applications") {
-            // Running from Applications - always check for mounted DMG on first launch of this session
-            // This handles the case where user drags to Applications, then launches
+            // Only check for mounted installer DMGs on the very first launch.
+            // After the first launch, any mounted DMG is likely from a Sparkle
+            // auto-update and should not trigger the eject dialog.
+            let hasLaunchedKey = "justspeaktoit.hasLaunchedBefore"
+            guard !UserDefaults.standard.bool(forKey: hasLaunchedKey) else { return }
+            UserDefaults.standard.set(true, forKey: hasLaunchedKey)
+
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
                 self.checkForMountedDMG()
             }

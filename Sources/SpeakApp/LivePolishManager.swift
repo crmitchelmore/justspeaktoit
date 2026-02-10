@@ -16,11 +16,15 @@ final class LivePolishManager: ObservableObject {
   private let settings: AppSettings
   private let log = Logger(subsystem: "com.github.speakapp", category: "LivePolish")
 
-  /// Debounce interval in seconds
-  private var debounceInterval: TimeInterval = 0.5
+  /// Debounce interval in seconds (reads from settings)
+  private var debounceInterval: TimeInterval {
+    Double(settings.livePolishDebounceMs) / 1000.0
+  }
 
-  /// Minimum characters of new content before triggering polish
-  private var minDeltaChars: Int = 20
+  /// Minimum characters of new content before triggering polish (reads from settings)
+  private var minDeltaChars: Int {
+    settings.livePolishMinDeltaChars
+  }
 
   /// Task for the current debounce timer
   private var debounceTask: Task<Void, Never>?
@@ -50,12 +54,6 @@ final class LivePolishManager: ObservableObject {
   init(client: ChatLLMClient, settings: AppSettings) {
     self.client = client
     self.settings = settings
-  }
-
-  /// Configure debounce and delta thresholds
-  func configure(debounceInterval: TimeInterval = 0.5, minDeltaChars: Int = 20) {
-    self.debounceInterval = debounceInterval
-    self.minDeltaChars = minDeltaChars
   }
 
   /// Called when new transcript text is available. Debounces and triggers polish.

@@ -222,7 +222,7 @@ enum WireUp {
     let settings = AppSettings()
     let permissions = PermissionsManager()
     let history = HistoryManager(flushInterval: settings.historyFlushInterval)
-    let hud = HUDManager()
+    let hud = HUDManager(appSettings: settings)
     let hotKeys = HotKeyManager(permissionsManager: permissions, appSettings: settings)
     let audioDevices = AudioInputDeviceManager(appSettings: settings)
     let audio = AudioFileManager(

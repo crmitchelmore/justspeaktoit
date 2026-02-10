@@ -58,12 +58,25 @@ final class HUDManager: ObservableObject {
   /// Normalized audio level (0.0 to 1.0) during recording phase
   @Published private(set) var audioLevel: Float = 0
 
+  private let appSettings: AppSettings
   private var timer: Timer?
   private var phaseStartDate: Date?
   private var autoHideTimer: Timer?
 
+  init(appSettings: AppSettings) {
+    self.appSettings = appSettings
+  }
+
   func beginRecording() {
-    isExpanded = false
+    // Set initial expansion state based on user preference
+    switch appSettings.hudSizePreference {
+    case .compact:
+      isExpanded = false
+    case .expanded:
+      isExpanded = true
+    case .autoExpand:
+      isExpanded = false  // Will auto-expand when transcript exceeds threshold
+    }
     transition(.recording, headline: "Recording", subheadline: "Capturing audio")
   }
 
@@ -84,10 +97,12 @@ final class HUDManager: ObservableObject {
   func updateLiveTranscript(final: String, interim: String) {
     snapshot.finalTranscript = final
     snapshot.interimTranscript = interim
-    // Auto-expand if transcript exceeds threshold
-    let totalLength = final.count + interim.count
-    if totalLength > Self.autoExpandThreshold && !isExpanded {
-      isExpanded = true
+    // Auto-expand if preference allows and transcript exceeds threshold
+    if appSettings.hudSizePreference == .autoExpand {
+      let totalLength = final.count + interim.count
+      if totalLength > Self.autoExpandThreshold && !isExpanded {
+        isExpanded = true
+      }
     }
   }
 

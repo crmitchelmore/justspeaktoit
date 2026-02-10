@@ -513,7 +513,11 @@ final class MainManager: ObservableObject {
       var finalText = corrections.transformedText
       var postProcessingFailureNotice: (headline: String, message: String)?
 
-      if appSettings.postProcessingEnabled {
+      // Skip post-processing if live polish is active and user preference is set
+      let shouldSkipForLivePolish = appSettings.speedMode.usesLivePolish 
+        && appSettings.skipPostProcessingWithLivePolish
+      
+      if appSettings.postProcessingEnabled && !shouldSkipForLivePolish {
         hudManager.beginPostProcessing()
         session.postProcessingStarted = Date()
         guard
@@ -891,7 +895,11 @@ final class MainManager: ObservableObject {
       session.lexiconContext = lexiconContext
       var finalText = corrections.transformedText
 
-      if appSettings.postProcessingEnabled {
+      // Skip post-processing if live polish is active and user preference is set
+      let shouldSkipForLivePolish = appSettings.speedMode.usesLivePolish 
+        && appSettings.skipPostProcessingWithLivePolish
+      
+      if appSettings.postProcessingEnabled && !shouldSkipForLivePolish {
         hudManager.beginPostProcessing()
         session.postProcessingStarted = Date()
         guard

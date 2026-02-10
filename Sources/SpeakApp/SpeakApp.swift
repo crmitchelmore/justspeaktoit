@@ -71,6 +71,7 @@ struct SpeakApp: App {
                 }
             }
             .tint(.brandAccent)
+            .preferredColorScheme(environmentHolder.environment?.settings.appearance.colorScheme)
         }
         .defaultSize(width: 1080, height: 720)
         .commands {

@@ -262,13 +262,13 @@ struct HUDOverlay_Previews: PreviewProvider {
   }
 
   private static var previewManager: HUDManager {
-    let manager = HUDManager()
+    let manager = HUDManager(appSettings: AppSettings())
     manager.beginRecording()
     return manager
   }
 
   private static var expandedPreviewManager: HUDManager {
-    let manager = HUDManager()
+    let manager = HUDManager(appSettings: AppSettings())
     manager.beginRecording()
     manager.updateLiveTranscription(
       text: "Hello, this is a test of the live transcription feature. It should scroll and show the text properly. And this is still being spoken...",

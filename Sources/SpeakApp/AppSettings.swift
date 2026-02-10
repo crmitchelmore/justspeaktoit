@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import ServiceManagement
 import SpeakCore
+import SwiftUI
 
 /// Centralised configuration model backed by `UserDefaults` and published to SwiftUI.
 @MainActor
@@ -12,6 +13,15 @@ final class AppSettings: ObservableObject {
     case dark
 
     var id: String { rawValue }
+
+    /// Converts to SwiftUI ColorScheme, returning nil for system (follows system setting)
+    var colorScheme: ColorScheme? {
+      switch self {
+      case .system: return nil
+      case .light: return .light
+      case .dark: return .dark
+      }
+    }
   }
 
   enum TranscriptionMode: String, CaseIterable, Identifiable {
@@ -212,8 +222,6 @@ final class AppSettings: ObservableObject {
     case preferredLocale
     case postRecordingTailDuration
     case deepgramStopGracePeriod
-    case whisperServerHost
-    case whisperServerPort
     case preferredAudioInputUID
     case defaultTTSVoice
     case ttsSpeed
@@ -421,15 +429,6 @@ final class AppSettings: ObservableObject {
 
   @Published var deepgramStopGracePeriod: TimeInterval {
     didSet { store(deepgramStopGracePeriod, key: .deepgramStopGracePeriod) }
-  }
-
-  // Nemotron local server settings
-  @Published var whisperServerHost: String {
-    didSet { store(whisperServerHost, key: .whisperServerHost) }
-  }
-
-  @Published var whisperServerPort: Int {
-    didSet { store(whisperServerPort, key: .whisperServerPort) }
   }
 
   @Published private(set) var trackedAPIKeyIdentifiers: [String] {
@@ -681,10 +680,6 @@ final class AppSettings: ObservableObject {
       defaults.object(forKey: DefaultsKey.postRecordingTailDuration.rawValue) as? Double ?? 0.5
     deepgramStopGracePeriod =
       defaults.object(forKey: DefaultsKey.deepgramStopGracePeriod.rawValue) as? Double ?? 0
-    whisperServerHost =
-      defaults.string(forKey: DefaultsKey.whisperServerHost.rawValue) ?? "localhost"
-    whisperServerPort =
-      defaults.object(forKey: DefaultsKey.whisperServerPort.rawValue) as? Int ?? 9876
     trackedAPIKeyIdentifiers =
       defaults.array(forKey: DefaultsKey.trackedKeyIdentifiers.rawValue) as? [String] ?? []
 

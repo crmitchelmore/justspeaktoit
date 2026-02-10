@@ -179,6 +179,11 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
 - The `VERSION` file is updated as a best-effort side effect; the **tag is the source of truth**
 - Non-releasable commits (chore, docs, ci, etc.) do not create a release
 
+### Working with Auto-Release
+- After pushing a releasable commit (`feat:`, `fix:`, `perf:`), the bot pushes a VERSION bump commit to main
+- You must `git pull --rebase origin main` before your next push, or it will be rejected
+- If you have unstaged changes: `git stash && git pull --rebase origin main && git stash pop`
+
 ## SwiftUI Concurrency Patterns
 
 ### Singleton ObservableObjects
@@ -199,6 +204,11 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
 ### Async Delays in SwiftUI
 - Prefer `.task { try? await Task.sleep(for: .seconds(2)) }` over `DispatchQueue.asyncAfter`
 - The `.task` modifier properly handles view lifecycle and cancellation
+
+### MainActor Deadlock Anti-Pattern
+- **Never** use `DispatchSemaphore.wait()` on the MainActor while spawning `Task { @MainActor in }` — this is an instant deadlock
+- The semaphore blocks the MainActor, preventing the task from ever executing to signal it
+- Use `Thread.sleep` for brief synchronous delays, or restructure as fully `async`
 
 ## Commit Message Tagging
 - Prefix commit messages with a platform tag or scope: `[mac]`/`[ios]` or `(mac)`/`(ios)` (e.g., `fix: [mac] add recording sound picker` or `fix(mac): add recording sound picker`).

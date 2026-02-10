@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import ServiceManagement
 import SpeakCore
 
 /// Centralised configuration model backed by `UserDefaults` and published to SwiftUI.
@@ -374,7 +375,28 @@ final class AppSettings: ObservableObject {
   }
 
   @Published var runAtLogin: Bool {
-    didSet { store(runAtLogin, key: .runAtLogin) }
+    didSet {
+      store(runAtLogin, key: .runAtLogin)
+      updateLoginItemRegistration()
+    }
+  }
+
+  /// Registers or unregisters the app as a login item based on the current `runAtLogin` setting.
+  private func updateLoginItemRegistration() {
+    let service = SMAppService.mainApp
+    do {
+      if runAtLogin {
+        if service.status != .enabled {
+          try service.register()
+        }
+      } else {
+        if service.status == .enabled {
+          try service.unregister()
+        }
+      }
+    } catch {
+      print("[AppSettings] Failed to update login item: \(error)")
+    }
   }
 
   @Published var recordingsDirectory: URL {
@@ -757,6 +779,7 @@ final class AppSettings: ObservableObject {
 
     ensureRecordingsDirectoryExists()
     applyAppVisibility()
+    updateLoginItemRegistration()
   }
 
   func registerAPIKeyIdentifier(_ identifier: String) {

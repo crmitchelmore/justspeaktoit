@@ -1,16 +1,20 @@
-name: Auto Release (Disabled)
+name: Auto Release
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch: {}
 
 jobs:
   check-and-release:
     runs-on: macos-15
-    # Don't run on version bump commits or appcast updates
-    if: "!contains(github.event.head_commit.message, 'chore: bump version') && !contains(github.event.head_commit.message, 'chore: update appcast')"
+    # Skip bot commits (version bumps, appcast updates) to avoid loops
+    if: >-
+      !contains(github.event.head_commit.message, 'chore: bump version') &&
+      !contains(github.event.head_commit.message, 'chore: update appcast')
     permissions:
       contents: write
-    
+
     steps:
       - uses: actions/checkout@v6
         with:
@@ -21,33 +25,31 @@ jobs:
       - name: Check for releasable changes
         id: check
         run: |
-          # Get commits since last tag
-          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-          
+          # Find the latest mac-v* tag (authoritative version source)
+          LAST_TAG=$(git tag --list 'mac-v*' --sort=-v:refname | head -1)
+
           if [ -z "$LAST_TAG" ]; then
-            echo "No previous tag found, will create initial release"
+            echo "No previous mac-v* tag found, will create initial release"
             echo "should_release=true" >> $GITHUB_OUTPUT
             echo "bump_type=minor" >> $GITHUB_OUTPUT
             exit 0
           fi
-          
+
           echo "Last tag: $LAST_TAG"
-          
-          # Check commits since last tag for conventional commit types
-          COMMITS=$(git log $LAST_TAG..HEAD --pretty=format:"%s" 2>/dev/null || echo "")
-          
+
+          # Collect commits since last tag
+          COMMITS=$(git log "$LAST_TAG"..HEAD --pretty=format:"%s" 2>/dev/null || echo "")
+
           if [ -z "$COMMITS" ]; then
             echo "No new commits since $LAST_TAG"
             echo "should_release=false" >> $GITHUB_OUTPUT
             exit 0
           fi
-          
+
           echo "Commits since $LAST_TAG:"
           echo "$COMMITS"
-          
-          # Determine bump type based on conventional commits
-          BUMP_TYPE="patch"
-          
+
+          # Determine bump type from conventional commits
           if echo "$COMMITS" | grep -qE "^feat(\(.+\))?!:|^fix(\(.+\))?!:|BREAKING CHANGE"; then
             BUMP_TYPE="major"
           elif echo "$COMMITS" | grep -qE "^feat(\(.+\))?:"; then
@@ -55,12 +57,11 @@ jobs:
           elif echo "$COMMITS" | grep -qE "^fix(\(.+\))?:|^perf(\(.+\))?:"; then
             BUMP_TYPE="patch"
           else
-            # No releasable commits (only chore, docs, style, etc.)
-            echo "No releasable commits found"
+            echo "No releasable commits found (chore/docs/ci/style/test only)"
             echo "should_release=false" >> $GITHUB_OUTPUT
             exit 0
           fi
-          
+
           echo "Bump type: $BUMP_TYPE"
           echo "should_release=true" >> $GITHUB_OUTPUT
           echo "bump_type=$BUMP_TYPE" >> $GITHUB_OUTPUT
@@ -69,14 +70,19 @@ jobs:
         if: steps.check.outputs.should_release == 'true'
         id: version
         run: |
-          CURRENT_VERSION=$(cat VERSION)
+          # Derive current version from latest mac-v* tag (not VERSION file)
+          LAST_TAG=$(git tag --list 'mac-v*' --sort=-v:refname | head -1)
+          CURRENT_VERSION="${LAST_TAG#mac-v}"
+
+          if [ -z "$CURRENT_VERSION" ]; then
+            CURRENT_VERSION=$(cat VERSION)
+          fi
+
           echo "Current version: $CURRENT_VERSION"
-          
-          # Parse version components
+
           IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
-          
           BUMP_TYPE="${{ steps.check.outputs.bump_type }}"
-          
+
           case $BUMP_TYPE in
             major)
               MAJOR=$((MAJOR + 1))
@@ -91,40 +97,37 @@ jobs:
               PATCH=$((PATCH + 1))
               ;;
           esac
-          
+
           NEW_VERSION="$MAJOR.$MINOR.$PATCH"
           echo "New version: $NEW_VERSION"
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
 
-      - name: Bump version and create tag
+      - name: Create tag and bump VERSION
         if: steps.check.outputs.should_release == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           NEW_VERSION="${{ steps.version.outputs.new_version }}"
+          TAG="mac-v$NEW_VERSION"
 
-          if git rev-parse "v$NEW_VERSION" >/dev/null 2>&1; then
-            echo "Tag v$NEW_VERSION already exists. Skipping release."
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists — skipping."
             exit 0
           fi
-          
-          # Save the current commit SHA (the one that triggered this workflow)
-          # We'll tag THIS commit, not a version bump commit
+
           RELEASE_SHA=$(git rev-parse HEAD)
-          echo "Will tag commit: $RELEASE_SHA"
-          
-          # Configure git
+          echo "Will tag commit $RELEASE_SHA as $TAG"
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          
-          # Create and push tag FIRST on the triggering commit
-          # This ensures the tag points to a commit that exists on main
-          git tag "v$NEW_VERSION" "$RELEASE_SHA"
-          git push origin "v$NEW_VERSION"
-          echo "🚀 Created tag v$NEW_VERSION on commit ${RELEASE_SHA:0:7}"
-          
-          # Now try to update VERSION file (best effort, may fail due to branch protection)
+
+          # Tag the triggering commit (kicks off release-mac.yml)
+          git tag "$TAG" "$RELEASE_SHA"
+          git push origin "$TAG"
+          echo "🚀 Created tag $TAG on ${RELEASE_SHA:0:7}"
+
+          # Best-effort VERSION file update
           echo "$NEW_VERSION" > VERSION
           git add VERSION
           git commit -m "chore: bump version to $NEW_VERSION"
-          git push origin main || echo "⚠️ Could not push version bump to main (branch protection). VERSION file may be out of sync."
+          git push origin main || echo "⚠️ Could not push VERSION bump (branch protection)"

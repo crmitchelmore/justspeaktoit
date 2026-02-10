@@ -28,15 +28,13 @@ gh release list --repo crmitchelmore/justspeaktoit | grep "mac-v" | head -1
 
 ### macOS Release Process
 
-1. **Check current version**: `gh release list | grep mac-v | head -1`
-2. **Commit changes** with `[mac]` tag: `git commit -m "feat: [mac] description"`
-3. **Push to main**: `git push origin main`
-4. **Create and push tag**: 
-   ```bash
-   git tag mac-v0.7.7  # Use NEXT version after latest mac-v* tag
-   git push origin mac-v0.7.7
-   ```
-5. The workflow builds, notarizes, and publishes to GitHub Releases + updates appcast.xml
+Releases are **fully automated** via conventional commits:
+
+1. Push to `main` with a releasable commit type (`feat:`, `fix:`, `perf:`, or breaking change)
+2. `auto-release.yml` determines the version bump and creates a `mac-v*` tag
+3. `release-mac.yml` builds, notarises, publishes to GitHub Releases, updates appcast.xml, and updates Homebrew tap
+
+Manual releases are still possible by creating and pushing a `mac-v*` tag directly.
 
 ### iOS Release Process
 
@@ -166,13 +164,57 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
 - iOS testing requires device/simulator via Xcode
 
 ## Commit & Pull Request Guidelines
-- Use Conventional Commits (`feat:`, `fix:`, `chore:`) with imperative descriptions
+- **Use Conventional Commits** — this is mandatory as commit types drive automated releases
+- Commit types that **trigger a release**: `feat:` (minor bump), `fix:` / `perf:` (patch bump), breaking changes via `!` suffix or `BREAKING CHANGE` footer (major bump)
+- Commit types that **do not release**: `chore:`, `docs:`, `ci:`, `style:`, `test:`, `refactor:`, `build:`
 - Keep commits scoped to a single concern
+- Use platform tags in scope: `feat(mac):`, `fix(ios):` — these feed Sparkle release notes
 - Pull requests should describe motivation, note user-visible changes, and reference related issues
 - Include `make test` output or screenshots when UI shifts
+
+### Automated Release Process
+- Every push to `main` triggers `.github/workflows/auto-release.yml`
+- The workflow analyses conventional commits since the last `mac-v*` tag
+- If releasable commits exist, it creates a new `mac-v*` tag which triggers the full macOS build/notarise/release pipeline
+- The `VERSION` file is updated as a best-effort side effect; the **tag is the source of truth**
+- Non-releasable commits (chore, docs, ci, etc.) do not create a release
+
+## SwiftUI Concurrency Patterns
+
+### Singleton ObservableObjects
+- Use `@ObservedObject` (not `@StateObject`) when referencing singletons like `TipStore.shared`
+- Singletons manage their own lifecycle; `@StateObject` causes ownership conflicts and crashes
+
+### Child View Button Actions
+- Don't pass `@ObservedObject` to child views that have button actions
+- Pass primitive values (e.g., `isPurchasing: Bool`) and access singleton directly in action:
+  ```swift
+  Button {
+      Task { @MainActor in
+          await MySingleton.shared.doWork()
+      }
+  }
+  ```
+
+### Async Delays in SwiftUI
+- Prefer `.task { try? await Task.sleep(for: .seconds(2)) }` over `DispatchQueue.asyncAfter`
+- The `.task` modifier properly handles view lifecycle and cancellation
+
+## Commit Message Tagging
+- Prefix commit messages with a platform tag or scope: `[mac]`/`[ios]` or `(mac)`/`(ios)` (e.g., `fix: [mac] add recording sound picker` or `fix(mac): add recording sound picker`).
+- These tags/scopes feed the Sparkle release notes generator so macOS updates only list mac-specific changes.
 
 ## Security & Configuration Tips
 - Do not commit personalised signing assets
 - Keep bundle identifiers within `Config/AppInfo.plist` and adjust via scripts
 - API keys stored in Keychain via `SecureStorage` (SpeakCore) / `SecureAppStorage` (SpeakApp)
 - Keychain service: `com.github.speakapp.credentials`, account: `speak-app-secrets`
+
+## App Store Connect / iOS Signing (sensitive)
+- App Store Connect API Key ID: stored in secure notes (do not commit)
+- App Store Connect Issuer ID: stored in secure notes (do not commit)
+- App Store Connect API key: store base64 in `.env` as `APP_STORE_CONNECT_API_KEY` (do not commit)
+- iOS distribution cert: store base64 in `.env` as `IOS_DISTRIBUTION_P12` (password in `.env` as `IOS_DISTRIBUTION_PASSWORD`)
+- GitHub secrets used by CI: `APP_STORE_CONNECT_API_KEY`, `APP_STORE_CONNECT_ISSUER_ID`, `APPLE_TEAM_ID`, `IOS_DISTRIBUTION_P12`, `IOS_DISTRIBUTION_PASSWORD`, `IOS_APPSTORE_PROFILE`, `IOS_WIDGET_APPSTORE_PROFILE`
+- Required entitlements: App Group `group.com.justspeaktoit.ios` and iCloud container `iCloud.com.justspeaktoit.ios`
+- Never commit private keys or provisioning profile contents.

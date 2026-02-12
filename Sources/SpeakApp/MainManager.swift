@@ -516,8 +516,12 @@ final class MainManager: ObservableObject {
       // Skip post-processing if live polish is active and user preference is set
       let shouldSkipForLivePolish = appSettings.speedMode.usesLivePolish 
         && appSettings.skipPostProcessingWithLivePolish
+
+      // Skip post-processing when using AssemblyAI with a pre-processing prompt
+      let usingAssemblyAIPreprocessing = appSettings.liveTranscriptionModel.contains("assemblyai")
+        && !appSettings.postProcessingSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
       
-      if appSettings.postProcessingEnabled && !shouldSkipForLivePolish {
+      if appSettings.postProcessingEnabled && !shouldSkipForLivePolish && !usingAssemblyAIPreprocessing {
         hudManager.beginPostProcessing()
         session.postProcessingStarted = Date()
         guard
@@ -898,8 +902,12 @@ final class MainManager: ObservableObject {
       // Skip post-processing if live polish is active and user preference is set
       let shouldSkipForLivePolish = appSettings.speedMode.usesLivePolish 
         && appSettings.skipPostProcessingWithLivePolish
+
+      // Skip post-processing when using AssemblyAI with a pre-processing prompt
+      let usingAssemblyAIPreprocessing = appSettings.liveTranscriptionModel.contains("assemblyai")
+        && !appSettings.postProcessingSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
       
-      if appSettings.postProcessingEnabled && !shouldSkipForLivePolish {
+      if appSettings.postProcessingEnabled && !shouldSkipForLivePolish && !usingAssemblyAIPreprocessing {
         hudManager.beginPostProcessing()
         session.postProcessingStarted = Date()
         guard

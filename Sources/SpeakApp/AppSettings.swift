@@ -255,6 +255,7 @@ final class AppSettings: ObservableObject {
     case recordingSoundsEnabled
     case recordingSoundProfile
     case recordingSoundVolume
+    case assemblyAIKeyterms
   }
 
   private static let defaultBatchTranscriptionModel = "google/gemini-2.0-flash-001"
@@ -341,6 +342,10 @@ final class AppSettings: ObservableObject {
 
   @Published var postProcessingSystemPrompt: String {
     didSet { store(postProcessingSystemPrompt, key: .postProcessingSystemPrompt) }
+  }
+
+  @Published var assemblyAIKeyterms: String {
+    didSet { store(assemblyAIKeyterms, key: .assemblyAIKeyterms) }
   }
 
   @Published var postProcessingOutputLanguage: String {
@@ -637,6 +642,8 @@ final class AppSettings: ObservableObject {
     postProcessingSystemPrompt =
       defaults.string(forKey: DefaultsKey.postProcessingSystemPrompt.rawValue)
       ?? "You are a transcription assistant. Clean up the text, fix punctuation, and respect speaker turns."
+    assemblyAIKeyterms =
+      defaults.string(forKey: DefaultsKey.assemblyAIKeyterms.rawValue) ?? ""
     postProcessingOutputLanguage =
       defaults.string(forKey: DefaultsKey.postProcessingOutputLanguage.rawValue) ?? "English"
     postProcessingIncludeLexiconDirectives =

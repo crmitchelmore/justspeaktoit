@@ -886,6 +886,7 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
   private let secureStorage: SecureAppStorage
   private var transcriber: AssemblyAILiveTranscriber?
   private var currentModel: String?
+  private var currentLanguage: String?
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
   private let audioEngine = AVAudioEngine()
   private let logger = Logger(subsystem: "com.speak.app", category: "AssemblyAILiveController")
@@ -898,6 +899,8 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
   private var finalSegments: [TranscriptionSegment] = []
   private var currentInterim: String = ""
   private var fullTranscript: String = ""
+  private var currentTurnOrder: Int = -1
+  private let formatTurnsEnabled: Bool = true
 
   init(
     appSettings: AppSettings,
@@ -913,6 +916,7 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
 
   func configure(language: String?, model: String) {
     currentModel = model
+    currentLanguage = language
     logger.info("Configured AssemblyAI with model: \(model)")
   }
 
@@ -935,6 +939,7 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
     finalSegments = []
     currentInterim = ""
     fullTranscript = ""
+    currentTurnOrder = -1
     streamingStartTime = nil
     hasFinished = false
 
@@ -952,17 +957,28 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
     }
     targetFormat = outputFormat
 
+    // Build pre-processing prompt from the post-processing prompt when using AssemblyAI
+    let prompt = appSettings.postProcessingSystemPrompt
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    let keyterms = appSettings.assemblyAIKeyterms
+      .split(separator: ",")
+      .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+      .filter { !$0.isEmpty }
+
     let provider = AssemblyAITranscriptionProvider()
     transcriber = provider.createLiveTranscriber(
       apiKey: apiKey,
-      sampleRate: 16000
+      sampleRate: 16000,
+      prompt: prompt,
+      keyterms: keyterms,
+      language: currentLanguage
     )
 
     transcriber?.start(
-      onTranscript: { [weak self] text, isFinal in
+      onTranscript: { [weak self] turn in
         Task { @MainActor [weak self] in
           guard let self else { return }
-          self.handleTranscript(text: text, isFinal: isFinal)
+          self.handleTurn(turn)
         }
       },
       onError: { [weak self] error in
@@ -995,20 +1011,57 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
     streamingStartTime = Date()
   }
 
-  private func handleTranscript(text: String, isFinal: Bool) {
-    if isFinal {
-      let segment = TranscriptionSegment(startTime: 0, endTime: 0, text: text)
-      finalSegments.append(segment)
+  private func handleTurn(_ turn: AssemblyAITurnResponse) {
+    guard !turn.transcript.isEmpty || turn.end_of_turn else { return }
+
+    if let langCode = turn.language_code {
+      logger.info("Detected language: \(langCode) (confidence: \(turn.language_confidence ?? 0))")
+    }
+
+    if turn.end_of_turn {
+      if formatTurnsEnabled && !turn.turn_is_formatted {
+        // Unformatted end-of-turn: show as interim — formatted version is coming next
+        currentInterim = turn.transcript
+        rebuildDisplay()
+        return
+      }
+
+      // Definitive final (formatted if enabled, or unformatted if format_turns is off)
+      let segment = TranscriptionSegment(startTime: 0, endTime: 0, text: turn.transcript)
+
+      if currentTurnOrder == turn.turn_order,
+        let idx = finalSegments.indices.last
+      {
+        finalSegments[idx] = segment
+      } else {
+        finalSegments.append(segment)
+      }
+
       fullTranscript = finalSegments.map(\.text).joined(separator: " ")
       currentInterim = ""
+      currentTurnOrder = -1
       delegate?.liveTranscriber(self, didUpdatePartial: fullTranscript)
     } else {
-      currentInterim = text
-      let displayText = fullTranscript.isEmpty
-        ? currentInterim
-        : fullTranscript + " " + currentInterim
-      delegate?.liveTranscriber(self, didUpdatePartial: displayText)
+      // Ongoing turn — replace interim (AssemblyAI sends full turn text each time)
+      currentTurnOrder = turn.turn_order
+
+      var displayTranscript = turn.transcript
+      if let lastWord = turn.words?.last, !lastWord.word_is_final {
+        if !displayTranscript.isEmpty {
+          displayTranscript += " "
+        }
+        displayTranscript += lastWord.text
+      }
+      currentInterim = displayTranscript
+      rebuildDisplay()
     }
+  }
+
+  private func rebuildDisplay() {
+    let displayText = fullTranscript.isEmpty
+      ? currentInterim
+      : fullTranscript + " " + currentInterim
+    delegate?.liveTranscriber(self, didUpdatePartial: displayText)
   }
 
   // Audio processor that resamples and forwards to AssemblyAI

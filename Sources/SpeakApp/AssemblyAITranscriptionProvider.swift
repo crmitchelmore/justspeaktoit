@@ -15,36 +15,64 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
   private let bufferPool: AudioBufferPool
   private let logger = Logger(subsystem: "com.speak.app", category: "AssemblyAILiveTranscriber")
 
-  private var onTranscript: ((String, Bool) -> Void)?
+  private var onTranscript: ((AssemblyAITurnResponse) -> Void)?
   private var onError: ((Error) -> Void)?
   private var isStopping: Bool = false
+
+  private var prompt: String
+  private var keyterms: [String]
+  private var language: String?
 
   init(
     apiKey: String,
     sampleRate: Int = 16000,
+    prompt: String = "",
+    keyterms: [String] = [],
+    language: String? = nil,
     session: URLSession = .shared,
     bufferPool: AudioBufferPool = AudioBufferPool(poolSize: 10, bufferSize: 4096)
   ) {
     self.apiKey = apiKey
     self.sampleRate = sampleRate
+    self.prompt = prompt
+    self.keyterms = keyterms
+    self.language = language
     self.session = session
     self.bufferPool = bufferPool
   }
 
   func start(
-    onTranscript: @escaping (String, Bool) -> Void,
+    onTranscript: @escaping (AssemblyAITurnResponse) -> Void,
     onError: @escaping (Error) -> Void
   ) {
     isStopping = false
     self.onTranscript = onTranscript
     self.onError = onError
 
+    let isEnglish = language == nil || language?.hasPrefix("en") == true
+    let speechModel = isEnglish ? "universal-streaming-english" : "universal-streaming-multi"
+
     var urlComponents = URLComponents(string: "wss://streaming.assemblyai.com/v3/ws")!
     urlComponents.queryItems = [
       URLQueryItem(name: "sample_rate", value: String(sampleRate)),
       URLQueryItem(name: "encoding", value: "pcm_s16le"),
       URLQueryItem(name: "format_turns", value: "true"),
+      URLQueryItem(name: "speech_model", value: speechModel),
+      URLQueryItem(name: "min_end_of_turn_silence_when_confident", value: "560"),
     ]
+
+    // prompt and keyterms_prompt are mutually exclusive
+    if !prompt.isEmpty {
+      urlComponents.queryItems?.append(URLQueryItem(name: "prompt", value: prompt))
+      if !keyterms.isEmpty {
+        logger.warning("prompt and keyterms_prompt cannot be used together. Using prompt only.")
+      }
+    } else {
+      let validTerms = keyterms.filter { !$0.isEmpty && $0.count <= 50 }.prefix(100)
+      for term in validTerms {
+        urlComponents.queryItems?.append(URLQueryItem(name: "keyterms_prompt", value: term))
+      }
+    }
 
     guard let url = urlComponents.url else {
       onError(AssemblyAIError.invalidURL)
@@ -124,16 +152,37 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
     isStopping = true
     bufferPool.logMetrics()
 
-    // Send graceful terminate message before closing
-    if let webSocketTask, webSocketTask.state == .running {
-      let terminateMsg = #"{"type":"Terminate"}"#
-      let message = URLSessionWebSocketTask.Message.string(terminateMsg)
-      webSocketTask.send(message) { _ in }
+    guard let webSocketTask, webSocketTask.state == .running else {
+      self.webSocketTask = nil
+      return
     }
 
-    webSocketTask?.cancel(with: .normalClosure, reason: nil)
-    webSocketTask = nil
-    logger.info("AssemblyAI WebSocket connection closed")
+    // Send ForceEndpoint to flush the current turn before terminating
+    let forceMsg = #"{"type":"ForceEndpoint"}"#
+    webSocketTask.send(.string(forceMsg)) { [weak self] _ in
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+        guard let self else { return }
+        let terminateMsg = #"{"type":"Terminate"}"#
+        self.webSocketTask?.send(.string(terminateMsg)) { _ in }
+        self.webSocketTask?.cancel(with: .normalClosure, reason: nil)
+        self.webSocketTask = nil
+        self.logger.info("AssemblyAI WebSocket connection closed")
+      }
+    }
+  }
+
+  func updateConfiguration(_ config: [String: Any]) {
+    guard let webSocketTask, webSocketTask.state == .running else { return }
+    var payload = config
+    payload["type"] = "UpdateConfiguration"
+    guard let data = try? JSONSerialization.data(withJSONObject: payload),
+      let json = String(data: data, encoding: .utf8)
+    else { return }
+    webSocketTask.send(.string(json)) { [weak self] error in
+      if let error {
+        self?.logger.error("Failed to send config update: \(error.localizedDescription)")
+      }
+    }
   }
 
   // MARK: - Private
@@ -191,8 +240,7 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
       switch envelope.type {
       case "Turn":
         let turn = try JSONDecoder().decode(AssemblyAITurnResponse.self, from: data)
-        guard !turn.transcript.isEmpty else { return }
-        onTranscript?(turn.transcript, turn.end_of_turn)
+        onTranscript?(turn)
       case "Begin":
         logger.info("AssemblyAI session started")
       case "Termination":
@@ -445,11 +493,17 @@ struct AssemblyAITranscriptionProvider: TranscriptionProvider {
   /// Creates a live transcriber for streaming audio.
   func createLiveTranscriber(
     apiKey: String,
-    sampleRate: Int = 16000
+    sampleRate: Int = 16000,
+    prompt: String = "",
+    keyterms: [String] = [],
+    language: String? = nil
   ) -> AssemblyAILiveTranscriber {
     AssemblyAILiveTranscriber(
       apiKey: apiKey,
       sampleRate: sampleRate,
+      prompt: prompt,
+      keyterms: keyterms,
+      language: language,
       session: session,
       bufferPool: bufferPool
     )
@@ -505,7 +559,7 @@ private struct AssemblyAIStreamEnvelope: Decodable {
   let type: String
 }
 
-private struct AssemblyAITurnResponse: Decodable {
+struct AssemblyAITurnResponse: Decodable {
   let type: String
   let turn_order: Int
   let turn_is_formatted: Bool
@@ -513,9 +567,12 @@ private struct AssemblyAITurnResponse: Decodable {
   let transcript: String
   let end_of_turn_confidence: Double?
   let words: [AssemblyAIStreamWord]?
+  let utterance: String?
+  let language_code: String?
+  let language_confidence: Double?
 }
 
-private struct AssemblyAIStreamWord: Decodable {
+struct AssemblyAIStreamWord: Decodable {
   let text: String
   let word_is_final: Bool
   let start: Int

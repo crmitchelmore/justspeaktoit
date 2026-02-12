@@ -1002,11 +1002,20 @@ struct SettingsView: View {
       }
       .speakTooltip("Choose how Speak cleans up transcripts—from languages to creativity and custom prompts.")
 
-      SettingsCard(title: "System prompt", systemImage: "quote.bubble", tint: Color.mint) {
+      SettingsCard(title: "Transcription Prompt", systemImage: "quote.bubble", tint: Color.mint) {
         VStack(alignment: .leading, spacing: 8) {
-          Text("The system prompt guides how the LLM cleans up your transcript.")
+          if settings.liveTranscriptionModel.contains("assemblyai") {
+            Label(
+              "This prompt is sent directly to the transcription model (pre-processing). No additional LLM cost or latency.",
+              systemImage: "bolt.fill"
+            )
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.mint)
+          } else {
+            Text("This prompt is sent to an LLM after transcription (post-processing). Requires an OpenRouter API key.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
           TextEditor(text: settingsBinding(\AppSettings.postProcessingSystemPrompt))
             .font(.body.monospaced())
             .frame(minHeight: 200)
@@ -1019,9 +1028,37 @@ struct SettingsView: View {
                 generateSystemPromptPreview()
               }
             }
+
+          if !settings.postProcessingSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !settings.assemblyAIKeyterms.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && settings.liveTranscriptionModel.contains("assemblyai")
+          {
+            Label(
+              "Prompt and keyterms cannot be used together. Prompt takes priority.",
+              systemImage: "exclamationmark.triangle"
+            )
+            .font(.caption)
+            .foregroundStyle(.orange)
+          }
         }
       }
       .speakTooltip("Guide the cleanup model with your own instructions for tone and formatting.")
+
+      if settings.liveTranscriptionModel.contains("assemblyai") {
+        SettingsCard(title: "Keyterms", systemImage: "textformat.abc", tint: Color.blue) {
+          VStack(alignment: .leading, spacing: 8) {
+            Text("Comma-separated terms to boost recognition accuracy (e.g. proper nouns, jargon). Max 100 terms, each ≤50 characters.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+            TextField(
+              "AssemblyAI, Universal-3 Pro, Keanu Reeves",
+              text: settingsBinding(\AppSettings.assemblyAIKeyterms)
+            )
+            .textFieldStyle(.roundedBorder)
+          }
+        }
+        .speakTooltip("Add domain-specific terms to improve transcription accuracy. Additional cost: $0.04/hour.")
+      }
 
       SettingsCard(title: "System-Generated Parts", systemImage: "gearshape.2", tint: Color.brandAccentDeep) {
         VStack(alignment: .leading, spacing: 16) {

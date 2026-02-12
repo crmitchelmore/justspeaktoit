@@ -55,9 +55,7 @@ final class FnKeyBackend {
     fnIsPressed = false
   }
 
-  nonisolated deinit {
-    // Cleanup resources if stop() wasn't called
-    // Note: NSEvent.removeMonitor and CGEvent tap cleanup are safe to call from any thread
+  deinit {
     if let monitor = globalMonitor {
       NSEvent.removeMonitor(monitor)
     }

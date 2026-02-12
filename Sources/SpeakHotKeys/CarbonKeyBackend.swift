@@ -37,8 +37,7 @@ final class CarbonKeyBackend {
     removeEventHandler()
   }
 
-  nonisolated deinit {
-    // Cleanup Carbon resources if stop() wasn't called
+  deinit {
     if let ref = hotKeyRef {
       UnregisterEventHotKey(ref)
     }

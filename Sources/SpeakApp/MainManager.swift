@@ -63,6 +63,8 @@ final class MainManager: ObservableObject {
   private var cachedSilenceDuration: TimeInterval = 0
   /// Tracks whether the HUD window is visible to skip unnecessary UI updates
   private var isHUDOccluded: Bool = false
+  private var occlusionObserver: NSObjectProtocol?
+  private var willTerminateObserver: NSObjectProtocol?
 
   private struct RetryData {
     let transcriptionResult: TranscriptionResult
@@ -155,7 +157,7 @@ final class MainManager: ObservableObject {
     configureHotKeys()
 
     // Observe app termination to clean up timer
-    NotificationCenter.default.addObserver(
+    willTerminateObserver = NotificationCenter.default.addObserver(
       forName: NSApplication.willTerminateNotification,
       object: nil,
       queue: .main
@@ -1185,7 +1187,7 @@ final class MainManager: ObservableObject {
     
     // Track HUD visibility to skip UI updates when app is occluded
     isHUDOccluded = !(NSApp.occlusionState.contains(.visible))
-    NotificationCenter.default.addObserver(
+    occlusionObserver = NotificationCenter.default.addObserver(
       forName: NSApplication.didChangeOcclusionStateNotification,
       object: nil,
       queue: .main
@@ -1264,11 +1266,10 @@ final class MainManager: ObservableObject {
     audioLevelTimer = nil
     silenceStartTime = nil
     isHUDOccluded = false
-    NotificationCenter.default.removeObserver(
-      self,
-      name: NSApplication.didChangeOcclusionStateNotification,
-      object: nil
-    )
+    if let observer = occlusionObserver {
+      NotificationCenter.default.removeObserver(observer)
+      occlusionObserver = nil
+    }
     hudManager.updateAudioLevel(0)
   }
 

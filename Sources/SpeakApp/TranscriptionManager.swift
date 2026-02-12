@@ -295,6 +295,8 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
     latestResult = nil
     hasFinished = false
     guard let activeRequest = request else {
+      audioEngine.stop()
+      audioEngine.inputNode.removeTap(onBus: 0)
       await audioDeviceManager.endUsingPreferredInput(session: sessionContext)
       throw TranscriptionManagerError.recognizerUnavailable
     }

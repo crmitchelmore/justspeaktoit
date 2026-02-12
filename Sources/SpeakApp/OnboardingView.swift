@@ -1,4 +1,6 @@
 import AppKit
+import AVFoundation
+import SpeakHotKeys
 import SwiftUI
 
 // MARK: - Provider Info for Onboarding
@@ -60,15 +62,35 @@ final class OnboardingState: ObservableObject {
     @Published var isValidating = false
     @Published var validationError: String?
     @Published var permissionsGranted: Set<PermissionType> = []
+    @Published var selectedHotKey: HotKey = .fnKey
+    
+    // Test recording state
+    @Published var isTestRecording = false
+    @Published var testRecordingText: String?
+    @Published var testRecordingError: String?
     
     let permissionsManager: PermissionsManager
     let secureStorage: SecureAppStorage
     let settings: AppSettings
+    let hotKeyManager: HotKeyManager
+    let audioFileManager: AudioFileManager
+    let transcriptionManager: TranscriptionManager
     
-    init(permissionsManager: PermissionsManager, secureStorage: SecureAppStorage, settings: AppSettings) {
+    init(
+        permissionsManager: PermissionsManager,
+        secureStorage: SecureAppStorage,
+        settings: AppSettings,
+        hotKeyManager: HotKeyManager,
+        audioFileManager: AudioFileManager,
+        transcriptionManager: TranscriptionManager
+    ) {
         self.permissionsManager = permissionsManager
         self.secureStorage = secureStorage
         self.settings = settings
+        self.hotKeyManager = hotKeyManager
+        self.audioFileManager = audioFileManager
+        self.transcriptionManager = transcriptionManager
+        self.selectedHotKey = settings.selectedHotKey
         refreshPermissions()
     }
     
@@ -179,14 +201,18 @@ final class OnboardingState: ObservableObject {
 enum OnboardingStep: Int, CaseIterable {
     case welcome
     case permissions
+    case hotkey
     case apiKey
+    case testRecording
     case complete
     
     var title: String {
         switch self {
         case .welcome: return "Welcome"
         case .permissions: return "Permissions"
+        case .hotkey: return "Hotkey"
         case .apiKey: return "API Key"
+        case .testRecording: return "Test"
         case .complete: return "Ready!"
         }
     }
@@ -198,11 +224,22 @@ struct OnboardingView: View {
     @StateObject private var state: OnboardingState
     @Binding var isComplete: Bool
     
-    init(permissionsManager: PermissionsManager, secureStorage: SecureAppStorage, settings: AppSettings, isComplete: Binding<Bool>) {
+    init(
+        permissionsManager: PermissionsManager,
+        secureStorage: SecureAppStorage,
+        settings: AppSettings,
+        hotKeyManager: HotKeyManager,
+        audioFileManager: AudioFileManager,
+        transcriptionManager: TranscriptionManager,
+        isComplete: Binding<Bool>
+    ) {
         _state = StateObject(wrappedValue: OnboardingState(
             permissionsManager: permissionsManager,
             secureStorage: secureStorage,
-            settings: settings
+            settings: settings,
+            hotKeyManager: hotKeyManager,
+            audioFileManager: audioFileManager,
+            transcriptionManager: transcriptionManager
         ))
         _isComplete = isComplete
     }
@@ -227,10 +264,14 @@ struct OnboardingView: View {
                     WelcomeStepView(state: state)
                 case .permissions:
                     PermissionsStepView(state: state)
+                case .hotkey:
+                    HotKeyStepView(state: state)
                 case .apiKey:
                     APIKeyStepView(state: state)
+                case .testRecording:
+                    TestRecordingStepView(state: state)
                 case .complete:
-                    CompleteStepView(isComplete: $isComplete)
+                    CompleteStepView(state: state, isComplete: $isComplete)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -242,7 +283,11 @@ struct OnboardingView: View {
                 if state.currentStep != .welcome {
                     Button("Back") {
                         withAnimation {
-                            if let prev = OnboardingStep(rawValue: state.currentStep.rawValue - 1) {
+                            // Special case: if on .complete and testRecording was skipped
+                            if state.currentStep == .complete && state.selectedHotKey == .fnKey {
+                                // Go back to apiKey, skipping testRecording
+                                state.currentStep = .apiKey
+                            } else if let prev = OnboardingStep(rawValue: state.currentStep.rawValue - 1) {
                                 state.currentStep = prev
                             }
                         }
@@ -255,6 +300,7 @@ struct OnboardingView: View {
                 if state.currentStep == .apiKey {
                     Button("Skip for Now") {
                         withAnimation {
+                            // Skip API key and test recording, go straight to complete
                             state.currentStep = .complete
                         }
                     }
@@ -291,8 +337,12 @@ struct OnboardingView: View {
             return true
         case .permissions:
             return state.permissionsGranted.contains(.microphone)
+        case .hotkey:
+            return true
         case .apiKey:
             return !state.apiKey.isEmpty && !state.isValidating
+        case .testRecording:
+            return true
         case .complete:
             return true
         }
@@ -300,6 +350,15 @@ struct OnboardingView: View {
     
     private func advanceStep() async {
         switch state.currentStep {
+        case .hotkey:
+            // Save the selected hotkey to settings
+            state.settings.selectedHotKey = state.selectedHotKey
+            state.hotKeyManager.restartWithCurrentHotKey()
+            if let next = OnboardingStep(rawValue: state.currentStep.rawValue + 1) {
+                withAnimation {
+                    state.currentStep = next
+                }
+            }
         case .apiKey:
             // Validate and save API key
             let valid = await state.validateAPIKey()
@@ -307,11 +366,20 @@ struct OnboardingView: View {
                 do {
                     try await state.saveAPIKey()
                     withAnimation {
-                        state.currentStep = .complete
+                        // If using non-Fn hotkey, show test recording; otherwise go to complete
+                        if state.selectedHotKey != .fnKey {
+                            state.currentStep = .testRecording
+                        } else {
+                            state.currentStep = .complete
+                        }
                     }
                 } catch {
                     state.validationError = "Failed to save: \(error.localizedDescription)"
                 }
+            }
+        case .testRecording:
+            withAnimation {
+                state.currentStep = .complete
             }
         default:
             if let next = OnboardingStep(rawValue: state.currentStep.rawValue + 1) {
@@ -695,7 +763,312 @@ struct APIKeyStepView: View {
     }
 }
 
+// MARK: - Hotkey Step
+
+struct HotKeyStepView: View {
+    @ObservedObject var state: OnboardingState
+    
+    var body: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "keyboard.fill")
+                .font(.system(size: 50))
+                .foregroundColor(.accentColor)
+            
+            Text("Choose Your Hotkey")
+                .font(.title)
+                .fontWeight(.bold)
+            
+            Text("This is the key you'll press to start and stop recording")
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+            
+            VStack(spacing: 16) {
+                // Fn key option
+                Button {
+                    state.selectedHotKey = .fnKey
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text("🌐")
+                                    .font(.title2)
+                                Text("Fn (Globe) Key")
+                                    .font(.headline)
+                            }
+                            Text("Default — works on most Mac keyboards")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        if state.selectedHotKey == .fnKey {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                                .font(.title2)
+                        }
+                    }
+                    .padding()
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(state.selectedHotKey == .fnKey ? Color.accentColor.opacity(0.1) : Color.secondary.opacity(0.1))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(state.selectedHotKey == .fnKey ? Color.accentColor : Color.clear, lineWidth: 2)
+                    )
+                }
+                .buttonStyle(.plain)
+                
+                // Custom shortcut option
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Custom Shortcut")
+                                .font(.headline)
+                            Text("Choose any key combination")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        if state.selectedHotKey != .fnKey {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                                .font(.title2)
+                        }
+                    }
+                    
+                    HotKeyRecorder("Record shortcut", hotKey: $state.selectedHotKey)
+                }
+                .padding()
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(state.selectedHotKey != .fnKey ? Color.accentColor.opacity(0.1) : Color.secondary.opacity(0.1))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(state.selectedHotKey != .fnKey ? Color.accentColor : Color.clear, lineWidth: 2)
+                )
+            }
+            .padding(.horizontal, 40)
+            
+            // Troubleshooting
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: 8) {
+                    TroubleshootingRow(icon: "globe", text: "If Fn opens emoji picker: go to System Settings → Keyboard → \"Press 🌐 key to\" and change it to \"Do Nothing\"")
+                    TroubleshootingRow(icon: "keyboard", text: "External keyboards may not send Fn events — use a custom shortcut instead")
+                    TroubleshootingRow(icon: "lock.shield", text: "Accessibility and Input Monitoring permissions are required for hotkey detection")
+                }
+                .padding(.top, 8)
+            } label: {
+                Text("Having trouble with Fn?")
+                    .font(.caption)
+                    .foregroundColor(.accentColor)
+            }
+            .padding(.horizontal, 40)
+        }
+    }
+}
+
+struct TroubleshootingRow: View {
+    let icon: String
+    let text: String
+    
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: icon)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .frame(width: 16)
+            Text(text)
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+    }
+}
+
+// MARK: - Test Recording Step
+
+struct TestRecordingStepView: View {
+    @ObservedObject var state: OnboardingState
+    @State private var audioPlayer: AVAudioPlayer?
+    @State private var recordingURL: URL?
+    @State private var isPlaying = false
+    
+    var body: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "waveform.circle.fill")
+                .font(.system(size: 50))
+                .foregroundColor(.accentColor)
+            
+            Text("Test Your Setup")
+                .font(.title)
+                .fontWeight(.bold)
+            
+            Text("Record a short phrase to verify everything works")
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+            
+            VStack(spacing: 16) {
+                // Hotkey reminder
+                HStack {
+                    Image(systemName: "info.circle")
+                        .foregroundColor(.accentColor)
+                    Text("Press **\(state.selectedHotKey.displayString)** to record, or use the button below")
+                        .font(.subheadline)
+                }
+                .padding()
+                .background(Color.accentColor.opacity(0.1))
+                .cornerRadius(8)
+                
+                // Record button
+                Button {
+                    Task {
+                        if state.isTestRecording {
+                            await stopTestRecording()
+                        } else {
+                            await startTestRecording()
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Image(systemName: state.isTestRecording ? "stop.circle.fill" : "record.circle")
+                            .font(.title2)
+                        Text(state.isTestRecording ? "Stop Recording" : "Start Recording")
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(state.isTestRecording ? Color.red : Color.accentColor)
+                    .foregroundColor(.white)
+                    .cornerRadius(10)
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 40)
+                
+                // Results
+                if let text = state.testRecordingText {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                            Text("Transcription successful!")
+                                .font(.headline)
+                                .foregroundColor(.green)
+                        }
+                        
+                        Text(text)
+                            .font(.body)
+                            .padding()
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.secondary.opacity(0.1))
+                            .cornerRadius(8)
+                        
+                        // Playback button
+                        if recordingURL != nil {
+                            Button {
+                                togglePlayback()
+                            } label: {
+                                HStack {
+                                    Image(systemName: isPlaying ? "stop.fill" : "play.fill")
+                                    Text(isPlaying ? "Stop Playback" : "Play Recording")
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                    }
+                    .padding(.horizontal, 40)
+                }
+                
+                if let error = state.testRecordingError {
+                    HStack {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(.orange)
+                        Text(error)
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                    }
+                    .padding(.horizontal, 40)
+                }
+            }
+            
+            Text("You can skip this step and test later")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .onDisappear {
+            // Stop recording and playback if active when navigating away
+            if state.isTestRecording {
+                Task {
+                    try? await state.audioFileManager.stopRecording()
+                    state.isTestRecording = false
+                }
+            }
+            audioPlayer?.stop()
+            isPlaying = false
+        }
+    }
+    
+    private func startTestRecording() async {
+        guard !state.isTestRecording else { return }
+        state.testRecordingError = nil
+        state.testRecordingText = nil
+        state.isTestRecording = true
+        do {
+            let url = try await state.audioFileManager.startRecording()
+            recordingURL = url
+        } catch {
+            state.isTestRecording = false
+            state.testRecordingError = "Failed to start recording: \(error.localizedDescription)"
+        }
+    }
+    
+    private func stopTestRecording() async {
+        do {
+            let summary = try await state.audioFileManager.stopRecording()
+            state.isTestRecording = false
+            recordingURL = summary.url
+            
+            // Transcribe the recording
+            let result = try await state.transcriptionManager.transcribeFile(at: summary.url)
+            if result.text.isEmpty {
+                state.testRecordingError = "No speech detected. Try speaking louder or check your microphone."
+            } else {
+                state.testRecordingText = result.text
+            }
+        } catch {
+            state.isTestRecording = false
+            state.testRecordingError = "Transcription failed: \(error.localizedDescription)"
+        }
+    }
+    
+    private func togglePlayback() {
+        if isPlaying {
+            audioPlayer?.stop()
+            isPlaying = false
+        } else if let url = recordingURL {
+            do {
+                audioPlayer = try AVAudioPlayer(contentsOf: url)
+                audioPlayer?.play()
+                isPlaying = true
+                
+                // Poll to reset isPlaying when audio finishes naturally
+                Task {
+                    while isPlaying, let player = audioPlayer {
+                        if !player.isPlaying {
+                            isPlaying = false
+                            break
+                        }
+                        try? await Task.sleep(nanoseconds: 100_000_000) // 0.1s
+                    }
+                }
+            } catch {
+                state.testRecordingError = "Failed to play recording: \(error.localizedDescription)"
+            }
+        }
+    }
+}
+
 struct CompleteStepView: View {
+    @ObservedObject var state: OnboardingState
     @Binding var isComplete: Bool
     
     var body: some View {
@@ -712,7 +1085,7 @@ struct CompleteStepView: View {
                 .foregroundColor(.secondary)
             
             VStack(alignment: .leading, spacing: 16) {
-                TipRow(icon: "command", text: "Press ⌥Space (Option+Space) to start recording")
+                TipRow(icon: "keyboard", text: "Press \(state.selectedHotKey.displayString) to start recording")
                 TipRow(icon: "text.cursor", text: "Click in any text field, then record")
                 TipRow(icon: "gearshape.fill", text: "Right-click the menu bar icon for settings")
             }
@@ -747,19 +1120,6 @@ struct TipRow: View {
 // MARK: - Preview
 
 #if DEBUG
-struct OnboardingView_Previews: PreviewProvider {
-    static var previews: some View {
-        let permissionsManager = PermissionsManager()
-        let settings = AppSettings()
-        OnboardingView(
-            permissionsManager: permissionsManager,
-            secureStorage: SecureAppStorage(
-                permissionsManager: permissionsManager,
-                appSettings: settings
-            ),
-            settings: settings,
-            isComplete: .constant(false)
-        )
-    }
-}
+// Preview requires the full AppEnvironment to construct dependencies.
+// Use the running app or SpeakHotKeysDemo for visual testing.
 #endif

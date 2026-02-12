@@ -349,7 +349,7 @@ final class MainManager: ObservableObject {
     clearRetryData()
 
     let gesture = trigger.historyGesture
-    let session = ActiveSession(gesture: gesture, hotKeyDescription: "Fn")
+    let session = ActiveSession(gesture: gesture, hotKeyDescription: appSettings.selectedHotKey.displayString)
     activeSession = session
     state = .recording
 
@@ -733,7 +733,7 @@ final class MainManager: ObservableObject {
     lastErrorMessage = nil
     hudManager.beginPostProcessing()
 
-    let session = ActiveSession(gesture: .uiButton, hotKeyDescription: "Fn")
+    let session = ActiveSession(gesture: .uiButton, hotKeyDescription: appSettings.selectedHotKey.displayString)
     activeSession = session
     session.transcriptionResult = retryData.transcriptionResult
     session.recordingSummary = retryData.recordingSummary

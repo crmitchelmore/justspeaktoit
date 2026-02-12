@@ -1,4 +1,5 @@
 import SpeakCore
+import SpeakHotKeys
 import AppKit
 import Sparkle
 import SwiftUI
@@ -1956,9 +1957,53 @@ struct SettingsView: View {
 
   private var hotKeySettings: some View {
     LazyVStack(spacing: 20) {
+      SettingsCard(title: "Trigger Key", systemImage: "keyboard", tint: Color.blue) {
+        VStack(alignment: .leading, spacing: 12) {
+          Text("Choose which key triggers recording.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+          HStack(spacing: 12) {
+            Button {
+              settings.selectedHotKey = .fnKey
+              environment.hotKeys.restartWithCurrentHotKey()
+            } label: {
+              Label("🌐 Fn Key", systemImage: settings.selectedHotKey == .fnKey ? "checkmark.circle.fill" : "circle")
+            }
+            .buttonStyle(.plain)
+            .padding(8)
+            .background(
+              RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(settings.selectedHotKey == .fnKey ? Color.accentColor.opacity(0.15) : Color.clear)
+            )
+
+            Text("or")
+              .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 4) {
+              Text("Custom Shortcut")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+              HotKeyRecorder(
+                "Shortcut",
+                hotKey: Binding(
+                  get: { self.settings.selectedHotKey },
+                  set: { newKey in
+                    self.settings.selectedHotKey = newKey
+                    self.environment.hotKeys.restartWithCurrentHotKey()
+                  }
+                )
+              )
+              .frame(maxWidth: 200)
+            }
+          }
+        }
+      }
+      .speakTooltip("Pick the Fn key or record a custom keyboard shortcut for recording.")
+
       SettingsCard(title: "Activation", systemImage: "command.square", tint: Color.yellow) {
         VStack(alignment: .leading, spacing: 12) {
-          Text("Choose how the Fn key controls recording.")
+          Text("Choose how the hotkey controls recording.")
             .font(.caption)
             .foregroundStyle(.secondary)
           Picker("Activation", selection: settingsBinding(\AppSettings.hotKeyActivationStyle)) {
@@ -1973,10 +2018,10 @@ struct SettingsView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
               .fill(Color(nsColor: .controlBackgroundColor))
           )
-          .speakTooltip("Decide whether you press, hold, or double-tap the Fn key to start a session.")
+          .speakTooltip("Decide whether you press, hold, or double-tap the hotkey to start a session.")
         }
       }
-      .speakTooltip("Choose how the Fn key behaves when you start and stop recordings.")
+      .speakTooltip("Choose how the hotkey behaves when you start and stop recordings.")
 
       SettingsCard(title: "Timing", systemImage: "timer", tint: Color.orange) {
         VStack(alignment: .leading, spacing: 16) {

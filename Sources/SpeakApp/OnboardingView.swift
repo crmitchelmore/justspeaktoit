@@ -283,7 +283,11 @@ struct OnboardingView: View {
                 if state.currentStep != .welcome {
                     Button("Back") {
                         withAnimation {
-                            if let prev = OnboardingStep(rawValue: state.currentStep.rawValue - 1) {
+                            // Special case: if on .complete and testRecording was skipped
+                            if state.currentStep == .complete && state.selectedHotKey == .fnKey {
+                                // Go back to apiKey, skipping testRecording
+                                state.currentStep = .apiKey
+                            } else if let prev = OnboardingStep(rawValue: state.currentStep.rawValue - 1) {
                                 state.currentStep = prev
                             }
                         }
@@ -990,6 +994,17 @@ struct TestRecordingStepView: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
+        .onDisappear {
+            // Stop recording and playback if active when navigating away
+            if state.isTestRecording {
+                Task {
+                    try? await state.audioFileManager.stopRecording()
+                    state.isTestRecording = false
+                }
+            }
+            audioPlayer?.stop()
+            isPlaying = false
+        }
     }
     
     private func startTestRecording() async {
@@ -1032,6 +1047,17 @@ struct TestRecordingStepView: View {
                 audioPlayer = try AVAudioPlayer(contentsOf: url)
                 audioPlayer?.play()
                 isPlaying = true
+                
+                // Poll to reset isPlaying when audio finishes naturally
+                Task {
+                    while isPlaying, let player = audioPlayer {
+                        if !player.isPlaying {
+                            isPlaying = false
+                            break
+                        }
+                        try? await Task.sleep(nanoseconds: 100_000_000) // 0.1s
+                    }
+                }
             } catch {
                 state.testRecordingError = "Failed to play recording: \(error.localizedDescription)"
             }

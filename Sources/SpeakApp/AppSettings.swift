@@ -4,6 +4,7 @@ import ServiceManagement
 import SpeakCore
 import SpeakHotKeys
 import SwiftUI
+import os.log
 
 /// Centralised configuration model backed by `UserDefaults` and published to SwiftUI.
 @MainActor
@@ -453,8 +454,11 @@ final class AppSettings: ObservableObject {
 
   @Published var selectedHotKey: HotKey {
     didSet {
-      if let data = try? JSONEncoder().encode(selectedHotKey) {
+      do {
+        let data = try JSONEncoder().encode(selectedHotKey)
         defaults.set(data, forKey: DefaultsKey.selectedHotKey.rawValue)
+      } catch {
+        log.error("Failed to encode selectedHotKey: \(error.localizedDescription)")
       }
     }
   }
@@ -642,6 +646,7 @@ final class AppSettings: ObservableObject {
   }
 
   private let defaults: UserDefaults
+  private let log = Logger(subsystem: "com.github.speakapp", category: "AppSettings")
 
   init(defaults: UserDefaults = .standard) {
     self.defaults = defaults

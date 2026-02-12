@@ -36,6 +36,16 @@ final class CarbonKeyBackend {
     removeEventHandler()
   }
 
+  nonisolated deinit {
+    // Cleanup Carbon resources if stop() wasn't called
+    if let ref = hotKeyRef {
+      UnregisterEventHotKey(ref)
+    }
+    if let handler = eventHandler {
+      RemoveEventHandler(handler)
+    }
+  }
+
   // MARK: - Carbon Event Handler
 
   private func installEventHandler() {

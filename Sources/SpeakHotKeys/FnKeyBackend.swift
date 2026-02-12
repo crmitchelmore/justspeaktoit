@@ -54,6 +54,23 @@ final class FnKeyBackend {
     fnIsPressed = false
   }
 
+  nonisolated deinit {
+    // Cleanup resources if stop() wasn't called
+    // Note: NSEvent.removeMonitor and CGEvent tap cleanup are safe to call from any thread
+    if let monitor = globalMonitor {
+      NSEvent.removeMonitor(monitor)
+    }
+    if let monitor = localMonitor {
+      NSEvent.removeMonitor(monitor)
+    }
+    if let source = eventTapRunLoopSource {
+      CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
+    }
+    if let tap = eventTap {
+      CGEvent.tapEnable(tap: tap, enable: false)
+    }
+  }
+
   // MARK: - NSEvent Handling (Fallback)
 
   private func handleNSEvent(event: NSEvent) {

@@ -28,8 +28,9 @@ struct TroubleshootingItem: Identifiable {
 protocol TroubleshootingCheck {
   @MainActor func evaluate(
     settings: AppSettings,
-    permissions: PermissionsManager
-  ) -> [TroubleshootingItem]
+    permissions: PermissionsManager,
+    secureStorage: SecureAppStorage
+  ) async -> [TroubleshootingItem]
 }
 
 // MARK: - Built-in Checks
@@ -37,8 +38,9 @@ protocol TroubleshootingCheck {
 struct HotkeyInfoCheck: TroubleshootingCheck {
   @MainActor func evaluate(
     settings: AppSettings,
-    permissions: PermissionsManager
-  ) -> [TroubleshootingItem] {
+    permissions: PermissionsManager,
+    secureStorage: SecureAppStorage
+  ) async -> [TroubleshootingItem] {
     let style = settings.hotKeyActivationStyle
     let detail: String
     switch style {
@@ -65,8 +67,9 @@ struct HotkeyInfoCheck: TroubleshootingCheck {
 struct ClipboardRestoreCheck: TroubleshootingCheck {
   @MainActor func evaluate(
     settings: AppSettings,
-    permissions: PermissionsManager
-  ) -> [TroubleshootingItem] {
+    permissions: PermissionsManager,
+    secureStorage: SecureAppStorage
+  ) async -> [TroubleshootingItem] {
     guard settings.restoreClipboardAfterPaste else {
       return [
         TroubleshootingItem(
@@ -99,8 +102,9 @@ struct ClipboardRestoreCheck: TroubleshootingCheck {
 struct PermissionsCheck: TroubleshootingCheck {
   @MainActor func evaluate(
     settings: AppSettings,
-    permissions: PermissionsManager
-  ) -> [TroubleshootingItem] {
+    permissions: PermissionsManager,
+    secureStorage: SecureAppStorage
+  ) async -> [TroubleshootingItem] {
     permissions.refreshAll()
     return PermissionType.allCases.compactMap { type in
       let status = permissions.status(for: type)
@@ -119,6 +123,45 @@ struct PermissionsCheck: TroubleshootingCheck {
   }
 }
 
+struct PostProcessingAPIKeyCheck: TroubleshootingCheck {
+  @MainActor func evaluate(
+    settings: AppSettings,
+    permissions: PermissionsManager,
+    secureStorage: SecureAppStorage
+  ) async -> [TroubleshootingItem] {
+    guard settings.postProcessingEnabled else {
+      return []
+    }
+
+    let model = settings.postProcessingModel
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    let resolvedModel = model.isEmpty ? "inception/mercury" : model
+    let isLocal = resolvedModel.lowercased().hasPrefix("apple/")
+      || resolvedModel.lowercased().hasPrefix("local/")
+      || resolvedModel.lowercased() == "on-device"
+
+    guard !isLocal else { return [] }
+
+    let hasKey = await secureStorage.hasSecret(identifier: "openrouter.apiKey")
+    if hasKey { return [] }
+
+    return [
+      TroubleshootingItem(
+        id: "postprocessing-api-key",
+        title: "Post-Processing Needs an API Key",
+        detail:
+          "Post-processing is enabled and uses \(resolvedModel), which requires an OpenRouter API key. Add one in API Keys, or disable post-processing if you don't need it.",
+        status: .issue,
+        systemImage: "key",
+        actions: [
+          .autoFix { settings.postProcessingEnabled = false },
+          .navigate(.apiKeys),
+        ]
+      ),
+    ]
+  }
+}
+
 // MARK: - Analyser
 
 @MainActor
@@ -127,12 +170,17 @@ final class TroubleshootingAnalyser: ObservableObject {
 
   private let checks: [TroubleshootingCheck] = [
     PermissionsCheck(),
+    PostProcessingAPIKeyCheck(),
     HotkeyInfoCheck(),
     ClipboardRestoreCheck(),
   ]
 
-  func analyse(settings: AppSettings, permissions: PermissionsManager) {
-    let results = checks.flatMap { $0.evaluate(settings: settings, permissions: permissions) }
+  func analyse(settings: AppSettings, permissions: PermissionsManager, secureStorage: SecureAppStorage) async {
+    var results: [TroubleshootingItem] = []
+    for check in checks {
+      let items = await check.evaluate(settings: settings, permissions: permissions, secureStorage: secureStorage)
+      results.append(contentsOf: items)
+    }
     items = results.sorted { priority($0.status) < priority($1.status) }
   }
 

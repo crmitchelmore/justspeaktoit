@@ -19,11 +19,18 @@ struct TroubleshootingView: View {
     }
     .onAppear { runAnalysis() }
     .onChange(of: environment.settings.restoreClipboardAfterPaste) { runAnalysis() }
+    .onChange(of: environment.settings.postProcessingEnabled) { runAnalysis() }
     .onChange(of: environment.permissions.statuses) { runAnalysis() }
   }
 
   private func runAnalysis() {
-    analyser.analyse(settings: environment.settings, permissions: environment.permissions)
+    Task {
+      await analyser.analyse(
+        settings: environment.settings,
+        permissions: environment.permissions,
+        secureStorage: environment.secureStorage
+      )
+    }
   }
 
   // MARK: - Header

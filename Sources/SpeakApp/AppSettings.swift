@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import ServiceManagement
 import SpeakCore
+import SpeakHotKeys
 import SwiftUI
 
 /// Centralised configuration model backed by `UserDefaults` and published to SwiftUI.
@@ -273,6 +274,7 @@ final class AppSettings: ObservableObject {
     case recordingSoundVolume
     case assemblyAIKeyterms
     case accessibilityInsertionMode
+    case selectedHotKey
   }
 
   private static let defaultBatchTranscriptionModel = "google/gemini-2.0-flash-001"
@@ -447,6 +449,14 @@ final class AppSettings: ObservableObject {
 
   @Published var doubleTapWindow: TimeInterval {
     didSet { store(doubleTapWindow, key: .doubleTapWindow) }
+  }
+
+  @Published var selectedHotKey: HotKey {
+    didSet {
+      if let data = try? JSONEncoder().encode(selectedHotKey) {
+        defaults.set(data, forKey: DefaultsKey.selectedHotKey.rawValue)
+      }
+    }
   }
 
   @Published var postRecordingTailDuration: TimeInterval {
@@ -708,6 +718,13 @@ final class AppSettings: ObservableObject {
     holdThreshold = defaults.object(forKey: DefaultsKey.holdThreshold.rawValue) as? Double ?? 0.35
     doubleTapWindow =
       defaults.object(forKey: DefaultsKey.doubleTapWindow.rawValue) as? Double ?? 0.4
+    if let hotKeyData = defaults.data(forKey: DefaultsKey.selectedHotKey.rawValue),
+      let decoded = try? JSONDecoder().decode(HotKey.self, from: hotKeyData)
+    {
+      selectedHotKey = decoded
+    } else {
+      selectedHotKey = .fnKey
+    }
     postRecordingTailDuration =
       defaults.object(forKey: DefaultsKey.postRecordingTailDuration.rawValue) as? Double ?? 0.5
     deepgramStopGracePeriod =

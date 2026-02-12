@@ -44,6 +44,9 @@ struct SpeakApp: App {
                             permissionsManager: environment.permissionsManager,
                             secureStorage: environment.secureStorage,
                             settings: environment.settings,
+                            hotKeyManager: environment.hotKeys,
+                            audioFileManager: environment.audio,
+                            transcriptionManager: environment.transcription,
                             isComplete: $hasCompletedOnboarding
                         )
                         .onAppear {

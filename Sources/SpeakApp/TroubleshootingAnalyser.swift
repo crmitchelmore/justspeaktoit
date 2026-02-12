@@ -1,4 +1,5 @@
 import Foundation
+import SpeakHotKeys
 
 // MARK: - Troubleshooting Item Model
 
@@ -42,25 +43,63 @@ struct HotkeyInfoCheck: TroubleshootingCheck {
     secureStorage: SecureAppStorage
   ) async -> [TroubleshootingItem] {
     let style = settings.hotKeyActivationStyle
+    let hotKey = settings.selectedHotKey
+    let keyName = hotKey.displayString
+    
     let detail: String
     switch style {
     case .holdToRecord:
-      detail = "Press and hold the Fn key to record. Release to stop."
+      detail = "Press and hold \(keyName) to record. Release to stop."
     case .doubleTapToggle:
-      detail = "Double-tap the Fn key to start recording, double-tap again to stop."
+      detail = "Double-tap \(keyName) to start recording, double-tap again to stop."
     case .holdAndDoubleTap:
-      detail = "Hold the Fn key to record (release to stop), or double-tap to toggle."
+      detail = "Hold \(keyName) to record (release to stop), or double-tap to toggle."
     }
-    return [
+    
+    var items = [
       TroubleshootingItem(
         id: "hotkey-info",
-        title: "Shortcut: Fn Key",
+        title: "Shortcut: \(keyName)",
         detail: detail,
         status: .info,
         systemImage: "keyboard",
         actions: [.navigate(.shortcuts)]
       ),
     ]
+    
+    // Fn-specific troubleshooting
+    if hotKey == .fnKey {
+      items.append(
+        TroubleshootingItem(
+          id: "hotkey-fn-tip",
+          title: "Fn Key Tip",
+          detail: "If Fn opens the emoji picker, go to System Settings → Keyboard → \"Press 🌐 key to\" and change it to \"Do Nothing\". External keyboards may not send Fn — consider using a custom shortcut instead.",
+          status: .info,
+          systemImage: "globe",
+          actions: [.navigate(.shortcuts)]
+        )
+      )
+    }
+    
+    // Custom shortcut troubleshooting
+    if case .custom = hotKey {
+      let accessibilityGranted = permissions.status(for: .accessibility).isGranted
+      let inputMonitoringGranted = permissions.status(for: .inputMonitoring).isGranted
+      if !accessibilityGranted || !inputMonitoringGranted {
+        items.append(
+          TroubleshootingItem(
+            id: "hotkey-custom-permissions",
+            title: "Custom Shortcut Needs Permissions",
+            detail: "Custom hotkey detection requires both Accessibility and Input Monitoring permissions. Grant them in System Settings → Privacy & Security.",
+            status: .issue,
+            systemImage: "lock.shield",
+            actions: [.navigate(.permissions)]
+          )
+        )
+      }
+    }
+    
+    return items
   }
 }
 

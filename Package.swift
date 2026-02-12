@@ -9,6 +9,7 @@ let package = Package(
         .iOS(.v17)
     ],
     products: [
+        .library(name: "SpeakHotKeys", targets: ["SpeakHotKeys"]),
         .library(name: "SpeakCore", targets: ["SpeakCore"]),
         .library(name: "SpeakiOSLib", targets: ["SpeakiOSLib"]),
         .executable(name: "SpeakApp", targets: ["SpeakApp"])
@@ -20,6 +21,10 @@ let package = Package(
         .package(url: "https://github.com/getsentry/sentry-cocoa.git", from: "9.3.0")
     ],
     targets: [
+        .target(
+            name: "SpeakHotKeys",
+            path: "Sources/SpeakHotKeys"
+        ),
         .target(
             name: "SpeakCore"
         ),
@@ -33,9 +38,15 @@ let package = Package(
             name: "SpeakApp",
             dependencies: [
                 "SpeakCore",
+                "SpeakHotKeys",
                 .product(name: "Sparkle", package: "Sparkle"),
                 .product(name: "Sentry", package: "sentry-cocoa")
             ]
+        ),
+        .executableTarget(
+            name: "SpeakHotKeysDemo",
+            dependencies: ["SpeakHotKeys"],
+            path: "Sources/SpeakHotKeysDemo"
         ),
         .testTarget(
             name: "SpeakAppTests",

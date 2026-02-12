@@ -149,6 +149,24 @@ final class MainManager: ObservableObject {
       self.liveTextInserter.update(with: polished)
     }
 
+    // Trigger immediate polish on utterance boundary (AssemblyAI sub-turn signal)
+    transcriptionManager.$utteranceBoundaryText
+      .compactMap { $0 }
+      .receive(on: RunLoop.main)
+      .sink { [weak self] _ in
+        guard let self, self.appSettings.speedMode.usesLivePolish, self.state == .recording else {
+          return
+        }
+        Task { @MainActor [weak self] in
+          guard let self else { return }
+          await self.livePolishManager.polishNow(
+            stableContext: "",
+            tailText: self.transcriptionManager.livePartialText
+          )
+        }
+      }
+      .store(in: &cancellables)
+
     recordingSoundPlayer.preload()
     configureHotKeys()
   }

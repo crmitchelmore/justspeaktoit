@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import SwiftUI
 
@@ -165,35 +166,29 @@ extension HotKey.ModifierSet {
 
 // MARK: - Key Event Interception
 
-/// View modifier that intercepts keyDown events for recording.
-private struct KeyDownHandler: NSViewRepresentable {
-  let handler: (NSEvent) -> Bool
+/// View modifier that intercepts keyDown events via a local event monitor.
+private struct KeyDownMonitor: ViewModifier {
+    let handler: (NSEvent) -> Bool
+    @State private var monitor: Any?
 
-  func makeNSView(context: Context) -> KeyDownView {
-    let view = KeyDownView()
-    view.handler = handler
-    return view
-  }
-
-  func updateNSView(_ nsView: KeyDownView, context: Context) {
-    nsView.handler = handler
-  }
-
-  final class KeyDownView: NSView {
-    var handler: ((NSEvent) -> Bool)?
-
-    override var acceptsFirstResponder: Bool { true }
-
-    override func keyDown(with event: NSEvent) {
-      if handler?(event) != true {
-        super.keyDown(with: event)
-      }
+    func body(content: Content) -> some View {
+        content
+            .onAppear {
+                monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                    handler(event) ? nil : event
+                }
+            }
+            .onDisappear {
+                if let monitor { NSEvent.removeMonitor(monitor) }
+                monitor = nil
+            }
     }
-  }
 }
 
 extension View {
-  func onKeyDown(handler: @escaping (NSEvent) -> Bool) -> some View {
-    background(KeyDownHandler(handler: handler))
-  }
+    func onKeyDown(handler: @escaping (NSEvent) -> Bool) -> some View {
+        modifier(KeyDownMonitor(handler: handler))
+    }
 }
+
+#endif

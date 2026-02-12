@@ -1,3 +1,4 @@
+#if os(macOS)
 // MARK: - Core Types
 
 import AppKit
@@ -118,3 +119,5 @@ public struct HotKeyConfiguration: Sendable {
     self.doubleTapWindow = doubleTapWindow
   }
 }
+
+#endif

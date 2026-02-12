@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import Carbon
 import Foundation
@@ -141,3 +142,5 @@ final class CarbonKeyBackend {
     return noErr
   }
 }
+
+#endif

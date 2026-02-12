@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import CoreGraphics
 import Foundation
@@ -182,3 +183,5 @@ final class FnKeyBackend {
     }
   }
 }
+
+#endif

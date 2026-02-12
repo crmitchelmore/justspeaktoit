@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 
 /// Maps macOS virtual key codes to human-readable strings.
@@ -92,3 +93,5 @@ public enum KeyCodeMapping {
     63,  // Fn/Globe
   ]
 }
+
+#endif

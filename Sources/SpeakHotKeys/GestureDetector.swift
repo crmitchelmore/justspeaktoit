@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import os.log
 
@@ -121,3 +122,5 @@ public final class GestureDetector {
     onGesture?(event)
   }
 }
+
+#endif

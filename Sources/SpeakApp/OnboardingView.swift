@@ -1008,13 +1008,15 @@ struct TestRecordingStepView: View {
     }
     
     private func startTestRecording() async {
+        guard !state.isTestRecording else { return }
         state.testRecordingError = nil
         state.testRecordingText = nil
+        state.isTestRecording = true
         do {
             let url = try await state.audioFileManager.startRecording()
             recordingURL = url
-            state.isTestRecording = true
         } catch {
+            state.isTestRecording = false
             state.testRecordingError = "Failed to start recording: \(error.localizedDescription)"
         }
     }

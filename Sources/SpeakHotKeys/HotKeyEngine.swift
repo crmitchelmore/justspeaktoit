@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import Foundation
 import os.log
@@ -127,3 +128,5 @@ public final class HotKeyEngine: ObservableObject {
     }
   }
 }
+
+#endif

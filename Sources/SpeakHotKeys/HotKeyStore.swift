@@ -1,3 +1,4 @@
+#if os(macOS)
 import Combine
 import Foundation
 import os.log
@@ -36,3 +37,5 @@ public final class HotKeyStore: ObservableObject {
     log.debug("Saved hotkey: \(self.hotKey.displayString)")
   }
 }
+
+#endif

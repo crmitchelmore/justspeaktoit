@@ -210,6 +210,23 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
 - The semaphore blocks the MainActor, preventing the task from ever executing to signal it
 - Use `Thread.sleep` for brief synchronous delays, or restructure as fully `async`
 
+## AssemblyAI Universal Streaming
+
+### Turn message semantics
+- With `format_turns=true`, each turn produces TWO end-of-turn messages: unformatted then formatted. Only commit the formatted one.
+- `transcript` contains only finalised words (`word_is_final=true`). Non-final words appear only in the `words` array.
+- Track `turn_order` to replace (not append) segments for the same turn.
+- Interim text uses replacement semantics — AssemblyAI sends the full turn text each time, not deltas.
+
+### Pre-processing prompt
+- `postProcessingSystemPrompt` is sent as the `prompt` query parameter on the WebSocket URL when using AssemblyAI.
+- When a pre-processing prompt is active, LLM post-processing is automatically skipped.
+- `prompt` and `keyterms_prompt` are mutually exclusive — prompt takes priority.
+
+### Key files
+- `AssemblyAITranscriptionProvider.swift` — WebSocket client, response models
+- `TranscriptionManager.swift` (`AssemblyAILiveController`) — turn handling, audio processing
+
 ## Commit Message Tagging
 - Prefix commit messages with a platform tag or scope: `[mac]`/`[ios]` or `(mac)`/`(ios)` (e.g., `fix: [mac] add recording sound picker` or `fix(mac): add recording sound picker`).
 - These tags/scopes feed the Sparkle release notes generator so macOS updates only list mac-specific changes.

@@ -119,6 +119,10 @@ public struct ModelCatalog: Sendable {
             id: "deepgram/nova-2-streaming", displayName: "Deepgram Nova-2 (Streaming)",
             description: "Real-time WebSocket streaming transcription with interim results.",
             estimatedLatencyMs: 200, latencyTier: .fast),
+        Option(
+            id: "assemblyai/universal-streaming", displayName: "AssemblyAI Universal (Streaming)",
+            description: "Real-time WebSocket streaming via AssemblyAI's v3 API with turn-based transcription.",
+            estimatedLatencyMs: 250, latencyTier: .fast),
     ]
 
     public static let batchTranscription: [Option] = [
@@ -152,9 +156,13 @@ public struct ModelCatalog: Sendable {
             description: "Third-party streaming/batch model.",
             estimatedLatencyMs: 500, latencyTier: .fast),
         Option(
-            id: "assemblyai/conformer-2", displayName: "AssemblyAI Conformer-2",
-            description: "Alternative batch transcription engine.",
-            estimatedLatencyMs: 1800, latencyTier: .medium),
+            id: "assemblyai/universal-3-pro", displayName: "AssemblyAI Universal-3 Pro",
+            description: "AssemblyAI's most accurate batch transcription model with speaker labels.",
+            estimatedLatencyMs: 1500, latencyTier: .medium),
+        Option(
+            id: "assemblyai/universal-2", displayName: "AssemblyAI Universal-2",
+            description: "Fast and reliable batch transcription from AssemblyAI.",
+            estimatedLatencyMs: 1200, latencyTier: .medium),
     ]
 
     // Curated, static set for transcript cleanup (OpenRouter) with pricing + tags.

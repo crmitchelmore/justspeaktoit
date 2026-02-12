@@ -872,6 +872,310 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
   }
 }
 
+// MARK: - AssemblyAI Live Controller
+
+/// Wraps AssemblyAILiveTranscriber to conform to LiveTranscriptionController protocol.
+/// Resamples audio from device sample rate (typically 48kHz) to 16kHz for AssemblyAI.
+final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
+  weak var delegate: LiveTranscriptionSessionDelegate?
+  private(set) var isRunning: Bool = false
+
+  private let appSettings: AppSettings
+  private let permissionsManager: PermissionsManager
+  private let audioDeviceManager: AudioInputDeviceManager
+  private let secureStorage: SecureAppStorage
+  private var transcriber: AssemblyAILiveTranscriber?
+  private var currentModel: String?
+  private var activeInputSession: AudioInputDeviceManager.SessionContext?
+  private let audioEngine = AVAudioEngine()
+  private let logger = Logger(subsystem: "com.speak.app", category: "AssemblyAILiveController")
+  private let audioProcessor = AssemblyAIAudioProcessor()
+  private var hasFinished: Bool = false
+
+  private let targetSampleRate: Double = 16000
+  private var targetFormat: AVAudioFormat?
+  private var streamingStartTime: Date?
+  private var finalSegments: [TranscriptionSegment] = []
+  private var currentInterim: String = ""
+  private var fullTranscript: String = ""
+
+  init(
+    appSettings: AppSettings,
+    permissionsManager: PermissionsManager,
+    audioDeviceManager: AudioInputDeviceManager,
+    secureStorage: SecureAppStorage
+  ) {
+    self.appSettings = appSettings
+    self.permissionsManager = permissionsManager
+    self.audioDeviceManager = audioDeviceManager
+    self.secureStorage = secureStorage
+  }
+
+  func configure(language: String?, model: String) {
+    currentModel = model
+    logger.info("Configured AssemblyAI with model: \(model)")
+  }
+
+  func start() async throws {
+    guard await ensurePermissions() else {
+      throw TranscriptionManagerError.permissionsMissing
+    }
+
+    let apiKey: String
+    do {
+      apiKey = try await secureStorage.secret(identifier: "assemblyai.apiKey")
+      guard !apiKey.isEmpty else { throw AssemblyAIError.missingAPIKey }
+    } catch {
+      throw AssemblyAIError.missingAPIKey
+    }
+
+    let sessionContext = await audioDeviceManager.beginUsingPreferredInput()
+    activeInputSession = sessionContext
+
+    finalSegments = []
+    currentInterim = ""
+    fullTranscript = ""
+    streamingStartTime = nil
+    hasFinished = false
+
+    let inputNode = audioEngine.inputNode
+    inputNode.removeTap(onBus: 0)
+    let inputFormat = inputNode.outputFormat(forBus: 0)
+
+    guard let outputFormat = AVAudioFormat(
+      commonFormat: .pcmFormatInt16,
+      sampleRate: targetSampleRate,
+      channels: 1,
+      interleaved: true
+    ) else {
+      throw AssemblyAIError.connectionFailed
+    }
+    targetFormat = outputFormat
+
+    let provider = AssemblyAITranscriptionProvider()
+    transcriber = provider.createLiveTranscriber(
+      apiKey: apiKey,
+      sampleRate: 16000
+    )
+
+    transcriber?.start(
+      onTranscript: { [weak self] text, isFinal in
+        Task { @MainActor [weak self] in
+          guard let self else { return }
+          self.handleTranscript(text: text, isFinal: isFinal)
+        }
+      },
+      onError: { [weak self] error in
+        Task { @MainActor [weak self] in
+          guard let self else { return }
+          if !self.isRunning { return }
+          self.delegate?.liveTranscriber(self, didFail: error)
+        }
+      }
+    )
+
+    guard let transcriber else { throw AssemblyAIError.connectionFailed }
+
+    audioProcessor.setRunning(true)
+    let processor = audioProcessor
+    let log = logger
+    inputNode.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { buffer, _ in
+      processor.handleAudioTap(
+        buffer,
+        inputFormat: inputFormat,
+        outputFormat: outputFormat,
+        transcriber: transcriber,
+        logger: log
+      )
+    }
+
+    audioEngine.prepare()
+    try audioEngine.start()
+    isRunning = true
+    streamingStartTime = Date()
+  }
+
+  private func handleTranscript(text: String, isFinal: Bool) {
+    if isFinal {
+      let segment = TranscriptionSegment(startTime: 0, endTime: 0, text: text)
+      finalSegments.append(segment)
+      fullTranscript = finalSegments.map(\.text).joined(separator: " ")
+      currentInterim = ""
+      delegate?.liveTranscriber(self, didUpdatePartial: fullTranscript)
+    } else {
+      currentInterim = text
+      let displayText = fullTranscript.isEmpty
+        ? currentInterim
+        : fullTranscript + " " + currentInterim
+      delegate?.liveTranscriber(self, didUpdatePartial: displayText)
+    }
+  }
+
+  // Audio processor that resamples and forwards to AssemblyAI
+  private final class AssemblyAIAudioProcessor: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "com.speak.app.assemblyai.audioProcessing")
+    private var isRunning: Bool = false
+    private var cachedConverter: AVAudioConverter?
+    private var cachedInputFormat: AVAudioFormat?
+    private var reusableOutputBuffer: AVAudioPCMBuffer?
+
+    func setRunning(_ running: Bool) {
+      queue.sync {
+        isRunning = running
+        if !running {
+          cachedConverter = nil
+          cachedInputFormat = nil
+          reusableOutputBuffer = nil
+        }
+      }
+    }
+
+    func handleAudioTap(
+      _ buffer: AVAudioPCMBuffer,
+      inputFormat: AVAudioFormat,
+      outputFormat: AVAudioFormat,
+      transcriber: AssemblyAILiveTranscriber,
+      logger: Logger
+    ) {
+      guard let copied = copyPCMBuffer(buffer) else { return }
+      queue.async { [weak self] in
+        guard let self, self.isRunning else { return }
+        self.processAndSendAudio(
+          copied, from: inputFormat, to: outputFormat,
+          transcriber: transcriber, logger: logger
+        )
+      }
+    }
+
+    private func copyPCMBuffer(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+      let frameLength = buffer.frameLength
+      guard let copy = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: frameLength) else {
+        return nil
+      }
+      copy.frameLength = frameLength
+      let src = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: buffer.audioBufferList))
+      let dst = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: copy.audioBufferList))
+      for idx in 0..<min(src.count, dst.count) {
+        let srcBuf = src[idx]
+        guard let srcData = srcBuf.mData, let dstData = dst[idx].mData else { continue }
+        dstData.copyMemory(from: srcData, byteCount: Int(srcBuf.mDataByteSize))
+        dst[idx].mDataByteSize = srcBuf.mDataByteSize
+      }
+      return copy
+    }
+
+    private func processAndSendAudio(
+      _ buffer: AVAudioPCMBuffer,
+      from inputFormat: AVAudioFormat,
+      to outputFormat: AVAudioFormat,
+      transcriber: AssemblyAILiveTranscriber,
+      logger: Logger
+    ) {
+      let converter: AVAudioConverter
+      if let cached = cachedConverter, cachedInputFormat == inputFormat {
+        converter = cached
+      } else {
+        guard let newConverter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
+          logger.error("Failed to create audio converter")
+          return
+        }
+        cachedConverter = newConverter
+        cachedInputFormat = inputFormat
+        converter = newConverter
+      }
+
+      let ratio = outputFormat.sampleRate / inputFormat.sampleRate
+      let outputFrameCapacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio)
+
+      let outputBuffer: AVAudioPCMBuffer
+      if let reusable = reusableOutputBuffer, reusable.frameCapacity >= outputFrameCapacity {
+        reusable.frameLength = 0
+        outputBuffer = reusable
+      } else {
+        guard let newBuffer = AVAudioPCMBuffer(
+          pcmFormat: outputFormat, frameCapacity: outputFrameCapacity
+        ) else { return }
+        reusableOutputBuffer = newBuffer
+        outputBuffer = newBuffer
+      }
+
+      converter.reset()
+      var error: NSError?
+      let status = converter.convert(to: outputBuffer, error: &error) { _, outStatus in
+        outStatus.pointee = .haveData
+        return buffer
+      }
+
+      guard status != .error, error == nil else { return }
+
+      guard let int16Data = outputBuffer.int16ChannelData else { return }
+      let frameLength = Int(outputBuffer.frameLength)
+      let data = Data(bytes: int16Data[0], count: frameLength * 2)
+      transcriber.sendAudio(data)
+    }
+  }
+
+  func stop() async {
+    guard isRunning else { return }
+    guard !hasFinished else { return }
+    hasFinished = true
+
+    audioEngine.stop()
+    audioEngine.inputNode.removeTap(onBus: 0)
+    isRunning = false
+    audioProcessor.setRunning(false)
+
+    transcriber?.stop()
+
+    let result = buildFinalResult()
+    await MainActor.run {
+      delegate?.liveTranscriber(self, didFinishWith: result)
+    }
+
+    await endActiveInputSession()
+    transcriber = nil
+  }
+
+  private func buildFinalResult() -> TranscriptionResult {
+    var text = finalSegments.map(\.text).joined(separator: " ")
+    let trimmedInterim = currentInterim.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !trimmedInterim.isEmpty {
+      if !text.isEmpty { text += " " }
+      text += trimmedInterim
+    }
+
+    let streamingDuration: TimeInterval
+    if let startTime = streamingStartTime {
+      streamingDuration = Date().timeIntervalSince(startTime)
+    } else {
+      streamingDuration = 0
+    }
+
+    return TranscriptionResult(
+      text: text,
+      segments: finalSegments,
+      confidence: nil,
+      duration: streamingDuration,
+      modelIdentifier: currentModel ?? "assemblyai/universal-streaming",
+      cost: nil,
+      rawPayload: nil,
+      debugInfo: nil
+    )
+  }
+
+  private func endActiveInputSession() async {
+    guard let session = activeInputSession else { return }
+    activeInputSession = nil
+    await audioDeviceManager.endUsingPreferredInput(session: session)
+  }
+
+  private func ensurePermissions() async -> Bool {
+    let microphone = await permissionsManager.request(.microphone)
+    let speech = await permissionsManager.request(.speechRecognition)
+    return microphone.isGranted && speech.isGranted
+  }
+}
+
 // MARK: - Switching Live Transcriber
 
 /// Routes to appropriate live transcription controller based on selected model.
@@ -880,6 +1184,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     didSet {
       nativeController.delegate = delegate
       deepgramController.delegate = delegate
+      assemblyAIController.delegate = delegate
     }
   }
 
@@ -890,6 +1195,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   private let appSettings: AppSettings
   private let nativeController: NativeOSXLiveTranscriber
   private let deepgramController: DeepgramLiveController
+  private let assemblyAIController: AssemblyAILiveController
   private var activeController: (any LiveTranscriptionController)?
   private var currentModel: String?
 
@@ -911,6 +1217,12 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       audioDeviceManager: audioDeviceManager,
       secureStorage: secureStorage
     )
+    self.assemblyAIController = AssemblyAILiveController(
+      appSettings: appSettings,
+      permissionsManager: permissionsManager,
+      audioDeviceManager: audioDeviceManager,
+      secureStorage: secureStorage
+    )
   }
 
   func configure(language: String?, model: String) {
@@ -918,13 +1230,19 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     print("[SwitchingLiveTranscriber] Configured with model: \(model)")
     nativeController.configure(language: language, model: model)
     deepgramController.configure(language: language, model: model)
+    assemblyAIController.configure(language: language, model: model)
   }
 
   func start() async throws {
     let model = currentModel ?? appSettings.liveTranscriptionModel
-    let useDeepgram = model.contains("deepgram")
-    print("[SwitchingLiveTranscriber] Starting with model: \(model), useDeepgram: \(useDeepgram)")
-    activeController = useDeepgram ? deepgramController : nativeController
+    print("[SwitchingLiveTranscriber] Starting with model: \(model)")
+    if model.contains("assemblyai") {
+      activeController = assemblyAIController
+    } else if model.contains("deepgram") {
+      activeController = deepgramController
+    } else {
+      activeController = nativeController
+    }
     try await activeController?.start()
   }
 

@@ -13,6 +13,7 @@ actor TranscriptionProviderRegistry {
         providers["openai"] = OpenAITranscriptionProvider()
         providers["revai"] = RevAITranscriptionProvider()
         providers["deepgram"] = DeepgramTranscriptionProvider()
+        providers["assemblyai"] = AssemblyAITranscriptionProvider()
     }
 
     func allProviders() -> [TranscriptionProviderMetadata] {

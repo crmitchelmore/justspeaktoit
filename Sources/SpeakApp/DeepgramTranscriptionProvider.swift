@@ -272,7 +272,9 @@ struct DeepgramTranscriptionProvider: TranscriptionProvider {
     ) async throws -> TranscriptionResult {
         let endpoint = baseURL.appendingPathComponent("listen")
 
-        var urlComponents = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)!
+        guard var urlComponents = URLComponents(url: endpoint, resolvingAgainstBaseURL: false) else {
+            throw TranscriptionProviderError.invalidResponse
+        }
         var queryItems = [
             URLQueryItem(name: "model", value: extractModelName(from: model)),
             URLQueryItem(name: "punctuate", value: "true"),
@@ -286,7 +288,11 @@ struct DeepgramTranscriptionProvider: TranscriptionProvider {
 
         urlComponents.queryItems = queryItems
 
-        var request = URLRequest(url: urlComponents.url!)
+        guard let requestURL = urlComponents.url else {
+            throw TranscriptionProviderError.invalidResponse
+        }
+
+        var request = URLRequest(url: requestURL)
         request.httpMethod = "POST"
         request.setValue("Token \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("audio/m4a", forHTTPHeaderField: "Content-Type")

@@ -61,6 +61,10 @@ final class MainManager: ObservableObject {
   private var cachedSilenceEnabled: Bool = false
   private var cachedSilenceThreshold: Float = 0
   private var cachedSilenceDuration: TimeInterval = 0
+  /// Tracks whether the HUD window is visible to skip unnecessary UI updates
+  private var isHUDOccluded: Bool = false
+  private var occlusionObserver: NSObjectProtocol?
+  private var willTerminateObserver: NSObjectProtocol?
 
   private struct RetryData {
     let transcriptionResult: TranscriptionResult
@@ -169,6 +173,15 @@ final class MainManager: ObservableObject {
 
     recordingSoundPlayer.preload()
     configureHotKeys()
+
+    // Observe app termination to clean up timer
+    willTerminateObserver = NotificationCenter.default.addObserver(
+      forName: NSApplication.willTerminateNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      self?.stopAudioLevelMonitoring()
+    }
   }
 
   /// Handle live text updates and trigger live polish if enabled
@@ -1198,6 +1211,16 @@ final class MainManager: ObservableObject {
     cachedSilenceThreshold = appSettings.silenceThreshold
     cachedSilenceDuration = appSettings.silenceDuration
     
+    // Track HUD visibility to skip UI updates when app is occluded
+    isHUDOccluded = !(NSApp.occlusionState.contains(.visible))
+    occlusionObserver = NotificationCenter.default.addObserver(
+      forName: NSApplication.didChangeOcclusionStateNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      self?.isHUDOccluded = !(NSApp.occlusionState.contains(.visible))
+    }
+
     // Use target-selector Timer pattern to completely bypass Swift concurrency runtime.
     // Block-based timers with [weak self] can crash in swift_getObjectType during
     // executor verification if the object is deallocating.
@@ -1215,8 +1238,12 @@ final class MainManager: ObservableObject {
   
   @objc private func audioLevelTimerFired() {
     // This runs on main thread via RunLoop.main. No Swift concurrency checks.
+    guard state == .recording else { return }
     let level = audioFileManager.getCurrentAudioLevel()
-    hudManager.updateAudioLevel(level)
+    // Only push UI updates when the HUD is likely visible
+    if !isHUDOccluded {
+      hudManager.updateAudioLevel(level)
+    }
     checkSilenceDetection(
       level: level,
       enabled: cachedSilenceEnabled,
@@ -1244,6 +1271,10 @@ final class MainManager: ObservableObject {
         let silentDuration = Date().timeIntervalSince(startTime)
         if silentDuration >= duration {
           logger.info("Auto-stopping recording after \(silentDuration, privacy: .public)s of silence")
+          SentryManager.addBreadcrumb(
+            category: "recording",
+            message: "Silence auto-stop after \(String(format: "%.1f", silentDuration))s"
+          )
           silenceStartTime = nil
           Task {
             await endSession(trigger: .silenceDetection)
@@ -1260,6 +1291,11 @@ final class MainManager: ObservableObject {
     audioLevelTimer?.invalidate()
     audioLevelTimer = nil
     silenceStartTime = nil
+    isHUDOccluded = false
+    if let observer = occlusionObserver {
+      NotificationCenter.default.removeObserver(observer)
+      occlusionObserver = nil
+    }
     hudManager.updateAudioLevel(0)
   }
 

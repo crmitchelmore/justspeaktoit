@@ -294,7 +294,11 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
 
     latestResult = nil
     hasFinished = false
-    recognitionTask = recognizer.recognitionTask(with: request!) { [weak self] result, error in
+    guard let activeRequest = request else {
+      await audioDeviceManager.endUsingPreferredInput(session: sessionContext)
+      throw TranscriptionManagerError.recognizerUnavailable
+    }
+    recognitionTask = recognizer.recognitionTask(with: activeRequest) { [weak self] result, error in
       guard let self else { return }
       if let result {
         self.latestResult = result

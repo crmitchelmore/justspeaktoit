@@ -29,6 +29,7 @@ final class TranscriptionManager: ObservableObject {
   @Published private(set) var liveTextIsFinal: Bool = true
   @Published private(set) var liveTextConfidence: Double?
   @Published private(set) var isLiveTranscribing: Bool = false
+  @Published private(set) var utteranceBoundaryText: String?
 
   private let appSettings: AppSettings
   private let liveController: SwitchingLiveTranscriber
@@ -219,6 +220,13 @@ extension TranscriptionManager: LiveTranscriptionSessionDelegate {
       pendingError = error
       // Keep isLiveTranscribing true so stopLiveTranscription doesn't throw early
     }
+  }
+
+  func liveTranscriber(
+    _ session: any LiveTranscriptionController,
+    didDetectUtteranceBoundary utterance: String
+  ) {
+    utteranceBoundaryText = utterance
   }
 }
 
@@ -1016,6 +1024,11 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
 
     if let langCode = turn.language_code {
       logger.info("Detected language: \(langCode) (confidence: \(turn.language_confidence ?? 0))")
+    }
+
+    // Utterance boundary — trigger immediate polish before end-of-turn
+    if let utterance = turn.utterance, !utterance.isEmpty {
+      delegate?.liveTranscriber(self, didDetectUtteranceBoundary: utterance)
     }
 
     if turn.end_of_turn {

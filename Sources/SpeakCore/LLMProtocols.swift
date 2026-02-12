@@ -178,6 +178,10 @@ public protocol LiveTranscriptionSessionDelegate: AnyObject {
     func liveTranscriber(
         _ session: any LiveTranscriptionController, didFinishWith result: TranscriptionResult)
     func liveTranscriber(_ session: any LiveTranscriptionController, didFail error: Error)
+    func liveTranscriber(
+        _ session: any LiveTranscriptionController,
+        didDetectUtteranceBoundary utterance: String
+    )
 }
 
 @MainActor

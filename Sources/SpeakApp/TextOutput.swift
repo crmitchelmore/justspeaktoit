@@ -86,16 +86,36 @@ struct AccessibilityTextOutput: TextOutputting {
 
     let focusedElement = unsafeBitCast(rawFocused, to: AXUIElement.self)
 
-    let setResult = AXUIElementSetAttributeValue(
-      focusedElement, kAXValueAttribute as CFString, text as CFTypeRef)
-    guard setResult == .success else {
-      return TextOutputResult(
-        method: .none,
-        error: TextOutputError.unableToSetValue(setResult)
-      )
-    }
+    switch appSettings.accessibilityInsertionMode {
+    case .insertAtCursor:
+      // Insert at cursor by replacing the current selection (or inserting if selection is empty)
+      let setResult = AXUIElementSetAttributeValue(
+        focusedElement, kAXSelectedTextAttribute as CFString, text as CFTypeRef)
+      guard setResult == .success else {
+        // Fall back to replacing the whole field if selected text insertion isn't supported
+        let fallbackResult = AXUIElementSetAttributeValue(
+          focusedElement, kAXValueAttribute as CFString, text as CFTypeRef)
+        guard fallbackResult == .success else {
+          return TextOutputResult(
+            method: .none,
+            error: TextOutputError.unableToSetValue(fallbackResult)
+          )
+        }
+        return TextOutputResult(method: .accessibility, error: nil)
+      }
+      return TextOutputResult(method: .accessibility, error: nil)
 
-    return TextOutputResult(method: .accessibility, error: nil)
+    case .replaceAll:
+      let setResult = AXUIElementSetAttributeValue(
+        focusedElement, kAXValueAttribute as CFString, text as CFTypeRef)
+      guard setResult == .success else {
+        return TextOutputResult(
+          method: .none,
+          error: TextOutputError.unableToSetValue(setResult)
+        )
+      }
+      return TextOutputResult(method: .accessibility, error: nil)
+    }
   }
 }
 
@@ -288,7 +308,8 @@ struct SmartTextOutput: TextOutputting {
     let getStatus = AXUIElementCopyAttributeValue(
       element, kAXValueAttribute as CFString, &currentValue)
     if getStatus == .success, let currentString = currentValue as? String {
-      return currentString.hasSuffix(text) || currentString == text
+      // With insert-at-cursor the text could be anywhere in the field
+      return currentString.contains(text) || currentString == text
     }
     return false
   }

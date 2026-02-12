@@ -276,7 +276,27 @@ struct SettingsView: View {
           .speakTooltip("Decide how Speak returns transcripts—typed for you, placed on the clipboard, or saved for later.")
           .accessibilityLabel("Text output method picker")
 
-          .accessibilityLabel("Text output method picker")
+          if settings.textOutputMethod != .clipboardOnly {
+            Picker("Accessibility Insertion", selection: settingsBinding(\AppSettings.accessibilityInsertionMode)) {
+              ForEach(AppSettings.AccessibilityInsertionMode.allCases) { mode in
+                Text(mode.displayName).tag(mode)
+              }
+            }
+            .pickerStyle(.menu)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+              RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor))
+            )
+            .speakTooltip("Insert at Cursor adds text where your cursor is. Replace Field overwrites the entire text field.")
+
+            Text(settings.accessibilityInsertionMode == .insertAtCursor
+              ? "Text will be inserted at your cursor position, preserving existing content."
+              : "Text will replace the entire contents of the focused text field.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
           VStack(alignment: .leading, spacing: 8) {
             settingsToggle(
               "Restore clipboard after paste",

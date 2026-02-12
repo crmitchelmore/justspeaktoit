@@ -59,6 +59,22 @@ final class AppSettings: ObservableObject {
     }
   }
 
+  enum AccessibilityInsertionMode: String, CaseIterable, Identifiable {
+    case insertAtCursor
+    case replaceAll
+
+    var id: String { rawValue }
+
+    var displayName: String {
+      switch self {
+      case .insertAtCursor:
+        return "Insert at Cursor"
+      case .replaceAll:
+        return "Replace Field"
+      }
+    }
+  }
+
   enum HotKeyActivationStyle: String, CaseIterable, Identifiable {
     case holdToRecord
     case doubleTapToggle
@@ -256,6 +272,7 @@ final class AppSettings: ObservableObject {
     case recordingSoundProfile
     case recordingSoundVolume
     case assemblyAIKeyterms
+    case accessibilityInsertionMode
   }
 
   private static let defaultBatchTranscriptionModel = "google/gemini-2.0-flash-001"
@@ -366,6 +383,10 @@ final class AppSettings: ObservableObject {
 
   @Published var textOutputMethod: TextOutputMethod {
     didSet { store(textOutputMethod.rawValue, key: .textOutputMethod) }
+  }
+
+  @Published var accessibilityInsertionMode: AccessibilityInsertionMode {
+    didSet { store(accessibilityInsertionMode.rawValue, key: .accessibilityInsertionMode) }
   }
 
   @Published var restoreClipboardAfterPaste: Bool {
@@ -656,6 +677,10 @@ final class AppSettings: ObservableObject {
       TextOutputMethod(
         rawValue: defaults.string(forKey: DefaultsKey.textOutputMethod.rawValue)
           ?? TextOutputMethod.clipboardOnly.rawValue) ?? .clipboardOnly
+    accessibilityInsertionMode =
+      AccessibilityInsertionMode(
+        rawValue: defaults.string(forKey: DefaultsKey.accessibilityInsertionMode.rawValue)
+          ?? AccessibilityInsertionMode.insertAtCursor.rawValue) ?? .insertAtCursor
     restoreClipboardAfterPaste =
       defaults.object(forKey: DefaultsKey.restoreClipboard.rawValue) as? Bool ?? true
     showHUDDuringSessions = defaults.object(forKey: DefaultsKey.showHUD.rawValue) as? Bool ?? true

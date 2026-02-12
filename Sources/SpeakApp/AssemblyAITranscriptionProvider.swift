@@ -149,6 +149,7 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
   }
 
   func stop() {
+    guard !isStopping else { return }
     isStopping = true
     bufferPool.logMetrics()
 
@@ -157,16 +158,18 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
       return
     }
 
+    // Capture strong reference so Terminate is always sent even if transcriber is deallocated
+    let task = webSocketTask
+
     // Send ForceEndpoint to flush the current turn before terminating
     let forceMsg = #"{"type":"ForceEndpoint"}"#
-    webSocketTask.send(.string(forceMsg)) { [weak self] _ in
+    task.send(.string(forceMsg)) { [weak self] _ in
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-        guard let self else { return }
         let terminateMsg = #"{"type":"Terminate"}"#
-        self.webSocketTask?.send(.string(terminateMsg)) { _ in }
-        self.webSocketTask?.cancel(with: .normalClosure, reason: nil)
-        self.webSocketTask = nil
-        self.logger.info("AssemblyAI WebSocket connection closed")
+        task.send(.string(terminateMsg)) { _ in }
+        task.cancel(with: .normalClosure, reason: nil)
+        self?.webSocketTask = nil
+        self?.logger.info("AssemblyAI WebSocket connection closed")
       }
     }
   }

@@ -5,6 +5,7 @@ enum SidebarItem: Hashable, Identifiable {
   case history
   case voiceOutput
   case corrections
+  case troubleshooting
   case settings(SettingsTab)
 
   var id: Self { self }
@@ -19,6 +20,8 @@ enum SidebarItem: Hashable, Identifiable {
       return "Voice Output"
     case .corrections:
       return "Corrections"
+    case .troubleshooting:
+      return "Troubleshooting"
     case .settings(let tab):
       return LocalizedStringKey(tab.title)
     }
@@ -34,6 +37,8 @@ enum SidebarItem: Hashable, Identifiable {
       return "speaker.wave.3"
     case .corrections:
       return "character.book.closed"
+    case .troubleshooting:
+      return "stethoscope"
     case .settings(let tab):
       return tab.systemImage
     }
@@ -49,6 +54,8 @@ enum SidebarItem: Hashable, Identifiable {
       return .green
     case .corrections:
       return .brandAccentWarm
+    case .troubleshooting:
+      return .brandLagoon
     case .settings:
       return .brandAccentWarm
     }
@@ -64,6 +71,8 @@ enum SidebarItem: Hashable, Identifiable {
       return "Convert text to natural speech with various voices and providers."
     case .corrections:
       return "Curate custom name and phrase corrections that stay private to your device."
+    case .troubleshooting:
+      return "Diagnose common issues, view quick fixes, and get help with configuration."
     case .settings(let tab):
       return "Adjust \(tab.title) preferences."
     }
@@ -76,7 +85,7 @@ struct SideBarView: View {
   var body: some View {
     List {
       Section("Speak") {
-        ForEach([SidebarItem.dashboard, .history, .voiceOutput, .corrections]) { item in
+        ForEach([SidebarItem.dashboard, .history, .voiceOutput, .corrections, .troubleshooting]) { item in
           Button {
             selection = item
           } label: {

@@ -40,6 +40,8 @@ struct MainView: View {
         .environmentObject(personalLexicon)
         .environmentObject(environment.autoCorrectionTracker)
         .environmentObject(environment.settings)
+    case .troubleshooting:
+      TroubleshootingView(sidebarSelection: $selection)
     case .settings(let tab):
       SettingsView(tab: tab)
     }

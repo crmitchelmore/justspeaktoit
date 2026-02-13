@@ -492,7 +492,7 @@ struct SettingsView: View {
             }
           }
 
-          HStack(spacing: 0) {
+          HStack(spacing: 12) {
             Button("Preview Start") {
               previewRecordingSound(.start)
             }

@@ -164,6 +164,7 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
 - iOS testing requires device/simulator via Xcode
 
 ## Commit & Pull Request Guidelines
+- **Never use `git add -A` or `git add .`** — always stage specific files (`git add <path>`) to avoid committing other agents' work
 - **Use Conventional Commits** — this is mandatory as commit types drive automated releases
 - Commit types that **trigger a release**: `feat:` (minor bump), `fix:` / `perf:` (patch bump), breaking changes via `!` suffix or `BREAKING CHANGE` footer (major bump)
 - Commit types that **do not release**: `chore:`, `docs:`, `ci:`, `style:`, `test:`, `refactor:`, `build:`
@@ -209,6 +210,17 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
 - **Never** use `DispatchSemaphore.wait()` on the MainActor while spawning `Task { @MainActor in }` — this is an instant deadlock
 - The semaphore blocks the MainActor, preventing the task from ever executing to signal it
 - Use `Thread.sleep` for brief synchronous delays, or restructure as fully `async`
+
+### NotificationCenter Block-Based Observers
+- `addObserver(forName:object:queue:block:)` returns an opaque `NSObjectProtocol` token — **always store it**
+- Remove with `NotificationCenter.default.removeObserver(token)`, NOT `removeObserver(self, name:, object:)`
+- The `removeObserver(self, name:, object:)` variant is for target-action observers only
+- Failing to store and remove the token causes a memory leak on each registration cycle
+
+### Audio Engine Resource Cleanup
+- When adding guard-let error paths in transcription code, always clean up audio resources started before the guard point
+- Call `audioEngine.stop()` and `audioEngine.inputNode.removeTap(onBus: 0)` before throwing
+- Compare with existing cleanup paths in the same function to ensure consistency
 
 ## AssemblyAI Universal Streaming
 

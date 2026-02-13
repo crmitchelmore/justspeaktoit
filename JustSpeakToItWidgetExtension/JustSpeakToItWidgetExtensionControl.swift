@@ -19,64 +19,63 @@ struct JustSpeakToItWidgetExtensionControl: ControlWidget {
             provider: Provider()
         ) { value in
             ControlWidgetToggle(
-                "Start Timer",
-                isOn: value.isRunning,
-                action: StartTimerIntent(value.name)
-            ) { isRunning in
-                Label(isRunning ? "On" : "Off", systemImage: "timer")
+                "Transcribe",
+                isOn: value.isRecording,
+                action: ToggleTranscriptionControlIntent()
+            ) { isRecording in
+                Label(
+                    isRecording ? "Recording..." : "Transcribe",
+                    systemImage: isRecording ? "stop.circle.fill" : "mic.fill"
+                )
             }
         }
-        .displayName("Timer")
-        .description("A an example control that runs a timer.")
+        .displayName("Transcribe Voice")
+        .description("Start or stop voice transcription. Copies result to clipboard.")
     }
 }
 
 @available(iOS 18.0, *)
 extension JustSpeakToItWidgetExtensionControl {
     struct Value {
-        var isRunning: Bool
-        var name: String
+        var isRecording: Bool
     }
 
-    @available(iOS 18.0, *)
     struct Provider: AppIntentControlValueProvider {
-        func previewValue(configuration: TimerConfiguration) -> Value {
-            JustSpeakToItWidgetExtensionControl.Value(isRunning: false, name: configuration.timerName)
+        func previewValue(configuration: TranscriptionControlConfiguration) -> Value {
+            Value(isRecording: false)
         }
 
-        func currentValue(configuration: TimerConfiguration) async throws -> Value {
-            let isRunning = true // Check if the timer is running
-            return JustSpeakToItWidgetExtensionControl.Value(isRunning: isRunning, name: configuration.timerName)
+        func currentValue(configuration: TranscriptionControlConfiguration) async throws -> Value {
+            let defaults = UserDefaults(suiteName: "group.com.speak.ios")
+            let isRecording = defaults?.bool(forKey: "isRecording") ?? false
+            return Value(isRecording: isRecording)
         }
     }
 }
 
 @available(iOS 18.0, *)
-struct TimerConfiguration: ControlConfigurationIntent {
-    static let title: LocalizedStringResource = "Timer Name Configuration"
-
-    @Parameter(title: "Timer Name", default: "Timer")
-    var timerName: String
+struct TranscriptionControlConfiguration: ControlConfigurationIntent {
+    static let title: LocalizedStringResource = "Transcription Configuration"
 }
 
 @available(iOS 18.0, *)
-struct StartTimerIntent: SetValueIntent {
-    static let title: LocalizedStringResource = "Start a timer"
+struct ToggleTranscriptionControlIntent: SetValueIntent {
+    static let title: LocalizedStringResource = "Toggle Transcription"
 
-    @Parameter(title: "Timer Name")
-    var name: String
-
-    @Parameter(title: "Timer is running")
+    @Parameter(title: "Recording")
     var value: Bool
 
     init() {}
 
-    init(_ name: String) {
-        self.name = name
-    }
-
     func perform() async throws -> some IntentResult {
-        // Start the timer…
+        let service = await TranscriptionRecordingService.shared
+        let isRunning = await service.isRunning
+
+        if isRunning {
+            await service.stopRecording()
+        } else {
+            try await service.startRecording()
+        }
         return .result()
     }
 }

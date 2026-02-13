@@ -92,7 +92,8 @@ let project = Project(
                 "NSMicrophoneUsageDescription": "Just Speak to It needs microphone access for voice transcription.",
                 "NSSpeechRecognitionUsageDescription": "Just Speak to It uses speech recognition to transcribe your voice.",
                 "NSCameraUsageDescription": "Just Speak to It does not use the camera, but a linked library requires this declaration.",
-                "ITSAppUsesNonExemptEncryption": false
+                "ITSAppUsesNonExemptEncryption": false,
+                "UIBackgroundModes": ["audio"]
             ]),
             sources: ["SpeakiOSApp/**"],
             resources: [
@@ -116,7 +117,8 @@ let project = Project(
             infoPlist: .file(path: "JustSpeakToItWidgetExtension/Info.plist"),
             sources: ["JustSpeakToItWidgetExtension/**"],
             dependencies: [
-                .package(product: "SpeakCore")
+                .package(product: "SpeakCore"),
+                .package(product: "SpeakiOSLib")
             ],
             settings: .settings(base: iosWidgetSettings)
         )

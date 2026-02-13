@@ -544,15 +544,7 @@ final class MainManager: ObservableObject {
       var finalText = corrections.transformedText
       var postProcessingFailureNotice: (headline: String, message: String)?
 
-      // Skip post-processing if live polish is active and user preference is set
-      let shouldSkipForLivePolish = appSettings.speedMode.usesLivePolish 
-        && appSettings.skipPostProcessingWithLivePolish
-
-      // Skip post-processing when using AssemblyAI with a pre-processing prompt
-      let usingAssemblyAIPreprocessing = appSettings.liveTranscriptionModel.contains("assemblyai")
-        && !appSettings.postProcessingSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-      
-      if appSettings.postProcessingEnabled && !shouldSkipForLivePolish && !usingAssemblyAIPreprocessing {
+      if shouldRunPostProcessing() {
         hudManager.beginPostProcessing()
         session.postProcessingStarted = Date()
         guard
@@ -930,15 +922,7 @@ final class MainManager: ObservableObject {
       session.lexiconContext = lexiconContext
       var finalText = corrections.transformedText
 
-      // Skip post-processing if live polish is active and user preference is set
-      let shouldSkipForLivePolish = appSettings.speedMode.usesLivePolish 
-        && appSettings.skipPostProcessingWithLivePolish
-
-      // Skip post-processing when using AssemblyAI with a pre-processing prompt
-      let usingAssemblyAIPreprocessing = appSettings.liveTranscriptionModel.contains("assemblyai")
-        && !appSettings.postProcessingSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-      
-      if appSettings.postProcessingEnabled && !shouldSkipForLivePolish && !usingAssemblyAIPreprocessing {
+      if shouldRunPostProcessing() {
         hudManager.beginPostProcessing()
         session.postProcessingStarted = Date()
         guard
@@ -1234,6 +1218,17 @@ final class MainManager: ObservableObject {
     if let timer = audioLevelTimer {
       RunLoop.main.add(timer, forMode: .common)
     }
+  }
+
+  private func shouldRunPostProcessing() -> Bool {
+    let shouldSkipForLivePolish = appSettings.speedMode.usesLivePolish
+      && appSettings.skipPostProcessingWithLivePolish
+    guard !shouldSkipForLivePolish else { return false }
+
+    // AssemblyAI streaming supports keyterms prompting only; prompt text runs in Speak clean-up.
+    let hasAssemblyAIPrompt = appSettings.liveTranscriptionModel.contains("assemblyai")
+      && !appSettings.postProcessingSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    return appSettings.postProcessingEnabled || hasAssemblyAIPrompt
   }
   
   @objc private func audioLevelTimerFired() {

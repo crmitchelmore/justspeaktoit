@@ -274,6 +274,7 @@ final class AppSettings: ObservableObject {
     case recordingSoundProfile
     case recordingSoundVolume
     case assemblyAIKeyterms
+    case assemblyAIIgnoredPronunciationTerms
     case accessibilityInsertionMode
     case selectedHotKey
   }
@@ -366,6 +367,10 @@ final class AppSettings: ObservableObject {
 
   @Published var assemblyAIKeyterms: String {
     didSet { store(assemblyAIKeyterms, key: .assemblyAIKeyterms) }
+  }
+
+  @Published var assemblyAIIgnoredPronunciationTerms: [String] {
+    didSet { store(assemblyAIIgnoredPronunciationTerms, key: .assemblyAIIgnoredPronunciationTerms) }
   }
 
   @Published var postProcessingOutputLanguage: String {
@@ -684,6 +689,8 @@ final class AppSettings: ObservableObject {
       ?? "You are a transcription assistant. Clean up the text, fix punctuation, and respect speaker turns."
     assemblyAIKeyterms =
       defaults.string(forKey: DefaultsKey.assemblyAIKeyterms.rawValue) ?? ""
+    assemblyAIIgnoredPronunciationTerms =
+      defaults.array(forKey: DefaultsKey.assemblyAIIgnoredPronunciationTerms.rawValue) as? [String] ?? []
     postProcessingOutputLanguage =
       defaults.string(forKey: DefaultsKey.postProcessingOutputLanguage.rawValue) ?? "English"
     postProcessingIncludeLexiconDirectives =

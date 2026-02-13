@@ -129,7 +129,7 @@ On first run, device will prompt for:
 
 ### Deepgram Transcription
 1. Settings → API Keys → Add Deepgram key
-2. Settings → Transcription → Select "Deepgram Nova-2"
+2. Settings → Transcription → Select "Deepgram Nova-3"
 3. Return to main view
 4. Tap microphone → transcribe
 5. Verify streaming works

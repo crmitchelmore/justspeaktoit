@@ -558,10 +558,10 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
 
     // Create transcriber with 16kHz sample rate (always)
     let provider = DeepgramTranscriptionProvider()
-    print("[DeepgramLiveController] Creating transcriber with model: \(self.currentModel ?? "nova-2")")
+    print("[DeepgramLiveController] Creating transcriber with model: \(self.currentModel ?? "nova-3")")
     transcriber = provider.createLiveTranscriber(
       apiKey: apiKey,
-      model: currentModel ?? "nova-2",
+      model: currentModel ?? "nova-3",
       language: currentLanguage,
       sampleRate: 16000  // Always 16kHz - we resample before sending
     )
@@ -817,8 +817,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
     }
 
     // Estimate cost based on Deepgram pricing
-    // Nova-2 streaming: $0.0043/minute ($0.0059 with smart formatting)
-    // Using $0.0059 since we have smart_format enabled
+    // Nova-3 (monolingual): $0.0077/minute
     let cost = estimateDeepgramCost(durationSeconds: streamingDuration, model: currentModel)
 
     return TranscriptionResult(
@@ -826,7 +825,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
       segments: finalSegments,
       confidence: nil,
       duration: streamingDuration,
-      modelIdentifier: currentModel ?? "deepgram/nova-2-streaming",
+      modelIdentifier: currentModel ?? "deepgram/nova-3-streaming",
       cost: cost,
       rawPayload: nil,
       debugInfo: nil
@@ -834,31 +833,33 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
   }
 
   /// Estimate Deepgram streaming cost based on duration and model
-  /// Pricing as of 2024: https://deepgram.com/pricing
+  /// Pricing reference: https://deepgram.com/pricing
   private func estimateDeepgramCost(durationSeconds: TimeInterval, model: String?) -> ChatCostBreakdown? {
     guard durationSeconds > 0 else { return nil }
 
     let minutes = durationSeconds / 60.0
 
-    // Deepgram pricing per minute (with smart formatting enabled)
-    // Nova-2: $0.0043 base + $0.0016 smart_format = $0.0059/min
-    // Nova: $0.0041 base + $0.0016 smart_format = $0.0057/min
-    // Enhanced: $0.0145/min + $0.0016 = $0.0161/min
-    // Base: $0.0125/min + $0.0016 = $0.0141/min
+    // Deepgram pricing per minute (PAYG, single channel)
+    // Nova-3 (Monolingual): $0.0077/min
+    // Nova-1 & 2: $0.0058/min
+    // Enhanced: $0.0165/min
+    // Base: $0.0145/min
     let pricePerMinute: Decimal
-    let modelName = model?.lowercased() ?? "nova-2"
+    let modelName = model?.lowercased() ?? "nova-3"
 
-    if modelName.contains("nova-2") {
-      pricePerMinute = Decimal(string: "0.0059")!
+    if modelName.contains("nova-3") {
+      pricePerMinute = Decimal(string: "0.0077")!
+    } else if modelName.contains("nova-2") {
+      pricePerMinute = Decimal(string: "0.0058")!
     } else if modelName.contains("nova") {
-      pricePerMinute = Decimal(string: "0.0057")!
+      pricePerMinute = Decimal(string: "0.0058")!
     } else if modelName.contains("enhanced") {
-      pricePerMinute = Decimal(string: "0.0161")!
+      pricePerMinute = Decimal(string: "0.0165")!
     } else if modelName.contains("base") {
-      pricePerMinute = Decimal(string: "0.0141")!
+      pricePerMinute = Decimal(string: "0.0145")!
     } else {
-      // Default to Nova-2 pricing
-      pricePerMinute = Decimal(string: "0.0059")!
+      // Default to Nova-3 pricing
+      pricePerMinute = Decimal(string: "0.0077")!
     }
 
     let totalCost = Decimal(minutes) * pricePerMinute

@@ -23,7 +23,7 @@ final class DeepgramLiveTranscriber: @unchecked Sendable {
 
     init(
         apiKey: String,
-        model: String = "nova-2",
+        model: String = "nova-3",
         language: String? = nil,
         sampleRate: Int = 16000,
         session: URLSession = .shared,
@@ -359,9 +359,9 @@ struct DeepgramTranscriptionProvider: TranscriptionProvider {
     func supportedModels() -> [ModelCatalog.Option] {
         [
             ModelCatalog.Option(
-                id: "deepgram/nova-2",
-                displayName: "Nova-2",
-                description: "Deepgram's latest and most accurate speech-to-text model."
+                id: "deepgram/nova-3",
+                displayName: "Nova-3",
+                description: "Deepgram's highest-performing speech-to-text model."
             ),
             ModelCatalog.Option(
                 id: "deepgram/nova",
@@ -384,7 +384,7 @@ struct DeepgramTranscriptionProvider: TranscriptionProvider {
     /// Creates a live transcriber for streaming audio.
     func createLiveTranscriber(
         apiKey: String,
-        model: String = "nova-2",
+        model: String = "nova-3",
         language: String? = nil,
         sampleRate: Int = 16000
     ) -> DeepgramLiveTranscriber {

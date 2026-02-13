@@ -116,7 +116,7 @@ public struct ModelCatalog: Sendable {
             description: "Alternative on-device engine that mirrors system dictation.",
             estimatedLatencyMs: 100, latencyTier: .instant),
         Option(
-            id: "deepgram/nova-2-streaming", displayName: "Deepgram Nova-2 (Streaming)",
+            id: "deepgram/nova-3-streaming", displayName: "Deepgram Nova-3 (Streaming)",
             description: "Real-time WebSocket streaming transcription with interim results.",
             estimatedLatencyMs: 200, latencyTier: .fast),
         Option(
@@ -152,7 +152,7 @@ public struct ModelCatalog: Sendable {
             description: "Early-access GPT-4o variant optimised for audio understanding.",
             estimatedLatencyMs: 2000, latencyTier: .medium),
         Option(
-            id: "deepgram/nova-2", displayName: "Deepgram Nova-2",
+            id: "deepgram/nova-3", displayName: "Deepgram Nova-3",
             description: "Third-party streaming/batch model.",
             estimatedLatencyMs: 500, latencyTier: .fast),
         Option(

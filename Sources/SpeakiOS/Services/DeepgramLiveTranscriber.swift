@@ -18,7 +18,7 @@ public final class DeepgramLiveTranscriber: ObservableObject {
     // MARK: - Configuration
     
     public var language: String = Locale.current.identifier
-    public var model: String = "nova-2"
+    public var model: String = "nova-3"
     
     // MARK: - Callbacks
     

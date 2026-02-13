@@ -2,6 +2,70 @@
 import AppIntents
 import UIKit
 
+// MARK: - Audio Recording Intent (Action Button / Shortcuts)
+
+@available(iOS 18, *)
+private func stopResultDialog(for result: TranscriptionResult) -> IntentDialog {
+    let wordCount = result.text.split(separator: " ").count
+    if result.text.isEmpty {
+        return "Recording stopped. No speech detected."
+    }
+    return "Copied \(wordCount) words to clipboard."
+}
+
+/// Toggle intent for starting/stopping transcription via Action Button, Siri, or Shortcuts.
+/// Conforms to AudioRecordingIntent so the system allows background audio recording
+/// and shows the recording indicator. Requires iOS 18+.
+@available(iOS 18, *)
+public struct StartTranscriptionRecordingIntent: AudioRecordingIntent {
+    public static var title: LocalizedStringResource = "Transcribe Voice"
+    public static var description = IntentDescription(
+        "Start or stop voice transcription. The transcript is copied to your clipboard automatically."
+    )
+
+    public static var openAppWhenRun: Bool = false
+
+    public init() {}
+
+    public func perform() async throws -> some IntentResult & ProvidesDialog {
+        let service = await TranscriptionRecordingService.shared
+        let isRunning = await service.isRunning
+
+        if isRunning {
+            let result = await service.stopRecording()
+            return .result(dialog: stopResultDialog(for: result))
+        } else {
+            try await service.startRecording()
+            return .result(dialog: "Recording started. Press again to stop and copy.")
+        }
+    }
+}
+
+/// Intent to stop an active recording from a Live Activity button.
+@available(iOS 18, *)
+public struct StopTranscriptionRecordingIntent: AppIntent {
+    public static var title: LocalizedStringResource = "Stop Transcription"
+    public static var description = IntentDescription("Stops the current transcription and copies it to clipboard")
+
+    public static var openAppWhenRun: Bool = false
+
+    public init() {}
+
+    public func perform() async throws -> some IntentResult & ProvidesDialog {
+        let service = await TranscriptionRecordingService.shared
+        let isRunning = await service.isRunning
+
+        guard isRunning else {
+            return .result(dialog: "No active recording.")
+        }
+
+        let result = await service.stopRecording()
+        return .result(dialog: stopResultDialog(for: result))
+    }
+}
+
+// MARK: - Copy Intents
+
 /// App Intent to copy the last transcribed sentence to clipboard.
 /// Can be triggered from Live Activity, Shortcuts, or Siri.
 struct CopyLastSentenceIntent: AppIntent {
@@ -52,9 +116,22 @@ struct CopyFullTranscriptIntent: AppIntent {
     }
 }
 
-/// App Shortcuts provider exposing transcription actions.
+/// App Shortcuts provider exposing transcription actions (iOS 18+, includes recording).
+@available(iOS 18, *)
 struct TranscriptionShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
+        AppShortcut(
+            intent: StartTranscriptionRecordingIntent(),
+            phrases: [
+                "Record with \(.applicationName)",
+                "Transcribe with \(.applicationName)",
+                "Start recording with \(.applicationName)",
+                "Start transcription with \(.applicationName)"
+            ],
+            shortTitle: "Transcribe Voice",
+            systemImageName: "mic.fill"
+        )
+
         AppShortcut(
             intent: CopyLastSentenceIntent(),
             phrases: [
@@ -104,6 +181,44 @@ public final class SharedTranscriptionState {
     public func clear() {
         defaults?.removeObject(forKey: "currentTranscriptText")
         defaults?.removeObject(forKey: "lastTranscribedSentence")
+    }
+    
+    // MARK: - Recording State
+    
+    /// Whether a headless recording session is currently active.
+    public var isRecording: Bool {
+        get { defaults?.bool(forKey: "isRecording") ?? false }
+        set { defaults?.set(newValue, forKey: "isRecording") }
+    }
+    
+    /// Start time of the current recording session.
+    public var recordingStartTime: Date? {
+        get { defaults?.object(forKey: "recordingStartTime") as? Date }
+        set {
+            if let date = newValue {
+                defaults?.set(date, forKey: "recordingStartTime")
+            } else {
+                defaults?.removeObject(forKey: "recordingStartTime")
+            }
+        }
+    }
+    
+    /// The most recently completed transcript (for clipboard result).
+    public var lastCompletedTranscript: String? {
+        get { defaults?.string(forKey: "lastCompletedTranscript") }
+        set {
+            if let text = newValue {
+                defaults?.set(text, forKey: "lastCompletedTranscript")
+            } else {
+                defaults?.removeObject(forKey: "lastCompletedTranscript")
+            }
+        }
+    }
+    
+    /// Clears recording-specific state when a session ends.
+    public func clearRecordingState() {
+        isRecording = false
+        recordingStartTime = nil
     }
     
     private func extractLastSentence(from text: String) -> String? {

@@ -2409,11 +2409,16 @@ struct SettingsView: View {
     raw
       .split(separator: ",")
       .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-      .filter { !$0.isEmpty }
+      .filter(isValidAssemblyAIKeyterm)
   }
 
   private func canonicalKeyterm(_ term: String) -> String {
     term.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+  }
+
+  private func isValidAssemblyAIKeyterm(_ term: String) -> Bool {
+    let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines)
+    return !trimmed.isEmpty && !trimmed.contains(",") && trimmed.count <= 50
   }
 
   private func pronunciationSeedKeyterms() -> [String] {
@@ -2428,9 +2433,7 @@ struct SettingsView: View {
       let term = raw.trimmingCharacters(in: .whitespacesAndNewlines)
       let canonical = canonicalKeyterm(term)
       guard
-        !canonical.isEmpty,
-        !term.contains(","),
-        term.count <= 50,
+        isValidAssemblyAIKeyterm(term),
         seen.insert(canonical).inserted
       else { continue }
       terms.append(term)
@@ -2442,26 +2445,24 @@ struct SettingsView: View {
     guard settings.isAssemblyAIModel else { return }
 
     let seedTerms = pronunciationSeedKeyterms()
-    guard !seedTerms.isEmpty else { return }
-
     let ignoredPronunciationTerms = Set(
       settings.assemblyAIIgnoredPronunciationTerms.map(canonicalKeyterm))
     let currentTerms = parseAssemblyAIKeyterms(settings.assemblyAIKeyterms)
 
     var mergedTerms: [String] = []
     var seen: Set<String> = []
-    for term in seedTerms where !ignoredPronunciationTerms.contains(canonicalKeyterm(term)) {
-      let canonical = canonicalKeyterm(term)
-      guard seen.insert(canonical).inserted else { continue }
-      mergedTerms.append(term)
-    }
     for term in currentTerms {
       let canonical = canonicalKeyterm(term)
       guard seen.insert(canonical).inserted else { continue }
       mergedTerms.append(term)
     }
+    for term in seedTerms where !ignoredPronunciationTerms.contains(canonicalKeyterm(term)) {
+      let canonical = canonicalKeyterm(term)
+      guard seen.insert(canonical).inserted else { continue }
+      mergedTerms.append(term)
+    }
 
-    let mergedKeyterms = mergedTerms.joined(separator: ", ")
+    let mergedKeyterms = Array(mergedTerms.prefix(100)).joined(separator: ", ")
     if mergedKeyterms != settings.assemblyAIKeyterms {
       settings.assemblyAIKeyterms = mergedKeyterms
     }

@@ -279,14 +279,7 @@ final class AppSettings: ObservableObject {
     case selectedHotKey
   }
 
-  private static let defaultLiveTranscriptionModel = "apple/local/SFSpeechRecognizer"
   private static let defaultBatchTranscriptionModel = "google/gemini-2.0-flash-001"
-  private static let legacyLiveModelMapping: [String: String] = [
-    "deepgram/nova-2-streaming": "deepgram/nova-3-streaming",
-    "deepgram/nova-2": "deepgram/nova-3-streaming",
-    "deepgram/nova": "deepgram/nova-3-streaming",
-    "deepgram/nova-3": "deepgram/nova-3-streaming",
-  ]
   private static let legacyWhisperModelIDs: Set<String> = [
     "openrouter/whisper-large-v3",
     "openrouter/whisper-medium",
@@ -311,11 +304,6 @@ final class AppSettings: ObservableObject {
 
   @Published var liveTranscriptionModel: String {
     didSet {
-      let normalized = Self.normalizedLiveTranscriptionModel(liveTranscriptionModel)
-      if normalized != liveTranscriptionModel {
-        liveTranscriptionModel = normalized
-        return
-      }
       store(liveTranscriptionModel, key: .liveTranscriptionModel)
       enforceSpeedModeConstraints()
     }
@@ -680,9 +668,9 @@ final class AppSettings: ObservableObject {
       TranscriptionMode(
         rawValue: defaults.string(forKey: DefaultsKey.transcriptionMode.rawValue)
           ?? TranscriptionMode.liveNative.rawValue) ?? .liveNative
-    liveTranscriptionModel = Self.normalizedLiveTranscriptionModel(
-      defaults.string(forKey: DefaultsKey.liveTranscriptionModel.rawValue)
-    )
+    let liveModel = defaults.string(forKey: "liveTranscriptionModel") ?? "apple/local/SFSpeechRecognizer"
+    liveTranscriptionModel =
+      liveModel.hasPrefix("deepgram/") ? "deepgram/nova-3-streaming" : liveModel
     batchTranscriptionModel =
       Self.normalizedBatchModel(
         defaults.string(forKey: DefaultsKey.batchTranscriptionModel.rawValue))
@@ -883,15 +871,6 @@ final class AppSettings: ObservableObject {
   func applyAppVisibility() {
     let policy: NSApplication.ActivationPolicy = appVisibility.showInDock ? .regular : .accessory
     NSApplication.shared.setActivationPolicy(policy)
-  }
-
-  private static func normalizedLiveTranscriptionModel(_ identifier: String?) -> String {
-    let trimmed = identifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    guard !trimmed.isEmpty else { return defaultLiveTranscriptionModel }
-    if let mapped = legacyLiveModelMapping[trimmed] {
-      return mapped
-    }
-    return trimmed
   }
 
   private static func normalizedBatchModel(_ identifier: String?) -> String {

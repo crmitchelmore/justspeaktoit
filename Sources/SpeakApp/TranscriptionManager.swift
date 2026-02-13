@@ -849,8 +849,6 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
 
     if modelName.contains("nova-3") {
       pricePerMinute = Decimal(string: "0.0077")!
-    } else if modelName.contains("nova-2") {
-      pricePerMinute = Decimal(string: "0.0058")!
     } else if modelName.contains("nova") {
       pricePerMinute = Decimal(string: "0.0058")!
     } else if modelName.contains("enhanced") {
@@ -1356,4 +1354,5 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     await activeController?.stop()
     activeController = nil
   }
+
 }

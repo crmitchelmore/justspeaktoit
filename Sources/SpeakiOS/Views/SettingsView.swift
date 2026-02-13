@@ -19,14 +19,7 @@ public final class AppSettings: ObservableObject {
     public static let shared = AppSettings()
     
     @Published public var selectedModel: String {
-        didSet {
-            let normalized = Self.normalizedSelectedModel(selectedModel)
-            if normalized != selectedModel {
-                selectedModel = normalized
-                return
-            }
-            UserDefaults.standard.set(selectedModel, forKey: "selectedModel")
-        }
+        didSet { UserDefaults.standard.set(selectedModel, forKey: "selectedModel") }
     }
     
     @Published public var deepgramAPIKey: String {
@@ -87,20 +80,9 @@ public final class AppSettings: ObservableObject {
         PostProcessingModelInfo(id: "anthropic/claude-sonnet-4", name: "Claude Sonnet", description: "Best structure preservation"),
     ]
 
-    private static func normalizedSelectedModel(_ identifier: String?) -> String {
-        let trimmed = identifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !trimmed.isEmpty else { return "apple/local/SFSpeechRecognizer" }
-
-        switch trimmed {
-        case "deepgram/nova-2", "deepgram/nova", "deepgram/nova-2-streaming", "deepgram/nova-3-streaming":
-            return "deepgram/nova-3"
-        default:
-            return trimmed
-        }
-    }
-    
     private init() {
-        let selected = Self.normalizedSelectedModel(UserDefaults.standard.string(forKey: "selectedModel"))
+        let selectedRaw = UserDefaults.standard.string(forKey: "selectedModel") ?? "apple/local/SFSpeechRecognizer"
+        let selected = selectedRaw.hasPrefix("deepgram/") ? "deepgram/nova-3" : selectedRaw
         let deepgram = Self.loadFromKeychain(for: "deepgram.apiKey") ?? ""
         let openRouter = Self.loadFromKeychain(for: "openrouter.apiKey") ?? ""
         

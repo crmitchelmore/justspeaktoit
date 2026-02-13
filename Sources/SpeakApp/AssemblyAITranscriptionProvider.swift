@@ -156,7 +156,7 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
     let forceMsg = #"{"type":"ForceEndpoint"}"#
     task.send(.string(forceMsg)) { [weak self] _ in
       // Wait long enough for the final Turn response to arrive before terminating
-      DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+      DispatchQueue.global().asyncAfter(deadline: .now() + 2.0) {
         let terminateMsg = #"{"type":"Terminate"}"#
         task.send(.string(terminateMsg)) { _ in }
         task.cancel(with: .normalClosure, reason: nil)

@@ -915,6 +915,7 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
   private var fullTranscript: String = ""
   private var currentTurnOrder: Int = -1
   private let formatTurnsEnabled: Bool = true
+  private var stopContinuation: CheckedContinuation<Void, Never>?
 
   init(
     appSettings: AppSettings,
@@ -1062,6 +1063,12 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
       currentInterim = ""
       currentTurnOrder = -1
       delegate?.liveTranscriber(self, didUpdatePartial: fullTranscript)
+
+      // Signal stop() that the final turn has been captured
+      if hasFinished, let continuation = stopContinuation {
+        stopContinuation = nil
+        continuation.resume()
+      }
     } else {
       // Ongoing turn — replace interim (AssemblyAI sends full turn text each time)
       currentTurnOrder = turn.turn_order
@@ -1199,11 +1206,24 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
     isRunning = false
     audioProcessor.setRunning(false)
 
-    transcriber?.stop()
-
-    // Wait for the final Turn response triggered by ForceEndpoint.
-    // Task.sleep suspends (doesn't block MainActor), so the Turn callback can still run.
-    try? await Task.sleep(for: .milliseconds(1500))
+    // Wait for the final Turn response triggered by ForceEndpoint, with a timeout.
+    if transcriber != nil {
+      transcriber?.stop()
+      await withTaskGroup(of: Void.self) { group in
+        group.addTask { @MainActor [weak self] in
+          await withCheckedContinuation { continuation in
+            self?.stopContinuation = continuation
+          }
+        }
+        group.addTask {
+          try? await Task.sleep(for: .seconds(2))
+        }
+        // Return as soon as either the final turn arrives or the timeout fires
+        await group.next()
+        group.cancelAll()
+      }
+      stopContinuation = nil
+    }
 
     let result = buildFinalResult()
     await MainActor.run {

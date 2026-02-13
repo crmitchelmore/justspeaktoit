@@ -262,7 +262,10 @@ struct SettingsView: View {
         sidebarSelection = .settings(.postProcessing)
       }
     } message: {
-      Text("AssemblyAI streaming supports keyterms prompting. Any custom prompt is applied in Speak's clean-up stage, while keyterms are sent directly to AssemblyAI.")
+      Text(
+        "AssemblyAI streaming supports keyterms prompting. Any custom prompt is applied in "
+          + "Speak's clean-up stage, while keyterms are sent directly to AssemblyAI."
+      )
     }
   }
 

@@ -17,15 +17,17 @@ private func stopResultDialog(for result: TranscriptionResult) -> IntentDialog {
 /// Conforms to AudioRecordingIntent so the system allows background audio recording
 /// and shows the recording indicator. Requires iOS 18+.
 @available(iOS 18, *)
-struct StartTranscriptionRecordingIntent: AudioRecordingIntent {
-    static var title: LocalizedStringResource = "Transcribe Voice"
-    static var description = IntentDescription(
+public struct StartTranscriptionRecordingIntent: AudioRecordingIntent {
+    public static var title: LocalizedStringResource = "Transcribe Voice"
+    public static var description = IntentDescription(
         "Start or stop voice transcription. The transcript is copied to your clipboard automatically."
     )
 
-    static var openAppWhenRun: Bool = false
+    public static var openAppWhenRun: Bool = false
 
-    func perform() async throws -> some IntentResult & ProvidesDialog {
+    public init() {}
+
+    public func perform() async throws -> some IntentResult & ProvidesDialog {
         let service = await TranscriptionRecordingService.shared
         let isRunning = await service.isRunning
 
@@ -41,13 +43,15 @@ struct StartTranscriptionRecordingIntent: AudioRecordingIntent {
 
 /// Intent to stop an active recording from a Live Activity button.
 @available(iOS 18, *)
-struct StopTranscriptionRecordingIntent: AppIntent {
-    static var title: LocalizedStringResource = "Stop Transcription"
-    static var description = IntentDescription("Stops the current transcription and copies it to clipboard")
+public struct StopTranscriptionRecordingIntent: AppIntent {
+    public static var title: LocalizedStringResource = "Stop Transcription"
+    public static var description = IntentDescription("Stops the current transcription and copies it to clipboard")
 
-    static var openAppWhenRun: Bool = false
+    public static var openAppWhenRun: Bool = false
 
-    func perform() async throws -> some IntentResult & ProvidesDialog {
+    public init() {}
+
+    public func perform() async throws -> some IntentResult & ProvidesDialog {
         let service = await TranscriptionRecordingService.shared
         let isRunning = await service.isRunning
 

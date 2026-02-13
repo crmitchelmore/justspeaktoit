@@ -155,7 +155,10 @@ struct LockScreenTranscriptionView: View {
 
                     Spacer()
 
-                    Text("\(state.wordCount) words • \(formatDuration(state.duration))")
+                    Text("\(state.wordCount) words • ")
+                        .font(.caption)
+                        .foregroundStyle(.secondary) +
+                    Text(startTime, style: .timer)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

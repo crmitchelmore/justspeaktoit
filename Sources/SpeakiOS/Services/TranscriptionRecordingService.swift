@@ -20,6 +20,7 @@ public final class TranscriptionRecordingService: ObservableObject {
     private var appleTranscriber: iOSLiveTranscriber?
     private var deepgramTranscriber: DeepgramLiveTranscriber?
     private var startTime: Date?
+    private var currentModel: String = ""
 
     private init() {}
 
@@ -29,8 +30,7 @@ public final class TranscriptionRecordingService: ObservableObject {
     }
 
     private var modelDisplayName: String {
-        let model = AppSettings.shared.selectedModel
-        if model.hasPrefix("deepgram") { return "Deepgram" }
+        if currentModel.hasPrefix("deepgram") { return "Deepgram" }
         return "Apple Speech"
     }
 
@@ -41,7 +41,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         guard !isRunning else { return }
 
         let settings = AppSettings.shared
-        var model = settings.selectedModel
+        currentModel = settings.selectedModel
         partialText = ""
         wordCount = 0
         startTime = Date()
@@ -50,44 +50,61 @@ public final class TranscriptionRecordingService: ObservableObject {
         sharedState.recordingStartTime = startTime
 
         // Fallback to Apple Speech if Deepgram selected but no API key
-        if model.hasPrefix("deepgram") && !settings.hasDeepgramKey {
-            model = "apple/local/SFSpeechRecognizer"
+        if currentModel.hasPrefix("deepgram") && !settings.hasDeepgramKey {
+            currentModel = "apple/local/SFSpeechRecognizer"
         }
 
         // Live Activity is mandatory for AudioRecordingIntent
         activityManager.startActivity(provider: modelDisplayName)
 
-        if model.hasPrefix("deepgram") {
-            let transcriber = DeepgramLiveTranscriber(audioSessionManager: audioSessionManager)
-            transcriber.configure(apiKey: settings.deepgramAPIKey)
-            transcriber.model = model.replacingOccurrences(of: "deepgram/", with: "")
+        do {
+            if currentModel.hasPrefix("deepgram") {
+                let transcriber = DeepgramLiveTranscriber(audioSessionManager: audioSessionManager)
+                transcriber.configure(apiKey: settings.deepgramAPIKey)
+                transcriber.model = currentModel.replacingOccurrences(of: "deepgram/", with: "")
 
-            transcriber.onPartialResult = { [weak self] text, isFinal in
-                self?.handlePartialResult(text: text)
-            }
-            transcriber.onError = { [weak self] error in
-                self?.handleError(error)
+                transcriber.onPartialResult = { [weak self] text, isFinal in
+                    Task { @MainActor in
+                        self?.handlePartialResult(text: text)
+                    }
+                }
+                transcriber.onError = { [weak self] error in
+                    Task { @MainActor in
+                        self?.handleError(error)
+                    }
+                }
+
+                deepgramTranscriber = transcriber
+                appleTranscriber = nil
+                try await transcriber.start()
+            } else {
+                let transcriber = iOSLiveTranscriber(audioSessionManager: audioSessionManager)
+
+                transcriber.onPartialResult = { [weak self] text, isFinal in
+                    Task { @MainActor in
+                        self?.handlePartialResult(text: text)
+                    }
+                }
+                transcriber.onError = { [weak self] error in
+                    Task { @MainActor in
+                        self?.handleError(error)
+                    }
+                }
+
+                appleTranscriber = transcriber
+                deepgramTranscriber = nil
+                try await transcriber.start()
             }
 
-            deepgramTranscriber = transcriber
-            appleTranscriber = nil
-            try await transcriber.start()
-        } else {
-            let transcriber = iOSLiveTranscriber(audioSessionManager: audioSessionManager)
-
-            transcriber.onPartialResult = { [weak self] text, isFinal in
-                self?.handlePartialResult(text: text)
-            }
-            transcriber.onError = { [weak self] error in
-                self?.handleError(error)
-            }
-
-            appleTranscriber = transcriber
+            isRunning = true
+        } catch {
+            startTime = nil
             deepgramTranscriber = nil
-            try await transcriber.start()
+            appleTranscriber = nil
+            sharedState.clearRecordingState()
+            activityManager.endActivity()
+            throw error
         }
-
-        isRunning = true
     }
 
     /// Stops recording, copies transcript to clipboard, and returns the result.
@@ -95,7 +112,6 @@ public final class TranscriptionRecordingService: ObservableObject {
     public func stopRecording() async -> TranscriptionResult {
         isRunning = false
         let duration = elapsedSeconds
-        let model = AppSettings.shared.selectedModel
 
         let result: TranscriptionResult
         if let deepgram = deepgramTranscriber {
@@ -110,7 +126,7 @@ public final class TranscriptionRecordingService: ObservableObject {
                 segments: [],
                 confidence: nil,
                 duration: TimeInterval(duration),
-                modelIdentifier: model,
+                modelIdentifier: currentModel,
                 cost: nil,
                 rawPayload: nil,
                 debugInfo: nil
@@ -122,7 +138,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         // Record to history
         iOSHistoryManager.shared.recordTranscription(
             text: result.text,
-            model: model,
+            model: currentModel,
             duration: result.duration
         )
 
@@ -156,6 +172,8 @@ public final class TranscriptionRecordingService: ObservableObject {
         appleTranscriber = nil
         isRunning = false
         startTime = nil
+        partialText = ""
+        wordCount = 0
         sharedState.clearRecordingState()
         activityManager.endActivity()
     }

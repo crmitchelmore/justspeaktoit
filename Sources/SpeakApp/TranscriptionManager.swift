@@ -915,6 +915,7 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
   private var fullTranscript: String = ""
   private var currentTurnOrder: Int = -1
   private let formatTurnsEnabled: Bool = true
+  private var stopContinuation: CheckedContinuation<Void, Never>?
 
   init(
     appSettings: AppSettings,
@@ -971,9 +972,8 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
     }
     targetFormat = outputFormat
 
-    // Build pre-processing prompt from the post-processing prompt when using AssemblyAI
-    let prompt = appSettings.postProcessingSystemPrompt
-      .trimmingCharacters(in: .whitespacesAndNewlines)
+    // AssemblyAI streaming only supports keyterms_prompt — the preprocessing prompt
+    // is applied post-transcription by PostProcessingManager, not by the streaming API.
     let keyterms = appSettings.assemblyAIKeyterms
       .split(separator: ",")
       .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -983,7 +983,6 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
     transcriber = provider.createLiveTranscriber(
       apiKey: apiKey,
       sampleRate: 16000,
-      prompt: prompt,
       keyterms: keyterms,
       language: currentLanguage
     )
@@ -1028,6 +1027,10 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
   private func handleTurn(_ turn: AssemblyAITurnResponse) {
     guard !turn.transcript.isEmpty || turn.end_of_turn else { return }
 
+    let eot = turn.end_of_turn
+    let fmt = turn.turn_is_formatted
+    logger.debug("Turn: order=\(turn.turn_order) end=\(eot) formatted=\(fmt) len=\(turn.transcript.count)")
+
     if let langCode = turn.language_code {
       logger.info("Detected language: \(langCode) (confidence: \(turn.language_confidence ?? 0))")
     }
@@ -1060,6 +1063,12 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
       currentInterim = ""
       currentTurnOrder = -1
       delegate?.liveTranscriber(self, didUpdatePartial: fullTranscript)
+
+      // Signal stop() that the final turn has been captured
+      if hasFinished, let continuation = stopContinuation {
+        stopContinuation = nil
+        continuation.resume()
+      }
     } else {
       // Ongoing turn — replace interim (AssemblyAI sends full turn text each time)
       currentTurnOrder = turn.turn_order
@@ -1197,7 +1206,24 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
     isRunning = false
     audioProcessor.setRunning(false)
 
-    transcriber?.stop()
+    // Wait for the final Turn response triggered by ForceEndpoint, with a timeout.
+    if transcriber != nil {
+      transcriber?.stop()
+      await withTaskGroup(of: Void.self) { group in
+        group.addTask { @MainActor [weak self] in
+          await withCheckedContinuation { continuation in
+            self?.stopContinuation = continuation
+          }
+        }
+        group.addTask {
+          try? await Task.sleep(for: .seconds(2))
+        }
+        // Return as soon as either the final turn arrives or the timeout fires
+        await group.next()
+        group.cancelAll()
+      }
+      stopContinuation = nil
+    }
 
     let result = buildFinalResult()
     await MainActor.run {
@@ -1209,6 +1235,9 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
   }
 
   private func buildFinalResult() -> TranscriptionResult {
+    logger.info(
+      "Building result: segments=\(self.finalSegments.count) interim=\(self.currentInterim.count) chars"
+    )
     var text = finalSegments.map(\.text).joined(separator: " ")
     let trimmedInterim = currentInterim.trimmingCharacters(in: .whitespacesAndNewlines)
     if !trimmedInterim.isEmpty {

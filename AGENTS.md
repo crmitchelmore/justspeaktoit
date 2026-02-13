@@ -231,9 +231,10 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
 - Interim text uses replacement semantics — AssemblyAI sends the full turn text each time, not deltas.
 
 ### Pre-processing prompt
-- `postProcessingSystemPrompt` is sent as the `prompt` query parameter on the WebSocket URL when using AssemblyAI.
+- AssemblyAI streaming v3 does **not** support an arbitrary `prompt` parameter — only `keyterms_prompt`.
+- `keyterms_prompt` entries are sourced from `assemblyAIKeyterms` (comma-separated, max 50 chars each, max 100 items).
+- The `postProcessingSystemPrompt` is applied post-transcription by `PostProcessingManager`, not by the streaming API.
 - When a pre-processing prompt is active, LLM post-processing is automatically skipped.
-- `prompt` and `keyterms_prompt` are mutually exclusive — prompt takes priority.
 
 ### Key files
 - `AssemblyAITranscriptionProvider.swift` — WebSocket client, response models

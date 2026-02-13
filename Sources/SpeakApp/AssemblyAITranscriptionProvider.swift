@@ -19,14 +19,12 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
   private var onError: ((Error) -> Void)?
   private var isStopping: Bool = false
 
-  private var prompt: String
   private var keyterms: [String]
   private var language: String?
 
   init(
     apiKey: String,
     sampleRate: Int = 16000,
-    prompt: String = "",
     keyterms: [String] = [],
     language: String? = nil,
     session: URLSession = .shared,
@@ -34,7 +32,6 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
   ) {
     self.apiKey = apiKey
     self.sampleRate = sampleRate
-    self.prompt = prompt
     self.keyterms = keyterms
     self.language = language
     self.session = session
@@ -61,17 +58,11 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
       URLQueryItem(name: "min_end_of_turn_silence_when_confident", value: "560"),
     ]
 
-    // prompt and keyterms_prompt are mutually exclusive
-    if !prompt.isEmpty {
-      urlComponents.queryItems?.append(URLQueryItem(name: "prompt", value: prompt))
-      if !keyterms.isEmpty {
-        logger.warning("prompt and keyterms_prompt cannot be used together. Using prompt only.")
-      }
-    } else {
-      let validTerms = keyterms.filter { !$0.isEmpty && $0.count <= 50 }.prefix(100)
-      for term in validTerms {
-        urlComponents.queryItems?.append(URLQueryItem(name: "keyterms_prompt", value: term))
-      }
+    // AssemblyAI streaming v3 only supports keyterms_prompt (not arbitrary prompts).
+    // The preprocessing prompt is applied post-transcription; only keyterms are sent to the WebSocket.
+    let validTerms = keyterms.filter { !$0.isEmpty && $0.count <= 50 }.prefix(100)
+    for term in validTerms {
+      urlComponents.queryItems?.append(URLQueryItem(name: "keyterms_prompt", value: term))
     }
 
     guard let url = urlComponents.url else {
@@ -85,7 +76,7 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
     webSocketTask = session.webSocketTask(with: request)
     webSocketTask?.resume()
 
-    logger.info("AssemblyAI WebSocket connection started")
+    logger.info("AssemblyAI WebSocket connecting to \(url.absoluteString.prefix(120))")
     receiveMessages()
   }
 
@@ -164,7 +155,8 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
     // Send ForceEndpoint to flush the current turn before terminating
     let forceMsg = #"{"type":"ForceEndpoint"}"#
     task.send(.string(forceMsg)) { [weak self] _ in
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+      // Wait long enough for the final Turn response to arrive before terminating
+      DispatchQueue.global().asyncAfter(deadline: .now() + 2.0) {
         let terminateMsg = #"{"type":"Terminate"}"#
         task.send(.string(terminateMsg)) { _ in }
         task.cancel(with: .normalClosure, reason: nil)
@@ -245,7 +237,7 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
         let turn = try JSONDecoder().decode(AssemblyAITurnResponse.self, from: data)
         onTranscript?(turn)
       case "Begin":
-        logger.info("AssemblyAI session started")
+        logger.info("AssemblyAI session started — \(json.prefix(200))")
       case "Termination":
         logger.info("AssemblyAI session terminated by server")
       default:
@@ -497,14 +489,12 @@ struct AssemblyAITranscriptionProvider: TranscriptionProvider {
   func createLiveTranscriber(
     apiKey: String,
     sampleRate: Int = 16000,
-    prompt: String = "",
     keyterms: [String] = [],
     language: String? = nil
   ) -> AssemblyAILiveTranscriber {
     AssemblyAILiveTranscriber(
       apiKey: apiKey,
       sampleRate: sampleRate,
-      prompt: prompt,
       keyterms: keyterms,
       language: language,
       session: session,

@@ -971,9 +971,8 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
     }
     targetFormat = outputFormat
 
-    // Build pre-processing prompt from the post-processing prompt when using AssemblyAI
-    let prompt = appSettings.postProcessingSystemPrompt
-      .trimmingCharacters(in: .whitespacesAndNewlines)
+    // AssemblyAI streaming only supports keyterms_prompt — the preprocessing prompt
+    // is applied post-transcription by PostProcessingManager, not by the streaming API.
     let keyterms = appSettings.assemblyAIKeyterms
       .split(separator: ",")
       .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -983,7 +982,6 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
     transcriber = provider.createLiveTranscriber(
       apiKey: apiKey,
       sampleRate: 16000,
-      prompt: prompt,
       keyterms: keyterms,
       language: currentLanguage
     )
@@ -1027,6 +1025,10 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
 
   private func handleTurn(_ turn: AssemblyAITurnResponse) {
     guard !turn.transcript.isEmpty || turn.end_of_turn else { return }
+
+    logger.debug(
+      "Turn: order=\(turn.turn_order) end=\(turn.end_of_turn) formatted=\(turn.turn_is_formatted) len=\(turn.transcript.count)"
+    )
 
     if let langCode = turn.language_code {
       logger.info("Detected language: \(langCode) (confidence: \(turn.language_confidence ?? 0))")
@@ -1199,6 +1201,10 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
 
     transcriber?.stop()
 
+    // Wait for the final Turn response triggered by ForceEndpoint.
+    // Task.sleep suspends (doesn't block MainActor), so the Turn callback can still run.
+    try? await Task.sleep(for: .milliseconds(1500))
+
     let result = buildFinalResult()
     await MainActor.run {
       delegate?.liveTranscriber(self, didFinishWith: result)
@@ -1209,6 +1215,9 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
   }
 
   private func buildFinalResult() -> TranscriptionResult {
+    logger.info(
+      "Building result: segments=\(self.finalSegments.count) interim=\(self.currentInterim.count) chars"
+    )
     var text = finalSegments.map(\.text).joined(separator: " ")
     let trimmedInterim = currentInterim.trimmingCharacters(in: .whitespacesAndNewlines)
     if !trimmedInterim.isEmpty {

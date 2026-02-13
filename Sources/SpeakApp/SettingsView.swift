@@ -18,10 +18,14 @@ enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
   var id: String { rawValue }
 
   var title: String {
+    title(isAssemblyAI: false)
+  }
+
+  func title(isAssemblyAI: Bool) -> String {
     switch self {
     case .general: return "General"
     case .transcription: return "Transcription"
-    case .postProcessing: return "Post-processing"
+    case .postProcessing: return isAssemblyAI ? "Pre-processing" : "Post-processing"
     case .voiceOutput: return "Voice Output"
     case .pronunciation: return "Pronunciation"
     case .apiKeys: return "API Keys"
@@ -72,6 +76,7 @@ struct SettingsView: View {
   ]
 
   let tab: SettingsTab
+  @Binding var sidebarSelection: SidebarItem?
   @State private var newAPIKeyValue: String = ""
   @State private var apiKeyValidationState: ValidationViewState = .idle
   @State private var isDeletingRecordings: Bool = false
@@ -83,6 +88,7 @@ struct SettingsView: View {
   @State private var showSystemPromptPreview = false
   @State private var systemPromptPreview = ""
   @State private var showingConfigTransfer = false
+  @State private var showingAssemblyAIPreprocessingAlert = false
   @State private var soundPreviewPlayer: RecordingSoundPlayer?
   private let openRouterKeyIdentifier = "openrouter.apiKey"
 
@@ -130,8 +136,8 @@ struct SettingsView: View {
         overviewChip(
           title: "Mode", value: settings.transcriptionMode.displayName, systemImage: "waveform")
         overviewChip(
-          title: "Post-processing",
-          value: settings.postProcessingEnabled ? "Enabled" : "Disabled",
+          title: settings.isAssemblyAIModel ? "Pre-processing" : "Post-processing",
+          value: settings.isAssemblyAIModel ? "Built-in" : (settings.postProcessingEnabled ? "Enabled" : "Disabled"),
           systemImage: "wand.and.stars")
         overviewChip(
           title: "Output", value: settings.textOutputMethod.displayName,
@@ -191,8 +197,9 @@ struct SettingsView: View {
     )
   }
 
-  init(tab: SettingsTab = .general) {
+  init(tab: SettingsTab = .general, sidebarSelection: Binding<SidebarItem?>) {
     self.tab = tab
+    _sidebarSelection = sidebarSelection
   }
 
   private func overviewChip(title: String, value: String, systemImage: String) -> some View {
@@ -232,6 +239,19 @@ struct SettingsView: View {
         colors: [Color.brandAccentWarm.opacity(0.08), .clear], startPoint: .top, endPoint: .center))
     .task {
       transcriptionProviders = await TranscriptionProviderRegistry.shared.allProviders()
+    }
+    .onChange(of: settings.liveTranscriptionModel) { _, newValue in
+      if newValue.contains("assemblyai") {
+        settings.postProcessingEnabled = false
+        showingAssemblyAIPreprocessingAlert = true
+      }
+    }
+    .alert("Pre-processing Enabled", isPresented: $showingAssemblyAIPreprocessingAlert) {
+      Button("OK") {
+        sidebarSelection = .settings(.postProcessing)
+      }
+    } message: {
+      Text("This model supports built-in pre-processing — your prompt is sent directly to the transcription model with no additional LLM cost or latency. Post-processing has been disabled.")
     }
   }
 
@@ -946,6 +966,65 @@ struct SettingsView: View {
 
   private var postProcessingSettings: some View {
     LazyVStack(spacing: 20) {
+      if settings.isAssemblyAIModel {
+        preprocessingSettings
+      } else {
+        fullPostProcessingSettings
+      }
+    }
+  }
+
+  private var preprocessingSettings: some View {
+    Group {
+      SettingsCard(title: "Pre-processing", systemImage: "bolt.fill", tint: Color.mint) {
+        VStack(alignment: .leading, spacing: 12) {
+          Label(
+            "Your prompt is sent directly to the transcription model — no additional LLM cost or latency.",
+            systemImage: "bolt.fill"
+          )
+          .font(.callout)
+          .foregroundStyle(.mint)
+
+          TextEditor(text: settingsBinding(\AppSettings.postProcessingSystemPrompt))
+            .font(.body.monospaced())
+            .frame(minHeight: 200)
+            .overlay(
+              RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.mint.opacity(0.2), lineWidth: 1)
+            )
+
+          if !settings.postProcessingSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !settings.assemblyAIKeyterms.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+          {
+            Label(
+              "Prompt and keyterms cannot be used together. Prompt takes priority.",
+              systemImage: "exclamationmark.triangle"
+            )
+            .font(.caption)
+            .foregroundStyle(.orange)
+          }
+        }
+      }
+      .speakTooltip("Guide the transcription model with your own instructions for tone and formatting.")
+
+      SettingsCard(title: "Keyterms", systemImage: "textformat.abc", tint: Color.blue) {
+        VStack(alignment: .leading, spacing: 8) {
+          Text("Comma-separated terms to boost recognition accuracy (e.g. proper nouns, jargon). Max 100 terms, each ≤50 characters.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+          TextField(
+            "AssemblyAI, Universal-3 Pro, Keanu Reeves",
+            text: settingsBinding(\AppSettings.assemblyAIKeyterms)
+          )
+          .textFieldStyle(.roundedBorder)
+        }
+      }
+      .speakTooltip("Add domain-specific terms to improve transcription accuracy. Additional cost: $0.04/hour.")
+    }
+  }
+
+  private var fullPostProcessingSettings: some View {
+    Group {
       SettingsCard(title: "Cleanup", systemImage: "wand.and.stars", tint: Color.brandAccentWarm) {
         VStack(alignment: .leading, spacing: 12) {
           settingsToggle(
@@ -1025,18 +1104,9 @@ struct SettingsView: View {
 
       SettingsCard(title: "Transcription Prompt", systemImage: "quote.bubble", tint: Color.mint) {
         VStack(alignment: .leading, spacing: 8) {
-          if settings.liveTranscriptionModel.contains("assemblyai") {
-            Label(
-              "This prompt is sent directly to the transcription model (pre-processing). No additional LLM cost or latency.",
-              systemImage: "bolt.fill"
-            )
+          Text("This prompt is sent to an LLM after transcription (post-processing). Requires an OpenRouter API key.")
             .font(.caption)
-            .foregroundStyle(.mint)
-          } else {
-            Text("This prompt is sent to an LLM after transcription (post-processing). Requires an OpenRouter API key.")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          }
+            .foregroundStyle(.secondary)
           TextEditor(text: settingsBinding(\AppSettings.postProcessingSystemPrompt))
             .font(.body.monospaced())
             .frame(minHeight: 200)
@@ -1049,37 +1119,9 @@ struct SettingsView: View {
                 generateSystemPromptPreview()
               }
             }
-
-          if !settings.postProcessingSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !settings.assemblyAIKeyterms.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && settings.liveTranscriptionModel.contains("assemblyai")
-          {
-            Label(
-              "Prompt and keyterms cannot be used together. Prompt takes priority.",
-              systemImage: "exclamationmark.triangle"
-            )
-            .font(.caption)
-            .foregroundStyle(.orange)
-          }
         }
       }
       .speakTooltip("Guide the cleanup model with your own instructions for tone and formatting.")
-
-      if settings.liveTranscriptionModel.contains("assemblyai") {
-        SettingsCard(title: "Keyterms", systemImage: "textformat.abc", tint: Color.blue) {
-          VStack(alignment: .leading, spacing: 8) {
-            Text("Comma-separated terms to boost recognition accuracy (e.g. proper nouns, jargon). Max 100 terms, each ≤50 characters.")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-            TextField(
-              "AssemblyAI, Universal-3 Pro, Keanu Reeves",
-              text: settingsBinding(\AppSettings.assemblyAIKeyterms)
-            )
-            .textFieldStyle(.roundedBorder)
-          }
-        }
-        .speakTooltip("Add domain-specific terms to improve transcription accuracy. Additional cost: $0.04/hour.")
-      }
 
       SettingsCard(title: "System-Generated Parts", systemImage: "gearshape.2", tint: Color.brandAccentDeep) {
         VStack(alignment: .leading, spacing: 16) {

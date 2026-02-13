@@ -636,6 +636,10 @@ final class AppSettings: ObservableObject {
     transcriptionMode == .liveNative && liveTranscriptionModel.contains("streaming")
   }
 
+  var isAssemblyAIModel: Bool {
+    liveTranscriptionModel.contains("assemblyai")
+  }
+
   private func enforceSpeedModeConstraints() {
     if speedMode != .instant && !supportsSpeedModeProcessing {
       speedMode = .instant

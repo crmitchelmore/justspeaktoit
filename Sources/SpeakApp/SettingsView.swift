@@ -2015,15 +2015,15 @@ struct SettingsView: View {
             } label: {
               Label("🌐 Fn Key", systemImage: settings.selectedHotKey == .fnKey ? "checkmark.circle.fill" : "circle")
             }
-            .buttonStyle(.plain)
-            .padding(8)
+            .buttonStyle(.plain).hidden().allowsHitTesting(false)
+            .padding(0)
             .background(
               RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(settings.selectedHotKey == .fnKey ? Color.accentColor.opacity(0.15) : Color.clear)
             )
 
-            Text("or")
-              .foregroundStyle(.secondary)
+            Text("").frame(width: 0)
+              .foregroundStyle(.clear)
 
             VStack(alignment: .leading, spacing: 4) {
               Text("Custom Shortcut")

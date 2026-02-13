@@ -111,17 +111,15 @@ final class AutoCorrectionModelTests: XCTestCase {
 
     func testIsLikelyCorrection_split_withCommonPrefix() {
         let change = WordChange(type: .split, original: "cannot", corrected: "can not")
-        // Split with shared prefix should be a likely correction
-        if change.isLikelyCorrection {
-            XCTAssertTrue(true) // Split with common prefix is valid
-        }
+        XCTAssertTrue(
+            change.isLikelyCorrection, "Split with shared prefix should be a likely correction"
+        )
     }
 
     func testIsLikelyCorrection_merge_withCommonPrefix() {
         let change = WordChange(type: .merge, original: "can not", corrected: "cannot")
-        // Merge with shared prefix should be a likely correction
-        if change.isLikelyCorrection {
-            XCTAssertTrue(true) // Merge with common prefix is valid
-        }
+        XCTAssertTrue(
+            change.isLikelyCorrection, "Merge with shared prefix should be a likely correction"
+        )
     }
 }

@@ -45,10 +45,9 @@ final class ModelCatalogTests: XCTestCase {
 
     // MARK: - Pricing
 
-    func testPricing_formatDollars_roundsCorrectly() {
+    func testPricing_compactDisplay_formatsCorrectly() {
         let pricing = ModelCatalog.Pricing(promptPerMTokens: 0.15, completionPerMTokens: 0.60)
-        let display = pricing.compactDisplay
-        XCTAssertFalse(display.isEmpty, "Compact display should produce text")
+        XCTAssertEqual(pricing.compactDisplay, "$0.15/$0.60")
     }
 
     // MARK: - Catalog Integrity

@@ -914,6 +914,7 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
   private var currentInterim: String = ""
   private var fullTranscript: String = ""
   private var currentTurnOrder: Int = -1
+  private var finalSegmentIndexByTurnOrder: [Int: Int] = [:]
   private let formatTurnsEnabled: Bool = true
   private var stopContinuation: CheckedContinuation<Void, Never>?
 
@@ -955,6 +956,7 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
     currentInterim = ""
     fullTranscript = ""
     currentTurnOrder = -1
+    finalSegmentIndexByTurnOrder = [:]
     streamingStartTime = nil
     hasFinished = false
 
@@ -1051,12 +1053,13 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
       // Definitive final (formatted if enabled, or unformatted if format_turns is off)
       let segment = TranscriptionSegment(startTime: 0, endTime: 0, text: turn.transcript)
 
-      if currentTurnOrder == turn.turn_order,
-        let idx = finalSegments.indices.last
+      if let existingIndex = finalSegmentIndexByTurnOrder[turn.turn_order],
+        finalSegments.indices.contains(existingIndex)
       {
-        finalSegments[idx] = segment
+        finalSegments[existingIndex] = segment
       } else {
         finalSegments.append(segment)
+        finalSegmentIndexByTurnOrder[turn.turn_order] = finalSegments.count - 1
       }
 
       fullTranscript = finalSegments.map(\.text).joined(separator: " ")

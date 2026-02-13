@@ -239,19 +239,30 @@ struct SettingsView: View {
         colors: [Color.brandAccentWarm.opacity(0.08), .clear], startPoint: .top, endPoint: .center))
     .task {
       transcriptionProviders = await TranscriptionProviderRegistry.shared.allProviders()
+      syncAssemblyAIKeytermsFromPronunciation()
     }
     .onChange(of: settings.liveTranscriptionModel) { _, _ in
       if settings.isAssemblyAIModel {
         settings.postProcessingEnabled = false
+        syncAssemblyAIKeytermsFromPronunciation()
         showingAssemblyAIPreprocessingAlert = true
       }
+    }
+    .onChange(of: settings.assemblyAIKeyterms) { _, _ in
+      syncIgnoredPronunciationKeyterms()
+    }
+    .onChange(of: settings.ttsPronunciationDictionary) { _, _ in
+      syncAssemblyAIKeytermsFromPronunciation()
+    }
+    .onReceive(environment.pronunciationManager.$entries) { _ in
+      syncAssemblyAIKeytermsFromPronunciation()
     }
     .alert("Pre-processing Enabled", isPresented: $showingAssemblyAIPreprocessingAlert) {
       Button("OK") {
         sidebarSelection = .settings(.postProcessing)
       }
     } message: {
-      Text("This model supports built-in pre-processing — your prompt is sent directly to the transcription model with no additional LLM cost or latency. Post-processing has been disabled.")
+      Text("AssemblyAI streaming supports keyterms prompting. Any custom prompt is applied in Speak's clean-up stage, while keyterms are sent directly to AssemblyAI.")
     }
   }
 
@@ -979,7 +990,7 @@ struct SettingsView: View {
       SettingsCard(title: "Pre-processing", systemImage: "bolt.fill", tint: Color.mint) {
         VStack(alignment: .leading, spacing: 12) {
           Label(
-            "Your prompt is sent directly to the transcription model — no additional LLM cost or latency.",
+            "AssemblyAI accepts keyterms prompting only. Custom prompt text is applied in Speak's clean-up step.",
             systemImage: "bolt.fill"
           )
           .font(.callout)
@@ -992,17 +1003,6 @@ struct SettingsView: View {
               RoundedRectangle(cornerRadius: 12)
                 .stroke(Color.mint.opacity(0.2), lineWidth: 1)
             )
-
-          if !settings.postProcessingSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !settings.assemblyAIKeyterms.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-          {
-            Label(
-              "Prompt and keyterms cannot be used together. Prompt takes priority.",
-              systemImage: "exclamationmark.triangle"
-            )
-            .font(.caption)
-            .foregroundStyle(.orange)
-          }
         }
       }
       .speakTooltip("Guide the transcription model with your own instructions for tone and formatting.")
@@ -2402,6 +2402,92 @@ struct SettingsView: View {
           apiKeyValidationState = .finished(validation)
         }
       }
+    }
+  }
+
+  private func parseAssemblyAIKeyterms(_ raw: String) -> [String] {
+    raw
+      .split(separator: ",")
+      .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+      .filter { !$0.isEmpty }
+  }
+
+  private func canonicalKeyterm(_ term: String) -> String {
+    term.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+  }
+
+  private func pronunciationSeedKeyterms() -> [String] {
+    let modernDictionaryTerms = environment.pronunciationManager.entries
+      .filter { !$0.isRegex }
+      .map(\.word)
+    let legacyDictionaryTerms = settings.ttsPronunciationDictionary.keys.sorted()
+
+    var terms: [String] = []
+    var seen: Set<String> = []
+    for raw in modernDictionaryTerms + legacyDictionaryTerms {
+      let term = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+      let canonical = canonicalKeyterm(term)
+      guard
+        !canonical.isEmpty,
+        !term.contains(","),
+        term.count <= 50,
+        seen.insert(canonical).inserted
+      else { continue }
+      terms.append(term)
+    }
+    return terms
+  }
+
+  private func syncAssemblyAIKeytermsFromPronunciation() {
+    guard settings.isAssemblyAIModel else { return }
+
+    let seedTerms = pronunciationSeedKeyterms()
+    guard !seedTerms.isEmpty else { return }
+
+    let ignoredPronunciationTerms = Set(
+      settings.assemblyAIIgnoredPronunciationTerms.map(canonicalKeyterm))
+    let currentTerms = parseAssemblyAIKeyterms(settings.assemblyAIKeyterms)
+
+    var mergedTerms: [String] = []
+    var seen: Set<String> = []
+    for term in seedTerms where !ignoredPronunciationTerms.contains(canonicalKeyterm(term)) {
+      let canonical = canonicalKeyterm(term)
+      guard seen.insert(canonical).inserted else { continue }
+      mergedTerms.append(term)
+    }
+    for term in currentTerms {
+      let canonical = canonicalKeyterm(term)
+      guard seen.insert(canonical).inserted else { continue }
+      mergedTerms.append(term)
+    }
+
+    let mergedKeyterms = mergedTerms.joined(separator: ", ")
+    if mergedKeyterms != settings.assemblyAIKeyterms {
+      settings.assemblyAIKeyterms = mergedKeyterms
+    }
+
+    syncIgnoredPronunciationKeyterms(seedTerms: seedTerms)
+  }
+
+  private func syncIgnoredPronunciationKeyterms(seedTerms: [String]? = nil) {
+    guard settings.isAssemblyAIModel else { return }
+
+    let pronunciationTerms = seedTerms ?? pronunciationSeedKeyterms()
+    let selectedTermSet = Set(parseAssemblyAIKeyterms(settings.assemblyAIKeyterms).map(canonicalKeyterm))
+    var ignoredSet = Set(settings.assemblyAIIgnoredPronunciationTerms.map(canonicalKeyterm))
+
+    for term in pronunciationTerms {
+      let canonical = canonicalKeyterm(term)
+      if selectedTermSet.contains(canonical) {
+        ignoredSet.remove(canonical)
+      } else {
+        ignoredSet.insert(canonical)
+      }
+    }
+
+    let updatedIgnored = ignoredSet.sorted()
+    if updatedIgnored != settings.assemblyAIIgnoredPronunciationTerms {
+      settings.assemblyAIIgnoredPronunciationTerms = updatedIgnored
     }
   }
 

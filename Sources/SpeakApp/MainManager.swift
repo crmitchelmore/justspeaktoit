@@ -548,11 +548,12 @@ final class MainManager: ObservableObject {
       let shouldSkipForLivePolish = appSettings.speedMode.usesLivePolish 
         && appSettings.skipPostProcessingWithLivePolish
 
-      // Skip post-processing when using AssemblyAI with a pre-processing prompt
-      let usingAssemblyAIPreprocessing = appSettings.liveTranscriptionModel.contains("assemblyai")
+      // AssemblyAI streaming supports keyterms prompting only; run prompt text via Speak clean-up.
+      let hasAssemblyAIPrompt = appSettings.liveTranscriptionModel.contains("assemblyai")
         && !appSettings.postProcessingSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-      
-      if appSettings.postProcessingEnabled && !shouldSkipForLivePolish && !usingAssemblyAIPreprocessing {
+      let shouldRunPostProcessing = appSettings.postProcessingEnabled || hasAssemblyAIPrompt
+
+      if shouldRunPostProcessing && !shouldSkipForLivePolish {
         hudManager.beginPostProcessing()
         session.postProcessingStarted = Date()
         guard
@@ -934,11 +935,12 @@ final class MainManager: ObservableObject {
       let shouldSkipForLivePolish = appSettings.speedMode.usesLivePolish 
         && appSettings.skipPostProcessingWithLivePolish
 
-      // Skip post-processing when using AssemblyAI with a pre-processing prompt
-      let usingAssemblyAIPreprocessing = appSettings.liveTranscriptionModel.contains("assemblyai")
+      // AssemblyAI streaming supports keyterms prompting only; run prompt text via Speak clean-up.
+      let hasAssemblyAIPrompt = appSettings.liveTranscriptionModel.contains("assemblyai")
         && !appSettings.postProcessingSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-      
-      if appSettings.postProcessingEnabled && !shouldSkipForLivePolish && !usingAssemblyAIPreprocessing {
+      let shouldRunPostProcessing = appSettings.postProcessingEnabled || hasAssemblyAIPrompt
+
+      if shouldRunPostProcessing && !shouldSkipForLivePolish {
         hudManager.beginPostProcessing()
         session.postProcessingStarted = Date()
         guard

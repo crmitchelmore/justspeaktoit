@@ -81,6 +81,7 @@ enum SidebarItem: Hashable, Identifiable {
 
 struct SideBarView: View {
   @Binding var selection: SidebarItem?
+  @EnvironmentObject private var settings: AppSettings
 
   var body: some View {
     List {
@@ -127,7 +128,7 @@ struct SideBarView: View {
                 .foregroundStyle(Color.brandAccentWarm)
                 .imageScale(.medium)
                 .frame(width: 20)
-              Text(LocalizedStringKey(tab.title))
+              Text(LocalizedStringKey(tab.title(isAssemblyAI: settings.isAssemblyAIModel)))
                 .fontWeight(selection == item ? .semibold : .regular)
                 .foregroundStyle(.primary)
               Spacer()

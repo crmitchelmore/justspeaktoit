@@ -43,7 +43,7 @@ struct MainView: View {
     case .troubleshooting:
       TroubleshootingView(sidebarSelection: $selection)
     case .settings(let tab):
-      SettingsView(tab: tab)
+      SettingsView(tab: tab, sidebarSelection: $selection)
     }
   }
 

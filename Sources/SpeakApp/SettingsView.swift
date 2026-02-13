@@ -240,8 +240,8 @@ struct SettingsView: View {
     .task {
       transcriptionProviders = await TranscriptionProviderRegistry.shared.allProviders()
     }
-    .onChange(of: settings.liveTranscriptionModel) { _, newValue in
-      if newValue.contains("assemblyai") {
+    .onChange(of: settings.liveTranscriptionModel) { _, _ in
+      if settings.isAssemblyAIModel {
         settings.postProcessingEnabled = false
         showingAssemblyAIPreprocessingAlert = true
       }

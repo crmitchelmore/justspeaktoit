@@ -49,6 +49,10 @@ let package = Package(
             path: "Sources/SpeakHotKeysDemo"
         ),
         .testTarget(
+            name: "SpeakCoreTests",
+            dependencies: ["SpeakCore"]
+        ),
+        .testTarget(
             name: "SpeakAppTests",
             dependencies: ["SpeakApp"]
         )

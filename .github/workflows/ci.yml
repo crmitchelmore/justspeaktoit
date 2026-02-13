@@ -34,7 +34,23 @@ jobs:
         run: make build
 
       - name: Test
-        run: make test
+        run: swift test --enable-code-coverage
+
+      - name: Report Coverage
+        if: always()
+        run: |
+          BIN_PATH=$(swift build --show-bin-path)
+          XCTEST_PATH=$(find "$BIN_PATH" -name '*.xctest' -type d | head -1)
+          if [ -n "$XCTEST_PATH" ]; then
+            EXEC_PATH="$XCTEST_PATH/Contents/MacOS/$(basename "$XCTEST_PATH" .xctest)"
+            COV_DIR=$(swift test --show-codecov-path 2>/dev/null || echo "")
+            if [ -n "$COV_DIR" ] && [ -f "$COV_DIR" ]; then
+              echo "### Test Coverage Summary" >> $GITHUB_STEP_SUMMARY
+              xcrun llvm-cov report "$EXEC_PATH" \
+                --instr-profile="$(dirname "$COV_DIR")/default.profdata" \
+                --ignore-filename-regex='\.build|Tests/' 2>/dev/null | head -30 >> $GITHUB_STEP_SUMMARY || true
+            fi
+          fi
 
   build-ios:
     name: Build iOS Library
@@ -53,4 +69,4 @@ jobs:
 
       - name: SwiftLint
         run: |
-          swift package plugin --allow-writing-to-package-directory swiftlint --strict || true
+          swift package plugin --allow-writing-to-package-directory swiftlint --strict

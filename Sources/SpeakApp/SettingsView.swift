@@ -2008,40 +2008,17 @@ struct SettingsView: View {
             .font(.caption)
             .foregroundStyle(.secondary)
 
-          HStack(spacing: 12) {
-            Button {
-              settings.selectedHotKey = .fnKey
-              environment.hotKeys.restartWithCurrentHotKey()
-            } label: {
-              Label("🌐 Fn Key", systemImage: settings.selectedHotKey == .fnKey ? "checkmark.circle.fill" : "circle")
-            }
-            .buttonStyle(.plain)
-            .padding(8)
-            .background(
-              RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(settings.selectedHotKey == .fnKey ? Color.accentColor.opacity(0.15) : Color.clear)
+          HotKeyRecorder(
+            "Shortcut",
+            hotKey: Binding(
+              get: { self.settings.selectedHotKey },
+              set: { newKey in
+                self.settings.selectedHotKey = newKey
+                self.environment.hotKeys.restartWithCurrentHotKey()
+              }
             )
-
-            Text("or")
-              .foregroundStyle(.secondary)
-
-            VStack(alignment: .leading, spacing: 4) {
-              Text("Custom Shortcut")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-              HotKeyRecorder(
-                "Shortcut",
-                hotKey: Binding(
-                  get: { self.settings.selectedHotKey },
-                  set: { newKey in
-                    self.settings.selectedHotKey = newKey
-                    self.environment.hotKeys.restartWithCurrentHotKey()
-                  }
-                )
-              )
-              .frame(maxWidth: 200)
-            }
-          }
+          )
+          .frame(maxWidth: 320, alignment: .leading)
         }
       }
       .speakTooltip("Pick the Fn key or record a custom keyboard shortcut for recording.")

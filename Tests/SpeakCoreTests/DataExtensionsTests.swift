@@ -43,7 +43,7 @@ final class DataExtensionsTests: XCTestCase {
 
     func testAppendFileField_containsFilenameAndMimeType() {
         var data = Data()
-        let fileData = "audio content".data(using: .utf8)!
+        let fileData = Data("audio content".utf8)
         data.appendFileField(
             named: "file",
             filename: "recording.wav",

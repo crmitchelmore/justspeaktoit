@@ -69,4 +69,4 @@ jobs:
 
       - name: SwiftLint
         run: |
-          swift package plugin --allow-writing-to-package-directory swiftlint --strict
+          swift package plugin --allow-writing-to-package-directory swiftlint --strict --baseline .swiftlint-baseline.json

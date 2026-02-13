@@ -239,6 +239,18 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
 - `AssemblyAITranscriptionProvider.swift` — WebSocket client, response models
 - `TranscriptionManager.swift` (`AssemblyAILiveController`) — turn handling, audio processing
 
+## Accessibility Text Insertion
+
+### API semantics
+- `kAXSelectedTextAttribute` — inserts at cursor position (or replaces selection). Preferred default.
+- `kAXValueAttribute` — replaces the entire field content. Use as fallback.
+- Not all apps support `kAXSelectedTextAttribute`; fall back gracefully.
+- `SmartTextOutput` skips accessibility entirely for known problematic apps (Electron, Chromium, etc.).
+
+### Settings
+- `AccessibilityInsertionMode`: `.insertAtCursor` (default) or `.replaceAll`
+- Only relevant when `TextOutputMethod` is `.smart` or `.accessibilityOnly`
+
 ## Commit Message Tagging
 - Prefix commit messages with a platform tag or scope: `[mac]`/`[ios]` or `(mac)`/`(ios)` (e.g., `fix: [mac] add recording sound picker` or `fix(mac): add recording sound picker`).
 - These tags/scopes feed the Sparkle release notes generator so macOS updates only list mac-specific changes.

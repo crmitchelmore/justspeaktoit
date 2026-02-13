@@ -68,6 +68,7 @@ let project = Project(
             entitlements: .file(path: "Config/SpeakMacOS.entitlements"),
             dependencies: [
                 .package(product: "SpeakCore"),
+                .package(product: "SpeakHotKeys"),
                 .package(product: "Sparkle"),
                 .package(product: "Sentry")
             ],

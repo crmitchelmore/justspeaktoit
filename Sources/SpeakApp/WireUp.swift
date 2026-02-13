@@ -365,7 +365,7 @@ enum WireUp {
     
     if hasDeepgramKey {
       await MainActor.run {
-        settings.liveTranscriptionModel = "deepgram/nova-2-streaming"
+        settings.liveTranscriptionModel = "deepgram/nova-3-streaming"
         print("[WireUp] Deepgram API key found, setting as default transcription provider")
       }
     } else {

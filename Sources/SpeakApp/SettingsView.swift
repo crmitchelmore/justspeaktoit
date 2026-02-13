@@ -743,7 +743,7 @@ struct SettingsView: View {
             .foregroundStyle(.secondary)
 
           if !speedModeAvailable {
-            Text("To enable these modes, select a streaming Live Model (e.g., Deepgram Nova-2 Streaming).")
+            Text("To enable these modes, select a streaming Live Model (e.g., Deepgram Nova-3 Streaming).")
               .font(.caption)
               .foregroundStyle(.secondary)
           }

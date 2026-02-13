@@ -79,9 +79,10 @@ public final class AppSettings: ObservableObject {
         PostProcessingModelInfo(id: "anthropic/claude-3.5-haiku", name: "Claude Haiku", description: "Great instruction following"),
         PostProcessingModelInfo(id: "anthropic/claude-sonnet-4", name: "Claude Sonnet", description: "Best structure preservation"),
     ]
-    
+
     private init() {
-        let selected = UserDefaults.standard.string(forKey: "selectedModel") ?? "apple/local/SFSpeechRecognizer"
+        let selectedRaw = UserDefaults.standard.string(forKey: "selectedModel") ?? "apple/local/SFSpeechRecognizer"
+        let selected = selectedRaw.hasPrefix("deepgram/") ? "deepgram/nova-3" : selectedRaw
         let deepgram = Self.loadFromKeychain(for: "deepgram.apiKey") ?? ""
         let openRouter = Self.loadFromKeychain(for: "openrouter.apiKey") ?? ""
         
@@ -117,7 +118,7 @@ public final class AppSettings: ObservableObject {
         
         if isFirstLaunch || needsDeepgramKey {
             if hasDeepgramKey {
-                selectedModel = "deepgram/nova-2"
+                selectedModel = "deepgram/nova-3"
             } else {
                 selectedModel = "apple/local/SFSpeechRecognizer"
             }
@@ -128,7 +129,7 @@ public final class AppSettings: ObservableObject {
     /// Re-configure provider after onboarding or API key changes.
     public func reconfigureDefaultProvider() {
         if hasDeepgramKey {
-            selectedModel = "deepgram/nova-2"
+            selectedModel = "deepgram/nova-3"
         }
     }
     
@@ -199,8 +200,7 @@ public struct SettingsView: View {
                     Text("Apple Speech (On-Device)").tag("apple/local/SFSpeechRecognizer")
                     
                     // Deepgram options (always shown, but warn if no key)
-                    Text("Deepgram Nova-2").tag("deepgram/nova-2")
-                    Text("Deepgram Nova").tag("deepgram/nova")
+                    Text("Deepgram Nova-3").tag("deepgram/nova-3")
                 }
                 
                 if settings.selectedModel.hasPrefix("deepgram") && !settings.hasDeepgramKey {

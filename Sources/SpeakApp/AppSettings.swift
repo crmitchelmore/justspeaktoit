@@ -668,9 +668,9 @@ final class AppSettings: ObservableObject {
       TranscriptionMode(
         rawValue: defaults.string(forKey: DefaultsKey.transcriptionMode.rawValue)
           ?? TranscriptionMode.liveNative.rawValue) ?? .liveNative
+    let liveModel = defaults.string(forKey: "liveTranscriptionModel") ?? "apple/local/SFSpeechRecognizer"
     liveTranscriptionModel =
-      defaults.string(forKey: DefaultsKey.liveTranscriptionModel.rawValue)
-      ?? "apple/local/SFSpeechRecognizer"
+      liveModel.hasPrefix("deepgram/") ? "deepgram/nova-3-streaming" : liveModel
     batchTranscriptionModel =
       Self.normalizedBatchModel(
         defaults.string(forKey: DefaultsKey.batchTranscriptionModel.rawValue))

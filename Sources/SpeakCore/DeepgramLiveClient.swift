@@ -21,7 +21,7 @@ public final class DeepgramLiveClient: @unchecked Sendable {
 
     public init(
         apiKey: String,
-        model: String = "nova-2",
+        model: String = "nova-3",
         language: String? = nil,
         sampleRate: Int = 16000,
         session: URLSession = .shared,

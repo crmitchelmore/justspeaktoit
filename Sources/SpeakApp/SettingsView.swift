@@ -137,7 +137,9 @@ struct SettingsView: View {
           title: "Mode", value: settings.transcriptionMode.displayName, systemImage: "waveform")
         overviewChip(
           title: settings.isAssemblyAIModel ? "Pre-processing" : "Post-processing",
-          value: settings.isAssemblyAIModel ? "Built-in" : (settings.postProcessingEnabled ? "Enabled" : "Disabled"),
+          value: settings.isAssemblyAIModel
+            ? "Keyterms only"
+            : (settings.postProcessingEnabled ? "Enabled" : "Disabled"),
           systemImage: "wand.and.stars")
         overviewChip(
           title: "Output", value: settings.textOutputMethod.displayName,
@@ -257,14 +259,14 @@ struct SettingsView: View {
     .onReceive(environment.pronunciationManager.$entries) { _ in
       syncAssemblyAIKeytermsFromPronunciation()
     }
-    .alert("Pre-processing Enabled", isPresented: $showingAssemblyAIPreprocessingAlert) {
+    .alert("AssemblyAI Pre-processing", isPresented: $showingAssemblyAIPreprocessingAlert) {
       Button("OK") {
         sidebarSelection = .settings(.postProcessing)
       }
     } message: {
       Text(
-        "AssemblyAI streaming supports keyterms prompting. Any custom prompt is applied in "
-          + "Speak's clean-up stage, while keyterms are sent directly to AssemblyAI."
+        "Custom prompt-based pre-processing is disabled for AssemblyAI live streaming."
+          + " Use Keyterms for recognition guidance."
       )
     }
   }
@@ -992,23 +994,39 @@ struct SettingsView: View {
     Group {
       SettingsCard(title: "Pre-processing", systemImage: "bolt.fill", tint: Color.mint) {
         VStack(alignment: .leading, spacing: 12) {
+          // AssemblyAI live streaming only supports keyterms prompting.
           Label(
-            "AssemblyAI accepts keyterms prompting only. Custom prompt text is applied in Speak's clean-up step.",
+            "AssemblyAI streaming does not support custom instruction prompts."
+              + " Prompt-based pre-processing is disabled.",
             systemImage: "bolt.fill"
           )
           .font(.callout)
           .foregroundStyle(.mint)
 
-          TextEditor(text: settingsBinding(\AppSettings.postProcessingSystemPrompt))
-            .font(.body.monospaced())
-            .frame(minHeight: 200)
-            .overlay(
-              RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.mint.opacity(0.2), lineWidth: 1)
-            )
+          VStack(alignment: .leading, spacing: 6) {
+            Text("Supported in AssemblyAI live mode:")
+              .font(.caption.weight(.semibold))
+            Label("Keyterms prompting (up to 100 terms, each up to 50 characters)", systemImage: "checkmark.circle")
+            Label("Dynamic keyterm updates during a session", systemImage: "checkmark.circle")
+            Label("Punctuation/casing output via format_turns responses", systemImage: "checkmark.circle")
+
+            Text("Not supported by AssemblyAI streaming:")
+              .font(.caption.weight(.semibold))
+              .padding(.top, 4)
+            Label("Custom prompt or system instruction preloading", systemImage: "xmark.circle")
+            Label("Session-level formatting directives beyond format_turns", systemImage: "xmark.circle")
+            Text("Use non-AssemblyAI transcription models for custom prompt-guided cleanup.")
+          }
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .padding(10)
+          .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+              .fill(Color(nsColor: .controlBackgroundColor))
+          )
         }
       }
-      .speakTooltip("Guide the transcription model with your own instructions for tone and formatting.")
+      .speakTooltip("AssemblyAI live streaming supports keyterms only.")
 
       SettingsCard(title: "Keyterms", systemImage: "textformat.abc", tint: Color.blue) {
         VStack(alignment: .leading, spacing: 8) {
@@ -2008,39 +2026,21 @@ struct SettingsView: View {
             .font(.caption)
             .foregroundStyle(.secondary)
 
-          HStack(spacing: 12) {
-            Button {
-              settings.selectedHotKey = .fnKey
-              environment.hotKeys.restartWithCurrentHotKey()
-            } label: {
-              Label("🌐 Fn Key", systemImage: settings.selectedHotKey == .fnKey ? "checkmark.circle.fill" : "circle")
-            }
-            .buttonStyle(.plain).hidden().allowsHitTesting(false)
-            .padding(0)
-            .background(
-              RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(settings.selectedHotKey == .fnKey ? Color.accentColor.opacity(0.15) : Color.clear)
-            )
-
-            Text("").frame(width: 0)
-              .foregroundStyle(.clear)
-
-            VStack(alignment: .leading, spacing: 4) {
-              Text("Custom Shortcut")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-              HotKeyRecorder(
-                "Shortcut",
-                hotKey: Binding(
-                  get: { self.settings.selectedHotKey },
-                  set: { newKey in
-                    self.settings.selectedHotKey = newKey
-                    self.environment.hotKeys.restartWithCurrentHotKey()
-                  }
-                )
+          VStack(alignment: .leading, spacing: 4) {
+            Text("Custom Shortcut")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+            HotKeyRecorder(
+              "Shortcut",
+              hotKey: Binding(
+                get: { self.settings.selectedHotKey },
+                set: { newKey in
+                  self.settings.selectedHotKey = newKey
+                  self.environment.hotKeys.restartWithCurrentHotKey()
+                }
               )
-              .frame(maxWidth: 200)
-            }
+            )
+            .frame(maxWidth: 200)
           }
         }
       }

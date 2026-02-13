@@ -63,7 +63,7 @@ public final class TranscriptionRecordingService: ObservableObject {
             transcriber.model = model.replacingOccurrences(of: "deepgram/", with: "")
 
             transcriber.onPartialResult = { [weak self] text, isFinal in
-                self?.handlePartialResult(text: self?.deepgramTranscriber?.partialText ?? text)
+                self?.handlePartialResult(text: text)
             }
             transcriber.onError = { [weak self] error in
                 self?.handleError(error)
@@ -76,7 +76,7 @@ public final class TranscriptionRecordingService: ObservableObject {
             let transcriber = iOSLiveTranscriber(audioSessionManager: audioSessionManager)
 
             transcriber.onPartialResult = { [weak self] text, isFinal in
-                self?.handlePartialResult(text: self?.appleTranscriber?.partialText ?? text)
+                self?.handlePartialResult(text: text)
             }
             transcriber.onError = { [weak self] error in
                 self?.handleError(error)

@@ -69,12 +69,10 @@ struct ToggleTranscriptionControlIntent: SetValueIntent {
 
     func perform() async throws -> some IntentResult {
         let service = await TranscriptionRecordingService.shared
-        let isRunning = await service.isRunning
-
-        if isRunning {
-            await service.stopRecording()
-        } else {
+        if value {
             try await service.startRecording()
+        } else {
+            await service.stopRecording()
         }
         return .result()
     }

@@ -4,6 +4,15 @@ import UIKit
 
 // MARK: - Audio Recording Intent (Action Button / Shortcuts)
 
+@available(iOS 18, *)
+private func stopResultDialog(for result: TranscriptionResult) -> IntentDialog {
+    let wordCount = result.text.split(separator: " ").count
+    if result.text.isEmpty {
+        return "Recording stopped. No speech detected."
+    }
+    return "Copied \(wordCount) words to clipboard."
+}
+
 /// Toggle intent for starting/stopping transcription via Action Button, Siri, or Shortcuts.
 /// Conforms to AudioRecordingIntent so the system allows background audio recording
 /// and shows the recording indicator. Requires iOS 18+.
@@ -22,11 +31,7 @@ struct StartTranscriptionRecordingIntent: AudioRecordingIntent {
 
         if isRunning {
             let result = await service.stopRecording()
-            let wordCount = result.text.split(separator: " ").count
-            if result.text.isEmpty {
-                return .result(dialog: "Recording stopped. No speech detected.")
-            }
-            return .result(dialog: "Copied \(wordCount) words to clipboard.")
+            return .result(dialog: stopResultDialog(for: result))
         } else {
             try await service.startRecording()
             return .result(dialog: "Recording started. Press again to stop and copy.")
@@ -51,11 +56,7 @@ struct StopTranscriptionRecordingIntent: AppIntent {
         }
 
         let result = await service.stopRecording()
-        let wordCount = result.text.split(separator: " ").count
-        if result.text.isEmpty {
-            return .result(dialog: "Recording stopped. No speech detected.")
-        }
-        return .result(dialog: "Copied \(wordCount) words to clipboard.")
+        return .result(dialog: stopResultDialog(for: result))
     }
 }
 

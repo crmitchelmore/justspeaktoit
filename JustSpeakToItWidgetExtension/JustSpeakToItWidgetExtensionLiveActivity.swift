@@ -94,12 +94,14 @@ struct JustSpeakToItWidgetExtensionLiveActivity: Widget {
             }
         }
     }
+}
 
-    private func formatDuration(_ seconds: Int) -> String {
-        let mins = seconds / 60
-        let secs = seconds % 60
-        return String(format: "%d:%02d", mins, secs)
-    }
+// MARK: - Helpers
+
+private func formatDuration(_ seconds: Int) -> String {
+    let mins = seconds / 60
+    let secs = seconds % 60
+    return String(format: "%d:%02d", mins, secs)
 }
 
 // MARK: - Status Indicator
@@ -191,12 +193,6 @@ struct LockScreenTranscriptionView: View {
             }
         }
         .padding()
-    }
-
-    private func formatDuration(_ seconds: Int) -> String {
-        let mins = seconds / 60
-        let secs = seconds % 60
-        return String(format: "%d:%02d", mins, secs)
     }
 }
 

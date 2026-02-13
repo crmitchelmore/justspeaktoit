@@ -1225,9 +1225,9 @@ final class MainManager: ObservableObject {
       && appSettings.skipPostProcessingWithLivePolish
     guard !shouldSkipForLivePolish else { return false }
 
-    // AssemblyAI streaming supports keyterms prompting only; prompt text runs in Speak clean-up.
-    let hasAssemblyAIPrompt = appSettings.liveTranscriptionModel.contains("assemblyai")
-      && !appSettings.postProcessingSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    let hasAssemblyAIPrompt = false
+      && appSettings.liveTranscriptionModel.contains("assemblyai")
+
     return appSettings.postProcessingEnabled || hasAssemblyAIPrompt
   }
   

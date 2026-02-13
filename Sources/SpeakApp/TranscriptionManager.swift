@@ -1026,9 +1026,9 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
   private func handleTurn(_ turn: AssemblyAITurnResponse) {
     guard !turn.transcript.isEmpty || turn.end_of_turn else { return }
 
-    logger.debug(
-      "Turn: order=\(turn.turn_order) end=\(turn.end_of_turn) formatted=\(turn.turn_is_formatted) len=\(turn.transcript.count)"
-    )
+    let eot = turn.end_of_turn
+    let fmt = turn.turn_is_formatted
+    logger.debug("Turn: order=\(turn.turn_order) end=\(eot) formatted=\(fmt) len=\(turn.transcript.count)")
 
     if let langCode = turn.language_code {
       logger.info("Detected language: \(langCode) (confidence: \(turn.language_confidence ?? 0))")

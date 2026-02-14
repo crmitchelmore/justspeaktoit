@@ -62,7 +62,6 @@ final class DeepgramLiveTranscriber: @unchecked Sendable {
             URLQueryItem(name: "endpointing", value: "300"),
             URLQueryItem(name: "vad_events", value: "true")
         ]
-
         if let language {
             let languageCode = extractLanguageCode(from: language)
             queryItems.append(URLQueryItem(name: "language", value: languageCode))
@@ -282,7 +281,6 @@ struct DeepgramTranscriptionProvider: TranscriptionProvider {
             URLQueryItem(name: "numerals", value: "true"),
             URLQueryItem(name: "utterances", value: "true")
         ]
-
         if let language {
             let languageCode = extractLanguageCode(from: language)
             queryItems.append(URLQueryItem(name: "language", value: languageCode))

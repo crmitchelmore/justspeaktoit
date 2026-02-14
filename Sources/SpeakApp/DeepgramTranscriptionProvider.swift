@@ -54,6 +54,7 @@ final class DeepgramLiveTranscriber: @unchecked Sendable {
             URLQueryItem(name: "model", value: model),
             URLQueryItem(name: "punctuate", value: "true"),
             URLQueryItem(name: "smart_format", value: "true"),
+            URLQueryItem(name: "numerals", value: "true"),
             URLQueryItem(name: "interim_results", value: "true"),
             URLQueryItem(name: "encoding", value: "linear16"),
             URLQueryItem(name: "sample_rate", value: String(sampleRate)),
@@ -278,6 +279,7 @@ struct DeepgramTranscriptionProvider: TranscriptionProvider {
         var queryItems = [
             URLQueryItem(name: "model", value: extractModelName(from: model)),
             URLQueryItem(name: "punctuate", value: "true"),
+            URLQueryItem(name: "numerals", value: "true"),
             URLQueryItem(name: "utterances", value: "true")
         ]
 

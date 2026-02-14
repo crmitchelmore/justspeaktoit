@@ -6,6 +6,7 @@
 //
 
 import AppIntents
+import SpeakiOSLib
 import SwiftUI
 import WidgetKit
 

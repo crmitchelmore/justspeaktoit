@@ -6,9 +6,10 @@
 //
 
 import AppIntents
-import SpeakiOSLib
 import SwiftUI
 import WidgetKit
+
+import SpeakiOSLib
 
 @available(iOS 18.0, *)
 struct JustSpeakToItWidgetExtensionControl: ControlWidget {

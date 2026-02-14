@@ -9,6 +9,8 @@ import AppIntents
 import SwiftUI
 import WidgetKit
 
+import SpeakiOSLib
+
 @available(iOS 18.0, *)
 struct JustSpeakToItWidgetExtensionControl: ControlWidget {
     static let kind: String = "com.justspeaktoit.ios.JustSpeakToItWidgetExtension"

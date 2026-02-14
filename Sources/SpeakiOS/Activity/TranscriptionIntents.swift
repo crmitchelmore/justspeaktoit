@@ -1,5 +1,6 @@
 #if os(iOS)
 import AppIntents
+import SpeakCore
 import UIKit
 
 // MARK: - Audio Recording Intent (Action Button / Shortcuts)

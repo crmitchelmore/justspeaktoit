@@ -94,7 +94,15 @@ let project = Project(
                 "NSSpeechRecognitionUsageDescription": "Just Speak to It uses speech recognition to transcribe your voice.",
                 "NSCameraUsageDescription": "Just Speak to It does not use the camera, but a linked library requires this declaration.",
                 "ITSAppUsesNonExemptEncryption": false,
-                "UIBackgroundModes": ["audio"]
+                "UIBackgroundModes": ["audio"],
+                "UIApplicationShortcutItems": [
+                    [
+                        "UIApplicationShortcutItemType": "com.justspeaktoit.ios.quickaction.transcribe",
+                        "UIApplicationShortcutItemTitle": "Transcribe Voice",
+                        "UIApplicationShortcutItemSubtitle": "Start or stop recording",
+                        "UIApplicationShortcutItemIconSymbolName": "mic.fill"
+                    ]
+                ]
             ]),
             sources: ["SpeakiOSApp/**"],
             resources: [

@@ -373,8 +373,16 @@ public struct SettingsView: View {
 
             Section("About") {
                 LabeledContent("Version") {
-                    Text("1.0.0")
+                    let ver = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+                    let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+                    Text("\(ver) (\(build))")
                         .foregroundStyle(.secondary)
+                }
+
+                LabeledContent("Commit") {
+                    Text(BuildInfo.gitCommitShort)
+                        .foregroundStyle(.secondary)
+                        .font(.system(.body, design: .monospaced))
                 }
 
                 LabeledContent("SpeakCore") {

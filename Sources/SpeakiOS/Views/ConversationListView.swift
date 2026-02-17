@@ -241,7 +241,31 @@ public struct OpenClawSettingsView: View {
                 }
 
                 if settings.ttsEnabled {
-                    Text("Responses will be spoken using Deepgram Aura TTS (requires Deepgram API key).")
+                    Picker("Voice", selection: $settings.ttsVoice) {
+                        ForEach(OpenClawSettings.availableVoices, id: \.id) { voice in
+                            Text(voice.label).tag(voice.id)
+                        }
+                    }
+
+                    Picker("Model", selection: $settings.ttsModel) {
+                        ForEach(OpenClawSettings.availableModels, id: \.id) { mdl in
+                            Text(mdl.label).tag(mdl.id)
+                        }
+                    }
+
+                    VStack(alignment: .leading) {
+                        HStack {
+                            Text("Speed")
+                            Spacer()
+                            Text(String(format: "%.1f×", settings.ttsSpeed))
+                                .foregroundStyle(.secondary)
+                        }
+                        Slider(value: $settings.ttsSpeed, in: 0.5...2.0, step: 0.1)
+                    }
+
+                    Text(
+                        "Requires a Deepgram API key in the main app settings."
+                    )
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

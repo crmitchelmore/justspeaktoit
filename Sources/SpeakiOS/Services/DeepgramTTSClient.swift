@@ -90,7 +90,7 @@ public final class DeepgramTTSClient: ObservableObject {
         do {
             // Configure audio session for playback
             let audioSession = AVAudioSession.sharedInstance()
-            try audioSession.setCategory(.playback, mode: .spokenContent)
+            try audioSession.setCategory(.playback, mode: .spokenAudio)
             try audioSession.setActive(true)
 
             audioPlayer = try AVAudioPlayer(data: data)

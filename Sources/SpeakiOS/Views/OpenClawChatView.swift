@@ -142,7 +142,7 @@ public struct OpenClawChatView: View {
             } label: {
                 Image(systemName: coordinator.isRecording ? "stop.circle.fill" : "mic.circle.fill")
                     .font(.system(size: 32))
-                    .foregroundStyle(coordinator.isRecording ? .red : .accentColor)
+                    .foregroundStyle(coordinator.isRecording ? .red : Color.accentColor)
             }
             .accessibilityLabel(coordinator.isRecording ? "Stop recording" : "Start voice input")
 
@@ -153,7 +153,7 @@ public struct OpenClawChatView: View {
                 } label: {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.system(size: 32))
-                        .foregroundStyle(.accentColor)
+                        .foregroundStyle(Color.accentColor)
                 }
                 .transition(.scale.combined(with: .opacity))
                 .accessibilityLabel("Send message")

@@ -94,7 +94,7 @@ public struct ConversationListView: View {
                     OpenClawChatView()
                 } label: {
                     Label("New Conversation", systemImage: "plus.message")
-                        .foregroundStyle(.accentColor)
+                        .foregroundStyle(Color.accentColor)
                 }
             }
 
@@ -254,7 +254,7 @@ struct InfoStepRow: View {
                 .font(.caption.bold())
                 .foregroundStyle(.white)
                 .frame(width: 22, height: 22)
-                .background(.accentColor, in: Circle())
+                .background(Color.accentColor, in: Circle())
 
             Text(text)
                 .font(.caption)

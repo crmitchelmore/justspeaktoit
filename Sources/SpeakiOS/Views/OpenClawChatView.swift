@@ -12,7 +12,12 @@ public struct OpenClawChatView: View {
     @State private var textInput = ""
     @State private var showingSettings = false
 
-    public init() {}
+    /// When set, the view opens this existing conversation. When nil, creates a new one.
+    private let initialConversation: OpenClawClient.Conversation?
+
+    public init(conversation: OpenClawClient.Conversation? = nil) {
+        self.initialConversation = conversation
+    }
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -93,8 +98,8 @@ public struct OpenClawChatView: View {
         }
         .onAppear {
             if coordinator.currentConversation == nil {
-                if let first = store.conversations.first {
-                    coordinator.selectConversation(first)
+                if let conv = initialConversation {
+                    coordinator.selectConversation(conv)
                 } else {
                     coordinator.startNewConversation()
                 }

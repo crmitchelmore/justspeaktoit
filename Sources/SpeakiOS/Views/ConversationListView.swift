@@ -78,7 +78,7 @@ public struct ConversationListView: View {
             Text("Start a new voice conversation with your AI assistant.")
         } actions: {
             NavigationLink("New Conversation") {
-                OpenClawChatView()
+                OpenClawChatView(conversation: nil)
             }
             .buttonStyle(.borderedProminent)
         }
@@ -91,7 +91,7 @@ public struct ConversationListView: View {
             // New conversation button
             Section {
                 NavigationLink {
-                    OpenClawChatView()
+                    OpenClawChatView(conversation: nil)
                 } label: {
                     Label("New Conversation", systemImage: "plus.message")
                         .foregroundStyle(.accentColor)
@@ -102,10 +102,7 @@ public struct ConversationListView: View {
             Section("Recent") {
                 ForEach(store.conversations) { conv in
                     NavigationLink {
-                        OpenClawChatView()
-                            .onAppear {
-                                // Will be picked up by the chat view
-                            }
+                        OpenClawChatView(conversation: conv)
                     } label: {
                         ConversationRow(conversation: conv)
                     }
@@ -174,7 +171,7 @@ public struct OpenClawSettingsView: View {
                     Label("Enable OpenClaw", systemImage: "bolt.horizontal.icloud")
                 }
 
-                TextField("Gateway URL", text: $urlInput)
+                TextField("host:port or wss://hostname", text: $urlInput)
                     .keyboardType(.URL)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
@@ -182,6 +179,10 @@ public struct OpenClawSettingsView: View {
                     .onChange(of: urlInput) { _, newValue in
                         settings.gatewayURL = newValue
                     }
+
+                Text("Enter host:port for local connections or a Tailscale/public hostname. The ws:// or wss:// prefix is added automatically.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 SecureField("Gateway Token", text: $tokenInput)
                     .textContentType(.password)

@@ -52,7 +52,12 @@ public final class OpenClawSettings: ObservableObject {
     }
 
     @Published public var headsetSingleTapAcknowledge: Bool {
-        didSet { UserDefaults.standard.set(headsetSingleTapAcknowledge, forKey: "openclaw.headsetSingleTapAcknowledge") }
+        didSet {
+            UserDefaults.standard.set(
+                headsetSingleTapAcknowledge,
+                forKey: "openclaw.headsetSingleTapAcknowledge"
+            )
+        }
     }
 
     @Published public var keywordAcknowledgeEnabled: Bool {
@@ -104,13 +109,15 @@ public final class OpenClawSettings: ObservableObject {
         self.ttsVoice = UserDefaults.standard.string(forKey: "openclaw.ttsVoice") ?? "asteria"
         self.ttsModel = UserDefaults.standard.string(forKey: "openclaw.ttsModel") ?? "aura-2"
         self.ttsSpeed = UserDefaults.standard.object(forKey: "openclaw.ttsSpeed") as? Double ?? 1.0
-        self.conversationModeEnabled = UserDefaults.standard.object(forKey: "openclaw.conversationModeEnabled") as? Bool ?? false
+        self.conversationModeEnabled =
+            UserDefaults.standard.object(forKey: "openclaw.conversationModeEnabled") as? Bool ?? false
         self.autoResumeListening = UserDefaults.standard.object(forKey: "openclaw.autoResumeListening") as? Bool ?? true
         self.headsetSingleTapAcknowledge =
             UserDefaults.standard.object(forKey: "openclaw.headsetSingleTapAcknowledge") as? Bool ?? false
         self.keywordAcknowledgeEnabled =
             UserDefaults.standard.object(forKey: "openclaw.keywordAcknowledgeEnabled") as? Bool ?? false
-        self.keywordAcknowledgePhrase = UserDefaults.standard.string(forKey: "openclaw.keywordAcknowledgePhrase") ?? "over"
+        self.keywordAcknowledgePhrase =
+            UserDefaults.standard.string(forKey: "openclaw.keywordAcknowledgePhrase") ?? "over"
         self.lowLatencySpeech = UserDefaults.standard.object(forKey: "openclaw.lowLatencySpeech") as? Bool ?? true
     }
 

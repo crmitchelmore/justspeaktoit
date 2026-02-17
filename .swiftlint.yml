@@ -17,3 +17,6 @@ identifier_name:
   min_length:
     warning: 3
     error: 2
+  excluded:
+    - id
+    - ok

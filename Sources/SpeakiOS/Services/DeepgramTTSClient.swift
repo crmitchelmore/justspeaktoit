@@ -20,8 +20,9 @@ public final class DeepgramTTSClient: ObservableObject {
 
     // MARK: - Configuration
 
-    public var model: String = "aura-2-en"
+    public var model: String = "aura-2"
     public var voice: String = "asteria"
+    public var speed: Double = 1.0
 
     // MARK: - Init
 
@@ -50,7 +51,9 @@ public final class DeepgramTTSClient: ObservableObject {
             throw DeepgramTTSError.missingAPIKey
         }
 
-        let url = URL(string: "https://api.deepgram.com/v1/speak?model=\(model)-\(voice)")!
+        // Deepgram model format: aura-2-{voice}-en or aura-{voice}-en
+        let modelParam = "\(model)-\(voice)-en"
+        let url = URL(string: "https://api.deepgram.com/v1/speak?model=\(modelParam)")!
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -94,6 +97,8 @@ public final class DeepgramTTSClient: ObservableObject {
             try audioSession.setActive(true)
 
             audioPlayer = try AVAudioPlayer(data: data)
+            audioPlayer?.enableRate = true
+            audioPlayer?.rate = Float(speed)
             audioPlayer?.prepareToPlay()
 
             isSpeaking = true

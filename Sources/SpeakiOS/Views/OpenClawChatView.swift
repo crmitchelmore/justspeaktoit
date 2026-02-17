@@ -102,10 +102,12 @@ public struct OpenClawChatView: View {
                     coordinator.selectConversation(conv)
                 } else {
                     coordinator.startNewConversation()
+                    // Only connect here if startNewConversation didn't
+                    // already trigger a reconnect.
+                    if settings.isConfigured {
+                        coordinator.connect()
+                    }
                 }
-            }
-            if settings.isConfigured {
-                coordinator.connect()
             }
         }
         .onDisappear {

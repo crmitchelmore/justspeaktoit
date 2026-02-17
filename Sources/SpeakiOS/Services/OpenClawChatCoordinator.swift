@@ -267,8 +267,10 @@ public final class OpenClawChatCoordinator: ObservableObject {
         client.onChatDelta = { [weak self] runId, delta in
             Task { @MainActor in
                 guard self?.currentRunId == runId else { return }
-                self?.accumulatedResponse += delta
-                self?.streamingResponse = self?.accumulatedResponse ?? ""
+                // Delta events carry cumulative text (full content so far),
+                // not incremental fragments — replace, don't append.
+                self?.accumulatedResponse = delta
+                self?.streamingResponse = delta
             }
         }
 
@@ -278,6 +280,8 @@ public final class OpenClawChatCoordinator: ObservableObject {
 
                 let responseText = finalMessage.isEmpty ? self.accumulatedResponse : finalMessage
                 self.isProcessing = false
+                self.streamingResponse = ""
+                self.accumulatedResponse = ""
 
                 guard let conv = self.currentConversation else { return }
 
@@ -316,6 +320,11 @@ public final class OpenClawChatCoordinator: ObservableObject {
                     apiKey: appSettings.openRouterAPIKey
                 )
             }
+
+            // Apply TTS settings
+            ttsClient.model = settings.ttsModel
+            ttsClient.voice = settings.ttsVoice
+            ttsClient.speed = settings.ttsSpeed
 
             // Speak via Deepgram TTS
             isSpeaking = true

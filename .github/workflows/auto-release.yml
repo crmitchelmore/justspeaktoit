@@ -131,3 +131,12 @@ jobs:
           git add VERSION
           git commit -m "chore: bump version to $NEW_VERSION"
           git push origin main || echo "⚠️ Could not push VERSION bump (branch protection)"
+
+      - name: Trigger iOS TestFlight Release
+        if: steps.check.outputs.should_release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.AUTO_RELEASE_TOKEN }}
+        run: |
+          NEW_VERSION="${{ steps.version.outputs.new_version }}"
+          echo "🚀 Triggering iOS TestFlight build for v$NEW_VERSION"
+          gh workflow run "Release iOS (TestFlight)" -f version="$NEW_VERSION"

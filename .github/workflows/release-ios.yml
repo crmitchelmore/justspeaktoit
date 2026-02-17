@@ -4,9 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version number (e.g., 0.1.0)'
-        required: true
-        default: '0.1.0'
+        description: 'Version number (leave empty to use VERSION file)'
+        required: false
       build_number:
         description: 'Build number (auto-increments if empty)'
         required: false
@@ -139,6 +138,21 @@ jobs:
           pbx_path.write_text(updated)
           PY
 
+      - name: Determine Version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION=$(cat VERSION)
+          fi
+          COMMIT_SHA="${{ github.sha }}"
+          SHORT_SHA="${COMMIT_SHA:0:7}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "commit_sha=$COMMIT_SHA" >> $GITHUB_OUTPUT
+          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+          echo "Building iOS version: $VERSION (commit $SHORT_SHA)"
+
       - name: Determine Build Number
         id: build_number
         env:
@@ -151,9 +165,27 @@ jobs:
             echo "build=$RUN_NUMBER" >> $GITHUB_OUTPUT
           fi
 
+      - name: Stamp Git Commit into Info.plist
+        env:
+          COMMIT_SHA: ${{ steps.version.outputs.commit_sha }}
+        run: |
+          # Tuist generates the Info.plist from the Project.swift extendingDefault.
+          # We inject GitCommitSHA via a build-phase-generated file instead.
+          mkdir -p SpeakiOSApp
+          cat > SpeakiOSApp/BuildInfo.swift << EOF
+          // Auto-generated at build time — do not edit
+          import Foundation
+          public enum BuildInfo {
+              public static let gitCommitSHA = "$COMMIT_SHA"
+              public static let gitCommitShort = "${COMMIT_SHA:0:7}"
+          }
+          EOF
+          echo "Stamped commit: ${COMMIT_SHA:0:7}"
+          cat SpeakiOSApp/BuildInfo.swift
+
       - name: Build and Archive
         env:
-          VERSION: ${{ github.event.inputs.version }}
+          VERSION: ${{ steps.version.outputs.version }}
           BUILD_NUMBER: ${{ steps.build_number.outputs.build }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |

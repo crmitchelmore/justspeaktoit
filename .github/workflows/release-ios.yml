@@ -171,8 +171,8 @@ jobs:
         run: |
           # Tuist generates the Info.plist from the Project.swift extendingDefault.
           # We inject GitCommitSHA via a build-phase-generated file instead.
-          mkdir -p SpeakiOSApp
-          cat > SpeakiOSApp/BuildInfo.swift << EOF
+          mkdir -p Sources/SpeakiOS/Services
+          cat > Sources/SpeakiOS/Services/BuildInfo.swift << EOF
           // Auto-generated at build time — do not edit
           import Foundation
           public enum BuildInfo {
@@ -181,7 +181,7 @@ jobs:
           }
           EOF
           echo "Stamped commit: ${COMMIT_SHA:0:7}"
-          cat SpeakiOSApp/BuildInfo.swift
+          cat Sources/SpeakiOS/Services/BuildInfo.swift
 
       - name: Build and Archive
         env:

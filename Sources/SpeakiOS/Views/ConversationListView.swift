@@ -78,7 +78,7 @@ public struct ConversationListView: View {
             Text("Start a new voice conversation with your AI assistant.")
         } actions: {
             NavigationLink("New Conversation") {
-                OpenClawChatView()
+                OpenClawChatView(conversation: nil)
             }
             .buttonStyle(.borderedProminent)
         }
@@ -91,7 +91,7 @@ public struct ConversationListView: View {
             // New conversation button
             Section {
                 NavigationLink {
-                    OpenClawChatView()
+                    OpenClawChatView(conversation: nil)
                 } label: {
                     Label("New Conversation", systemImage: "plus.message")
                         .foregroundStyle(Color.accentColor)
@@ -102,10 +102,7 @@ public struct ConversationListView: View {
             Section("Recent") {
                 ForEach(store.conversations) { conv in
                     NavigationLink {
-                        OpenClawChatView()
-                            .onAppear {
-                                // Will be picked up by the chat view
-                            }
+                        OpenClawChatView(conversation: conv)
                     } label: {
                         ConversationRow(conversation: conv)
                     }
@@ -164,6 +161,7 @@ public struct OpenClawSettingsView: View {
     @ObservedObject private var settings = OpenClawSettings.shared
     @State private var tokenInput = ""
     @State private var urlInput = ""
+    @State private var testState: OpenClawConnectionTester.Result = .idle
 
     public init() {}
 
@@ -174,14 +172,20 @@ public struct OpenClawSettingsView: View {
                     Label("Enable OpenClaw", systemImage: "bolt.horizontal.icloud")
                 }
 
-                TextField("Gateway URL", text: $urlInput)
+                TextField("host:port or wss://hostname", text: $urlInput)
                     .keyboardType(.URL)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
                     .onAppear { urlInput = settings.gatewayURL }
                     .onChange(of: urlInput) { _, newValue in
                         settings.gatewayURL = newValue
+                        testState = .idle
                     }
+
+                Text("Enter host:port for local connections or a Tailscale/public hostname. "
+                     + "The ws:// or wss:// prefix is added automatically.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 SecureField("Gateway Token", text: $tokenInput)
                     .textContentType(.password)
@@ -194,6 +198,33 @@ public struct OpenClawSettingsView: View {
                         tokenInput = "••••••••"
                     }
                 }
+
+                // Test Connection
+                Button {
+                    if !tokenInput.isEmpty && tokenInput != "••••••••" {
+                        settings.token = tokenInput
+                        tokenInput = "••••••••"
+                    }
+                    Task { await testConnection() }
+                } label: {
+                    HStack {
+                        switch testState {
+                        case .idle:
+                            Label("Test Connection", systemImage: "antenna.radiowaves.left.and.right")
+                        case .testing:
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Testing…")
+                        case .success(let msg):
+                            Label(msg, systemImage: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                        case .failure(let msg):
+                            Label(msg, systemImage: "xmark.circle.fill")
+                                .foregroundStyle(.red)
+                        }
+                    }
+                }
+                .disabled(settings.gatewayURL.isEmpty || settings.token.isEmpty || testState == .testing)
 
                 // Status
                 HStack {
@@ -241,6 +272,16 @@ public struct OpenClawSettingsView: View {
         }
         .navigationTitle("OpenClaw Settings")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    // MARK: - Connection Test
+
+    private func testConnection() async {
+        testState = .testing
+        testState = await OpenClawConnectionTester.test(
+            rawURL: settings.gatewayURL,
+            token: settings.token
+        )
     }
 }
 

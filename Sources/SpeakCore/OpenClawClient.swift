@@ -157,12 +157,38 @@ public final class OpenClawClient: @unchecked Sendable { // swiftlint:disable:th
 
     // MARK: - Connection
 
+    /// Normalise a user-entered gateway address into a WebSocket URL.
+    /// Accepts forms like:
+    ///   "host:port"              → "ws://host:port"
+    ///   "host"                   → "ws://host"
+    ///   "http://host:port"       → "ws://host:port"
+    ///   "https://host:port"      → "wss://host:port"
+    ///   "ws://host:port"         → unchanged
+    ///   "wss://host:port"        → unchanged
+    public static func normaliseGatewayURL(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return trimmed }
+
+        if trimmed.hasPrefix("ws://") || trimmed.hasPrefix("wss://") {
+            return trimmed
+        }
+        if trimmed.hasPrefix("https://") {
+            return "wss://" + trimmed.dropFirst("https://".count)
+        }
+        if trimmed.hasPrefix("http://") {
+            return "ws://" + trimmed.dropFirst("http://".count)
+        }
+        // Bare host or host:port — default to ws://
+        return "ws://" + trimmed
+    }
+
     public func connect(config: ConnectConfig) {
         self.config = config
         onConnectionStateChanged?(.connecting)
 
-        guard let url = URL(string: config.gatewayURL) else {
-            onConnectionStateChanged?(.error("Invalid gateway URL"))
+        let normalisedURL = Self.normaliseGatewayURL(config.gatewayURL)
+        guard let url = URL(string: normalisedURL) else {
+            onConnectionStateChanged?(.error("Invalid gateway URL: \(config.gatewayURL)"))
             return
         }
 
@@ -172,7 +198,7 @@ public final class OpenClawClient: @unchecked Sendable { // swiftlint:disable:th
         webSocket = session.webSocketTask(with: request)
         webSocket?.resume()
 
-        logger.info("Connecting to OpenClaw gateway at \(config.gatewayURL)")
+        logger.info("Connecting to OpenClaw gateway at \(normalisedURL) (raw: \(config.gatewayURL))")
 
         // Send connect frame
         let connectFrame = ConnectFrame(

@@ -51,6 +51,7 @@ final class MainManager: ObservableObject {
   private var activeSession: ActiveSession?
   /// Guards against re-entrant calls to endSession (e.g. silence detection + user hotkey racing).
   private var isEndingSession = false
+  private let recordingStopTimeout: TimeInterval = 8
   private var cancellables: Set<AnyCancellable> = []
   private var hotKeyTokens: [HotKeyListenerToken] = []
   private var shortcutTokens: [ShortcutListenerToken] = []
@@ -72,6 +73,18 @@ final class MainManager: ObservableObject {
     let personalCorrections: PersonalLexiconHistorySummary?
     let lexiconContext: PersonalLexiconContext
     let originalHistoryItemID: UUID?
+  }
+
+  private enum SessionStopError: LocalizedError {
+    case recordingStopTimedOut(seconds: TimeInterval)
+
+    var errorDescription: String? {
+      switch self {
+      case .recordingStopTimedOut(let seconds):
+        let timeout = String(format: "%.0f", seconds)
+        return "Stopping recording took too long (\(timeout)s timeout)."
+      }
+    }
   }
 
   init(
@@ -213,6 +226,7 @@ final class MainManager: ObservableObject {
   }
 
   func toggleRecordingFromUI() {
+    guard !isEndingSession else { return }
     if activeSession == nil {
       Task { await startSession(trigger: .uiButton) }
     } else {
@@ -438,7 +452,7 @@ final class MainManager: ObservableObject {
     )
 
     do {
-      let summary = try await audioFileManager.stopRecording()
+      let summary = try await stopRecordingWithTimeout()
       session.recordingSummary = summary
       session.recordingEnded = summary.startedAt.addingTimeInterval(summary.duration)
 
@@ -1073,6 +1087,26 @@ final class MainManager: ObservableObject {
     let historyItem = session.buildHistoryItem(finalText: session.transcriptionResult?.text)
     await historyManager.append(historyItem)
     activeSession = nil
+  }
+
+  private func stopRecordingWithTimeout() async throws -> RecordingSummary {
+    let timeout = recordingStopTimeout
+    let audioFileManager = self.audioFileManager
+    return try await withThrowingTaskGroup(of: RecordingSummary.self) { group in
+      group.addTask {
+        try await audioFileManager.stopRecording()
+      }
+      group.addTask {
+        try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+        throw SessionStopError.recordingStopTimedOut(seconds: timeout)
+      }
+
+      guard let summary = try await group.next() else {
+        throw SessionStopError.recordingStopTimedOut(seconds: timeout)
+      }
+      group.cancelAll()
+      return summary
+    }
   }
 
   private func postProcessingRequestPreview(systemPrompt: String, rawText: String) -> String {

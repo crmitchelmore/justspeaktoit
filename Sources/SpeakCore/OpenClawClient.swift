@@ -160,7 +160,8 @@ public final class OpenClawClient: @unchecked Sendable {
     ///   "https://host:port"      → "wss://host:port"
     ///   "ws://host:port"         → unchanged
     ///   "wss://host:port"        → unchanged
-    private static func normaliseGatewayURL(_ raw: String) -> String {
+    /// Expose normalisation for UI display/testing.
+    public static func normaliseGatewayURL(_ raw: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return trimmed }
 

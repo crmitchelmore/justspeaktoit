@@ -161,6 +161,14 @@ public struct OpenClawSettingsView: View {
     @ObservedObject private var settings = OpenClawSettings.shared
     @State private var tokenInput = ""
     @State private var urlInput = ""
+    @State private var testState: ConnectionTestState = .idle
+
+    enum ConnectionTestState: Equatable {
+        case idle
+        case testing
+        case success(String) // e.g. "Connected in 320ms"
+        case failure(String)
+    }
 
     public init() {}
 
@@ -178,6 +186,7 @@ public struct OpenClawSettingsView: View {
                     .onAppear { urlInput = settings.gatewayURL }
                     .onChange(of: urlInput) { _, newValue in
                         settings.gatewayURL = newValue
+                        testState = .idle
                     }
 
                 Text("Enter host:port for local connections or a Tailscale/public hostname. The ws:// or wss:// prefix is added automatically.")
@@ -195,6 +204,34 @@ public struct OpenClawSettingsView: View {
                         tokenInput = "••••••••"
                     }
                 }
+
+                // Test Connection
+                Button {
+                    // Save any pending token before testing
+                    if !tokenInput.isEmpty && tokenInput != "••••••••" {
+                        settings.token = tokenInput
+                        tokenInput = "••••••••"
+                    }
+                    Task { await testConnection() }
+                } label: {
+                    HStack {
+                        switch testState {
+                        case .idle:
+                            Label("Test Connection", systemImage: "antenna.radiowaves.left.and.right")
+                        case .testing:
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Testing…")
+                        case .success(let msg):
+                            Label(msg, systemImage: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                        case .failure(let msg):
+                            Label(msg, systemImage: "xmark.circle.fill")
+                                .foregroundStyle(.red)
+                        }
+                    }
+                }
+                .disabled(settings.gatewayURL.isEmpty || settings.token.isEmpty || testState == .testing)
 
                 // Status
                 HStack {
@@ -239,6 +276,92 @@ public struct OpenClawSettingsView: View {
         }
         .navigationTitle("OpenClaw Settings")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    // MARK: - Connection Test
+
+    private func testConnection() async {
+        testState = .testing
+        let rawURL = settings.gatewayURL
+        let token = settings.token
+        let normalisedURL = OpenClawClient.normaliseGatewayURL(rawURL)
+
+        guard let url = URL(string: normalisedURL) else {
+            testState = .failure("Invalid URL")
+            return
+        }
+
+        let start = CFAbsoluteTimeGetCurrent()
+
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 10
+
+            let session = URLSession(configuration: .default)
+            let ws = session.webSocketTask(with: request)
+            ws.resume()
+
+            // Build connect frame
+            let connectPayload: [String: Any] = [
+                "id": "test-1",
+                "method": "connect",
+                "params": [
+                    "token": token,
+                    "clientName": "speak-ios-test",
+                    "mode": "chat",
+                    "protocol": 1
+                ]
+            ]
+
+            guard let jsonData = try? JSONSerialization.data(withJSONObject: connectPayload),
+                  let jsonString = String(data: jsonData, encoding: .utf8) else {
+                Task { @MainActor in testState = .failure("Encoding error") }
+                ws.cancel(with: .normalClosure, reason: nil)
+                cont.resume()
+                return
+            }
+
+            ws.send(.string(jsonString)) { sendError in
+                if let sendError {
+                    Task { @MainActor in testState = .failure("Send failed: \(sendError.localizedDescription)") }
+                    ws.cancel(with: .normalClosure, reason: nil)
+                    cont.resume()
+                    return
+                }
+
+                ws.receive { result in
+                    let elapsed = Int((CFAbsoluteTimeGetCurrent() - start) * 1000)
+
+                    switch result {
+                    case .success(let message):
+                        var ok = false
+                        if case .string(let text) = message,
+                           let data = text.data(using: .utf8),
+                           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                            // Check for error response (e.g. bad token)
+                            if let error = json["error"] as? [String: Any],
+                               let errorMsg = error["message"] as? String {
+                                Task { @MainActor in testState = .failure(errorMsg) }
+                            } else if json["result"] != nil || json["id"] != nil {
+                                ok = true
+                                Task { @MainActor in testState = .success("Connected (\(elapsed)ms)") }
+                            } else {
+                                Task { @MainActor in testState = .failure("Unexpected response") }
+                            }
+                        } else {
+                            Task { @MainActor in testState = .failure("Unexpected response format") }
+                        }
+                        _ = ok // suppress unused warning
+
+                    case .failure(let error):
+                        Task { @MainActor in testState = .failure(error.localizedDescription) }
+                    }
+
+                    ws.cancel(with: .normalClosure, reason: nil)
+                    cont.resume()
+                }
+            }
+        }
     }
 }
 

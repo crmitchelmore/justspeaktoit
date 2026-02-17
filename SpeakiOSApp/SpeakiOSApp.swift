@@ -52,8 +52,33 @@ struct SpeakiOSApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            MainTabView()
                 .tint(.brandAccent)
+        }
+    }
+}
+
+/// Root tab view with Transcription and OpenClaw tabs.
+struct MainTabView: View {
+    @State private var selectedTab = 0
+
+    var body: some View {
+        TabView(selection: $selectedTab) {
+            NavigationStack {
+                ContentView()
+            }
+            .tabItem {
+                Label("Transcribe", systemImage: "mic.fill")
+            }
+            .tag(0)
+
+            NavigationStack {
+                ConversationListView()
+            }
+            .tabItem {
+                Label("OpenClaw", systemImage: "bolt.horizontal.icloud.fill")
+            }
+            .tag(1)
         }
     }
 }

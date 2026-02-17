@@ -326,6 +326,20 @@ public struct SettingsView: View {
                 }
             }
             
+            Section("OpenClaw") {
+                NavigationLink {
+                    OpenClawSettingsView()
+                } label: {
+                    Label("Configure OpenClaw", systemImage: "bolt.horizontal.icloud")
+                }
+                
+                if OpenClawSettings.shared.isConfigured {
+                    Label("Connected", systemImage: "checkmark.circle")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                }
+            }
+            
             Section("Send to Mac") {
                 NavigationLink {
                     SendToMacView()

@@ -45,7 +45,10 @@ public struct OpenClawChatView: View {
 
                         // Recording indicator
                         if coordinator.isRecording {
-                            RecordingIndicator(partialText: coordinator.partialTranscript)
+                            RecordingIndicator(
+                                partialText: coordinator.partialTranscript,
+                                showAcknowledgeHint: settings.conversationModeEnabled
+                            )
                                 .id("recording")
                         }
 
@@ -74,12 +77,23 @@ public struct OpenClawChatView: View {
                         proxy.scrollTo("streaming", anchor: .bottom)
                     }
                 }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    guard settings.conversationModeEnabled,
+                          coordinator.isRecording || coordinator.isSpeaking else { return }
+                    Task {
+                        await coordinator.handleAcknowledgeSignal()
+                    }
+                }
             }
 
             Divider()
 
             // Input area
-            inputBar
+            VStack(spacing: 0) {
+                conversationModeBar
+                inputBar
+            }
         }
         .navigationTitle(coordinator.currentConversation?.title ?? "OpenClaw")
         .navigationBarTitleDisplayMode(.inline)
@@ -109,9 +123,17 @@ public struct OpenClawChatView: View {
                     }
                 }
             }
+            Task {
+                await coordinator.conversationModeChanged(isEnabled: settings.conversationModeEnabled)
+            }
         }
         .onDisappear {
             coordinator.disconnect()
+        }
+        .onChange(of: settings.conversationModeEnabled) { _, isEnabled in
+            Task {
+                await coordinator.conversationModeChanged(isEnabled: isEnabled)
+            }
         }
         .alert("Error", isPresented: .init(
             get: { coordinator.error != nil },
@@ -124,6 +146,32 @@ public struct OpenClawChatView: View {
     }
 
     // MARK: - Input Bar
+
+    @ViewBuilder
+    private var conversationModeBar: some View {
+        HStack(spacing: 8) {
+            Button {
+                settings.conversationModeEnabled.toggle()
+            } label: {
+                Label(
+                    "Conversation Mode",
+                    systemImage: settings.conversationModeEnabled ? "checkmark.square.fill" : "square"
+                )
+                .font(.subheadline)
+            }
+            .buttonStyle(.plain)
+
+            Spacer()
+
+            if settings.conversationModeEnabled {
+                Text("Tap to confirm")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal)
+        .padding(.top, 8)
+    }
 
     @ViewBuilder
     private var inputBar: some View {
@@ -246,28 +294,37 @@ struct MessageBubble: View {
 
 struct RecordingIndicator: View {
     let partialText: String
+    let showAcknowledgeHint: Bool
     @State private var pulseScale: CGFloat = 1.0
 
     var body: some View {
-        HStack(spacing: 12) {
-            Circle()
-                .fill(.red)
-                .frame(width: 12, height: 12)
-                .scaleEffect(pulseScale)
-                .animation(
-                    .easeInOut(duration: 0.8).repeatForever(autoreverses: true),
-                    value: pulseScale
-                )
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 12) {
+                Circle()
+                    .fill(.red)
+                    .frame(width: 12, height: 12)
+                    .scaleEffect(pulseScale)
+                    .animation(
+                        .easeInOut(duration: 0.8).repeatForever(autoreverses: true),
+                        value: pulseScale
+                    )
 
-            if partialText.isEmpty {
-                Text("Listening…")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .italic()
-            } else {
-                Text(partialText)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                if partialText.isEmpty {
+                    Text("Listening…")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .italic()
+                } else {
+                    Text(partialText)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if showAcknowledgeHint {
+                Text("Tap the chat area, use headset tap, or say your keyword to send.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
         }
         .padding(.horizontal)

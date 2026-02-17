@@ -252,6 +252,21 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
 - `AccessibilityInsertionMode`: `.insertAtCursor` (default) or `.replaceAll`
 - Only relevant when `TextOutputMethod` is `.smart` or `.accessibilityOnly`
 
+## OpenClaw Hands-Free Voice Mode (iOS)
+
+### Conversation loop
+- Keep Conversation Mode user-configurable and available directly on the OpenClaw chat screen.
+- In Conversation Mode, use the loop: record → send → speak → auto-resume listening.
+- Auto-resume must remain configurable so users can opt out.
+
+### Acknowledge controls
+- Support multiple acknowledgement paths: on-screen tap, headset single-tap (remote command), and optional keyword.
+- Treat acknowledgement keywords as control input and trim them from transcript text before sending.
+
+### Latency rules
+- Avoid fixed sleeps for connection readiness; wait for connection state with timeout and explicit error.
+- Provide a low-latency speech option that skips summarisation before TTS when enabled.
+
 ## Commit Message Tagging
 - Prefix commit messages with a platform tag or scope: `[mac]`/`[ios]` or `(mac)`/`(ios)` (e.g., `fix: [mac] add recording sound picker` or `fix(mac): add recording sound picker`).
 - These tags/scopes feed the Sparkle release notes generator so macOS updates only list mac-specific changes.

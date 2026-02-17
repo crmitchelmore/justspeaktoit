@@ -1,11 +1,13 @@
 import Foundation
 import os.log
 
+// swiftlint:disable file_length
+
 // MARK: - OpenClaw Gateway WebSocket Client
 
 /// A lightweight client for the OpenClaw gateway WebSocket protocol.
 /// Supports chat.send, chat.history, and streaming chat events.
-public final class OpenClawClient: @unchecked Sendable {
+public final class OpenClawClient: @unchecked Sendable { // swiftlint:disable:this type_body_length
     // MARK: - Types
 
     public struct ConnectConfig: Codable, Sendable {
@@ -86,12 +88,14 @@ public final class OpenClawClient: @unchecked Sendable {
         let method: String = "connect"
         let params: ConnectParams
 
+        // swiftlint:disable:next nesting
         struct ConnectParams: Encodable {
             let token: String
             let clientName: String
             let mode: String
             let protocolVersion: Int
 
+            // swiftlint:disable:next nesting
             enum CodingKeys: String, CodingKey {
                 case token
                 case clientName
@@ -106,6 +110,7 @@ public final class OpenClawClient: @unchecked Sendable {
         let result: AnyCodable?
         let error: ResponseError?
 
+        // swiftlint:disable:next nesting
         struct ResponseError: Decodable {
             let message: String
             let code: String?
@@ -220,7 +225,7 @@ public final class OpenClawClient: @unchecked Sendable {
         let params: [String: AnyCodable] = [
             "sessionKey": AnyCodable(key),
             "message": AnyCodable(message),
-            "idempotencyKey": AnyCodable(idempotencyKey),
+            "idempotencyKey": AnyCodable(idempotencyKey)
         ]
 
         let frame = RequestFrame(id: reqId, method: "chat.send", params: params)
@@ -252,7 +257,7 @@ public final class OpenClawClient: @unchecked Sendable {
 
         let params: [String: AnyCodable] = [
             "sessionKey": AnyCodable(key),
-            "limit": AnyCodable(limit),
+            "limit": AnyCodable(limit)
         ]
 
         let frame = RequestFrame(id: reqId, method: "chat.history", params: params)

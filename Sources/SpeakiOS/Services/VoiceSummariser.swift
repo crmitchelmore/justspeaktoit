@@ -60,10 +60,10 @@ public final class VoiceSummariser: ObservableObject {
             "model": model,
             "messages": [
                 ["role": "system", "content": Self.systemPrompt],
-                ["role": "user", "content": text],
+                ["role": "user", "content": text]
             ],
             "max_tokens": 300,
-            "temperature": 0.3,
+            "temperature": 0.3
         ]
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)

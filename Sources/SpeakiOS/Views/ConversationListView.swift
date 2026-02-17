@@ -220,7 +220,10 @@ public struct OpenClawSettingsView: View {
                 }
 
                 if settings.summariseResponses {
-                    Text("Long responses will be summarised into concise voice-friendly text before speaking (requires OpenRouter API key).")
+                    Text(
+                        "Long responses will be summarised into concise voice-friendly text "
+                            + "before speaking (requires OpenRouter API key)."
+                    )
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

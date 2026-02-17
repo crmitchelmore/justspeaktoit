@@ -184,8 +184,8 @@ public final class OpenClawChatCoordinator: ObservableObject {
 
         // Monitor partial text updates
         Task { @MainActor in
-            while self.isRecording, let t = self.transcriber {
-                self.partialTranscript = t.partialText
+            while self.isRecording, let activeTranscriber = self.transcriber {
+                self.partialTranscript = activeTranscriber.partialText
                 try? await Task.sleep(for: .milliseconds(100))
             }
         }

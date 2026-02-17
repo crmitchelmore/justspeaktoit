@@ -51,7 +51,7 @@ public final class OpenClawSettings: ObservableObject {
         let deleteQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
+            kSecAttrAccount as String: account
         ]
         SecItemDelete(deleteQuery as CFDictionary)
 
@@ -61,7 +61,7 @@ public final class OpenClawSettings: ObservableObject {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
-            kSecValueData as String: key.data(using: .utf8)!,
+            kSecValueData as String: key.data(using: .utf8)!
         ]
         SecItemAdd(addQuery as CFDictionary, nil)
     }
@@ -74,7 +74,7 @@ public final class OpenClawSettings: ObservableObject {
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
             kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
+            kSecMatchLimit as String: kSecMatchLimitOne
         ]
 
         var result: AnyObject?

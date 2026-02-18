@@ -764,7 +764,7 @@ struct CloudKitSyncSettingsSection: View {
                             Color.orange.opacity(0.12),
                             in: Capsule()
                         )
-                } else if historyManager.items.count > 0 {
+                } else if !historyManager.items.isEmpty {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundStyle(.green)
                 }

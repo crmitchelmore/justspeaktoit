@@ -121,10 +121,15 @@ extension OpenClawChatCoordinator {
     }
 
     private func isNewAssistantSegment(_ incoming: String, comparedTo previous: String) -> Bool {
-        guard !previous.isEmpty else { return false }
-        if incoming.hasPrefix(previous) || previous.hasPrefix(incoming) {
+        guard !previous.isEmpty, !incoming.isEmpty else { return false }
+
+        if incoming.hasPrefix(previous) {
             return false
         }
+        if previous.hasPrefix(incoming) {
+            return incoming.count < previous.count
+        }
+
         return true
     }
 

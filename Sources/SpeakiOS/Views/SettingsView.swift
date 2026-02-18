@@ -1,6 +1,7 @@
 #if os(iOS)
 import SwiftUI
 import SpeakCore
+import SpeakSync
 
 // swiftlint:disable file_length
 
@@ -296,6 +297,9 @@ public struct SettingsView: View {
             }
 
             Section("Sync") {
+                // CloudKit History Sync
+                CloudKitSyncSettingsSection()
+
                 // Sync status
                 let syncStatus = SyncStatus.current()
 
@@ -716,6 +720,99 @@ struct PermissionRow: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 2)
                 .background(required ? Color.red.opacity(0.1) : Color.secondary.opacity(0.1), in: Capsule())
+        }
+    }
+}
+
+// MARK: - CloudKit Sync Settings
+
+struct CloudKitSyncSettingsSection: View {
+    @ObservedObject private var syncEngine = HistorySyncEngine.shared
+    @StateObject private var historyManager = iOSHistoryManager.shared
+    @State private var isSyncing = false
+
+    var body: some View {
+        // CloudKit status
+        HStack {
+            Label("iCloud History Sync", systemImage: "icloud")
+            Spacer()
+            Text(syncEngine.state.isCloudAvailable ? "Active" : "Unavailable")
+                .foregroundStyle(
+                    syncEngine.state.isCloudAvailable ? .green : .secondary
+                )
+        }
+        .accessibilityElement(children: .combine)
+
+        if syncEngine.state.isCloudAvailable {
+            // Sync counts
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Synced Entries")
+                        .font(.subheadline)
+                    Text("\(historyManager.syncedCount) of \(historyManager.items.count)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if historyManager.unsyncedCount > 0 {
+                    Text("\(historyManager.unsyncedCount) pending")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            Color.orange.opacity(0.12),
+                            in: Capsule()
+                        )
+                } else if historyManager.items.count > 0 {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                }
+            }
+
+            // Last sync time
+            if let lastSync = syncEngine.state.lastSyncTime {
+                LabeledContent("Last Sync") {
+                    Text(lastSync, style: .relative)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            // Error display
+            if let error = syncEngine.state.error {
+                Label {
+                    Text(error.localizedDescription)
+                        .font(.caption)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                }
+                .foregroundStyle(.orange)
+            }
+
+            // Manual sync button
+            Button {
+                isSyncing = true
+                Task {
+                    await historyManager.triggerSync()
+                    isSyncing = false
+                }
+            } label: {
+                HStack {
+                    Label("Sync Now", systemImage: "arrow.triangle.2.circlepath")
+                    Spacer()
+                    if isSyncing || syncEngine.state.isSyncing {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
+            }
+            .disabled(isSyncing || syncEngine.state.isSyncing)
+        } else {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Sign in to iCloud in Settings to sync transcription history across your devices.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }

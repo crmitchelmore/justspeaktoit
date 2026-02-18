@@ -80,8 +80,21 @@ public final class iOSHistoryManager: ObservableObject {
     private let decoder = JSONDecoder()
 
     /// IDs of entries that have been synced to CloudKit.
-    private var syncedIDs: Set<UUID> = []
+    private(set) var syncedIDs: Set<UUID> = []
     private let syncedIDsKey = "speak.sync.syncedHistoryIDs"
+
+    /// Number of entries synced to CloudKit.
+    public var syncedCount: Int { syncedIDs.count }
+
+    /// Number of entries not yet synced.
+    public var unsyncedCount: Int {
+        items.filter { !syncedIDs.contains($0.id) }.count
+    }
+
+    /// Whether a specific item has been synced.
+    public func isSynced(_ item: iOSHistoryItem) -> Bool {
+        syncedIDs.contains(item.id)
+    }
 
     private init() {
         let documentsURL = FileManager.default.urls(
@@ -361,6 +374,18 @@ public struct HistoryView: View {
     
     private var historyList: some View {
         List {
+            // Sync status banner
+            if syncEngine.state.isCloudAvailable {
+                Section {
+                    SyncStatusBanner(
+                        syncEngine: syncEngine,
+                        syncedCount: historyManager.syncedCount,
+                        unsyncedCount: historyManager.unsyncedCount,
+                        totalCount: historyManager.items.count
+                    )
+                }
+            }
+
             // Stats header
             Section {
                 HStack(spacing: 20) {
@@ -384,7 +409,10 @@ public struct HistoryView: View {
             // History items
             Section {
                 ForEach(historyManager.items) { item in
-                    HistoryItemRow(item: item)
+                    HistoryItemRow(
+                        item: item,
+                        isSynced: historyManager.isSynced(item)
+                    )
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                             Button(role: .destructive) {
                                 historyManager.remove(item)
@@ -438,6 +466,7 @@ public struct HistoryView: View {
 
 struct HistoryItemRow: View {
     let item: iOSHistoryItem
+    let isSynced: Bool
     @State private var isExpanded = false
     
     var body: some View {
@@ -456,6 +485,11 @@ struct HistoryItemRow: View {
                 Spacer()
                 
                 HStack(spacing: 8) {
+                    // Sync indicator
+                    Image(systemName: isSynced ? "icloud.fill" : "icloud.slash")
+                        .font(.caption2)
+                        .foregroundStyle(isSynced ? .green : .secondary.opacity(0.5))
+
                     Label("\(item.wordCount)", systemImage: "text.word.spacing")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -544,4 +578,110 @@ struct HistoryItemRow: View {
         HistoryView()
     }
 }
+
+// MARK: - Sync Status Banner
+
+struct SyncStatusBanner: View {
+    @ObservedObject var syncEngine: HistorySyncEngine
+    let syncedCount: Int
+    let unsyncedCount: Int
+    let totalCount: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Image(systemName: syncIcon)
+                    .foregroundStyle(syncIconColor)
+                    .font(.body)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(syncEngine.state.statusMessage)
+                        .font(.subheadline.weight(.medium))
+                    Text(syncSummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                if syncEngine.state.isSyncing {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+
+            // Progress bar
+            if totalCount > 0 {
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(Color.secondary.opacity(0.15))
+                            .frame(height: 4)
+                        Capsule()
+                            .fill(syncBarColor)
+                            .frame(
+                                width: geometry.size.width * syncFraction,
+                                height: 4
+                            )
+                    }
+                }
+                .frame(height: 4)
+            }
+
+            if let error = syncEngine.state.error {
+                Text(error.localizedDescription)
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+                    .lineLimit(2)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var syncFraction: CGFloat {
+        guard totalCount > 0 else { return 0 }
+        return CGFloat(syncedCount) / CGFloat(totalCount)
+    }
+
+    private var syncSummary: String {
+        if totalCount == 0 {
+            return "No entries"
+        }
+        if unsyncedCount == 0 {
+            return "All \(totalCount) entries synced"
+        }
+        return "\(syncedCount) of \(totalCount) synced · \(unsyncedCount) pending"
+    }
+
+    private var syncIcon: String {
+        if syncEngine.state.isSyncing {
+            return "arrow.triangle.2.circlepath.icloud"
+        }
+        if syncEngine.state.error != nil {
+            return "exclamationmark.icloud"
+        }
+        if unsyncedCount == 0, totalCount > 0 {
+            return "checkmark.icloud.fill"
+        }
+        return "icloud.fill"
+    }
+
+    private var syncIconColor: Color {
+        if syncEngine.state.error != nil {
+            return .orange
+        }
+        if unsyncedCount == 0, totalCount > 0 {
+            return .green
+        }
+        return .blue
+    }
+
+    private var syncBarColor: Color {
+        if syncEngine.state.error != nil {
+            return .orange
+        }
+        return .green
+    }
+}
+
 #endif

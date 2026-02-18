@@ -149,35 +149,27 @@ public struct OpenClawChatView: View {
 
     @ViewBuilder
     private var conversationModeBar: some View {
-        HStack(spacing: 8) {
-            Button {
-                settings.conversationModeEnabled.toggle()
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: settings.conversationModeEnabled ? "checkmark.square.fill" : "square")
-                        .font(.title3)
-                    Text("Conversation Mode")
-                        .font(.subheadline.weight(.semibold))
-                }
-                .foregroundStyle(.primary)
-                .padding(.horizontal, 12)
-                .frame(minHeight: 44)
-                .background(
-                    Color(.secondarySystemBackground),
-                    in: RoundedRectangle(cornerRadius: 10)
-                )
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle(isOn: $settings.conversationModeEnabled) {
+                Label("Conversation Mode", systemImage: "waveform.badge.mic")
+                    .font(.subheadline.weight(.semibold))
             }
-            .buttonStyle(.plain)
-            .contentShape(Rectangle())
-
-            Spacer()
+            .toggleStyle(.switch)
+            .tint(.accentColor)
+            .frame(minHeight: 44)
 
             if settings.conversationModeEnabled {
-                Text("Tap to confirm")
+                Text("Tap the chat area to acknowledge")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
         .padding(.horizontal)
         .padding(.top, 8)
     }
@@ -187,8 +179,19 @@ public struct OpenClawChatView: View {
         HStack(spacing: 12) {
             // Text field
             TextField("Type a message…", text: $textInput, axis: .vertical)
-                .lineLimit(1...4)
-                .textFieldStyle(.roundedBorder)
+                .font(.body)
+                .lineLimit(1...5)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .frame(minHeight: 50)
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Color(.secondarySystemBackground))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(Color(.separator).opacity(0.28), lineWidth: 1)
+                )
                 .submitLabel(.send)
                 .onSubmit {
                     sendTextIfNeeded()

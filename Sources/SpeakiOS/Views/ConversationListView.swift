@@ -282,6 +282,43 @@ public struct OpenClawSettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+
+                Toggle(isOn: $settings.lowLatencySpeech) {
+                    Label("Prioritise Low Latency", systemImage: "hare")
+                }
+
+                if settings.lowLatencySpeech {
+                    Text("Skips the extra summarisation step before speaking for faster responses.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Hands-Free Conversation") {
+                Toggle(isOn: $settings.conversationModeEnabled) {
+                    Label("Conversation Mode", systemImage: "checkmark.square")
+                }
+
+                Toggle(isOn: $settings.autoResumeListening) {
+                    Label("Auto-Resume Listening", systemImage: "arrow.clockwise.circle")
+                }
+                .disabled(!settings.conversationModeEnabled)
+
+                Toggle(isOn: $settings.headsetSingleTapAcknowledge) {
+                    Label("Headset Single-Tap Acknowledge", systemImage: "airpodspro")
+                }
+                .disabled(!settings.conversationModeEnabled)
+
+                Toggle(isOn: $settings.keywordAcknowledgeEnabled) {
+                    Label("Keyword Acknowledge", systemImage: "waveform.and.mic")
+                }
+                .disabled(!settings.conversationModeEnabled)
+
+                if settings.keywordAcknowledgeEnabled && settings.conversationModeEnabled {
+                    TextField("Keyword (for example: over)", text: $settings.keywordAcknowledgePhrase)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                }
             }
 
             Section("How It Works") {
@@ -289,7 +326,8 @@ public struct OpenClawSettingsView: View {
                     InfoStepRow(number: 1, text: "Tap the mic to record your voice message")
                     InfoStepRow(number: 2, text: "Your speech is transcribed using your selected model")
                     InfoStepRow(number: 3, text: "The text is sent to your OpenClaw agent")
-                    InfoStepRow(number: 4, text: "The response is summarised and spoken back to you")
+                    InfoStepRow(number: 4, text: "The response is spoken back to you")
+                    InfoStepRow(number: 5, text: "In conversation mode, listening can restart automatically")
                 }
                 .padding(.vertical, 4)
             }

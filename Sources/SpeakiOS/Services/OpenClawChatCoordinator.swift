@@ -1,5 +1,7 @@
 #if os(iOS)
+import Combine
 import Foundation
+import MediaPlayer
 import SpeakCore
 import SwiftUI
 import os.log
@@ -112,8 +114,13 @@ public final class OpenClawChatCoordinator: ObservableObject {
     private let appSettings = AppSettings.shared
 
     private var transcriber: TranscriberCoordinator?
+    private var recordingMonitorTask: Task<Void, Never>?
+    private var awaitingKeywordAcknowledge = false
     private var currentRunId: String?
     private var accumulatedResponse = ""
+    private var settingsCancellables = Set<AnyCancellable>()
+    private var headsetToggleTarget: Any?
+    private var headsetPauseTarget: Any?
 
     private let logger = Logger(subsystem: "com.justspeaktoit.ios", category: "OpenClawChat")
 
@@ -121,6 +128,17 @@ public final class OpenClawChatCoordinator: ObservableObject {
 
     public init() {
         setupClientCallbacks()
+        observeSettings()
+        ttsClient.$isSpeaking
+            .sink { [weak self] speaking in
+                self?.isSpeaking = speaking
+            }
+            .store(in: &settingsCancellables)
+        configureHeadsetCommandHandling(enabled: settings.headsetSingleTapAcknowledge)
+    }
+
+    deinit {
+        unregisterHeadsetCommandHandlers()
     }
 
     // MARK: - Connection
@@ -173,34 +191,54 @@ public final class OpenClawChatCoordinator: ObservableObject {
 
     /// Start recording voice input using the app's configured transcription provider.
     public func startVoiceInput() async throws {
-        guard !isRecording else { return }
+        guard !isRecording, !isProcessing, !isSpeaking else { return }
 
         let coordinator = TranscriberCoordinator()
         self.transcriber = coordinator
         isRecording = true
         partialTranscript = ""
+        awaitingKeywordAcknowledge = false
 
         try await coordinator.start()
 
-        // Monitor partial text updates
-        Task { @MainActor in
+        recordingMonitorTask?.cancel()
+        recordingMonitorTask = Task { @MainActor [weak self] in
+            guard let self else { return }
             while self.isRecording, let activeTranscriber = self.transcriber {
-                self.partialTranscript = activeTranscriber.partialText
-                try? await Task.sleep(for: .milliseconds(100))
+                let liveText = activeTranscriber.partialText
+                self.partialTranscript = liveText
+
+                if self.shouldTriggerKeywordAcknowledge(for: liveText) {
+                    self.awaitingKeywordAcknowledge = true
+                    await self.stopVoiceInputAndSend(triggeredByAcknowledgement: true)
+                    return
+                }
+
+                try? await Task.sleep(for: .milliseconds(60))
             }
         }
     }
 
     /// Stop recording and send the transcribed text to OpenClaw.
-    public func stopVoiceInputAndSend() async {
+    public func stopVoiceInputAndSend(triggeredByAcknowledgement: Bool = false) async {
         guard isRecording, let coordinator = transcriber else { return }
+
+        recordingMonitorTask?.cancel()
+        recordingMonitorTask = nil
+        awaitingKeywordAcknowledge = false
 
         let result = await coordinator.stop()
         isRecording = false
         transcriber = nil
 
-        let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        var text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if settings.keywordAcknowledgeEnabled {
+            text = removingAcknowledgementKeyword(from: text)
+        }
+        guard !text.isEmpty else {
+            await maybeResumeConversationListening()
+            return
+        }
 
         partialTranscript = ""
         await sendTextMessage(text)
@@ -208,133 +246,78 @@ public final class OpenClawChatCoordinator: ObservableObject {
 
     /// Cancel voice input without sending.
     public func cancelVoiceInput() {
+        recordingMonitorTask?.cancel()
+        recordingMonitorTask = nil
+        awaitingKeywordAcknowledge = false
         transcriber?.cancel()
         transcriber = nil
         isRecording = false
         partialTranscript = ""
     }
 
-    // MARK: - Text Sending
-
-    public func sendTextMessage(_ text: String) async {
-        guard let conv = currentConversation else {
-            startNewConversation()
-            // Small delay for connection
-            try? await Task.sleep(for: .milliseconds(500))
-            await sendTextMessage(text)
+    public func conversationModeChanged(isEnabled: Bool) async {
+        if isEnabled {
+            await maybeResumeConversationListening()
             return
         }
 
-        // Ensure connected
-        if case .disconnected = connectionState {
-            connect()
-            try? await Task.sleep(for: .milliseconds(1000))
-        }
-
-        // Add user message
-        let userMessage = OpenClawClient.ChatMessage(role: "user", content: text)
-        store.addMessage(userMessage, to: conv.id)
-        currentConversation = store.conversations.first { $0.id == conv.id }
-
-        isProcessing = true
-        streamingResponse = ""
-        accumulatedResponse = ""
-
-        client.sendMessage(text, sessionKey: conv.sessionKey) { [weak self] result in
-            Task { @MainActor in
-                switch result {
-                case .success(let runId):
-                    self?.currentRunId = runId
-                    self?.logger.info("Message sent, runId: \(runId)")
-                case .failure(let error):
-                    self?.error = error
-                    self?.isProcessing = false
-                    self?.logger.error("Send failed: \(error.localizedDescription)")
-                }
-            }
+        if isRecording {
+            cancelVoiceInput()
         }
     }
 
-    // MARK: - Private
-
-    private func setupClientCallbacks() {
-        client.onConnectionStateChanged = { [weak self] state in
-            Task { @MainActor in
-                self?.connectionState = state
-            }
+    public func handleAcknowledgeSignal() async {
+        if isRecording {
+            await stopVoiceInputAndSend(triggeredByAcknowledgement: true)
+            return
         }
 
-        client.onChatDelta = { [weak self] runId, delta in
-            Task { @MainActor in
-                guard self?.currentRunId == runId else { return }
-                // Delta events carry cumulative text (full content so far),
-                // not incremental fragments — replace, don't append.
-                self?.accumulatedResponse = delta
-                self?.streamingResponse = delta
-            }
+        if isSpeaking {
+            ttsClient.stop()
+            await maybeResumeConversationListening()
+            return
         }
 
-        client.onChatFinal = { [weak self] runId, finalMessage in
-            Task { @MainActor in
-                guard let self, self.currentRunId == runId else { return }
-
-                let responseText = finalMessage.isEmpty ? self.accumulatedResponse : finalMessage
-                self.isProcessing = false
-                self.streamingResponse = ""
-                self.accumulatedResponse = ""
-
-                guard let conv = self.currentConversation else { return }
-
-                // Add assistant message
-                let assistantMessage = OpenClawClient.ChatMessage(
-                    role: "assistant",
-                    content: responseText
-                )
-                self.store.addMessage(assistantMessage, to: conv.id)
-                self.currentConversation = self.store.conversations.first { $0.id == conv.id }
-
-                // Summarise and speak if enabled
-                if self.settings.ttsEnabled && self.appSettings.hasDeepgramKey {
-                    await self.summariseAndSpeak(responseText)
-                }
-            }
-        }
-
-        client.onChatError = { [weak self] runId, errorMessage in
-            Task { @MainActor in
-                guard self?.currentRunId == runId else { return }
-                self?.error = OpenClawError.serverError(errorMessage)
-                self?.isProcessing = false
-            }
-        }
+        await maybeResumeConversationListening()
     }
 
-    private func summariseAndSpeak(_ text: String) async {
+    // MARK: - Text Sending
+
+    public func sendTextMessage(_ text: String) async {
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedText.isEmpty else { return }
+
         do {
-            var spokenText = text
+            let conv = try await ensureConversationReady()
 
-            // Summarise if enabled
-            if settings.summariseResponses && appSettings.hasOpenRouterKey {
-                spokenText = try await summariser.summarise(
-                    text,
-                    apiKey: appSettings.openRouterAPIKey
-                )
+            // Add user message
+            let userMessage = OpenClawClient.ChatMessage(role: "user", content: trimmedText)
+            store.addMessage(userMessage, to: conv.id)
+            currentConversation = store.conversations.first { $0.id == conv.id }
+
+            isProcessing = true
+            streamingResponse = ""
+            accumulatedResponse = ""
+
+            client.sendMessage(trimmedText, sessionKey: conv.sessionKey) { [weak self] result in
+                Task { @MainActor in
+                    switch result {
+                    case .success(let runId):
+                        self?.currentRunId = runId
+                        self?.logger.info("Message sent, runId: \(runId)")
+                    case .failure(let error):
+                        self?.error = error
+                        self?.isProcessing = false
+                        self?.logger.error("Send failed: \(error.localizedDescription)")
+                    }
+                }
             }
-
-            // Apply TTS settings
-            ttsClient.model = settings.ttsModel
-            ttsClient.voice = settings.ttsVoice
-            ttsClient.speed = settings.ttsSpeed
-
-            // Speak via Deepgram TTS
-            isSpeaking = true
-            try await ttsClient.speak(text: spokenText, apiKey: appSettings.deepgramAPIKey)
-            isSpeaking = false
         } catch {
-            isSpeaking = false
-            logger.error("TTS failed: \(error.localizedDescription)")
-            // Don't set self.error — TTS failure shouldn't block the UI
+            self.error = error
+            self.isProcessing = false
+            self.logger.error("Connection failed: \(error.localizedDescription)")
         }
     }
+
 }
 #endif

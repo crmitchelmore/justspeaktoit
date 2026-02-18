@@ -106,10 +106,11 @@ public final class DeepgramTTSClient: ObservableObject {
 
             // Wait for playback to complete
             while audioPlayer?.isPlaying == true {
-                try await Task.sleep(for: .milliseconds(100))
+                try await Task.sleep(for: .milliseconds(30))
             }
 
             isSpeaking = false
+            try? audioSession.setActive(false, options: .notifyOthersOnDeactivation)
         } catch {
             isSpeaking = false
             self.error = error

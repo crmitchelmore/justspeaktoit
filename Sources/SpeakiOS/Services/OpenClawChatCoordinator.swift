@@ -113,9 +113,9 @@ public final class OpenClawChatCoordinator: ObservableObject {
     let settings = OpenClawSettings.shared
     let appSettings = AppSettings.shared
 
-    var transcriber: TranscriberCoordinator?
-    var recordingMonitorTask: Task<Void, Never>?
-    var awaitingKeywordAcknowledge = false
+    private var transcriber: TranscriberCoordinator?
+    private var recordingMonitorTask: Task<Void, Never>?
+    private(set) var awaitingKeywordAcknowledge = false
     var currentRunId: String?
     var accumulatedResponse = ""
     var settingsCancellables = Set<AnyCancellable>()

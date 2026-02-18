@@ -159,7 +159,7 @@ public struct OpenClawChatView: View {
             .frame(minHeight: 44)
 
             if settings.conversationModeEnabled {
-                Text("Tap to confirm")
+                Text("Tap the chat area to acknowledge")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

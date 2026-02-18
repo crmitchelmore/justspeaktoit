@@ -106,23 +106,23 @@ public final class OpenClawChatCoordinator: ObservableObject {
 
     // MARK: - Dependencies
 
-    private let client = OpenClawClient()
-    private let ttsClient = DeepgramTTSClient()
-    private let summariser = VoiceSummariser()
-    private let store = ConversationStore.shared
-    private let settings = OpenClawSettings.shared
-    private let appSettings = AppSettings.shared
+    let client = OpenClawClient()
+    let ttsClient = DeepgramTTSClient()
+    let summariser = VoiceSummariser()
+    let store = ConversationStore.shared
+    let settings = OpenClawSettings.shared
+    let appSettings = AppSettings.shared
 
-    private var transcriber: TranscriberCoordinator?
-    private var recordingMonitorTask: Task<Void, Never>?
-    private var awaitingKeywordAcknowledge = false
-    private var currentRunId: String?
-    private var accumulatedResponse = ""
-    private var settingsCancellables = Set<AnyCancellable>()
-    private var headsetToggleTarget: Any?
-    private var headsetPauseTarget: Any?
+    var transcriber: TranscriberCoordinator?
+    var recordingMonitorTask: Task<Void, Never>?
+    var awaitingKeywordAcknowledge = false
+    var currentRunId: String?
+    var accumulatedResponse = ""
+    var settingsCancellables = Set<AnyCancellable>()
+    var headsetToggleTarget: Any?
+    var headsetPauseTarget: Any?
 
-    private let logger = Logger(subsystem: "com.justspeaktoit.ios", category: "OpenClawChat")
+    let logger = Logger(subsystem: "com.justspeaktoit.ios", category: "OpenClawChat")
 
     // MARK: - Init
 
@@ -135,10 +135,6 @@ public final class OpenClawChatCoordinator: ObservableObject {
             }
             .store(in: &settingsCancellables)
         configureHeadsetCommandHandling(enabled: settings.headsetSingleTapAcknowledge)
-    }
-
-    deinit {
-        unregisterHeadsetCommandHandlers()
     }
 
     // MARK: - Connection

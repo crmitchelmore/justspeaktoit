@@ -264,6 +264,11 @@ extension OpenClawChatCoordinator {
             return
         }
 
+        if nonEmpty.count == 1 {
+            await summariseAndSpeak(nonEmpty[0])
+            return
+        }
+
         for response in nonEmpty {
             await summariseAndSpeak(response, allowSummary: false)
         }

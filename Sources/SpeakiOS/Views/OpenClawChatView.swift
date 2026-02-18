@@ -153,13 +153,22 @@ public struct OpenClawChatView: View {
             Button {
                 settings.conversationModeEnabled.toggle()
             } label: {
-                Label(
-                    "Conversation Mode",
-                    systemImage: settings.conversationModeEnabled ? "checkmark.square.fill" : "square"
+                HStack(spacing: 8) {
+                    Image(systemName: settings.conversationModeEnabled ? "checkmark.square.fill" : "square")
+                        .font(.title3)
+                    Text("Conversation Mode")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 12)
+                .frame(minHeight: 44)
+                .background(
+                    Color(.secondarySystemBackground),
+                    in: RoundedRectangle(cornerRadius: 10)
                 )
-                .font(.subheadline)
             }
             .buttonStyle(.plain)
+            .contentShape(Rectangle())
 
             Spacer()
 
@@ -198,6 +207,7 @@ public struct OpenClawChatView: View {
                 Image(systemName: coordinator.isRecording ? "stop.circle.fill" : "mic.circle.fill")
                     .font(.system(size: 32))
                     .foregroundStyle(coordinator.isRecording ? .red : Color.accentColor)
+                    .frame(width: 52, height: 52)
             }
             .accessibilityLabel(coordinator.isRecording ? "Stop recording" : "Start voice input")
 
@@ -209,6 +219,7 @@ public struct OpenClawChatView: View {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.system(size: 32))
                         .foregroundStyle(Color.accentColor)
+                        .frame(width: 52, height: 52)
                 }
                 .transition(.scale.combined(with: .opacity))
                 .accessibilityLabel("Send message")

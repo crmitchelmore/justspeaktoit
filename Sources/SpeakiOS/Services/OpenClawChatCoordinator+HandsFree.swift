@@ -81,10 +81,12 @@ extension OpenClawChatCoordinator {
         guard settings.isConfigured else { throw OpenClawError.notConnected }
         if case .connected = connectionState { return }
 
+        var didInitiateConnect = false
         if case .connecting = connectionState {
             // Existing connection attempt in progress.
         } else {
             connect()
+            didInitiateConnect = true
         }
 
         let deadline = Date().addingTimeInterval(5)
@@ -95,7 +97,10 @@ extension OpenClawChatCoordinator {
             case .error(let message):
                 throw OpenClawError.serverError(message)
             case .disconnected:
-                connect()
+                if !didInitiateConnect {
+                    connect()
+                    didInitiateConnect = true
+                }
             case .connecting:
                 break
             }
@@ -130,7 +135,17 @@ extension OpenClawChatCoordinator {
             .trimmingCharacters(in: trailingCharacters)
             .lowercased()
 
-        return normalisedTranscript.hasSuffix(keyword.lowercased())
+        let lowerKeyword = keyword.lowercased()
+        guard normalisedTranscript.hasSuffix(lowerKeyword) else { return false }
+
+        let prefixEnd = normalisedTranscript.index(
+            normalisedTranscript.endIndex,
+            offsetBy: -lowerKeyword.count
+        )
+        if prefixEnd == normalisedTranscript.startIndex { return true }
+
+        let charBefore = normalisedTranscript[normalisedTranscript.index(before: prefixEnd)]
+        return charBefore.isWhitespace || charBefore.isPunctuation
     }
 
     func removingAcknowledgementKeyword(from text: String) -> String {
@@ -226,11 +241,8 @@ extension OpenClawChatCoordinator {
             ttsClient.speed = settings.ttsSpeed
 
             // Speak via Deepgram TTS
-            isSpeaking = true
             try await ttsClient.speak(text: spokenText, apiKey: appSettings.deepgramAPIKey)
-            isSpeaking = false
         } catch {
-            isSpeaking = false
             logger.error("TTS failed: \(error.localizedDescription)")
             // Don't set self.error — TTS failure shouldn't block the UI
         }

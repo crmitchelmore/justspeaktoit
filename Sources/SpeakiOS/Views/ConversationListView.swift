@@ -314,7 +314,7 @@ public struct OpenClawSettingsView: View {
                 }
                 .disabled(!settings.conversationModeEnabled)
 
-                if settings.keywordAcknowledgeEnabled {
+                if settings.keywordAcknowledgeEnabled && settings.conversationModeEnabled {
                     TextField("Keyword (for example: over)", text: $settings.keywordAcknowledgePhrase)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()

@@ -129,6 +129,12 @@ public final class OpenClawChatCoordinator: ObservableObject {
     public init() {
         setupClientCallbacks()
         observeSettings()
+        ttsClient.$isSpeaking
+            .receive(on: RunLoop.main)
+            .sink { [weak self] speaking in
+                self?.isSpeaking = speaking
+            }
+            .store(in: &settingsCancellables)
         configureHeadsetCommandHandling(enabled: settings.headsetSingleTapAcknowledge)
     }
 
@@ -269,7 +275,6 @@ public final class OpenClawChatCoordinator: ObservableObject {
 
         if isSpeaking {
             ttsClient.stop()
-            isSpeaking = false
             await maybeResumeConversationListening()
             return
         }

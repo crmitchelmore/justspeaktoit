@@ -118,7 +118,7 @@ public final class OpenClawSettings: ObservableObject {
             UserDefaults.standard.object(forKey: "openclaw.keywordAcknowledgeEnabled") as? Bool ?? false
         self.keywordAcknowledgePhrase =
             UserDefaults.standard.string(forKey: "openclaw.keywordAcknowledgePhrase") ?? "over"
-        self.lowLatencySpeech = UserDefaults.standard.object(forKey: "openclaw.lowLatencySpeech") as? Bool ?? true
+        self.lowLatencySpeech = UserDefaults.standard.object(forKey: "openclaw.lowLatencySpeech") as? Bool ?? false
     }
 
     // MARK: - Keychain

@@ -118,6 +118,7 @@ public final class OpenClawChatCoordinator: ObservableObject {
     private(set) var awaitingKeywordAcknowledge = false
     var currentRunId: String?
     var accumulatedResponse = ""
+    var pendingAssistantResponses: [String] = []
     var settingsCancellables = Set<AnyCancellable>()
     var headsetToggleTarget: Any?
     var headsetPauseTarget: Any?
@@ -294,6 +295,7 @@ public final class OpenClawChatCoordinator: ObservableObject {
             isProcessing = true
             streamingResponse = ""
             accumulatedResponse = ""
+            pendingAssistantResponses = []
 
             client.sendMessage(trimmedText, sessionKey: conv.sessionKey) { [weak self] result in
                 Task { @MainActor in

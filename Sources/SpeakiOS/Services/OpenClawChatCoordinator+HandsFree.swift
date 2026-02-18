@@ -16,11 +16,15 @@ extension OpenClawChatCoordinator {
 
         client.onChatDelta = { [weak self] runId, delta in
             Task { @MainActor in
-                guard self?.currentRunId == runId else { return }
-                // Delta events carry cumulative text (full content so far),
-                // not incremental fragments — replace, don't append.
-                self?.accumulatedResponse = delta
-                self?.streamingResponse = delta
+                guard let self, self.currentRunId == runId else { return }
+                let previous = self.accumulatedResponse
+
+                if self.isNewAssistantSegment(delta, comparedTo: previous) {
+                    self.persistAssistantMessageIfNeeded(previous)
+                }
+
+                self.accumulatedResponse = delta
+                self.streamingResponse = delta
             }
         }
 
@@ -33,20 +37,13 @@ extension OpenClawChatCoordinator {
                 self.isProcessing = false
                 self.streamingResponse = ""
                 self.accumulatedResponse = ""
-
-                guard let conv = self.currentConversation else { return }
-
-                // Add assistant message
-                let assistantMessage = OpenClawClient.ChatMessage(
-                    role: "assistant",
-                    content: responseText
-                )
-                self.store.addMessage(assistantMessage, to: conv.id)
-                self.currentConversation = self.store.conversations.first { $0.id == conv.id }
+                self.persistAssistantMessageIfNeeded(responseText)
+                let responseBatch = self.pendingAssistantResponses
+                self.pendingAssistantResponses = []
 
                 // Summarise and speak if enabled
                 if self.settings.ttsEnabled && self.appSettings.hasDeepgramKey {
-                    await self.summariseAndSpeak(responseText)
+                    await self.speakAssistantResponses(responseBatch)
                 }
 
                 await self.maybeResumeConversationListening()
@@ -59,6 +56,9 @@ extension OpenClawChatCoordinator {
                 self?.currentRunId = nil
                 self?.error = OpenClawError.serverError(errorMessage)
                 self?.isProcessing = false
+                self?.streamingResponse = ""
+                self?.accumulatedResponse = ""
+                self?.pendingAssistantResponses = []
             }
         }
     }
@@ -118,6 +118,30 @@ extension OpenClawChatCoordinator {
         } catch {
             logger.error("Auto-resume recording failed: \(error.localizedDescription)")
         }
+    }
+
+    private func isNewAssistantSegment(_ incoming: String, comparedTo previous: String) -> Bool {
+        guard !previous.isEmpty else { return false }
+        if incoming.hasPrefix(previous) || previous.hasPrefix(incoming) {
+            return false
+        }
+        return true
+    }
+
+    private func persistAssistantMessageIfNeeded(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let conv = currentConversation else { return }
+
+        if let existingConversation = store.conversations.first(where: { $0.id == conv.id }),
+           existingConversation.messages.last?.role == "assistant",
+           existingConversation.messages.last?.content == trimmed {
+            return
+        }
+
+        let assistantMessage = OpenClawClient.ChatMessage(role: "assistant", content: trimmed)
+        store.addMessage(assistantMessage, to: conv.id)
+        currentConversation = store.conversations.first { $0.id == conv.id }
+        pendingAssistantResponses.append(trimmed)
     }
 
     func shouldTriggerKeywordAcknowledge(for transcript: String) -> Bool {
@@ -221,12 +245,32 @@ extension OpenClawChatCoordinator {
         commandCenter.pauseCommand.isEnabled = false
     }
 
-    func summariseAndSpeak(_ text: String) async {
+    private func speakAssistantResponses(_ responses: [String]) async {
+        let nonEmpty = responses.map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines)
+        }.filter { !$0.isEmpty }
+        guard !nonEmpty.isEmpty else { return }
+
+        if nonEmpty.count > 1,
+           settings.summariseResponses,
+           !settings.lowLatencySpeech,
+           appSettings.hasOpenRouterKey {
+            await summariseAndSpeak(nonEmpty.joined(separator: "\n\n"), allowSummary: true)
+            return
+        }
+
+        for response in nonEmpty {
+            await summariseAndSpeak(response, allowSummary: false)
+        }
+    }
+
+    func summariseAndSpeak(_ text: String, allowSummary: Bool = true) async {
         do {
             var spokenText = text
 
             // Summarise if enabled and latency mode is not prioritised.
-            if settings.summariseResponses &&
+            if allowSummary &&
+                settings.summariseResponses &&
                 !settings.lowLatencySpeech &&
                 appSettings.hasOpenRouterKey {
                 spokenText = try await summariser.summarise(

@@ -130,7 +130,6 @@ public final class OpenClawChatCoordinator: ObservableObject {
         setupClientCallbacks()
         observeSettings()
         ttsClient.$isSpeaking
-            .receive(on: RunLoop.main)
             .sink { [weak self] speaking in
                 self?.isSpeaking = speaking
             }
@@ -233,7 +232,7 @@ public final class OpenClawChatCoordinator: ObservableObject {
         transcriber = nil
 
         var text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if triggeredByAcknowledgement || settings.keywordAcknowledgeEnabled {
+        if settings.keywordAcknowledgeEnabled {
             text = removingAcknowledgementKeyword(from: text)
         }
         guard !text.isEmpty else {

@@ -1,5 +1,6 @@
 #if os(iOS)
 import Foundation
+import SpeakSync
 import SwiftUI
 
 // MARK: - History Item Model
@@ -12,14 +13,16 @@ public struct iOSHistoryItem: Identifiable, Codable {
     public let model: String
     public let duration: TimeInterval
     public let wordCount: Int
-    
+    public let originPlatform: String
+
     public init(
         id: UUID = UUID(),
         createdAt: Date = Date(),
         transcription: String,
         model: String,
         duration: TimeInterval,
-        wordCount: Int
+        wordCount: Int,
+        originPlatform: String = "ios"
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -27,51 +30,112 @@ public struct iOSHistoryItem: Identifiable, Codable {
         self.model = model
         self.duration = duration
         self.wordCount = wordCount
+        self.originPlatform = originPlatform
+    }
+
+    /// Convert to a syncable entry for CloudKit.
+    func toSyncable() -> SyncableHistoryEntry {
+        SyncableHistoryEntry(
+            id: id,
+            createdAt: createdAt,
+            rawTranscription: transcription,
+            postProcessedText: nil,
+            model: model,
+            duration: duration,
+            wordCount: wordCount,
+            originPlatform: originPlatform,
+            updatedAt: createdAt
+        )
+    }
+
+    /// Create from a synced remote entry.
+    static func fromSyncable(_ entry: SyncableHistoryEntry) -> iOSHistoryItem {
+        let text = entry.postProcessedText
+            ?? entry.rawTranscription
+            ?? ""
+        return iOSHistoryItem(
+            id: entry.id,
+            createdAt: entry.createdAt,
+            transcription: text,
+            model: entry.model,
+            duration: entry.duration,
+            wordCount: entry.wordCount,
+            originPlatform: entry.originPlatform
+        )
     }
 }
 
 // MARK: - History Manager
 
-/// Manages transcription history persistence for iOS.
+/// Manages transcription history persistence for iOS with CloudKit sync.
 @MainActor
 public final class iOSHistoryManager: ObservableObject {
     public static let shared = iOSHistoryManager()
-    
+
     @Published public private(set) var items: [iOSHistoryItem] = []
     @Published public private(set) var isLoading = false
-    
+
     private let fileURL: URL
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
-    
+
+    /// IDs of entries that have been synced to CloudKit.
+    private var syncedIDs: Set<UUID> = []
+    private let syncedIDsKey = "speak.sync.syncedHistoryIDs"
+
     private init() {
-        let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        self.fileURL = documentsURL.appendingPathComponent("transcription-history.json")
-        
+        let documentsURL = FileManager.default.urls(
+            for: .documentDirectory,
+            in: .userDomainMask
+        )[0]
+        self.fileURL = documentsURL.appendingPathComponent(
+            "transcription-history.json"
+        )
+
         encoder.dateEncodingStrategy = .iso8601
         decoder.dateDecodingStrategy = .iso8601
-        
+
+        loadSyncedIDs()
+
         Task {
             await loadHistory()
+            await initializeSync()
         }
     }
-    
+
+    // MARK: - CloudKit Sync Init
+
+    private func initializeSync() async {
+        await HistorySyncEngine.shared.initialize(delegate: self)
+        await HistorySyncEngine.shared.sync()
+    }
+
     // MARK: - Public API
-    
+
     /// Adds a new transcription to history.
     public func add(_ item: iOSHistoryItem) {
         items.insert(item, at: 0)
         saveHistory()
+
+        // Upload to CloudKit in background
+        Task {
+            try? await HistorySyncEngine.shared.upload(
+                entry: item.toSyncable()
+            )
+            syncedIDs.insert(item.id)
+            saveSyncedIDs()
+        }
     }
-    
+
     /// Creates and adds a history item from transcription result.
     public func recordTranscription(
         text: String,
         model: String,
         duration: TimeInterval
     ) {
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return }
+
         let item = iOSHistoryItem(
             transcription: text,
             model: model,
@@ -80,27 +144,51 @@ public final class iOSHistoryManager: ObservableObject {
         )
         add(item)
     }
-    
+
     /// Removes an item from history.
     public func remove(_ item: iOSHistoryItem) {
         items.removeAll { $0.id == item.id }
         saveHistory()
+
+        // Delete from CloudKit in background
+        Task {
+            try? await HistorySyncEngine.shared.delete(entryID: item.id)
+            syncedIDs.remove(item.id)
+            saveSyncedIDs()
+        }
     }
-    
+
     /// Clears all history.
     public func clearAll() {
+        let allIDs = items.map(\.id)
         items.removeAll()
         saveHistory()
+
+        // Delete all from CloudKit in background
+        Task {
+            for entryID in allIDs {
+                try? await HistorySyncEngine.shared.delete(entryID: entryID)
+            }
+            syncedIDs.removeAll()
+            saveSyncedIDs()
+        }
     }
-    
+
+    /// Trigger a manual sync.
+    public func triggerSync() async {
+        await HistorySyncEngine.shared.sync()
+    }
+
     // MARK: - Persistence
-    
+
     private func loadHistory() async {
         isLoading = true
         defer { isLoading = false }
-        
-        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
-        
+
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            return
+        }
+
         do {
             let data = try Data(contentsOf: fileURL)
             items = try decoder.decode([iOSHistoryItem].self, from: data)
@@ -108,7 +196,7 @@ public final class iOSHistoryManager: ObservableObject {
             print("[iOSHistoryManager] Failed to load history: \(error)")
         }
     }
-    
+
     private func saveHistory() {
         do {
             let data = try encoder.encode(items)
@@ -117,12 +205,59 @@ public final class iOSHistoryManager: ObservableObject {
             print("[iOSHistoryManager] Failed to save history: \(error)")
         }
     }
+
+    // MARK: - Synced IDs Tracking
+
+    private func loadSyncedIDs() {
+        if let strings = UserDefaults.standard.stringArray(
+            forKey: syncedIDsKey
+        ) {
+            syncedIDs = Set(strings.compactMap { UUID(uuidString: $0) })
+        }
+    }
+
+    private func saveSyncedIDs() {
+        let strings = syncedIDs.map(\.uuidString)
+        UserDefaults.standard.set(strings, forKey: syncedIDsKey)
+    }
+}
+
+// MARK: - HistorySyncDelegate
+
+extension iOSHistoryManager: HistorySyncDelegate {
+    public func pendingEntries() -> [SyncableHistoryEntry] {
+        items
+            .filter { !syncedIDs.contains($0.id) }
+            .map { $0.toSyncable() }
+    }
+
+    public func didReceiveRemoteEntry(_ entry: SyncableHistoryEntry) {
+        // Skip if we already have this entry
+        guard !items.contains(where: { $0.id == entry.id }) else {
+            return
+        }
+
+        let item = iOSHistoryItem.fromSyncable(entry)
+        items.insert(item, at: 0)
+        items.sort { $0.createdAt > $1.createdAt }
+        saveHistory()
+        syncedIDs.insert(entry.id)
+        saveSyncedIDs()
+    }
+
+    public func didDeleteRemoteEntry(id: UUID) {
+        items.removeAll { $0.id == id }
+        saveHistory()
+        syncedIDs.remove(id)
+        saveSyncedIDs()
+    }
 }
 
 // MARK: - History View
 
 public struct HistoryView: View {
     @StateObject private var historyManager = iOSHistoryManager.shared
+    @ObservedObject private var syncEngine = HistorySyncEngine.shared
     @State private var showingClearConfirmation = false
     @State private var showSkeletonLoading = false
     
@@ -142,6 +277,9 @@ public struct HistoryView: View {
         }
         .navigationTitle("History")
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                syncStatusView
+            }
             if !historyManager.items.isEmpty {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(role: .destructive) {
@@ -151,6 +289,9 @@ public struct HistoryView: View {
                     }
                 }
             }
+        }
+        .refreshable {
+            await historyManager.triggerSync()
         }
         .confirmationDialog(
             "Clear History",
@@ -174,6 +315,22 @@ public struct HistoryView: View {
                     }
                 }
             }
+        }
+    }
+    
+    @ViewBuilder
+    private var syncStatusView: some View {
+        if syncEngine.state.isSyncing {
+            ProgressView()
+                .controlSize(.small)
+        } else if syncEngine.state.isCloudAvailable {
+            Image(systemName: "icloud.fill")
+                .foregroundStyle(.green)
+                .font(.caption)
+        } else {
+            Image(systemName: "icloud.slash")
+                .foregroundStyle(.secondary)
+                .font(.caption)
         }
     }
     
@@ -323,6 +480,14 @@ struct HistoryItemRow: View {
                     .padding(.vertical, 4)
                     .background(Color.secondary.opacity(0.15), in: Capsule())
                 
+                if item.originPlatform != "ios" {
+                    Text(platformDisplayName)
+                        .font(.caption2)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.blue.opacity(0.15), in: Capsule())
+                }
+                
                 Spacer()
                 
                 if item.transcription.count > 150 {
@@ -351,6 +516,17 @@ struct HistoryItemRow: View {
             return "Apple Speech"
         }
         return item.model
+    }
+
+    private var platformDisplayName: String {
+        switch item.originPlatform {
+        case "macos":
+            return "Mac"
+        case "ios":
+            return "iPhone"
+        default:
+            return item.originPlatform
+        }
     }
     
     private func formatDuration(_ seconds: TimeInterval) -> String {

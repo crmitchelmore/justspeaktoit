@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import SpeakSync
 
 @MainActor
 final class AppEnvironment: ObservableObject {
@@ -330,6 +331,12 @@ enum WireUp {
     // Auto-start transport server if enabled
     if settings.enableSendToMac {
       try? transportServer.start()
+    }
+
+    // Start CloudKit history sync
+    let syncAdapter = MacHistorySyncAdapter(historyManager: history)
+    Task {
+      await syncAdapter.start()
     }
 
     Task { await secureStorage.preloadTrackedSecrets() }

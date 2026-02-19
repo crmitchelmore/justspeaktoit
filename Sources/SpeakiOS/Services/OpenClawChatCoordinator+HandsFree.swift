@@ -308,26 +308,35 @@ extension OpenClawChatCoordinator {
 
     // MARK: - Live Activity Helpers
 
+    /// Observes `isSpeaking` and `isProcessing` changes to keep the Live Activity current.
+    func observeLiveActivityStateChanges() {
+        $isSpeaking
+            .removeDuplicates()
+            .sink { [weak self] _ in self?.updateLiveActivityState() }
+            .store(in: &settingsCancellables)
+
+        $isProcessing
+            .removeDuplicates()
+            .sink { [weak self] _ in self?.updateLiveActivityState() }
+            .store(in: &settingsCancellables)
+
+        $isRecording
+            .removeDuplicates()
+            .sink { [weak self] _ in self?.updateLiveActivityState() }
+            .store(in: &settingsCancellables)
+    }
+
     /// Updates the Live Activity with the current coordinator state, if one is running.
     func updateLiveActivityState() {
         guard openClawActivityManager.isActivityRunning else { return }
         let title = currentConversation?.title ?? "OpenClaw"
         let count = currentConversation?.messages.count ?? 0
-
-        var status: OpenClawActivityAttributes.ConversationStatus = .idle
-        if isRecording {
-            status = .recording
-        } else if isProcessing {
-            status = .processing
-        } else if isSpeaking {
-            status = .speaking
-        }
+        let status = currentLiveActivityStatus
 
         openClawActivityManager.updateActivity(
             status: status,
             title: title,
-            messageCount: count,
-            duration: 0
+            messageCount: count
         )
     }
 }

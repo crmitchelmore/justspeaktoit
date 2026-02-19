@@ -138,6 +138,7 @@ public final class OpenClawChatCoordinator: ObservableObject {
                 self?.isSpeaking = speaking
             }
             .store(in: &settingsCancellables)
+        observeLiveActivityStateChanges()
         configureHeadsetCommandHandling(enabled: settings.headsetSingleTapAcknowledge)
     }
 
@@ -206,26 +207,29 @@ public final class OpenClawChatCoordinator: ObservableObject {
         let title = currentConversation?.title ?? "OpenClaw"
         let count = currentConversation?.messages.count ?? 0
 
-        var status: OpenClawActivityAttributes.ConversationStatus = .idle
-        if isRecording {
-            status = .recording
-        } else if isProcessing {
-            status = .processing
-        } else if isSpeaking {
-            status = .speaking
-        }
+        let status = currentLiveActivityStatus
 
         openClawActivityManager.startActivity(title: title, messageCount: count)
 
         if status != .recording {
-            let elapsed = 0
             openClawActivityManager.updateActivity(
                 status: status,
                 title: title,
-                messageCount: count,
-                duration: elapsed
+                messageCount: count
             )
         }
+    }
+
+    /// Computed property for current Live Activity status based on coordinator state.
+    var currentLiveActivityStatus: OpenClawActivityAttributes.ConversationStatus {
+        if isRecording {
+            return .recording
+        } else if isProcessing {
+            return .processing
+        } else if isSpeaking {
+            return .speaking
+        }
+        return .idle
     }
 
     /// Ends the Live Activity (for example when the app becomes active again).

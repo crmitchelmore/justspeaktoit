@@ -66,6 +66,7 @@ public final class OpenClawActivityManager: ObservableObject {
 
     private var lastUpdateTime: Date = .distantPast
     private let minimumUpdateInterval: TimeInterval = 1.0
+    private var updateThrottleTask: Task<Void, Never>?
 
     public init() {}
 
@@ -96,18 +97,24 @@ public final class OpenClawActivityManager: ObservableObject {
     }
 
     /// Updates the Live Activity state.
+    /// Duration is automatically calculated from the activity's start time.
     public func updateActivity(
         status: OpenClawActivityAttributes.ConversationStatus,
         title: String,
-        messageCount: Int,
-        duration: Int
+        messageCount: Int
     ) {
         guard let activity = currentActivity else { return }
 
         let now = Date()
-        guard now.timeIntervalSince(lastUpdateTime) >= minimumUpdateInterval else { return }
-        lastUpdateTime = now
+        guard now.timeIntervalSince(lastUpdateTime) >= minimumUpdateInterval else {
+            scheduleThrottledUpdate(status: status, title: title, messageCount: messageCount)
+            return
+        }
 
+        lastUpdateTime = now
+        updateThrottleTask?.cancel()
+
+        let duration = Int(now.timeIntervalSince(activity.attributes.startTime))
         let state = OpenClawActivityAttributes.ContentState(
             status: status,
             title: String(title.prefix(60)),
@@ -120,23 +127,43 @@ public final class OpenClawActivityManager: ObservableObject {
         }
     }
 
-    /// Ends the current activity immediately.
-    public func endActivity() {
-        guard let activity = currentActivity else { return }
-
-        Task {
-            await activity.end(nil, dismissalPolicy: .immediate)
+    /// Schedules a deferred update after the throttle interval.
+    private func scheduleThrottledUpdate(
+        status: OpenClawActivityAttributes.ConversationStatus,
+        title: String,
+        messageCount: Int
+    ) {
+        updateThrottleTask?.cancel()
+        updateThrottleTask = Task {
+            try? await Task.sleep(for: .seconds(minimumUpdateInterval))
+            guard !Task.isCancelled else { return }
             await MainActor.run {
-                currentActivity = nil
-                isActivityRunning = false
+                updateActivity(status: status, title: title, messageCount: messageCount)
             }
         }
     }
 
-    /// Marks the activity as ended with a brief dismissal delay.
-    public func completeActivity(messageCount: Int, duration: Int) {
+    /// Ends the current activity immediately.
+    public func endActivity() {
+        updateThrottleTask?.cancel()
+
         guard let activity = currentActivity else { return }
 
+        // Clear state synchronously to avoid race conditions
+        // with a subsequent startActivity call.
+        currentActivity = nil
+        isActivityRunning = false
+
+        Task {
+            await activity.end(nil, dismissalPolicy: .immediate)
+        }
+    }
+
+    /// Marks the activity as ended with a brief dismissal delay.
+    public func completeActivity(messageCount: Int) {
+        guard let activity = currentActivity else { return }
+
+        let duration = Int(Date().timeIntervalSince(activity.attributes.startTime))
         let finalState = OpenClawActivityAttributes.ContentState(
             status: .ended,
             title: activity.content.state.title,
@@ -144,15 +171,15 @@ public final class OpenClawActivityManager: ObservableObject {
             duration: duration
         )
 
+        // Clear state synchronously to avoid race conditions.
+        currentActivity = nil
+        isActivityRunning = false
+
         Task {
             await activity.end(
                 .init(state: finalState, staleDate: nil),
                 dismissalPolicy: .after(.now + 5)
             )
-            await MainActor.run {
-                currentActivity = nil
-                isActivityRunning = false
-            }
         }
     }
 }

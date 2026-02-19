@@ -118,11 +118,15 @@ public final class OpenClawChatCoordinator: ObservableObject {
     private(set) var awaitingKeywordAcknowledge = false
     var currentRunId: String?
     var accumulatedResponse = ""
+    var pendingAssistantResponses: [String] = []
     var settingsCancellables = Set<AnyCancellable>()
     var headsetToggleTarget: Any?
     var headsetPauseTarget: Any?
 
     let logger = Logger(subsystem: "com.justspeaktoit.ios", category: "OpenClawChat")
+
+    /// Manages the Live Activity for OpenClaw recording sessions.
+    let openClawActivityManager = OpenClawActivityManager()
 
     // MARK: - Init
 
@@ -134,6 +138,7 @@ public final class OpenClawChatCoordinator: ObservableObject {
                 self?.isSpeaking = speaking
             }
             .store(in: &settingsCancellables)
+        observeLiveActivityStateChanges()
         configureHeadsetCommandHandling(enabled: settings.headsetSingleTapAcknowledge)
     }
 
@@ -159,6 +164,17 @@ public final class OpenClawChatCoordinator: ObservableObject {
         client.disconnect()
     }
 
+    /// Stops recording, TTS playback, and disconnects.
+    /// Called when the user navigates away from the chat view.
+    public func stopAllAndDisconnect() {
+        if isRecording {
+            cancelVoiceInput()
+        }
+        ttsClient.stop()
+        openClawActivityManager.endActivity()
+        disconnect()
+    }
+
     // MARK: - Conversation Management
 
     public func startNewConversation() {
@@ -181,6 +197,44 @@ public final class OpenClawChatCoordinator: ObservableObject {
             disconnect()
         }
         connect()
+    }
+
+    // MARK: - Live Activity
+
+    /// Starts a Live Activity when the app moves to the background while in a conversation.
+    public func startLiveActivityIfNeeded() {
+        guard currentConversation != nil else { return }
+        let title = currentConversation?.title ?? "OpenClaw"
+        let count = currentConversation?.messages.count ?? 0
+
+        let status = currentLiveActivityStatus
+
+        openClawActivityManager.startActivity(title: title, messageCount: count)
+
+        if status != .recording {
+            openClawActivityManager.updateActivity(
+                status: status,
+                title: title,
+                messageCount: count
+            )
+        }
+    }
+
+    /// Computed property for current Live Activity status based on coordinator state.
+    var currentLiveActivityStatus: OpenClawActivityAttributes.ConversationStatus {
+        if isRecording {
+            return .recording
+        } else if isProcessing {
+            return .processing
+        } else if isSpeaking {
+            return .speaking
+        }
+        return .idle
+    }
+
+    /// Ends the Live Activity (for example when the app becomes active again).
+    public func endLiveActivity() {
+        openClawActivityManager.endActivity()
     }
 
     // MARK: - Voice Input
@@ -294,6 +348,7 @@ public final class OpenClawChatCoordinator: ObservableObject {
             isProcessing = true
             streamingResponse = ""
             accumulatedResponse = ""
+            pendingAssistantResponses = []
 
             client.sendMessage(trimmedText, sessionKey: conv.sessionKey) { [weak self] result in
                 Task { @MainActor in

@@ -91,9 +91,14 @@ public final class DeepgramTTSClient: ObservableObject {
         stop()
 
         do {
-            // Configure audio session for playback
+            // Use playAndRecord so we don't tear down the mic session
+            // when conversation mode will immediately resume recording.
             let audioSession = AVAudioSession.sharedInstance()
-            try audioSession.setCategory(.playback, mode: .spokenAudio)
+            try audioSession.setCategory(
+                .playAndRecord,
+                mode: .spokenAudio,
+                options: [.allowBluetooth, .defaultToSpeaker, .allowBluetoothA2DP]
+            )
             try audioSession.setActive(true)
 
             audioPlayer = try AVAudioPlayer(data: data)

@@ -9,6 +9,7 @@ public struct OpenClawChatView: View {
     @StateObject private var coordinator = OpenClawChatCoordinator()
     @ObservedObject private var store = ConversationStore.shared
     @ObservedObject private var settings = OpenClawSettings.shared
+    @Environment(\.scenePhase) private var scenePhase
     @State private var textInput = ""
     @State private var showingSettings = false
 
@@ -128,11 +129,23 @@ public struct OpenClawChatView: View {
             }
         }
         .onDisappear {
-            coordinator.disconnect()
+            coordinator.stopAllAndDisconnect()
         }
         .onChange(of: settings.conversationModeEnabled) { _, isEnabled in
             Task {
                 await coordinator.conversationModeChanged(isEnabled: isEnabled)
+            }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            switch newPhase {
+            case .background:
+                // App backgrounded while in a conversation — start Live Activity
+                coordinator.startLiveActivityIfNeeded()
+            case .active:
+                // App returned — end the Live Activity (UI is visible)
+                coordinator.endLiveActivity()
+            default:
+                break
             }
         }
         .alert("Error", isPresented: .init(
@@ -149,26 +162,27 @@ public struct OpenClawChatView: View {
 
     @ViewBuilder
     private var conversationModeBar: some View {
-        HStack(spacing: 8) {
-            Button {
-                settings.conversationModeEnabled.toggle()
-            } label: {
-                Label(
-                    "Conversation Mode",
-                    systemImage: settings.conversationModeEnabled ? "checkmark.square.fill" : "square"
-                )
-                .font(.subheadline)
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle(isOn: $settings.conversationModeEnabled) {
+                Label("Conversation Mode", systemImage: "waveform.badge.mic")
+                    .font(.subheadline.weight(.semibold))
             }
-            .buttonStyle(.plain)
-
-            Spacer()
+            .toggleStyle(.switch)
+            .tint(.accentColor)
+            .frame(minHeight: 44)
 
             if settings.conversationModeEnabled {
-                Text("Tap to confirm")
+                Text("Tap the chat area to acknowledge")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
         .padding(.horizontal)
         .padding(.top, 8)
     }
@@ -178,8 +192,19 @@ public struct OpenClawChatView: View {
         HStack(spacing: 12) {
             // Text field
             TextField("Type a message…", text: $textInput, axis: .vertical)
-                .lineLimit(1...4)
-                .textFieldStyle(.roundedBorder)
+                .font(.body)
+                .lineLimit(1...5)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .frame(minHeight: 50)
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Color(.secondarySystemBackground))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(Color(.separator).opacity(0.28), lineWidth: 1)
+                )
                 .submitLabel(.send)
                 .onSubmit {
                     sendTextIfNeeded()
@@ -198,6 +223,7 @@ public struct OpenClawChatView: View {
                 Image(systemName: coordinator.isRecording ? "stop.circle.fill" : "mic.circle.fill")
                     .font(.system(size: 32))
                     .foregroundStyle(coordinator.isRecording ? .red : Color.accentColor)
+                    .frame(width: 52, height: 52)
             }
             .accessibilityLabel(coordinator.isRecording ? "Stop recording" : "Start voice input")
 
@@ -209,6 +235,7 @@ public struct OpenClawChatView: View {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.system(size: 32))
                         .foregroundStyle(Color.accentColor)
+                        .frame(width: 52, height: 52)
                 }
                 .transition(.scale.combined(with: .opacity))
                 .accessibilityLabel("Send message")

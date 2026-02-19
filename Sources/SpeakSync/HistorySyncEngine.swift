@@ -16,6 +16,13 @@ public protocol HistorySyncDelegate: AnyObject {
     func didDeleteRemoteEntry(id: UUID)
 }
 
+/// Result of a CloudKit zone-changes fetch operation.
+private struct FetchChangesResult {
+    var records: [CKRecord]
+    var deletedIDs: [CKRecord.ID]
+    var serverChangeToken: CKServerChangeToken?
+}
+
 /// Main sync engine handling CloudKit operations for transcription history.
 @MainActor
 public final class HistorySyncEngine: ObservableObject {
@@ -173,26 +180,26 @@ public final class HistorySyncEngine: ObservableObject {
 
     private func fetchRemoteChanges() async throws {
         let changeToken = loadChangeToken()
-        let (fetched, deleted, newToken) = try await executeFetchOperation(changeToken: changeToken)
+        let result = try await executeFetchOperation(changeToken: changeToken)
 
-        for record in fetched {
+        for record in result.records {
             if let entry = SyncRecord.entry(from: record) {
                 delegate?.didReceiveRemoteEntry(entry)
             }
         }
 
-        for recordID in deleted {
+        for recordID in result.deletedIDs {
             if let uuid = UUID(uuidString: recordID.recordName) {
                 delegate?.didDeleteRemoteEntry(id: uuid)
             }
         }
 
-        if let token = newToken {
+        if let token = result.serverChangeToken {
             saveChangeToken(token)
         }
 
-        state.pendingDownloadCount = fetched.count
-        log.info("Fetched \(fetched.count) records, \(deleted.count) deletions")
+        state.pendingDownloadCount = result.records.count
+        log.info("Fetched \(result.records.count) records, \(result.deletedIDs.count) deletions")
     }
 
     private func loadChangeToken() -> CKServerChangeToken? {
@@ -210,7 +217,7 @@ public final class HistorySyncEngine: ObservableObject {
 
     private func executeFetchOperation(
         changeToken: CKServerChangeToken?
-    ) async throws -> ([CKRecord], [CKRecord.ID], CKServerChangeToken?) {
+    ) async throws -> FetchChangesResult {
         let config = CKFetchRecordZoneChangesOperation.ZoneConfiguration()
         config.previousServerChangeToken = changeToken
 
@@ -255,7 +262,11 @@ public final class HistorySyncEngine: ObservableObject {
             SyncConfiguration.privateDatabase.add(operation)
         }
 
-        return (fetchedRecords, deletedIDs, newToken)
+        return FetchChangesResult(
+            records: fetchedRecords,
+            deletedIDs: deletedIDs,
+            serverChangeToken: newToken
+        )
     }
 
     // MARK: - Upload

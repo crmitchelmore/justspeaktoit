@@ -41,6 +41,9 @@ extension OpenClawChatCoordinator {
                 let responseBatch = self.pendingAssistantResponses
                 self.pendingAssistantResponses = []
 
+                // Update Live Activity status
+                self.updateLiveActivityState()
+
                 // Summarise and speak if enabled
                 if self.settings.ttsEnabled && self.appSettings.hasDeepgramKey {
                     await self.speakAssistantResponses(responseBatch)
@@ -115,6 +118,7 @@ extension OpenClawChatCoordinator {
         guard !isRecording, !isProcessing, !isSpeaking else { return }
         do {
             try await startVoiceInput()
+            updateLiveActivityState()
         } catch {
             logger.error("Auto-resume recording failed: \(error.localizedDescription)")
         }
@@ -300,6 +304,31 @@ extension OpenClawChatCoordinator {
             logger.error("TTS failed: \(error.localizedDescription)")
             // Don't set self.error — TTS failure shouldn't block the UI
         }
+    }
+
+    // MARK: - Live Activity Helpers
+
+    /// Updates the Live Activity with the current coordinator state, if one is running.
+    func updateLiveActivityState() {
+        guard openClawActivityManager.isActivityRunning else { return }
+        let title = currentConversation?.title ?? "OpenClaw"
+        let count = currentConversation?.messages.count ?? 0
+
+        var status: OpenClawActivityAttributes.ConversationStatus = .idle
+        if isRecording {
+            status = .recording
+        } else if isProcessing {
+            status = .processing
+        } else if isSpeaking {
+            status = .speaking
+        }
+
+        openClawActivityManager.updateActivity(
+            status: status,
+            title: title,
+            messageCount: count,
+            duration: 0
+        )
     }
 }
 #endif

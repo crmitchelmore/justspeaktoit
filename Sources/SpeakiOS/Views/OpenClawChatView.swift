@@ -9,6 +9,7 @@ public struct OpenClawChatView: View {
     @StateObject private var coordinator = OpenClawChatCoordinator()
     @ObservedObject private var store = ConversationStore.shared
     @ObservedObject private var settings = OpenClawSettings.shared
+    @Environment(\.scenePhase) private var scenePhase
     @State private var textInput = ""
     @State private var showingSettings = false
 
@@ -128,11 +129,23 @@ public struct OpenClawChatView: View {
             }
         }
         .onDisappear {
-            coordinator.disconnect()
+            coordinator.stopAllAndDisconnect()
         }
         .onChange(of: settings.conversationModeEnabled) { _, isEnabled in
             Task {
                 await coordinator.conversationModeChanged(isEnabled: isEnabled)
+            }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            switch newPhase {
+            case .background:
+                // App backgrounded while in a conversation — start Live Activity
+                coordinator.startLiveActivityIfNeeded()
+            case .active:
+                // App returned — end the Live Activity (UI is visible)
+                coordinator.endLiveActivity()
+            default:
+                break
             }
         }
         .alert("Error", isPresented: .init(

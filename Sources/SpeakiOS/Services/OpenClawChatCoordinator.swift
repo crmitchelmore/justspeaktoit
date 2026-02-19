@@ -125,6 +125,9 @@ public final class OpenClawChatCoordinator: ObservableObject {
 
     let logger = Logger(subsystem: "com.justspeaktoit.ios", category: "OpenClawChat")
 
+    /// Manages the Live Activity for OpenClaw recording sessions.
+    let openClawActivityManager = OpenClawActivityManager()
+
     // MARK: - Init
 
     public init() {
@@ -160,6 +163,17 @@ public final class OpenClawChatCoordinator: ObservableObject {
         client.disconnect()
     }
 
+    /// Stops recording, TTS playback, and disconnects.
+    /// Called when the user navigates away from the chat view.
+    public func stopAllAndDisconnect() {
+        if isRecording {
+            cancelVoiceInput()
+        }
+        ttsClient.stop()
+        openClawActivityManager.endActivity()
+        disconnect()
+    }
+
     // MARK: - Conversation Management
 
     public func startNewConversation() {
@@ -182,6 +196,41 @@ public final class OpenClawChatCoordinator: ObservableObject {
             disconnect()
         }
         connect()
+    }
+
+    // MARK: - Live Activity
+
+    /// Starts a Live Activity when the app moves to the background while in a conversation.
+    public func startLiveActivityIfNeeded() {
+        guard currentConversation != nil else { return }
+        let title = currentConversation?.title ?? "OpenClaw"
+        let count = currentConversation?.messages.count ?? 0
+
+        var status: OpenClawActivityAttributes.ConversationStatus = .idle
+        if isRecording {
+            status = .recording
+        } else if isProcessing {
+            status = .processing
+        } else if isSpeaking {
+            status = .speaking
+        }
+
+        openClawActivityManager.startActivity(title: title, messageCount: count)
+
+        if status != .recording {
+            let elapsed = 0
+            openClawActivityManager.updateActivity(
+                status: status,
+                title: title,
+                messageCount: count,
+                duration: elapsed
+            )
+        }
+    }
+
+    /// Ends the Live Activity (for example when the app becomes active again).
+    public func endLiveActivity() {
+        openClawActivityManager.endActivity()
     }
 
     // MARK: - Voice Input

@@ -41,6 +41,9 @@ extension OpenClawChatCoordinator {
                 let responseBatch = self.pendingAssistantResponses
                 self.pendingAssistantResponses = []
 
+                // Update Live Activity status
+                self.updateLiveActivityState()
+
                 // Summarise and speak if enabled
                 if self.settings.ttsEnabled && self.appSettings.hasDeepgramKey {
                     await self.speakAssistantResponses(responseBatch)
@@ -115,6 +118,7 @@ extension OpenClawChatCoordinator {
         guard !isRecording, !isProcessing, !isSpeaking else { return }
         do {
             try await startVoiceInput()
+            updateLiveActivityState()
         } catch {
             logger.error("Auto-resume recording failed: \(error.localizedDescription)")
         }
@@ -300,6 +304,40 @@ extension OpenClawChatCoordinator {
             logger.error("TTS failed: \(error.localizedDescription)")
             // Don't set self.error — TTS failure shouldn't block the UI
         }
+    }
+
+    // MARK: - Live Activity Helpers
+
+    /// Observes `isSpeaking` and `isProcessing` changes to keep the Live Activity current.
+    func observeLiveActivityStateChanges() {
+        $isSpeaking
+            .removeDuplicates()
+            .sink { [weak self] _ in self?.updateLiveActivityState() }
+            .store(in: &settingsCancellables)
+
+        $isProcessing
+            .removeDuplicates()
+            .sink { [weak self] _ in self?.updateLiveActivityState() }
+            .store(in: &settingsCancellables)
+
+        $isRecording
+            .removeDuplicates()
+            .sink { [weak self] _ in self?.updateLiveActivityState() }
+            .store(in: &settingsCancellables)
+    }
+
+    /// Updates the Live Activity with the current coordinator state, if one is running.
+    func updateLiveActivityState() {
+        guard openClawActivityManager.isActivityRunning else { return }
+        let title = currentConversation?.title ?? "OpenClaw"
+        let count = currentConversation?.messages.count ?? 0
+        let status = currentLiveActivityStatus
+
+        openClawActivityManager.updateActivity(
+            status: status,
+            title: title,
+            messageCount: count
+        )
     }
 }
 #endif

@@ -9364,10 +9364,10 @@
     "violation": {
       "location": {
         "file": "Sources/SpeakApp/WireUp.swift",
-        "line": 221,
+        "line": 222,
         "character": 10
       },
-      "reason": "Function body should span 100 lines or less excluding comments and whitespace: currently spans 109 lines",
+      "reason": "Function body should span 50 lines or less excluding comments and whitespace: currently spans 86 lines",
       "ruleDescription": "Function bodies should not span too many lines",
       "ruleName": "Function Body Length",
       "ruleIdentifier": "function_body_length",

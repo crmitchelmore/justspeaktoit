@@ -11,6 +11,7 @@ let package = Package(
     products: [
         .library(name: "SpeakHotKeys", targets: ["SpeakHotKeys"]),
         .library(name: "SpeakCore", targets: ["SpeakCore"]),
+        .library(name: "SpeakSync", targets: ["SpeakSync"]),
         .library(name: "SpeakiOSLib", targets: ["SpeakiOSLib"]),
         .executable(name: "SpeakApp", targets: ["SpeakApp"])
     ],
@@ -29,8 +30,12 @@ let package = Package(
             name: "SpeakCore"
         ),
         .target(
+            name: "SpeakSync",
+            path: "Sources/SpeakSync"
+        ),
+        .target(
             name: "SpeakiOSLib",
-            dependencies: ["SpeakCore"],
+            dependencies: ["SpeakCore", "SpeakSync"],
             path: "Sources/SpeakiOS",
             exclude: ["SpeakiOSApp.swift"]
         ),
@@ -38,6 +43,7 @@ let package = Package(
             name: "SpeakApp",
             dependencies: [
                 "SpeakCore",
+                "SpeakSync",
                 "SpeakHotKeys",
                 .product(name: "Sparkle", package: "Sparkle"),
                 .product(name: "Sentry", package: "sentry-cocoa")

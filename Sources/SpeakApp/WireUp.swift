@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import SpeakSync
 
 @MainActor
 final class AppEnvironment: ObservableObject {
@@ -248,19 +249,7 @@ enum WireUp {
       settings: settings,
       personalLexicon: personalLexicon
     )
-    let ttsClients: [TTSProvider: TextToSpeechClient] = [
-      .elevenlabs: ElevenLabsClient(secureStorage: secureStorage),
-      .openai: OpenAITTSClient(secureStorage: secureStorage),
-      .azure: AzureSpeechClient(secureStorage: secureStorage, appSettings: settings),
-      .deepgram: DeepgramTTSClient(secureStorage: secureStorage),
-      .system: SystemTTSClient(),
-    ]
-    let tts = TextToSpeechManager(
-      appSettings: settings,
-      secureStorage: secureStorage,
-      clients: ttsClients,
-      pronunciationManager: pronunciationManager
-    )
+    let tts = buildTTSManager(settings: settings, secureStorage: secureStorage, pronunciation: pronunciationManager)
     let livePolish = LivePolishManager(client: openRouter, settings: settings)
     let liveTextInserter = LiveTextInserter(
       permissionsManager: permissions,
@@ -291,7 +280,7 @@ enum WireUp {
     )
     let hudPresenter = HUDWindowPresenter(manager: hud, settings: settings)
     let shortcuts = ShortcutManager(permissionsManager: permissions)
-    
+
     // Transport server for "Send to Mac" from iOS
     let transportServer = TransportServer()
 
@@ -318,30 +307,60 @@ enum WireUp {
       transportServer: transportServer,
       hudPresenter: hudPresenter
     )
-    
-    // Configure transport server callbacks
-    transportServer.onTranscriptReceived = { sessionId, text in
-      Task { @MainActor in
-        // Insert received text into active app using existing LiveTextInserter
-        environment.liveTextInserter.update(with: text)
-      }
-    }
-    
-    // Auto-start transport server if enabled
-    if settings.enableSendToMac {
-      try? transportServer.start()
-    }
 
-    Task { await secureStorage.preloadTrackedSecrets() }
-    
-    // Configure default transcription provider based on available API keys
-    Task {
-      await configureDefaultTranscriptionProvider(settings: settings, secureStorage: secureStorage)
-    }
+    configureServices(environment: environment, settings: settings, secureStorage: secureStorage)
 
     return environment
   }
-  
+
+  // MARK: - Service Configuration
+
+  private static func configureServices(
+    environment: AppEnvironment,
+    settings: AppSettings,
+    secureStorage: SecureAppStorage
+  ) {
+    environment.transportServer.onTranscriptReceived = { _, text in
+      Task { @MainActor in
+        environment.liveTextInserter.update(with: text)
+      }
+    }
+
+    if settings.enableSendToMac {
+      try? environment.transportServer.start()
+    }
+
+    let syncAdapter = MacHistorySyncAdapter(historyManager: environment.history)
+    Task { await syncAdapter.start() }
+
+    Task { await secureStorage.preloadTrackedSecrets() }
+    Task {
+      await configureDefaultTranscriptionProvider(settings: settings, secureStorage: secureStorage)
+    }
+  }
+
+  // MARK: - TTS Factory
+
+  private static func buildTTSManager(
+    settings: AppSettings,
+    secureStorage: SecureAppStorage,
+    pronunciation: PronunciationManager
+  ) -> TextToSpeechManager {
+    let clients: [TTSProvider: TextToSpeechClient] = [
+      .elevenlabs: ElevenLabsClient(secureStorage: secureStorage),
+      .openai: OpenAITTSClient(secureStorage: secureStorage),
+      .azure: AzureSpeechClient(secureStorage: secureStorage, appSettings: settings),
+      .deepgram: DeepgramTTSClient(secureStorage: secureStorage),
+      .system: SystemTTSClient(),
+    ]
+    return TextToSpeechManager(
+      appSettings: settings,
+      secureStorage: secureStorage,
+      clients: clients,
+      pronunciationManager: pronunciation
+    )
+  }
+
   /// Configure the default live transcription model based on available API keys.
   /// Priority: Deepgram > Apple (fallback)
   /// Called on app launch and after onboarding completes.
@@ -353,16 +372,16 @@ enum WireUp {
     // Check if it's still the default Apple value
     let currentModel = settings.liveTranscriptionModel
     let isDefaultApple = currentModel == "apple/local/SFSpeechRecognizer"
-    
+
     // If user has already changed from default, respect their choice
     guard isDefaultApple else {
       print("[WireUp] User has custom transcription model, skipping auto-config")
       return
     }
-    
+
     // Check for Deepgram API key
     let hasDeepgramKey = await secureStorage.hasSecret(identifier: "deepgram.apiKey")
-    
+
     if hasDeepgramKey {
       await MainActor.run {
         settings.liveTranscriptionModel = "deepgram/nova-3-streaming"

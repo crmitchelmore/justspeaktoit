@@ -68,6 +68,7 @@ let project = Project(
             entitlements: .file(path: "Config/SpeakMacOS.entitlements"),
             dependencies: [
                 .package(product: "SpeakCore"),
+                .package(product: "SpeakSync"),
                 .package(product: "SpeakHotKeys"),
                 .package(product: "Sparkle"),
                 .package(product: "Sentry")
@@ -114,6 +115,7 @@ let project = Project(
             dependencies: [
                 .package(product: "SpeakCore"),
                 .package(product: "SpeakiOSLib"),
+                .package(product: "SpeakSync"),
                 .target(name: "JustSpeakToItWidgetExtension")
             ],
             settings: .settings(base: iosAppSettings)

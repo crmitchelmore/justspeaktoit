@@ -34,7 +34,7 @@ public enum SyncConfiguration {
 
     /// Whether this app build has CloudKit entitlements.
     /// Developer ID Sparkle builds may omit CloudKit entitlements.
-    public static var hasCloudKitEntitlement: Bool {
+    static var hasCloudKitEntitlement: Bool {
 #if os(macOS)
         guard let task = SecTaskCreateFromSelf(nil) else {
             return false

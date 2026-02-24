@@ -173,6 +173,26 @@ jobs:
           echo "$CODESIGN_INFO"
           echo "$CODESIGN_INFO" | grep -q "runtime"
 
+      - name: Verify Hardened Runtime
+        run: |
+          APP_PATH="$RUNNER_TEMP/export/$PRODUCT_NAME.app"
+          MAIN_BINARY="$APP_PATH/Contents/MacOS/$PRODUCT_NAME"
+
+          # Exported app signs correctly for Developer ID but omits runtime option.
+          # Re-sign the main binary with runtime, then refresh app bundle signature.
+          codesign --force --timestamp --options runtime \
+            --sign "Developer ID Application" \
+            --entitlements Config/SpeakMacOS.entitlements \
+            "$MAIN_BINARY"
+
+          codesign --force --timestamp \
+            --sign "Developer ID Application" \
+            "$APP_PATH"
+
+          CODESIGN_INFO=$(codesign -dv --verbose=4 "$MAIN_BINARY" 2>&1)
+          echo "$CODESIGN_INFO"
+          echo "$CODESIGN_INFO" | grep -q "runtime"
+
       - name: Notarize App
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}

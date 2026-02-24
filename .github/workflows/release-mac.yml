@@ -118,26 +118,20 @@ jobs:
           grep -A1 "CFBundleShortVersionString\|CFBundleVersion\|GitCommitSHA" Config/AppInfo.plist
 
       - name: Build Release Archive
-        env:
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         run: |
-          # Build archive with automatic signing so Xcode can fetch/generate
-          # the required Developer ID provisioning profile for iCloud entitlements.
+          # Archive unsigned to avoid automatic-development signing on CI runners.
+          # Distribution signing and profile resolution happens at export time.
           xcodebuild archive \
             -workspace "$WORKSPACE" \
             -scheme "$SCHEME" \
             -configuration Release \
             -archivePath $RUNNER_TEMP/$PRODUCT_NAME.xcarchive \
             -destination "generic/platform=macOS" \
-            CODE_SIGN_STYLE=Automatic \
-            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_ALLOWED=NO \
             PRODUCT_BUNDLE_IDENTIFIER=com.justspeaktoit.mac \
-            ENABLE_HARDENED_RUNTIME=YES \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_${{ env.APP_STORE_CONNECT_KEY_ID }}.p8 \
-            -authenticationKeyID ${{ env.APP_STORE_CONNECT_KEY_ID }} \
-            -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID"
+            ENABLE_HARDENED_RUNTIME=YES
 
       - name: Export App (Developer ID / Ad-Hoc)
         env:
@@ -155,6 +149,8 @@ jobs:
               <string>${{ secrets.APPLE_TEAM_ID }}</string>
               <key>signingStyle</key>
               <string>automatic</string>
+              <key>signingCertificate</key>
+              <string>Developer ID Application</string>
           </dict>
           </plist>
           EOF

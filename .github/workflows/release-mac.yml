@@ -14,6 +14,7 @@ env:
   SCHEME: SpeakApp
   PRODUCT_NAME: JustSpeakToIt
   WORKSPACE: "Just Speak to It.xcworkspace"
+  APP_STORE_CONNECT_KEY_ID: S747NJ9DZY
 
 jobs:
   build-and-release:
@@ -59,6 +60,13 @@ jobs:
           
           # Clean up
           rm -f $CERTIFICATE_PATH
+
+      - name: Install App Store Connect API Key
+        env:
+          APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+        run: |
+          mkdir -p ~/.appstoreconnect/private_keys
+          echo "$APP_STORE_CONNECT_API_KEY" | base64 --decode > ~/.appstoreconnect/private_keys/AuthKey_${{ env.APP_STORE_CONNECT_KEY_ID }}.p8
 
       - name: Generate Xcode Project
         run: |
@@ -109,21 +117,29 @@ jobs:
       - name: Build Release Archive
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         run: |
-          # Build without signing first, sign during export
-          # Enable hardened runtime (required for notarization)
+          # Build archive with automatic signing so Xcode can fetch/generate
+          # the required Developer ID provisioning profile for iCloud entitlements.
           xcodebuild archive \
             -workspace "$WORKSPACE" \
             -scheme "$SCHEME" \
             -configuration Release \
             -archivePath $RUNNER_TEMP/$PRODUCT_NAME.xcarchive \
             -destination "generic/platform=macOS" \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGN_STYLE=Automatic \
+            CODE_SIGN_IDENTITY="Developer ID Application" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
             PRODUCT_BUNDLE_IDENTIFIER=com.justspeaktoit.mac \
-            ENABLE_HARDENED_RUNTIME=YES
+            ENABLE_HARDENED_RUNTIME=YES \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_${{ env.APP_STORE_CONNECT_KEY_ID }}.p8 \
+            -authenticationKeyID ${{ env.APP_STORE_CONNECT_KEY_ID }} \
+            -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID"
 
       - name: Export App (Developer ID / Ad-Hoc)
+        env:
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         run: |
           # Create export options plist for Developer ID distribution
           cat > $RUNNER_TEMP/ExportOptions.plist << EOF
@@ -136,9 +152,7 @@ jobs:
               <key>teamID</key>
               <string>${{ secrets.APPLE_TEAM_ID }}</string>
               <key>signingStyle</key>
-              <string>manual</string>
-              <key>signingCertificate</key>
-              <string>Developer ID Application</string>
+              <string>automatic</string>
           </dict>
           </plist>
           EOF
@@ -146,7 +160,11 @@ jobs:
           xcodebuild -exportArchive \
             -archivePath $RUNNER_TEMP/$PRODUCT_NAME.xcarchive \
             -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist \
-            -exportPath $RUNNER_TEMP/export
+            -exportPath $RUNNER_TEMP/export \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_${{ env.APP_STORE_CONNECT_KEY_ID }}.p8 \
+            -authenticationKeyID ${{ env.APP_STORE_CONNECT_KEY_ID }} \
+            -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID"
 
       - name: Notarize App
         env:

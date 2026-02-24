@@ -25,15 +25,15 @@ enum SentryManager {
     /// without crashing. DEBUG builds use a disabled DSN to avoid sending data.
     static func start() {
         #if canImport(Sentry)
+        let dsn = "https://6da8db9be62a737d295a727db0f6ce7e@o4510682832240640"
+            + ".ingest.de.sentry.io/4510790595903568"
         SentrySDK.start { options in
+            options.dsn = dsn
             #if DEBUG
-            // Use the real DSN structure but disable sending — this exercises
-            // the full SDK init code path so linking/config issues surface in dev.
-            options.dsn = "https://6da8db9be62a737d295a727db0f6ce7e@o4510682832240640.ingest.de.sentry.io/4510790595903568"
+            // Exercises full SDK init so linking/config issues surface in dev.
             options.enabled = false
             options.environment = "debug"
             #else
-            options.dsn = "https://6da8db9be62a737d295a727db0f6ce7e@o4510682832240640.ingest.de.sentry.io/4510790595903568"
             options.environment = "production"
             #endif
 

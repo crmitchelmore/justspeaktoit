@@ -309,9 +309,6 @@ enum WireUp {
     )
 
     configureServices(environment: environment, settings: settings, secureStorage: secureStorage)
-
-    print("[WireUp] AppEnvironment.bootstrap complete — \(type(of: environment))")
-
     return environment
   }
 
@@ -339,6 +336,8 @@ enum WireUp {
     Task {
       await configureDefaultTranscriptionProvider(settings: settings, secureStorage: secureStorage)
     }
+
+    print("[WireUp] AppEnvironment.bootstrap complete")
   }
 
   // MARK: - TTS Factory

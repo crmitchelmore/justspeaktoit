@@ -32,7 +32,7 @@ final class SentryManagerTests: XCTestCase {
 
     func testCapture_error_doesNotCrash() {
         SentryManager.start()
-        
+
         let error = NSError(domain: "test", code: 42, userInfo: [
             NSLocalizedDescriptionKey: "Test error"
         ])
@@ -41,7 +41,7 @@ final class SentryManagerTests: XCTestCase {
 
     func testCapture_error_withContext_doesNotCrash() {
         SentryManager.start()
-        
+
         let error = NSError(domain: "test", code: 1)
         SentryManager.capture(error: error, context: [
             "key": "value",
@@ -51,7 +51,7 @@ final class SentryManagerTests: XCTestCase {
 
     func testCapture_error_withNilContext_doesNotCrash() {
         SentryManager.start()
-        
+
         let error = NSError(domain: "test", code: 0)
         SentryManager.capture(error: error, context: nil)
     }

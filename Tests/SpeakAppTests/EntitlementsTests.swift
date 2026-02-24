@@ -102,7 +102,7 @@ final class EntitlementsTests: XCTestCase {
         let allowedKeys: Set<String> = [
             "com.apple.security.device.audio-input",
             "com.apple.security.automation.apple-events",
-            "com.apple.security.cs.disable-library-validation",
+            "com.apple.security.cs.disable-library-validation"
         ]
 
         let actualKeys = Set(entitlements.keys)

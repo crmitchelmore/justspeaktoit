@@ -57,7 +57,7 @@ final class WireUpBootstrapTests: XCTestCase {
         // Verify that services share the same AppSettings instance.
         // The permissionsManager alias should point to the same object as permissions.
         let env = WireUp.bootstrap()
-        
+
         // We can't directly inspect internal references of each service,
         // but we can verify the environment's own properties are consistent.
         XCTAssertTrue(env.settings === env.settings, "Sanity check: settings identity")
@@ -91,7 +91,7 @@ final class WireUpBootstrapTests: XCTestCase {
     func testEnvironmentHolder_bootstrapsLazily() {
         let holder = EnvironmentHolder()
         XCTAssertNil(holder.environment, "Environment should not be created until bootstrap() is called")
-        
+
         holder.bootstrap()
         XCTAssertNotNil(holder.environment, "Environment should be created after bootstrap()")
     }
@@ -101,10 +101,10 @@ final class WireUpBootstrapTests: XCTestCase {
         let holder = EnvironmentHolder()
         holder.bootstrap()
         let first = holder.environment
-        
+
         holder.bootstrap() // second call should be a no-op
         let second = holder.environment
-        
+
         XCTAssertTrue(first === second, "Second bootstrap() call should not create a new environment")
     }
 }

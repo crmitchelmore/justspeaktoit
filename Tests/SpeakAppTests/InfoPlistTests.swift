@@ -51,11 +51,11 @@ final class InfoPlistTests: XCTestCase {
     func testSparkleFeedURL_isValidHTTPS() {
         let value = plist["SUFeedURL"] as? String
         XCTAssertNotNil(value, "SUFeedURL must be present for Sparkle updates")
-        
+
         guard let urlString = value else { return }
         XCTAssertTrue(urlString.hasPrefix("https://"),
             "SUFeedURL must use HTTPS for security: got '\(urlString)'")
-        
+
         let url = URL(string: urlString)
         XCTAssertNotNil(url, "SUFeedURL must be a valid URL: '\(urlString)'")
     }

@@ -45,16 +45,15 @@ public enum SyncConfiguration {
             "com.apple.developer.icloud-services" as CFString,
             nil
         ) as? [String]
-        if services?.contains("CloudKit") == true {
-            return true
-        }
+        let hasCloudKitService = services?.contains("CloudKit") == true
 
         let containers = SecTaskCopyValueForEntitlement(
             task,
             "com.apple.developer.icloud-container-identifiers" as CFString,
             nil
         ) as? [String]
-        return containers?.contains(containerIdentifier) == true
+        let hasContainerIdentifier = containers?.contains(containerIdentifier) == true
+        return hasCloudKitService && hasContainerIdentifier
 #else
         return true
 #endif

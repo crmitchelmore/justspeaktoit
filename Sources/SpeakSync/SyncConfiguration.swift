@@ -1,5 +1,8 @@
 import CloudKit
 import Foundation
+#if os(macOS)
+import Security
+#endif
 
 /// Configuration for CloudKit sync operations.
 public enum SyncConfiguration {
@@ -27,6 +30,33 @@ public enum SyncConfiguration {
     /// The CloudKit container.
     public static var container: CKContainer {
         CKContainer(identifier: containerIdentifier)
+    }
+
+    /// Whether this app build has CloudKit entitlements.
+    /// Developer ID Sparkle builds may omit CloudKit entitlements.
+    static var hasCloudKitEntitlement: Bool {
+#if os(macOS)
+        guard let task = SecTaskCreateFromSelf(nil) else {
+            return false
+        }
+
+        let services = SecTaskCopyValueForEntitlement(
+            task,
+            "com.apple.developer.icloud-services" as CFString,
+            nil
+        ) as? [String]
+        let hasCloudKitService = services?.contains("CloudKit") == true
+
+        let containers = SecTaskCopyValueForEntitlement(
+            task,
+            "com.apple.developer.icloud-container-identifiers" as CFString,
+            nil
+        ) as? [String]
+        let hasContainerIdentifier = containers?.contains(containerIdentifier) == true
+        return hasCloudKitService && hasContainerIdentifier
+#else
+        return true
+#endif
     }
 
     /// The private database for user's transcription data.

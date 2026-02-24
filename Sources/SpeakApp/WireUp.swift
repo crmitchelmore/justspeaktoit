@@ -310,6 +310,8 @@ enum WireUp {
 
     configureServices(environment: environment, settings: settings, secureStorage: secureStorage)
 
+    print("[WireUp] AppEnvironment.bootstrap complete — \(type(of: environment))")
+
     return environment
   }
 

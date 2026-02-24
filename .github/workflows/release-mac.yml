@@ -131,7 +131,6 @@ jobs:
             -archivePath $RUNNER_TEMP/$PRODUCT_NAME.xcarchive \
             -destination "generic/platform=macOS" \
             CODE_SIGN_STYLE=Automatic \
-            CODE_SIGN_IDENTITY="Developer ID Application" \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
             PRODUCT_BUNDLE_IDENTIFIER=com.justspeaktoit.mac \
             ENABLE_HARDENED_RUNTIME=YES \

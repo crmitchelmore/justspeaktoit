@@ -54,13 +54,15 @@ final class WireUpBootstrapTests: XCTestCase {
 
     @MainActor
     func testBootstrap_settingsIsSharedAcrossServices() {
-        // Verify that services share the same AppSettings instance.
-        // The permissionsManager alias should point to the same object as permissions.
+        // Verify that the environment wires a shared AppSettings instance —
+        // a mutation on env.settings should be observable by any service that
+        // holds the same reference. We toggle a boolean as a proxy.
         let env = WireUp.bootstrap()
-
-        // We can't directly inspect internal references of each service,
-        // but we can verify the environment's own properties are consistent.
-        XCTAssertTrue(env.settings === env.settings, "Sanity check: settings identity")
+        let before = env.settings.postProcessingEnabled
+        env.settings.postProcessingEnabled.toggle()
+        XCTAssertNotEqual(env.settings.postProcessingEnabled, before,
+                          "Settings mutation should be observable")
+        env.settings.postProcessingEnabled = before // restore
     }
 
     @MainActor

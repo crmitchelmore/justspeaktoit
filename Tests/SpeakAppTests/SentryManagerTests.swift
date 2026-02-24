@@ -5,21 +5,18 @@ import XCTest
 /// Tests for SentryManager initialisation and API surface.
 ///
 /// Critical context: SentryManager.start() runs as the VERY FIRST thing in the app
-/// (in SpeakApp.init(), before any UI or service creation). The actual Sentry SDK
-/// initialisation is gated behind `#if !DEBUG`, meaning it NEVER executes in the
-/// default test configuration. This test file verifies:
+/// (in SpeakApp.init(), before any UI or service creation). The SDK now initialises
+/// in both DEBUG and release builds; DEBUG disables sending via `options.enabled = false`.
+/// This test file verifies:
 ///
-/// 1. The debug path (no-op) doesn't crash
+/// 1. The DEBUG path (initialised but disabled) doesn't crash
 /// 2. All public API methods can be called without crashing
 /// 3. The breadcrumb/capture APIs handle edge cases
-///
-/// To test the actual Sentry SDK init, run tests in release configuration:
-///   swift test -c release
 final class SentryManagerTests: XCTestCase {
 
     func testStart_doesNotCrash() {
-        // This calls SentryManager.start() which in DEBUG is a no-op.
-        // In release config (-c release), this actually initialises the Sentry SDK.
+        // DEBUG: SDK initialises with sending disabled.
+        // Release (-c release): SDK initialises with production settings.
         SentryManager.start()
     }
 

@@ -168,13 +168,6 @@ jobs:
 
       - name: Verify Hardened Runtime
         run: |
-          MAIN_BINARY="$RUNNER_TEMP/export/$PRODUCT_NAME.app/Contents/MacOS/$PRODUCT_NAME"
-          CODESIGN_INFO=$(codesign -dv --verbose=4 "$MAIN_BINARY" 2>&1)
-          echo "$CODESIGN_INFO"
-          echo "$CODESIGN_INFO" | grep -q "runtime"
-
-      - name: Verify Hardened Runtime
-        run: |
           APP_PATH="$RUNNER_TEMP/export/$PRODUCT_NAME.app"
           MAIN_BINARY="$APP_PATH/Contents/MacOS/$PRODUCT_NAME"
 

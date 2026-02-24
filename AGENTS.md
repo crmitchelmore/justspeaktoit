@@ -48,10 +48,11 @@ The `VERSION` file is a **hint** used as fallback when no tag is present. It doe
 
 ### Post-Release Support
 
-When a user reports that a freshly shipped macOS release won't install or launch, do the remediation directly:
+When a user reports that a freshly shipped macOS release won't install or launch, perform the remediation directly when the environment permits filesystem/app actions; otherwise provide these exact steps for the user to run locally:
 1. Download the latest `mac-v*` DMG.
-2. Replace `/Applications/JustSpeakToIt.app` (back up the existing app to `/tmp` first).
-3. Verify launch locally (e.g. `open -n /Applications/JustSpeakToIt.app`) before asking the user to retry.
+2. Back up the existing app to a persistent location, e.g. `mv /Applications/JustSpeakToIt.app ~/Desktop/JustSpeakToIt.app.bak-$(date +%s)`.
+3. Replace `/Applications/JustSpeakToIt.app` with the app from the DMG.
+4. Verify launch locally (e.g. `open -n /Applications/JustSpeakToIt.app`) before asking the user to retry.
 
 ## Project Structure & Module Organization
 

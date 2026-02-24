@@ -187,6 +187,8 @@ jobs:
 
           codesign --force --timestamp \
             --sign "Developer ID Application" \
+            --options runtime \
+            --entitlements Config/SpeakMacOS.entitlements \
             "$APP_PATH"
 
           CODESIGN_INFO=$(codesign -dv --verbose=4 "$MAIN_BINARY" 2>&1)

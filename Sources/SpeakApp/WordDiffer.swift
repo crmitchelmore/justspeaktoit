@@ -117,15 +117,17 @@ struct WordDiffer {
     // Build LCS table
     let m = original.count
     let n = edited.count
-    guard m > 0, n > 0 else { return [] }
     var dp = [[Int]](repeating: [Int](repeating: 0, count: n + 1), count: m + 1)
 
-    for i in 1...m {
-      for j in 1...n {
-        if original[i - 1].lowercased() == edited[j - 1].lowercased() {
-          dp[i][j] = dp[i - 1][j - 1] + 1
+    for rowIndex in 0..<m {
+      for columnIndex in 0..<n {
+        if original[rowIndex].lowercased() == edited[columnIndex].lowercased() {
+          dp[rowIndex + 1][columnIndex + 1] = dp[rowIndex][columnIndex] + 1
         } else {
-          dp[i][j] = max(dp[i - 1][j], dp[i][j - 1])
+          dp[rowIndex + 1][columnIndex + 1] = max(
+            dp[rowIndex][columnIndex + 1],
+            dp[rowIndex + 1][columnIndex]
+          )
         }
       }
     }

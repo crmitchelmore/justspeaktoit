@@ -129,6 +129,12 @@ public final class HistorySyncEngine: ObservableObject {
     // MARK: - Cloud Availability
 
     private func checkCloudAvailability() async {
+        guard SyncConfiguration.hasCloudKitEntitlement else {
+            state.isCloudAvailable = false
+            log.warning("CloudKit entitlement missing; history sync disabled")
+            return
+        }
+
         do {
             let status = try await SyncConfiguration.container.accountStatus()
             state.isCloudAvailable = (status == .available)

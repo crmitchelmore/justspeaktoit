@@ -65,8 +65,11 @@ jobs:
         env:
           APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
         run: |
+          KEY_PATH=~/.appstoreconnect/private_keys/AuthKey_${{ env.APP_STORE_CONNECT_KEY_ID }}.p8
+          umask 077
           mkdir -p ~/.appstoreconnect/private_keys
-          echo "$APP_STORE_CONNECT_API_KEY" | base64 --decode > ~/.appstoreconnect/private_keys/AuthKey_${{ env.APP_STORE_CONNECT_KEY_ID }}.p8
+          echo "$APP_STORE_CONNECT_API_KEY" | base64 --decode > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
 
       - name: Generate Xcode Project
         run: |
@@ -377,3 +380,4 @@ jobs:
         if: always()
         run: |
           security delete-keychain $RUNNER_TEMP/app-signing.keychain-db || true
+          rm -f ~/.appstoreconnect/private_keys/AuthKey_${{ env.APP_STORE_CONNECT_KEY_ID }}.p8 || true

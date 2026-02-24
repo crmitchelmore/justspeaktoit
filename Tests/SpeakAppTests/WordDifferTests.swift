@@ -95,4 +95,20 @@ final class WordDifferTests: XCTestCase {
             "Changes should only be case corrections"
         )
     }
+
+    func testFindChanges_largeDeletion_doesNotCrashAndReturnsEmpty() {
+        let changes = WordDiffer.findChanges(
+            original: "one two three four five",
+            edited: "one"
+        )
+        XCTAssertTrue(changes.isEmpty, "Large deletions should be treated as rewrites, not corrections")
+    }
+
+    func testFindChanges_largeInsertion_doesNotCrashAndReturnsEmpty() {
+        let changes = WordDiffer.findChanges(
+            original: "one",
+            edited: "one two three four five"
+        )
+        XCTAssertTrue(changes.isEmpty, "Large insertions should be treated as rewrites, not corrections")
+    }
 }

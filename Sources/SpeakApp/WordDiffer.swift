@@ -117,6 +117,7 @@ struct WordDiffer {
     // Build LCS table
     let m = original.count
     let n = edited.count
+    guard m > 0, n > 0 else { return [] }
     var dp = [[Int]](repeating: [Int](repeating: 0, count: n + 1), count: m + 1)
 
     for i in 1...m {

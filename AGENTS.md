@@ -46,6 +46,13 @@ Manual releases are still possible by creating and pushing a `mac-v*` tag direct
 
 The `VERSION` file is a **hint** used as fallback when no tag is present. It does NOT control the release version - the **tag determines the version**. Keep it updated but always verify against actual releases.
 
+### Post-Release Support
+
+When a user reports that a freshly shipped macOS release won't install or launch, do the remediation directly:
+1. Download the latest `mac-v*` DMG.
+2. Replace `/Applications/JustSpeakToIt.app` (back up the existing app to `/tmp` first).
+3. Verify launch locally (e.g. `open -n /Applications/JustSpeakToIt.app`) before asking the user to retry.
+
 ## Project Structure & Module Organization
 
 This project uses **Swift Package Manager** for modularization with cross-platform support:

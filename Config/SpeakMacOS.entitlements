@@ -76,7 +76,8 @@
 	<key>com.apple.security.cs.disable-library-validation</key>
 	<true/>
 
-	<!-- CloudKit: iCloud container for transcription history sync -->
+	<!-- Restricted for Developer ID (iCloud/APNs): requires embedded provisioning profile.
+	     For App Store builds, uncomment and set aps-environment to production.
 	<key>com.apple.developer.icloud-container-identifiers</key>
 	<array>
 		<string>iCloud.com.justspeaktoit</string>
@@ -85,9 +86,8 @@
 	<array>
 		<string>CloudKit</string>
 	</array>
-
-	<!-- Push Notifications: Required for CloudKit silent push sync -->
 	<key>aps-environment</key>
 	<string>development</string>
+	-->
 </dict>
 </plist>

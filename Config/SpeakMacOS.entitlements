@@ -76,7 +76,8 @@
 	<key>com.apple.security.cs.disable-library-validation</key>
 	<true/>
 
-	<!-- Restricted for Developer ID: requires embedded provisioning profile
+	<!-- Restricted for Developer ID (iCloud/APNs): requires embedded provisioning profile.
+	     For App Store builds, uncomment and set aps-environment to production.
 	<key>com.apple.developer.icloud-container-identifiers</key>
 	<array>
 		<string>iCloud.com.justspeaktoit</string>

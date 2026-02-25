@@ -33,8 +33,11 @@ jobs:
       - name: Build
         run: make build
 
-      - name: Test
+      - name: Test (Debug)
         run: swift test --enable-code-coverage
+
+      - name: Test (Release)
+        run: swift test -c release
 
       - name: Report Coverage
         if: always()

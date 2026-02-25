@@ -81,6 +81,11 @@ jobs:
             -workspace "$WORKSPACE" \
             -scheme "$SCHEME"
 
+      - name: Run Tests (Release Config)
+        run: |
+          echo "Running tests in release configuration as release gate..."
+          swift test -c release
+
       - name: Verify Entitlements for Developer ID
         run: |
           # Entitlements file is pre-configured for Developer ID (non-sandboxed).
@@ -188,6 +193,13 @@ jobs:
           echo "$CODESIGN_INFO"
           echo "$CODESIGN_INFO" | grep -q "runtime"
 
+      - name: Verify App Launches (Pre-Notarisation)
+        run: |
+          APP_PATH="$RUNNER_TEMP/export/$PRODUCT_NAME.app"
+          echo "Verifying signed app launches without crashing..."
+          chmod +x scripts/verify-launch.sh
+          ./scripts/verify-launch.sh "$APP_PATH"
+
       - name: Notarize App
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -250,6 +262,19 @@ jobs:
           
           # Staple the notarization ticket
           xcrun stapler staple "$APP_PATH"
+
+      - name: Verify Entitlements (Post-Sign)
+        run: |
+          APP_PATH="$RUNNER_TEMP/export/$PRODUCT_NAME.app"
+          chmod +x scripts/verify-entitlements.sh
+          ./scripts/verify-entitlements.sh "$APP_PATH"
+
+      - name: Verify App Launches (Post-Notarisation)
+        run: |
+          APP_PATH="$RUNNER_TEMP/export/$PRODUCT_NAME.app"
+          echo "Verifying notarised+stapled app launches without crashing..."
+          chmod +x scripts/verify-launch.sh
+          ./scripts/verify-launch.sh "$APP_PATH"
 
       - name: Create DMG
         run: |

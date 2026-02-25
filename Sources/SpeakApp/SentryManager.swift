@@ -20,15 +20,22 @@ enum SentryManager {
     struct PerformanceSpan {}
     #endif
 
-    /// Initialize Sentry SDK - call as early as possible in app lifecycle
+    /// Initialize Sentry SDK - call as early as possible in app lifecycle.
+    /// Runs in both DEBUG and release to verify the SDK loads and configures
+    /// without crashing. DEBUG builds use a disabled DSN to avoid sending data.
     static func start() {
-        #if DEBUG
-        // Don't send errors in debug builds
-        return
-        #else
         #if canImport(Sentry)
+        let dsn = "https://6da8db9be62a737d295a727db0f6ce7e@o4510682832240640"
+            + ".ingest.de.sentry.io/4510790595903568"
         SentrySDK.start { options in
-            options.dsn = "https://6da8db9be62a737d295a727db0f6ce7e@o4510682832240640.ingest.de.sentry.io/4510790595903568"
+            options.dsn = dsn
+            #if DEBUG
+            // Exercises full SDK init so linking/config issues surface in dev.
+            options.enabled = false
+            options.environment = "debug"
+            #else
+            options.environment = "production"
+            #endif
 
             // Enable performance monitoring
             options.tracesSampleRate = 0.2  // 20% of transactions
@@ -42,9 +49,6 @@ enum SentryManager {
             // Capture HTTP client errors
             options.enableCaptureFailedRequests = true
 
-            // Set environment
-            options.environment = "production"
-
             // Set app version from bundle
             if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
                let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String {
@@ -55,12 +59,10 @@ enum SentryManager {
             options.sendDefaultPii = false
         }
         #endif
-        #endif
     }
 
     /// Capture an error with optional context
     static func capture(error: Error, context: [String: Any]? = nil) {
-        #if !DEBUG
         #if canImport(Sentry)
         SentrySDK.capture(error: error) { scope in
             if let context = context {
@@ -68,12 +70,10 @@ enum SentryManager {
             }
         }
         #endif
-        #endif
     }
 
     /// Capture a message for non-error events
     static func capture(message: String, level: LogLevel = .info) {
-        #if !DEBUG
         #if canImport(Sentry)
         SentrySDK.capture(message: message) { scope in
             scope.setLevel(level)
@@ -81,12 +81,10 @@ enum SentryManager {
         #else
         _ = level
         #endif
-        #endif
     }
 
     /// Add breadcrumb for debugging context
     static func addBreadcrumb(category: String, message: String, level: LogLevel = .info) {
-        #if !DEBUG
         #if canImport(Sentry)
         let crumb = Breadcrumb(level: level, category: category)
         crumb.message = message
@@ -94,31 +92,24 @@ enum SentryManager {
         #else
         _ = level
         #endif
-        #endif
     }
 
     /// Set user identifier (anonymized)
     static func setUser(id: String) {
-        #if !DEBUG
         #if canImport(Sentry)
         let user = User(userId: id)
         SentrySDK.setUser(user)
-        #endif
         #endif
     }
 
     /// Start a performance transaction span
     static func startSpan(operation: String, description: String) -> PerformanceSpan? {
-        #if DEBUG
-        return nil
-        #else
         #if canImport(Sentry)
         return SentrySDK.startTransaction(name: description, operation: operation)
         #else
         _ = operation
         _ = description
         return nil
-        #endif
         #endif
     }
 }

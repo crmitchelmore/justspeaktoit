@@ -29,9 +29,35 @@ rebuild: ## Clean and then build from scratch
 test: ## Execute the test suite
 	swift test $(SWIFT_FLAGS)
 
+.PHONY: test-release
+test-release: ## Run tests in release configuration
+	swift test -c release $(SWIFT_FLAGS)
+
+.PHONY: test-all
+test-all: test test-release ## Run tests in both debug and release
+
 .PHONY: release
 release: ## Build optimized release binary
 	swift build -c release $(SWIFT_FLAGS)
+
+.PHONY: verify
+verify: release ## Build release binary and verify it launches
+	chmod +x scripts/verify-launch.sh
+	./scripts/verify-launch.sh .build/release/SpeakApp
+
+.PHONY: install-verify
+install-verify: release ## Build release, install to /Applications, launch and verify
+	@echo "Installing to /Applications/JustSpeakToIt-Dev.app..."
+	rm -rf /Applications/JustSpeakToIt-Dev.app
+	mkdir -p /Applications/JustSpeakToIt-Dev.app/Contents/MacOS
+	cp .build/release/SpeakApp /Applications/JustSpeakToIt-Dev.app/Contents/MacOS/JustSpeakToIt
+	cp -r .build/release/SpeakApp.app/Contents/Info.plist /Applications/JustSpeakToIt-Dev.app/Contents/ 2>/dev/null || true
+	chmod +x scripts/verify-launch.sh
+	./scripts/verify-launch.sh /Applications/JustSpeakToIt-Dev.app
+	@echo "✅ Install verification passed"
+
+.PHONY: preflight
+preflight: test-all verify ## Full pre-release check (tests + launch verification)
 
 .PHONY: xcode
 xcode: ## Generate and open Xcode workspace

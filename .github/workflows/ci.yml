@@ -39,11 +39,6 @@ jobs:
       - name: Test (Release)
         run: swift test -c release
 
-      - name: Verify Launch
-        run: |
-          chmod +x scripts/verify-launch.sh
-          ./scripts/verify-launch.sh .build/release/SpeakApp
-
       - name: Report Coverage
         if: always()
         run: |

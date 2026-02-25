@@ -19,8 +19,7 @@ let package = Package(
         .package(url: "https://github.com/realm/SwiftLint.git", from: "0.55.0"),
         .package(url: "https://github.com/nicklockwood/SwiftFormat.git", from: "0.53.6"),
         .package(url: "https://github.com/sparkle-project/Sparkle.git", from: "2.6.0"),
-        .package(url: "https://github.com/getsentry/sentry-cocoa.git", from: "9.3.0"),
-        .package(url: "https://github.com/pointfreeco/swift-snapshot-testing", from: "1.17.0")
+        .package(url: "https://github.com/getsentry/sentry-cocoa.git", from: "9.3.0")
     ],
     targets: [
         .target(
@@ -62,13 +61,6 @@ let package = Package(
         .testTarget(
             name: "SpeakAppTests",
             dependencies: ["SpeakApp"]
-        ),
-        .testTarget(
-            name: "SpeakAppSnapshotTests",
-            dependencies: [
-                "SpeakApp",
-                .product(name: "SnapshotTesting", package: "swift-snapshot-testing"),
-            ]
         )
     ]
 )

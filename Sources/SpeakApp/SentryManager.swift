@@ -30,11 +30,12 @@ enum SentryManager {
         SentrySDK.start { options in
             options.dsn = dsn
             // Set app version from bundle
-            if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
-               let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String {
+            if let info = Bundle.main.infoDictionary,
+               let version = info["CFBundleShortVersionString"] as? String,
+               let build = info["CFBundleVersion"] as? String {
                 options.releaseName = "justspeaktoit-mac@\(version)+\(build)"
+                options.dist = build
             }
-            options.dist = Bundle.main.infoDictionary?["CFBundleVersion"] as? String
             #if DEBUG
             // Exercises full SDK init so linking/config issues surface in dev.
             options.enabled = false

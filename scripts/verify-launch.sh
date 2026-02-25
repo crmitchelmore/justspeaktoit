@@ -16,7 +16,7 @@ set -euo pipefail
 
 # --- Timing helpers ---
 if [[ "$(date +%s%N 2>/dev/null)" == *N* ]]; then
-    _now_ns() { echo "$(date +%s)000000000"; }
+    _now_ns() { python3 -c 'import time; print(time.time_ns())'; }
 else
     _now_ns() { date +%s%N; }
 fi

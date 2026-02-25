@@ -29,6 +29,12 @@ enum SentryManager {
             + ".ingest.de.sentry.io/4510790595903568"
         SentrySDK.start { options in
             options.dsn = dsn
+            // Set app version from bundle
+            if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
+               let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String {
+                options.releaseName = "justspeaktoit-mac@\(version)+\(build)"
+            }
+            options.dist = Bundle.main.infoDictionary?["CFBundleVersion"] as? String
             #if DEBUG
             // Exercises full SDK init so linking/config issues surface in dev.
             options.enabled = false
@@ -48,12 +54,6 @@ enum SentryManager {
 
             // Capture HTTP client errors
             options.enableCaptureFailedRequests = true
-
-            // Set app version from bundle
-            if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
-               let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String {
-                options.releaseName = "com.justspeaktoit.app@\(version)+\(build)"
-            }
 
             // Don't send PII by default
             options.sendDefaultPii = false

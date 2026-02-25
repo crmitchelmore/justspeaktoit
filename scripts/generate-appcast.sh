@@ -114,7 +114,8 @@ cat << EOF
         url="${DOWNLOAD_URL}"
         sparkle:edSignature="${SIGNATURE}"
         length="${FILE_SIZE}"
-        type="application/octet-stream"/>
+        type="application/octet-stream"
+        sparkle:phasedRolloutInterval="86400"/>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
     </item>
   </channel>

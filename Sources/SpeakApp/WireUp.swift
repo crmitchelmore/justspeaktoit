@@ -219,9 +219,22 @@ final class AppEnvironment: ObservableObject {
 
 @MainActor
 enum WireUp {
-  static func bootstrap() -> AppEnvironment {
-    let settings = AppSettings()
-    let permissions = PermissionsManager()
+
+  // MARK: - Dependency Injection Options
+
+  struct BootstrapOptions {
+    var settingsOverride: AppSettings?
+    var permissionsOverride: PermissionsManager?
+
+    static let `default` = BootstrapOptions()
+  }
+
+  static func bootstrap(
+    options: BootstrapOptions = .default
+  ) -> AppEnvironment {
+    let settings = options.settingsOverride ?? AppSettings()
+    let permissions = options.permissionsOverride
+      ?? PermissionsManager()
     let history = HistoryManager(flushInterval: settings.historyFlushInterval)
     let hud = HUDManager(appSettings: settings)
     let hotKeys = HotKeyManager(permissionsManager: permissions, appSettings: settings)

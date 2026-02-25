@@ -39,6 +39,11 @@ jobs:
       - name: Test (Release)
         run: swift test -c release
 
+      - name: Verify Launch
+        run: |
+          chmod +x scripts/verify-launch.sh
+          ./scripts/verify-launch.sh .build/release/SpeakApp
+
       - name: Report Coverage
         if: always()
         run: |
@@ -63,6 +68,15 @@ jobs:
 
       - name: Build iOS Library
         run: swift build --target SpeakiOSLib
+
+      - name: Test SpeakCore (iOS Simulator)
+        run: |
+          xcodebuild test \
+            -scheme SpeakCore \
+            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+            -skipPackagePluginValidation \
+            -quiet \
+            2>&1 | tail -20
 
   lint:
     name: Lint

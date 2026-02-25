@@ -327,6 +327,22 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Create Sentry Release
+        if: env.SENTRY_AUTH_TOKEN != ''
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if command -v sentry-cli &>/dev/null; then
+            sentry-cli releases new "justspeaktoit-mac@${VERSION}+${BUILD_NUMBER}"
+            sentry-cli releases set-commits "justspeaktoit-mac@${VERSION}+${BUILD_NUMBER}" --auto
+            sentry-cli releases finalize "justspeaktoit-mac@${VERSION}+${BUILD_NUMBER}"
+          else
+            echo "sentry-cli not found, skipping release creation"
+          fi
+
       - name: Update Landing Page Appcast
         if: startsWith(github.ref, 'refs/tags/mac-v')
         env:

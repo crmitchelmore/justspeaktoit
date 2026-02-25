@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "Running preflight checks before push..."
+
+if ! make preflight; then
+    echo "❌ Preflight failed — push blocked. Use --no-verify to skip."
+    exit 1
+fi

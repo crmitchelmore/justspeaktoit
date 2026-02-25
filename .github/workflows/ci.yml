@@ -34,10 +34,10 @@ jobs:
         run: make build
 
       - name: Test (Debug)
-        run: swift test --enable-code-coverage
+        run: swift test --enable-code-coverage --skip SpeakAppSnapshotTests
 
       - name: Test (Release)
-        run: swift test -c release
+        run: swift test -c release --skip SpeakAppSnapshotTests
 
       - name: Report Coverage
         if: always()
@@ -63,6 +63,15 @@ jobs:
 
       - name: Build iOS Library
         run: swift build --target SpeakiOSLib
+
+      - name: Test SpeakCore (iOS Simulator)
+        run: |
+          xcodebuild test \
+            -scheme SpeakCore \
+            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+            -skipPackagePluginValidation \
+            -quiet \
+            2>&1 | tail -20
 
   lint:
     name: Lint

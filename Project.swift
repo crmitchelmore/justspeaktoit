@@ -133,6 +133,16 @@ let project = Project(
                 .package(product: "SpeakiOSLib")
             ],
             settings: .settings(base: iosWidgetSettings)
+        ),
+        .target(
+            name: "SpeakAppUITests",
+            destinations: .macOS,
+            product: .uiTests,
+            bundleId: "com.justspeaktoit.uitests",
+            sources: ["Tests/SpeakAppUITests/**"],
+            dependencies: [
+                .target(name: "SpeakApp")
+            ]
         )
     ]
 )

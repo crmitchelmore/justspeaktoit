@@ -14,6 +14,13 @@
 
 set -euo pipefail
 
+# --- Timing helpers ---
+if [[ "$(date +%s%N 2>/dev/null)" == *N* ]]; then
+    _now_ns() { python3 -c 'import time; print(time.time_ns())'; }
+else
+    _now_ns() { date +%s%N; }
+fi
+
 TIMEOUT_SECONDS="${VERIFY_LAUNCH_TIMEOUT:-8}"
 PROCESS_NAME="JustSpeakToIt"
 
@@ -48,6 +55,7 @@ if [ -d "$CRASH_DIR" ]; then
 fi
 
 # --- Launch the app ---
+LAUNCH_START_NS=$(_now_ns)
 APP_PID=""
 
 if [[ "$APP_PATH" == *.app ]]; then
@@ -72,6 +80,19 @@ if [ -z "$APP_PID" ]; then
 fi
 
 echo "  PID: $APP_PID"
+
+# --- Record launch time ---
+LAUNCH_END_NS=$(_now_ns)
+LAUNCH_ELAPSED_NS=$((LAUNCH_END_NS - LAUNCH_START_NS))
+LAUNCH_TIME_S=$(awk "BEGIN {printf \"%.1f\", $LAUNCH_ELAPSED_NS / 1000000000}")
+echo "  Launch time: ${LAUNCH_TIME_S}s"
+echo "$LAUNCH_TIME_S" > /tmp/launch-time.txt
+if [ -f ".launch-time-baseline" ]; then
+    BASELINE=$(cat .launch-time-baseline)
+    if awk "BEGIN {exit !($LAUNCH_TIME_S > 2 * $BASELINE)}"; then
+        echo "  ⚠️ Launch time regression: ${LAUNCH_TIME_S}s (baseline: ${BASELINE}s)"
+    fi
+fi
 
 # --- Wait and check if process is still alive ---
 echo "  Waiting ${TIMEOUT_SECONDS}s to verify stability..."

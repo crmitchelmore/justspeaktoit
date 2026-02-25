@@ -59,6 +59,11 @@ install-verify: release ## Build release, install to /Applications, launch and v
 .PHONY: preflight
 preflight: test-all verify ## Full pre-release check (tests + launch verification)
 
+.PHONY: install-hooks
+install-hooks: ## Install git hooks for pre-push verification
+	git config core.hooksPath .githooks
+	@echo "✓ Git hooks installed (pre-push → make preflight)"
+
 .PHONY: xcode
 xcode: ## Generate and open Xcode workspace
 	tuist generate

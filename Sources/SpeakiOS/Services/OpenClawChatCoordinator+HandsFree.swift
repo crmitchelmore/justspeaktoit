@@ -287,10 +287,17 @@ extension OpenClawChatCoordinator {
                 settings.summariseResponses &&
                 !settings.lowLatencySpeech &&
                 appSettings.hasOpenRouterKey {
-                spokenText = try await summariser.summarise(
-                    text,
-                    apiKey: appSettings.openRouterAPIKey
-                )
+                do {
+                    spokenText = try await summariser.summarise(
+                        text,
+                        apiKey: appSettings.openRouterAPIKey
+                    )
+                    logger.info("Summarised response (\(text.count)→\(spokenText.count) chars)")
+                } catch {
+                    // Summarisation failed — fall back to speaking the original text
+                    logger.warning("Summarisation failed, speaking raw: \(error.localizedDescription)")
+                    spokenText = text
+                }
             }
 
             // Apply TTS settings

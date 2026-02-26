@@ -34,6 +34,9 @@ public final class DeepgramLiveTranscriber: ObservableObject {
     private var apiKey: String?
     private var startTime: Date?
     private var accumulatedText = ""
+
+    /// Persistent audio recorder — saves audio to disk alongside transcription.
+    public let audioRecorder = AudioRecordingPersistence()
     
     // MARK: - Init
     
@@ -146,6 +149,9 @@ public final class DeepgramLiveTranscriber: ObservableObject {
         
         // Install tap on input node using native format, then convert
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) { [weak self] buffer, _ in
+            // Persist raw audio to disk
+            self?.audioRecorder.writeBuffer(buffer)
+
             // Calculate output frame capacity based on sample rate ratio
             let ratio = 16000.0 / nativeFormat.sampleRate
             let outputFrameCapacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio)
@@ -171,6 +177,9 @@ public final class DeepgramLiveTranscriber: ObservableObject {
         // Start audio engine
         audioEngine.prepare()
         try audioEngine.start()
+
+        // Start persistent recording alongside transcription
+        try? audioRecorder.startRecording(format: nativeFormat)
         
         // Reset state
         partialText = ""
@@ -205,7 +214,10 @@ public final class DeepgramLiveTranscriber: ObservableObject {
         // Stop Deepgram client
         deepgramClient?.stop()
         deepgramClient = nil
-        
+
+        // Stop persistent recording
+        _ = audioRecorder.stopRecording()
+
         // Build final result
         let duration = startTime.map { Date().timeIntervalSince($0) } ?? 0
         let text = accumulatedText.isEmpty ? partialText : accumulatedText
@@ -238,6 +250,10 @@ public final class DeepgramLiveTranscriber: ObservableObject {
         audioEngine.inputNode.removeTap(onBus: 0)
         deepgramClient?.stop()
         deepgramClient = nil
+
+        // Cancel persistent recording (keeps partial file)
+        audioRecorder.cancelRecording()
+
         isRunning = false
         
         audioSessionManager.deactivate()

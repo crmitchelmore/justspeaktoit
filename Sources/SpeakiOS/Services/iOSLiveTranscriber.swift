@@ -68,6 +68,9 @@ public final class iOSLiveTranscriber: ObservableObject {
     private var latestResult: SFSpeechRecognitionResult?
     private var startTime: Date?
     private var segments: [TranscriptionSegment] = []
+
+    /// Persistent audio recorder — saves audio to disk alongside transcription.
+    public let audioRecorder = AudioRecordingPersistence()
     
     // MARK: - Init
     
@@ -158,11 +161,15 @@ public final class iOSLiveTranscriber: ObservableObject {
         
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
             self?.recognitionRequest?.append(buffer)
+            self?.audioRecorder.writeBuffer(buffer)
         }
         
         // Start audio engine
         audioEngine.prepare()
         try audioEngine.start()
+
+        // Start persistent recording alongside transcription
+        try? audioRecorder.startRecording(format: recordingFormat)
         
         // Reset state
         partialText = ""
@@ -208,7 +215,10 @@ public final class iOSLiveTranscriber: ObservableObject {
         
         // Cancel recognition task
         recognitionTask?.cancel()
-        
+
+        // Stop persistent recording
+        _ = audioRecorder.stopRecording()
+
         // Build final result
         let duration = startTime.map { Date().timeIntervalSince($0) } ?? 0
         let result = buildFinalResult(duration: duration)
@@ -238,6 +248,9 @@ public final class iOSLiveTranscriber: ObservableObject {
         audioEngine.inputNode.removeTap(onBus: 0)
         recognitionTask?.cancel()
         
+        // Cancel persistent recording (keeps partial file by default)
+        audioRecorder.cancelRecording()
+
         recognitionRequest = nil
         recognitionTask = nil
         speechRecognizer = nil

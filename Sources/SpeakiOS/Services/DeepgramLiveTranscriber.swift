@@ -9,65 +9,77 @@ import os.log
 @MainActor
 public final class DeepgramLiveTranscriber: ObservableObject {
     // MARK: - Published State
-    
+
     @Published private(set) public var isRunning = false
     @Published private(set) public var partialText = ""
     @Published private(set) public var finalText = ""
     @Published private(set) public var error: Error?
-    
+
     // MARK: - Configuration
-    
+
     public var language: String = Locale.current.identifier
     public var model: String = "nova-3"
-    
+
     // MARK: - Callbacks
-    
+
     public var onPartialResult: ((String, Bool) -> Void)?
     public var onFinalResult: ((TranscriptionResult) -> Void)?
     public var onError: ((Error) -> Void)?
-    
+
     // MARK: - Private
-    
+
     private let audioSessionManager: AudioSessionManager
     private var deepgramClient: DeepgramLiveClient?
     private let audioEngine = AVAudioEngine()
     private var apiKey: String?
     private var startTime: Date?
     private var accumulatedText = ""
-    
+
+    /// Persistent audio recorder — saves audio to disk alongside transcription.
+    public let audioRecorder = AudioRecordingPersistence()
+
     // MARK: - Init
-    
+
     public init(audioSessionManager: AudioSessionManager) {
         self.audioSessionManager = audioSessionManager
         setupInterruptionHandling()
     }
-    
+
     // MARK: - Public API
-    
+
     /// Configure the API key for Deepgram.
     public func configure(apiKey: String) {
         self.apiKey = apiKey
     }
-    
+
     /// Check if API key is configured.
     public var isConfigured: Bool {
         apiKey?.isEmpty == false
     }
-    
+
     /// Start live transcription with Deepgram.
     public func start() async throws {
         guard !isRunning else { return }
-        
+
         SpeakLogger.logTranscription(event: "start", model: "deepgram/\(model)")
-        
+
         guard let apiKey, !apiKey.isEmpty else {
             let error = DeepgramLiveError.missingAPIKey
             SpeakLogger.logError(error, context: "DeepgramLiveTranscriber.start", logger: SpeakLogger.transcription)
             self.error = error
             throw error
         }
-        
-        // Request microphone permission
+
+        try await ensureMicrophonePermission()
+        try configureAudioSession()
+        connectDeepgramClient(apiKey: apiKey)
+        try startAudioEngine()
+        resetState()
+
+        print("[DeepgramLiveTranscriber] Started")
+    }
+
+    private func ensureMicrophonePermission() async throws {
         if !audioSessionManager.hasMicrophonePermission() {
             let granted = await audioSessionManager.requestMicrophonePermission()
             if !granted {
@@ -77,8 +89,9 @@ public final class DeepgramLiveTranscriber: ObservableObject {
                 throw error
             }
         }
-        
-        // Configure audio session
+    }
+
+    private func configureAudioSession() throws {
         do {
             try audioSessionManager.configureForRecording()
             SpeakLogger.audio.info("Audio session configured for Deepgram")
@@ -88,18 +101,16 @@ public final class DeepgramLiveTranscriber: ObservableObject {
             self.error = wrappedError
             throw wrappedError
         }
-        
-        // Create Deepgram client
+    }
+
+    private func connectDeepgramClient(apiKey: String) {
         deepgramClient = DeepgramLiveClient(
             apiKey: apiKey,
             model: model,
             language: language,
             sampleRate: 16000
         )
-        
         SpeakLogger.network.info("Connecting to Deepgram streaming API")
-        
-        // Start Deepgram connection
         deepgramClient?.start(
             onTranscript: { [weak self] text, isFinal in
                 Task { @MainActor in
@@ -112,14 +123,27 @@ public final class DeepgramLiveTranscriber: ObservableObject {
                 }
             }
         )
-        
-        // Setup audio engine
+    }
+
+    private func startAudioEngine() throws {
         let inputNode = audioEngine.inputNode
-        
-        // Get the native format from the input node - we must use this format for the tap
         let nativeFormat = inputNode.outputFormat(forBus: 0)
-        
-        // Create a format converter for resampling to 16kHz mono (Deepgram requirement)
+        let (targetFormat, converter) = try createAudioConverter(from: nativeFormat)
+
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) { [weak self] buffer, _ in
+            self?.audioRecorder.writeBuffer(buffer)
+            self?.convertAndSendAudio(buffer: buffer, nativeFormat: nativeFormat,
+                                      targetFormat: targetFormat, converter: converter)
+        }
+
+        audioEngine.prepare()
+        try audioEngine.start()
+        try? audioRecorder.startRecording(format: nativeFormat)
+    }
+
+    private func createAudioConverter(
+        from nativeFormat: AVAudioFormat
+    ) throws -> (AVAudioFormat, AVAudioConverter) {
         guard let targetFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
             sampleRate: 16000,
@@ -127,62 +151,54 @@ public final class DeepgramLiveTranscriber: ObservableObject {
             interleaved: false
         ) else {
             let error = iOSTranscriptionError.audioSessionFailed(
-                NSError(domain: "DeepgramLiveTranscriber", code: -1, 
+                NSError(domain: "DeepgramLiveTranscriber", code: -1,
                        userInfo: [NSLocalizedDescriptionKey: "Failed to create target audio format"])
             )
             self.error = error
             throw error
         }
-        
-        // Create converter for resampling
         guard let converter = AVAudioConverter(from: nativeFormat, to: targetFormat) else {
             let error = iOSTranscriptionError.audioSessionFailed(
-                NSError(domain: "DeepgramLiveTranscriber", code: -2, 
+                NSError(domain: "DeepgramLiveTranscriber", code: -2,
                        userInfo: [NSLocalizedDescriptionKey: "Failed to create audio converter"])
             )
             self.error = error
             throw error
         }
-        
-        // Install tap on input node using native format, then convert
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) { [weak self] buffer, _ in
-            // Calculate output frame capacity based on sample rate ratio
-            let ratio = 16000.0 / nativeFormat.sampleRate
-            let outputFrameCapacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio)
-            
-            guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: outputFrameCapacity) else {
-                return
-            }
-            
-            var error: NSError?
-            let status = converter.convert(to: outputBuffer, error: &error) { inNumPackets, outStatus in
-                outStatus.pointee = .haveData
-                return buffer
-            }
-            
-            guard status != .error, let channelData = outputBuffer.floatChannelData?[0] else {
-                return
-            }
-            
-            let frameCount = Int(outputBuffer.frameLength)
-            self?.deepgramClient?.sendAudioSamples(channelData, frameCount: frameCount)
+        return (targetFormat, converter)
+    }
+
+    private nonisolated func convertAndSendAudio(
+        buffer: AVAudioPCMBuffer,
+        nativeFormat: AVAudioFormat,
+        targetFormat: AVAudioFormat,
+        converter: AVAudioConverter
+    ) {
+        let ratio = 16000.0 / nativeFormat.sampleRate
+        let outputFrameCapacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio)
+        guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: outputFrameCapacity) else {
+            return
         }
-        
-        // Start audio engine
-        audioEngine.prepare()
-        try audioEngine.start()
-        
-        // Reset state
+        var error: NSError?
+        let status = converter.convert(to: outputBuffer, error: &error) { _, outStatus in
+            outStatus.pointee = .haveData
+            return buffer
+        }
+        guard status != .error, let channelData = outputBuffer.floatChannelData?[0] else {
+            return
+        }
+        deepgramClient?.sendAudioSamples(channelData, frameCount: Int(outputBuffer.frameLength))
+    }
+
+    private func resetState() {
         partialText = ""
         finalText = ""
         accumulatedText = ""
         error = nil
         startTime = Date()
         isRunning = true
-        
-        print("[DeepgramLiveTranscriber] Started")
     }
-    
+
     /// Stop transcription and return final result.
     public func stop() async -> TranscriptionResult {
         guard isRunning else {
@@ -197,19 +213,22 @@ public final class DeepgramLiveTranscriber: ObservableObject {
                 debugInfo: nil
             )
         }
-        
+
         // Stop audio engine
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
-        
+
         // Stop Deepgram client
         deepgramClient?.stop()
         deepgramClient = nil
-        
+
+        // Stop persistent recording
+        _ = audioRecorder.stopRecording()
+
         // Build final result
         let duration = startTime.map { Date().timeIntervalSince($0) } ?? 0
         let text = accumulatedText.isEmpty ? partialText : accumulatedText
-        
+
         let result = TranscriptionResult(
             text: text,
             segments: [],
@@ -220,33 +239,37 @@ public final class DeepgramLiveTranscriber: ObservableObject {
             rawPayload: nil,
             debugInfo: nil
         )
-        
+
         isRunning = false
         audioSessionManager.deactivate()
-        
+
         SpeakLogger.logTranscription(event: "stop", model: "deepgram/\(model)", wordCount: result.text.split(separator: " ").count)
         onFinalResult?(result)
-        
+
         return result
     }
-    
+
     /// Cancel transcription without returning result.
     public func cancel() {
         guard isRunning else { return }
-        
+
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
         deepgramClient?.stop()
         deepgramClient = nil
+
+        // Cancel persistent recording (keeps partial file)
+        audioRecorder.cancelRecording()
+
         isRunning = false
-        
+
         audioSessionManager.deactivate()
-        
+
         print("[DeepgramLiveTranscriber] Cancelled")
     }
-    
+
     // MARK: - Private
-    
+
     private func setupInterruptionHandling() {
         audioSessionManager.onInterruption = { [weak self] began in
             Task { @MainActor in
@@ -256,19 +279,19 @@ public final class DeepgramLiveTranscriber: ObservableObject {
             }
         }
     }
-    
+
     private func handleInterruption() {
         guard isRunning else { return }
-        
+
         print("[DeepgramLiveTranscriber] Handling interruption")
         error = iOSTranscriptionError.interrupted
         onError?(iOSTranscriptionError.interrupted)
-        
+
         Task {
             _ = await stop()
         }
     }
-    
+
     private func handleTranscript(text: String, isFinal: Bool) {
         if isFinal {
             // Accumulate final text
@@ -286,10 +309,10 @@ public final class DeepgramLiveTranscriber: ObservableObject {
                 partialText = accumulatedText + " " + text
             }
         }
-        
+
         onPartialResult?(text, isFinal)
     }
-    
+
     private func handleError(_ error: Error) {
         self.error = error
         onError?(error)

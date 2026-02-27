@@ -346,6 +346,21 @@ public struct SettingsView: View {
                 }
             }
 
+            Section("Recordings") {
+                NavigationLink {
+                    RecordingsView()
+                } label: {
+                    Label("Saved Recordings", systemImage: "waveform.circle")
+                }
+
+                Text(
+                    "Audio is saved locally during transcription so you can "
+                        + "replay or re-transcribe if connectivity was lost."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
             Section("Send to Mac") {
                 NavigationLink {
                     SendToMacView()

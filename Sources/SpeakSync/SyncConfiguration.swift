@@ -7,7 +7,11 @@ import Security
 /// Configuration for CloudKit sync operations.
 public enum SyncConfiguration {
     /// The CloudKit container identifier.
+    #if os(iOS)
+    public static let containerIdentifier = "iCloud.com.justspeaktoit.ios"
+    #elseif os(macOS)
     public static let containerIdentifier = "iCloud.com.justspeaktoit"
+    #endif
 
     /// The custom zone name for transcription history.
     public static let zoneName = "TranscriptionHistoryZone"

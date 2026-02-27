@@ -449,7 +449,8 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
           self.delegate?.liveTranscriber(self, didUpdateWith: update)
           self.delegate?.liveTranscriber(self, didUpdatePartial: displayText)
           if result.isFinal {
-            print("[NativeOSXLiveTranscriber] Mid-session isFinal – committing \(displayText.count) chars and restarting recognition")
+            print("[NativeOSXLiveTranscriber] Mid-session isFinal – "
+              + "committing \(displayText.count) chars, restarting")
             self.committedText = displayText
             self.restartRecognitionTask()
           }

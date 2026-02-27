@@ -401,7 +401,7 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
     }
 
     let currentText = result.bestTranscription.formattedString
-    let fullText = committedText.isEmpty ? currentText : committedText + " " + currentText
+    let fullText = [committedText, currentText].filter { !$0.isEmpty }.joined(separator: " ")
     let duration = (segments.last?.endTime ?? 0) - (segments.first?.startTime ?? 0)
     let outcome = TranscriptionResult(
       text: fullText,
@@ -431,13 +431,12 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
     recognitionTask = recognizer.recognitionTask(with: activeRequest) { [weak self] result, error in
       guard let self else { return }
       if let result {
-        self.latestResult = result
         Task { @MainActor [weak self] in
           guard let self, generation == self.recognitionGeneration else { return }
+          self.latestResult = result
           let currentText = result.bestTranscription.formattedString
-          let displayText = self.committedText.isEmpty
-            ? currentText
-            : self.committedText + " " + currentText
+          let displayText = [self.committedText, currentText]
+            .filter { !$0.isEmpty }.joined(separator: " ")
           let confidence = result.bestTranscription.segments.isEmpty
             ? nil
             : result.transcriptionSegmentsConfidence

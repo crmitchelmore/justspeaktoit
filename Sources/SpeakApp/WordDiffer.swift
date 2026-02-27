@@ -114,41 +114,12 @@ struct WordDiffer {
 
   /// Use longest common subsequence to align words and find replacements.
   private static func extractViaLCS(original: [String], edited: [String]) -> [WordChange] {
-    // Build LCS table
-    let m = original.count
-    let n = edited.count
-    guard m > 0, n > 0 else { return [] }
-    var dp = [[Int]](repeating: [Int](repeating: 0, count: n + 1), count: m + 1)
+    guard !original.isEmpty, !edited.isEmpty else { return [] }
 
-    for rowIndex in 0..<m {
-      for columnIndex in 0..<n {
-        if original[rowIndex].lowercased() == edited[columnIndex].lowercased() {
-          dp[rowIndex + 1][columnIndex + 1] = dp[rowIndex][columnIndex] + 1
-        } else {
-          dp[rowIndex + 1][columnIndex + 1] = max(
-            dp[rowIndex][columnIndex + 1],
-            dp[rowIndex + 1][columnIndex]
-          )
-        }
-      }
-    }
-
-    // Backtrack to find which words are in common
-    var commonOriginalIndices = Set<Int>()
-    var commonEditedIndices = Set<Int>()
-    var i = m, j = n
-    while i > 0 && j > 0 {
-      if original[i - 1].lowercased() == edited[j - 1].lowercased() {
-        commonOriginalIndices.insert(i - 1)
-        commonEditedIndices.insert(j - 1)
-        i -= 1
-        j -= 1
-      } else if dp[i - 1][j] > dp[i][j - 1] {
-        i -= 1
-      } else {
-        j -= 1
-      }
-    }
+    let table = buildLCSTable(original: original, edited: edited)
+    let (commonOriginalIndices, commonEditedIndices) = backtrackLCS(
+      table: table, original: original, edited: edited
+    )
 
     // Find words that are not in common
     let changedOriginal = original.enumerated()
@@ -172,5 +143,45 @@ struct WordDiffer {
     }
 
     return changes
+  }
+
+  private static func buildLCSTable(original: [String], edited: [String]) -> [[Int]] {
+    let rows = original.count
+    let cols = edited.count
+    var table = [[Int]](repeating: [Int](repeating: 0, count: cols + 1), count: rows + 1)
+    for rowIndex in 0..<rows {
+      for columnIndex in 0..<cols {
+        if original[rowIndex].lowercased() == edited[columnIndex].lowercased() {
+          table[rowIndex + 1][columnIndex + 1] = table[rowIndex][columnIndex] + 1
+        } else {
+          table[rowIndex + 1][columnIndex + 1] = max(
+            table[rowIndex][columnIndex + 1],
+            table[rowIndex + 1][columnIndex]
+          )
+        }
+      }
+    }
+    return table
+  }
+
+  private static func backtrackLCS(
+    table: [[Int]], original: [String], edited: [String]
+  ) -> (Set<Int>, Set<Int>) {
+    var commonOriginalIndices = Set<Int>()
+    var commonEditedIndices = Set<Int>()
+    var row = original.count, col = edited.count
+    while row > 0 && col > 0 {
+      if original[row - 1].lowercased() == edited[col - 1].lowercased() {
+        commonOriginalIndices.insert(row - 1)
+        commonEditedIndices.insert(col - 1)
+        row -= 1
+        col -= 1
+      } else if table[row - 1][col] > table[row][col - 1] {
+        row -= 1
+      } else {
+        col -= 1
+      }
+    }
+    return (commonOriginalIndices, commonEditedIndices)
   }
 }

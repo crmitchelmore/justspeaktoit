@@ -9,7 +9,7 @@ public enum SyncConfiguration {
     /// The CloudKit container identifier.
     #if os(iOS)
     public static let containerIdentifier = "iCloud.com.justspeaktoit.ios"
-    #else
+    #elseif os(macOS)
     public static let containerIdentifier = "iCloud.com.justspeaktoit"
     #endif
 

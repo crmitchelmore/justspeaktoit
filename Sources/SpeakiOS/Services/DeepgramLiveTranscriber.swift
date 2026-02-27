@@ -129,11 +129,13 @@ public final class DeepgramLiveTranscriber: ObservableObject {
         let inputNode = audioEngine.inputNode
         let nativeFormat = inputNode.outputFormat(forBus: 0)
         let (targetFormat, converter) = try createAudioConverter(from: nativeFormat)
+        let client = deepgramClient
 
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) { [weak self] buffer, _ in
             self?.audioRecorder.writeBuffer(buffer)
             self?.convertAndSendAudio(buffer: buffer, nativeFormat: nativeFormat,
-                                      targetFormat: targetFormat, converter: converter)
+                                      targetFormat: targetFormat, converter: converter,
+                                      client: client)
         }
 
         audioEngine.prepare()
@@ -172,7 +174,8 @@ public final class DeepgramLiveTranscriber: ObservableObject {
         buffer: AVAudioPCMBuffer,
         nativeFormat: AVAudioFormat,
         targetFormat: AVAudioFormat,
-        converter: AVAudioConverter
+        converter: AVAudioConverter,
+        client: DeepgramLiveClient?
     ) {
         let ratio = 16000.0 / nativeFormat.sampleRate
         let outputFrameCapacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio)
@@ -187,7 +190,7 @@ public final class DeepgramLiveTranscriber: ObservableObject {
         guard status != .error, let channelData = outputBuffer.floatChannelData?[0] else {
             return
         }
-        deepgramClient?.sendAudioSamples(channelData, frameCount: Int(outputBuffer.frameLength))
+        client?.sendAudioSamples(channelData, frameCount: Int(outputBuffer.frameLength))
     }
 
     private func resetState() {

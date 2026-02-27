@@ -249,6 +249,9 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
   private var hasFinished: Bool = false
   /// Accumulated text from recognition segments finalised mid-session (on pause).
   private var committedText: String = ""
+  /// Last `formattedString` received from the recognizer, used to detect
+  /// implicit text resets where Apple silently clears the transcript.
+  private var lastFormattedString: String = ""
   /// Monotonic counter incremented on each recognition restart so that
   /// error callbacks from cancelled tasks are ignored.
   private var recognitionGeneration: Int = 0
@@ -308,6 +311,7 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
     latestResult = nil
     hasFinished = false
     committedText = ""
+    lastFormattedString = ""
     recognitionGeneration = 0
     guard request != nil else {
       audioEngine.stop()
@@ -435,6 +439,9 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
           guard let self, generation == self.recognitionGeneration else { return }
           self.latestResult = result
           let currentText = result.bestTranscription.formattedString
+          self.commitIfImplicitReset(currentText: currentText, isFinal: result.isFinal)
+          self.lastFormattedString = currentText
+
           let displayText = [self.committedText, currentText]
             .filter { !$0.isEmpty }.joined(separator: " ")
           let confidence = result.bestTranscription.segments.isEmpty
@@ -448,9 +455,11 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
           self.delegate?.liveTranscriber(self, didUpdateWith: update)
           self.delegate?.liveTranscriber(self, didUpdatePartial: displayText)
           if result.isFinal {
-            print("[NativeOSXLiveTranscriber] Mid-session isFinal – "
-              + "committing \(displayText.count) chars, restarting")
+            print(
+              "[NativeOSXLiveTranscriber] Mid-session isFinal – "
+                + "committing \(displayText.count) chars, restarting")
             self.committedText = displayText
+            self.lastFormattedString = ""
             self.restartRecognitionTask()
           }
         }
@@ -466,6 +475,22 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
         }
       }
     }
+  }
+
+  /// Detect when Apple's recognizer silently resets `formattedString` after
+  /// a pause without sending `isFinal`.  If the new text is dramatically
+  /// shorter than the previous result, commit the old text to prevent loss.
+  @MainActor
+  private func commitIfImplicitReset(currentText: String, isFinal: Bool) {
+    guard !isFinal,
+      lastFormattedString.count >= 10,
+      currentText.count < lastFormattedString.count / 2
+    else { return }
+    print(
+      "[NativeOSXLiveTranscriber] Implicit text reset – "
+        + "committing \(lastFormattedString.count) chars")
+    committedText = [committedText, lastFormattedString]
+      .filter { !$0.isEmpty }.joined(separator: " ")
   }
 
   /// Restart recognition after a mid-session `isFinal` so continued speech
@@ -485,6 +510,7 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
     }
     request = newRequest
     latestResult = nil
+    lastFormattedString = ""
 
     startRecognitionTask(with: recognizer)
   }

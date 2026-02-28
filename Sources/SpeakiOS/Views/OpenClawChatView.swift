@@ -27,14 +27,17 @@ public struct OpenClawChatView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 12) {
                         if let conv = coordinator.currentConversation {
-                            ForEach(conv.messages) { message in
+                            ForEach(coordinator.isBufferingForTTS
+                                ? Array(conv.messages.prefix(coordinator.messageCountBeforeResponse))
+                                : conv.messages
+                            ) { message in
                                 MessageBubble(message: message)
                                     .id(message.id)
                             }
                         }
 
                         // Streaming response
-                        if !coordinator.streamingResponse.isEmpty {
+                        if !coordinator.streamingResponse.isEmpty && !coordinator.isBufferingForTTS {
                             MessageBubble(
                                 message: .init(
                                     role: "assistant",
@@ -53,12 +56,13 @@ public struct OpenClawChatView: View {
                                 .id("recording")
                         }
 
-                        // Processing indicator
-                        if coordinator.isProcessing && coordinator.streamingResponse.isEmpty {
+                        // Processing or TTS preparation indicator
+                        if coordinator.isBufferingForTTS
+                            || (coordinator.isProcessing && coordinator.streamingResponse.isEmpty) {
                             HStack(spacing: 8) {
                                 ProgressView()
                                     .scaleEffect(0.8)
-                                Text("Thinking…")
+                                Text(coordinator.isProcessing ? "Thinking…" : "Preparing response…")
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
                             }
@@ -76,6 +80,14 @@ public struct OpenClawChatView: View {
                 .onChange(of: coordinator.streamingResponse) { _, _ in
                     withAnimation(.easeOut(duration: 0.1)) {
                         proxy.scrollTo("streaming", anchor: .bottom)
+                    }
+                }
+                .onChange(of: coordinator.isBufferingForTTS) { _, isBuffering in
+                    if !isBuffering,
+                       let lastId = coordinator.currentConversation?.messages.last?.id {
+                        withAnimation(.easeOut(duration: 0.3)) {
+                            proxy.scrollTo(lastId, anchor: .bottom)
+                        }
                     }
                 }
                 .contentShape(Rectangle())

@@ -246,6 +246,44 @@
       animation: fadeInUp 0.8s var(--ease-out-expo) 0.8s forwards;
     }
 
+    /* Homebrew install block */
+    .brew-install {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      background: rgba(0, 0, 0, 0.5);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 0.75rem 1.25rem;
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      font-size: 0.85rem;
+      color: var(--color-text-muted);
+      margin-top: 1.5rem;
+      opacity: 0;
+      animation: fadeInUp 0.8s var(--ease-out-expo) 1s forwards;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      position: relative;
+    }
+    .brew-install:hover {
+      border-color: var(--color-accent);
+      color: var(--color-text);
+    }
+    .brew-install__prompt {
+      color: var(--color-secondary);
+      user-select: none;
+    }
+    .brew-install__copy {
+      color: var(--color-text-muted);
+      font-size: 0.8rem;
+      opacity: 0.6;
+      transition: opacity 0.2s;
+      user-select: none;
+    }
+    .brew-install:hover .brew-install__copy {
+      opacity: 1;
+    }
+
     .btn {
       display: inline-flex;
       align-items: center;
@@ -427,7 +465,7 @@
     /* Features Grid */
     .features-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
       gap: 1.5rem;
     }
 
@@ -623,6 +661,7 @@
     .platform-card:hover {
       transform: translateY(-8px);
       box-shadow: 0 30px 60px rgba(0, 0, 0, 0.4);
+      border-color: rgba(255, 106, 61, 0.3);
     }
 
     .platform-card__icon {
@@ -766,9 +805,47 @@
     }
 
     /* Responsive */
+    .nav__hamburger {
+      display: none;
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 0.5rem;
+    }
+    .nav__hamburger span {
+      display: block;
+      width: 22px;
+      height: 2px;
+      background: var(--color-text);
+      margin: 5px 0;
+      border-radius: 2px;
+      transition: all 0.3s ease;
+    }
+
     @media (max-width: 768px) {
+      .nav__hamburger {
+        display: block;
+        z-index: 102;
+      }
+
       .nav__links {
         display: none;
+        position: fixed;
+        inset: 0;
+        background: var(--color-bg);
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        gap: 2.5rem;
+        z-index: 101;
+      }
+
+      .nav__links.open {
+        display: flex;
+      }
+
+      .nav__links .nav__link {
+        font-size: 1.25rem;
       }
 
       .pricing-highlight {
@@ -824,6 +901,11 @@
       <li><a href="#faq" class="nav__link">FAQ</a></li>
     </ul>
     <a href="#download" class="nav__cta">Download Free</a>
+    <button class="nav__hamburger" onclick="document.querySelector('.nav__links').classList.toggle('open')" aria-label="Toggle menu">
+      <span></span>
+      <span></span>
+      <span></span>
+    </button>
   </nav>
 
   <!-- Hero -->
@@ -843,14 +925,20 @@
         <span class="btn__icon">⬇️</span>
         Download for Mac
       </a>
-      <span class="btn btn--secondary" style="opacity: 0.6; cursor: default;">
+      <a href="https://testflight.apple.com/join/justspeaktoit" class="btn btn--secondary" target="_blank" rel="noopener">
         <span class="btn__icon">📱</span>
-        iOS Coming Soon
-      </span>
+        Join iOS TestFlight
+      </a>
       <a href="https://github.com/crmitchelmore/justspeaktoit" class="btn btn--ghost" target="_blank" rel="noopener">
         <span class="btn__icon">⭐</span>
         Star on GitHub
       </a>
+    </div>
+
+    <div class="brew-install" onclick="navigator.clipboard.writeText('brew install --cask justspeaktoit').then(() => { this.querySelector('.brew-install__copy').textContent = 'Copied!'; setTimeout(() => this.querySelector('.brew-install__copy').textContent = 'Click to copy', 1500); })" title="Click to copy">
+      <span class="brew-install__prompt">$</span>
+      <code>brew install --cask justspeaktoit</code>
+      <span class="brew-install__copy">Click to copy</span>
     </div>
     
     <div class="hero__waveform">
@@ -923,7 +1011,7 @@
         <div class="feature-card__icon">⚡</div>
         <h3 class="feature-card__title">Instant Hotkey Access</h3>
         <p class="feature-card__description">
-          Double-tap Fn or use a custom shortcut to start recording from anywhere. Your transcript appears right where your cursor is.
+          Double-tap Fn, hold-to-record, or use a custom shortcut to start recording from anywhere. Your transcript appears right where your cursor is.
         </p>
       </div>
 
@@ -939,7 +1027,7 @@
         <div class="feature-card__icon">🎯</div>
         <h3 class="feature-card__title">Smart Text Insertion</h3>
         <p class="feature-card__description">
-          Transcripts are automatically typed into any app using accessibility APIs. Works with any text field, anywhere.
+          Transcripts are automatically typed into any app using accessibility APIs. Insert at cursor or replace selection—works with any text field.
         </p>
       </div>
 
@@ -947,15 +1035,23 @@
         <div class="feature-card__icon">🧠</div>
         <h3 class="feature-card__title">AI Post-Processing</h3>
         <p class="feature-card__description">
-          Optional LLM cleanup removes filler words, fixes punctuation, and formats your speech into polished prose.
+          Optional LLM cleanup using GPT-4o, Claude, Gemini, or Mistral—removes filler words, fixes punctuation, and polishes your prose.
         </p>
       </div>
 
       <div class="feature-card reveal">
-        <div class="feature-card__icon">📚</div>
-        <h3 class="feature-card__title">Personal Lexicon</h3>
+        <div class="feature-card__icon">💬</div>
+        <h3 class="feature-card__title">OpenClaw AI Chat</h3>
         <p class="feature-card__description">
-          Teach the app your jargon, names, and acronyms. Your custom dictionary improves accuracy over time.
+          Have voice-powered conversations with AI. Speak your questions and hear responses read back—complete with conversation history.
+        </p>
+      </div>
+
+      <div class="feature-card reveal">
+        <div class="feature-card__icon">🎙️</div>
+        <h3 class="feature-card__title">Hands-Free Mode</h3>
+        <p class="feature-card__description">
+          Full voice-to-voice conversation loop: record, send, listen to the response, and auto-resume recording. No tapping required.
         </p>
       </div>
 
@@ -963,7 +1059,23 @@
         <div class="feature-card__icon">🔊</div>
         <h3 class="feature-card__title">Text-to-Speech</h3>
         <p class="feature-card__description">
-          Hear your transcripts read back with natural voices from OpenAI, ElevenLabs, or Apple's system voices.
+          Hear responses with natural voices from OpenAI, ElevenLabs, Deepgram, Azure, or Apple's built-in system voices.
+        </p>
+      </div>
+
+      <div class="feature-card reveal">
+        <div class="feature-card__icon">📚</div>
+        <h3 class="feature-card__title">Personal Lexicon</h3>
+        <p class="feature-card__description">
+          Teach the app your jargon, names, and acronyms. Your custom dictionary improves accuracy across all providers.
+        </p>
+      </div>
+
+      <div class="feature-card reveal">
+        <div class="feature-card__icon">☁️</div>
+        <h3 class="feature-card__title">iCloud History Sync</h3>
+        <p class="feature-card__description">
+          Your transcription history syncs seamlessly between Mac and iOS via iCloud. Pick up right where you left off on any device.
         </p>
       </div>
     </div>
@@ -1004,14 +1116,16 @@
   <div class="byok-section reveal" id="byok">
     <h2 class="byok-section__title">Bring Your Own Keys</h2>
     <p class="byok-section__description">
-      Use your existing API keys from OpenAI, Deepgram, Rev.ai, or OpenRouter. 
+      Use your existing API keys from any supported provider. 
       Pay only for what you use—typically <strong>$0.36 per hour</strong> or less. 
       No subscriptions, no hidden fees, no data selling.
     </p>
     <div class="provider-logos">
+      <span class="provider-logo">Deepgram Nova-3</span>
+      <span class="provider-logo">AssemblyAI</span>
       <span class="provider-logo">OpenAI Whisper</span>
-      <span class="provider-logo">Deepgram</span>
       <span class="provider-logo">Rev.ai</span>
+      <span class="provider-logo">Google Gemini</span>
       <span class="provider-logo">OpenRouter</span>
       <span class="provider-logo">Apple (Free)</span>
     </div>
@@ -1034,20 +1148,24 @@
         <ul class="platform-card__features">
           <li>Menu bar app with global hotkeys</li>
           <li>Direct text insertion via Accessibility</li>
-          <li>Live transcription preview</li>
-          <li>Full provider support</li>
+          <li>Live transcription preview HUD</li>
+          <li>All providers + AI post-processing</li>
+          <li>OpenClaw AI chat with hands-free mode</li>
+          <li>Install via Homebrew or direct download</li>
           <li>Requires macOS 14+</li>
         </ul>
       </div>
 
       <div class="platform-card reveal">
         <span class="platform-card__icon">📱</span>
-        <h3 class="platform-card__title">iOS <span style="font-size: 0.7em; opacity: 0.7;">(Coming Soon)</span></h3>
+        <h3 class="platform-card__title">iOS <span style="font-size: 0.7em; color: var(--color-secondary);">(TestFlight Beta)</span></h3>
         <ul class="platform-card__features">
           <li>Live Activity with Dynamic Island</li>
-          <li>On-device Apple Speech</li>
-          <li>Copy/share transcripts easily</li>
-          <li>Send to Mac feature</li>
+          <li>Deepgram + Apple Speech transcription</li>
+          <li>OpenClaw AI chat with voice input</li>
+          <li>Audio recording & playback</li>
+          <li>Home Screen widgets</li>
+          <li>iCloud history sync with Mac</li>
           <li>Requires iOS 17+</li>
         </ul>
       </div>
@@ -1103,7 +1221,7 @@
         </summary>
         <p class="faq-item__answer">
           On Mac, you can capture system audio from meeting apps like Zoom or Teams. 
-          On iOS, the app captures audio from your device's microphone—place your phone near the speaker for best results in meetings.
+          On iOS, the app captures audio from your device's microphone—place your phone near the speaker for best results, or use the hands-free conversation mode to interact with AI directly.
         </p>
       </details>
 
@@ -1114,8 +1232,20 @@
         </summary>
         <p class="faq-item__answer">
           Open the app's Settings and enter your API keys in the Providers section. 
-          Keys are stored securely in your Mac's Keychain and can sync to iOS via iCloud Keychain. 
-          We never see or transmit your keys.
+          Keys are stored securely in your Mac's Keychain. 
+          We never see or transmit your keys—they go directly to the provider's API.
+        </p>
+      </details>
+
+      <details class="faq-item reveal">
+        <summary class="faq-item__question">
+          What is OpenClaw?
+          <span class="faq-item__toggle">+</span>
+        </summary>
+        <p class="faq-item__answer">
+          OpenClaw is the built-in AI chat feature. You can have voice-powered conversations with AI assistants—
+          speak your questions, get spoken responses, and use hands-free mode for a completely voice-driven experience.
+          Conversations are saved locally and can sync via iCloud.
         </p>
       </details>
     </div>
@@ -1132,10 +1262,10 @@
         <span class="btn__icon">⬇️</span>
         Download for Mac
       </a>
-      <span class="btn btn--secondary" style="opacity: 0.6; cursor: default;">
+      <a href="https://testflight.apple.com/join/justspeaktoit" class="btn btn--secondary" target="_blank" rel="noopener">
         <span class="btn__icon">📱</span>
-        App Store Coming Soon
-      </span>
+        Join iOS TestFlight
+      </a>
     </div>
     <p class="reveal" style="margin-top: 1.5rem; color: var(--color-text-muted); font-size: 0.95rem;">
       Have a feature request, bug report, or want to contribute? <a href="https://github.com/crmitchelmore/justspeaktoit/issues" style="color: var(--color-accent);">Open an issue on GitHub</a> — we'd love to hear from you!
@@ -1149,7 +1279,7 @@
       JustSpeakToIt
     </div>
     <p class="footer__text">
-      Voice-first transcription for Mac & iOS
+      Voice-first transcription for Mac & iOS · Open Source
     </p>
     <div class="footer__links">
       <a href="#" class="footer__link">Privacy Policy</a>
@@ -1215,6 +1345,13 @@
 
     document.querySelectorAll('.faq-item').forEach((item, i) => {
       item.style.transitionDelay = `${i * 0.1}s`;
+    });
+
+    // Close mobile menu when a link is clicked
+    document.querySelectorAll('.nav__links .nav__link').forEach(link => {
+      link.addEventListener('click', () => {
+        document.querySelector('.nav__links').classList.remove('open');
+      });
     });
   </script>
 </body>

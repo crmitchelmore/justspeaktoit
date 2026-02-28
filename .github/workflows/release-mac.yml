@@ -339,6 +339,9 @@ jobs:
             sentry-cli releases new "justspeaktoit-mac@${VERSION}+${BUILD_NUMBER}"
             sentry-cli releases set-commits "justspeaktoit-mac@${VERSION}+${BUILD_NUMBER}" --auto
             sentry-cli releases finalize "justspeaktoit-mac@${VERSION}+${BUILD_NUMBER}"
+            # Upload dSYMs for symbolication
+            sentry-cli debug-files upload --include-sources \
+              "$RUNNER_TEMP/$PRODUCT_NAME.xcarchive/dSYMs"
           else
             echo "sentry-cli not found, skipping release creation"
           fi

@@ -32,8 +32,10 @@ public enum SyncConfiguration {
     public static let batchSize = 100
 
     /// The CloudKit container.
-    public static var container: CKContainer {
-        CKContainer(identifier: containerIdentifier)
+    /// Returns `nil` when CloudKit entitlements are missing (Developer ID builds).
+    public static var container: CKContainer? {
+        guard hasCloudKitEntitlement else { return nil }
+        return CKContainer(identifier: containerIdentifier)
     }
 
     /// Whether this app build has CloudKit entitlements.
@@ -66,8 +68,9 @@ public enum SyncConfiguration {
     }
 
     /// The private database for user's transcription data.
-    public static var privateDatabase: CKDatabase {
-        container.privateCloudDatabase
+    /// Returns `nil` when CloudKit entitlements are missing.
+    public static var privateDatabase: CKDatabase? {
+        container?.privateCloudDatabase
     }
 
     /// The custom zone for transcription history.

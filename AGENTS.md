@@ -275,6 +275,11 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
 - Avoid fixed sleeps for connection readiness; wait for connection state with timeout and explicit error.
 - Provide a low-latency speech option that skips summarisation before TTS when enabled.
 
+### iOS control ergonomics
+- Prefer native iOS controls (for example, `Toggle` with switch style) over custom checkbox-like controls in chat/input surfaces.
+- Keep interactive controls at least 44pt high/wide, and size message composer inputs to a comfortable HIG-aligned minimum (around 50pt).
+- If acknowledgement hints are shown, make the interaction target explicit (for example, “Tap the chat area…”).
+
 ## Commit Message Tagging
 - Prefix commit messages with a platform tag or scope: `[mac]`/`[ios]` or `(mac)`/`(ios)` (e.g., `fix: [mac] add recording sound picker` or `fix(mac): add recording sound picker`).
 - These tags/scopes feed the Sparkle release notes generator so macOS updates only list mac-specific changes.
@@ -293,3 +298,30 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
 - GitHub secrets used by CI: `APP_STORE_CONNECT_API_KEY`, `APP_STORE_CONNECT_ISSUER_ID`, `APPLE_TEAM_ID`, `IOS_DISTRIBUTION_P12`, `IOS_DISTRIBUTION_PASSWORD`, `IOS_APPSTORE_PROFILE`, `IOS_WIDGET_APPSTORE_PROFILE`
 - Required entitlements: App Group `group.com.justspeaktoit.ios` and iCloud container `iCloud.com.justspeaktoit.ios`
 - Never commit private keys or provisioning profile contents.
+
+## Sentry Error Monitoring
+- **Region:** EU (de.sentry.io) — use `https://de.sentry.io/api/0/` for all API calls
+- **Org slug:** `tally-lz`
+- **Project slug:** `justspeaktoit`
+- **Auth token:** stored in `.env` as `SENTRY_AUTH_TOKEN` (do not commit)
+- **DSN:** configured in `Sources/SpeakApp/SentryManager.swift`
+- **GitHub CI secret:** `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, `SENTRY_PROJECT`
+
+### Querying Sentry from CLI
+```bash
+# Load token from .env
+export SENTRY_AUTH_TOKEN=$(grep SENTRY_AUTH_TOKEN .env | cut -d= -f2)
+
+# List unresolved issues
+curl -s -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" \
+  "https://de.sentry.io/api/0/projects/tally-lz/justspeaktoit/issues/?query=is:unresolved&sort=date&limit=25"
+
+# Get latest event for an issue
+curl -s -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" \
+  "https://de.sentry.io/api/0/organizations/tally-lz/issues/{ISSUE_ID}/events/latest/"
+
+# Ignore/resolve an issue
+curl -s -X PUT -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" -H "Content-Type: application/json" \
+  -d '{"status":"ignored"}' \
+  "https://de.sentry.io/api/0/organizations/tally-lz/issues/{ISSUE_ID}/"
+```

@@ -258,11 +258,13 @@ public struct OpenClawChatView: View {
         .background(.bar)
         .animation(.spring(response: 0.2), value: textInput.isEmpty)
     }
+}
 
-    // MARK: - Connection Badge
+// MARK: - OpenClawChatView Helpers
 
+extension OpenClawChatView {
     @ViewBuilder
-    private var connectionBadge: some View {
+    var connectionBadge: some View {
         HStack(spacing: 4) {
             Circle()
                 .fill(connectionColor)
@@ -275,7 +277,7 @@ public struct OpenClawChatView: View {
         }
     }
 
-    private var connectionColor: Color {
+    var connectionColor: Color {
         switch coordinator.connectionState {
         case .connected: return .green
         case .connecting: return .orange
@@ -284,9 +286,7 @@ public struct OpenClawChatView: View {
         }
     }
 
-    // MARK: - Actions
-
-    private func sendTextIfNeeded() {
+    func sendTextIfNeeded() {
         let text = textInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         textInput = ""

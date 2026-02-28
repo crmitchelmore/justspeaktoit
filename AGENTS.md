@@ -310,18 +310,20 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
 ### Querying Sentry from CLI
 ```bash
 # Load token from .env
-export SENTRY_AUTH_TOKEN=$(grep SENTRY_AUTH_TOKEN .env | cut -d= -f2)
+export SENTRY_AUTH_TOKEN="$(sed -n 's/^SENTRY_AUTH_TOKEN=//p' .env | tail -n1)"
+export SENTRY_ORG="tally-lz"
+export SENTRY_PROJECT="justspeaktoit"
 
 # List unresolved issues
 curl -s -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" \
-  "https://de.sentry.io/api/0/projects/tally-lz/justspeaktoit/issues/?query=is:unresolved&sort=date&limit=25"
+  "https://de.sentry.io/api/0/projects/$SENTRY_ORG/$SENTRY_PROJECT/issues/?query=is:unresolved&sort=date&limit=25"
 
 # Get latest event for an issue
 curl -s -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" \
-  "https://de.sentry.io/api/0/organizations/tally-lz/issues/{ISSUE_ID}/events/latest/"
+  "https://de.sentry.io/api/0/organizations/$SENTRY_ORG/issues/{ISSUE_ID}/events/latest/"
 
 # Ignore/resolve an issue
 curl -s -X PUT -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" -H "Content-Type: application/json" \
   -d '{"status":"ignored"}' \
-  "https://de.sentry.io/api/0/organizations/tally-lz/issues/{ISSUE_ID}/"
+  "https://de.sentry.io/api/0/organizations/$SENTRY_ORG/issues/{ISSUE_ID}/"
 ```

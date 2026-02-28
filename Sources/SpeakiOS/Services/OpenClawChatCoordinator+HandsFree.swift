@@ -48,6 +48,7 @@ extension OpenClawChatCoordinator {
                 if self.settings.ttsEnabled && self.appSettings.hasDeepgramKey {
                     await self.speakAssistantResponses(responseBatch)
                 }
+                self.isBufferingForTTS = false
 
                 await self.maybeResumeConversationListening()
             }
@@ -62,6 +63,7 @@ extension OpenClawChatCoordinator {
                 self?.streamingResponse = ""
                 self?.accumulatedResponse = ""
                 self?.pendingAssistantResponses = []
+                self?.isBufferingForTTS = false
             }
         }
     }

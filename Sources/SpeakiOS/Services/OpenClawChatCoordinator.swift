@@ -102,6 +102,7 @@ public final class OpenClawChatCoordinator: ObservableObject {
     @Published public var isSpeaking = false
     @Published public var partialTranscript = ""
     @Published public var streamingResponse = ""
+    @Published public var isBufferingForTTS = false
     @Published public var error: Error?
 
     // MARK: - Dependencies
@@ -119,6 +120,7 @@ public final class OpenClawChatCoordinator: ObservableObject {
     var currentRunId: String?
     var accumulatedResponse = ""
     var pendingAssistantResponses: [String] = []
+    var messageCountBeforeResponse = 0
     var settingsCancellables = Set<AnyCancellable>()
     var headsetToggleTarget: Any?
     var headsetPauseTarget: Any?
@@ -136,6 +138,9 @@ public final class OpenClawChatCoordinator: ObservableObject {
         ttsClient.$isSpeaking
             .sink { [weak self] speaking in
                 self?.isSpeaking = speaking
+                if speaking {
+                    self?.isBufferingForTTS = false
+                }
             }
             .store(in: &settingsCancellables)
         observeLiveActivityStateChanges()
@@ -171,6 +176,7 @@ public final class OpenClawChatCoordinator: ObservableObject {
             cancelVoiceInput()
         }
         ttsClient.stop()
+        isBufferingForTTS = false
         openClawActivityManager.endActivity()
         disconnect()
     }
@@ -349,6 +355,11 @@ public final class OpenClawChatCoordinator: ObservableObject {
             streamingResponse = ""
             accumulatedResponse = ""
             pendingAssistantResponses = []
+
+            if settings.ttsEnabled, appSettings.hasDeepgramKey {
+                isBufferingForTTS = true
+                messageCountBeforeResponse = currentConversation?.messages.count ?? 0
+            }
 
             client.sendMessage(trimmedText, sessionKey: conv.sessionKey) { [weak self] result in
                 Task { @MainActor in

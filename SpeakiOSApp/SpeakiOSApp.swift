@@ -49,21 +49,26 @@ final class SpeakiOSAppDelegate: NSObject, UIApplicationDelegate {
 @main
 struct SpeakiOSApp: App {
     @UIApplicationDelegateAdaptor(SpeakiOSAppDelegate.self) private var appDelegate
+    @StateObject private var deepLinkRouter = DeepLinkRouter.shared
 
     var body: some Scene {
         WindowGroup {
             MainTabView()
                 .tint(.brandAccent)
+                .environmentObject(deepLinkRouter)
+                .onOpenURL { url in
+                    deepLinkRouter.handle(url)
+                }
         }
     }
 }
 
 /// Root tab view with Transcription and OpenClaw tabs.
 struct MainTabView: View {
-    @State private var selectedTab = 0
+    @EnvironmentObject private var deepLinkRouter: DeepLinkRouter
 
     var body: some View {
-        TabView(selection: $selectedTab) {
+        TabView(selection: $deepLinkRouter.selectedTab) {
             NavigationStack {
                 ContentView()
             }
@@ -72,13 +77,50 @@ struct MainTabView: View {
             }
             .tag(0)
 
-            NavigationStack {
-                ConversationListView()
-            }
-            .tabItem {
-                Label("OpenClaw", systemImage: "bolt.horizontal.icloud.fill")
-            }
-            .tag(1)
+            OpenClawTabView()
+                .tabItem {
+                    Label("OpenClaw", systemImage: "bolt.horizontal.icloud.fill")
+                }
+                .tag(1)
         }
+    }
+}
+
+/// Wraps the OpenClaw tab with its own NavigationStack and deep-link navigation.
+struct OpenClawTabView: View {
+    @EnvironmentObject private var deepLinkRouter: DeepLinkRouter
+    @ObservedObject private var store = ConversationStore.shared
+    @State private var selectedConversation: OpenClawClient.Conversation?
+    @State private var showConversation = false
+
+    var body: some View {
+        NavigationStack {
+            ConversationListView()
+                .navigationDestination(isPresented: $showConversation) {
+                    OpenClawChatView(conversation: selectedConversation)
+                }
+        }
+        .onChange(of: deepLinkRouter.pendingConversationId) { _, newId in
+            navigateToPendingConversation(id: newId)
+        }
+        .onAppear {
+            // Handle deep link that arrived before this view appeared
+            if let pending = deepLinkRouter.pendingConversationId {
+                navigateToPendingConversation(id: pending)
+            }
+        }
+    }
+
+    private func navigateToPendingConversation(id: String?) {
+        guard let cid = id else { return }
+        deepLinkRouter.pendingConversationId = nil
+
+        if let conv = store.conversations.first(where: { $0.id == cid }) {
+            selectedConversation = conv
+        } else {
+            // Conversation not found — open a new one
+            selectedConversation = nil
+        }
+        showConversation = true
     }
 }

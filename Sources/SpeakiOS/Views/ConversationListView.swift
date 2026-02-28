@@ -8,7 +8,9 @@ import SpeakCore
 public struct ConversationListView: View {
     @ObservedObject private var store = ConversationStore.shared
     @ObservedObject private var settings = OpenClawSettings.shared
+    @EnvironmentObject private var deepLinkRouter: DeepLinkRouter
     @State private var showingClearConfirmation = false
+    @State private var navigationPath = NavigationPath()
 
     public init() {}
 

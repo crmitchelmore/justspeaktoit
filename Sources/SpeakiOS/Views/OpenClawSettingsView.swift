@@ -98,7 +98,10 @@ public struct OpenClawSettingsView: View {
 
                 if settings.ttsEnabled {
                     Picker("Voice", selection: $settings.ttsVoice) {
-                        ForEach(OpenClawSettings.availableVoices, id: \.id) { voice in
+                        ForEach(
+                            OpenClawSettings.voices(for: settings.ttsModel),
+                            id: \.id
+                        ) { voice in
                             Text(voice.label).tag(voice.id)
                         }
                     }
@@ -107,6 +110,9 @@ public struct OpenClawSettingsView: View {
                         ForEach(OpenClawSettings.availableModels, id: \.id) { mdl in
                             Text(mdl.label).tag(mdl.id)
                         }
+                    }
+                    .onChange(of: settings.ttsModel) { _ in
+                        settings.validateVoiceModelCombination()
                     }
 
                     VStack(alignment: .leading) {

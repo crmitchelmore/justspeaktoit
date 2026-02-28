@@ -36,12 +36,18 @@ enum SentryManager {
                 options.releaseName = "justspeaktoit-mac@\(version)+\(build)"
                 options.dist = build
             }
+            let isTestRun = NSClassFromString("XCTestCase") != nil
             #if DEBUG
             // Exercises full SDK init so linking/config issues surface in dev.
             options.enabled = false
             options.environment = "debug"
             #else
-            options.environment = "production"
+            if isTestRun {
+                options.enabled = false
+                options.environment = "test"
+            } else {
+                options.environment = "production"
+            }
             #endif
 
             // Enable performance monitoring

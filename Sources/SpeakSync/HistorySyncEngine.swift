@@ -89,14 +89,15 @@ public final class HistorySyncEngine: ObservableObject {
 
     /// Upload a single entry to CloudKit.
     public func upload(entry: SyncableHistoryEntry) async throws {
-        guard state.isCloudAvailable else {
+        guard state.isCloudAvailable,
+              let database = SyncConfiguration.privateDatabase else {
             throw SyncError.cloudUnavailable
         }
 
         let record = SyncRecord.record(from: entry)
 
         do {
-            _ = try await SyncConfiguration.privateDatabase.save(record)
+            _ = try await database.save(record)
             log.debug("Uploaded entry: \(entry.id.uuidString)")
         } catch {
             throw SyncError.cloudKit(error)
@@ -105,7 +106,8 @@ public final class HistorySyncEngine: ObservableObject {
 
     /// Delete an entry from CloudKit.
     public func delete(entryID: UUID) async throws {
-        guard state.isCloudAvailable else {
+        guard state.isCloudAvailable,
+              let database = SyncConfiguration.privateDatabase else {
             throw SyncError.cloudUnavailable
         }
 
@@ -115,7 +117,7 @@ public final class HistorySyncEngine: ObservableObject {
         )
 
         do {
-            try await SyncConfiguration.privateDatabase.deleteRecord(
+            try await database.deleteRecord(
                 withID: recordID
             )
             log.debug("Deleted entry: \(entryID.uuidString)")
@@ -136,7 +138,7 @@ public final class HistorySyncEngine: ObservableObject {
         }
 
         do {
-            let status = try await SyncConfiguration.container.accountStatus()
+            let status = try await SyncConfiguration.container?.accountStatus() ?? .noAccount
             state.isCloudAvailable = (status == .available)
         } catch {
             state.isCloudAvailable = false
@@ -167,19 +169,21 @@ public final class HistorySyncEngine: ObservableObject {
     }
 
     private func createCustomZone() async throws {
+        guard let database = SyncConfiguration.privateDatabase else { return }
         do {
-            _ = try await SyncConfiguration.privateDatabase.save(SyncConfiguration.recordZone)
+            _ = try await database.save(SyncConfiguration.recordZone)
         } catch let error as CKError where error.code == .serverRecordChanged {
             // Zone already exists
         }
     }
 
     private func createSubscription() async throws {
+        guard let database = SyncConfiguration.privateDatabase else { return }
         let subscription = CKDatabaseSubscription(subscriptionID: "transcription-history-changes")
         let info = CKSubscription.NotificationInfo()
         info.shouldSendContentAvailable = true
         subscription.notificationInfo = info
-        _ = try await SyncConfiguration.privateDatabase.save(subscription)
+        _ = try await database.save(subscription)
     }
 
     // MARK: - Fetch Remote Changes
@@ -224,6 +228,10 @@ public final class HistorySyncEngine: ObservableObject {
     private func executeFetchOperation(
         changeToken: CKServerChangeToken?
     ) async throws -> FetchChangesResult {
+        guard let database = SyncConfiguration.privateDatabase else {
+            throw SyncError.cloudUnavailable
+        }
+
         let config = CKFetchRecordZoneChangesOperation.ZoneConfiguration()
         config.previousServerChangeToken = changeToken
 
@@ -265,7 +273,7 @@ public final class HistorySyncEngine: ObservableObject {
                     cont.resume(throwing: error)
                 }
             }
-            SyncConfiguration.privateDatabase.add(operation)
+            database.add(operation)
         }
 
         return FetchChangesResult(
@@ -279,6 +287,9 @@ public final class HistorySyncEngine: ObservableObject {
 
     private func uploadPendingEntries() async throws {
         guard let delegate else { return }
+        guard let database = SyncConfiguration.privateDatabase else {
+            throw SyncError.cloudUnavailable
+        }
 
         let entries = delegate.pendingEntries()
         guard !entries.isEmpty else { return }
@@ -299,7 +310,7 @@ public final class HistorySyncEngine: ObservableObject {
                     cont.resume(throwing: error)
                 }
             }
-            SyncConfiguration.privateDatabase.add(operation)
+            database.add(operation)
         }
 
         log.info("Uploaded \(records.count) records")

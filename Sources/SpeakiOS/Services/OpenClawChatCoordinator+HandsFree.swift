@@ -216,18 +216,10 @@ extension OpenClawChatCoordinator {
     }
 
     private func registerHeadsetCommandHandlers() {
-        guard headsetToggleTarget == nil, headsetPauseTarget == nil else { return }
+        guard headsetPauseTarget == nil else { return }
 
         let commandCenter = MPRemoteCommandCenter.shared()
-        commandCenter.togglePlayPauseCommand.isEnabled = true
         commandCenter.pauseCommand.isEnabled = true
-
-        headsetToggleTarget = commandCenter.togglePlayPauseCommand.addTarget { [weak self] _ in
-            Task { @MainActor in
-                await self?.handleAcknowledgeSignal()
-            }
-            return .success
-        }
 
         headsetPauseTarget = commandCenter.pauseCommand.addTarget { [weak self] _ in
             Task { @MainActor in

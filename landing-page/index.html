@@ -264,6 +264,10 @@
       cursor: pointer;
       transition: all 0.3s ease;
       position: relative;
+      text-align: left;
+      -webkit-appearance: none;
+      appearance: none;
+      width: auto;
     }
     .brew-install:hover {
       border-color: var(--color-accent);
@@ -901,7 +905,7 @@
       <li><a href="#faq" class="nav__link">FAQ</a></li>
     </ul>
     <a href="#download" class="nav__cta">Download Free</a>
-    <button class="nav__hamburger" onclick="document.querySelector('.nav__links').classList.toggle('open')" aria-label="Toggle menu">
+    <button class="nav__hamburger" aria-label="Toggle menu">
       <span></span>
       <span></span>
       <span></span>
@@ -935,11 +939,11 @@
       </a>
     </div>
 
-    <div class="brew-install" onclick="navigator.clipboard.writeText('brew install --cask justspeaktoit').then(() => { this.querySelector('.brew-install__copy').textContent = 'Copied!'; setTimeout(() => this.querySelector('.brew-install__copy').textContent = 'Click to copy', 1500); })" title="Click to copy">
+    <button class="brew-install" title="Click to copy" type="button">
       <span class="brew-install__prompt">$</span>
       <code>brew install --cask justspeaktoit</code>
       <span class="brew-install__copy">Click to copy</span>
-    </div>
+    </button>
     
     <div class="hero__waveform">
       <div class="waveform-bar"></div>
@@ -1347,12 +1351,36 @@
       item.style.transitionDelay = `${i * 0.1}s`;
     });
 
+    // Mobile menu toggle
+    document.querySelector('.nav__hamburger').addEventListener('click', () => {
+      document.querySelector('.nav__links').classList.toggle('open');
+    });
+
     // Close mobile menu when a link is clicked
     document.querySelectorAll('.nav__links .nav__link').forEach(link => {
       link.addEventListener('click', () => {
         document.querySelector('.nav__links').classList.remove('open');
       });
     });
+
+    // Brew install copy-to-clipboard
+    const brewInstallBlock = document.querySelector('.brew-install');
+    if (brewInstallBlock) {
+      brewInstallBlock.addEventListener('click', () => {
+        const copyText = brewInstallBlock.querySelector('.brew-install__copy');
+        navigator.clipboard.writeText('brew install --cask justspeaktoit').then(() => {
+          if (copyText) {
+            copyText.textContent = 'Copied!';
+            setTimeout(() => { copyText.textContent = 'Click to copy'; }, 1500);
+          }
+        }).catch(() => {
+          if (copyText) {
+            copyText.textContent = 'Copy failed';
+            setTimeout(() => { copyText.textContent = 'Click to copy'; }, 1500);
+          }
+        });
+      });
+    }
   </script>
 </body>
 </html>

@@ -74,8 +74,31 @@ public final class OpenClawSettings: ObservableObject {
 
     // MARK: - Available Voices & Models
 
-    /// Deepgram Aura-2 voices.
-    public static let availableVoices: [(id: String, label: String)] = [
+    /// Deepgram Aura-2 voices (from official docs).
+    public static let aura2Voices: [(id: String, label: String)] = [
+        ("andromeda", "Andromeda (American, Female)"),
+        ("apollo", "Apollo (American, Male)"),
+        ("arcas", "Arcas (American, Male)"),
+        ("aries", "Aries (American, Male)"),
+        ("asteria", "Asteria (American, Female)"),
+        ("athena", "Athena (American, Female)"),
+        ("aurora", "Aurora (American, Female)"),
+        ("callista", "Callista (American, Female)"),
+        ("cora", "Cora (American, Female)"),
+        ("draco", "Draco (British, Male)"),
+        ("electra", "Electra (American, Female)"),
+        ("helena", "Helena (American, Female)"),
+        ("hera", "Hera (American, Female)"),
+        ("hermes", "Hermes (American, Male)"),
+        ("luna", "Luna (American, Female)"),
+        ("orion", "Orion (American, Male)"),
+        ("orpheus", "Orpheus (American, Male)"),
+        ("pandora", "Pandora (British, Female)"),
+        ("thalia", "Thalia (American, Female)")
+    ]
+
+    /// Deepgram Aura-1 voices.
+    public static let aura1Voices: [(id: String, label: String)] = [
         ("asteria", "Asteria (American, Female)"),
         ("luna", "Luna (American, Female)"),
         ("stella", "Stella (American, Female)"),
@@ -90,11 +113,25 @@ public final class OpenClawSettings: ObservableObject {
         ("zeus", "Zeus (American, Male)")
     ]
 
+    /// Returns voices available for the given model.
+    public static func voices(for model: String) -> [(id: String, label: String)] {
+        model.hasPrefix("aura-2") ? aura2Voices : aura1Voices
+    }
+
     /// Deepgram TTS models — the id is used as a prefix before the voice name.
     public static let availableModels: [(id: String, label: String)] = [
         ("aura-2", "Aura 2 (English)"),
         ("aura", "Aura 1 (English)")
     ]
+
+    /// Validate that the current voice is compatible with the current model,
+    /// falling back to the first available voice if not.
+    public func validateVoiceModelCombination() {
+        let validVoices = Self.voices(for: ttsModel)
+        if !validVoices.contains(where: { $0.id == ttsVoice }) {
+            ttsVoice = validVoices.first?.id ?? "asteria"
+        }
+    }
 
     public var isConfigured: Bool {
         !gatewayURL.isEmpty && !token.isEmpty && enabled
@@ -119,6 +156,9 @@ public final class OpenClawSettings: ObservableObject {
         self.keywordAcknowledgePhrase =
             UserDefaults.standard.string(forKey: "openclaw.keywordAcknowledgePhrase") ?? "over"
         self.lowLatencySpeech = UserDefaults.standard.object(forKey: "openclaw.lowLatencySpeech") as? Bool ?? false
+
+        // Validate saved voice is compatible with saved model
+        validateVoiceModelCombination()
     }
 
     // MARK: - Keychain

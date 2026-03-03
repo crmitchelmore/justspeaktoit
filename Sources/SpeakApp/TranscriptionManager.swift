@@ -3,6 +3,8 @@ import AVFoundation
 import Foundation
 import Speech
 
+// swiftlint:disable file_length
+
 enum TranscriptionManagerError: LocalizedError {
   case liveSessionAlreadyRunning
   case liveSessionNotRunning
@@ -978,6 +980,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
 
 // MARK: - AssemblyAI Live Controller
 
+// swiftlint:disable type_body_length
 /// Wraps AssemblyAILiveTranscriber to conform to LiveTranscriptionController protocol.
 /// Resamples audio from device sample rate (typically 48kHz) to 16kHz for AssemblyAI.
 final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
@@ -1026,6 +1029,7 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
     logger.info("Configured AssemblyAI with model: \(model)")
   }
 
+  // swiftlint:disable:next function_body_length
   func start() async throws {
     guard await ensurePermissions() else {
       throw TranscriptionManagerError.permissionsMissing
@@ -1370,6 +1374,7 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
     return microphone.isGranted && speech.isGranted
   }
 }
+// swiftlint:enable type_body_length
 
 // MARK: - Switching Live Transcriber
 

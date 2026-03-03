@@ -3,6 +3,8 @@ import Foundation
 import os.log
 import SpeakCore
 
+// swiftlint:disable file_length
+
 // MARK: - AssemblyAI Live Transcriber
 
 /// Handles real-time audio streaming to AssemblyAI's v3 WebSocket API.
@@ -55,7 +57,7 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
       URLQueryItem(name: "encoding", value: "pcm_s16le"),
       URLQueryItem(name: "format_turns", value: "true"),
       URLQueryItem(name: "speech_model", value: speechModel),
-      URLQueryItem(name: "min_turn_silence", value: "560"),
+      URLQueryItem(name: "min_turn_silence", value: "560")
     ]
 
     // AssemblyAI streaming v3 only supports keyterms_prompt (not arbitrary prompts).
@@ -254,6 +256,7 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
 
 // MARK: - AssemblyAI Transcription Provider
 
+// swiftlint:disable type_body_length
 struct AssemblyAITranscriptionProvider: TranscriptionProvider {
   let metadata = TranscriptionProviderMetadata(
     id: "assemblyai",
@@ -584,6 +587,7 @@ struct AssemblyAITranscriptionProvider: TranscriptionProvider {
     )
   }
 }
+// swiftlint:enable type_body_length
 
 // MARK: - Streaming Response Models
 

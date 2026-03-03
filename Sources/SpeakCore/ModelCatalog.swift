@@ -120,8 +120,22 @@ public struct ModelCatalog: Sendable {
             description: "Real-time WebSocket streaming transcription with interim results.",
             estimatedLatencyMs: 200, latencyTier: .fast),
         Option(
-            id: "assemblyai/universal-streaming", displayName: "AssemblyAI Universal (Streaming)",
-            description: "Real-time WebSocket streaming via AssemblyAI's v3 API with turn-based transcription.",
+            id: "assemblyai/universal-streaming", displayName: "AssemblyAI Universal (Streaming, Auto)",
+            description: "Auto-selects English or multilingual v3 streaming based on your preferred locale.",
+            estimatedLatencyMs: 250, latencyTier: .fast),
+        Option(
+            id: "assemblyai/universal-streaming-english",
+            displayName: "AssemblyAI Universal (Streaming, English)",
+            description: "English-only Universal-Streaming v3 with turn-based transcription.",
+            estimatedLatencyMs: 230, latencyTier: .fast),
+        Option(
+            id: "assemblyai/universal-streaming-multilingual",
+            displayName: "AssemblyAI Universal (Streaming, Multilingual)",
+            description: "Universal-Streaming v3 with language detection across supported multilingual speech.",
+            estimatedLatencyMs: 260, latencyTier: .fast),
+        Option(
+            id: "assemblyai/u3-rt-pro-streaming", displayName: "AssemblyAI U3-RT Pro (Streaming)",
+            description: "AssemblyAI's u3-rt-pro streaming model for higher real-time transcription accuracy.",
             estimatedLatencyMs: 250, latencyTier: .fast),
     ]
 

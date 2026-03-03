@@ -3,6 +3,8 @@ import Foundation
 import os.log
 import SpeakCore
 
+// swiftlint:disable file_length
+
 // MARK: - AssemblyAI Live Transcriber
 
 /// Handles real-time audio streaming to AssemblyAI's v3 WebSocket API.
@@ -20,20 +22,23 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
   private var isStopping: Bool = false
 
   private var keyterms: [String]
-  private var language: String?
+  private let speechModel: String
+  private let languageDetectionEnabled: Bool
 
   init(
     apiKey: String,
     sampleRate: Int = 16000,
     keyterms: [String] = [],
-    language: String? = nil,
+    speechModel: String = "universal-streaming-english",
+    languageDetectionEnabled: Bool = false,
     session: URLSession = .shared,
     bufferPool: AudioBufferPool = AudioBufferPool(poolSize: 10, bufferSize: 4096)
   ) {
     self.apiKey = apiKey
     self.sampleRate = sampleRate
     self.keyterms = keyterms
-    self.language = language
+    self.speechModel = speechModel
+    self.languageDetectionEnabled = languageDetectionEnabled
     self.session = session
     self.bufferPool = bufferPool
   }
@@ -46,16 +51,13 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
     self.onTranscript = onTranscript
     self.onError = onError
 
-    let isEnglish = language == nil || language?.hasPrefix("en") == true
-    let speechModel = isEnglish ? "universal-streaming-english" : "universal-streaming-multi"
-
-    var urlComponents = URLComponents(string: "wss://streaming.assemblyai.com/v3/ws")!
+    var urlComponents = URLComponents(string: "wss://streaming.eu.assemblyai.com/v3/ws")!
     urlComponents.queryItems = [
       URLQueryItem(name: "sample_rate", value: String(sampleRate)),
       URLQueryItem(name: "encoding", value: "pcm_s16le"),
       URLQueryItem(name: "format_turns", value: "true"),
       URLQueryItem(name: "speech_model", value: speechModel),
-      URLQueryItem(name: "min_end_of_turn_silence_when_confident", value: "560"),
+      URLQueryItem(name: "min_turn_silence", value: "560")
     ]
 
     // AssemblyAI streaming v3 only supports keyterms_prompt (not arbitrary prompts).
@@ -63,6 +65,9 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
     let validTerms = keyterms.filter { !$0.isEmpty && $0.count <= 50 }.prefix(100)
     for term in validTerms {
       urlComponents.queryItems?.append(URLQueryItem(name: "keyterms_prompt", value: term))
+    }
+    if languageDetectionEnabled {
+      urlComponents.queryItems?.append(URLQueryItem(name: "language_detection", value: "true"))
     }
 
     guard let url = urlComponents.url else {
@@ -251,6 +256,7 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
 
 // MARK: - AssemblyAI Transcription Provider
 
+// swiftlint:disable type_body_length
 struct AssemblyAITranscriptionProvider: TranscriptionProvider {
   let metadata = TranscriptionProviderMetadata(
     id: "assemblyai",
@@ -489,14 +495,17 @@ struct AssemblyAITranscriptionProvider: TranscriptionProvider {
   func createLiveTranscriber(
     apiKey: String,
     sampleRate: Int = 16000,
+    model: String = "assemblyai/universal-streaming",
     keyterms: [String] = [],
     language: String? = nil
   ) -> AssemblyAILiveTranscriber {
-    AssemblyAILiveTranscriber(
+    let config = mapLiveSpeechModel(from: model, language: language)
+    return AssemblyAILiveTranscriber(
       apiKey: apiKey,
       sampleRate: sampleRate,
       keyterms: keyterms,
-      language: language,
+      speechModel: config.speechModel,
+      languageDetectionEnabled: config.languageDetectionEnabled,
       session: session,
       bufferPool: bufferPool
     )
@@ -514,6 +523,39 @@ struct AssemblyAITranscriptionProvider: TranscriptionProvider {
       return ["universal-2"]
     default:
       return ["universal-3-pro", "universal-2"]
+    }
+  }
+
+  private func mapLiveSpeechModel(from model: String, language: String?) -> AssemblyAILiveSpeechModelConfig {
+    let name = model.split(separator: "/").last.map(String.init) ?? model
+    switch name {
+    case "universal-streaming-english":
+      return AssemblyAILiveSpeechModelConfig(
+        speechModel: "universal-streaming-english",
+        languageDetectionEnabled: false
+      )
+    case "universal-streaming-multilingual":
+      return AssemblyAILiveSpeechModelConfig(
+        speechModel: "universal-streaming-multilingual",
+        languageDetectionEnabled: true
+      )
+    case "u3-rt-pro-streaming", "u3-rt-pro":
+      return AssemblyAILiveSpeechModelConfig(
+        speechModel: "u3-rt-pro",
+        languageDetectionEnabled: false
+      )
+    default:
+      let languageCode = language.map { extractLanguageCode(from: $0) } ?? "en"
+      if languageCode.hasPrefix("en") {
+        return AssemblyAILiveSpeechModelConfig(
+          speechModel: "universal-streaming-english",
+          languageDetectionEnabled: false
+        )
+      }
+      return AssemblyAILiveSpeechModelConfig(
+        speechModel: "universal-streaming-multilingual",
+        languageDetectionEnabled: true
+      )
     }
   }
 
@@ -545,11 +587,17 @@ struct AssemblyAITranscriptionProvider: TranscriptionProvider {
     )
   }
 }
+// swiftlint:enable type_body_length
 
 // MARK: - Streaming Response Models
 
 private struct AssemblyAIStreamEnvelope: Decodable {
   let type: String
+}
+
+private struct AssemblyAILiveSpeechModelConfig {
+  let speechModel: String
+  let languageDetectionEnabled: Bool
 }
 
 struct AssemblyAITurnResponse: Decodable {

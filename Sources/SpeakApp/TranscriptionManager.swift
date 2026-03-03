@@ -1075,6 +1075,7 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
     transcriber = provider.createLiveTranscriber(
       apiKey: apiKey,
       sampleRate: 16000,
+      model: currentModel ?? appSettings.liveTranscriptionModel,
       keyterms: keyterms,
       language: currentLanguage
     )

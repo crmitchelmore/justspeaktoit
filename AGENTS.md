@@ -244,6 +244,10 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
 - The `postProcessingSystemPrompt` is applied post-transcription by `PostProcessingManager`, not by the streaming API.
 - When a pre-processing prompt is active, LLM post-processing is automatically skipped.
 
+### Rollout preference
+- Prefer core live-transcription integration first; add advanced v3 controls only when a clear app need is confirmed.
+- Keep style control in post-processing (`postProcessingSystemPrompt`); streaming v3 supports `keyterms_prompt` only.
+
 ### Key files
 - `AssemblyAITranscriptionProvider.swift` — WebSocket client, response models
 - `TranscriptionManager.swift` (`AssemblyAILiveController`) — turn handling, audio processing

@@ -1218,10 +1218,14 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
       queue.sync {
         guard !pendingPCMData.isEmpty else { return }
 
-        while pendingPCMData.count >= Self.preferredChunkBytes {
-          let chunk = Data(pendingPCMData.prefix(Self.preferredChunkBytes))
-          pendingPCMData.removeFirst(Self.preferredChunkBytes)
+        var offset = 0
+        while pendingPCMData.count - offset >= Self.preferredChunkBytes {
+          let chunk = pendingPCMData.subdata(in: offset..<(offset + Self.preferredChunkBytes))
           transcriber.sendAudio(chunk)
+          offset += Self.preferredChunkBytes
+        }
+        if offset > 0 {
+          pendingPCMData.removeFirst(offset)
         }
 
         guard !pendingPCMData.isEmpty else { return }
@@ -1230,7 +1234,7 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
             contentsOf: repeatElement(0, count: Self.minimumChunkBytes - pendingPCMData.count))
         }
         transcriber.sendAudio(pendingPCMData)
-        pendingPCMData.removeAll(keepingCapacity: true)
+        pendingPCMData.removeAll(keepingCapacity: false)
       }
     }
 
@@ -1317,10 +1321,14 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
       let data = Data(bytes: int16Data[0], count: frameLength * 2)
       pendingPCMData.append(data)
 
-      while pendingPCMData.count >= Self.preferredChunkBytes {
-        let chunk = Data(pendingPCMData.prefix(Self.preferredChunkBytes))
-        pendingPCMData.removeFirst(Self.preferredChunkBytes)
+      var offset = 0
+      while pendingPCMData.count - offset >= Self.preferredChunkBytes {
+        let chunk = pendingPCMData.subdata(in: offset..<(offset + Self.preferredChunkBytes))
         transcriber.sendAudio(chunk)
+        offset += Self.preferredChunkBytes
+      }
+      if offset > 0 {
+        pendingPCMData.removeFirst(offset)
       }
     }
   }

@@ -14,6 +14,7 @@ jobs:
       !contains(github.event.head_commit.message, 'chore: update appcast')
     permissions:
       contents: write
+      actions: write
 
     steps:
       - uses: actions/checkout@v6
@@ -135,8 +136,12 @@ jobs:
       - name: Trigger iOS TestFlight Release
         if: steps.check.outputs.should_release == 'true'
         env:
-          GH_TOKEN: ${{ secrets.AUTO_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           NEW_VERSION="${{ steps.version.outputs.new_version }}"
           echo "🚀 Triggering iOS TestFlight build for v$NEW_VERSION"
-          gh workflow run "Release iOS (TestFlight)" -f version="$NEW_VERSION"
+          if gh workflow run "Release iOS (TestFlight)" --ref main -f version="$NEW_VERSION"; then
+            echo "✅ Triggered iOS TestFlight release for v$NEW_VERSION"
+          else
+            echo "⚠️ Could not trigger iOS TestFlight release; continuing without failing macOS auto-release"
+          fi

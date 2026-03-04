@@ -1345,6 +1345,7 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
     // Wait for the final Turn response triggered by ForceEndpoint, with a timeout.
     if let transcriber {
       audioProcessor.flushPendingAudio(to: transcriber)
+      await transcriber.waitForPendingSends()
       audioProcessor.setRunning(false)
       transcriber.stop()
       await withTaskGroup(of: Void.self) { group in

@@ -103,10 +103,16 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
     request.setValue(apiKey, forHTTPHeaderField: "Authorization")
 
     let task = session.webSocketTask(with: request)
-    withStateLock {
+    let shouldReceive = withStateLock { () -> Bool in
+      guard !isStopping else { return false }
       webSocketTask = task
+      task.resume()
+      return true
     }
-    task.resume()
+    guard shouldReceive else {
+      task.cancel(with: .goingAway, reason: nil)
+      return
+    }
 
     logger.info("AssemblyAI WebSocket connecting via \(host.rawValue)")
     receiveMessages()
@@ -208,20 +214,6 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
     }
   }
 
-  func updateConfiguration(_ config: [String: Any]) {
-    guard let webSocketTask = currentWebSocketTask(), webSocketTask.state == .running else { return }
-    var payload = config
-    payload["type"] = "UpdateConfiguration"
-    guard let data = try? JSONSerialization.data(withJSONObject: payload),
-      let json = String(data: data, encoding: .utf8)
-    else { return }
-    webSocketTask.send(.string(json)) { [weak self] error in
-      if let error {
-        self?.logger.error("Failed to send config update: \(error.localizedDescription)")
-      }
-    }
-  }
-
   // MARK: - Private
 
   private func receiveMessages() {
@@ -246,7 +238,12 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
   private func retryWithGlobalEndpointIfNeeded(after error: Error) -> Bool {
     var taskToCancel: URLSessionWebSocketTask?
     let shouldRetry = withStateLock { () -> Bool in
-      guard currentEndpointHost == .europe, !hasAttemptedGlobalFallback, !sessionDidBegin else {
+      guard
+        !isStopping,
+        currentEndpointHost == .europe,
+        !hasAttemptedGlobalFallback,
+        !sessionDidBegin
+      else {
         return false
       }
       hasAttemptedGlobalFallback = true
@@ -300,6 +297,22 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
       }
     } catch {
       logger.debug("Failed to parse AssemblyAI response: \(error.localizedDescription)")
+    }
+  }
+}
+
+extension AssemblyAILiveTranscriber {
+  func updateConfiguration(_ config: [String: Any]) {
+    guard let webSocketTask = currentWebSocketTask(), webSocketTask.state == .running else { return }
+    var payload = config
+    payload["type"] = "UpdateConfiguration"
+    guard let data = try? JSONSerialization.data(withJSONObject: payload),
+      let json = String(data: data, encoding: .utf8)
+    else { return }
+    webSocketTask.send(.string(json)) { [weak self] error in
+      if let error {
+        self?.logger.error("Failed to send config update: \(error.localizedDescription)")
+      }
     }
   }
 }

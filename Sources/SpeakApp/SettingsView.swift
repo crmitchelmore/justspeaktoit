@@ -4,6 +4,8 @@ import AppKit
 import Sparkle
 import SwiftUI
 
+// swiftlint:disable file_length type_body_length
+
 enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
   case general
   case transcription
@@ -243,11 +245,17 @@ struct SettingsView: View {
       transcriptionProviders = await TranscriptionProviderRegistry.shared.allProviders()
       syncAssemblyAIKeytermsFromPronunciation()
     }
-    .onChange(of: settings.liveTranscriptionModel) { _, _ in
-      if settings.isAssemblyAIModel {
+    .onChange(of: settings.liveTranscriptionModel) { oldValue, newValue in
+      let oldIsAssembly = oldValue.localizedCaseInsensitiveContains("assemblyai")
+      let newIsAssembly = newValue.localizedCaseInsensitiveContains("assemblyai")
+      if newIsAssembly {
         settings.postProcessingEnabled = false
         syncAssemblyAIKeytermsFromPronunciation()
-        showingAssemblyAIPreprocessingAlert = true
+        if !oldIsAssembly {
+          DispatchQueue.main.async {
+            showingAssemblyAIPreprocessingAlert = true
+          }
+        }
       }
     }
     .onChange(of: settings.assemblyAIKeyterms) { _, _ in
@@ -2897,14 +2905,7 @@ private struct ModelPicker: View {
       } else {
         Picker(title, selection: $selection) {
           ForEach(options) { option in
-            HStack {
-              Text(option.displayName)
-              Spacer()
-              ModelPricingBadges(option: option, compact: true)
-              ModelTagBadges(tags: option.tags, compact: true)
-              LatencyBadgeCompact(option: option)
-            }
-            .tag(option.id)
+            Text(option.displayName).tag(option.id)
           }
           Text("Custom…").tag(ModelCatalog.customOptionID)
         }
@@ -3169,3 +3170,4 @@ private struct PronunciationEntryView: View {
 // - Hotkey management and configuration: This should allow selection of a hotkey (default should be the fn key). Probably a https://github.com/sindresorhus/KeyboardShortcuts is a good choice
 // - Permission management: Call from permissions manager to see and ask for permissions and allow the user to validate easily for each one if it was correctly granted. Perhaps a test button that tries to use the permission and validates the outcome somehow.
 // And then any other sections you think are relevant. This should be presented in a concise but user-friendly format.
+// swiftlint:enable file_length type_body_length

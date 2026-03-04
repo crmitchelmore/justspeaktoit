@@ -1192,11 +1192,15 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
 
   // Audio processor that resamples and forwards to AssemblyAI
   private final class AssemblyAIAudioProcessor: @unchecked Sendable {
+    private static let minimumChunkBytes = 1600   // 50ms @ 16kHz PCM16 mono
+    private static let preferredChunkBytes = 3200 // 100ms @ 16kHz PCM16 mono
+
     private let queue = DispatchQueue(label: "com.speak.app.assemblyai.audioProcessing")
     private var isRunning: Bool = false
     private var cachedConverter: AVAudioConverter?
     private var cachedInputFormat: AVAudioFormat?
     private var reusableOutputBuffer: AVAudioPCMBuffer?
+    private var pendingPCMData = Data()
 
     func setRunning(_ running: Bool) {
       queue.sync {
@@ -1205,7 +1209,32 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
           cachedConverter = nil
           cachedInputFormat = nil
           reusableOutputBuffer = nil
+          pendingPCMData.removeAll(keepingCapacity: false)
         }
+      }
+    }
+
+    func flushPendingAudio(to transcriber: AssemblyAILiveTranscriber) {
+      queue.sync {
+        guard !pendingPCMData.isEmpty else { return }
+
+        var offset = 0
+        while pendingPCMData.count - offset >= Self.preferredChunkBytes {
+          let chunk = pendingPCMData.subdata(in: offset..<(offset + Self.preferredChunkBytes))
+          transcriber.sendAudio(chunk)
+          offset += Self.preferredChunkBytes
+        }
+        if offset > 0 {
+          pendingPCMData.removeFirst(offset)
+        }
+
+        guard !pendingPCMData.isEmpty else { return }
+        if pendingPCMData.count < Self.minimumChunkBytes {
+          pendingPCMData.append(
+            contentsOf: repeatElement(0, count: Self.minimumChunkBytes - pendingPCMData.count))
+        }
+        transcriber.sendAudio(pendingPCMData)
+        pendingPCMData.removeAll(keepingCapacity: false)
       }
     }
 
@@ -1290,7 +1319,17 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
       guard let int16Data = outputBuffer.int16ChannelData else { return }
       let frameLength = Int(outputBuffer.frameLength)
       let data = Data(bytes: int16Data[0], count: frameLength * 2)
-      transcriber.sendAudio(data)
+      pendingPCMData.append(data)
+
+      var offset = 0
+      while pendingPCMData.count - offset >= Self.preferredChunkBytes {
+        let chunk = pendingPCMData.subdata(in: offset..<(offset + Self.preferredChunkBytes))
+        transcriber.sendAudio(chunk)
+        offset += Self.preferredChunkBytes
+      }
+      if offset > 0 {
+        pendingPCMData.removeFirst(offset)
+      }
     }
   }
 
@@ -1302,11 +1341,13 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
     audioEngine.stop()
     audioEngine.inputNode.removeTap(onBus: 0)
     isRunning = false
-    audioProcessor.setRunning(false)
 
     // Wait for the final Turn response triggered by ForceEndpoint, with a timeout.
-    if transcriber != nil {
-      transcriber?.stop()
+    if let transcriber {
+      audioProcessor.flushPendingAudio(to: transcriber)
+      await transcriber.waitForPendingSends()
+      audioProcessor.setRunning(false)
+      transcriber.stop()
       await withTaskGroup(of: Void.self) { group in
         group.addTask { @MainActor [weak self] in
           await withCheckedContinuation { continuation in
@@ -1321,6 +1362,8 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
         group.cancelAll()
       }
       stopContinuation = nil
+    } else {
+      audioProcessor.setRunning(false)
     }
 
     let result = buildFinalResult()

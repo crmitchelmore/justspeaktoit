@@ -7,6 +7,7 @@ import SpeakCore
 
 // MARK: - AssemblyAI Live Transcriber
 
+// swiftlint:disable type_body_length
 /// Handles real-time audio streaming to AssemblyAI's v3 WebSocket API.
 final class AssemblyAILiveTranscriber: @unchecked Sendable {
   private enum EndpointHost: String {
@@ -23,6 +24,7 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
   private let bufferPool: AudioBufferPool
   private let logger = Logger(subsystem: "com.speak.app", category: "AssemblyAILiveTranscriber")
   private let stateLock = NSLock()
+  private let pendingSendGroup = DispatchGroup()
 
   private var onTranscript: ((AssemblyAITurnResponse) -> Void)?
   private var onError: ((Error) -> Void)?
@@ -130,8 +132,11 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
 
     let dataToSend = buffer
     let message = URLSessionWebSocketTask.Message.data(dataToSend)
+    let sendGroup = pendingSendGroup
+    sendGroup.enter()
 
     webSocketTask.send(message) { [weak self] error in
+      defer { sendGroup.leave() }
       guard let self else { return }
       var returnBuffer = buffer
       self.bufferPool.returnBuffer(&returnBuffer)
@@ -167,8 +172,11 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
 
     let dataToSend = buffer
     let message = URLSessionWebSocketTask.Message.data(dataToSend)
+    let sendGroup = pendingSendGroup
+    sendGroup.enter()
 
     webSocketTask.send(message) { [weak self] error in
+      defer { sendGroup.leave() }
       guard let self else { return }
       var returnBuffer = buffer
       self.bufferPool.returnBuffer(&returnBuffer)
@@ -300,8 +308,19 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
     }
   }
 }
+// swiftlint:enable type_body_length
 
 extension AssemblyAILiveTranscriber {
+  func waitForPendingSends(timeout: TimeInterval = 1.5) async {
+    let sendGroup = pendingSendGroup
+    await withCheckedContinuation { continuation in
+      DispatchQueue.global().async {
+        _ = sendGroup.wait(timeout: .now() + timeout)
+        continuation.resume()
+      }
+    }
+  }
+
   func updateConfiguration(_ config: [String: Any]) {
     guard let webSocketTask = currentWebSocketTask(), webSocketTask.state == .running else { return }
     var payload = config

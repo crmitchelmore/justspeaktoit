@@ -198,7 +198,9 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
         task.cancel(with: .normalClosure, reason: nil)
         if let self {
           self.withStateLock {
-            self.webSocketTask = nil
+            if self.webSocketTask === task {
+              self.webSocketTask = nil
+            }
           }
           self.logger.info("AssemblyAI WebSocket connection closed")
         }

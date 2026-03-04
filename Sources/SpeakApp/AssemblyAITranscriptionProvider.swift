@@ -9,13 +9,20 @@ import SpeakCore
 
 /// Handles real-time audio streaming to AssemblyAI's v3 WebSocket API.
 final class AssemblyAILiveTranscriber: @unchecked Sendable {
+  private enum EndpointHost: String {
+    case europe = "streaming.eu.assemblyai.com"
+    case global = "streaming.assemblyai.com"
+  }
+
+  private static let minimumTurnSilenceMs = "560"
+
   private let apiKey: String
   private let sampleRate: Int
-  private var unfairLock = os_unfair_lock()
   private var webSocketTask: URLSessionWebSocketTask?
   private let session: URLSession
   private let bufferPool: AudioBufferPool
   private let logger = Logger(subsystem: "com.speak.app", category: "AssemblyAILiveTranscriber")
+  private let stateLock = NSLock()
 
   private var onTranscript: ((AssemblyAITurnResponse) -> Void)?
   private var onError: ((Error) -> Void)?
@@ -24,6 +31,10 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
   private var keyterms: [String]
   private let speechModel: String
   private let languageDetectionEnabled: Bool
+  private let preferredEndpointHost: EndpointHost = .europe
+  private var currentEndpointHost: EndpointHost = .europe
+  private var hasAttemptedGlobalFallback: Bool = false
+  private var sessionDidBegin: Bool = false
 
   init(
     apiKey: String,
@@ -47,17 +58,30 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
     onTranscript: @escaping (AssemblyAITurnResponse) -> Void,
     onError: @escaping (Error) -> Void
   ) {
-    isStopping = false
-    self.onTranscript = onTranscript
-    self.onError = onError
+    let endpointHost = withStateLock { () -> EndpointHost in
+      isStopping = false
+      self.onTranscript = onTranscript
+      self.onError = onError
+      hasAttemptedGlobalFallback = false
+      sessionDidBegin = false
+      currentEndpointHost = preferredEndpointHost
+      return currentEndpointHost
+    }
 
-    var urlComponents = URLComponents(string: "wss://streaming.eu.assemblyai.com/v3/ws")!
+    connectWebSocket(using: endpointHost)
+  }
+
+  private func connectWebSocket(using host: EndpointHost) {
+    guard var urlComponents = makeWebSocketURL(for: host) else {
+      currentOnError()?(AssemblyAIError.invalidURL)
+      return
+    }
     urlComponents.queryItems = [
       URLQueryItem(name: "sample_rate", value: String(sampleRate)),
       URLQueryItem(name: "encoding", value: "pcm_s16le"),
       URLQueryItem(name: "format_turns", value: "true"),
       URLQueryItem(name: "speech_model", value: speechModel),
-      URLQueryItem(name: "min_turn_silence", value: "560")
+      URLQueryItem(name: "min_turn_silence", value: Self.minimumTurnSilenceMs)
     ]
 
     // AssemblyAI streaming v3 only supports keyterms_prompt (not arbitrary prompts).
@@ -71,22 +95,35 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
     }
 
     guard let url = urlComponents.url else {
-      onError(AssemblyAIError.invalidURL)
+      currentOnError()?(AssemblyAIError.invalidURL)
       return
     }
 
     var request = URLRequest(url: url)
     request.setValue(apiKey, forHTTPHeaderField: "Authorization")
 
-    webSocketTask = session.webSocketTask(with: request)
-    webSocketTask?.resume()
+    let task = session.webSocketTask(with: request)
+    let shouldReceive = withStateLock { () -> Bool in
+      guard !isStopping else { return false }
+      webSocketTask = task
+      task.resume()
+      return true
+    }
+    guard shouldReceive else {
+      task.cancel(with: .goingAway, reason: nil)
+      return
+    }
 
-    logger.info("AssemblyAI WebSocket connecting to \(url.absoluteString.prefix(120))")
+    logger.info("AssemblyAI WebSocket connecting via \(host.rawValue)")
     receiveMessages()
   }
 
+  private func makeWebSocketURL(for host: EndpointHost) -> URLComponents? {
+    URLComponents(string: "wss://\(host.rawValue)/v3/ws")
+  }
+
   func sendAudio(_ audioData: Data) {
-    guard let webSocketTask, webSocketTask.state == .running else { return }
+    guard let webSocketTask = currentWebSocketTask(), webSocketTask.state == .running else { return }
 
     var buffer = bufferPool.checkout()
     buffer.append(audioData)
@@ -100,9 +137,9 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
       self.bufferPool.returnBuffer(&returnBuffer)
 
       if let error {
-        if self.isStopping || self.shouldIgnoreSocketError(error) { return }
+        if self.isStoppingState() || self.shouldIgnoreSocketError(error) { return }
         self.logger.error("Failed to send audio: \(error.localizedDescription)")
-        self.onError?(error)
+        self.currentOnError()?(error)
       }
     }
   }
@@ -123,7 +160,7 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
       }
     }
 
-    guard let webSocketTask, webSocketTask.state == .running else {
+    guard let webSocketTask = currentWebSocketTask(), webSocketTask.state == .running else {
       bufferPool.returnBuffer(&buffer)
       return
     }
@@ -137,25 +174,25 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
       self.bufferPool.returnBuffer(&returnBuffer)
 
       if let error {
-        if self.isStopping || self.shouldIgnoreSocketError(error) { return }
+        if self.isStoppingState() || self.shouldIgnoreSocketError(error) { return }
         self.logger.error("Failed to send audio: \(error.localizedDescription)")
-        self.onError?(error)
+        self.currentOnError()?(error)
       }
     }
   }
 
   func stop() {
-    guard !isStopping else { return }
-    isStopping = true
+    let task = withStateLock { () -> URLSessionWebSocketTask? in
+      guard !isStopping else { return nil }
+      isStopping = true
+      if webSocketTask?.state != .running {
+        webSocketTask = nil
+      }
+      return webSocketTask
+    }
     bufferPool.logMetrics()
 
-    guard let webSocketTask, webSocketTask.state == .running else {
-      self.webSocketTask = nil
-      return
-    }
-
-    // Capture strong reference so Terminate is always sent even if transcriber is deallocated
-    let task = webSocketTask
+    guard let task, task.state == .running else { return }
 
     // Send ForceEndpoint to flush the current turn before terminating
     let forceMsg = #"{"type":"ForceEndpoint"}"#
@@ -165,45 +202,23 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
         let terminateMsg = #"{"type":"Terminate"}"#
         task.send(.string(terminateMsg)) { _ in }
         task.cancel(with: .normalClosure, reason: nil)
-        self?.webSocketTask = nil
-        self?.logger.info("AssemblyAI WebSocket connection closed")
-      }
-    }
-  }
-
-  func updateConfiguration(_ config: [String: Any]) {
-    guard let webSocketTask, webSocketTask.state == .running else { return }
-    var payload = config
-    payload["type"] = "UpdateConfiguration"
-    guard let data = try? JSONSerialization.data(withJSONObject: payload),
-      let json = String(data: data, encoding: .utf8)
-    else { return }
-    webSocketTask.send(.string(json)) { [weak self] error in
-      if let error {
-        self?.logger.error("Failed to send config update: \(error.localizedDescription)")
+        if let self {
+          self.withStateLock {
+            if self.webSocketTask === task {
+              self.webSocketTask = nil
+            }
+          }
+          self.logger.info("AssemblyAI WebSocket connection closed")
+        }
       }
     }
   }
 
   // MARK: - Private
 
-  private func shouldIgnoreSocketError(_ error: Error) -> Bool {
-    let nsError = error as NSError
-    if nsError.domain == NSPOSIXErrorDomain, nsError.code == 57 { return true }
-    if nsError.localizedDescription.localizedCaseInsensitiveContains("socket is not connected") {
-      return true
-    }
-    return false
-  }
-
   private func receiveMessages() {
-    os_unfair_lock_lock(&unfairLock)
-    let task = webSocketTask
-    let stopping = isStopping
-    let errorHandler = onError
-    os_unfair_lock_unlock(&unfairLock)
-
-    task?.receive { [weak self] result in
+    guard let webSocketTask = currentWebSocketTask() else { return }
+    webSocketTask.receive { [weak self] result in
       guard let self else { return }
 
       switch result {
@@ -211,11 +226,40 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
         self.handleMessage(message)
         self.receiveMessages()
       case .failure(let error):
-        if stopping || self.shouldIgnoreSocketError(error) { return }
+        if self.isStoppingState() { return }
+        if self.retryWithGlobalEndpointIfNeeded(after: error) { return }
+        if self.shouldIgnoreSocketError(error) { return }
         self.logger.error("WebSocket receive error: \(error.localizedDescription)")
-        errorHandler?(error)
+        self.currentOnError()?(error)
       }
     }
+  }
+
+  private func retryWithGlobalEndpointIfNeeded(after error: Error) -> Bool {
+    var taskToCancel: URLSessionWebSocketTask?
+    let shouldRetry = withStateLock { () -> Bool in
+      guard
+        !isStopping,
+        currentEndpointHost == .europe,
+        !hasAttemptedGlobalFallback,
+        !sessionDidBegin
+      else {
+        return false
+      }
+      hasAttemptedGlobalFallback = true
+      currentEndpointHost = .global
+      taskToCancel = webSocketTask
+      webSocketTask = nil
+      return true
+    }
+    guard shouldRetry else { return false }
+
+    logger.warning(
+      "AssemblyAI EU endpoint failed before session begin (\(error.localizedDescription)); retrying global endpoint"
+    )
+    taskToCancel?.cancel(with: .goingAway, reason: nil)
+    connectWebSocket(using: .global)
+    return true
   }
 
   private func handleMessage(_ message: URLSessionWebSocketTask.Message) {
@@ -240,8 +284,11 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
       switch envelope.type {
       case "Turn":
         let turn = try JSONDecoder().decode(AssemblyAITurnResponse.self, from: data)
-        onTranscript?(turn)
+        currentOnTranscript()?(turn)
       case "Begin":
+        withStateLock {
+          sessionDidBegin = true
+        }
         logger.info("AssemblyAI session started — \(json.prefix(200))")
       case "Termination":
         logger.info("AssemblyAI session terminated by server")
@@ -251,6 +298,55 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
     } catch {
       logger.debug("Failed to parse AssemblyAI response: \(error.localizedDescription)")
     }
+  }
+}
+
+extension AssemblyAILiveTranscriber {
+  func updateConfiguration(_ config: [String: Any]) {
+    guard let webSocketTask = currentWebSocketTask(), webSocketTask.state == .running else { return }
+    var payload = config
+    payload["type"] = "UpdateConfiguration"
+    guard let data = try? JSONSerialization.data(withJSONObject: payload),
+      let json = String(data: data, encoding: .utf8)
+    else { return }
+    webSocketTask.send(.string(json)) { [weak self] error in
+      if let error {
+        self?.logger.error("Failed to send config update: \(error.localizedDescription)")
+      }
+    }
+  }
+}
+
+private extension AssemblyAILiveTranscriber {
+  func withStateLock<T>(_ block: () -> T) -> T {
+    stateLock.lock()
+    defer { stateLock.unlock() }
+    return block()
+  }
+
+  func currentWebSocketTask() -> URLSessionWebSocketTask? {
+    withStateLock { webSocketTask }
+  }
+
+  func isStoppingState() -> Bool {
+    withStateLock { isStopping }
+  }
+
+  func currentOnError() -> ((Error) -> Void)? {
+    withStateLock { onError }
+  }
+
+  func currentOnTranscript() -> ((AssemblyAITurnResponse) -> Void)? {
+    withStateLock { onTranscript }
+  }
+
+  func shouldIgnoreSocketError(_ error: Error) -> Bool {
+    let nsError = error as NSError
+    if nsError.domain == NSPOSIXErrorDomain, nsError.code == 57 { return true }
+    if nsError.localizedDescription.localizedCaseInsensitiveContains("socket is not connected") {
+      return true
+    }
+    return false
   }
 }
 

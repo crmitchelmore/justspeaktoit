@@ -1208,9 +1208,9 @@ final class MainManager: ObservableObject {
       transcriptionManager.cancelLiveTranscription()
     }
 
-    Task {
+    Task { [failedSession = activeSession] in
       await audioFileManager.cancelRecording(deleteFile: !preserveFile)
-      if let session = activeSession {
+      if let session = failedSession {
         let historyItem = session.buildHistoryItem(finalText: session.transcriptionResult?.text)
         await historyManager.append(historyItem)
       }

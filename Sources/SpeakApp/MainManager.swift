@@ -6,8 +6,6 @@ import Combine
 import Foundation
 import os.log
 
-// swiftlint:disable file_length type_body_length
-
 @MainActor
 final class MainManager: ObservableObject {
   enum State: Equatable {
@@ -1210,8 +1208,7 @@ final class MainManager: ObservableObject {
       transcriptionManager.cancelLiveTranscription()
     }
 
-    let failedSession = activeSession
-    Task {
+    Task { [failedSession = activeSession] in
       await audioFileManager.cancelRecording(deleteFile: !preserveFile)
       if let session = failedSession {
         let historyItem = session.buildHistoryItem(finalText: session.transcriptionResult?.text)
@@ -1485,4 +1482,3 @@ private final class ActiveSession {
 // This file also takes the HUD Manager as a dependency and calls the lifecycle events on the HUD Manager for it to be updated.
 // It should call out to the HUD view to present that to the user the hud manager should update it. And pass any error messages back to it if things fail.
 // Finally, after a session has completed and either succeeded and output the text or failed and an error has displayed, this file is responsible for cleaning up any open resources or sessions and closing them down properly.
-// swiftlint:enable file_length type_body_length

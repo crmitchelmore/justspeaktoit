@@ -941,7 +941,7 @@
 
     <button class="brew-install" title="Click to copy" type="button">
       <span class="brew-install__prompt">$</span>
-      <code>brew install --cask justspeaktoit</code>
+      <code>brew tap crmitchelmore/justspeaktoit && brew install --cask justspeaktoit</code>
       <span class="brew-install__copy">Click to copy</span>
     </button>
     
@@ -1368,7 +1368,7 @@
     if (brewInstallBlock) {
       brewInstallBlock.addEventListener('click', () => {
         const copyText = brewInstallBlock.querySelector('.brew-install__copy');
-        navigator.clipboard.writeText('brew install --cask justspeaktoit').then(() => {
+        navigator.clipboard.writeText('brew tap crmitchelmore/justspeaktoit && brew install --cask justspeaktoit').then(() => {
           if (copyText) {
             copyText.textContent = 'Copied!';
             setTimeout(() => { copyText.textContent = 'Click to copy'; }, 1500);

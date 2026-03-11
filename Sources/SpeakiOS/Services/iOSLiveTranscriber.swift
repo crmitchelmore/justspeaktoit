@@ -5,37 +5,6 @@ import Speech
 import SpeakCore
 import os.log
 
-/// Error types for iOS live transcription.
-public enum iOSTranscriptionError: LocalizedError {
-    case permissionDenied(Permission)
-    case recognizerUnavailable
-    case audioSessionFailed(Error)
-    case recognitionFailed(Error)
-    case interrupted
-
-    public enum Permission {
-        case microphone
-        case speechRecognition
-    }
-
-    public var errorDescription: String? {
-        switch self {
-        case .permissionDenied(.microphone):
-            return "Microphone permission is required for transcription."
-        case .permissionDenied(.speechRecognition):
-            return "Speech recognition permission is required."
-        case .recognizerUnavailable:
-            return "Speech recognizer is not available for the selected language."
-        case .audioSessionFailed(let error):
-            return "Failed to configure audio: \(error.localizedDescription)"
-        case .recognitionFailed(let error):
-            return "Recognition failed: \(error.localizedDescription)"
-        case .interrupted:
-            return "Transcription was interrupted (e.g., by a phone call)."
-        }
-    }
-}
-
 /// iOS-native live transcription using Apple Speech framework.
 @MainActor
 public final class iOSLiveTranscriber: ObservableObject {
@@ -68,6 +37,11 @@ public final class iOSLiveTranscriber: ObservableObject {
     private var latestResult: SFSpeechRecognitionResult?
     private var startTime: Date?
     private var segments: [TranscriptionSegment] = []
+    /// Accumulated text from recognition segments finalised mid-session (on pause).
+    private var committedText: String = ""
+    /// Last `formattedString` received from the recognizer, used to detect
+    /// implicit text resets where Apple silently clears the transcript.
+    private var lastFormattedString: String = ""
 
     /// Persistent audio recorder — saves audio to disk alongside transcription.
     public let audioRecorder = AudioRecordingPersistence()
@@ -187,6 +161,8 @@ public final class iOSLiveTranscriber: ObservableObject {
         error = nil
         latestResult = nil
         segments = []
+        committedText = ""
+        lastFormattedString = ""
         startTime = Date()
     }
 
@@ -287,6 +263,11 @@ public final class iOSLiveTranscriber: ObservableObject {
 
     private func handleRecognitionResult(_ result: SFSpeechRecognitionResult?, error: Error?) {
         if let error = error {
+            // Ignore errors from cancelled tasks during restart
+            let nsError = error as NSError
+            if nsError.domain == "kAFAssistantErrorDomain" && nsError.code == 209 {
+                return
+            }
             print("[iOSLiveTranscriber] Recognition error: \(error.localizedDescription)")
             self.error = iOSTranscriptionError.recognitionFailed(error)
             onError?(self.error!)
@@ -296,24 +277,77 @@ public final class iOSLiveTranscriber: ObservableObject {
         guard let result = result else { return }
 
         latestResult = result
-        let text = result.bestTranscription.formattedString
-        let isFinal = result.isFinal
+        let currentText = result.bestTranscription.formattedString
+        let resultIsFinal = result.isFinal
+
+        // Detect implicit text reset (Apple silently clears after a pause)
+        commitIfImplicitReset(currentText: currentText, isFinal: resultIsFinal)
+        lastFormattedString = currentText
+
+        // Build display text from committed + current
+        let displayText = [committedText, currentText]
+            .filter { !$0.isEmpty }.joined(separator: " ")
 
         // Calculate confidence
         let avgConfidence: Double? = result.bestTranscription.segments.isEmpty
             ? nil
-            : result.bestTranscription.segments.map { Double($0.confidence) }.reduce(0, +) / Double(result.bestTranscription.segments.count)
+            : result.bestTranscription.segments.map {
+                Double($0.confidence)
+            }.reduce(0, +) / Double(result.bestTranscription.segments.count)
 
         // Update state
-        partialText = text
-        self.isFinal = isFinal
+        partialText = displayText
+        self.isFinal = resultIsFinal
         self.confidence = avgConfidence
 
         // Callback
-        onPartialResult?(text, isFinal)
+        onPartialResult?(displayText, resultIsFinal)
 
-        if isFinal {
-            print("[iOSLiveTranscriber] Final result received")
+        if resultIsFinal {
+            print("[iOSLiveTranscriber] Mid-session isFinal – "
+                  + "committing \(displayText.count) chars, restarting")
+            committedText = displayText
+            lastFormattedString = ""
+            restartRecognitionTask()
+        }
+    }
+
+    /// Detect when Apple's recognizer silently resets `formattedString` after
+    /// a pause without sending `isFinal`.  If the new text is dramatically
+    /// shorter than the previous result, commit the old text to prevent loss.
+    private func commitIfImplicitReset(currentText: String, isFinal: Bool) {
+        guard !isFinal,
+              lastFormattedString.count >= 10,
+              currentText.count < lastFormattedString.count / 2
+        else { return }
+        print("[iOSLiveTranscriber] Implicit text reset – "
+              + "committing \(lastFormattedString.count) chars")
+        committedText = [committedText, lastFormattedString]
+            .filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
+    /// Restart recognition after a mid-session `isFinal` so continued speech
+    /// is captured without losing previously committed text.
+    private func restartRecognitionTask() {
+        guard isRunning, let recognizer = speechRecognizer else { return }
+
+        recognitionTask?.cancel()
+        recognitionTask = nil
+
+        let newRequest = SFSpeechAudioBufferRecognitionRequest()
+        newRequest.shouldReportPartialResults = true
+        if preferOnDevice && recognizer.supportsOnDeviceRecognition {
+            newRequest.requiresOnDeviceRecognition = true
+        }
+        recognitionRequest = newRequest
+        latestResult = nil
+        lastFormattedString = ""
+
+        recognitionTask = recognizer.recognitionTask(with: newRequest) {
+            [weak self] result, error in
+            Task { @MainActor in
+                self?.handleRecognitionResult(result, error: error)
+            }
         }
     }
 
@@ -333,6 +367,7 @@ public final class iOSLiveTranscriber: ObservableObject {
             }
         }
 
+        // partialText already includes committedText from previous segments
         return TranscriptionResult(
             text: partialText,
             segments: finalSegments,

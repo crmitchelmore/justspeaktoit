@@ -7,6 +7,7 @@ import os.log
 
 /// iOS-native live transcription using Apple Speech framework.
 @MainActor
+// swiftlint:disable:next type_body_length
 public final class iOSLiveTranscriber: ObservableObject {
     // MARK: - Published State
 
@@ -343,8 +344,7 @@ public final class iOSLiveTranscriber: ObservableObject {
         latestResult = nil
         lastFormattedString = ""
 
-        recognitionTask = recognizer.recognitionTask(with: newRequest) {
-            [weak self] result, error in
+        recognitionTask = recognizer.recognitionTask(with: newRequest) { [weak self] result, error in
             Task { @MainActor in
                 self?.handleRecognitionResult(result, error: error)
             }

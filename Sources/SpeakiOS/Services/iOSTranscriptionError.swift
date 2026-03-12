@@ -2,6 +2,7 @@
 import Foundation
 
 /// Error types for iOS live transcription.
+// swiftlint:disable:next type_name
 public enum iOSTranscriptionError: LocalizedError {
     case permissionDenied(Permission)
     case recognizerUnavailable

@@ -1,7 +1,7 @@
 #if os(iOS)
 import Foundation
 
-// swiftlint:disable:next type_name
+// swiftlint:disable type_name
 /// Error types for iOS live transcription.
 public enum iOSTranscriptionError: LocalizedError {
     case permissionDenied(Permission)
@@ -32,4 +32,5 @@ public enum iOSTranscriptionError: LocalizedError {
         }
     }
 }
+// swiftlint:enable type_name
 #endif

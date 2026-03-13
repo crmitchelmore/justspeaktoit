@@ -277,7 +277,7 @@ public final class iOSLiveTranscriber: ObservableObject {
             let nsError = error as NSError
             if nsError.domain == Self.assistantErrorDomain,
                nsError.code == Self.cancelledTaskErrorCode,
-               (isShuttingDownRecognitionTask || !isRunning) {
+               isShuttingDownRecognitionTask || !isRunning {
                 return
             }
             print("[iOSLiveTranscriber] Recognition error: \(error.localizedDescription)")
@@ -285,7 +285,6 @@ public final class iOSLiveTranscriber: ObservableObject {
             onError?(self.error!)
             return
         }
-
         guard let result = result else { return }
 
         isShuttingDownRecognitionTask = false
@@ -364,7 +363,6 @@ public final class iOSLiveTranscriber: ObservableObject {
             }
         }
     }
-
     private func appendLatestSegments() {
         guard let latestResult else { return }
         accumulatedSegments.append(contentsOf: mappedSegments(from: latestResult))
@@ -381,7 +379,6 @@ public final class iOSLiveTranscriber: ObservableObject {
             )
         }
     }
-
     private func buildFinalResult(duration: TimeInterval) -> TranscriptionResult {
         let latestSegments = latestResult.map(mappedSegments(from:)) ?? []
         let finalSegments = accumulatedSegments + latestSegments

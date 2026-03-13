@@ -19,6 +19,7 @@ struct JustSpeakToItWidgetExtensionLiveActivity: Widget {
         ActivityConfiguration(for: TranscriptionActivityAttributes.self) { context in
             // Lock Screen / Banner view
             LockScreenTranscriptionView(state: context.state, startTime: context.attributes.startTime)
+                .widgetURL(URL(string: "justspeaktoit://transcribe"))
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
@@ -92,6 +93,7 @@ struct JustSpeakToItWidgetExtensionLiveActivity: Widget {
                     transcriptionStatusIndicator(for: context.state.status)
                 }
             }
+            .widgetURL(URL(string: "justspeaktoit://transcribe"))
         }
     }
 }

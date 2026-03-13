@@ -104,6 +104,12 @@ let project = Project(
                         "UIApplicationShortcutItemSubtitle": "Start or stop recording",
                         "UIApplicationShortcutItemIconSymbolName": "mic.fill"
                     ]
+                ],
+                "CFBundleURLTypes": [
+                    [
+                        "CFBundleURLName": "com.justspeaktoit.ios",
+                        "CFBundleURLSchemes": ["justspeaktoit"]
+                    ]
                 ]
             ]),
             sources: ["SpeakiOSApp/**"],

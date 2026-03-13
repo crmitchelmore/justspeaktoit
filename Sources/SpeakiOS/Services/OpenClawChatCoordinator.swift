@@ -13,6 +13,7 @@ import os.log
 public final class ConversationStore: ObservableObject {
     public static let shared = ConversationStore()
 
+    @Published public private(set) var isLoaded = false
     @Published public private(set) var conversations: [OpenClawClient.Conversation] = []
 
     private let fileURL: URL
@@ -69,6 +70,7 @@ public final class ConversationStore: ObservableObject {
     // MARK: - Persistence
 
     private func load() async {
+        defer { isLoaded = true }
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
         do {
             let data = try Data(contentsOf: fileURL)

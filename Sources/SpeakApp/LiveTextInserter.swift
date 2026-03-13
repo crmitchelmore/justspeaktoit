@@ -290,27 +290,21 @@ final class LiveTextInserter: ObservableObject {
   }
 
   /// Verify that text was actually inserted by re-reading the value after a short delay.
-  /// Uses async Task.sleep to prevent UI blocking.
+  /// Runs on MainActor, so it must avoid semaphore + Task patterns that can deadlock.
   private func verifyInsertion(expected: String, element: AXUIElement) -> Bool {
-    // Wait 50ms for the target app to process the accessibility change
-    // Using async Task.sleep to prevent UI blocking
-    let semaphore = DispatchSemaphore(value: 0)
-    var result = false
-    
-    Task { @MainActor in
-      try? await Task.sleep(for: .milliseconds(50))
-      
-      var currentValue: CFTypeRef?
-      let getStatus = AXUIElementCopyAttributeValue(
-        element, kAXValueAttribute as CFString, &currentValue
-      )
-      if getStatus == .success, let currentString = currentValue as? String {
-        result = currentString == expected || currentString.hasSuffix(expected)
-      }
-      semaphore.signal()
+    // Give the target app a brief moment to apply the AX value change before re-reading it.
+    // This synchronous wait avoids the MainActor deadlock caused by waiting on a semaphore
+    // while also scheduling the verification work back onto MainActor.
+    Thread.sleep(forTimeInterval: 0.05)
+
+    var currentValue: CFTypeRef?
+    let getStatus = AXUIElementCopyAttributeValue(
+      element, kAXValueAttribute as CFString, &currentValue
+    )
+    guard getStatus == .success, let currentString = currentValue as? String else {
+      return false
     }
-    
-    semaphore.wait()
-    return result
+
+    return currentString == expected || currentString.hasSuffix(expected)
   }
 }

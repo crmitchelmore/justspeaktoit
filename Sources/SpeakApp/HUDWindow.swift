@@ -16,10 +16,12 @@ final class HUDWindowPresenter {
 
   private func observeSnapshot() {
     cancellable = manager.$snapshot
+      .map(\.phase.isVisible)
+      .removeDuplicates()
       .receive(on: RunLoop.main)
-      .sink { [weak self] snapshot in
+      .sink { [weak self] isVisible in
         guard let self else { return }
-        if snapshot.phase.isVisible {
+        if isVisible {
           self.windowController.present()
         } else {
           self.windowController.dismiss()
@@ -67,11 +69,13 @@ private final class HUDWindowController: NSWindowController {
   func present() {
     guard let window = window else { return }
     updateFrameIfNeeded()
+    guard !window.isVisible else { return }
     window.orderFrontRegardless()
   }
 
   func dismiss() {
-    window?.orderOut(nil)
+    guard let window = window, window.isVisible else { return }
+    window.orderOut(nil)
   }
 
   private func updateFrameIfNeeded() {

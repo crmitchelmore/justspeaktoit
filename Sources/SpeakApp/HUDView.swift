@@ -59,7 +59,7 @@ struct HUDOverlay: View {
     .padding(.vertical, 16)
     return hudShell(base)
       .shadow(color: .black.opacity(0.25), radius: 18, x: 0, y: 12)
-      .animation(.spring(response: 0.25, dampingFraction: 0.85), value: manager.snapshot)
+      .animation(.spring(response: 0.25, dampingFraction: 0.85), value: manager.snapshot.phase)
       .animation(.spring(response: 0.25, dampingFraction: 0.85), value: manager.isExpanded)
       .frame(maxWidth: manager.isExpanded ? 500 : 320)
       .padding(.horizontal, 60)

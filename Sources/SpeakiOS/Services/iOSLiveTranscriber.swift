@@ -37,12 +37,17 @@ public final class iOSLiveTranscriber: ObservableObject {
     private var recognitionTask: SFSpeechRecognitionTask?
     private var latestResult: SFSpeechRecognitionResult?
     private var startTime: Date?
+    private var accumulatedSegments: [TranscriptionSegment] = []
     private var segments: [TranscriptionSegment] = []
+    private var isShuttingDownRecognitionTask = false
     /// Accumulated text from recognition segments finalised mid-session (on pause).
     private var committedText: String = ""
     /// Last `formattedString` received from the recognizer, used to detect
     /// implicit text resets where Apple silently clears the transcript.
     private var lastFormattedString: String = ""
+
+    private static let assistantErrorDomain = "kAFAssistantErrorDomain"
+    private static let cancelledTaskErrorCode = 209
 
     /// Persistent audio recorder — saves audio to disk alongside transcription.
     public let audioRecorder = AudioRecordingPersistence()
@@ -161,7 +166,9 @@ public final class iOSLiveTranscriber: ObservableObject {
         confidence = nil
         error = nil
         latestResult = nil
+        accumulatedSegments = []
         segments = []
+        isShuttingDownRecognitionTask = false
         committedText = ""
         lastFormattedString = ""
         startTime = Date()
@@ -181,6 +188,8 @@ public final class iOSLiveTranscriber: ObservableObject {
                 debugInfo: nil
             )
         }
+
+        isShuttingDownRecognitionTask = true
 
         // Signal end of audio
         recognitionRequest?.endAudio()
@@ -219,6 +228,7 @@ public final class iOSLiveTranscriber: ObservableObject {
 
         SpeakLogger.transcription.info("Cancelling transcription")
 
+        isShuttingDownRecognitionTask = true
         recognitionRequest?.endAudio()
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
@@ -264,9 +274,10 @@ public final class iOSLiveTranscriber: ObservableObject {
 
     private func handleRecognitionResult(_ result: SFSpeechRecognitionResult?, error: Error?) {
         if let error = error {
-            // Ignore errors from cancelled tasks during restart
             let nsError = error as NSError
-            if nsError.domain == "kAFAssistantErrorDomain" && nsError.code == 209 {
+            if nsError.domain == Self.assistantErrorDomain,
+               nsError.code == Self.cancelledTaskErrorCode,
+               (isShuttingDownRecognitionTask || !isRunning) {
                 return
             }
             print("[iOSLiveTranscriber] Recognition error: \(error.localizedDescription)")
@@ -277,6 +288,7 @@ public final class iOSLiveTranscriber: ObservableObject {
 
         guard let result = result else { return }
 
+        isShuttingDownRecognitionTask = false
         latestResult = result
         let currentText = result.bestTranscription.formattedString
         let resultIsFinal = result.isFinal
@@ -332,6 +344,8 @@ public final class iOSLiveTranscriber: ObservableObject {
     private func restartRecognitionTask() {
         guard isRunning, let recognizer = speechRecognizer else { return }
 
+        isShuttingDownRecognitionTask = true
+        appendLatestSegments()
         recognitionTask?.cancel()
         recognitionTask = nil
 
@@ -351,21 +365,26 @@ public final class iOSLiveTranscriber: ObservableObject {
         }
     }
 
-    private func buildFinalResult(duration: TimeInterval) -> TranscriptionResult {
-        // Build segments from latest result
-        var finalSegments: [TranscriptionSegment] = []
+    private func appendLatestSegments() {
+        guard let latestResult else { return }
+        accumulatedSegments.append(contentsOf: mappedSegments(from: latestResult))
+    }
 
-        if let result = latestResult {
-            finalSegments = result.bestTranscription.segments.map { segment in
-                TranscriptionSegment(
-                    startTime: segment.timestamp,
-                    endTime: segment.timestamp + segment.duration,
-                    text: segment.substring,
-                    isFinal: true,
-                    confidence: Double(segment.confidence)
-                )
-            }
+    private func mappedSegments(from result: SFSpeechRecognitionResult) -> [TranscriptionSegment] {
+        result.bestTranscription.segments.map { segment in
+            TranscriptionSegment(
+                startTime: segment.timestamp,
+                endTime: segment.timestamp + segment.duration,
+                text: segment.substring,
+                isFinal: true,
+                confidence: Double(segment.confidence)
+            )
         }
+    }
+
+    private func buildFinalResult(duration: TimeInterval) -> TranscriptionResult {
+        let latestSegments = latestResult.map(mappedSegments(from:)) ?? []
+        let finalSegments = accumulatedSegments + latestSegments
 
         // partialText already includes committedText from previous segments
         return TranscriptionResult(

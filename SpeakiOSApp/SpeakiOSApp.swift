@@ -49,7 +49,7 @@ final class SpeakiOSAppDelegate: NSObject, UIApplicationDelegate {
 @main
 struct SpeakiOSApp: App {
     @UIApplicationDelegateAdaptor(SpeakiOSAppDelegate.self) private var appDelegate
-    @StateObject private var deepLinkRouter = DeepLinkRouter.shared
+    @ObservedObject private var deepLinkRouter = DeepLinkRouter.shared
 
     var body: some Scene {
         WindowGroup {
@@ -109,11 +109,15 @@ struct OpenClawTabView: View {
                 navigateToPendingConversation(id: pending)
             }
         }
+        .onChange(of: store.isLoaded) { _, loaded in
+            guard loaded else { return }
+            navigateToPendingConversation(id: deepLinkRouter.pendingConversationId)
+        }
     }
 
     private func navigateToPendingConversation(id: String?) {
         guard let cid = id else { return }
-        deepLinkRouter.pendingConversationId = nil
+        guard store.isLoaded else { return }
 
         if let conv = store.conversations.first(where: { $0.id == cid }) {
             selectedConversation = conv
@@ -121,6 +125,8 @@ struct OpenClawTabView: View {
             // Conversation not found — open a new one
             selectedConversation = nil
         }
+
+        deepLinkRouter.pendingConversationId = nil
         showConversation = true
     }
 }

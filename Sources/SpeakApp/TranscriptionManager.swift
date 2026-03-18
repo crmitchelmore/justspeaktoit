@@ -840,9 +840,16 @@ private extension DeepgramLiveController {
       }
       print("[DeepgramLiveController] API key retrieved (length: \(apiKey.count))")
       return apiKey
+    } catch let error as SecureAppStorageError {
+      if case .valueNotFound = error {
+        print("[DeepgramLiveController] ERROR: Deepgram API key is missing")
+        throw DeepgramError.missingAPIKey
+      }
+      print("[DeepgramLiveController] ERROR: Failed to retrieve API key: \(error.localizedDescription)")
+      throw error
     } catch {
       print("[DeepgramLiveController] ERROR: Failed to retrieve API key: \(error.localizedDescription)")
-      throw DeepgramError.missingAPIKey
+      throw error
     }
   }
 
@@ -1059,13 +1066,7 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
       throw TranscriptionManagerError.permissionsMissing
     }
 
-    let apiKey: String
-    do {
-      apiKey = try await secureStorage.secret(identifier: "assemblyai.apiKey")
-      guard !apiKey.isEmpty else { throw AssemblyAIError.missingAPIKey }
-    } catch {
-      throw AssemblyAIError.missingAPIKey
-    }
+    let apiKey = try await assemblyAIAPIKey()
 
     let sessionContext = await audioDeviceManager.beginUsingPreferredInput()
     activeInputSession = sessionContext
@@ -1467,6 +1468,21 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
     let speech = await permissionsManager.request(.speechRecognition)
     return microphone.isGranted && speech.isGranted
   }
+
+  private func assemblyAIAPIKey() async throws -> String {
+    do {
+      let apiKey = try await secureStorage.secret(identifier: "assemblyai.apiKey")
+      guard !apiKey.isEmpty else { throw AssemblyAIError.missingAPIKey }
+      return apiKey
+    } catch let error as SecureAppStorageError {
+      if case .valueNotFound = error {
+        throw AssemblyAIError.missingAPIKey
+      }
+      throw error
+    } catch {
+      throw error
+    }
+  }
 }
 // swiftlint:enable type_body_length
 
@@ -1533,7 +1549,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   }
 
   private func makeController(for model: String) -> any LiveTranscriptionController {
-    if model.contains("assemblyai") {
+    if model.hasPrefix("assemblyai/") {
       return AssemblyAILiveController(
         appSettings: appSettings,
         permissionsManager: permissionsManager,
@@ -1541,7 +1557,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
         secureStorage: secureStorage
       )
     }
-    if model.contains("deepgram") {
+    if model.hasPrefix("deepgram/") {
       return DeepgramLiveController(
         appSettings: appSettings,
         permissionsManager: permissionsManager,

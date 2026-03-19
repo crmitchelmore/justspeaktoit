@@ -174,7 +174,7 @@ final class HUDManager: ObservableObject {
     // Block-based timers with [weak self] can crash in swift_getObjectType during
     // executor verification if the object is deallocating.
     timer = Timer.scheduledTimer(
-      timeInterval: 0.02,
+      timeInterval: HUDPlatformWorkarounds.elapsedTimerInterval,
       target: self,
       selector: #selector(elapsedTimerFired),
       userInfo: nil,

@@ -91,14 +91,15 @@ private struct HUDWindowContent: View {
   @ObservedObject var settings: AppSettings
 
   var body: some View {
-    ZStack {
-      Color.clear
+    VStack(spacing: 0) {
+      Spacer(minLength: 0)
       HUDOverlay(manager: manager)
         .environmentObject(settings)
         .padding(.horizontal, 72)
         .padding(.bottom, 72)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
     }
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+    .background(Color.clear)
     .ignoresSafeArea()
   }
 }

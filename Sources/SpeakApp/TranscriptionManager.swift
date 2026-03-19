@@ -1,4 +1,5 @@
 import SpeakCore
+import AppKit
 import AVFoundation
 import Foundation
 import Speech
@@ -288,12 +289,7 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
     }
     speechRecognizer = recognizer
 
-    request = SFSpeechAudioBufferRecognitionRequest()
-    request?.shouldReportPartialResults = true
-    // Prefer on-device recognition to avoid server errors
-    if recognizer.supportsOnDeviceRecognition {
-      request?.requiresOnDeviceRecognition = true
-    }
+    request = makeRecognitionRequest(for: recognizer)
 
     let inputNode = audioEngine.inputNode
     inputNode.removeTap(onBus: 0)
@@ -505,16 +501,21 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
     recognitionTask?.cancel()
     recognitionTask = nil
 
-    let newRequest = SFSpeechAudioBufferRecognitionRequest()
-    newRequest.shouldReportPartialResults = true
-    if recognizer.supportsOnDeviceRecognition {
-      newRequest.requiresOnDeviceRecognition = true
-    }
-    request = newRequest
+    request = makeRecognitionRequest(for: recognizer)
     latestResult = nil
     lastFormattedString = ""
 
     startRecognitionTask(with: recognizer)
+  }
+
+  private func makeRecognitionRequest(for recognizer: SFSpeechRecognizer) -> SFSpeechAudioBufferRecognitionRequest {
+    let request = SFSpeechAudioBufferRecognitionRequest()
+    request.shouldReportPartialResults = true
+    request.taskHint = .dictation
+    if recognizer.supportsOnDeviceRecognition {
+      request.requiresOnDeviceRecognition = true
+    }
+    return request
   }
 
   private func ensurePermissions() async -> Bool {
@@ -1488,11 +1489,25 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
 
 // MARK: - Switching Live Transcriber
 
+struct LiveTranscriptionControllerReusePolicy {
+  static let idleResetThreshold: TimeInterval = 10 * 60
+
+  static func shouldResetControllers(
+    invalidateBeforeNextStart: Bool,
+    lastStopDate: Date?,
+    now: Date
+  ) -> Bool {
+    guard !invalidateBeforeNextStart else { return true }
+    guard let lastStopDate else { return false }
+    return now.timeIntervalSince(lastStopDate) >= idleResetThreshold
+  }
+}
+
 /// Routes to appropriate live transcription controller based on selected model.
 final class SwitchingLiveTranscriber: LiveTranscriptionController {
   weak var delegate: LiveTranscriptionSessionDelegate? {
     didSet {
-      activeController?.delegate = delegate
+      applyDelegateAndConfiguration()
     }
   }
 
@@ -1504,40 +1519,84 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   private let permissionsManager: PermissionsManager
   private let audioDeviceManager: AudioInputDeviceManager
   private let secureStorage: SecureAppStorage
+  private let nowProvider: () -> Date
   private var activeController: (any LiveTranscriptionController)?
+  private var nativeController: NativeOSXLiveTranscriber
+  private var deepgramController: DeepgramLiveController
+  private var assemblyAIController: AssemblyAILiveController
   private var currentLanguage: String?
   private var currentModel: String?
+  private var invalidateBeforeNextStart: Bool = false
+  private var lastStopDate: Date?
+  private var willSleepObserver: NSObjectProtocol?
+  private var didWakeObserver: NSObjectProtocol?
 
   init(
     appSettings: AppSettings,
     permissionsManager: PermissionsManager,
     audioDeviceManager: AudioInputDeviceManager,
-    secureStorage: SecureAppStorage
+    secureStorage: SecureAppStorage,
+    nowProvider: @escaping () -> Date = Date.init
   ) {
     self.appSettings = appSettings
     self.permissionsManager = permissionsManager
     self.audioDeviceManager = audioDeviceManager
     self.secureStorage = secureStorage
+    self.nowProvider = nowProvider
+    nativeController = NativeOSXLiveTranscriber(
+      permissionsManager: permissionsManager,
+      appSettings: appSettings,
+      audioDeviceManager: audioDeviceManager
+    )
+    deepgramController = DeepgramLiveController(
+      appSettings: appSettings,
+      permissionsManager: permissionsManager,
+      audioDeviceManager: audioDeviceManager,
+      secureStorage: secureStorage
+    )
+    assemblyAIController = AssemblyAILiveController(
+      appSettings: appSettings,
+      permissionsManager: permissionsManager,
+      audioDeviceManager: audioDeviceManager,
+      secureStorage: secureStorage
+    )
+    applyDelegateAndConfiguration()
+    startObservingLifecycle()
+  }
+
+  deinit {
+    let notificationCenter = NSWorkspace.shared.notificationCenter
+    if let willSleepObserver {
+      notificationCenter.removeObserver(willSleepObserver)
+    }
+    if let didWakeObserver {
+      notificationCenter.removeObserver(didWakeObserver)
+    }
   }
 
   func configure(language: String?, model: String) {
     currentLanguage = language
     currentModel = model
     print("[SwitchingLiveTranscriber] Configured with model: \(model)")
-    activeController?.configure(language: language, model: model)
+    applyDelegateAndConfiguration()
   }
 
   func start() async throws {
     let model = currentModel ?? appSettings.liveTranscriptionModel
     print("[SwitchingLiveTranscriber] Starting with model: \(model)")
-    let controller = makeController(for: model)
-    controller.delegate = delegate
-    controller.configure(language: currentLanguage, model: model)
+    if shouldResetControllersBeforeStart(at: nowProvider()) {
+      print("[SwitchingLiveTranscriber] Resetting cached live controllers before start")
+      resetControllers()
+    }
+
+    let controller = controller(for: model)
     activeController = controller
     do {
       try await controller.start()
+      invalidateBeforeNextStart = false
     } catch {
       activeController = nil
+      invalidateBeforeNextStart = true
       throw error
     }
   }
@@ -1546,29 +1605,84 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     print("[SwitchingLiveTranscriber] Stopping...")
     await activeController?.stop()
     activeController = nil
+    lastStopDate = nowProvider()
   }
 
-  private func makeController(for model: String) -> any LiveTranscriptionController {
-    if model.hasPrefix("assemblyai/") {
-      return AssemblyAILiveController(
-        appSettings: appSettings,
-        permissionsManager: permissionsManager,
-        audioDeviceManager: audioDeviceManager,
-        secureStorage: secureStorage
-      )
+  private func controller(for model: String) -> any LiveTranscriptionController {
+    if model.hasPrefix("assemblyai/") { return assemblyAIController }
+    if model.hasPrefix("deepgram/") { return deepgramController }
+    return nativeController
+  }
+
+  private func applyDelegateAndConfiguration() {
+    let controllers: [any LiveTranscriptionController] = [
+      nativeController,
+      deepgramController,
+      assemblyAIController,
+    ]
+    let model = currentModel ?? appSettings.liveTranscriptionModel
+    for controller in controllers {
+      controller.delegate = delegate
+      controller.configure(language: currentLanguage, model: model)
     }
-    if model.hasPrefix("deepgram/") {
-      return DeepgramLiveController(
-        appSettings: appSettings,
-        permissionsManager: permissionsManager,
-        audioDeviceManager: audioDeviceManager,
-        secureStorage: secureStorage
-      )
-    }
-    return NativeOSXLiveTranscriber(
+  }
+
+  private func shouldResetControllersBeforeStart(at now: Date) -> Bool {
+    LiveTranscriptionControllerReusePolicy.shouldResetControllers(
+      invalidateBeforeNextStart: invalidateBeforeNextStart,
+      lastStopDate: lastStopDate,
+      now: now
+    )
+  }
+
+  private func resetControllers() {
+    activeController = nil
+    nativeController = NativeOSXLiveTranscriber(
       permissionsManager: permissionsManager,
       appSettings: appSettings,
       audioDeviceManager: audioDeviceManager
     )
+    deepgramController = DeepgramLiveController(
+      appSettings: appSettings,
+      permissionsManager: permissionsManager,
+      audioDeviceManager: audioDeviceManager,
+      secureStorage: secureStorage
+    )
+    assemblyAIController = AssemblyAILiveController(
+      appSettings: appSettings,
+      permissionsManager: permissionsManager,
+      audioDeviceManager: audioDeviceManager,
+      secureStorage: secureStorage
+    )
+    invalidateBeforeNextStart = false
+    lastStopDate = nil
+    applyDelegateAndConfiguration()
+  }
+
+  private func startObservingLifecycle() {
+    let notificationCenter = NSWorkspace.shared.notificationCenter
+    willSleepObserver = notificationCenter.addObserver(
+      forName: NSWorkspace.willSleepNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      Task { @MainActor [weak self] in
+        self?.markControllersStale()
+      }
+    }
+    didWakeObserver = notificationCenter.addObserver(
+      forName: NSWorkspace.didWakeNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      Task { @MainActor [weak self] in
+        self?.markControllersStale()
+      }
+    }
+  }
+
+  @MainActor
+  private func markControllersStale() {
+    invalidateBeforeNextStart = true
   }
 }

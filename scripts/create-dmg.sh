@@ -103,10 +103,15 @@ hdiutil create -srcfolder "$DMG_TEMP" -volname "$VOLUME_NAME" -fs HFS+ \
 # Mount the DMG
 ATTACH_OUTPUT=$(hdiutil attach -readwrite -noverify "$DMG_TEMP_RW")
 MOUNT_DEVICE=$(printf '%s\n' "$ATTACH_OUTPUT" | awk '/\/Volumes\// {print $1; exit}')
+if [ -z "$MOUNT_DEVICE" ]; then
+    MOUNT_DEVICE=$(printf '%s\n' "$ATTACH_OUTPUT" | awk '$1 ~ /^\/dev\// {print $1; exit}')
+fi
 MOUNT_DIR=$(printf '%s\n' "$ATTACH_OUTPUT" | awk -F '\t' '/\/Volumes\// {print $NF; exit}')
 
 if [ -z "$MOUNT_DEVICE" ] || [ -z "$MOUNT_DIR" ]; then
-    echo "Failed to determine mounted DMG details"
+    echo "Failed to determine mounted DMG details" >&2
+    printf '%s\n' "$ATTACH_OUTPUT" >&2
+    cleanup_mounted_dmg
     exit 1
 fi
 

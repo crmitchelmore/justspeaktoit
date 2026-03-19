@@ -4,14 +4,24 @@ import SwiftUI
 struct HUDOverlay: View {
   @ObservedObject var manager: HUDManager
   @EnvironmentObject private var settings: AppSettings
+  @Environment(\.colorScheme) private var colorScheme
 
   var body: some View {
     if manager.snapshot.phase.isVisible {
-      content
-        .transition(.move(edge: .bottom).combined(with: .opacity))
+      presentedContent
         .padding(.bottom, 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .ignoresSafeArea()
+    }
+  }
+
+  @ViewBuilder
+  private var presentedContent: some View {
+    if shouldUseLegacyRendering {
+      content
+    } else {
+      content
+        .transition(.move(edge: .bottom).combined(with: .opacity))
     }
   }
 
@@ -38,7 +48,12 @@ struct HUDOverlay: View {
         }
       }
       if case .recording = manager.snapshot.phase {
-        AudioLevelMeterView(level: manager.audioLevel, width: 100, height: 4)
+        AudioLevelMeterView(
+          level: manager.audioLevel,
+          animatesLevel: !shouldUseLegacyRendering,
+          width: 100,
+          height: 4
+        )
           .padding(.top, 2)
           .accessibilityLabel("Audio level meter")
           .accessibilityValue("\(Int(manager.audioLevel * 100)) percent")
@@ -57,19 +72,26 @@ struct HUDOverlay: View {
     }
     .padding(.horizontal, 24)
     .padding(.vertical, 16)
-    return hudShell(base)
-      .shadow(color: .black.opacity(0.25), radius: 18, x: 0, y: 12)
-      .animation(.spring(response: 0.25, dampingFraction: 0.85), value: manager.snapshot.phase)
-      .animation(.spring(response: 0.25, dampingFraction: 0.85), value: manager.isExpanded)
+    let shell = hudShell(base)
       .frame(maxWidth: manager.isExpanded ? 500 : 320)
       .padding(.horizontal, 60)
+    if shouldUseLegacyRendering {
+      return AnyView(shell)
+    } else {
+      return AnyView(
+        shell
+          .shadow(color: .black.opacity(0.25), radius: 18, x: 0, y: 12)
+          .animation(.spring(response: 0.25, dampingFraction: 0.85), value: manager.snapshot.phase)
+          .animation(.spring(response: 0.25, dampingFraction: 0.85), value: manager.isExpanded)
+      )
+    }
   }
 
   @ViewBuilder
   private func hudShell<Content: View>(_ view: Content) -> some View {
     let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
     #if compiler(>=6.1) && canImport(SwiftUI, _version: 7.0)
-    if #available(macOS 26.0, *), shouldUseGlassEffect {
+    if #available(macOS 26.0, *), !shouldUseLegacyRendering {
       view
         .background(phaseTint)
         .glassEffect(.regular.tint(phaseColor.opacity(0.18)).interactive(), in: .rect(cornerRadius: 20))
@@ -84,27 +106,24 @@ struct HUDOverlay: View {
 
   @ViewBuilder
   private func hudShellFallback<Content: View>(_ view: Content, shape: RoundedRectangle) -> some View {
-    view
-      .background(
-        shape
-          .fill(.thickMaterial)
-          .overlay(phaseTint)
-      )
-      .overlay(shape.stroke(phaseColor.opacity(0.45), lineWidth: strokeWidth))
+    if shouldUseLegacyRendering {
+      view
+        .background(
+          shape
+            .fill(legacyBackgroundColor)
+            .overlay(phaseTint)
+        )
+        .overlay(shape.stroke(phaseColor.opacity(0.28), lineWidth: strokeWidth))
+    } else {
+      view
+        .background(
+          shape
+            .fill(.thickMaterial)
+            .overlay(phaseTint)
+        )
+        .overlay(shape.stroke(phaseColor.opacity(0.45), lineWidth: strokeWidth))
+    }
   }
-
-  #if os(macOS)
-  /// Returns `true` when glassEffect is safe to use on the current OS build.
-  /// macOS 26.0.x exhibits a SwiftUI bug inside DesignLibrary that leads to EXC_BAD_ACCESS.
-  private var shouldUseGlassEffect: Bool {
-    guard #available(macOS 26.0, *) else { return false }
-    let version = ProcessInfo.processInfo.operatingSystemVersion
-    let isSequoiaDotZero = version.majorVersion == 26 && version.minorVersion == 0
-    return !isSequoiaDotZero
-  }
-  #else
-  private var shouldUseGlassEffect: Bool { false }
-  #endif
 
   @ViewBuilder
   private func liveTranscriptionView(text: String) -> some View {
@@ -112,14 +131,24 @@ struct HUDOverlay: View {
     let confidence = manager.snapshot.liveTextConfidence
 
     HStack(spacing: 6) {
-      Text(text)
-        .font(isFinal ? .callout : .callout.italic())
-        .fontWeight(isFinal ? .regular : .light)
-        .foregroundStyle(isFinal ? .primary : .secondary)
-        .lineLimit(2)
-        .truncationMode(.head)
-        .animation(.easeInOut(duration: 0.2), value: isFinal)
-        .accessibilityLabel(isFinal ? "Transcript: \(text)" : "Partial transcript: \(text)")
+      if shouldUseLegacyRendering {
+        Text(text)
+          .font(isFinal ? .callout : .callout.italic())
+          .fontWeight(isFinal ? .regular : .light)
+          .foregroundStyle(isFinal ? .primary : .secondary)
+          .lineLimit(2)
+          .truncationMode(.head)
+          .accessibilityLabel(isFinal ? "Transcript: \(text)" : "Partial transcript: \(text)")
+      } else {
+        Text(text)
+          .font(isFinal ? .callout : .callout.italic())
+          .fontWeight(isFinal ? .regular : .light)
+          .foregroundStyle(isFinal ? .primary : .secondary)
+          .lineLimit(2)
+          .truncationMode(.head)
+          .animation(.easeInOut(duration: 0.2), value: isFinal)
+          .accessibilityLabel(isFinal ? "Transcript: \(text)" : "Partial transcript: \(text)")
+      }
 
       if let confidence, confidence > 0 {
         Text("\(Int(confidence * 100))%")
@@ -144,7 +173,7 @@ struct HUDOverlay: View {
       // Show the live transcript inline (no disclosure/expand UI).
       liveTranscriptionView(text: transcriptText)
         .padding(.top, 4)
-            .accessibilityHint("Press Command-R to retry the operation")
+        .accessibilityHint("Press Command-R to retry the operation")
     }
   }
 
@@ -202,15 +231,22 @@ struct HUDOverlay: View {
   private var animatedGlyph: some View {
     switch manager.snapshot.phase {
     case .failure:
-      TimelineView(.animation) { context in
-        let progress = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1)
-        let scale = 0.9 + (progress < 0.5 ? progress : 1 - progress) * 0.35
+      if shouldUseLegacyRendering {
         Image(systemName: "exclamationmark.triangle.fill")
           .font(.system(size: 32, weight: .bold))
-          .foregroundStyle(phaseColor.gradient)
-          .scaleEffect(scale)
-          .shadow(color: phaseColor.opacity(0.45), radius: 10, x: 0, y: 6)
+          .foregroundStyle(phaseColor)
           .accessibilityLabel("Error indicator")
+      } else {
+        TimelineView(.animation) { context in
+          let progress = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1)
+          let scale = 0.9 + (progress < 0.5 ? progress : 1 - progress) * 0.35
+          Image(systemName: "exclamationmark.triangle.fill")
+            .font(.system(size: 32, weight: .bold))
+            .foregroundStyle(phaseColor.gradient)
+            .scaleEffect(scale)
+            .shadow(color: phaseColor.opacity(0.45), radius: 10, x: 0, y: 6)
+            .accessibilityLabel("Error indicator")
+        }
       }
     case .success:
       Image(systemName: "checkmark.circle.fill")
@@ -219,17 +255,32 @@ struct HUDOverlay: View {
         .shadow(color: phaseColor.opacity(0.3), radius: 6, x: 0, y: 4)
         .accessibilityLabel("Success indicator")
     default:
-      TimelineView(.animation) { context in
-        let progress = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1)
-        let scale = 0.9 + (progress < 0.5 ? progress : 1 - progress) * 0.4
+      if shouldUseLegacyRendering {
         Circle()
-          .fill(phaseColor.gradient)
+          .fill(phaseColor)
           .frame(width: 18, height: 18)
-          .scaleEffect(scale)
-          .shadow(color: phaseColor.opacity(0.4), radius: 6, x: 0, y: 4)
           .accessibilityLabel("Recording status indicator")
+      } else {
+        TimelineView(.animation) { context in
+          let progress = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1)
+          let scale = 0.9 + (progress < 0.5 ? progress : 1 - progress) * 0.4
+          Circle()
+            .fill(phaseColor.gradient)
+            .frame(width: 18, height: 18)
+            .scaleEffect(scale)
+            .shadow(color: phaseColor.opacity(0.4), radius: 6, x: 0, y: 4)
+            .accessibilityLabel("Recording status indicator")
+        }
       }
     }
+  }
+
+  private var shouldUseLegacyRendering: Bool {
+    HUDPlatformWorkarounds.isLegacyRenderingEnabled
+  }
+
+  private var legacyBackgroundColor: Color {
+    colorScheme == .dark ? Color.black.opacity(0.82) : Color.white.opacity(0.94)
   }
 
   private var elapsedText: String {

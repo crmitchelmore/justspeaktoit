@@ -5,6 +5,9 @@ struct AudioLevelMeterView: View {
     /// Normalized audio level from 0.0 (silence) to 1.0 (peak/clipping)
     let level: Float
 
+    /// Whether meter updates should animate smoothly.
+    var animatesLevel: Bool = true
+
     /// Width of the meter bar
     var width: CGFloat = 120
 
@@ -12,7 +15,7 @@ struct AudioLevelMeterView: View {
     var height: CGFloat = 6
 
     var body: some View {
-        GeometryReader { geometry in
+        let meter = GeometryReader { geometry in
             ZStack(alignment: .leading) {
                 // Background track
                 RoundedRectangle(cornerRadius: height / 2, style: .continuous)
@@ -25,7 +28,13 @@ struct AudioLevelMeterView: View {
             }
         }
         .frame(width: width, height: height)
-        .animation(.linear(duration: 0.033), value: level)
+
+        if animatesLevel {
+            meter
+                .animation(.linear(duration: 0.033), value: level)
+        } else {
+            meter
+        }
     }
 
     private func levelWidth(in totalWidth: CGFloat) -> CGFloat {

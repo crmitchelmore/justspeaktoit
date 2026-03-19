@@ -10,6 +10,8 @@ VERSION="$3"
 VOLUME_NAME="Just Speak to It"
 DMG_TEMP="$RUNNER_TEMP/dmg_temp"
 DMG_TEMP_RW="$RUNNER_TEMP/dmg_temp_rw.dmg"
+MOUNT_DEVICE=""
+MOUNT_DIR=""
 
 if [ -z "$APP_PATH" ] || [ -z "$OUTPUT_DMG" ]; then
     echo "Usage: $0 <app_path> <output_dmg> [version]"
@@ -23,6 +25,46 @@ fi
 
 DMG_TEMP="$RUNNER_TEMP/dmg_temp"
 DMG_TEMP_RW="$RUNNER_TEMP/dmg_temp_rw.dmg"
+
+detach_mounted_dmg() {
+    local attempt
+
+    for attempt in 1 2 3 4 5; do
+        if [ -n "$MOUNT_DEVICE" ] && hdiutil detach "$MOUNT_DEVICE" -force >/dev/null 2>&1; then
+            MOUNT_DEVICE=""
+            MOUNT_DIR=""
+            return 0
+        fi
+
+        if [ -n "$MOUNT_DIR" ] && hdiutil detach "$MOUNT_DIR" -force >/dev/null 2>&1; then
+            MOUNT_DEVICE=""
+            MOUNT_DIR=""
+            return 0
+        fi
+
+        if [ -n "$MOUNT_DEVICE" ] && diskutil eject "$MOUNT_DEVICE" >/dev/null 2>&1; then
+            MOUNT_DEVICE=""
+            MOUNT_DIR=""
+            return 0
+        fi
+
+        echo "  Detach attempt $attempt failed; waiting for Finder to release the DMG..."
+        sync
+        sleep 2
+    done
+
+    echo "Failed to detach DMG mounted at ${MOUNT_DIR:-unknown}"
+    return 1
+}
+
+cleanup_mounted_dmg() {
+    if [ -n "$MOUNT_DEVICE" ] || [ -n "$MOUNT_DIR" ]; then
+        echo "  Cleaning up mounted DMG..."
+        detach_mounted_dmg || true
+    fi
+}
+
+trap cleanup_mounted_dmg EXIT
 
 echo "Creating DMG installer..."
 echo "  App: $APP_PATH"
@@ -59,7 +101,15 @@ hdiutil create -srcfolder "$DMG_TEMP" -volname "$VOLUME_NAME" -fs HFS+ \
     -fsargs "-c c=64,a=16,e=16" -format UDRW -size "${DMG_SIZE}m" "$DMG_TEMP_RW"
 
 # Mount the DMG
-MOUNT_DIR=$(hdiutil attach -readwrite -noverify "$DMG_TEMP_RW" | grep "/Volumes/" | sed 's/.*\/Volumes/\/Volumes/')
+ATTACH_OUTPUT=$(hdiutil attach -readwrite -noverify "$DMG_TEMP_RW")
+MOUNT_DEVICE=$(printf '%s\n' "$ATTACH_OUTPUT" | awk '/\/Volumes\// {print $1; exit}')
+MOUNT_DIR=$(printf '%s\n' "$ATTACH_OUTPUT" | awk -F '\t' '/\/Volumes\// {print $NF; exit}')
+
+if [ -z "$MOUNT_DEVICE" ] || [ -z "$MOUNT_DIR" ]; then
+    echo "Failed to determine mounted DMG details"
+    exit 1
+fi
+
 echo "  Mounted at: $MOUNT_DIR"
 
 # Wait for mount
@@ -103,7 +153,7 @@ sync
 sleep 3
 
 # Unmount
-hdiutil detach "$MOUNT_DIR" -force
+detach_mounted_dmg
 
 # Convert to compressed read-only DMG
 hdiutil convert "$DMG_TEMP_RW" -format UDZO -imagekey zlib-level=9 -o "$OUTPUT_DMG"
@@ -111,6 +161,7 @@ hdiutil convert "$DMG_TEMP_RW" -format UDZO -imagekey zlib-level=9 -o "$OUTPUT_D
 # Clean up
 rm -rf "$DMG_TEMP"
 rm -f "$DMG_TEMP_RW"
+trap - EXIT
 
 echo "✅ DMG created: $OUTPUT_DMG"
 echo "   Size: $(du -h "$OUTPUT_DMG" | cut -f1)"

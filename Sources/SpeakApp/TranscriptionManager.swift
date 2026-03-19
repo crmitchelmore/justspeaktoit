@@ -1618,7 +1618,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     let controllers: [any LiveTranscriptionController] = [
       nativeController,
       deepgramController,
-      assemblyAIController,
+      assemblyAIController
     ]
     let model = currentModel ?? appSettings.liveTranscriptionModel
     for controller in controllers {

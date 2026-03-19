@@ -3,7 +3,7 @@ import XCTest
 
 @testable import SpeakApp
 
-final class LiveTranscriptionControllerReusePolicyTests: XCTestCase {
+final class LiveControllerReusePolicyTests: XCTestCase {
   func testShouldResetControllersWhenMarkedStale() {
     XCTAssertTrue(
       LiveTranscriptionControllerReusePolicy.shouldResetControllers(

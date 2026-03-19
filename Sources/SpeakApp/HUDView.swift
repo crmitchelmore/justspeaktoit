@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 
+// swiftlint:disable type_body_length
 struct HUDOverlay: View {
   @ObservedObject var manager: HUDManager
   @EnvironmentObject private var settings: AppSettings
@@ -296,6 +297,7 @@ struct HUDOverlay: View {
     }
   }
 }
+// swiftlint:enable type_body_length
 
 struct HUDOverlay_Previews: PreviewProvider {
   static var previews: some View {

@@ -7,6 +7,12 @@ import Foundation
 /// Falls back to clipboard mode if accessibility insertion isn't available.
 @MainActor
 final class LiveTextInserter: ObservableObject {
+  enum FinalizationResult {
+    case applied
+    case deferred
+    case failed(Error)
+  }
+
   /// The text that has been successfully inserted
   @Published private(set) var insertedText: String = ""
 
@@ -31,6 +37,9 @@ final class LiveTextInserter: ObservableObject {
   /// Whether first insertion was verified successfully
   private var firstInsertionVerified: Bool = false
 
+  /// Whether an accessibility write has already succeeded, even if verification later failed.
+  private var hasPerformedAccessibilityWrite: Bool = false
+
   var shouldUseLiveFinalization: Bool {
     isActive && !usingClipboardFallback
   }
@@ -51,6 +60,7 @@ final class LiveTextInserter: ObservableObject {
     insertedText = ""
     confirmedCharCount = 0
     firstInsertionVerified = false
+    hasPerformedAccessibilityWrite = false
     usingClipboardFallback = false
     isActive = true
     lastError = nil
@@ -75,6 +85,7 @@ final class LiveTextInserter: ObservableObject {
     insertedText = ""
     confirmedCharCount = 0
     firstInsertionVerified = false
+    hasPerformedAccessibilityWrite = false
     usingClipboardFallback = false
     isActive = false
     lastError = nil
@@ -115,17 +126,16 @@ final class LiveTextInserter: ObservableObject {
   }
 
   /// Apply final polished text - replaces what was inserted with polished version
-  func applyPolishedFinal(_ polishedText: String) {
-    guard shouldUseLiveFinalization else { return }
+  func applyPolishedFinal(_ polishedText: String) -> FinalizationResult {
+    guard shouldUseLiveFinalization else { return .deferred }
 
     guard !insertedText.isEmpty else {
       // Nothing was inserted live, just do normal insertion
-      insertFresh(polishedText)
-      return
+      return insertFresh(polishedText)
     }
 
     // Replace the live-inserted text with the polished version
-    replaceInsertedText(with: polishedText)
+    return replaceInsertedText(with: polishedText)
   }
 
   // MARK: - Private Methods
@@ -136,7 +146,7 @@ final class LiveTextInserter: ObservableObject {
   }
 
   private var canDeferToStandardDelivery: Bool {
-    !firstInsertionVerified && insertedText.isEmpty
+    !hasPerformedAccessibilityWrite
   }
 
   private func deferToStandardDelivery(reason: String, error: Error? = nil) {
@@ -181,13 +191,16 @@ final class LiveTextInserter: ObservableObject {
     )
 
     if setResult == .success {
+      hasPerformedAccessibilityWrite = true
+
       // Verify first insertion to ensure accessibility is actually working
       if !firstInsertionVerified {
         if verifyInsertion(expected: newValue, element: focusedElement) {
           firstInsertionVerified = true
           print("[LiveTextInserter] First insertion verified successfully")
         } else {
-          deferToStandardDelivery(reason: "First insertion verification failed")
+          lastError = TextOutputError.unableToVerifyInsertion
+          print("[LiveTextInserter] First insertion verification failed")
           return
         }
       }
@@ -203,13 +216,13 @@ final class LiveTextInserter: ObservableObject {
     }
   }
 
-  private func replaceInsertedText(with newText: String) {
+  private func replaceInsertedText(with newText: String) -> FinalizationResult {
     guard let focusedElement = getFocusedTextElement() else {
       deferToStandardDelivery(
         reason: "replaceInsertedText failed: no focused element",
         error: TextOutputError.unableToFindFocusedElement
       )
-      return
+      return usingClipboardFallback ? .deferred : .failed(lastError ?? TextOutputError.unableToFindFocusedElement)
     }
 
     // Get current field value
@@ -237,23 +250,26 @@ final class LiveTextInserter: ObservableObject {
     )
 
     if setResult == .success {
+      hasPerformedAccessibilityWrite = true
       insertedText = newText
       confirmedCharCount = insertedText.count
+      return .applied
     } else {
       deferToStandardDelivery(
         reason: "replaceInsertedText failed with AXError: \(setResult.rawValue)",
         error: TextOutputError.unableToSetValue(setResult)
       )
+      return usingClipboardFallback ? .deferred : .failed(lastError ?? TextOutputError.unableToSetValue(setResult))
     }
   }
 
-  private func insertFresh(_ text: String) {
+  private func insertFresh(_ text: String) -> FinalizationResult {
     guard let focusedElement = getFocusedTextElement() else {
       deferToStandardDelivery(
         reason: "insertFresh failed: no focused element",
         error: TextOutputError.unableToFindFocusedElement
       )
-      return
+      return usingClipboardFallback ? .deferred : .failed(lastError ?? TextOutputError.unableToFindFocusedElement)
     }
 
     // Get current value and append
@@ -274,13 +290,16 @@ final class LiveTextInserter: ObservableObject {
     )
 
     if setResult == .success {
+      hasPerformedAccessibilityWrite = true
       insertedText = text
       confirmedCharCount = text.count
+      return .applied
     } else {
       deferToStandardDelivery(
         reason: "insertFresh failed with AXError: \(setResult.rawValue)",
         error: TextOutputError.unableToSetValue(setResult)
       )
+      return usingClipboardFallback ? .deferred : .failed(lastError ?? TextOutputError.unableToSetValue(setResult))
     }
   }
 

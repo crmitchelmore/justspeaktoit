@@ -666,19 +666,16 @@ final class MainManager: ObservableObject {
       }
 
       // Handle live text insertion finalization
-      if liveInsertionEnabled && liveTextInserter.shouldUseLiveFinalization {
-        liveTextInserter.applyPolishedFinal(finalText)
-      }
-
-      let deliveredViaLiveInsertion = liveInsertionEnabled && liveTextInserter.shouldUseLiveFinalization
-
+      var liveFinalizationResult: LiveTextInserter.FinalizationResult = .deferred
       if liveInsertionEnabled && liveTextInserter.isActive {
+        liveFinalizationResult = liveTextInserter.applyPolishedFinal(finalText)
         liveTextInserter.end()
       }
 
-      if deliveredViaLiveInsertion {
+      switch liveFinalizationResult {
+      case .applied:
         session.outputMethod = .accessibility
-      } else {
+      case .deferred:
         let output = SmartTextOutput(permissionsManager: permissionsManager, appSettings: appSettings)
         let outputResult = output.output(text: finalText)
         session.outputMethod = outputResult.method
@@ -699,6 +696,21 @@ final class MainManager: ObservableObject {
           activeSession = nil
           return
         }
+      case .failed(let error):
+        session.errors.append(
+          HistoryError(
+            phase: .output,
+            message: "Failed to deliver text",
+            debugDescription: error.localizedDescription
+          )
+        )
+        hudManager.finishFailure(headline: "Delivery failed", message: error.localizedDescription)
+        state = .failed(error.localizedDescription)
+        lastErrorMessage = error.localizedDescription
+        livePolishManager.reset()
+        liveTextInserter.reset()
+        activeSession = nil
+        return
       }
 
       // Start monitoring for user corrections (auto-corrections feature)

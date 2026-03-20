@@ -42,6 +42,7 @@ enum TextOutputError: LocalizedError {
   case accessibilityPermissionMissing
   case unableToFindFocusedElement
   case unableToSetValue(AXError)
+  case unableToVerifyInsertion
   case clipboardWriteFailed
 
   var errorDescription: String? {
@@ -52,6 +53,8 @@ enum TextOutputError: LocalizedError {
       return "No focused field was detected."
     case .unableToSetValue(let status):
       return "Unable to set text via accessibility APIs (status: \(status.rawValue))."
+    case .unableToVerifyInsertion:
+      return "Unable to verify that text was inserted into the focused field."
     case .clipboardWriteFailed:
       return "Failed to write to the clipboard."
     }

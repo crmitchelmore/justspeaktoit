@@ -40,6 +40,9 @@ final class LiveTextInserter: ObservableObject {
   /// Whether an accessibility write has already succeeded, even if verification later failed.
   private var hasPerformedAccessibilityWrite: Bool = false
 
+  /// Whether incremental live updates should pause until finalization.
+  private var shouldPauseIncrementalUpdates: Bool = false
+
   var shouldUseLiveFinalization: Bool {
     isActive && !usingClipboardFallback
   }
@@ -61,6 +64,7 @@ final class LiveTextInserter: ObservableObject {
     confirmedCharCount = 0
     firstInsertionVerified = false
     hasPerformedAccessibilityWrite = false
+    shouldPauseIncrementalUpdates = false
     usingClipboardFallback = false
     isActive = true
     lastError = nil
@@ -86,6 +90,7 @@ final class LiveTextInserter: ObservableObject {
     confirmedCharCount = 0
     firstInsertionVerified = false
     hasPerformedAccessibilityWrite = false
+    shouldPauseIncrementalUpdates = false
     usingClipboardFallback = false
     isActive = false
     lastError = nil
@@ -97,6 +102,7 @@ final class LiveTextInserter: ObservableObject {
   func update(with newText: String) {
     guard isActive else { return }
     guard !usingClipboardFallback else { return }
+    guard !shouldPauseIncrementalUpdates else { return }
     guard !newText.isEmpty else { return }
 
     // Check if user switched apps - if so, pause but don't deactivate
@@ -199,8 +205,11 @@ final class LiveTextInserter: ObservableObject {
           firstInsertionVerified = true
           print("[LiveTextInserter] First insertion verified successfully")
         } else {
+          insertedText = newValue
+          confirmedCharCount = insertedText.count
+          shouldPauseIncrementalUpdates = true
           lastError = TextOutputError.unableToVerifyInsertion
-          print("[LiveTextInserter] First insertion verification failed")
+          print("[LiveTextInserter] First insertion verification failed, pausing incremental updates")
           return
         }
       }

@@ -13,7 +13,7 @@ final class LiveTextInserter: ObservableObject {
   /// Whether live insertion is active
   @Published private(set) var isActive: Bool = false
 
-  /// Whether we're using clipboard fallback mode (accessibility not available)
+  /// Whether live insertion should stop and let the standard final-delivery path handle output.
   @Published private(set) var usingClipboardFallback: Bool = false
 
   /// The last error encountered
@@ -31,6 +31,10 @@ final class LiveTextInserter: ObservableObject {
   /// Whether first insertion was verified successfully
   private var firstInsertionVerified: Bool = false
 
+  var shouldUseLiveFinalization: Bool {
+    isActive && !usingClipboardFallback
+  }
+
   init(permissionsManager: PermissionsManager, appSettings: AppSettings) {
     self.permissionsManager = permissionsManager
     self.appSettings = appSettings
@@ -44,37 +48,15 @@ final class LiveTextInserter: ObservableObject {
       return
     }
 
-    // Check if there's actually a focused text element we can insert into
-    guard let focusedElement = getFocusedTextElement() else {
-      lastError = TextOutputError.unableToFindFocusedElement
-      print("[LiveTextInserter] Cannot start: no focused text element found")
-      return
-    }
-
-    // Log detailed info about the focused element for debugging
-    logFocusedElementInfo(focusedElement)
-
-    // Check if the value attribute is settable
-    var settable: DarwinBoolean = false
-    let isSettable = AXUIElementIsAttributeSettable(focusedElement, kAXValueAttribute as CFString, &settable)
-    let canSetValue = isSettable == .success && settable.boolValue
-
-    // If not settable, use clipboard fallback mode
-    if !canSetValue {
-      print("[LiveTextInserter] Value not settable, will use clipboard fallback")
-      usingClipboardFallback = true
-    } else {
-      usingClipboardFallback = false
-    }
-
     insertedText = ""
     confirmedCharCount = 0
     firstInsertionVerified = false
+    usingClipboardFallback = false
     isActive = true
     lastError = nil
     initialFocusedApp = NSWorkspace.shared.frontmostApplication?.localizedName
     print(
-      "[LiveTextInserter] Started live insertion session, target app: \(initialFocusedApp ?? "unknown"), clipboard fallback: \(usingClipboardFallback)"
+      "[LiveTextInserter] Started live insertion session, target app: \(initialFocusedApp ?? "unknown"), deferring AX readiness checks"
     )
   }
 
@@ -101,6 +83,7 @@ final class LiveTextInserter: ObservableObject {
   /// - Parameter newText: The full current transcript (not just the delta)
   func update(with newText: String) {
     guard isActive else { return }
+    guard !usingClipboardFallback else { return }
     guard !newText.isEmpty else { return }
 
     // Check if user switched apps - if so, pause but don't deactivate
@@ -131,6 +114,8 @@ final class LiveTextInserter: ObservableObject {
 
   /// Apply final polished text - replaces what was inserted with polished version
   func applyPolishedFinal(_ polishedText: String) {
+    guard shouldUseLiveFinalization else { return }
+
     guard !insertedText.isEmpty else {
       // Nothing was inserted live, just do normal insertion
       insertFresh(polishedText)
@@ -148,10 +133,30 @@ final class LiveTextInserter: ObservableObject {
     return status.isGranted
   }
 
+  private var canDeferToStandardDelivery: Bool {
+    !firstInsertionVerified && insertedText.isEmpty
+  }
+
+  private func deferToStandardDelivery(reason: String, error: Error? = nil) {
+    if let error {
+      lastError = error
+    }
+
+    guard canDeferToStandardDelivery else {
+      print("[LiveTextInserter] \(reason)")
+      return
+    }
+
+    usingClipboardFallback = true
+    print("[LiveTextInserter] \(reason), deferring to standard delivery")
+  }
+
   private func appendText(_ text: String) {
     guard let focusedElement = getFocusedTextElement() else {
-      lastError = TextOutputError.unableToFindFocusedElement
-      print("[LiveTextInserter] appendText failed: no focused element")
+      deferToStandardDelivery(
+        reason: "appendText failed: no focused element",
+        error: TextOutputError.unableToFindFocusedElement
+      )
       return
     }
 
@@ -180,8 +185,7 @@ final class LiveTextInserter: ObservableObject {
           firstInsertionVerified = true
           print("[LiveTextInserter] First insertion verified successfully")
         } else {
-          print("[LiveTextInserter] First insertion verification failed, switching to clipboard fallback")
-          usingClipboardFallback = true
+          deferToStandardDelivery(reason: "First insertion verification failed")
           return
         }
       }
@@ -190,14 +194,19 @@ final class LiveTextInserter: ObservableObject {
       confirmedCharCount = insertedText.count
       print("[LiveTextInserter] Appended \(text.count) chars, total: \(insertedText.count)")
     } else {
-      lastError = TextOutputError.unableToSetValue(setResult)
-      print("[LiveTextInserter] appendText failed with AXError: \(setResult.rawValue)")
+      deferToStandardDelivery(
+        reason: "appendText failed with AXError: \(setResult.rawValue)",
+        error: TextOutputError.unableToSetValue(setResult)
+      )
     }
   }
 
   private func replaceInsertedText(with newText: String) {
     guard let focusedElement = getFocusedTextElement() else {
-      lastError = TextOutputError.unableToFindFocusedElement
+      deferToStandardDelivery(
+        reason: "replaceInsertedText failed: no focused element",
+        error: TextOutputError.unableToFindFocusedElement
+      )
       return
     }
 
@@ -229,13 +238,19 @@ final class LiveTextInserter: ObservableObject {
       insertedText = newText
       confirmedCharCount = insertedText.count
     } else {
-      lastError = TextOutputError.unableToSetValue(setResult)
+      deferToStandardDelivery(
+        reason: "replaceInsertedText failed with AXError: \(setResult.rawValue)",
+        error: TextOutputError.unableToSetValue(setResult)
+      )
     }
   }
 
   private func insertFresh(_ text: String) {
     guard let focusedElement = getFocusedTextElement() else {
-      lastError = TextOutputError.unableToFindFocusedElement
+      deferToStandardDelivery(
+        reason: "insertFresh failed: no focused element",
+        error: TextOutputError.unableToFindFocusedElement
+      )
       return
     }
 
@@ -260,7 +275,10 @@ final class LiveTextInserter: ObservableObject {
       insertedText = text
       confirmedCharCount = text.count
     } else {
-      lastError = TextOutputError.unableToSetValue(setResult)
+      deferToStandardDelivery(
+        reason: "insertFresh failed with AXError: \(setResult.rawValue)",
+        error: TextOutputError.unableToSetValue(setResult)
+      )
     }
   }
 

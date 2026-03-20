@@ -386,7 +386,7 @@ final class MainManager: ObservableObject {
     if liveInsertionEnabled {
       liveTextInserter.begin()
       if !liveTextInserter.isActive {
-        logger.warning("Live text insertion failed to start - will use clipboard fallback")
+        logger.warning("Live text insertion failed to start - will use standard delivery")
       }
     }
 
@@ -663,10 +663,17 @@ final class MainManager: ObservableObject {
       }
 
       // Handle live text insertion finalization
-      if liveInsertionEnabled && liveTextInserter.isActive {
-        // Apply polished final text via live inserter
+      if liveInsertionEnabled && liveTextInserter.shouldUseLiveFinalization {
         liveTextInserter.applyPolishedFinal(finalText)
+      }
+
+      let deliveredViaLiveInsertion = liveInsertionEnabled && liveTextInserter.shouldUseLiveFinalization
+
+      if liveInsertionEnabled && liveTextInserter.isActive {
         liveTextInserter.end()
+      }
+
+      if deliveredViaLiveInsertion {
         session.outputMethod = .accessibility
       } else {
         let output = SmartTextOutput(permissionsManager: permissionsManager, appSettings: appSettings)

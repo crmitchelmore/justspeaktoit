@@ -7,13 +7,19 @@ import Foundation
 /// Falls back to clipboard mode if accessibility insertion isn't available.
 @MainActor
 final class LiveTextInserter: ObservableObject {
+  enum FinalizationResult {
+    case applied
+    case deferred
+    case failed(Error)
+  }
+
   /// The text that has been successfully inserted
   @Published private(set) var insertedText: String = ""
 
   /// Whether live insertion is active
   @Published private(set) var isActive: Bool = false
 
-  /// Whether we're using clipboard fallback mode (accessibility not available)
+  /// Whether live insertion should stop and let the standard final-delivery path handle output.
   @Published private(set) var usingClipboardFallback: Bool = false
 
   /// The last error encountered
@@ -31,6 +37,16 @@ final class LiveTextInserter: ObservableObject {
   /// Whether first insertion was verified successfully
   private var firstInsertionVerified: Bool = false
 
+  /// Whether an accessibility write has already succeeded, even if verification later failed.
+  private var hasPerformedAccessibilityWrite: Bool = false
+
+  /// Whether incremental live updates should pause until finalization.
+  private var shouldPauseIncrementalUpdates: Bool = false
+
+  var shouldUseLiveFinalization: Bool {
+    isActive && !usingClipboardFallback
+  }
+
   init(permissionsManager: PermissionsManager, appSettings: AppSettings) {
     self.permissionsManager = permissionsManager
     self.appSettings = appSettings
@@ -44,37 +60,19 @@ final class LiveTextInserter: ObservableObject {
       return
     }
 
-    // Check if there's actually a focused text element we can insert into
-    guard let focusedElement = getFocusedTextElement() else {
-      lastError = TextOutputError.unableToFindFocusedElement
-      print("[LiveTextInserter] Cannot start: no focused text element found")
-      return
-    }
-
-    // Log detailed info about the focused element for debugging
-    logFocusedElementInfo(focusedElement)
-
-    // Check if the value attribute is settable
-    var settable: DarwinBoolean = false
-    let isSettable = AXUIElementIsAttributeSettable(focusedElement, kAXValueAttribute as CFString, &settable)
-    let canSetValue = isSettable == .success && settable.boolValue
-
-    // If not settable, use clipboard fallback mode
-    if !canSetValue {
-      print("[LiveTextInserter] Value not settable, will use clipboard fallback")
-      usingClipboardFallback = true
-    } else {
-      usingClipboardFallback = false
-    }
-
     insertedText = ""
     confirmedCharCount = 0
     firstInsertionVerified = false
+    hasPerformedAccessibilityWrite = false
+    shouldPauseIncrementalUpdates = false
+    usingClipboardFallback = false
     isActive = true
     lastError = nil
     initialFocusedApp = NSWorkspace.shared.frontmostApplication?.localizedName
+    let targetApp = initialFocusedApp ?? "unknown"
     print(
-      "[LiveTextInserter] Started live insertion session, target app: \(initialFocusedApp ?? "unknown"), clipboard fallback: \(usingClipboardFallback)"
+      "[LiveTextInserter] Started live insertion session, target app: \(targetApp), " +
+        "deferring AX readiness checks"
     )
   }
 
@@ -91,6 +89,8 @@ final class LiveTextInserter: ObservableObject {
     insertedText = ""
     confirmedCharCount = 0
     firstInsertionVerified = false
+    hasPerformedAccessibilityWrite = false
+    shouldPauseIncrementalUpdates = false
     usingClipboardFallback = false
     isActive = false
     lastError = nil
@@ -101,6 +101,8 @@ final class LiveTextInserter: ObservableObject {
   /// - Parameter newText: The full current transcript (not just the delta)
   func update(with newText: String) {
     guard isActive else { return }
+    guard !usingClipboardFallback else { return }
+    guard !shouldPauseIncrementalUpdates else { return }
     guard !newText.isEmpty else { return }
 
     // Check if user switched apps - if so, pause but don't deactivate
@@ -130,15 +132,16 @@ final class LiveTextInserter: ObservableObject {
   }
 
   /// Apply final polished text - replaces what was inserted with polished version
-  func applyPolishedFinal(_ polishedText: String) {
+  func applyPolishedFinal(_ polishedText: String) -> FinalizationResult {
+    guard shouldUseLiveFinalization else { return .deferred }
+
     guard !insertedText.isEmpty else {
       // Nothing was inserted live, just do normal insertion
-      insertFresh(polishedText)
-      return
+      return insertFresh(polishedText)
     }
 
     // Replace the live-inserted text with the polished version
-    replaceInsertedText(with: polishedText)
+    return replaceInsertedText(with: polishedText)
   }
 
   // MARK: - Private Methods
@@ -148,10 +151,30 @@ final class LiveTextInserter: ObservableObject {
     return status.isGranted
   }
 
+  private var canDeferToStandardDelivery: Bool {
+    !hasPerformedAccessibilityWrite
+  }
+
+  private func deferToStandardDelivery(reason: String, error: Error? = nil) {
+    if let error {
+      lastError = error
+    }
+
+    guard canDeferToStandardDelivery else {
+      print("[LiveTextInserter] \(reason)")
+      return
+    }
+
+    usingClipboardFallback = true
+    print("[LiveTextInserter] \(reason), deferring to standard delivery")
+  }
+
   private func appendText(_ text: String) {
     guard let focusedElement = getFocusedTextElement() else {
-      lastError = TextOutputError.unableToFindFocusedElement
-      print("[LiveTextInserter] appendText failed: no focused element")
+      deferToStandardDelivery(
+        reason: "appendText failed: no focused element",
+        error: TextOutputError.unableToFindFocusedElement
+      )
       return
     }
 
@@ -174,14 +197,19 @@ final class LiveTextInserter: ObservableObject {
     )
 
     if setResult == .success {
+      hasPerformedAccessibilityWrite = true
+
       // Verify first insertion to ensure accessibility is actually working
       if !firstInsertionVerified {
         if verifyInsertion(expected: newValue, element: focusedElement) {
           firstInsertionVerified = true
           print("[LiveTextInserter] First insertion verified successfully")
         } else {
-          print("[LiveTextInserter] First insertion verification failed, switching to clipboard fallback")
-          usingClipboardFallback = true
+          insertedText = newValue
+          confirmedCharCount = insertedText.count
+          shouldPauseIncrementalUpdates = true
+          lastError = TextOutputError.unableToVerifyInsertion
+          print("[LiveTextInserter] First insertion verification failed, pausing incremental updates")
           return
         }
       }
@@ -190,15 +218,20 @@ final class LiveTextInserter: ObservableObject {
       confirmedCharCount = insertedText.count
       print("[LiveTextInserter] Appended \(text.count) chars, total: \(insertedText.count)")
     } else {
-      lastError = TextOutputError.unableToSetValue(setResult)
-      print("[LiveTextInserter] appendText failed with AXError: \(setResult.rawValue)")
+      deferToStandardDelivery(
+        reason: "appendText failed with AXError: \(setResult.rawValue)",
+        error: TextOutputError.unableToSetValue(setResult)
+      )
     }
   }
 
-  private func replaceInsertedText(with newText: String) {
+  private func replaceInsertedText(with newText: String) -> FinalizationResult {
     guard let focusedElement = getFocusedTextElement() else {
-      lastError = TextOutputError.unableToFindFocusedElement
-      return
+      deferToStandardDelivery(
+        reason: "replaceInsertedText failed: no focused element",
+        error: TextOutputError.unableToFindFocusedElement
+      )
+      return usingClipboardFallback ? .deferred : .failed(lastError ?? TextOutputError.unableToFindFocusedElement)
     }
 
     // Get current field value
@@ -226,17 +259,26 @@ final class LiveTextInserter: ObservableObject {
     )
 
     if setResult == .success {
+      hasPerformedAccessibilityWrite = true
       insertedText = newText
       confirmedCharCount = insertedText.count
+      return .applied
     } else {
-      lastError = TextOutputError.unableToSetValue(setResult)
+      deferToStandardDelivery(
+        reason: "replaceInsertedText failed with AXError: \(setResult.rawValue)",
+        error: TextOutputError.unableToSetValue(setResult)
+      )
+      return usingClipboardFallback ? .deferred : .failed(lastError ?? TextOutputError.unableToSetValue(setResult))
     }
   }
 
-  private func insertFresh(_ text: String) {
+  private func insertFresh(_ text: String) -> FinalizationResult {
     guard let focusedElement = getFocusedTextElement() else {
-      lastError = TextOutputError.unableToFindFocusedElement
-      return
+      deferToStandardDelivery(
+        reason: "insertFresh failed: no focused element",
+        error: TextOutputError.unableToFindFocusedElement
+      )
+      return usingClipboardFallback ? .deferred : .failed(lastError ?? TextOutputError.unableToFindFocusedElement)
     }
 
     // Get current value and append
@@ -257,10 +299,16 @@ final class LiveTextInserter: ObservableObject {
     )
 
     if setResult == .success {
+      hasPerformedAccessibilityWrite = true
       insertedText = text
       confirmedCharCount = text.count
+      return .applied
     } else {
-      lastError = TextOutputError.unableToSetValue(setResult)
+      deferToStandardDelivery(
+        reason: "insertFresh failed with AXError: \(setResult.rawValue)",
+        error: TextOutputError.unableToSetValue(setResult)
+      )
+      return usingClipboardFallback ? .deferred : .failed(lastError ?? TextOutputError.unableToSetValue(setResult))
     }
   }
 
@@ -276,17 +324,6 @@ final class LiveTextInserter: ObservableObject {
     }
 
     return unsafeBitCast(rawFocused, to: AXUIElement.self)
-  }
-
-  /// Log detailed information about the focused element for debugging
-  private func logFocusedElementInfo(_ element: AXUIElement) {
-    var role: CFTypeRef?
-    var roleDesc: CFTypeRef?
-    AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
-    AXUIElementCopyAttributeValue(element, kAXRoleDescriptionAttribute as CFString, &roleDesc)
-    let roleStr = (role as? String) ?? "unknown"
-    let roleDescStr = (roleDesc as? String) ?? "unknown"
-    print("[LiveTextInserter] Focused element - role: \(roleStr), description: \(roleDescStr)")
   }
 
   /// Verify that text was actually inserted by re-reading the value after a short delay.

@@ -55,8 +55,10 @@ final class LiveTextInserter: ObservableObject {
     isActive = true
     lastError = nil
     initialFocusedApp = NSWorkspace.shared.frontmostApplication?.localizedName
+    let targetApp = initialFocusedApp ?? "unknown"
     print(
-      "[LiveTextInserter] Started live insertion session, target app: \(initialFocusedApp ?? "unknown"), deferring AX readiness checks"
+      "[LiveTextInserter] Started live insertion session, target app: \(targetApp), " +
+        "deferring AX readiness checks"
     )
   }
 

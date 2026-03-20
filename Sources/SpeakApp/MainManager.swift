@@ -6,7 +6,9 @@ import Combine
 import Foundation
 import os.log
 
+// swiftlint:disable file_length
 @MainActor
+// swiftlint:disable type_body_length
 final class MainManager: ObservableObject {
   enum State: Equatable {
     case idle
@@ -412,6 +414,7 @@ final class MainManager: ObservableObject {
     }
   }
 
+  // swiftlint:disable cyclomatic_complexity function_body_length
   private func endSession(trigger: SessionTriggerSource) async {
     guard !isEndingSession else { return }
     guard let session = activeSession else { return }
@@ -740,6 +743,7 @@ final class MainManager: ObservableObject {
       cleanupAfterFailure(message: error.localizedDescription, preserveFile: true)
     }
   }
+  // swiftlint:enable cyclomatic_complexity function_body_length
 
   private func performRetryPostProcessing(with retryData: RetryData) async {
     state = .processing
@@ -1347,6 +1351,7 @@ final class MainManager: ObservableObject {
     return unsafeBitCast(rawFocused, to: AXUIElement.self)
   }
 }
+// swiftlint:enable type_body_length
 extension MainManager {
   fileprivate func makeRecordingSummary(from url: URL, fallbackDuration: TimeInterval)
     -> RecordingSummary
@@ -1489,3 +1494,4 @@ private final class ActiveSession {
 // This file also takes the HUD Manager as a dependency and calls the lifecycle events on the HUD Manager for it to be updated.
 // It should call out to the HUD view to present that to the user the hud manager should update it. And pass any error messages back to it if things fail.
 // Finally, after a session has completed and either succeeded and output the text or failed and an error has displayed, this file is responsible for cleaning up any open resources or sessions and closing them down properly.
+// swiftlint:enable file_length

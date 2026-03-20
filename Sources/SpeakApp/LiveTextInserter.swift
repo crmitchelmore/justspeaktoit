@@ -326,17 +326,6 @@ final class LiveTextInserter: ObservableObject {
     return unsafeBitCast(rawFocused, to: AXUIElement.self)
   }
 
-  /// Log detailed information about the focused element for debugging
-  private func logFocusedElementInfo(_ element: AXUIElement) {
-    var role: CFTypeRef?
-    var roleDesc: CFTypeRef?
-    AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
-    AXUIElementCopyAttributeValue(element, kAXRoleDescriptionAttribute as CFString, &roleDesc)
-    let roleStr = (role as? String) ?? "unknown"
-    let roleDescStr = (roleDesc as? String) ?? "unknown"
-    print("[LiveTextInserter] Focused element - role: \(roleStr), description: \(roleDescStr)")
-  }
-
   /// Verify that text was actually inserted by re-reading the value after a short delay.
   /// Runs on MainActor, so it must avoid semaphore + Task patterns that can deadlock.
   private func verifyInsertion(expected: String, element: AXUIElement) -> Bool {

@@ -8,7 +8,7 @@ import os.log
 
 /// Centralised configuration model backed by `UserDefaults` and published to SwiftUI.
 @MainActor
-final class AppSettings: ObservableObject {
+final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_length
   enum Appearance: String, CaseIterable, Identifiable {
     case system
     case light
@@ -275,6 +275,10 @@ final class AppSettings: ObservableObject {
     case recordingSoundVolume
     case assemblyAIKeyterms
     case assemblyAIIgnoredPronunciationTerms
+    case modulateSpeakerDiarization
+    case modulateEmotionSignal
+    case modulateAccentSignal
+    case modulatePIIPhiTagging
     case accessibilityInsertionMode
     case selectedHotKey
   }
@@ -371,6 +375,22 @@ final class AppSettings: ObservableObject {
 
   @Published var assemblyAIIgnoredPronunciationTerms: [String] {
     didSet { store(assemblyAIIgnoredPronunciationTerms, key: .assemblyAIIgnoredPronunciationTerms) }
+  }
+
+  @Published var modulateSpeakerDiarizationEnabled: Bool {
+    didSet { store(modulateSpeakerDiarizationEnabled, key: .modulateSpeakerDiarization) }
+  }
+
+  @Published var modulateEmotionSignalEnabled: Bool {
+    didSet { store(modulateEmotionSignalEnabled, key: .modulateEmotionSignal) }
+  }
+
+  @Published var modulateAccentSignalEnabled: Bool {
+    didSet { store(modulateAccentSignalEnabled, key: .modulateAccentSignal) }
+  }
+
+  @Published var modulatePIIPhiTaggingEnabled: Bool {
+    didSet { store(modulatePIIPhiTaggingEnabled, key: .modulatePIIPhiTagging) }
   }
 
   @Published var postProcessingOutputLanguage: String {
@@ -645,6 +665,10 @@ final class AppSettings: ObservableObject {
     liveTranscriptionModel.contains("assemblyai")
   }
 
+  var hasSelectedModulateModel: Bool {
+    [liveTranscriptionModel, batchTranscriptionModel].contains { $0.split(separator: "/").first?.caseInsensitiveCompare("modulate") == .orderedSame } // swiftlint:disable:this line_length
+  }
+
   private func enforceSpeedModeConstraints() {
     if speedMode != .instant && !supportsSpeedModeProcessing {
       speedMode = .instant
@@ -657,7 +681,7 @@ final class AppSettings: ObservableObject {
   private let defaults: UserDefaults
   private let log = Logger(subsystem: "com.github.speakapp", category: "AppSettings")
 
-  init(defaults: UserDefaults = .standard) {
+  init(defaults: UserDefaults = .standard) { // swiftlint:disable:this function_body_length
     self.defaults = defaults
 
     appearance =
@@ -691,6 +715,14 @@ final class AppSettings: ObservableObject {
       defaults.string(forKey: DefaultsKey.assemblyAIKeyterms.rawValue) ?? ""
     assemblyAIIgnoredPronunciationTerms =
       defaults.array(forKey: DefaultsKey.assemblyAIIgnoredPronunciationTerms.rawValue) as? [String] ?? []
+    modulateSpeakerDiarizationEnabled =
+      defaults.object(forKey: DefaultsKey.modulateSpeakerDiarization.rawValue) as? Bool ?? true
+    modulateEmotionSignalEnabled =
+      defaults.object(forKey: DefaultsKey.modulateEmotionSignal.rawValue) as? Bool ?? false
+    modulateAccentSignalEnabled =
+      defaults.object(forKey: DefaultsKey.modulateAccentSignal.rawValue) as? Bool ?? false
+    modulatePIIPhiTaggingEnabled =
+      defaults.object(forKey: DefaultsKey.modulatePIIPhiTagging.rawValue) as? Bool ?? false
     postProcessingOutputLanguage =
       defaults.string(forKey: DefaultsKey.postProcessingOutputLanguage.rawValue) ?? "English"
     postProcessingIncludeLexiconDirectives =
@@ -907,4 +939,4 @@ final class AppSettings: ObservableObject {
     }
     return recordings
   }
-}
+} // swiftlint:disable:this file_length

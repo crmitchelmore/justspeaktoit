@@ -1747,6 +1747,7 @@ final class ModulateLiveController: NSObject, LiveTranscriptionController {
   }
 
   private func handleStreamingError(_ error: Error) {
+    hasFinished = true
     audioEngine.stop()
     audioEngine.inputNode.removeTap(onBus: 0)
     audioProcessor.setRunning(false)

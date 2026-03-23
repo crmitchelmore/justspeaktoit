@@ -114,6 +114,7 @@ The iOS app is built via Xcode but sources come from Swift packages:
 swift package plugin --allow-writing-to-package-directory swiftlint --strict --target SpeakApp
 swift package plugin --allow-writing-to-package-directory swiftformat --target SpeakApp
 ```
+- CI SwiftLint also runs with `.swiftlint-baseline.json`; the baseline is line-number-sensitive, so prefer exact-line inline suppressions when unblocking lint to avoid baseline drift.
 
 ## MCP Tools
 

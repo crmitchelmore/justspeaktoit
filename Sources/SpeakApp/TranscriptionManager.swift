@@ -1640,7 +1640,7 @@ final class ModulateLiveController: NSObject, LiveTranscriptionController {
       TranscriptionSegment(
         startTime: TimeInterval(utterance.startMs) / 1000,
         endTime: TimeInterval(utterance.startMs + utterance.durationMs) / 1000,
-        text: sessionFeatureConfiguration.segmentText(for: utterance)
+        text: sessionFeatureConfiguration.segmentText(for: utterance, within: utterances)
       )
     }
 
@@ -1747,13 +1747,23 @@ final class ModulateLiveController: NSObject, LiveTranscriptionController {
   }
 
   private func handleStreamingError(_ error: Error) {
-    guard isRunning else {
-      if let continuation = stopContinuation {
-        stopContinuation = nil
-        continuation.resume()
-      }
-      return
+    audioEngine.stop()
+    audioEngine.inputNode.removeTap(onBus: 0)
+    audioProcessor.setRunning(false)
+    transcriber?.cancel()
+    transcriber = nil
+    targetFormat = nil
+    isRunning = false
+
+    if let continuation = stopContinuation {
+      stopContinuation = nil
+      continuation.resume()
     }
+
+    Task { @MainActor [weak self] in
+      await self?.endActiveInputSession()
+    }
+
     delegate?.liveTranscriber(self, didFail: error)
   }
 

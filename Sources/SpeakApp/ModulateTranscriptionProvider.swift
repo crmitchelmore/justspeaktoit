@@ -56,16 +56,19 @@ struct ModulateFeatureConfiguration: Equatable, Sendable {
   }
 
   func formattedTranscript(from utterances: [ModulateUtterance], fallbackText: String) -> String {
-    let shouldLabelSpeakers = speakerDiarization && Set(utterances.map(\.speaker)).count > 1
-    guard shouldLabelSpeakers else { return fallbackText }
+    guard shouldLabelSpeakers(in: utterances) else { return fallbackText }
     return utterances.map { "Speaker \($0.speaker): \($0.text)" }.joined(separator: "\n")
   }
 
-  func segmentText(for utterance: ModulateUtterance) -> String {
-    if speakerDiarization && utterance.speaker > 0 {
+  func segmentText(for utterance: ModulateUtterance, within utterances: [ModulateUtterance]) -> String {
+    if shouldLabelSpeakers(in: utterances) && utterance.speaker > 0 {
       return "Speaker \(utterance.speaker): \(utterance.text)"
     }
     return utterance.text
+  }
+
+  private func shouldLabelSpeakers(in utterances: [ModulateUtterance]) -> Bool {
+    speakerDiarization && Set(utterances.map(\.speaker)).count > 1
   }
 
   private func boolString(_ value: Bool) -> String {
@@ -437,14 +440,7 @@ struct ModulateTranscriptionProvider: TranscriptionProvider {
       return .failure(message: "API key is empty")
     }
 
-    let url = baseURL.appendingPathComponent("api/velma-2-stt-batch")
-    var request = URLRequest(url: url)
-    request.httpMethod = "POST"
-
-    let boundary = "Boundary-\(UUID().uuidString)"
-    request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-    request.setValue(trimmed, forHTTPHeaderField: "X-API-Key")
-    request.httpBody = Data("--\(boundary)--\r\n".utf8)
+    let request = makeValidationRequest(apiKey: trimmed)
 
     do {
       let (data, response) = try await session.data(for: request)
@@ -458,14 +454,17 @@ struct ModulateTranscriptionProvider: TranscriptionProvider {
       switch http.statusCode {
       case 200..<300:
         return .success(message: "Modulate API key validated", debug: debug)
-      case 400:
+      case 400, 422:
         return .success(
-          message: "Modulate API key accepted (validation request intentionally omitted audio)",
+          message: "Modulate API key accepted, but the validation audio payload was rejected.",
           debug: debug
         )
       case 401:
         return .failure(message: detail ?? "Invalid API key.", debug: debug)
       case 403:
+        if detail?.localizedCaseInsensitiveContains("invalid_api_key") == true {
+          return .failure(message: "Invalid API key.", debug: debug)
+        }
         return .failure(
           message: detail ?? "This Modulate model is not enabled for your organisation.",
           debug: debug
@@ -562,15 +561,16 @@ struct ModulateTranscriptionProvider: TranscriptionProvider {
     featureConfiguration: ModulateFeatureConfiguration
   ) -> TranscriptionResult {
     let duration = TimeInterval(response.durationMs) / 1000
+    let utterances = response.utterances
     let segments = response.utterances.map { utterance in
       TranscriptionSegment(
         startTime: TimeInterval(utterance.startMs) / 1000,
         endTime: TimeInterval(utterance.startMs + utterance.durationMs) / 1000,
-        text: featureConfiguration.segmentText(for: utterance)
+        text: featureConfiguration.segmentText(for: utterance, within: utterances)
       )
     }
     let text = featureConfiguration.formattedTranscript(
-      from: response.utterances,
+      from: utterances,
       fallbackText: response.text
     )
 
@@ -631,6 +631,29 @@ struct ModulateTranscriptionProvider: TranscriptionProvider {
     return error.detail
   }
 
+  func makeValidationRequest(apiKey: String) -> URLRequest {
+    let url = baseURL.appendingPathComponent("api/velma-2-stt-batch")
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+
+    let boundary = "Boundary-\(UUID().uuidString)"
+    request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+    request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
+
+    var body = Data()
+    body.appendFileField(
+      named: "upload_file",
+      filename: "validation.wav",
+      mimeType: "audio/wav",
+      fileData: Self.makeValidationAudioData(),
+      boundary: boundary
+    )
+    body.appendString("--\(boundary)--\r\n")
+    request.httpBody = body
+
+    return request
+  }
+
   private func debugSnapshot(
     request: URLRequest,
     response: HTTPURLResponse? = nil,
@@ -668,6 +691,42 @@ struct ModulateTranscriptionProvider: TranscriptionProvider {
     return defaults
       .volatileDomainNames
       .first(where: { name in name != argumentDomain && name != registrationDomain && name != standardDomain })
+  }
+
+  private static func makeValidationAudioData(sampleRate: Int = 16_000, durationMs: Int = 250) -> Data {
+    let sampleCount = sampleRate * durationMs / 1000
+    let pcmData = Data(count: sampleCount * MemoryLayout<Int16>.size)
+    let byteRate = sampleRate * MemoryLayout<Int16>.size
+    let chunkSize = 36 + pcmData.count
+    let bitsPerSample: UInt16 = 16
+    let blockAlign: UInt16 = UInt16(MemoryLayout<Int16>.size)
+
+    var data = Data()
+    data.append("RIFF".data(using: .ascii)!)
+    data.append(Self.littleEndianUInt32(UInt32(chunkSize)))
+    data.append("WAVE".data(using: .ascii)!)
+    data.append("fmt ".data(using: .ascii)!)
+    data.append(Self.littleEndianUInt32(16))
+    data.append(Self.littleEndianUInt16(1))
+    data.append(Self.littleEndianUInt16(1))
+    data.append(Self.littleEndianUInt32(UInt32(sampleRate)))
+    data.append(Self.littleEndianUInt32(UInt32(byteRate)))
+    data.append(Self.littleEndianUInt16(blockAlign))
+    data.append(Self.littleEndianUInt16(bitsPerSample))
+    data.append("data".data(using: .ascii)!)
+    data.append(Self.littleEndianUInt32(UInt32(pcmData.count)))
+    data.append(pcmData)
+    return data
+  }
+
+  private static func littleEndianUInt16(_ value: UInt16) -> Data {
+    var littleEndian = value.littleEndian
+    return Data(bytes: &littleEndian, count: MemoryLayout<UInt16>.size)
+  }
+
+  private static func littleEndianUInt32(_ value: UInt32) -> Data {
+    var littleEndian = value.littleEndian
+    return Data(bytes: &littleEndian, count: MemoryLayout<UInt32>.size)
   }
 }
 // swiftlint:enable type_body_length

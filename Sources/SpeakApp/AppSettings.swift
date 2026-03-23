@@ -666,7 +666,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   }
 
   var hasSelectedModulateModel: Bool {
-    liveTranscriptionModel.contains("modulate") || batchTranscriptionModel.contains("modulate")
+    [liveTranscriptionModel, batchTranscriptionModel].contains { $0.split(separator: "/").first?.caseInsensitiveCompare("modulate") == .orderedSame } // swiftlint:disable:this line_length
   }
 
   private func enforceSpeedModeConstraints() {

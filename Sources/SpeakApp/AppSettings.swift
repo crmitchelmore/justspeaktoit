@@ -275,6 +275,10 @@ final class AppSettings: ObservableObject {
     case recordingSoundVolume
     case assemblyAIKeyterms
     case assemblyAIIgnoredPronunciationTerms
+    case modulateSpeakerDiarization
+    case modulateEmotionSignal
+    case modulateAccentSignal
+    case modulatePIIPhiTagging
     case accessibilityInsertionMode
     case selectedHotKey
   }
@@ -371,6 +375,22 @@ final class AppSettings: ObservableObject {
 
   @Published var assemblyAIIgnoredPronunciationTerms: [String] {
     didSet { store(assemblyAIIgnoredPronunciationTerms, key: .assemblyAIIgnoredPronunciationTerms) }
+  }
+
+  @Published var modulateSpeakerDiarizationEnabled: Bool {
+    didSet { store(modulateSpeakerDiarizationEnabled, key: .modulateSpeakerDiarization) }
+  }
+
+  @Published var modulateEmotionSignalEnabled: Bool {
+    didSet { store(modulateEmotionSignalEnabled, key: .modulateEmotionSignal) }
+  }
+
+  @Published var modulateAccentSignalEnabled: Bool {
+    didSet { store(modulateAccentSignalEnabled, key: .modulateAccentSignal) }
+  }
+
+  @Published var modulatePIIPhiTaggingEnabled: Bool {
+    didSet { store(modulatePIIPhiTaggingEnabled, key: .modulatePIIPhiTagging) }
   }
 
   @Published var postProcessingOutputLanguage: String {
@@ -645,6 +665,10 @@ final class AppSettings: ObservableObject {
     liveTranscriptionModel.contains("assemblyai")
   }
 
+  var hasSelectedModulateModel: Bool {
+    liveTranscriptionModel.contains("modulate") || batchTranscriptionModel.contains("modulate")
+  }
+
   private func enforceSpeedModeConstraints() {
     if speedMode != .instant && !supportsSpeedModeProcessing {
       speedMode = .instant
@@ -691,6 +715,14 @@ final class AppSettings: ObservableObject {
       defaults.string(forKey: DefaultsKey.assemblyAIKeyterms.rawValue) ?? ""
     assemblyAIIgnoredPronunciationTerms =
       defaults.array(forKey: DefaultsKey.assemblyAIIgnoredPronunciationTerms.rawValue) as? [String] ?? []
+    modulateSpeakerDiarizationEnabled =
+      defaults.object(forKey: DefaultsKey.modulateSpeakerDiarization.rawValue) as? Bool ?? true
+    modulateEmotionSignalEnabled =
+      defaults.object(forKey: DefaultsKey.modulateEmotionSignal.rawValue) as? Bool ?? false
+    modulateAccentSignalEnabled =
+      defaults.object(forKey: DefaultsKey.modulateAccentSignal.rawValue) as? Bool ?? false
+    modulatePIIPhiTaggingEnabled =
+      defaults.object(forKey: DefaultsKey.modulatePIIPhiTagging.rawValue) as? Bool ?? false
     postProcessingOutputLanguage =
       defaults.string(forKey: DefaultsKey.postProcessingOutputLanguage.rawValue) ?? "English"
     postProcessingIncludeLexiconDirectives =

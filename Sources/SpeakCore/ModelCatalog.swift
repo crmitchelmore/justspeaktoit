@@ -120,6 +120,10 @@ public struct ModelCatalog: Sendable {
             description: "Real-time WebSocket streaming transcription with interim results.",
             estimatedLatencyMs: 200, latencyTier: .fast),
         Option(
+            id: "modulate/velma-2-stt-streaming", displayName: "Modulate Velma-2 (Streaming)",
+            description: "Real-time multilingual WebSocket transcription with diarization and signal detection.",
+            estimatedLatencyMs: 220, latencyTier: .fast),
+        Option(
             id: "assemblyai/universal-streaming", displayName: "AssemblyAI Universal (Streaming, Auto)",
             description: "Auto-selects English or multilingual v3 streaming based on your preferred locale.",
             estimatedLatencyMs: 250, latencyTier: .fast),
@@ -136,7 +140,7 @@ public struct ModelCatalog: Sendable {
         Option(
             id: "assemblyai/u3-rt-pro-streaming", displayName: "AssemblyAI U3-RT Pro (Streaming)",
             description: "AssemblyAI's u3-rt-pro streaming model for higher real-time transcription accuracy.",
-            estimatedLatencyMs: 250, latencyTier: .fast),
+            estimatedLatencyMs: 250, latencyTier: .fast)
     ]
 
     public static let batchTranscription: [Option] = [
@@ -170,13 +174,22 @@ public struct ModelCatalog: Sendable {
             description: "Third-party streaming/batch model.",
             estimatedLatencyMs: 500, latencyTier: .fast),
         Option(
+            id: "modulate/velma-2-stt-batch", displayName: "Modulate Velma-2 Batch",
+            description: "Multilingual batch transcription with diarization, emotion, accent, and PII/PHI options.",
+            estimatedLatencyMs: 1200, latencyTier: .medium),
+        Option(
+            id: "modulate/velma-2-stt-batch-english-vfast",
+            displayName: "Modulate Velma-2 Batch (English Fast)",
+            description: "High-throughput English batch transcription with automatic punctuation and capitalization.",
+            estimatedLatencyMs: 700, latencyTier: .fast),
+        Option(
             id: "assemblyai/universal-3-pro", displayName: "AssemblyAI Universal-3 Pro",
             description: "AssemblyAI's most accurate batch transcription model with speaker labels.",
             estimatedLatencyMs: 1500, latencyTier: .medium),
         Option(
             id: "assemblyai/universal-2", displayName: "AssemblyAI Universal-2",
             description: "Fast and reliable batch transcription from AssemblyAI.",
-            estimatedLatencyMs: 1200, latencyTier: .medium),
+            estimatedLatencyMs: 1200, latencyTier: .medium)
     ]
 
     // Curated, static set for transcript cleanup (OpenRouter) with pricing + tags.
@@ -276,7 +289,7 @@ public struct ModelCatalog: Sendable {
             tags: [.fast, .quality, .leading],
             pricing: Pricing(promptPerMTokens: 1.75, completionPerMTokens: 14.0),
             contextLength: 128_000
-        ),
+        )
     ]
 
     public static var allOptions: [Option] {

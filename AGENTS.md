@@ -53,6 +53,7 @@ When a user reports that a freshly shipped macOS release won't install or launch
 2. Back up the existing app to a persistent location, e.g. `mv /Applications/JustSpeakToIt.app ~/Desktop/JustSpeakToIt.app.bak-$(date +%s)`.
 3. Replace `/Applications/JustSpeakToIt.app` with the app from the DMG.
 4. Verify launch locally (e.g. `open -n /Applications/JustSpeakToIt.app`) before asking the user to retry.
+5. If local install verification is requested, confirm `/Applications/JustSpeakToIt.app` exists, read `CFBundleShortVersionString`, and verify the process is running.
 
 ## Project Structure & Module Organization
 
@@ -190,8 +191,13 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
 
 ### Working with Auto-Release
 - After pushing a releasable commit (`feat:`, `fix:`, `perf:`), the bot pushes a VERSION bump commit to main
+- Scope does not affect macOS auto-release: `feat(ios):`, `fix(ios):`, and `perf(ios):` on `main` still create a new `mac-v*` tag because `.github/workflows/auto-release.yml` matches commit type, not scope.
 - You must `git pull --rebase origin main` before your next push, or it will be rejected
 - If you have unstaged changes: `git stash && git pull --rebase origin main && git stash pop`
+
+### PR merge unblock checklist
+- If `gh pr merge` says “required status checks are expected” while checks look green, inspect `mergeStateStatus`; if `BEHIND`, rebase on `origin/main` and force-push with lease.
+- After each push, re-check unresolved review threads (especially CodeRabbit), as new threads can be created on updated diffs and still block merge.
 
 ## SwiftUI Concurrency Patterns
 
@@ -248,6 +254,18 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
 - Prefer core live-transcription integration first; add advanced v3 controls only when a clear app need is confirmed.
 - Keep style control in post-processing (`postProcessingSystemPrompt`); streaming v3 supports `keyterms_prompt` only.
 
+### Connection reliability
+- Use EU host first (`streaming.eu.assemblyai.com`) and retry once on global host (`streaming.assemblyai.com`) only when failure occurs before `Begin`.
+- Guard shared live-stream state (`webSocketTask`, `isStopping`, callbacks, `sessionDidBegin`) with synchronisation when accessed from receive/send completions and lifecycle methods.
+- During delayed stop cleanup, clear `webSocketTask` only when it is the same task instance being terminated (`===`) to avoid wiping a newly-started session.
+- Do not establish fallback/reconnect sockets after stopping has begun.
+- On failure cleanup, capture the active session before async cancellation so failed runs still persist to History.
+
+### Live audio framing + shutdown guarantees
+- Live PCM chunk duration must be 50-1000ms (100ms preferred); sub-50ms frames can trigger close code 3007 (`Input Duration Violation`).
+- Stop sequencing must be: flush pending PCM, await pending WebSocket send completions (bounded timeout), send `ForceEndpoint`, then `Terminate`.
+- If users report “batch-like” live behaviour (no live text), run a direct WebSocket probe first and capture close code/reason before changing app logic.
+
 ### Key files
 - `AssemblyAITranscriptionProvider.swift` — WebSocket client, response models
 - `TranscriptionManager.swift` (`AssemblyAILiveController`) — turn handling, audio processing
@@ -259,6 +277,7 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
 - `kAXValueAttribute` — replaces the entire field content. Use as fallback.
 - Not all apps support `kAXSelectedTextAttribute`; fall back gracefully.
 - `SmartTextOutput` skips accessibility entirely for known problematic apps (Electron, Chromium, etc.).
+- Do not probe the focused AX element synchronously at recording start; check permission only, then defer AX readiness checks until the first insertion attempt.
 
 ### Settings
 - `AccessibilityInsertionMode`: `.insertAtCursor` (default) or `.replaceAll`

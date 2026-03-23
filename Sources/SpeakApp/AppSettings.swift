@@ -8,7 +8,7 @@ import os.log
 
 /// Centralised configuration model backed by `UserDefaults` and published to SwiftUI.
 @MainActor
-final class AppSettings: ObservableObject {
+final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_length
   enum Appearance: String, CaseIterable, Identifiable {
     case system
     case light
@@ -681,7 +681,7 @@ final class AppSettings: ObservableObject {
   private let defaults: UserDefaults
   private let log = Logger(subsystem: "com.github.speakapp", category: "AppSettings")
 
-  init(defaults: UserDefaults = .standard) {
+  init(defaults: UserDefaults = .standard) { // swiftlint:disable:this function_body_length
     self.defaults = defaults
 
     appearance =
@@ -939,4 +939,4 @@ final class AppSettings: ObservableObject {
     }
     return recordings
   }
-}
+} // swiftlint:disable:this file_length

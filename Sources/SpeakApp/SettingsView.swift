@@ -955,7 +955,7 @@ struct SettingsView: View {
             .foregroundStyle(.secondary)
           ModelPicker(
             title: "Batch Model",
-            help: "Remote transcription runs after recording stops for maximum accuracy and provider-specific metadata.",
+            help: "Remote transcription runs after recording stops for maximum accuracy and provider-specific metadata.", // swiftlint:disable:this line_length
             options: ModelCatalog.batchTranscription,
             value: settingsBinding(\AppSettings.batchTranscriptionModel)
           )

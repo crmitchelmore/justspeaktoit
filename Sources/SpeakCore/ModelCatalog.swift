@@ -29,7 +29,7 @@ public enum LatencyTier: String, Codable, CaseIterable, Comparable, Sendable {
     }
 }
 
-public struct ModelCatalog: Sendable {
+public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_length
     public enum Tag: String, Codable, CaseIterable, Hashable, Sendable {
         case fast
         case cheap

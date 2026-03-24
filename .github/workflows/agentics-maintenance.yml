@@ -41,9 +41,9 @@ on:
         description: 'Optional maintenance operation to run'
         required: false
         type: choice
-        default: ''
+        default: 'close-expired-entities'
         options:
-          - ''
+          - 'close-expired-entities'
           - 'disable'
           - 'enable'
           - 'update'
@@ -53,7 +53,7 @@ permissions: {}
 
 jobs:
   close-expired-entities:
-    if: ${{ !github.event.repository.fork && (github.event_name != 'workflow_dispatch' || github.event.inputs.operation == '') }}
+    if: ${{ !github.event.repository.fork && (github.event_name != 'workflow_dispatch' || github.event.inputs.operation == 'close-expired-entities') }}
     runs-on: ubuntu-slim
     permissions:
       discussions: write
@@ -93,7 +93,7 @@ jobs:
             await main();
 
   run_operation:
-    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.operation != '' && !github.event.repository.fork }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.operation != 'close-expired-entities' && !github.event.repository.fork }}
     runs-on: ubuntu-slim
     permissions:
       actions: write
@@ -121,7 +121,7 @@ jobs:
             await main();
 
       - name: Install gh-aw
-        uses: github/gh-aw-actions/setup-cli@v0.62.3
+        uses: github/gh-aw-actions/setup-cli@3fdddb991be60d9101dfaac84811d20543719da9 # v0.62.3
         with:
           version: v0.62.3
 

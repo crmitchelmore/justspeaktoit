@@ -72,18 +72,18 @@ jobs:
                   )
               ]
           else:
-              issues = gh_json(
-                  "issue",
-                  "list",
-                  "--repo",
-                  REPO,
-                  "--state",
-                  "open",
-                  "--limit",
-                  "100",
-                  "--json",
-                  "number,labels,title",
-              )
+              issues = []
+              page = 1
+              while True:
+                  batch = gh_json(
+                      "api",
+                      f"/repos/{REPO}/issues?state=open&per_page=100&page={page}",
+                  )
+                  batch = [item for item in batch if "pull_request" not in item]
+                  if not batch:
+                      break
+                  issues.extend(batch)
+                  page += 1
 
           reconciled = 0
           for issue in issues:

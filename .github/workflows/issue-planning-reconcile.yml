@@ -1,0 +1,153 @@
+name: Issue Planning - Reconcile State
+
+on:
+  workflow_run:
+    workflows:
+      - Issue Planning - Product
+      - Issue Planning - Security
+      - Issue Planning - Performance
+      - Issue Planning - Code Quality
+      - Issue Planning - Architecture
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Issue number to reconcile (optional)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: issue-planning-reconcile
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.head_branch == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reconcile planning labels
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.inputs.issue_number }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+
+          REPO = os.environ["REPO"]
+          ISSUE_NUMBER = os.environ.get("ISSUE_NUMBER", "").strip()
+          APPROVAL_TO_PENDING = {
+              "planning:product-approved": "planning:needs-product",
+              "planning:security-approved": "planning:needs-security",
+              "planning:performance-approved": "planning:needs-performance",
+              "planning:quality-approved": "planning:needs-quality",
+              "planning:architecture-approved": "planning:needs-architecture",
+          }
+
+          def gh_json(*args):
+              return json.loads(subprocess.check_output(["gh", *args], text=True))
+
+          def gh(*args):
+              print("+", "gh", *args)
+              subprocess.run(["gh", *args], check=True)
+
+          if ISSUE_NUMBER:
+              issues = [
+                  gh_json(
+                      "issue",
+                      "view",
+                      ISSUE_NUMBER,
+                      "--repo",
+                      REPO,
+                      "--json",
+                      "number,labels,title",
+                  )
+              ]
+          else:
+              issues = gh_json(
+                  "issue",
+                  "list",
+                  "--repo",
+                  REPO,
+                  "--state",
+                  "open",
+                  "--limit",
+                  "100",
+                  "--json",
+                  "number,labels,title",
+              )
+
+          reconciled = 0
+          for issue in issues:
+              number = issue["number"]
+              labels = {label["name"] for label in issue.get("labels", [])}
+              if not any(label.startswith("planning:") for label in labels):
+                  continue
+
+              all_approved = all(label in labels for label in APPROVAL_TO_PENDING)
+              desired_add = set()
+              desired_remove = set()
+
+              if all_approved:
+                  desired_add.add("planning:ready-for-dev")
+                  desired_remove.add("planning:in-discussion")
+              else:
+                  desired_add.add("planning:in-discussion")
+                  desired_remove.add("planning:ready-for-dev")
+
+              for approval_label, pending_label in APPROVAL_TO_PENDING.items():
+                  if approval_label in labels:
+                      desired_remove.add(pending_label)
+                  else:
+                      desired_add.add(pending_label)
+
+              add_labels = sorted(label for label in desired_add if label not in labels)
+              remove_labels = sorted(label for label in desired_remove if label in labels)
+
+              was_ready = "planning:ready-for-dev" in labels
+              will_be_ready = all_approved
+
+              if add_labels or remove_labels:
+                  cmd = ["issue", "edit", str(number), "--repo", REPO]
+                  if add_labels:
+                      cmd.extend(["--add-label", ",".join(add_labels)])
+                  if remove_labels:
+                      cmd.extend(["--remove-label", ",".join(remove_labels)])
+                  gh(*cmd)
+
+              if will_be_ready and not was_ready:
+                  gh(
+                      "issue",
+                      "comment",
+                      str(number),
+                      "--repo",
+                      REPO,
+                      "--body",
+                      "### ✅ Planning Ready\n\nAll five planning reviewers have approved this issue. `planning:ready-for-dev` is now set and the remaining pending labels have been cleared.",
+                  )
+              elif was_ready and not will_be_ready:
+                  gh(
+                      "issue",
+                      "comment",
+                      str(number),
+                      "--repo",
+                      REPO,
+                      "--body",
+                      "### ♻️ Planning Reopened\n\nAt least one planning approval is no longer present, so `planning:ready-for-dev` has been removed and the issue is back in discussion.",
+                  )
+
+              print(
+                  f"Reconciled issue #{number}: add={add_labels}, remove={remove_labels}, ready={will_be_ready}"
+              )
+              reconciled += 1
+
+          print(f"Reconciled {reconciled} planning issue(s).")
+          PY

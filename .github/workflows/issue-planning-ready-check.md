@@ -1,17 +1,13 @@
 ---
 name: Issue Planning - Ready Check
-description: Maintain the ready-for-development label once planning approvals change
+description: Manually audit ready-for-development state for a specific issue
 on:
-  issues:
-    types: [opened, reopened, labeled, unlabeled]
   workflow_dispatch:
     inputs:
       issue_number:
-        description: "Issue number to reconcile"
+        description: "Issue number to audit"
         required: true
         type: string
-
-if: github.event_name == 'workflow_dispatch' || github.event.issue.pull_request == null
 
 permissions:
   contents: read
@@ -46,7 +42,7 @@ engine: copilot
 ---
 # Issue Planning Ready Check
 
-Reconcile the issue planning state from labels alone.
+Manually audit the planning state for issue #${{ github.event.inputs.issue_number }}.
 
 ## Approval labels
 
@@ -60,16 +56,14 @@ All of these must be present for the issue to be ready:
 
 ## Instructions
 
-1. Determine the issue number from the event context or `workflow_dispatch` input.
-2. Never act on pull requests.
-3. Read the issue's current labels.
-4. If all five approval labels are present and `planning:ready-for-dev` is missing:
-   - add `planning:ready-for-dev`,
-   - remove `planning:in-discussion`,
-   - leave one short comment starting with `### ✅ Planning Ready`.
-5. If any approval label is missing and `planning:ready-for-dev` is present:
-   - remove `planning:ready-for-dev`,
-   - add `planning:in-discussion`,
-   - leave one short comment starting with `### ♻️ Planning Reopened`.
-6. If the labels already reflect the correct state, do nothing.
-7. Never touch role-specific approval or pending labels in this workflow.
+1. Read the issue's current labels and recent planning comments.
+2. If all five approval labels are present:
+   - add `planning:ready-for-dev` if it is missing,
+   - remove `planning:in-discussion` if it is present,
+   - leave one short comment starting with `### ✅ Planning Ready` only if you changed the ready state.
+3. If any approval label is missing:
+   - remove `planning:ready-for-dev` if it is present,
+   - add `planning:in-discussion` if it is missing,
+   - leave one short comment starting with `### ♻️ Planning Reopened` only if you changed the ready state.
+4. If the labels already match the approval state, do nothing.
+5. Never change role-specific approval or pending labels in this manual audit workflow.

@@ -35,3 +35,7 @@ Contents API write confirmed not signed-commit-safe (verified: false, reason: un
 ## 2026-03-25 — PR #161 (agentic-workflows PR plan-review)
 - Blocked: no linked plan issue in PR body. Cannot approve without one per review protocol.
 - PR is adding the plan-review infrastructure itself; may be a bootstrapping case — maintainer should clarify or link the planning issue.
+
+## 2026-03-25 — Issue #162: PR review stage approved
+
+Plan extends the existing `gh-aw` `issue-planning-*` agent pattern with `pr-review-*` agents and a reconcile workflow. `Plan issue: #...` is the explicit coupling mechanism. Label namespace must be `pr-review:*` to avoid collision with `planning:*`. Approved first pass — no app architecture changes, fits existing patterns cleanly.

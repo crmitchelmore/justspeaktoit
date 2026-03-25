@@ -8,3 +8,6 @@ Approved immediately because no runtime code path or UX latency is changing.
 
 ## 2026-03-25 — Issue #157 (HUD capture health)
 HUDManager is push-based (no polling); TranscriptionManager has session duration but no latency-bucket signal published to HUD. Latency signal design and update-rate cap are the two open performance items. Not yet approved.
+
+## 2026-03-25 — Issue #157 approved
+Approved after maintainer clarification: static `ModelCatalog.LatencyTier` for v1 (no measurement overhead), updates only on state transitions (never on audio ticks), `AudioInputDeviceManager` is CoreAudio-listener-driven (verified in source). If measured latency is added in v2, pattern is rolling avg of `TranscriptionResult.duration` throttled on final segment.

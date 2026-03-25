@@ -28,3 +28,6 @@ Live throwaway-branch test showed `PUT /repos/{owner}/{repo}/contents/{path}` pr
 
 ## 2026-03-25 — Issue #149 (corrected): Agentic workflow live retest
 Previous memory for issue #149 was stale (referenced a different Contents API topic). Actual issue is a workflow smoke test. No code quality concerns — approved immediately. Pattern: for issues with no implementation surface, approve without conditions.
+
+## 2026-03-25 — PR #161
+- Blocked for missing Plan issue linkage. Protocol requires `Plan issue: #<n>` or closing keyword before any approval can be granted.

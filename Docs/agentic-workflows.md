@@ -105,7 +105,7 @@ Use this rollout order when you add the planning team elsewhere:
 1. Prove the Copilot-backed path first with a minimal verifier workflow. Do not assume secret validation alone proves inference works.
 2. Install the kickoff workflow, five role workflows, the manual ready-check, and the deterministic reconcile workflow.
 3. Create the planning labels before live testing so approvals have a stable target.
-4. Seed all five `planning/<role>` memory branches up front with `principles.md`, `repository-context.md`, `issues/`, and `history/recent-decisions.md` rather than waiting for first use.
+4. Seed all five `planning/<role>` memory branches up front by creating the files `principles.md`, `repository-context.md`, and `history/recent-decisions.md`, plus the `issues/` directory, rather than waiting for first use.
 5. Retest on at least one realistic issue and one workflow-health issue, and confirm that reviewers reference each other's comments rather than only leaving one-shot approvals.
 6. Keep `Issue Planning - Ready Check` as a manual audit path and let `Issue Planning - Reconcile State` own the live label normalisation.
 

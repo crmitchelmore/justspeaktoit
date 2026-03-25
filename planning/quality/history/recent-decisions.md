@@ -37,3 +37,6 @@ All five roles approved after maintainer provided explicit decisions on PR templ
 
 ## 2026-03-25 — PR #161: Approved
 Implementation matches plan #162: PR template, label isolation, agent-based plan-link validation, and scoped role memory all delivered. Prior block was stale (plan link WAS present). Approved on second pass.
+
+## 2026-03-25 — Issue #174: First pass
+Workflow/CI-only port from career-framework. Three gaps raised: missing smoke-test protocol, unspecified redundant-layer removal (issue-triage vs product-validation), and persona.md source. Confirmed repo fact: both kickoff and triage currently fire on issues:opened. No PR plan-review workflows exist yet.

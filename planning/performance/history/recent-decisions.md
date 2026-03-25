@@ -34,3 +34,6 @@ Pure CI/workflow change: GitHub Actions, persona.md files, routing fixes, docs. 
 
 ## 2026-03-25 — PR #175 (port final agentic workflow pattern)
 Pure CI/workflow change linked to approved issue #174. No runtime code. Approved immediately — same pattern as PR #161/issue #174. All agentic workflow PRs are outside app performance scope.
+
+## 2026-03-25 — PR #177 approved
+docs(agentic-workflows): pure documentation-only PR. Plan issue #176 fully approved. No performance concern. Auto-approved immediately.

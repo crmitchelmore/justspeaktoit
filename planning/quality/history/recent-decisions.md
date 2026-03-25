@@ -32,14 +32,8 @@ Previous memory for issue #149 was stale (referenced a different Contents API to
 ## 2026-03-25 — PR #161
 - Blocked for missing Plan issue linkage. Protocol requires `Plan issue: #<n>` or closing keyword before any approval can be granted.
 
-## 2026-03-25 — PR #161
-First PR through new plan-review lane (bootstrapping). Blocked on: (1) PR body missing `Plan issue: #162`, (2) issue #162 not yet `planning:ready-for-dev`. These are structural blockers per the review protocol, not style nits.
+## 2026-03-25 — Issue #162: Plan-linked PR review stage
+All five roles approved after maintainer provided explicit decisions on PR template syntax, label isolation, and memory scope. The pattern of requiring concrete deterministic implementation decisions (not just intent) before approval proved correct here — all gaps were closeable with a single maintainer synthesis comment.
 
-## 2026-03-25 — PR #161 approved
-
-PR #161 adds the PR plan-review lane (five-role, plan-linked). Approved because:
-- Issue #162 was fully planning-approved before PR opened.
-- Reconcile script guards the all-open-PRs fallback with a `plan-review:` label check.
-- Bot-follow-up comment body handling is safe (prefix comparison only, no shell interpolation).
-- PR template update clearly prompts for a real `Plan issue:` number.
-- No Swift code changes; no test suite impact.
+## 2026-03-25 — PR #161: Approved
+Implementation matches plan #162: PR template, label isolation, agent-based plan-link validation, and scoped role memory all delivered. Prior block was stale (plan link WAS present). Approved on second pass.

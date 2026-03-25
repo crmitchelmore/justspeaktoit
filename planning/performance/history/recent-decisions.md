@@ -31,3 +31,6 @@ No runtime code changes. Approved. Guardrails: cap PR review history to ~10 roll
 
 ## 2026-03-25 — Issue #174 (port career-framework agentic workflow pattern)
 Pure CI/workflow change: GitHub Actions, persona.md files, routing fixes, docs. No runtime code changes. Approved immediately — entirely outside app performance scope.
+
+## 2026-03-25 — PR #175 (port final agentic workflow pattern)
+Pure CI/workflow change linked to approved issue #174. No runtime code. Approved immediately — same pattern as PR #161/issue #174. All agentic workflow PRs are outside app performance scope.

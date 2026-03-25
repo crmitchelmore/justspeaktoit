@@ -14,3 +14,7 @@ Maintainer asked for concrete cost analysis on repo-memory persistence portabili
 Decision: GitHub API signed commits (+1-3s/write) is the cheapest portable fallback that avoids org-level branch exemptions.
 Key guardrail: cap memory file sizes (recent-decisions.md to ~10 entries) to keep read/write time constant regardless of mechanism.
 External stores (Gist, artifact) are disproportionate for small text files.
+
+## 2026-03-25 — Issue #157 performance-approved confirmed
+Labels confirmed: planning:performance-approved already set. Only planning:needs-quality remains.
+Guardrails for implementation: rate-limit health updates to state-transitions or ~1 Hz; KVO-driven device enumeration; latency shown as bucket not live average.

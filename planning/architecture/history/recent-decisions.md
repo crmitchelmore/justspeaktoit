@@ -42,6 +42,3 @@ Plan extends the existing `gh-aw` `issue-planning-*` agent pattern with `pr-revi
 
 ## 2026-03-25 — PR #161 bootstrapping constraint
 PR #161 implements the plan-review lane but was opened before its planning issue #162 was created. Architecture blocked merge pending: (1) `Plan issue: #162` added to PR body, (2) issue #162 reaches `planning:ready-for-dev`. This establishes a precedent: even self-referential workflow PRs must link an approved plan issue before merging.
-
-## 2026-03-25 — PR #161: architecture-approved on second pass
-First pass blocked (no plan link, #162 not yet approved). Second pass: `Plan issue: #162` added, #162 reached `planning:ready-for-dev`. All plan requirements satisfied, no drift, no app code changes. Approved.

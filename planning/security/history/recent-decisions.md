@@ -24,3 +24,6 @@ Implementation is clean (fork guard, least-privilege, secrets redacted, comment-
 
 ## 2026-03-25 — PR #161 follow-up (issue #162 found)
 Issue #162 identified as the retroactive plan for PR #161. PR still blocked: body lacks `Plan issue: #162`, and issue #162 is not yet `planning:ready-for-dev` (needs product + quality). Security review stance unchanged.
+
+## 2026-03-25 — PR #161 approved (agentic PR plan-review lane)
+Plan issue #162 carried all five planning approvals. Assessed: narrow write permissions, no shell injection in comment-body or pr-number handling (subprocess list form), secrets properly injected and redacted. Bot-follow-up gated on github-actions[bot] authorship. Approved without blockers.

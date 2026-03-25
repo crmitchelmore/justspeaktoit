@@ -31,3 +31,9 @@ Previous memory for issue #149 was stale (referenced a different Contents API to
 
 ## 2026-03-25 — PR #161
 - Blocked for missing Plan issue linkage. Protocol requires `Plan issue: #<n>` or closing keyword before any approval can be granted.
+
+---
+## 2026-03-25 — Issue #162: PR review stage
+- Approved after maintainer answered all four implementation gaps (PR template syntax, validation rules, `plan-review:*` namespace, manual dispatch scoping).
+- Key pattern: PR body line `Plan issue: #<number>` is the coupling point between approved issue and PR review.
+- Label namespace isolation (`plan-review:*` vs `planning:*`) is now a verified decision.

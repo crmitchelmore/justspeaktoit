@@ -38,3 +38,6 @@ Approved immediately. PR #175 ports the final career-framework agentic workflow 
 
 ## 2026-03-25 — Issue #176
 Approved docs-only issue to document the default-branch proof pattern for agentic workflow changes. Evidence-backed pattern from PR #175: new workflow files on feature branches cannot be manually dispatched from main before merge. Clear scope (one note in `Docs/agentic-workflows.md`), concrete acceptance criteria, no implementation change.
+
+## 2026-03-25 — PR #177 initial review
+Approved immediately. Docs-only change to `Docs/agentic-workflows.md` replacing a vague sentence with a clear 3-step proof pattern. Plan issue #176 was approved; all three acceptance criteria delivered in diff. No scope drift.

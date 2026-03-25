@@ -247,7 +247,7 @@ For workflows that only exist on a feature branch, `gh workflow run --ref <branc
 
 1. On the feature branch, validate the source changes and generated lock files directly (for example with `gh aw compile`, `git diff`, and any existing CI or push-trigger smoke test).
 2. Open a linked pull request from that branch so the PR review lane can run against the branch workflow definitions before merge.
-3. After merge, open a fresh issue and a small linked pull request on the default branch to prove the paths that depend on default-branch workflow definitions: issue-open Product validation, `/doit` planning kickoff, and any manual `workflow_dispatch` reconcile or ready-check runs.
+3. After merge, open a fresh issue and a small linked pull request (for example, a documentation update) on the default branch to prove the paths that depend on default-branch workflow definitions: issue-open Product validation, `/doit` planning kickoff, and any manual `workflow_dispatch` reconcile or ready-check runs.
 
 This repository used that exact pattern after PR `#175`: the branch proved the workflow sources and PR review lane, while issue `#176` on `main` proved the default-branch intake and reconcile behaviour.
 

@@ -35,3 +35,6 @@ Maintainer provided detailed implementation contracts addressing Security (label
 
 ## 2026-03-25 — PR #175 initial review
 Approved immediately. PR #175 ports the final career-framework agentic workflow pattern. Plan issue #174 is planning:ready-for-dev with all five roles approved. PR description maps directly to all 7 plan requirements. Live proof: this Product-validates-on-PR-open review is itself evidence that requirement 1 (Product validation at intake) is delivered. Supersedes PR #161 (intermediate shape); named explicitly in PR body.
+
+## 2026-03-25 — Issue #176
+Approved docs-only issue to document the default-branch proof pattern for agentic workflow changes. Evidence-backed pattern from PR #175: new workflow files on feature branches cannot be manually dispatched from main before merge. Clear scope (one note in `Docs/agentic-workflows.md`), concrete acceptance criteria, no implementation change.

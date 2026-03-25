@@ -42,3 +42,6 @@ Documentation-only change to agentic-workflows.md. Approved immediately: no code
 
 ## 2026-03-25 — PR #177 (docs: default-branch proof pattern)
 Approved immediately. Documentation-only change to `Docs/agentic-workflows.md` linked to pre-approved issue #176. No code, no attack surface, no trust boundaries. Matches approved plan exactly.
+
+## 2026-03-25 — PR #181 (ignore closed-PR comments guard)
+Approved. Single-line guard `github.event.issue.state == 'open'` added to all 5 plan-review role workflows and the bot dispatcher. Security-positive: narrows execution scope, no permissions or trust boundary changes. All five approvals were already in place; this run confirmed the prior stance.

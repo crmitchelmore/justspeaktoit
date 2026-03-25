@@ -39,3 +39,6 @@ Contents API write confirmed not signed-commit-safe (verified: false, reason: un
 ## 2026-03-25 — Issue #162: PR review stage approved
 
 Plan extends the existing `gh-aw` `issue-planning-*` agent pattern with `pr-review-*` agents and a reconcile workflow. `Plan issue: #...` is the explicit coupling mechanism. Label namespace must be `pr-review:*` to avoid collision with `planning:*`. Approved first pass — no app architecture changes, fits existing patterns cleanly.
+
+## 2026-03-25 — PR #161 bootstrapping constraint
+PR #161 implements the plan-review lane but was opened before its planning issue #162 was created. Architecture blocked merge pending: (1) `Plan issue: #162` added to PR body, (2) issue #162 reaches `planning:ready-for-dev`. This establishes a precedent: even self-referential workflow PRs must link an approved plan issue before merging.

@@ -43,3 +43,6 @@ Workflow/CI-only port from career-framework. Three gaps raised: missing smoke-te
 
 ## 2026-03-25 — Issue #174: Approved (second pass)
 Maintainer clarification resolved all three blockers: two-phase smoke-test protocol, atomic removal of three named files, persona.md sourced from career-framework. Idempotent reconcile confirmed. All five roles approved; ready-for-dev applied.
+
+## 2026-03-25 — PR #175: Approved (first pass)
+Workflow/docs only PR. Redundant triage layer removed atomically. PR review guard improved to API-based `pull_request != null` check. Named personas added. No Swift code changes — no test coverage needed. Pattern: workflow-only PRs that deliver exactly the approved plan scope need no quality blockers.

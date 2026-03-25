@@ -11,3 +11,6 @@ Approved live capture health HUD feature. Clear user value (diagnose transcripti
 
 ## 2026-03-25 — Issue #149 re-review after Contents API correction
 Maintainer disproved Contents API for signed-commit repos (produces unsigned commits). Docs/agentic-workflows.md already documents two viable paths: exempt planning/* branches OR configure workflow commit signing. Contents API is ruled out as a portable default. Product approves; portability pattern design decision deferred to Architecture + Security re-review under corrected constraint.
+
+## 2026-03-25 — Issue #149 second re-review
+Maintainer explicitly asked Product to confirm approval given Contents API disqualification. All three remaining paths (workflow signing, branch exemption, dedicated repo) preserve persistent memory value. Product approval unchanged. Architecture and Security still need to settle the canonical recommendation.

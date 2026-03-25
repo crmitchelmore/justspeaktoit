@@ -26,3 +26,6 @@ Issue already had all five role approvals + ready-for-dev on workflow_dispatch r
 
 ## 2026-03-25 — PR #161 re-check (workflow_dispatch)
 Product approval confirmed and label already present. PR has plan link (Plan issue: #162), which was the prior blocker. All roles approved except Code Quality (needs-quality still present). No product action needed; waiting on Quality.
+
+## 2026-03-25 — Issue #174
+Approved on issue open. Clear workflow/tooling issue to port the proven career-framework agentic workflow pattern. Well-scoped with named reference design and testable success criteria. No end-user product risk. Interesting meta-fact: this issue triggered the Product-validates-on-open gate, which is itself one of the success criteria of the issue.

@@ -94,8 +94,9 @@ Planning state is tracked with labels:
 3. `Issue Planning - Bot Follow Up` sees the kickoff comment on the default branch and dispatches the five role reviewers.
 4. Each role reviewer comments in thread, asks focused follow-up questions, and bot-authored reviewer comments re-dispatch the other reviewers without letting a workflow react to its own comment directly.
 5. Maintainers answer unresolved questions in-thread, and those direct maintainer comments trigger the role reviewers as well.
-6. Role approval labels accumulate as concerns are resolved.
-7. `Issue Planning - Reconcile State` normalises the pending labels and applies `planning:ready-for-dev` once all five approvals are present.
+6. If a maintainer explicitly asks a named role to respond, that role should leave a visible follow-up comment even if its approval label stays unchanged.
+7. Role approval labels accumulate as concerns are resolved.
+8. `Issue Planning - Reconcile State` normalises the pending labels and applies `planning:ready-for-dev` once all five approvals are present.
 
 The live ready-state reconciliation is handled by `Issue Planning - Reconcile State` because bot-applied labels do not reliably trigger another agentic workflow run. Bot-to-bot planning follow-ups are handled by `Issue Planning - Bot Follow Up`, while the role workflows themselves keep `github-actions` in `skip-bots` to avoid self-loops.
 
@@ -108,7 +109,7 @@ Use this rollout order when you add the planning team elsewhere:
 2. Install the kickoff workflow, the deterministic bot-follow-up dispatcher, the five role workflows, the manual ready-check, and the deterministic reconcile workflow.
 3. Create the planning labels before live testing so approvals have a stable target.
 4. Seed all five `planning/<role>` memory branches up front by creating the files `principles.md`, `repository-context.md`, and `history/recent-decisions.md`, plus the `issues/` directory, rather than waiting for first use.
-5. Retest on at least one realistic issue and one workflow-health issue, and confirm that reviewers reference each other's comments rather than only leaving one-shot approvals.
+5. Retest on at least one realistic issue and one workflow-health issue, and confirm that reviewers reference each other's comments, visibly answer direct maintainer asks, and do more than leave one-shot approvals.
 6. Keep `Issue Planning - Ready Check` as a manual audit path and let `Issue Planning - Reconcile State` own the live label normalisation.
 
 ### Resetting or retesting planning

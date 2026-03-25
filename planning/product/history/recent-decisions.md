@@ -21,8 +21,8 @@ Code Quality approved at 03:33Z. Now 4/5 roles approved. Security still holds ne
 ## 2026-03-25 — PR #161 initial review
 Blocked: PR adds a PR plan-review lane but lacks a `Plan issue: #<n>` link—the same requirement the PR itself introduces. Needs plan linkage before Product can approve.
 
-## 2026-03-25 — Issue #162
-Approved PR review stage feature. Maintainer synthesis closed all Code Quality gaps. Product approved: clear user value (developer can't merge without plan review), well-bounded scope (`plan-review:*` labels, isolated from `planning:*`), `ready-to-merge` only when all 5 roles approve. Maintainer explicitly asked for confirmation; blocker was resolved by the synthesis comment.
+## 2026-03-25 — Issue #162 review
+Issue already had all five role approvals + ready-for-dev on workflow_dispatch review. No prior Product memory existed for this issue. Confirmed approval is appropriate: clear problem (plan-to-PR gap), specific requirements, testable guardrails (PR template, dispatch scope). Recorded issue memory; no comment needed.
 
-## 2026-03-25 — PR #161 approved
-Prior blocker (missing `Plan issue:` link) was resolved — PR body now has `Plan issue: #162`. Issue #162 carries `planning:ready-for-dev`. Implementation verified: PR template placeholder, `planning:ready-for-dev` gate in role prompts, `plan-review:*` label namespace, `Docs/agentic-workflows.md` portability doc, and scoped manual dispatch all present. Product approved.
+## 2026-03-25 — PR #161 re-check (workflow_dispatch)
+Product approval confirmed and label already present. PR has plan link (Plan issue: #162), which was the prior blocker. All roles approved except Code Quality (needs-quality still present). No product action needed; waiting on Quality.

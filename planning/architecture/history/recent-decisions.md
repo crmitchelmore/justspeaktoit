@@ -24,3 +24,7 @@ All five roles approved. Code Quality confirmed implementation boundary: `Captur
 ## 2026-03-25 — Issue #149: re-approved after planning reopen
 
 Issue was reopened with all roles reset to needs-*. Prior approval rationale unchanged (no app code changes, Contents API topology answer still valid). Re-approved immediately on second pass.
+
+## 2026-03-25 — Issue #149: Contents API correction
+
+Live throwaway-branch test showed `PUT /repos/{owner}/{repo}/contents/{path}` produced `verified: false`, `reason: unsigned` here. Do not treat Contents API writes as a signed-commit-safe default. For strict repos, prefer workflow commit signing as the portable default, with branch exemption as a repo-local fallback when governance allows it.

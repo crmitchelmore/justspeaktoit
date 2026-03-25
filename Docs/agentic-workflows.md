@@ -47,13 +47,21 @@ Each role has:
 - its own workflow in `.github/workflows/`
 - its own `repo-memory` branch under `planning/<role>`
 
-The role memories capture recurring viewpoints, issue-specific decisions, and long-term heuristics so future reviews build on prior product and engineering thinking.
+The role memories capture recurring viewpoints, verified repository context, issue-specific decisions, and long-term heuristics so future reviews build on prior product and engineering thinking.
+
+Each role memory should keep four compact files on its `planning/<role>` branch:
+
+- `principles.md` — stable heuristics for that role
+- `repository-context.md` — verified repo facts that repeatedly matter during planning
+- `issues/<issue-number>.md` — the live stance and resolved blockers for a specific issue
+- `history/recent-decisions.md` — durable decisions and learnings
 
 ### Workflows
 
 Custom planning workflows added in this repository:
 
 - `issue-planning-kickoff` — seeds the planning labels and explains the flow
+- `issue-planning-bot-follow-up` — deterministic dispatcher that re-queues the other reviewers when a bot-authored planning comment lands
 - `issue-planning-product`
 - `issue-planning-security`
 - `issue-planning-performance`
@@ -83,11 +91,26 @@ Planning state is tracked with labels:
 
 1. A new issue opens.
 2. `Issue Planning - Kickoff` adds the planning labels and posts a short explanation.
-3. Each role reviewer comments in thread, either asking for clarification or approving.
-4. Role approval labels accumulate as concerns are resolved.
-5. `Issue Planning - Reconcile State` normalises the pending labels and applies `planning:ready-for-dev` once all five approvals are present.
+3. `Issue Planning - Bot Follow Up` sees the kickoff comment on the default branch and dispatches the five role reviewers.
+4. Each role reviewer comments in thread, asks focused follow-up questions, and bot-authored reviewer comments re-dispatch the other reviewers without letting a workflow react to its own comment directly.
+5. Maintainers answer unresolved questions in-thread, and those direct maintainer comments trigger the role reviewers as well.
+6. If a maintainer explicitly asks a named role to respond, that role should leave a visible follow-up comment even if its approval label stays unchanged.
+7. Role approval labels accumulate as concerns are resolved.
+8. `Issue Planning - Reconcile State` normalises the pending labels and applies `planning:ready-for-dev` once all five approvals are present.
 
-The live ready-state reconciliation is handled by `Issue Planning - Reconcile State` because bot-applied labels do not reliably trigger another agentic workflow run.
+The live ready-state reconciliation is handled by `Issue Planning - Reconcile State` because bot-applied labels do not reliably trigger another agentic workflow run. Bot-to-bot planning follow-ups are handled by `Issue Planning - Bot Follow Up`, while the role workflows themselves keep `github-actions` in `skip-bots` to avoid self-loops.
+
+
+### Portable rollout pattern for other repositories
+
+Use this rollout order when you add the planning team elsewhere:
+
+1. Prove the Copilot-backed path first with a minimal verifier workflow. Do not assume secret validation alone proves inference works.
+2. Install the kickoff workflow, the deterministic bot-follow-up dispatcher, the five role workflows, the manual ready-check, and the deterministic reconcile workflow.
+3. Create the planning labels before live testing so approvals have a stable target.
+4. Seed all five `planning/<role>` memory branches up front by creating the files `principles.md`, `repository-context.md`, and `history/recent-decisions.md`, plus the `issues/` directory, rather than waiting for first use.
+5. Retest on at least one realistic issue and one workflow-health issue, and confirm that reviewers reference each other's comments, visibly answer direct maintainer asks, and do more than leave one-shot approvals.
+6. Keep `Issue Planning - Ready Check` as a manual audit path and let `Issue Planning - Reconcile State` own the live label normalisation.
 
 ### Resetting or retesting planning
 
@@ -107,5 +130,7 @@ gh workflow run issue-planning-ready-check.lock.yml --ref <branch> -f issue_numb
 ```
 
 Use `Issue Planning - Reconcile State` for the live label repair path and `Issue Planning - Ready Check` as a manual audit if you need the agent to re-evaluate a specific issue.
+
+For workflows that only exist on a feature branch, `gh workflow run --ref <branch>` can be unreliable. Prefer a push-trigger smoke test before merge, then re-run the planning workflows again on the default branch once they land.
 
 To restart planning for an existing issue, either reopen it or manually dispatch `Issue Planning - Kickoff` again.

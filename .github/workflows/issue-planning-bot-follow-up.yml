@@ -1,0 +1,82 @@
+name: Issue Planning - Bot Follow Up
+
+on:
+  issue_comment:
+    types: [created, edited]
+
+permissions:
+  actions: write
+  contents: read
+  issues: read
+
+concurrency:
+  group: issue-planning-follow-up-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    if: github.event.issue.pull_request == null
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
+      COMMENT_BODY: ${{ github.event.comment.body }}
+    steps:
+      - name: Dispatch follow-up planning reviews
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+
+          repo = os.environ["REPO"]
+          issue_number = os.environ["ISSUE_NUMBER"]
+          author = os.environ["COMMENT_AUTHOR"]
+          body = os.environ["COMMENT_BODY"].lstrip()
+
+          if author != "github-actions[bot]":
+              print("Non-bot comment; role workflows already handle maintainer follow-ups.")
+              sys.exit(0)
+
+          reviewers = {
+              "product": ("### 🧭 Product", "issue-planning-product.lock.yml"),
+              "security": ("### 🔐 Security", "issue-planning-security.lock.yml"),
+              "performance": ("### ⚡ Performance", "issue-planning-performance.lock.yml"),
+              "quality": ("### 🧹 Code Quality", "issue-planning-quality.lock.yml"),
+              "architecture": ("### 🏗️ Architecture", "issue-planning-architecture.lock.yml"),
+          }
+          kickoff_heading = "### 🗂️ Planning Kickoff"
+          terminal_headings = ("### ✅ Planning Ready", "### ♻️ Planning Reopened")
+
+          if body.startswith(terminal_headings):
+              print("Terminal planning status comment; nothing to dispatch.")
+              sys.exit(0)
+
+          issue = json.loads(
+              subprocess.check_output(
+                  ["gh", "issue", "view", issue_number, "--repo", repo, "--json", "labels"],
+                  text=True,
+              )
+          )
+          labels = {label["name"] for label in issue.get("labels", [])}
+          if not any(label.startswith("planning:") for label in labels) and not body.startswith(kickoff_heading):
+              print("Issue is not in planning flow; nothing to dispatch.")
+              sys.exit(0)
+
+          if body.startswith(kickoff_heading):
+              workflows = [workflow for _, workflow in reviewers.values()]
+          else:
+              commenter = next((role for role, (heading, _) in reviewers.items() if body.startswith(heading)), None)
+              if commenter is None:
+                  print("Bot comment is not a planning reviewer comment; nothing to dispatch.")
+                  sys.exit(0)
+              workflows = [workflow for role, (_, workflow) in reviewers.items() if role != commenter]
+
+          for workflow in workflows:
+              cmd = ["gh", "workflow", "run", workflow, "--repo", repo, "-f", f"issue_number={issue_number}"]
+              print("+", " ".join(cmd))
+              subprocess.run(cmd, check=True)
+          PY

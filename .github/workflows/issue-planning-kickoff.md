@@ -76,7 +76,8 @@ Initialise or reset the planning state for the selected issue.
    - `planning:quality-approved`
    - `planning:architecture-approved`
 5. Leave one short comment starting with `### 🗂️ Planning Kickoff` that:
-   - explains that Product, Security, Performance, Code Quality, and Architecture reviewers will comment in-thread,
+   - explains that Product, Security, Performance, Code Quality, and Architecture reviewers will comment in-thread and may reply to each other while the plan is still moving,
+   - tells maintainers to answer unresolved questions in-thread until the team converges,
    - tells maintainers the issue is ready when `planning:ready-for-dev` appears,
    - stays concise and operational.
 6. If an equivalent kickoff comment already exists and the labels are already correct, do nothing.

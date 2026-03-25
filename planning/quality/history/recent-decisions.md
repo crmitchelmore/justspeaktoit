@@ -19,3 +19,9 @@ Three blockers raised: (1) ownership shape for health state vs. recording state 
 ## 2026-03-25 — Issue #149: Contents API correction
 
 Live throwaway-branch test showed `PUT /repos/{owner}/{repo}/contents/{path}` produced `verified: false`, `reason: unsigned` here. Do not treat Contents API writes as a signed-commit-safe default. For strict repos, prefer workflow commit signing as the portable default, with branch exemption as a repo-local fallback when governance allows it.
+
+## 2026-03-25 — Issue #149: Post-correction round 2
+- Contents API confirmed unsigned in this repo. Rollout contract must not use it.
+- Architecture comment 4122824374 is stale (still references Contents API). Does not resolve portability question.
+- Quality approval blocked until Architecture corrects stance and Security confirms preferred path (workflow signing vs branch exemption).
+- Proposed rollout contract: 5 checkpoints — pre-flight, choose path, verify end-to-end, document, correction protocol.

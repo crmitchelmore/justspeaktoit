@@ -61,8 +61,7 @@ jobs:
   activation:
     needs: pre_activation
     if: >
-      (needs.pre_activation.outputs.activated == 'true') && ((${{ github.event_name == 'workflow_dispatch' ||
-      github.event_name == 'pull_request' || github.event.issue.pull_request != null }}) && ((github.event_name != 'pull_request') ||
+      (needs.pre_activation.outputs.activated == 'true') && ((github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || (github.event_name == 'issue_comment' && contains(github.event.issue.html_url, '/pull/'))) && ((github.event_name != 'pull_request') ||
       (github.event.pull_request.head.repo.id == github.repository_id)))
     runs-on: ubuntu-slim
     permissions:
@@ -1059,7 +1058,7 @@ jobs:
 
   pre_activation:
     if: >
-      (${{ github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || github.event.issue.pull_request != null }}) &&
+      (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || (github.event_name == 'issue_comment' && contains(github.event.issue.html_url, '/pull/'))) &&
       ((github.event_name != 'pull_request') || (github.event.pull_request.head.repo.id == github.repository_id))
     runs-on: ubuntu-slim
     outputs:

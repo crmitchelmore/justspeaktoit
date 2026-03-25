@@ -14,7 +14,7 @@ on:
         type: string
   skip-bots: [github-actions, copilot, dependabot, renovate]
 
-if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || github.event.issue.pull_request != null }}
+if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || (github.event_name == 'issue_comment' && contains(github.event.issue.html_url, '/pull/')) }}
 
 permissions:
   contents: read

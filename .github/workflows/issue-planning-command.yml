@@ -126,14 +126,6 @@ jobs:
 
           add_labels = sorted(label for label in planning_labels if label not in labels)
           remove_labels = sorted(label for label in reset_labels if label in labels)
-          reviewer_workflows = [
-              "issue-planning-product.lock.yml",
-              "issue-planning-security.lock.yml",
-              "issue-planning-performance.lock.yml",
-              "issue-planning-quality.lock.yml",
-              "issue-planning-architecture.lock.yml",
-          ]
-
           if add_labels or remove_labels:
               cmd = ["issue", "edit", issue_number, "--repo", repo]
               if add_labels:
@@ -156,15 +148,4 @@ jobs:
                   f"When `planning:ready-for-dev` appears, open a pull request that includes `Plan issue: #{issue_number}` in the body."
               ),
           )
-
-          for workflow in reviewer_workflows:
-              gh(
-                  "workflow",
-                  "run",
-                  workflow,
-                  "--repo",
-                  repo,
-                  "-f",
-                  f"issue_number={issue_number}",
-              )
           PY

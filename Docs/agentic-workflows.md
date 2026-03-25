@@ -66,7 +66,7 @@ Custom planning and plan-review workflows added in this repository:
 - `issue-triage` — basic issue intake that leaves a concise triage summary, resets the intake state, and hands off to Product validation
 - `issue-product-validation-dispatch` — deterministic dispatcher that starts Product validation for newly triaged issues
 - `issue-product-validation` — Product checks whether the issue fits this repository before full planning is allowed to start
-- `issue-planning-command` — accepts an authorised `/doit` comment and dispatches full planning
+- `issue-planning-command` — accepts an authorised `/doit` comment, seeds planning state, and posts the kickoff comment that starts full planning
 - `issue-planning-kickoff` — seeds the planning labels and explains the issue-planning flow after `/doit`
 - `issue-planning-bot-follow-up` — deterministic dispatcher that re-queues the other reviewers when a bot-authored planning comment lands
 - `issue-planning-product`
@@ -136,7 +136,7 @@ PR implementation review state is tracked with labels:
    - marks it `triage:out-of-scope`.
 5. Maintainers can answer Product's questions in-thread or edit the issue until Product validation converges.
 6. Once `triage:product-fit` is present, someone with repository write access comments `/doit` on the issue.
-7. `Issue Planning - Command` verifies that the commenter has write access, clears the intake labels, applies the `planning:*` labels, posts the `### 🗂️ Planning Kickoff` comment, and explicitly dispatches the five planning reviewers.
+7. `Issue Planning - Command` verifies that the commenter has write access, clears the intake labels, applies the `planning:*` labels, and posts the `### 🗂️ Planning Kickoff` comment.
 8. `Issue Planning - Kickoff` remains available as the manual reset and re-entry path when maintainers want to restart planning explicitly.
 9. Each issue reviewer comments in thread, asks focused follow-up questions, and bot-authored reviewer comments re-dispatch the other reviewers without letting a workflow react to its own comment directly.
 10. Maintainers answer unresolved questions in-thread, and those direct maintainer comments trigger the issue reviewers as well.

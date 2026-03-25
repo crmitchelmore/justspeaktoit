@@ -14,7 +14,7 @@ on:
         type: string
   skip-bots: [github-actions, copilot, dependabot, renovate]
 
-if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || (github.event_name == 'issue_comment' && github.event.issue.pull_request != null) }}
+if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && github.event.issue.state == 'open') }}
 
 permissions:
   contents: read
@@ -77,6 +77,7 @@ Review the relevant pull request plan-review conversation for `${{ github.reposi
 - Otherwise review the triggering pull request #${{ github.event.pull_request.number || github.event.issue.number }}.
 - If the pull request is still a draft, do nothing.
 - If this run came from `issue_comment`, only act when the comment belongs to a pull request.
+- If this run came from `issue_comment` and the pull request is closed or merged, do nothing.
 - If this run came from `issue_comment` and the pull request has no `plan-review:` labels and no prior kickoff comment that starts with `### 🔎 Plan Review Kickoff`, do nothing.
 - If this run came from `issue_comment`, treat only plan-review comments and maintainer clarifications as new material. Plan-review comments use headings like `### 🔎 Plan Review Kickoff`, `### 🧭 Product Review`, `### 🔐 Security Review`, `### ⚡ Performance Review`, `### 🧹 Code Quality Review`, `### 🏗️ Architecture Review`, `### ✅ Plan Review Ready`, `### ♻️ Plan Review Reopened`. Ignore unrelated automation or chatter.
 

@@ -22,7 +22,7 @@
 #
 # Security reviewer for PR plan-review discussions
 #
-# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"bc5bf5a76f84fbf61fc6d0060c4bbfe09be63e74e28e90f703f2963b862c9e8c","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
+# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"b9f00d724ec46d86b6b621d21b0ba8eb1d5b27a7c7447bfe19e4abb9e4eeb063","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
 
 name: "PR Plan Review - Security"
 "on":
@@ -62,8 +62,8 @@ jobs:
     needs: pre_activation
     if: >
       (needs.pre_activation.outputs.activated == 'true') && ((github.event_name == 'workflow_dispatch' ||
-      github.event_name == 'pull_request' || (github.event_name == 'issue_comment' && github.event.issue.pull_request != null)) &&
-      ((github.event_name != 'pull_request') || (github.event.pull_request.head.repo.id == github.repository_id)))
+      github.event_name == 'pull_request' || (github.event_name == 'issue_comment' && github.event.issue.pull_request != null &&
+      github.event.issue.state == 'open')) && ((github.event_name != 'pull_request') || (github.event.pull_request.head.repo.id == github.repository_id)))
     runs-on: ubuntu-slim
     permissions:
       contents: read
@@ -1060,7 +1060,8 @@ jobs:
   pre_activation:
     if: >
       (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || (github.event_name == 'issue_comment' &&
-      github.event.issue.pull_request != null)) && ((github.event_name != 'pull_request') || (github.event.pull_request.head.repo.id == github.repository_id))
+      github.event.issue.pull_request != null && github.event.issue.state == 'open')) && ((github.event_name != 'pull_request') ||
+      (github.event.pull_request.head.repo.id == github.repository_id))
     runs-on: ubuntu-slim
     outputs:
       activated: ${{ (steps.check_membership.outputs.is_team_member == 'true') && (steps.check_skip_bots.outputs.skip_bots_ok == 'true') }}

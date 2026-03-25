@@ -28,3 +28,6 @@ Issue was reopened with all roles reset to needs-*. Prior approval rationale unc
 ## 2026-03-25 — Issue #149: Contents API correction
 
 Live throwaway-branch test showed `PUT /repos/{owner}/{repo}/contents/{path}` produced `verified: false`, `reason: unsigned` here. Do not treat Contents API writes as a signed-commit-safe default. For strict repos, prefer workflow commit signing as the portable default, with branch exemption as a repo-local fallback when governance allows it.
+
+## 2026-03-25 — Issue #149: re-approved after memory correction (third pass)
+Contents API write confirmed not signed-commit-safe (verified: false, reason: unsigned). Corrected portable default: workflow commit signing. Branch exemption as repo-local fallback. Docs/agentic-workflows.md updated to match. Architecture-approved on third pass after memory was corrected by maintainer.

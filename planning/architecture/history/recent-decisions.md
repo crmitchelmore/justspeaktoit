@@ -20,3 +20,7 @@ All five planning roles approved. Architecture unblocked after Security approved
 ## 2026-03-25 — Issue #157: reached ready-for-dev
 
 All five roles approved. Code Quality confirmed implementation boundary: `CaptureHealthSnapshot` as plain struct in SpeakApp, updated via `HUDManager.updateCaptureHealth(_:)` from MainManager bindings. No high-frequency paths, no separate monitor object, categorical mapping before HUD. Aligns with architecture recommendation. Issue marked ready-for-dev.
+
+## 2026-03-25 — Issue #149: re-approved after planning reopen
+
+Issue was reopened with all roles reset to needs-*. Prior approval rationale unchanged (no app code changes, Contents API topology answer still valid). Re-approved immediately on second pass.

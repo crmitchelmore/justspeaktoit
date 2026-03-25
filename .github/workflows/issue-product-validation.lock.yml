@@ -20,11 +20,11 @@
 #
 # For more information: https://github.github.com/gh-aw/introduction/overview/
 #
-# Code Quality reviewer for issue planning discussions
+# Assess whether an issue fits this repository before the full planning team starts
 #
-# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"61be72117dbc67d552e4fcf3ecffde881f54c852be4257aeb737e7f0addb920e","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
+# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"893d0aff434d5068b27e5d709b332ba3ed7e8370144337c4ab3e57b3a703335b","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
 
-name: "Issue Planning - Code Quality"
+name: "Issue Product Validation"
 "on":
   issue_comment:
     types:
@@ -35,14 +35,13 @@ name: "Issue Planning - Code Quality"
     - edited
     - reopened
   # skip-bots: # Skip-bots processed as bot check in pre-activation job
-  # - github-actions # Skip-bots processed as bot check in pre-activation job
   # - copilot # Skip-bots processed as bot check in pre-activation job
   # - dependabot # Skip-bots processed as bot check in pre-activation job
   # - renovate # Skip-bots processed as bot check in pre-activation job
   workflow_dispatch:
     inputs:
       issue_number:
-        description: Issue number to review
+        description: Issue number to validate
         required: true
         type: string
 
@@ -51,7 +50,7 @@ permissions: {}
 concurrency:
   group: "gh-aw-${{ github.workflow }}-${{ github.event.issue.number || github.run_id }}"
 
-run-name: "Issue Planning - Code Quality"
+run-name: "Issue Product Validation"
 
 jobs:
   activation:
@@ -84,7 +83,7 @@ jobs:
           GH_AW_INFO_VERSION: ""
           GH_AW_INFO_AGENT_VERSION: "latest"
           GH_AW_INFO_CLI_VERSION: "v0.62.3"
-          GH_AW_INFO_WORKFLOW_NAME: "Issue Planning - Code Quality"
+          GH_AW_INFO_WORKFLOW_NAME: "Issue Product Validation"
           GH_AW_INFO_EXPERIMENTAL: "false"
           GH_AW_INFO_SUPPORTS_TOOLS_ALLOWLIST: "true"
           GH_AW_INFO_STAGED: "false"
@@ -118,7 +117,7 @@ jobs:
       - name: Check workflow file timestamps
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
-          GH_AW_WORKFLOW_FILE: "issue-planning-quality.lock.yml"
+          GH_AW_WORKFLOW_FILE: "issue-product-validation.lock.yml"
         with:
           script: |
             const { setupGlobals } = require('${{ runner.temp }}/gh-aw/actions/setup_globals.cjs');
@@ -201,7 +200,7 @@ jobs:
           </system>
           GH_AW_PROMPT_EOF
           cat << 'GH_AW_PROMPT_EOF'
-          {{#runtime-import .github/workflows/issue-planning-quality.md}}
+          {{#runtime-import .github/workflows/issue-product-validation.md}}
           GH_AW_PROMPT_EOF
           } > "$GH_AW_PROMPT"
       - name: Interpolate variables and render templates
@@ -231,9 +230,9 @@ jobs:
           GH_AW_GITHUB_RUN_ID: ${{ github.run_id }}
           GH_AW_GITHUB_WORKSPACE: ${{ github.workspace }}
           GH_AW_IS_PR_COMMENT: ${{ github.event.issue.pull_request && 'true' || '' }}
-          GH_AW_MEMORY_BRANCH_NAME: 'planning/quality'
-          GH_AW_MEMORY_CONSTRAINTS: "\n\n**Constraints:**\n- **Allowed Files**: Only files matching patterns: planning/quality/**/*.md, planning/quality/**/*.json\n- **Max File Size**: 262144 bytes (0.25 MB) per file\n- **Max File Count**: 100 files per commit\n- **Max Patch Size**: 65536 bytes (64 KB) total per push (max: 100 KB)\n"
-          GH_AW_MEMORY_DESCRIPTION: ' Code quality planning memory'
+          GH_AW_MEMORY_BRANCH_NAME: 'planning/product'
+          GH_AW_MEMORY_CONSTRAINTS: "\n\n**Constraints:**\n- **Allowed Files**: Only files matching patterns: planning/product/**/*.md, planning/product/**/*.json\n- **Max File Size**: 262144 bytes (0.25 MB) per file\n- **Max File Count**: 100 files per commit\n- **Max Patch Size**: 65536 bytes (64 KB) total per push (max: 100 KB)\n"
+          GH_AW_MEMORY_DESCRIPTION: ' Product planning memory'
           GH_AW_MEMORY_DIR: '/tmp/gh-aw/repo-memory/default/'
           GH_AW_MEMORY_TARGET_REPO: ' of the current repository'
           GH_AW_NEEDS_PRE_ACTIVATION_OUTPUTS_ACTIVATED: ${{ needs.pre_activation.outputs.activated }}
@@ -299,7 +298,7 @@ jobs:
       GH_AW_ASSETS_BRANCH: ""
       GH_AW_ASSETS_MAX_SIZE_KB: 0
       GH_AW_MCP_LOG_DIR: /tmp/gh-aw/mcp-logs/safeoutputs
-      GH_AW_WORKFLOW_ID_SANITIZED: issueplanningquality
+      GH_AW_WORKFLOW_ID_SANITIZED: issueproductvalidation
     outputs:
       checkout_pr_success: ${{ steps.checkout-pr.outputs.checkout_pr_success || 'true' }}
       detection_conclusion: ${{ steps.detection_conclusion.outputs.conclusion }}
@@ -334,7 +333,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_SERVER_URL: ${{ github.server_url }}
-          BRANCH_NAME: planning/quality
+          BRANCH_NAME: planning/product
           TARGET_REPO: ${{ github.repository }}
           MEMORY_DIR: /tmp/gh-aw/repo-memory/default
           CREATE_ORPHAN: true
@@ -389,7 +388,7 @@ jobs:
           mkdir -p /tmp/gh-aw/safeoutputs
           mkdir -p /tmp/gh-aw/mcp-logs/safeoutputs
           cat > ${RUNNER_TEMP}/gh-aw/safeoutputs/config.json << 'GH_AW_SAFE_OUTPUTS_CONFIG_EOF'
-          {"add_comment":{"max":1,"target":"*"},"add_labels":{"allowed":["planning:in-discussion","planning:ready-for-dev","planning:needs-quality","planning:quality-approved"],"max":4,"target":"*"},"missing_data":{},"missing_tool":{},"noop":{"max":1},"push_repo_memory":{"memories":[{"dir":"/tmp/gh-aw/repo-memory/default","id":"default","max_file_count":100,"max_file_size":262144,"max_patch_size":65536}]},"remove_labels":{"allowed":["planning:in-discussion","planning:ready-for-dev","planning:needs-quality","planning:quality-approved"],"max":4}}
+          {"add_comment":{"max":1,"target":"*"},"add_labels":{"allowed":["triage:pending-product-validation","triage:product-fit","triage:needs-clarification","triage:out-of-scope"],"max":4,"target":"*"},"missing_data":{},"missing_tool":{},"noop":{"max":1},"push_repo_memory":{"memories":[{"dir":"/tmp/gh-aw/repo-memory/default","id":"default","max_file_count":100,"max_file_size":262144,"max_patch_size":65536}]},"remove_labels":{"allowed":["triage:pending-product-validation","triage:product-fit","triage:needs-clarification","triage:out-of-scope"],"max":4}}
           GH_AW_SAFE_OUTPUTS_CONFIG_EOF
       - name: Write Safe Outputs Tools
         run: |
@@ -397,8 +396,8 @@ jobs:
           {
             "description_suffixes": {
               "add_comment": " CONSTRAINTS: Maximum 1 comment(s) can be added. Target: *.",
-              "add_labels": " CONSTRAINTS: Maximum 4 label(s) can be added. Only these labels are allowed: [\"planning:in-discussion\" \"planning:ready-for-dev\" \"planning:needs-quality\" \"planning:quality-approved\"]. Target: *.",
-              "remove_labels": " CONSTRAINTS: Maximum 4 label(s) can be removed. Only these labels can be removed: [planning:in-discussion planning:ready-for-dev planning:needs-quality planning:quality-approved]. Target: *."
+              "add_labels": " CONSTRAINTS: Maximum 4 label(s) can be added. Only these labels are allowed: [\"triage:pending-product-validation\" \"triage:product-fit\" \"triage:needs-clarification\" \"triage:out-of-scope\"]. Target: *.",
+              "remove_labels": " CONSTRAINTS: Maximum 4 label(s) can be removed. Only these labels can be removed: [triage:pending-product-validation triage:product-fit triage:needs-clarification triage:out-of-scope]. Target: *."
             },
             "repo_params": {},
             "dynamic_tools": []
@@ -647,7 +646,7 @@ jobs:
           touch /tmp/gh-aw/agent-step-summary.md
           # shellcheck disable=SC1003
           sudo -E awf --env-all --container-workdir "${GITHUB_WORKSPACE}" --mount "${RUNNER_TEMP}/gh-aw:${RUNNER_TEMP}/gh-aw:ro" --mount "${RUNNER_TEMP}/gh-aw:/host${RUNNER_TEMP}/gh-aw:ro" --allow-domains "api.business.githubcopilot.com,api.enterprise.githubcopilot.com,api.github.com,api.githubcopilot.com,api.individual.githubcopilot.com,api.snapcraft.io,archive.ubuntu.com,azure.archive.ubuntu.com,crl.geotrust.com,crl.globalsign.com,crl.identrust.com,crl.sectigo.com,crl.thawte.com,crl.usertrust.com,crl.verisign.com,crl3.digicert.com,crl4.digicert.com,crls.ssl.com,github.com,host.docker.internal,json-schema.org,json.schemastore.org,keyserver.ubuntu.com,ocsp.digicert.com,ocsp.geotrust.com,ocsp.globalsign.com,ocsp.identrust.com,ocsp.sectigo.com,ocsp.ssl.com,ocsp.thawte.com,ocsp.usertrust.com,ocsp.verisign.com,packagecloud.io,packages.cloud.google.com,packages.microsoft.com,ppa.launchpad.net,raw.githubusercontent.com,registry.npmjs.org,s.symcb.com,s.symcd.com,security.ubuntu.com,telemetry.enterprise.githubcopilot.com,ts-crl.ws.symantec.com,ts-ocsp.ws.symantec.com,www.googleapis.com" --log-level info --proxy-logs-dir /tmp/gh-aw/sandbox/firewall/logs --enable-host-access --image-tag 0.24.5 --skip-pull --enable-api-proxy \
-            -- /bin/bash -c '/usr/local/bin/copilot --add-dir /tmp/gh-aw/ --log-level all --log-dir /tmp/gh-aw/sandbox/agent/logs/ --add-dir "${GITHUB_WORKSPACE}" --disable-builtin-mcps --agent planning-quality --allow-all-tools --allow-all-paths --prompt "$(cat /tmp/gh-aw/aw-prompts/prompt.txt)"' 2>&1 | tee -a /tmp/gh-aw/agent-stdio.log
+            -- /bin/bash -c '/usr/local/bin/copilot --add-dir /tmp/gh-aw/ --log-level all --log-dir /tmp/gh-aw/sandbox/agent/logs/ --add-dir "${GITHUB_WORKSPACE}" --disable-builtin-mcps --agent planning-product --allow-all-tools --allow-all-paths --prompt "$(cat /tmp/gh-aw/aw-prompts/prompt.txt)"' 2>&1 | tee -a /tmp/gh-aw/agent-stdio.log
         env:
           COPILOT_AGENT_RUNNER_TYPE: STANDALONE
           COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
@@ -848,8 +847,8 @@ jobs:
         if: always() && steps.detection_guard.outputs.run_detection == 'true'
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
-          WORKFLOW_NAME: "Issue Planning - Code Quality"
-          WORKFLOW_DESCRIPTION: "Code Quality reviewer for issue planning discussions"
+          WORKFLOW_NAME: "Issue Product Validation"
+          WORKFLOW_DESCRIPTION: "Assess whether an issue fits this repository before the full planning team starts"
           HAS_PATCH: ${{ steps.collect_output.outputs.has_patch }}
         with:
           script: |
@@ -951,7 +950,7 @@ jobs:
       issues: write
       pull-requests: write
     concurrency:
-      group: "gh-aw-conclusion-issue-planning-quality"
+      group: "gh-aw-conclusion-issue-product-validation"
       cancel-in-progress: false
     outputs:
       noop_message: ${{ steps.noop.outputs.noop_message }}
@@ -981,7 +980,7 @@ jobs:
         env:
           GH_AW_AGENT_OUTPUT: ${{ env.GH_AW_AGENT_OUTPUT }}
           GH_AW_NOOP_MAX: "1"
-          GH_AW_WORKFLOW_NAME: "Issue Planning - Code Quality"
+          GH_AW_WORKFLOW_NAME: "Issue Product Validation"
         with:
           github-token: ${{ secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
@@ -994,7 +993,7 @@ jobs:
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
           GH_AW_AGENT_OUTPUT: ${{ env.GH_AW_AGENT_OUTPUT }}
-          GH_AW_WORKFLOW_NAME: "Issue Planning - Code Quality"
+          GH_AW_WORKFLOW_NAME: "Issue Product Validation"
         with:
           github-token: ${{ secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
@@ -1008,10 +1007,10 @@ jobs:
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
           GH_AW_AGENT_OUTPUT: ${{ env.GH_AW_AGENT_OUTPUT }}
-          GH_AW_WORKFLOW_NAME: "Issue Planning - Code Quality"
+          GH_AW_WORKFLOW_NAME: "Issue Product Validation"
           GH_AW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           GH_AW_AGENT_CONCLUSION: ${{ needs.agent.result }}
-          GH_AW_WORKFLOW_ID: "issue-planning-quality"
+          GH_AW_WORKFLOW_ID: "issue-product-validation"
           GH_AW_SECRET_VERIFICATION_RESULT: ${{ needs.activation.outputs.secret_verification_result }}
           GH_AW_CHECKOUT_PR_SUCCESS: ${{ needs.agent.outputs.checkout_pr_success }}
           GH_AW_INFERENCE_ACCESS_ERROR: ${{ needs.agent.outputs.inference_access_error }}
@@ -1035,7 +1034,7 @@ jobs:
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
           GH_AW_AGENT_OUTPUT: ${{ env.GH_AW_AGENT_OUTPUT }}
-          GH_AW_WORKFLOW_NAME: "Issue Planning - Code Quality"
+          GH_AW_WORKFLOW_NAME: "Issue Product Validation"
           GH_AW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           GH_AW_AGENT_CONCLUSION: ${{ needs.agent.result }}
           GH_AW_NOOP_MESSAGE: ${{ steps.noop.outputs.noop_message }}
@@ -1052,7 +1051,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event.issue.pull_request == null
     runs-on: ubuntu-slim
     outputs:
-      activated: ${{ (steps.check_membership.outputs.is_team_member == 'true') && (steps.check_skip_bots.outputs.skip_bots_ok == 'true') }}
+      activated: ${{ steps.check_skip_bots.outputs.skip_bots_ok == 'true' }}
       matched_command: ''
     steps:
       - name: Setup Scripts
@@ -1075,8 +1074,8 @@ jobs:
         id: check_skip_bots
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
-          GH_AW_SKIP_BOTS: github-actions,copilot,dependabot,renovate
-          GH_AW_WORKFLOW_NAME: "Issue Planning - Code Quality"
+          GH_AW_SKIP_BOTS: copilot,dependabot,renovate
+          GH_AW_WORKFLOW_NAME: "Issue Product Validation"
         with:
           script: |
             const { setupGlobals } = require('${{ runner.temp }}/gh-aw/actions/setup_globals.cjs');
@@ -1136,12 +1135,12 @@ jobs:
           ARTIFACT_DIR: /tmp/gh-aw/repo-memory/default
           MEMORY_ID: default
           TARGET_REPO: ${{ github.repository }}
-          BRANCH_NAME: planning/quality
+          BRANCH_NAME: planning/product
           MAX_FILE_SIZE: 262144
           MAX_FILE_COUNT: 100
           MAX_PATCH_SIZE: 65536
           ALLOWED_EXTENSIONS: '[".md",".json"]'
-          FILE_GLOB_FILTER: "planning/quality/**/*.md planning/quality/**/*.json"
+          FILE_GLOB_FILTER: "planning/product/**/*.md planning/product/**/*.json"
         with:
           script: |
             const { setupGlobals } = require('${{ runner.temp }}/gh-aw/actions/setup_globals.cjs');
@@ -1160,10 +1159,10 @@ jobs:
       pull-requests: write
     timeout-minutes: 15
     env:
-      GH_AW_CALLER_WORKFLOW_ID: "${{ github.repository }}/issue-planning-quality"
+      GH_AW_CALLER_WORKFLOW_ID: "${{ github.repository }}/issue-product-validation"
       GH_AW_ENGINE_ID: "copilot"
-      GH_AW_WORKFLOW_ID: "issue-planning-quality"
-      GH_AW_WORKFLOW_NAME: "Issue Planning - Code Quality"
+      GH_AW_WORKFLOW_ID: "issue-product-validation"
+      GH_AW_WORKFLOW_NAME: "Issue Product Validation"
     outputs:
       code_push_failure_count: ${{ steps.process_safe_outputs.outputs.code_push_failure_count }}
       code_push_failure_errors: ${{ steps.process_safe_outputs.outputs.code_push_failure_errors }}
@@ -1207,7 +1206,7 @@ jobs:
           GH_AW_ALLOWED_DOMAINS: "api.business.githubcopilot.com,api.enterprise.githubcopilot.com,api.github.com,api.githubcopilot.com,api.individual.githubcopilot.com,api.snapcraft.io,archive.ubuntu.com,azure.archive.ubuntu.com,crl.geotrust.com,crl.globalsign.com,crl.identrust.com,crl.sectigo.com,crl.thawte.com,crl.usertrust.com,crl.verisign.com,crl3.digicert.com,crl4.digicert.com,crls.ssl.com,github.com,host.docker.internal,json-schema.org,json.schemastore.org,keyserver.ubuntu.com,ocsp.digicert.com,ocsp.geotrust.com,ocsp.globalsign.com,ocsp.identrust.com,ocsp.sectigo.com,ocsp.ssl.com,ocsp.thawte.com,ocsp.usertrust.com,ocsp.verisign.com,packagecloud.io,packages.cloud.google.com,packages.microsoft.com,ppa.launchpad.net,raw.githubusercontent.com,registry.npmjs.org,s.symcb.com,s.symcd.com,security.ubuntu.com,telemetry.enterprise.githubcopilot.com,ts-crl.ws.symantec.com,ts-ocsp.ws.symantec.com,www.googleapis.com"
           GITHUB_SERVER_URL: ${{ github.server_url }}
           GITHUB_API_URL: ${{ github.api_url }}
-          GH_AW_SAFE_OUTPUTS_HANDLER_CONFIG: "{\"add_comment\":{\"hide_older_comments\":false,\"max\":1,\"target\":\"*\"},\"add_labels\":{\"allowed\":[\"planning:in-discussion\",\"planning:ready-for-dev\",\"planning:needs-quality\",\"planning:quality-approved\"],\"max\":4,\"target\":\"*\"},\"missing_data\":{},\"missing_tool\":{},\"noop\":{\"max\":1,\"report-as-issue\":\"true\"},\"remove_labels\":{\"allowed\":[\"planning:in-discussion\",\"planning:ready-for-dev\",\"planning:needs-quality\",\"planning:quality-approved\"],\"max\":4,\"target\":\"*\"}}"
+          GH_AW_SAFE_OUTPUTS_HANDLER_CONFIG: "{\"add_comment\":{\"hide_older_comments\":false,\"max\":1,\"target\":\"*\"},\"add_labels\":{\"allowed\":[\"triage:pending-product-validation\",\"triage:product-fit\",\"triage:needs-clarification\",\"triage:out-of-scope\"],\"max\":4,\"target\":\"*\"},\"missing_data\":{},\"missing_tool\":{},\"noop\":{\"max\":1,\"report-as-issue\":\"true\"},\"remove_labels\":{\"allowed\":[\"triage:pending-product-validation\",\"triage:product-fit\",\"triage:needs-clarification\",\"triage:out-of-scope\"],\"max\":4,\"target\":\"*\"}}"
         with:
           github-token: ${{ secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
@@ -1222,4 +1221,3 @@ jobs:
           name: safe-output-items
           path: /tmp/gh-aw/safe-output-items.jsonl
           if-no-files-found: ignore
-

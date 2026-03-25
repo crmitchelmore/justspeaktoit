@@ -1,0 +1,75 @@
+name: Issue Product Validation - Dispatch
+
+on:
+  workflow_run:
+    workflows:
+      - Agentic Issue Triage
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Issue number to validate (optional)
+        required: false
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+  issues: read
+
+concurrency:
+  group: issue-product-validation-dispatch
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      ISSUE_NUMBER: ${{ github.event.inputs.issue_number }}
+    steps:
+      - name: Dispatch Product validation
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+
+          repo = os.environ["REPO"]
+          explicit_issue = os.environ.get("ISSUE_NUMBER", "").strip()
+
+          def gh_json(*args):
+              return json.loads(subprocess.check_output(["gh", *args], text=True))
+
+          def gh(*args):
+              print("+", "gh", *args)
+              subprocess.run(["gh", *args], check=True)
+
+          if explicit_issue:
+              issue_numbers = [explicit_issue]
+          else:
+              issues = gh_json(
+                  "api",
+                  f"/repos/{repo}/issues?state=open&labels=triage:pending-product-validation&per_page=100",
+              )
+              issue_numbers = [
+                  str(issue["number"])
+                  for issue in issues
+                  if "pull_request" not in issue
+              ]
+
+          for issue_number in issue_numbers:
+              gh(
+                  "workflow",
+                  "run",
+                  "issue-product-validation.lock.yml",
+                  "--repo",
+                  repo,
+                  "-f",
+                  f"issue_number={issue_number}",
+              )
+          PY

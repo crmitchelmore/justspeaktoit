@@ -22,7 +22,7 @@
 #
 # Security reviewer for issue planning discussions
 #
-# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"5e663508876f61ef59f23a929798cc2b8a336e1c01b34c03865a6c2f9d971479","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
+# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"bef1da33925cd777fda15cd8b6ce5a59b6e6ee1bf5f8345225b2c788bb7db606","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
 
 name: "Issue Planning - Security"
 "on":
@@ -32,9 +32,8 @@ name: "Issue Planning - Security"
     - edited
   issues:
     types:
-    - opened
-    - reopened
     - edited
+    - reopened
   # skip-bots: # Skip-bots processed as bot check in pre-activation job
   # - github-actions # Skip-bots processed as bot check in pre-activation job
   # - copilot # Skip-bots processed as bot check in pre-activation job

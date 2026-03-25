@@ -3,7 +3,7 @@ name: Issue Planning - Code Quality
 description: Code Quality reviewer for issue planning discussions
 on:
   issues:
-    types: [opened, reopened, edited]
+    types: [edited, reopened]
   issue_comment:
     types: [created, edited]
   workflow_dispatch:
@@ -74,7 +74,8 @@ Review the relevant issue planning conversation for `${{ github.repository }}` f
 - If this run came from `workflow_dispatch`, review issue #${{ github.event.inputs.issue_number }}.
 - Otherwise review the triggering issue #${{ github.event.issue.number }}.
 - Never act on pull requests. If this event is a pull request comment, do nothing.
-- If this run came from `issue_comment` and the issue has no `planning:` labels and no prior kickoff comment that starts with `### 🗂️ Planning Kickoff`, do nothing.
+- If this run came from `issues` or `issue_comment` and the issue has no `planning:` labels and no prior kickoff comment that starts with `### 🗂️ Planning Kickoff`, do nothing.
+- If this run came from `issue_comment` and the new comment starts with `/doit`, do nothing. The manual planning command workflow owns that path.
 - If this run came from `issue_comment`, treat only planning-team comments and maintainer clarifications as new material. Planning-team comments use headings like `### 🗂️ Planning Kickoff`, `### 🧭 Product`, `### 🔐 Security`, `### ⚡ Performance`, `### 🧹 Code Quality`, `### 🏗️ Architecture`, `### ✅ Planning Ready`, `### ♻️ Planning Reopened`. Ignore unrelated automation or chatter.
 
 ## Approval model

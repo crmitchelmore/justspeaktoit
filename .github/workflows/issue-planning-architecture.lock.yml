@@ -22,7 +22,7 @@
 #
 # Architecture reviewer for issue planning discussions
 #
-# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"65a0ecfae725ef9623d3b657ad29bddbeeba5460a0b9314239d0ef5f764fb50a","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
+# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"1649f013dbf32e8999ed42983cd3682e569271911aeeb1db495e4693d41b4039","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
 
 name: "Issue Planning - Architecture"
 "on":
@@ -32,9 +32,8 @@ name: "Issue Planning - Architecture"
     - edited
   issues:
     types:
-    - opened
-    - reopened
     - edited
+    - reopened
   # skip-bots: # Skip-bots processed as bot check in pre-activation job
   # - github-actions # Skip-bots processed as bot check in pre-activation job
   # - copilot # Skip-bots processed as bot check in pre-activation job

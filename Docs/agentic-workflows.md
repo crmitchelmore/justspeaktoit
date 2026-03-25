@@ -243,7 +243,13 @@ Use `Issue Planning - Reconcile State` for the live issue label repair path and 
 
 Use `PR Plan Review - Reconcile State` for the live PR label repair path and `PR Plan Review - Ready Check` as a manual PR audit.
 
-For workflows that only exist on a feature branch, `gh workflow run --ref <branch>` can be unreliable. Prefer a push-trigger smoke test before merge, then re-run Product validation, issue-planning, and PR plan-review workflows again on the default branch once they land.
+For workflows that only exist on a feature branch, `gh workflow run --ref <branch>` can be unreliable. Use this proof pattern instead:
+
+1. On the feature branch, validate the source changes and generated lock files directly (for example with `gh aw compile`, `git diff`, and any existing CI or push-trigger smoke test).
+2. Open a linked pull request from that branch so the PR review lane can run against the branch workflow definitions before merge.
+3. After merge, open a fresh issue and a small linked pull request (for example, a documentation update) on the default branch to prove the paths that depend on default-branch workflow definitions: issue-open Product validation, `/doit` planning kickoff, and any manual `workflow_dispatch` reconcile or ready-check runs.
+
+This repository used that exact pattern after PR `#175`: the branch proved the workflow sources and PR review lane, while issue `#176` on `main` proved the default-branch intake and reconcile behaviour.
 
 To restart intake for an existing issue, re-run `Issue Product Validation`. To restart full planning for an intake-approved issue, use `/doit` again or manually dispatch `Issue Planning - Kickoff`. To restart PR plan review for an existing pull request, re-run `PR Plan Review - Kickoff` or push a new commit after clarifying the linked plan.
 

@@ -79,7 +79,7 @@ On repositories with stricter branch protections, the planning setup is only ope
 Custom planning and plan-review workflows added in this repository:
 
 - `issue-product-validation` — Alex Hale (`Product`) handles the first intake pass and decides whether the issue fits this repository before full planning is allowed to start
-- `issue-planning-command` — accepts an authorised `/doit` comment, seeds planning state, and posts the kickoff comment that starts full planning
+- `issue-planning-command` — accepts an authorised `/doit` command even when it appears inside a longer maintainer comment, seeds planning state, and posts the kickoff comment that starts full planning with any surrounding text carried over as context
 - `issue-planning-kickoff` — seeds the planning labels and explains the issue-planning flow after `/doit`
 - `issue-planning-bot-follow-up` — deterministic dispatcher that re-queues the other reviewers when a bot-authored planning comment lands
 - `issue-planning-product`
@@ -148,7 +148,7 @@ PR implementation review state is tracked with labels:
    - asks for more detail with `triage:needs-clarification`, or
    - marks it `triage:out-of-scope`.
 4. Maintainers can answer Product's questions in-thread or edit the issue until Product validation converges.
-5. Once `triage:product-fit` is present, someone with repository write access comments `/doit` on the issue.
+5. Once `triage:product-fit` is present, someone with repository write access comments `/doit` on the issue. The command can stand alone or appear inside a longer maintainer note; any other text in that comment is carried into planning as context.
 6. `Issue Planning - Command` verifies that the commenter has write access, clears the intake labels, applies the `planning:*` labels, and posts the `### 🗂️ Planning Kickoff` comment.
 7. `Issue Planning - Kickoff` remains available as the manual reset and re-entry path when maintainers want to restart planning explicitly.
 8. The five named teammates now join the thread:
@@ -194,7 +194,9 @@ The rule is simple: names stay stable, judgement improves, and quirks only deepe
 
 Do not use `/doit` while the issue still lacks `triage:product-fit`, or while it is in `triage:needs-clarification` or `triage:out-of-scope`. In those states, continue the Product discussion in-thread or update the issue until Product validation changes.
 
-Once `/doit` is accepted, the issue moves into `planning:*` labels, the kickoff comment starts the five-role discussion, and maintainers should answer open questions in-thread until `planning:ready-for-dev` appears. The resulting pull request should then include `Plan issue: #<issue-number>` in the body so the PR review lane can compare the implementation against the approved plan.
+`/doit` does not need to be the whole comment. A maintainer can write a short note such as scope guidance, a preferred option, or an answer to an open question in the same comment. The workflow will treat `/doit` as the command and carry the surrounding text into the kickoff comment as planning context.
+
+Once `/doit` is accepted, the issue moves into `planning:*` labels, the kickoff comment starts the five-role discussion, and maintainers should answer open questions in-thread until `planning:ready-for-dev` appears. If the `/doit` comment included extra text, that text is quoted into the kickoff comment as maintainer planning context. The resulting pull request should then include `Plan issue: #<issue-number>` in the body so the PR review lane can compare the implementation against the approved plan.
 
 ### Portable rollout pattern for other repositories
 
@@ -214,7 +216,7 @@ Use this rollout order when you add the planning team elsewhere:
 
 ### Resetting or retesting planning and plan review
 
-On the default branch, new issues enter `Issue Product Validation` automatically, `/doit` from an authorised repository writer starts the planning lane, `Issue Planning - Reconcile State` keeps the planning labels aligned after each role workflow completes, and `PR Plan Review - Reconcile State` does the same for pull requests.
+On the default branch, new issues enter `Issue Product Validation` automatically, `/doit` from an authorised repository writer starts the planning lane, and any extra text in that comment is carried into the kickoff note as planning context. `Issue Planning - Reconcile State` keeps the planning labels aligned after each role workflow completes, and `PR Plan Review - Reconcile State` does the same for pull requests.
 
 Before merge, or when manually re-running either stage, use `workflow_dispatch` with an issue number or pull request number. For example:
 
@@ -251,7 +253,7 @@ For workflows that only exist on a feature branch, `gh workflow run --ref <branc
 
 This repository used that exact pattern after PR `#175`: the branch proved the workflow sources and PR review lane, while issue `#176` on `main` proved the default-branch intake and reconcile behaviour.
 
-To restart intake for an existing issue, re-run `Issue Product Validation`. To restart full planning for an intake-approved issue, use `/doit` again or manually dispatch `Issue Planning - Kickoff`. To restart PR plan review for an existing pull request, re-run `PR Plan Review - Kickoff` or push a new commit after clarifying the linked plan.
+To restart intake for an existing issue, re-run `Issue Product Validation`. To restart full planning for an intake-approved issue, use `/doit` again (optionally with a short maintainer note that will be carried into kickoff) or manually dispatch `Issue Planning - Kickoff`. To restart PR plan review for an existing pull request, re-run `PR Plan Review - Kickoff` or push a new commit after clarifying the linked plan.
 
 #### Recovering from stale PR plan-review comments
 

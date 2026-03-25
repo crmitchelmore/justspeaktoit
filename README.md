@@ -18,7 +18,7 @@ This repository uses a named five-role planning and implementation review team:
 - **Casey Doyle** (`Code Quality`) protects maintainability, testability, and operational clarity
 - **Morgan Reed** (`Architecture`) guards system boundaries, sequencing, and coupling
 
-Every new issue goes straight to Product validation. Once Product marks an issue `triage:product-fit`, someone with repository write access can comment `/doit` to start the five-role planning discussion. Pull requests that include `Plan issue: #<number>` in the body are then reviewed by the same team against the approved plan.
+Every new issue goes straight to Product validation. Once Product marks an issue `triage:product-fit`, someone with repository write access can comment `/doit` — either on its own or inside a longer maintainer note — to start the five-role planning discussion. Any surrounding text is carried into the kickoff comment as planning context. Pull requests that include `Plan issue: #<number>` in the body are then reviewed by the same team against the approved plan.
 
 See [`Docs/agentic-workflows.md`](Docs/agentic-workflows.md) for the workflow setup and [`Docs/team-personalities.md`](Docs/team-personalities.md) for the persona map, memory model, and interaction diagrams.
 

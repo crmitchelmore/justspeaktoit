@@ -77,7 +77,7 @@ Review the relevant issue intake conversation for `${{ github.repository }}` fro
 - Otherwise review the triggering issue #${{ github.event.issue.number }}.
 - Never act on pull requests.
 - If the issue already has any `planning:` labels or a prior kickoff comment that starts with `### 🗂️ Planning Kickoff`, do nothing because full planning is already underway.
-- If this run came from `issue_comment` and the new comment starts with `/doit`, do nothing. The manual planning command workflow owns that path.
+- If this run came from `issue_comment` and the new comment contains an explicit `/doit` command anywhere, do nothing. The manual planning command workflow owns that path, including any surrounding maintainer context.
 - If this run came from `issues` and the issue just opened, treat that as the first Product intake pass.
 - If this run came from `issue_comment`, treat maintainer clarifications and direct requests for Product validation as new material. Ignore unrelated automation and your own prior `### 🧭 Product Validation` comments unless a maintainer explicitly asked you to revisit.
 

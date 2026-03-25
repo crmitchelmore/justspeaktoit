@@ -36,11 +36,23 @@ jobs:
           repo = os.environ["REPO"]
           issue_number = os.environ["ISSUE_NUMBER"]
           author = os.environ["COMMENT_AUTHOR"]
-          body = os.environ["COMMENT_BODY"].lstrip()
+          raw_body = os.environ["COMMENT_BODY"]
+          body = raw_body.lstrip()
+          command_pattern = re.compile(r"(?i)(?:^|(?<=\s))/doit(?=$|[\s.!?,:;])")
 
-          if not re.match(r"^/doit(?:\s|$)", body, re.IGNORECASE):
-              print("Comment is not a /doit command; nothing to do.")
+          if not command_pattern.search(body):
+              print("Comment does not contain a /doit command; nothing to do.")
               sys.exit(0)
+
+          context_lines = []
+          for line in raw_body.splitlines():
+              cleaned_line = command_pattern.sub("", line).strip()
+              if cleaned_line:
+                  context_lines.append(cleaned_line)
+
+          command_context = "\n".join(context_lines)
+          if len(command_context) > 600:
+              command_context = command_context[:597].rstrip() + "..."
 
           def gh_json(*args):
               return json.loads(subprocess.check_output(["gh", *args], text=True))
@@ -141,11 +153,18 @@ jobs:
               "--repo",
               repo,
               "--body",
-              (
-                  "### 🗂️ Planning Kickoff\n\n"
-                  f"`/doit` from `@{author}` was accepted, so Product, Security, Performance, Code Quality, and Architecture are now joining this thread. "
-                  "Answer unresolved questions in-thread until the team converges. "
-                  f"When `planning:ready-for-dev` appears, open a pull request that includes `Plan issue: #{issue_number}` in the body."
-              ),
+                  (
+                      "### 🗂️ Planning Kickoff\n\n"
+                      f"`/doit` from `@{author}` was accepted, so Product, Security, Performance, Code Quality, and Architecture are now joining this thread. "
+                      "Answer unresolved questions in-thread until the team converges."
+                      + (
+                          "\n\n**Maintainer context from the `/doit` comment:**\n"
+                          + "\n".join(f"> {line}" for line in command_context.splitlines())
+                          if command_context
+                          else ""
+                      )
+                      + "\n\n"
+                      + f"When `planning:ready-for-dev` appears, open a pull request that includes `Plan issue: #{issue_number}` in the body."
+                  ),
           )
           PY

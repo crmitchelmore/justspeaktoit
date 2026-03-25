@@ -32,8 +32,5 @@ Previous memory for issue #149 was stale (referenced a different Contents API to
 ## 2026-03-25 — PR #161
 - Blocked for missing Plan issue linkage. Protocol requires `Plan issue: #<n>` or closing keyword before any approval can be granted.
 
----
-## 2026-03-25 — Issue #162: PR review stage
-- Approved after maintainer answered all four implementation gaps (PR template syntax, validation rules, `plan-review:*` namespace, manual dispatch scoping).
-- Key pattern: PR body line `Plan issue: #<number>` is the coupling point between approved issue and PR review.
-- Label namespace isolation (`plan-review:*` vs `planning:*`) is now a verified decision.
+## 2026-03-25 — PR #161
+First PR through new plan-review lane (bootstrapping). Blocked on: (1) PR body missing `Plan issue: #162`, (2) issue #162 not yet `planning:ready-for-dev`. These are structural blockers per the review protocol, not style nits.

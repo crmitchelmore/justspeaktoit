@@ -25,3 +25,6 @@ Live throwaway-branch test showed `PUT /repos/{owner}/{repo}/contents/{path}` pr
 - Architecture comment 4122824374 is stale (still references Contents API). Does not resolve portability question.
 - Quality approval blocked until Architecture corrects stance and Security confirms preferred path (workflow signing vs branch exemption).
 - Proposed rollout contract: 5 checkpoints — pre-flight, choose path, verify end-to-end, document, correction protocol.
+
+## 2026-03-25 — Issue #149 (corrected): Agentic workflow live retest
+Previous memory for issue #149 was stale (referenced a different Contents API topic). Actual issue is a workflow smoke test. No code quality concerns — approved immediately. Pattern: for issues with no implementation surface, approve without conditions.

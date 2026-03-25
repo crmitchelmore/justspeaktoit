@@ -31,7 +31,9 @@ tools:
     branch-name: planning/quality
     description: "Code quality planning memory"
     file-glob:
+      - planning/quality/*.md
       - planning/quality/**/*.md
+      - planning/quality/*.json
       - planning/quality/**/*.json
     max-file-size: 262144
     max-patch-size: 65536
@@ -112,7 +114,7 @@ Keep it compact and useful. Maintain these files:
 - `planning/quality/pull-requests/<pr-number>.md` — implementation alignment, deviations, review blockers, and merge notes for this PR
 - `planning/quality/history/recent-decisions.md` — append a dated note with the newest meaningful learning or decision
 
-Always read memory first. If the PR links an approved planning issue, read that issue file and the PR file together, then update both at the end. If `principles.md` or `repository-context.md` is missing or too thin to be useful, seed it from concrete facts you can verify in the repository before commenting.
+Always read memory first. Ensure `planning/quality/pull-requests/<pr-number>.md` exists and reflects your latest stance before you finish. If the PR links an approved planning issue, read that issue file and the PR file together, then update both at the end. If `principles.md` or `repository-context.md` is missing or too thin to be useful, seed it from concrete facts you can verify in the repository before commenting.
 
 ## Review protocol
 

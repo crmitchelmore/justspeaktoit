@@ -31,7 +31,9 @@ tools:
     branch-name: planning/product
     description: "Product planning memory"
     file-glob:
+      - planning/product/*.md
       - planning/product/**/*.md
+      - planning/product/*.json
       - planning/product/**/*.json
     max-file-size: 262144
     max-patch-size: 65536
@@ -99,7 +101,7 @@ Keep it compact and useful. Maintain these files:
 - `planning/product/issues/<issue-number>.md` — latest stance, open questions, resolved blockers, intake decisions, and approval notes for this issue
 - `planning/product/history/recent-decisions.md` — append a dated note with the newest meaningful learning or decision
 
-Always read memory first, verify it against the current issue state, then update it at the end. If `principles.md` or `repository-context.md` is missing or too thin to be useful, seed it from concrete facts you can verify in the repository before commenting.
+Always read memory first, verify it against the current issue state, then update it at the end. Ensure `planning/product/issues/<issue-number>.md` exists and reflects your latest stance before you finish. If `principles.md` or `repository-context.md` is missing or too thin to be useful, seed it from concrete facts you can verify in the repository before commenting.
 
 ## Review protocol
 

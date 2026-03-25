@@ -239,7 +239,7 @@ jobs:
           GH_AW_GITHUB_WORKSPACE: ${{ github.workspace }}
           GH_AW_IS_PR_COMMENT: ${{ github.event.issue.pull_request && 'true' || '' }}
           GH_AW_MEMORY_BRANCH_NAME: 'planning/security'
-          GH_AW_MEMORY_CONSTRAINTS: "\n\n**Constraints:**\n- **Allowed Files**: Only files matching patterns: planning/security/**/*.md, planning/security/**/*.json\n- **Max File Size**: 262144 bytes (0.25 MB) per file\n- **Max File Count**: 100 files per commit\n- **Max Patch Size**: 65536 bytes (64 KB) total per push (max: 100 KB)\n"
+          GH_AW_MEMORY_CONSTRAINTS: "\n\n**Constraints:**\n- **Allowed Files**: Only files matching patterns: planning/security/*.md, planning/security/**/*.md, planning/security/*.json, planning/security/**/*.json\n- **Max File Size**: 262144 bytes (0.25 MB) per file\n- **Max File Count**: 100 files per commit\n- **Max Patch Size**: 65536 bytes (64 KB) total per push (max: 100 KB)\n"
           GH_AW_MEMORY_DESCRIPTION: ' Security planning memory'
           GH_AW_MEMORY_DIR: '/tmp/gh-aw/repo-memory/default/'
           GH_AW_MEMORY_TARGET_REPO: ' of the current repository'
@@ -1151,7 +1151,7 @@ jobs:
           MAX_FILE_COUNT: 100
           MAX_PATCH_SIZE: 65536
           ALLOWED_EXTENSIONS: '[".md",".json"]'
-          FILE_GLOB_FILTER: "planning/security/**/*.md planning/security/**/*.json"
+          FILE_GLOB_FILTER: "planning/security/*.md planning/security/**/*.md planning/security/*.json planning/security/**/*.json"
         with:
           script: |
             const { setupGlobals } = require('${{ runner.temp }}/gh-aw/actions/setup_globals.cjs');

@@ -22,7 +22,7 @@
 #
 # Performance reviewer for issue planning discussions
 #
-# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"d3539418c06dd2817a54355475cac1818a096c1cc9d859e912a93909e0a28c2b","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
+# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"a49d3ea9ba79a4f124120f063dead887040c13cb2fd67dfbf1f3b8f7673ed263","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
 
 name: "Issue Planning - Performance"
 "on":
@@ -32,9 +32,8 @@ name: "Issue Planning - Performance"
     - edited
   issues:
     types:
-    - opened
-    - reopened
     - edited
+    - reopened
   # skip-bots: # Skip-bots processed as bot check in pre-activation job
   # - github-actions # Skip-bots processed as bot check in pre-activation job
   # - copilot # Skip-bots processed as bot check in pre-activation job
@@ -233,7 +232,7 @@ jobs:
           GH_AW_GITHUB_WORKSPACE: ${{ github.workspace }}
           GH_AW_IS_PR_COMMENT: ${{ github.event.issue.pull_request && 'true' || '' }}
           GH_AW_MEMORY_BRANCH_NAME: 'planning/performance'
-          GH_AW_MEMORY_CONSTRAINTS: "\n\n**Constraints:**\n- **Allowed Files**: Only files matching patterns: planning/performance/**/*.md, planning/performance/**/*.json\n- **Max File Size**: 262144 bytes (0.25 MB) per file\n- **Max File Count**: 100 files per commit\n- **Max Patch Size**: 65536 bytes (64 KB) total per push (max: 100 KB)\n"
+          GH_AW_MEMORY_CONSTRAINTS: "\n\n**Constraints:**\n- **Allowed Files**: Only files matching patterns: planning/performance/*.md, planning/performance/**/*.md, planning/performance/*.json, planning/performance/**/*.json\n- **Max File Size**: 262144 bytes (0.25 MB) per file\n- **Max File Count**: 100 files per commit\n- **Max Patch Size**: 65536 bytes (64 KB) total per push (max: 100 KB)\n"
           GH_AW_MEMORY_DESCRIPTION: ' Performance planning memory'
           GH_AW_MEMORY_DIR: '/tmp/gh-aw/repo-memory/default/'
           GH_AW_MEMORY_TARGET_REPO: ' of the current repository'
@@ -1142,7 +1141,7 @@ jobs:
           MAX_FILE_COUNT: 100
           MAX_PATCH_SIZE: 65536
           ALLOWED_EXTENSIONS: '[".md",".json"]'
-          FILE_GLOB_FILTER: "planning/performance/**/*.md planning/performance/**/*.json"
+          FILE_GLOB_FILTER: "planning/performance/*.md planning/performance/**/*.md planning/performance/*.json planning/performance/**/*.json"
         with:
           script: |
             const { setupGlobals } = require('${{ runner.temp }}/gh-aw/actions/setup_globals.cjs');
@@ -1223,4 +1222,3 @@ jobs:
           name: safe-output-items
           path: /tmp/gh-aw/safe-output-items.jsonl
           if-no-files-found: ignore
-

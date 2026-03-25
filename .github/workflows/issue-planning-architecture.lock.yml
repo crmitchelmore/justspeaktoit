@@ -22,7 +22,7 @@
 #
 # Architecture reviewer for issue planning discussions
 #
-# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"65a0ecfae725ef9623d3b657ad29bddbeeba5460a0b9314239d0ef5f764fb50a","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
+# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"d2eb38c9d68840ca66c24c97ded1aee2d6ee49448ce8d97bde46edf078b7bb45","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
 
 name: "Issue Planning - Architecture"
 "on":
@@ -32,9 +32,8 @@ name: "Issue Planning - Architecture"
     - edited
   issues:
     types:
-    - opened
-    - reopened
     - edited
+    - reopened
   # skip-bots: # Skip-bots processed as bot check in pre-activation job
   # - github-actions # Skip-bots processed as bot check in pre-activation job
   # - copilot # Skip-bots processed as bot check in pre-activation job
@@ -233,7 +232,7 @@ jobs:
           GH_AW_GITHUB_WORKSPACE: ${{ github.workspace }}
           GH_AW_IS_PR_COMMENT: ${{ github.event.issue.pull_request && 'true' || '' }}
           GH_AW_MEMORY_BRANCH_NAME: 'planning/architecture'
-          GH_AW_MEMORY_CONSTRAINTS: "\n\n**Constraints:**\n- **Allowed Files**: Only files matching patterns: planning/architecture/**/*.md, planning/architecture/**/*.json\n- **Max File Size**: 262144 bytes (0.25 MB) per file\n- **Max File Count**: 100 files per commit\n- **Max Patch Size**: 65536 bytes (64 KB) total per push (max: 100 KB)\n"
+          GH_AW_MEMORY_CONSTRAINTS: "\n\n**Constraints:**\n- **Allowed Files**: Only files matching patterns: planning/architecture/*.md, planning/architecture/**/*.md, planning/architecture/*.json, planning/architecture/**/*.json\n- **Max File Size**: 262144 bytes (0.25 MB) per file\n- **Max File Count**: 100 files per commit\n- **Max Patch Size**: 65536 bytes (64 KB) total per push (max: 100 KB)\n"
           GH_AW_MEMORY_DESCRIPTION: ' Architecture planning memory'
           GH_AW_MEMORY_DIR: '/tmp/gh-aw/repo-memory/default/'
           GH_AW_MEMORY_TARGET_REPO: ' of the current repository'
@@ -1142,7 +1141,7 @@ jobs:
           MAX_FILE_COUNT: 100
           MAX_PATCH_SIZE: 65536
           ALLOWED_EXTENSIONS: '[".md",".json"]'
-          FILE_GLOB_FILTER: "planning/architecture/**/*.md planning/architecture/**/*.json"
+          FILE_GLOB_FILTER: "planning/architecture/*.md planning/architecture/**/*.md planning/architecture/*.json planning/architecture/**/*.json"
         with:
           script: |
             const { setupGlobals } = require('${{ runner.temp }}/gh-aw/actions/setup_globals.cjs');
@@ -1223,4 +1222,3 @@ jobs:
           name: safe-output-items
           path: /tmp/gh-aw/safe-output-items.jsonl
           if-no-files-found: ignore
-

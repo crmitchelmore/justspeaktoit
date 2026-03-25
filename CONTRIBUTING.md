@@ -63,6 +63,17 @@ open "Just Speak to It.xcworkspace"
 1. Open an issue using the feature request template
 2. Describe the use case and why it would benefit users
 
+### Agentic planning and PR review
+
+This repository uses an agentic planning flow before implementation starts:
+
+1. New issues go through Product validation on open.
+2. If Product asks for clarification, answer in-thread or edit the issue until it reaches `triage:product-fit`.
+3. Once the issue is Product-fit, someone with repository write access can comment `/doit` to start the five-role planning discussion.
+4. When implementation starts, open a PR that includes `Plan issue: #<issue-number>` in the body, along with the validation or testing evidence for the change.
+
+See [`Docs/agentic-workflows.md`](./Docs/agentic-workflows.md) for the full workflow and [`Docs/team-personalities.md`](./Docs/team-personalities.md) for the named role model.
+
 ### Submitting Code
 
 1. **Fork** the repository

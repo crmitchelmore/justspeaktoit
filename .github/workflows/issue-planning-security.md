@@ -3,7 +3,7 @@ name: Issue Planning - Security
 description: Security reviewer for issue planning discussions
 on:
   issues:
-    types: [opened, reopened, edited]
+    types: [edited, reopened]
   issue_comment:
     types: [created, edited]
   workflow_dispatch:
@@ -31,7 +31,9 @@ tools:
     branch-name: planning/security
     description: "Security planning memory"
     file-glob:
+      - planning/security/*.md
       - planning/security/**/*.md
+      - planning/security/*.json
       - planning/security/**/*.json
     max-file-size: 262144
     max-patch-size: 65536
@@ -74,7 +76,8 @@ Review the relevant issue planning conversation for `${{ github.repository }}` f
 - If this run came from `workflow_dispatch`, review issue #${{ github.event.inputs.issue_number }}.
 - Otherwise review the triggering issue #${{ github.event.issue.number }}.
 - Never act on pull requests. If this event is a pull request comment, do nothing.
-- If this run came from `issue_comment` and the issue has no `planning:` labels and no prior kickoff comment that starts with `### 🗂️ Planning Kickoff`, do nothing.
+- If this run came from `issues` or `issue_comment` and the issue has no `planning:` labels and no prior kickoff comment that starts with `### 🗂️ Planning Kickoff`, do nothing.
+- If this run came from `issue_comment` and the new comment starts with `/doit`, do nothing. The manual planning command workflow owns that path.
 - If this run came from `issue_comment`, treat only planning-team comments and maintainer clarifications as new material. Planning-team comments use headings like `### 🗂️ Planning Kickoff`, `### 🧭 Product`, `### 🔐 Security`, `### ⚡ Performance`, `### 🧹 Code Quality`, `### 🏗️ Architecture`, `### ✅ Planning Ready`, `### ♻️ Planning Reopened`. Ignore unrelated automation or chatter.
 
 ## Approval model
@@ -105,12 +108,13 @@ Read and update repo memory under `/tmp/gh-aw/repo-memory-default/planning/secur
 
 Keep it compact and useful. Maintain these files:
 
+- `planning/security/persona.md` — stable identity, signature habits, and earned quirks for this role
 - `planning/security/principles.md` — stable heuristics, recurring views, and long-term direction from this role
 - `planning/security/repository-context.md` — verified repository facts that help this role judge future issues quickly
 - `planning/security/issues/<issue-number>.md` — latest stance, open questions, resolved blockers, and approval notes for this issue
 - `planning/security/history/recent-decisions.md` — append a dated note with the newest meaningful learning or decision
 
-Always read memory first, verify it against the current issue state, then update it at the end. If `principles.md` or `repository-context.md` is missing or too thin to be useful, seed it from concrete facts you can verify in the repository before commenting.
+Always read memory first, including `persona.md`, verify it against the current issue state, then update it at the end. Ensure `planning/security/issues/<issue-number>.md` exists and reflects your latest stance before you finish. If `persona.md`, `principles.md`, or `repository-context.md` is missing or too thin to be useful, seed it from concrete facts you can verify in the repository before commenting.
 
 ## Review protocol
 
@@ -174,6 +178,7 @@ Always read memory first, verify it against the current issue state, then update
 
 - Be explicit that you are the automated `Security` reviewer.
 - Stay concise and specific; no generic filler.
+- If you cannot verify the live issue context because key comments, labels, or repo facts are unavailable or integrity-filtered, do not approve. Leave a `not yet` follow-up only when a maintainer explicitly asked for you, and say which missing context must be restated or re-exposed.
 - If nothing material changed, your current stance is already reflected in labels/comments, and nobody explicitly asked for your follow-up, do nothing.
 - Prefer concrete, testable questions over vague criticism.
 - Never use approval labels from other roles.

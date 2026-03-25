@@ -41,3 +41,6 @@ Approved docs-only issue to document the default-branch proof pattern for agenti
 
 ## 2026-03-25 — PR #177 initial review
 Approved immediately. Docs-only change to `Docs/agentic-workflows.md` replacing a vague sentence with a clear 3-step proof pattern. Plan issue #176 was approved; all three acceptance criteria delivered in diff. No scope drift.
+
+## 2026-03-25 — Issue #180
+Approved immediately. Same class as #149/#174/#176: targeted agentic-workflow reliability fix. Problem evidenced by PR #161 spurious runs on closed PR. Scope strictly limited to trigger guards; acceptance criteria testable. No user-facing product impact.

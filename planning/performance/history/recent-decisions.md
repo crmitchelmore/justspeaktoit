@@ -18,3 +18,7 @@ External stores (Gist, artifact) are disproportionate for small text files.
 ## 2026-03-25 — Issue #157 performance-approved confirmed
 Labels confirmed: planning:performance-approved already set. Only planning:needs-quality remains.
 Guardrails for implementation: rate-limit health updates to state-transitions or ~1 Hz; KVO-driven device enumeration; latency shown as bucket not live average.
+
+## 2026-03-25 — Issue #149: Contents API correction
+
+Live throwaway-branch test showed `PUT /repos/{owner}/{repo}/contents/{path}` produced `verified: false`, `reason: unsigned` here. Do not treat Contents API writes as a signed-commit-safe default. For strict repos, prefer workflow commit signing as the portable default, with branch exemption as a repo-local fallback when governance allows it.

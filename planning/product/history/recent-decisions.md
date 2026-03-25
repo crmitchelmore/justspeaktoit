@@ -44,3 +44,6 @@ Approved immediately. Docs-only change to `Docs/agentic-workflows.md` replacing 
 
 ## 2026-03-25 — Issue #180
 Approved immediately. Same class as #149/#174/#176: targeted agentic-workflow reliability fix. Problem evidenced by PR #161 spurious runs on closed PR. Scope strictly limited to trigger guards; acceptance criteria testable. No user-facing product impact.
+
+## 2026-03-25 — PR #181 initial review
+Approved. Plan issue #180 is planning:ready-for-dev with all 5 roles approved. PR implements exactly the scoped trigger guard fix (issue_comment open-PR check + dispatcher mirror). Verification evidence present. No scope drift, no user-facing impact.

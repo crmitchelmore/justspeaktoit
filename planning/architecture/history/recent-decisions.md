@@ -45,3 +45,7 @@ PR #161 implements the plan-review lane but was opened before its planning issue
 
 ## 2026-03-25 — Issue #174: Port career-framework agentic workflow pattern
 Architecture-approved. All changes are `.github/`-scoped (no app code). Key coupling: `bot-follow-up` explicitly dispatches all roles when `### 🗂️ Planning Kickoff` comment lands. Kickoff removal requires removing that explicit dispatch block since all role workflows already fire on `issues: [opened]`. Product must absorb label-seeding responsibility on first open pass.
+
+## 2026-03-25 — PR #175 architecture-approved
+
+PR #175 ports the final career-framework agentic workflow pattern. Zero app code changes — all `.github/`-scoped. Plan issue #174 was `planning:ready-for-dev` with prior architecture approval. Implementation matched approved design exactly: product-validation-on-open, `/doit` command, named persona agents, PR review lane with reconcile. Approved first pass.

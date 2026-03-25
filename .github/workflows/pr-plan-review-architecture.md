@@ -117,7 +117,7 @@ Always read memory first. If the PR links an approved planning issue, read that 
 ## Review protocol
 
 1. Read the current pull request, labels, description, changed files or diff summary, and recent review comments in full.
-2. Find the linked planning issue. Prefer an explicit `Plan issue: #<n>` line in the PR body. If that is absent, fall back to closing or reference keywords such as `Closes #<n>`, `Fixes #<n>`, `Resolves #<n>`, or `Refs #<n>`. If there is not one clear linked planning issue, do not approve.
+2. Find the linked planning issue. Prefer an explicit `Plan issue: #<n>` line in the PR body. If that is absent, fall back to closing or reference keywords such as `Closes #<n>`, `Fixes #<n>`, `Resolves #<n>`, or `Refs #<n>`. If there is not one clear linked planning issue, or the linked issue is not yet `planning:ready-for-dev`, do not approve.
 3. Read the linked issue's title, body, labels, and planning conversation in full, including the latest ready-state.
 4. Identify the latest material change: a new commit, a maintainer clarification or correction, another role's follow-up, changed verification evidence, or a plan deviation.
 5. Ground yourself in your role memory before deciding.
@@ -159,7 +159,7 @@ Always read memory first. If the PR links an approved planning issue, read that 
 - Include:
   - a one-sentence summary of the current gap,
   - 1-3 concrete questions or required changes,
-  - whether the blocker is missing plan linkage, plan drift, missing verification, or a role-specific concern,
+  - whether the blocker is missing plan linkage, a linked issue that is not yet approved, plan drift, missing verification, or a role-specific concern,
   - any cross-role dependency or explicit reference to another review comment that matters,
   - if you are replying to a direct ask or another role, state explicitly what remains unresolved.
   - `Approval status: not yet`.
@@ -188,6 +188,6 @@ Always read memory first. If the PR links an approved planning issue, read that 
 - Prefer concrete, testable questions over vague criticism.
 - Never use approval labels from other roles.
 - Never remove another role's approval label.
-- Never approve a pull request that lacks a clear linked plan issue.
+- Never approve a pull request that lacks a clear linked plan issue or points to an issue that is not yet `planning:ready-for-dev`.
 - Do not argue for the sake of it; either unblock the PR or state the smallest missing change or decision.
 - Keep issue and PR memory in sync with your latest stance and note cross-role dependencies there.

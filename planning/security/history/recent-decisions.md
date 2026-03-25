@@ -21,3 +21,6 @@ Blocked: no linked planning issue. Implementation looks clean (fork guard, least
 
 ## 2026-03-25 — PR #161 (first security comment)
 Implementation is clean (fork guard, least-privilege, secrets redacted, comment-body via env var, bot dispatcher scoped to known headings). Blocked only on missing plan issue linkage. This is a bootstrapping PR—maintainer must add a `Plan issue:` reference to the approved planning issue or explicitly waive the requirement.
+
+## 2026-03-25 — PR #161 follow-up (issue #162 found)
+Issue #162 identified as the retroactive plan for PR #161. PR still blocked: body lacks `Plan issue: #162`, and issue #162 is not yet `planning:ready-for-dev` (needs product + quality). Security review stance unchanged.

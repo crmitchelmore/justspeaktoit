@@ -37,3 +37,6 @@ Pure CI/workflow change linked to approved issue #174. No runtime code. Approved
 
 ## 2026-03-25 — PR #177 approved
 docs(agentic-workflows): pure documentation-only PR. Plan issue #176 fully approved. No performance concern. Auto-approved immediately.
+
+## 2026-03-25 — Issue #180 (ignore closed-PR comments in plan-review workflows)
+Pure CI guard change. Adds open-PR state check to prevent spurious workflow runs on closed PRs. No runtime code. Approved immediately — reduces workflow fan-out waste, consistent with prior agentic-workflow pattern approvals (#174, #176).

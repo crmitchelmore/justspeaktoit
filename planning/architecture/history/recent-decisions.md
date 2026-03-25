@@ -53,3 +53,6 @@ PR #175 ports the final career-framework agentic workflow pattern. Zero app code
 ## 2026-03-25 — PR #177 architecture-approved
 
 Docs-only PR updating `Docs/agentic-workflows.md` with the three-step branch-proof pattern. Plan issue #176 was `planning:ready-for-dev` with all roles approved. Diff matched acceptance criteria exactly (branch steps in step 1-2, post-merge steps in step 3, concrete self-referential example). Approved first pass.
+
+## 2026-03-25 — PR #181 architecture-approved (first pass)
+Closed-PR guard fix. All `.github/`-scoped. Issue #180 was `planning:ready-for-dev` with all five roles approved. Symmetric `github.event.issue.state == 'open'` guard added to `issue_comment` condition in all 5 role lock files and the bot dispatcher. `.md` sources updated to match. No app code. Approved first pass.

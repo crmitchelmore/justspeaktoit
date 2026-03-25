@@ -1,4 +1,7 @@
-# Recent Architecture Decisions
+# Recent Decisions
 
-## 2026-03-24 — Issue #149
-Workflow test issue; no architectural content. Approved to verify planning-team label/comment flow after secret refresh. No design decisions made.
+## 2026-03-25 — Seeded role memory
+Added `principles.md` and `repository-context.md` for the architecture reviewer so future planning discussions start with verified repository context.
+
+## 2026-03-25 — Issue #149
+Approved because the issue exists to validate the planning-system architecture, not to modify the application architecture.

@@ -32,5 +32,5 @@ Previous memory for issue #149 was stale (referenced a different Contents API to
 ## 2026-03-25 — PR #161
 - Blocked for missing Plan issue linkage. Protocol requires `Plan issue: #<n>` or closing keyword before any approval can be granted.
 
-## 2026-03-25 — PR #161
-First PR through new plan-review lane (bootstrapping). Blocked on: (1) PR body missing `Plan issue: #162`, (2) issue #162 not yet `planning:ready-for-dev`. These are structural blockers per the review protocol, not style nits.
+## 2026-03-25 — Issue #162: Plan-linked PR review stage
+All five roles approved after maintainer provided explicit decisions on PR template syntax, label isolation, and memory scope. The pattern of requiring concrete deterministic implementation decisions (not just intent) before approval proved correct here — all gaps were closeable with a single maintainer synthesis comment.

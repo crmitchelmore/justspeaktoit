@@ -36,3 +36,6 @@ PR reconcile: label-state-only decision (no comment parsing for merge-readiness)
 
 ## 2026-03-25 — PR #175 (port final career-framework agentic pattern)
 Approved. Implementation matches issue #174 plan exactly: fork guard on all PR workflows, `permissions: {}` top-level with least-privilege job overrides, reconcile is label-state-only, direct Product-validation-on-open replaces triage overlap, named personas (Priya Shah) added to security agent. No new attack surface; workflow-only changes.
+
+## 2026-03-25 — Issue #176 (document default-branch proof pattern)
+Documentation-only change to agentic-workflows.md. Approved immediately: no code, no new attack surface, no trust boundaries. The documented proof pattern (validate on main post-merge) is a security-positive practice worth encouraging.

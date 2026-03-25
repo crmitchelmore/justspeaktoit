@@ -9,6 +9,6 @@ Approved because the issue exists to validate the planning-system architecture, 
 ## 2026-03-25 — Issue #157 (HUD capture health)
 All data sources (PermissionsManager, AudioInputDeviceManager, AppSettings, ModelCatalog.LatencyTier) are SpeakApp-only. CaptureHealth struct belongs in HUDManager.Snapshot, not SpeakCore. MainManager is the right aggregation driver. Static LatencyTier is the safe latency signal — avoid runtime sampling.
 
-## 2026-03-25 — Issue #157 (HUD capture health) — approved
+## 2026-03-25 — Issue #149: portable planning-memory topology
 
-Maintainer confirmed: `CaptureHealthSnapshot` in `HUDManager` (SpeakApp only), static `LatencyTier` for v1, event-driven updates from 3 Combine publishers. This resolved the update-trigger open question. Architecture approved. Performance and Code Quality still pending.
+Maintainer raised the bar from "workflow validation" to "portable pattern for orgs with signed-commit rulesets". Architecture position: prefer Contents API writes (GitHub-verified by default) over branch exemptions or dedicated repos for single-repo cases. Dedicated repo is the right upgrade path at ≥3 repos. Decision rule: switch persistence mechanism before topology.

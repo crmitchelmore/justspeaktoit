@@ -40,3 +40,6 @@ Implementation matches plan #162: PR template, label isolation, agent-based plan
 
 ## 2026-03-25 — Issue #174: First pass
 Workflow/CI-only port from career-framework. Three gaps raised: missing smoke-test protocol, unspecified redundant-layer removal (issue-triage vs product-validation), and persona.md source. Confirmed repo fact: both kickoff and triage currently fire on issues:opened. No PR plan-review workflows exist yet.
+
+## 2026-03-25 — Issue #174: Approved (second pass)
+Maintainer clarification resolved all three blockers: two-phase smoke-test protocol, atomic removal of three named files, persona.md sourced from career-framework. Idempotent reconcile confirmed. All five roles approved; ready-for-dev applied.

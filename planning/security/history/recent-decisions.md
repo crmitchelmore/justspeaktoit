@@ -1,5 +1,7 @@
-# Recent Security Decisions
+# Recent Decisions
 
-## 2026-03-24 — Issue #149
+## 2026-03-25 — Seeded role memory
+Added `principles.md` and `repository-context.md` for the security reviewer so future planning discussions start with verified repository context.
 
-Workflow retest issue after secret rotation. No feature plan present; approved immediately. Established initial principles file covering Keychain storage, audio data handling, AX permissions, and CI secret hygiene.
+## 2026-03-25 — Issue #149
+Approved because the issue adds no new product attack surface and exists to verify that secret rotation restored automation.

@@ -15,3 +15,6 @@ Live throwaway-branch test showed `PUT /repos/{owner}/{repo}/contents/{path}` pr
 
 ## 2026-03-25 — Issue #149: Approved (signed-commit concern resolved)
 `planning/*` branches are unprotected; GITHUB_TOKEN commits via `github-actions[bot]` are acceptable here. The prior blocker (Contents API PAT → `verified: false`) was hypothetical for strict repos and does not apply. Issue approved.
+
+## 2026-03-25 — PR #161 (plan-review lane for PRs)
+Blocked: no linked planning issue. Implementation looks clean (fork guard, least-privilege permissions, prompt injection defence in agent runtime). Primary blocker is governance — the PR that introduces the `Plan issue:` requirement doesn't include one itself.

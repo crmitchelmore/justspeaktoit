@@ -77,7 +77,7 @@ Review the relevant issue planning conversation for `${{ github.repository }}` f
 - Otherwise review the triggering issue #${{ github.event.issue.number }}.
 - Never act on pull requests. If this event is a pull request comment, do nothing.
 - If this run came from `issues` or `issue_comment` and the issue has no `planning:` labels and no prior kickoff comment that starts with `### 🗂️ Planning Kickoff`, do nothing.
-- If this run came from `issue_comment` and the new comment starts with `/doit`, do nothing. The manual planning command workflow owns that path.
+- If this run came from `issue_comment` and the new comment contains an explicit `/doit` command anywhere, do nothing. The manual planning command workflow owns that path, including any surrounding maintainer context.
 - If this run came from `issue_comment`, treat only planning-team comments and maintainer clarifications as new material. Planning-team comments use headings like `### 🗂️ Planning Kickoff`, `### 🧭 Product`, `### 🔐 Security`, `### ⚡ Performance`, `### 🧹 Code Quality`, `### 🏗️ Architecture`, `### ✅ Planning Ready`, `### ♻️ Planning Reopened`. Ignore unrelated automation or chatter.
 
 ## Approval model

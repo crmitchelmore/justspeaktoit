@@ -25,3 +25,6 @@ Live throwaway-branch test showed `PUT /repos/{owner}/{repo}/contents/{path}` pr
 
 ## 2026-03-25 — Issue #149 re-approved after explicit maintainer re-review request
 Memory was already correct (Contents API = verified: false). Both remaining options (branch exemption, workflow commit signing) are cost-acceptable from Performance lens. Approved on maintainer's explicit ask. Note: Architecture's reply 4122824374 still cites Contents API as signed-safe — flagged for Architecture to correct.
+
+## 2026-03-25 — Issue #162 (plan-linked PR review)
+No runtime code changes. Approved. Guardrails: cap PR review history to ~10 rolling entries in recent-decisions.md; handle large diffs gracefully.

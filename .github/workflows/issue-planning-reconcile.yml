@@ -79,10 +79,9 @@ jobs:
                       "api",
                       f"/repos/{REPO}/issues?state=open&per_page=100&page={page}",
                   )
-                  batch = [item for item in batch if "pull_request" not in item]
                   if not batch:
                       break
-                  issues.extend(batch)
+                  issues.extend(item for item in batch if "pull_request" not in item)
                   page += 1
 
           reconciled = 0

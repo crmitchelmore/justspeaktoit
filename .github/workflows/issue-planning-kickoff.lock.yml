@@ -22,7 +22,7 @@
 #
 # Seed issue-planning labels and explain the review flow on new issues
 #
-# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"d7c8845698b66dc496727201a1b465d5e90bfd4e9001dfa4e2df847e5fe2cf75","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
+# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"f6f50a8966640ddbca4d1530ed78c38877388c206f4df9bcf738c2bb86d762f9","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
 
 name: "Issue Planning - Kickoff"
 "on":
@@ -31,7 +31,6 @@ name: "Issue Planning - Kickoff"
     - opened
     - reopened
   # skip-bots: # Skip-bots processed as bot check in pre-activation job
-  # - github-actions # Skip-bots processed as bot check in pre-activation job
   # - copilot # Skip-bots processed as bot check in pre-activation job
   # - dependabot # Skip-bots processed as bot check in pre-activation job
   # - renovate # Skip-bots processed as bot check in pre-activation job
@@ -1020,7 +1019,7 @@ jobs:
         id: check_skip_bots
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
-          GH_AW_SKIP_BOTS: github-actions,copilot,dependabot,renovate
+          GH_AW_SKIP_BOTS: copilot,dependabot,renovate
           GH_AW_WORKFLOW_NAME: "Issue Planning - Kickoff"
         with:
           script: |

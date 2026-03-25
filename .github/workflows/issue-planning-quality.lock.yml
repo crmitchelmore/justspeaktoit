@@ -22,7 +22,7 @@
 #
 # Code Quality reviewer for issue planning discussions
 #
-# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"6fd27dcd81268df5588a4011d4911e552806f2e36535085a4eb5ad3dba615e9d","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
+# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"0905eea913109e5568ce3d481f5dd5e9412daaf14fc4686cd58c89d7bcfb7613","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
 
 name: "Issue Planning - Code Quality"
 "on":
@@ -36,7 +36,6 @@ name: "Issue Planning - Code Quality"
     - reopened
     - edited
   # skip-bots: # Skip-bots processed as bot check in pre-activation job
-  # - github-actions # Skip-bots processed as bot check in pre-activation job
   # - copilot # Skip-bots processed as bot check in pre-activation job
   # - dependabot # Skip-bots processed as bot check in pre-activation job
   # - renovate # Skip-bots processed as bot check in pre-activation job
@@ -234,7 +233,7 @@ jobs:
           GH_AW_IS_PR_COMMENT: ${{ github.event.issue.pull_request && 'true' || '' }}
           GH_AW_MEMORY_BRANCH_NAME: 'planning/quality'
           GH_AW_MEMORY_CONSTRAINTS: "\n\n**Constraints:**\n- **Allowed Files**: Only files matching patterns: planning/quality/**/*.md, planning/quality/**/*.json\n- **Max File Size**: 262144 bytes (0.25 MB) per file\n- **Max File Count**: 100 files per commit\n- **Max Patch Size**: 65536 bytes (64 KB) total per push (max: 100 KB)\n"
-          GH_AW_MEMORY_DESCRIPTION: ' Code Quality planning memory'
+          GH_AW_MEMORY_DESCRIPTION: ' Code quality planning memory'
           GH_AW_MEMORY_DIR: '/tmp/gh-aw/repo-memory/default/'
           GH_AW_MEMORY_TARGET_REPO: ' of the current repository'
           GH_AW_NEEDS_PRE_ACTIVATION_OUTPUTS_ACTIVATED: ${{ needs.pre_activation.outputs.activated }}
@@ -1076,7 +1075,7 @@ jobs:
         id: check_skip_bots
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
-          GH_AW_SKIP_BOTS: github-actions,copilot,dependabot,renovate
+          GH_AW_SKIP_BOTS: copilot,dependabot,renovate
           GH_AW_WORKFLOW_NAME: "Issue Planning - Code Quality"
         with:
           script: |
@@ -1208,7 +1207,7 @@ jobs:
           GH_AW_ALLOWED_DOMAINS: "api.business.githubcopilot.com,api.enterprise.githubcopilot.com,api.github.com,api.githubcopilot.com,api.individual.githubcopilot.com,api.snapcraft.io,archive.ubuntu.com,azure.archive.ubuntu.com,crl.geotrust.com,crl.globalsign.com,crl.identrust.com,crl.sectigo.com,crl.thawte.com,crl.usertrust.com,crl.verisign.com,crl3.digicert.com,crl4.digicert.com,crls.ssl.com,github.com,host.docker.internal,json-schema.org,json.schemastore.org,keyserver.ubuntu.com,ocsp.digicert.com,ocsp.geotrust.com,ocsp.globalsign.com,ocsp.identrust.com,ocsp.sectigo.com,ocsp.ssl.com,ocsp.thawte.com,ocsp.usertrust.com,ocsp.verisign.com,packagecloud.io,packages.cloud.google.com,packages.microsoft.com,ppa.launchpad.net,raw.githubusercontent.com,registry.npmjs.org,s.symcb.com,s.symcd.com,security.ubuntu.com,telemetry.enterprise.githubcopilot.com,ts-crl.ws.symantec.com,ts-ocsp.ws.symantec.com,www.googleapis.com"
           GITHUB_SERVER_URL: ${{ github.server_url }}
           GITHUB_API_URL: ${{ github.api_url }}
-          GH_AW_SAFE_OUTPUTS_HANDLER_CONFIG: "{\"add_comment\":{\"hide_older_comments\":true,\"max\":1,\"target\":\"*\"},\"add_labels\":{\"allowed\":[\"planning:in-discussion\",\"planning:ready-for-dev\",\"planning:needs-quality\",\"planning:quality-approved\"],\"max\":4,\"target\":\"*\"},\"missing_data\":{},\"missing_tool\":{},\"noop\":{\"max\":1,\"report-as-issue\":\"true\"},\"remove_labels\":{\"allowed\":[\"planning:in-discussion\",\"planning:ready-for-dev\",\"planning:needs-quality\",\"planning:quality-approved\"],\"max\":4,\"target\":\"*\"}}"
+          GH_AW_SAFE_OUTPUTS_HANDLER_CONFIG: "{\"add_comment\":{\"hide_older_comments\":false,\"max\":1,\"target\":\"*\"},\"add_labels\":{\"allowed\":[\"planning:in-discussion\",\"planning:ready-for-dev\",\"planning:needs-quality\",\"planning:quality-approved\"],\"max\":4,\"target\":\"*\"},\"missing_data\":{},\"missing_tool\":{},\"noop\":{\"max\":1,\"report-as-issue\":\"true\"},\"remove_labels\":{\"allowed\":[\"planning:in-discussion\",\"planning:ready-for-dev\",\"planning:needs-quality\",\"planning:quality-approved\"],\"max\":4,\"target\":\"*\"}}"
         with:
           github-token: ${{ secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |

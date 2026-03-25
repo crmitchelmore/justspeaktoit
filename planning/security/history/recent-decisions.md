@@ -30,3 +30,6 @@ All prior security blockers resolved: `Plan issue: #162` in PR body; issue #162 
 
 ## 2026-03-25 — Issue #174 (career-framework workflow port)
 Blocked on one question: PR plan-review reconcile with `issue_comment` trigger — need confirmation it determines merge-readiness from label state only, not from comment content, and runs with least-privilege. Private repo + triage removal noted as low concern. Persona memory files assessed as low risk (same isolation pattern).
+
+## 2026-03-25 — Issue #174: Approved (both blockers resolved by maintainer)
+PR reconcile: label-state-only decision (no comment parsing for merge-readiness). Permissions: `contents: read`, `issues: write`, `pull-requests: write`. `issue_comment` trigger is idempotent nudge only. Atomic removal avoids double-fire window. Named persona files copied from career-framework — same isolation pattern, low risk.

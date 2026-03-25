@@ -8,6 +8,9 @@ final class PersonalLexiconService: ObservableObject {
   private let store: PersonalLexiconStore
   private let log = Logger(subsystem: "com.github.speakapp", category: "PersonalLexicon")
 
+  /// Cached compiled regexes keyed by alias string; avoids re-compilation on every `apply` call.
+  private var regexCache: [String: NSRegularExpression] = [:]
+
   init(store: PersonalLexiconStore) {
     self.store = store
     Task { [weak self] in
@@ -56,6 +59,7 @@ final class PersonalLexiconService: ObservableObject {
 
     rules.append(rule)
     rules = Self.normalised(rules: rules)
+    regexCache.removeAll()
     await persistSnapshot()
     return rule
   }
@@ -75,11 +79,13 @@ final class PersonalLexiconService: ObservableObject {
 
     rules[index] = sanitisedRule
     rules = Self.normalised(rules: rules)
+    regexCache.removeAll()
     await persistSnapshot()
   }
 
   func deleteRule(id: UUID) async {
     rules.removeAll { $0.id == id }
+    regexCache.removeAll()
     await persistSnapshot()
   }
 
@@ -193,10 +199,17 @@ final class PersonalLexiconService: ObservableObject {
   }
 
   private func apply(alias: String, with canonical: String, to text: String) -> (Int, String) {
-    let escapedAlias = NSRegularExpression.escapedPattern(for: alias)
-    let pattern = "(?i)\\b\(escapedAlias)\\b"
-    guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
-      return (0, text)
+    let regex: NSRegularExpression
+    if let cached = regexCache[alias] {
+      regex = cached
+    } else {
+      let escapedAlias = NSRegularExpression.escapedPattern(for: alias)
+      let pattern = "(?i)\\b\(escapedAlias)\\b"
+      guard let compiled = try? NSRegularExpression(pattern: pattern, options: []) else {
+        return (0, text)
+      }
+      regexCache[alias] = compiled
+      regex = compiled
     }
     let fullRange = NSRange(location: 0, length: text.utf16.count)
     let matches = regex.numberOfMatches(in: text, options: [], range: fullRange)

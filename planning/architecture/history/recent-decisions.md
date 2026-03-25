@@ -31,3 +31,7 @@ Live throwaway-branch test showed `PUT /repos/{owner}/{repo}/contents/{path}` pr
 
 ## 2026-03-25 — Issue #149: re-approved after memory correction (third pass)
 Contents API write confirmed not signed-commit-safe (verified: false, reason: unsigned). Corrected portable default: workflow commit signing. Branch exemption as repo-local fallback. Docs/agentic-workflows.md updated to match. Architecture-approved on third pass after memory was corrected by maintainer.
+
+## 2026-03-25 — PR #161 (agentic-workflows PR plan-review)
+- Blocked: no linked plan issue in PR body. Cannot approve without one per review protocol.
+- PR is adding the plan-review infrastructure itself; may be a bootstrapping case — maintainer should clarify or link the planning issue.

@@ -28,3 +28,6 @@ Memory was already correct (Contents API = verified: false). Both remaining opti
 
 ## 2026-03-25 — Issue #162 (plan-linked PR review)
 No runtime code changes. Approved. Guardrails: cap PR review history to ~10 rolling entries in recent-decisions.md; handle large diffs gracefully.
+
+## 2026-03-25 — Issue #174 (port career-framework agentic workflow pattern)
+Pure CI/workflow change: GitHub Actions, persona.md files, routing fixes, docs. No runtime code changes. Approved immediately — entirely outside app performance scope.

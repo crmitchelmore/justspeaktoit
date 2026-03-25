@@ -27,6 +27,10 @@ concurrency:
 
 jobs:
   reconcile:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.event == 'pull_request' ||
+      github.event.workflow_run.event == 'issue_comment'
     runs-on: ubuntu-latest
     steps:
       - name: Reconcile PR plan-review labels

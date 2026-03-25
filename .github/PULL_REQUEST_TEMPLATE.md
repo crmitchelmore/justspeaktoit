@@ -1,5 +1,5 @@
 ## Plan Link
-Plan issue: #<issue number>
+Plan issue: <!-- replace with approved issue number, e.g. #42 -->
 
 ## Description
 Brief description of the changes.
@@ -21,7 +21,7 @@ Brief description of the changes.
 - Verification notes / screenshots / logs:
 
 ## Checklist
-- [ ] My PR body includes `Plan issue: #...`
+- [ ] My PR body includes `Plan issue: #42` with the real approved issue number
 - [ ] This implementation matches the approved plan, or I have documented the deviation explicitly
 - [ ] My code follows the project's style guidelines
 - [ ] I have updated documentation if needed

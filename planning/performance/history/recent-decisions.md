@@ -28,6 +28,3 @@ Memory was already correct (Contents API = verified: false). Both remaining opti
 
 ## 2026-03-25 — Issue #162 (plan-linked PR review)
 No runtime code changes. Approved. Guardrails: cap PR review history to ~10 rolling entries in recent-decisions.md; handle large diffs gracefully.
-
-## 2026-03-25 — PR #161 (plan-linked PR review implementation)
-Only workflow/.github/docs changes. No runtime code. Memory growth capped at 65 KB/run by framework. Approved against issue #162.

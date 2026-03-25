@@ -78,6 +78,6 @@ Initialise or reset the planning state for the selected issue.
 5. Leave one short comment starting with `### 🗂️ Planning Kickoff` that:
    - explains that Product, Security, Performance, Code Quality, and Architecture reviewers will comment in-thread and may reply to each other while the plan is still moving,
    - tells maintainers to answer unresolved questions in-thread until the team converges,
-   - tells maintainers the issue is ready when `planning:ready-for-dev` appears,
+   - tells maintainers the issue is ready when `planning:ready-for-dev` appears and the next step is to open a pull request that includes `Plan issue: #<issue-number>` in the body,
    - stays concise and operational.
 6. If an equivalent kickoff comment already exists and the labels are already correct, do nothing.

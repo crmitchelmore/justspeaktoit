@@ -174,6 +174,7 @@ Always read memory first, verify it against the current issue state, then update
 
 - Be explicit that you are the automated `Performance` reviewer.
 - Stay concise and specific; no generic filler.
+- If you cannot verify the live issue context because key comments, labels, or repo facts are unavailable or integrity-filtered, do not approve. Leave a `not yet` follow-up only when a maintainer explicitly asked for you, and say which missing context must be restated or re-exposed.
 - If nothing material changed, your current stance is already reflected in labels/comments, and nobody explicitly asked for your follow-up, do nothing.
 - Prefer concrete, testable questions over vague criticism.
 - Never use approval labels from other roles.

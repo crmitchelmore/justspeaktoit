@@ -130,7 +130,7 @@ jobs:
                       "--repo",
                       REPO,
                       "--body",
-                      "### ✅ Planning Ready\n\nAll five planning reviewers have approved this issue. `planning:ready-for-dev` is now set and the remaining pending labels have been cleared.",
+                      f"### ✅ Planning Ready\n\nAll five planning reviewers have approved this issue. `planning:ready-for-dev` is now set and the remaining pending labels have been cleared.\n\nNext step: open a pull request that includes `Plan issue: #{number}` in the body so the PR review lane can compare the implementation against this approved plan.",
                   )
               elif was_ready and not will_be_ready:
                   gh(

@@ -29,3 +29,6 @@ Product approval confirmed and label already present. PR has plan link (Plan iss
 
 ## 2026-03-25 — Issue #174
 Approved on issue open. Clear workflow/tooling issue to port the proven career-framework agentic workflow pattern. Well-scoped with named reference design and testable success criteria. No end-user product risk. Interesting meta-fact: this issue triggered the Product-validates-on-open gate, which is itself one of the success criteria of the issue.
+
+## 2026-03-25 — Issue #174 maintainer clarification check
+Maintainer provided detailed implementation contracts addressing Security (label-only reconcile decision, minimal permissions) and Code Quality (split smoke-test protocol). Product approval unchanged — clarifications don't affect product scope or user value. Security and Quality still need to re-review.

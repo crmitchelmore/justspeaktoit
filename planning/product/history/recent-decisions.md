@@ -17,3 +17,6 @@ Maintainer explicitly asked Product to confirm approval given Contents API disqu
 
 ## 2026-03-25 — Issue #149 third check (Code Quality approved)
 Code Quality approved at 03:33Z. Now 4/5 roles approved. Security still holds needs-security pending strict-repo portability answer. Product stance unchanged; no comment needed.
+
+## 2026-03-25 — PR #161 initial review
+Blocked: PR adds a PR plan-review lane but lacks a `Plan issue: #<n>` link—the same requirement the PR itself introduces. Needs plan linkage before Product can approve.

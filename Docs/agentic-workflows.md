@@ -26,6 +26,7 @@ These catalogue workflows were added from `githubnext/agentics` and compiled int
 - `daily-perf-improver` — proposes performance improvements over time
 - `repository-quality-improver` — raises focused quality-analysis issues
 - `ci-doctor` — investigates failures in the installed automation workflows
+- `agentics-maintenance` — scheduled workflow that closes expired issues, pull requests, and discussions, and supports `disable`/`enable`/`update`/`upgrade` maintenance operations via `workflow_dispatch`
 
 ## Issue planning team
 

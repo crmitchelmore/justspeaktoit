@@ -1,0 +1,15 @@
+{
+  "last_run": "2026-03-25",
+  "run_id": "23534615026",
+  "tasks_done": ["task1","task2","task3","task7"],
+  "commands": {
+    "test": "swift test (make test), macOS only",
+    "coverage": "swift test --enable-code-coverage",
+    "lint": "swift package plugin swiftlint --strict --target SpeakApp"
+  },
+  "notes": ["Tests need macOS runner (os_unfair_lock/os.log)","Naming: testX_condition_expected()"],
+  "prs": [{"branch":"test-assist/audio-buffer-pool","status":"open","date":"2026-03-25"}],
+  "backlog": ["AnyCodable encode/decode","APIKeyValidationDebugSnapshot auto-redact","OpenClawTypes Codable"],
+  "cursor": "AnyCodable",
+  "task_last_run": {"t1":"2026-03-25","t2":"2026-03-25","t3":"2026-03-25","t4":null,"t5":null,"t6":null,"t7":"2026-03-25"}
+}

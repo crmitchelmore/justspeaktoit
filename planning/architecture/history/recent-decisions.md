@@ -42,3 +42,6 @@ Plan extends the existing `gh-aw` `issue-planning-*` agent pattern with `pr-revi
 
 ## 2026-03-25 — PR #161 bootstrapping constraint
 PR #161 implements the plan-review lane but was opened before its planning issue #162 was created. Architecture blocked merge pending: (1) `Plan issue: #162` added to PR body, (2) issue #162 reaches `planning:ready-for-dev`. This establishes a precedent: even self-referential workflow PRs must link an approved plan issue before merging.
+
+## 2026-03-25 — Issue #174: Port career-framework agentic workflow pattern
+Architecture-approved. All changes are `.github/`-scoped (no app code). Key coupling: `bot-follow-up` explicitly dispatches all roles when `### 🗂️ Planning Kickoff` comment lands. Kickoff removal requires removing that explicit dispatch block since all role workflows already fire on `issues: [opened]`. Product must absorb label-seeding responsibility on first open pass.

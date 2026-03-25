@@ -18,3 +18,6 @@ Live throwaway-branch test showed `PUT /repos/{owner}/{repo}/contents/{path}` pr
 
 ## 2026-03-25 — PR #161 (plan-review lane for PRs)
 Blocked: no linked planning issue. Implementation looks clean (fork guard, least-privilege permissions, prompt injection defence in agent runtime). Primary blocker is governance — the PR that introduces the `Plan issue:` requirement doesn't include one itself.
+
+## 2026-03-25 — Issue #162 (plan-linked PR review lane)
+Approved on first review. Scope is CI/workflow automation — no user data or secrets. Four implementation guardrails noted: (1) validate Plan issue number against actual approval labels, not just parse; (2) use `pull_request` not `pull_request_target` for fork PRs; (3) ready-to-merge label writable by workflow only; (4) prompt injection defence in PR review agents. Prior PR #161 implementation already addressed most of these.

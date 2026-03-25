@@ -39,3 +39,6 @@ Approved. Implementation matches issue #174 plan exactly: fork guard on all PR w
 
 ## 2026-03-25 — Issue #176 (document default-branch proof pattern)
 Documentation-only change to agentic-workflows.md. Approved immediately: no code, no new attack surface, no trust boundaries. The documented proof pattern (validate on main post-merge) is a security-positive practice worth encouraging.
+
+## 2026-03-25 — PR #177 (docs: default-branch proof pattern)
+Approved immediately. Documentation-only change to `Docs/agentic-workflows.md` linked to pre-approved issue #176. No code, no attack surface, no trust boundaries. Matches approved plan exactly.

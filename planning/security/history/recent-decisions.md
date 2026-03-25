@@ -33,3 +33,6 @@ Blocked on one question: PR plan-review reconcile with `issue_comment` trigger �
 
 ## 2026-03-25 — Issue #174: Approved (both blockers resolved by maintainer)
 PR reconcile: label-state-only decision (no comment parsing for merge-readiness). Permissions: `contents: read`, `issues: write`, `pull-requests: write`. `issue_comment` trigger is idempotent nudge only. Atomic removal avoids double-fire window. Named persona files copied from career-framework — same isolation pattern, low risk.
+
+## 2026-03-25 — PR #175 (port final career-framework agentic pattern)
+Approved. Implementation matches issue #174 plan exactly: fork guard on all PR workflows, `permissions: {}` top-level with least-privilege job overrides, reconcile is label-state-only, direct Product-validation-on-open replaces triage overlap, named personas (Priya Shah) added to security agent. No new attack surface; workflow-only changes.

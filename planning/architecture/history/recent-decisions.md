@@ -16,3 +16,7 @@ Maintainer raised the bar from "workflow validation" to "portable pattern for or
 ## 2026-03-25 — Issue #149: final approval
 
 All five planning roles approved. Architecture unblocked after Security approved (resolving signed-commit audit concern for Contents API approach). Issue marked ready-for-dev.
+
+## 2026-03-25 — Issue #157: reached ready-for-dev
+
+All five roles approved. Code Quality confirmed implementation boundary: `CaptureHealthSnapshot` as plain struct in SpeakApp, updated via `HUDManager.updateCaptureHealth(_:)` from MainManager bindings. No high-frequency paths, no separate monitor object, categorical mapping before HUD. Aligns with architecture recommendation. Issue marked ready-for-dev.

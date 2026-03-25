@@ -22,7 +22,7 @@
 #
 # Performance reviewer for issue planning discussions
 #
-# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"b84ce33111c79ede4fe9235ec9d3ddd990bef5e1996f60041ab62a54e48e7d4c","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
+# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"d3539418c06dd2817a54355475cac1818a096c1cc9d859e912a93909e0a28c2b","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
 
 name: "Issue Planning - Performance"
 "on":
@@ -36,6 +36,7 @@ name: "Issue Planning - Performance"
     - reopened
     - edited
   # skip-bots: # Skip-bots processed as bot check in pre-activation job
+  # - github-actions # Skip-bots processed as bot check in pre-activation job
   # - copilot # Skip-bots processed as bot check in pre-activation job
   # - dependabot # Skip-bots processed as bot check in pre-activation job
   # - renovate # Skip-bots processed as bot check in pre-activation job
@@ -1075,7 +1076,7 @@ jobs:
         id: check_skip_bots
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
-          GH_AW_SKIP_BOTS: copilot,dependabot,renovate
+          GH_AW_SKIP_BOTS: github-actions,copilot,dependabot,renovate
           GH_AW_WORKFLOW_NAME: "Issue Planning - Performance"
         with:
           script: |

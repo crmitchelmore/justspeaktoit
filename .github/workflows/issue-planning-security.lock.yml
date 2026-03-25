@@ -22,7 +22,7 @@
 #
 # Security reviewer for issue planning discussions
 #
-# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"23e1b3f4fd86d041d3686a119f6c6796d2efc3447a7928bc56a91b6935030aff","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
+# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"5e663508876f61ef59f23a929798cc2b8a336e1c01b34c03865a6c2f9d971479","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
 
 name: "Issue Planning - Security"
 "on":
@@ -36,6 +36,7 @@ name: "Issue Planning - Security"
     - reopened
     - edited
   # skip-bots: # Skip-bots processed as bot check in pre-activation job
+  # - github-actions # Skip-bots processed as bot check in pre-activation job
   # - copilot # Skip-bots processed as bot check in pre-activation job
   # - dependabot # Skip-bots processed as bot check in pre-activation job
   # - renovate # Skip-bots processed as bot check in pre-activation job
@@ -1075,7 +1076,7 @@ jobs:
         id: check_skip_bots
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
-          GH_AW_SKIP_BOTS: copilot,dependabot,renovate
+          GH_AW_SKIP_BOTS: github-actions,copilot,dependabot,renovate
           GH_AW_WORKFLOW_NAME: "Issue Planning - Security"
         with:
           script: |

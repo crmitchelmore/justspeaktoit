@@ -10,7 +10,7 @@ on:
         description: "Issue number to initialise"
         required: true
         type: string
-  skip-bots: [copilot, dependabot, renovate]
+  skip-bots: [github-actions, copilot, dependabot, renovate]
 
 if: github.event_name == 'workflow_dispatch' || github.event.issue.pull_request == null
 

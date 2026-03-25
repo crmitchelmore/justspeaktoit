@@ -22,7 +22,7 @@
 #
 # Code Quality reviewer for issue planning discussions
 #
-# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"0905eea913109e5568ce3d481f5dd5e9412daaf14fc4686cd58c89d7bcfb7613","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
+# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"9747b15fa053becc3c2e9ab3e2e8338b473cf5901249cb6adaf2195065ee17d5","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
 
 name: "Issue Planning - Code Quality"
 "on":
@@ -36,6 +36,7 @@ name: "Issue Planning - Code Quality"
     - reopened
     - edited
   # skip-bots: # Skip-bots processed as bot check in pre-activation job
+  # - github-actions # Skip-bots processed as bot check in pre-activation job
   # - copilot # Skip-bots processed as bot check in pre-activation job
   # - dependabot # Skip-bots processed as bot check in pre-activation job
   # - renovate # Skip-bots processed as bot check in pre-activation job
@@ -1075,7 +1076,7 @@ jobs:
         id: check_skip_bots
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
-          GH_AW_SKIP_BOTS: copilot,dependabot,renovate
+          GH_AW_SKIP_BOTS: github-actions,copilot,dependabot,renovate
           GH_AW_WORKFLOW_NAME: "Issue Planning - Code Quality"
         with:
           script: |

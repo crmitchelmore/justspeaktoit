@@ -15,3 +15,7 @@ Three blockers raised: (1) ownership shape for health state vs. recording state 
 - Event-driven refreshes on exactly three publishers (permissions, device, model) — no polling
 - Dedicated `updateCaptureHealth(_:)` method enforces clean call sites
 - Key quality rule: plain struct with value semantics = trivially unit-testable without mocking
+
+## 2026-03-25 — Issue #149: Contents API correction
+
+Live throwaway-branch test showed `PUT /repos/{owner}/{repo}/contents/{path}` produced `verified: false`, `reason: unsigned` here. Do not treat Contents API writes as a signed-commit-safe default. For strict repos, prefer workflow commit signing as the portable default, with branch exemption as a repo-local fallback when governance allows it.

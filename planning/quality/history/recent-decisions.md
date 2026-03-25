@@ -46,3 +46,6 @@ Maintainer clarification resolved all three blockers: two-phase smoke-test proto
 
 ## 2026-03-25 — PR #175: Approved (first pass)
 Workflow/docs only PR. Redundant triage layer removed atomically. PR review guard improved to API-based `pull_request != null` check. Named personas added. No Swift code changes — no test coverage needed. Pattern: workflow-only PRs that deliver exactly the approved plan scope need no quality blockers.
+
+## 2026-03-25 — PR #177: Approved (first pass)
+Docs-only PR delivering exactly what issue #176 approved. 3-step proof pattern with concrete repository example. Zero implementation surface — no test coverage needed. Pattern: docs-only PRs that precisely match the approved plan scope are approved immediately.

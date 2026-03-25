@@ -49,3 +49,6 @@ Workflow/docs only PR. Redundant triage layer removed atomically. PR review guar
 
 ## 2026-03-25 — PR #177: Approved (first pass)
 Docs-only PR delivering exactly what issue #176 approved. 3-step proof pattern with concrete repository example. Zero implementation surface — no test coverage needed. Pattern: docs-only PRs that precisely match the approved plan scope are approved immediately.
+
+## 2026-03-25 — Issue #180: Approved (first pass)
+Workflow guard tightening. State == 'open' check added to issue_comment path. Key guardrail: each .lock.yml has the guard at TWO locations (main job if: and pre_activation job if:). Dispatcher has one. 11 occurrences total. Pattern: workflow-only changes with verifiable YAML output approve on first pass.

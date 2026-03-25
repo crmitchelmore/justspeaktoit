@@ -12,3 +12,7 @@ All data sources (PermissionsManager, AudioInputDeviceManager, AppSettings, Mode
 ## 2026-03-25 — Issue #149: portable planning-memory topology
 
 Maintainer raised the bar from "workflow validation" to "portable pattern for orgs with signed-commit rulesets". Architecture position: prefer Contents API writes (GitHub-verified by default) over branch exemptions or dedicated repos for single-repo cases. Dedicated repo is the right upgrade path at ≥3 repos. Decision rule: switch persistence mechanism before topology.
+
+## 2026-03-25 — Issue #157: architecture approval confirmed, awaiting Code Quality
+
+Architecture approved the HUD capture-health plan after maintainer confirmed three Combine-based refresh triggers (no polling) and plain-struct value semantics. Maintainer then directed Code Quality to respond. Architecture stance unchanged — no follow-up comment needed.

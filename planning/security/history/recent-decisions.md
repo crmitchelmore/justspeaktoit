@@ -27,3 +27,6 @@ Issue #162 identified as the retroactive plan for PR #161. PR still blocked: bod
 
 ## 2026-03-25 — PR #161 final state confirmed
 All prior security blockers resolved: `Plan issue: #162` in PR body; issue #162 is `planning:ready-for-dev` with all five approvals. `plan-review:security-approved` already applied. Quality is the only remaining hold.
+
+## 2026-03-25 — Issue #174 (career-framework workflow port)
+Blocked on one question: PR plan-review reconcile with `issue_comment` trigger — need confirmation it determines merge-readiness from label state only, not from comment content, and runs with least-privilege. Private repo + triage removal noted as low concern. Persona memory files assessed as low risk (same isolation pattern).

@@ -49,3 +49,7 @@ Architecture-approved. All changes are `.github/`-scoped (no app code). Key coup
 ## 2026-03-25 — PR #175 architecture-approved
 
 PR #175 ports the final career-framework agentic workflow pattern. Zero app code changes — all `.github/`-scoped. Plan issue #174 was `planning:ready-for-dev` with prior architecture approval. Implementation matched approved design exactly: product-validation-on-open, `/doit` command, named persona agents, PR review lane with reconcile. Approved first pass.
+
+## 2026-03-25 — PR #177 architecture-approved
+
+Docs-only PR updating `Docs/agentic-workflows.md` with the three-step branch-proof pattern. Plan issue #176 was `planning:ready-for-dev` with all roles approved. Diff matched acceptance criteria exactly (branch steps in step 1-2, post-merge steps in step 3, concrete self-referential example). Approved first pass.

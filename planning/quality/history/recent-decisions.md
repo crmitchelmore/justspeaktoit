@@ -52,3 +52,6 @@ Docs-only PR delivering exactly what issue #176 approved. 3-step proof pattern w
 
 ## 2026-03-25 — Issue #180: Approved (first pass)
 Workflow guard tightening. State == 'open' check added to issue_comment path. Key guardrail: each .lock.yml has the guard at TWO locations (main job if: and pre_activation job if:). Dispatcher has one. 11 occurrences total. Pattern: workflow-only changes with verifiable YAML output approve on first pass.
+
+## 2026-03-25 — PR #181
+Workflow-only guard fix (closed-PR comments). Lock files + source .md files both updated; guard consistent across all 6 changed files. Approved on first pass — plan scope exact match, no implementation surface concerns.

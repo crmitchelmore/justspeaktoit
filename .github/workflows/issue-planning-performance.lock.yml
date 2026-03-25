@@ -22,7 +22,7 @@
 #
 # Performance reviewer for issue planning discussions
 #
-# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"d82d26158c7c83032572f82587ea0e345758b8bafe6178da189f608ab1cf4652","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
+# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"a49d3ea9ba79a4f124120f063dead887040c13cb2fd67dfbf1f3b8f7673ed263","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
 
 name: "Issue Planning - Performance"
 "on":
@@ -1052,7 +1052,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event.issue.pull_request == null
     runs-on: ubuntu-slim
     outputs:
-      activated: ${{ github.event_name == 'workflow_dispatch' || ((steps.check_membership.outputs.is_team_member == 'true') && (steps.check_skip_bots.outputs.skip_bots_ok == 'true')) }}
+      activated: ${{ (steps.check_membership.outputs.is_team_member == 'true') && (steps.check_skip_bots.outputs.skip_bots_ok == 'true') }}
       matched_command: ''
     steps:
       - name: Setup Scripts

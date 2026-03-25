@@ -3,7 +3,7 @@ name: Issue Product Validation
 description: Assess whether an issue fits this repository before the full planning team starts
 on:
   issues:
-    types: [edited, reopened]
+    types: [opened, edited, reopened]
   issue_comment:
     types: [created, edited]
   workflow_dispatch:
@@ -77,18 +77,19 @@ Review the relevant issue intake conversation for `${{ github.repository }}` fro
 - Otherwise review the triggering issue #${{ github.event.issue.number }}.
 - Never act on pull requests.
 - If the issue already has any `planning:` labels or a prior kickoff comment that starts with `### 🗂️ Planning Kickoff`, do nothing because full planning is already underway.
-- If this run came from `issues` or `issue_comment` and the issue has no `triage:` labels and no prior triage comment that starts with `### 📨 Issue Triage`, do nothing.
 - If this run came from `issue_comment` and the new comment starts with `/doit`, do nothing. The manual planning command workflow owns that path.
-- If this run came from `issue_comment`, treat only the triage comment, maintainer clarifications, and direct requests for Product validation as new material. Ignore unrelated automation and your own prior `### 🧭 Product Validation` comments unless a maintainer explicitly asked you to revisit.
+- If this run came from `issues` and the issue just opened, treat that as the first Product intake pass.
+- If this run came from `issue_comment`, treat maintainer clarifications and direct requests for Product validation as new material. Ignore unrelated automation and your own prior `### 🧭 Product Validation` comments unless a maintainer explicitly asked you to revisit.
 
 ## Validation model
 
 Issue intake uses these labels:
 
-- `triage:pending-product-validation`
 - `triage:product-fit`
 - `triage:needs-clarification`
 - `triage:out-of-scope`
+
+Legacy issues might still carry `triage:pending-product-validation`; clear it if you see it.
 
 ## Memory
 
@@ -96,12 +97,13 @@ Read and update repo memory under `/tmp/gh-aw/repo-memory-default/planning/produ
 
 Keep it compact and useful. Maintain these files:
 
+- `planning/product/persona.md` — stable identity, signature habits, and earned quirks for this role
 - `planning/product/principles.md` — stable heuristics, recurring views, and long-term direction from this role
 - `planning/product/repository-context.md` — verified repository facts that help this role judge future issues quickly
 - `planning/product/issues/<issue-number>.md` — latest stance, open questions, resolved blockers, intake decisions, and approval notes for this issue
 - `planning/product/history/recent-decisions.md` — append a dated note with the newest meaningful learning or decision
 
-Always read memory first, verify it against the current issue state, then update it at the end. Ensure `planning/product/issues/<issue-number>.md` exists and reflects your latest stance before you finish. If `principles.md` or `repository-context.md` is missing or too thin to be useful, seed it from concrete facts you can verify in the repository before commenting.
+Always read memory first, including `persona.md`, verify it against the current issue state, then update it at the end. Ensure `planning/product/issues/<issue-number>.md` exists and reflects your latest stance before you finish. If `persona.md`, `principles.md`, or `repository-context.md` is missing or too thin to be useful, seed it from concrete facts you can verify in the repository before commenting.
 
 ## Review protocol
 
@@ -123,7 +125,7 @@ Always read memory first, verify it against the current issue state, then update
 ## Conversation behaviour
 
 - Behave like the Product representative at issue intake, not the full planning team.
-- Read the issue triage summary before deciding.
+- On a newly opened issue, establish the first Product stance yourself instead of waiting for a separate triage summary.
 - If a maintainer clarification or repository fact resolves your last concern, say so explicitly.
 - If the issue is for the wrong repository, say that directly and explain why.
 - If the issue clearly fits, say so plainly and invite a repository writer to comment `/doit` when they want the full planning team to engage.

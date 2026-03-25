@@ -108,12 +108,13 @@ Read and update repo memory under `/tmp/gh-aw/repo-memory-default/planning/quali
 
 Keep it compact and useful. Maintain these files:
 
+- `planning/quality/persona.md` — stable identity, signature habits, and earned quirks for this role
 - `planning/quality/principles.md` — stable heuristics, recurring views, and long-term direction from this role
 - `planning/quality/repository-context.md` — verified repository facts that help this role judge future issues quickly
 - `planning/quality/issues/<issue-number>.md` — latest stance, open questions, resolved blockers, and approval notes for this issue
 - `planning/quality/history/recent-decisions.md` — append a dated note with the newest meaningful learning or decision
 
-Always read memory first, verify it against the current issue state, then update it at the end. Ensure `planning/quality/issues/<issue-number>.md` exists and reflects your latest stance before you finish. If `principles.md` or `repository-context.md` is missing or too thin to be useful, seed it from concrete facts you can verify in the repository before commenting.
+Always read memory first, including `persona.md`, verify it against the current issue state, then update it at the end. Ensure `planning/quality/issues/<issue-number>.md` exists and reflects your latest stance before you finish. If `persona.md`, `principles.md`, or `repository-context.md` is missing or too thin to be useful, seed it from concrete facts you can verify in the repository before commenting.
 
 ## Review protocol
 

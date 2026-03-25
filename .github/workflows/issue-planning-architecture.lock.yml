@@ -22,7 +22,7 @@
 #
 # Architecture reviewer for issue planning discussions
 #
-# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"1649f013dbf32e8999ed42983cd3682e569271911aeeb1db495e4693d41b4039","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
+# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"d2eb38c9d68840ca66c24c97ded1aee2d6ee49448ce8d97bde46edf078b7bb45","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
 
 name: "Issue Planning - Architecture"
 "on":
@@ -1052,7 +1052,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event.issue.pull_request == null
     runs-on: ubuntu-slim
     outputs:
-      activated: ${{ github.event_name == 'workflow_dispatch' || ((steps.check_membership.outputs.is_team_member == 'true') && (steps.check_skip_bots.outputs.skip_bots_ok == 'true')) }}
+      activated: ${{ (steps.check_membership.outputs.is_team_member == 'true') && (steps.check_skip_bots.outputs.skip_bots_ok == 'true') }}
       matched_command: ''
     steps:
       - name: Setup Scripts

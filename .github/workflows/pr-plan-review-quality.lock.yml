@@ -22,7 +22,7 @@
 #
 # Code Quality reviewer for PR plan-review discussions
 #
-# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"e3a4ef34313e433dc78f76bf6e6f0d7edaaa15972deadfb1a5b826a88bd6ad25","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
+# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"3f44697ff12896b6d8bbb0c12867d6184d5cdaca8444642e55dc23e71b66db91","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
 
 name: "PR Plan Review - Code Quality"
 "on":
@@ -61,8 +61,9 @@ jobs:
   activation:
     needs: pre_activation
     if: >
-      (needs.pre_activation.outputs.activated == 'true') && ((github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || (github.event_name == 'issue_comment' && contains(github.event.issue.html_url, '/pull/'))) && ((github.event_name != 'pull_request') ||
-      (github.event.pull_request.head.repo.id == github.repository_id)))
+      (needs.pre_activation.outputs.activated == 'true') && ((github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'pull_request' || (github.event_name == 'issue_comment' && github.event.issue.pull_request != null)) &&
+      ((github.event_name != 'pull_request') || (github.event.pull_request.head.repo.id == github.repository_id)))
     runs-on: ubuntu-slim
     permissions:
       contents: read
@@ -1058,8 +1059,8 @@ jobs:
 
   pre_activation:
     if: >
-      (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || (github.event_name == 'issue_comment' && contains(github.event.issue.html_url, '/pull/'))) &&
-      ((github.event_name != 'pull_request') || (github.event.pull_request.head.repo.id == github.repository_id))
+      (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || (github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request != null)) && ((github.event_name != 'pull_request') || (github.event.pull_request.head.repo.id == github.repository_id))
     runs-on: ubuntu-slim
     outputs:
       activated: ${{ (steps.check_membership.outputs.is_team_member == 'true') && (steps.check_skip_bots.outputs.skip_bots_ok == 'true') }}
@@ -1232,4 +1233,3 @@ jobs:
           name: safe-output-items
           path: /tmp/gh-aw/safe-output-items.jsonl
           if-no-files-found: ignore
-

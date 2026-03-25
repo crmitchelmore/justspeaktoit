@@ -22,7 +22,7 @@
 #
 # Assess whether an issue fits this repository before the full planning team starts
 #
-# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"893d0aff434d5068b27e5d709b332ba3ed7e8370144337c4ab3e57b3a703335b","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
+# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"4a6eea0a7f116eabf80009a52e990e8c3b73a408874d686ef1c9e64459c59d7a","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
 
 name: "Issue Product Validation"
 "on":
@@ -32,6 +32,7 @@ name: "Issue Product Validation"
     - edited
   issues:
     types:
+    - opened
     - edited
     - reopened
   # skip-bots: # Skip-bots processed as bot check in pre-activation job

@@ -22,7 +22,7 @@
 #
 # Product reviewer for issue planning discussions
 #
-# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"13b9ce8c9dd6c04f0414d71e7115eb6b8585272d2cff2a2bb8a581825c3e914e","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
+# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"8f660ba9f2198b2b3321a16d28f19ff851a7a6db0dacd791865dec4bf9e9fc36","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
 
 name: "Issue Planning - Product"
 "on":
@@ -1052,7 +1052,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event.issue.pull_request == null
     runs-on: ubuntu-slim
     outputs:
-      activated: ${{ github.event_name == 'workflow_dispatch' || ((steps.check_membership.outputs.is_team_member == 'true') && (steps.check_skip_bots.outputs.skip_bots_ok == 'true')) }}
+      activated: ${{ (steps.check_membership.outputs.is_team_member == 'true') && (steps.check_skip_bots.outputs.skip_bots_ok == 'true') }}
       matched_command: ''
     steps:
       - name: Setup Scripts

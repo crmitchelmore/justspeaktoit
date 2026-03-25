@@ -14,7 +14,7 @@ on:
         type: string
   skip-bots: [github-actions, copilot, dependabot, renovate]
 
-if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || (github.event_name == 'issue_comment' && contains(github.event.issue.html_url, '/pull/')) }}
+if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || (github.event_name == 'issue_comment' && github.event.issue.pull_request != null) }}
 
 permissions:
   contents: read
@@ -108,13 +108,14 @@ Read and update repo memory under `/tmp/gh-aw/repo-memory-default/planning/produ
 
 Keep it compact and useful. Maintain these files:
 
+- `planning/product/persona.md` — stable identity, signature habits, and earned quirks for this role
 - `planning/product/principles.md` — stable heuristics, recurring views, and long-term direction from this role
 - `planning/product/repository-context.md` — verified repository facts that help this role judge future work quickly
 - `planning/product/issues/<issue-number>.md` — approved issue-plan stance, open scope notes, and planning blockers for a linked issue
 - `planning/product/pull-requests/<pr-number>.md` — implementation alignment, deviations, review blockers, and merge notes for this PR
 - `planning/product/history/recent-decisions.md` — append a dated note with the newest meaningful learning or decision
 
-Always read memory first. Ensure `planning/product/pull-requests/<pr-number>.md` exists and reflects your latest stance before you finish. If the PR links an approved planning issue, read that issue file and the PR file together, then update both at the end. If `principles.md` or `repository-context.md` is missing or too thin to be useful, seed it from concrete facts you can verify in the repository before commenting.
+Always read memory first, including `persona.md`. Ensure `planning/product/pull-requests/<pr-number>.md` exists and reflects your latest stance before you finish. If the PR links an approved planning issue, read that issue file and the PR file together, then update both at the end. If `persona.md`, `principles.md`, or `repository-context.md` is missing or too thin to be useful, seed it from concrete facts you can verify in the repository before commenting.
 
 ## Review protocol
 

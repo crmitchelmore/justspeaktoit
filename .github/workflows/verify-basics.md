@@ -23,6 +23,7 @@ tools:
 network: defaults
 
 safe-outputs:
+  report-failure-as-issue: false
   add-comment:
 
 ---

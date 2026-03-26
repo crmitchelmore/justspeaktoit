@@ -33,6 +33,7 @@ tools:
     allowed-extensions: [".md", ".json"]
 
 safe-outputs:
+  report-failure-as-issue: false
   add-comment:
     max: 1
     target: "*"

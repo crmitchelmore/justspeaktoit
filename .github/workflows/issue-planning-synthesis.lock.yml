@@ -22,7 +22,7 @@
 #
 # Summarise multi-role planning discussion and post a unified team view
 #
-# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"7726071d927de2280d60e48ed8b77949f43b73f782a47ab96d492d014cc17f2d","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
+# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"ef332f41c17c60203844258552830115a68ac6cbb6e1d931eec4150bdb753bfc","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
 
 name: "Issue Planning - Synthesis"
 "on":
@@ -944,7 +944,7 @@ jobs:
           GH_AW_REPO_MEMORY_VALIDATION_ERROR_default: ${{ needs.push_repo_memory.outputs.validation_error_default }}
           GH_AW_REPO_MEMORY_PATCH_SIZE_EXCEEDED_default: ${{ needs.push_repo_memory.outputs.patch_size_exceeded_default }}
           GH_AW_GROUP_REPORTS: "false"
-          GH_AW_FAILURE_REPORT_AS_ISSUE: "true"
+          GH_AW_FAILURE_REPORT_AS_ISSUE: "false"
           GH_AW_TIMEOUT_MINUTES: "10"
         with:
           github-token: ${{ secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}

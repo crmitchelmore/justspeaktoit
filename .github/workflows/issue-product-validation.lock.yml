@@ -22,7 +22,7 @@
 #
 # Assess whether an issue fits this repository before the full planning team starts
 #
-# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"4a6eea0a7f116eabf80009a52e990e8c3b73a408874d686ef1c9e64459c59d7a","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
+# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"4e2886d9b263c0213b8c0fdd4448f6fbe238ca67ca244a32b5952b0f99bdf90b","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
 
 name: "Issue Product Validation"
 "on":
@@ -1021,7 +1021,7 @@ jobs:
           GH_AW_REPO_MEMORY_VALIDATION_ERROR_default: ${{ needs.push_repo_memory.outputs.validation_error_default }}
           GH_AW_REPO_MEMORY_PATCH_SIZE_EXCEEDED_default: ${{ needs.push_repo_memory.outputs.patch_size_exceeded_default }}
           GH_AW_GROUP_REPORTS: "false"
-          GH_AW_FAILURE_REPORT_AS_ISSUE: "true"
+          GH_AW_FAILURE_REPORT_AS_ISSUE: "false"
           GH_AW_TIMEOUT_MINUTES: "15"
         with:
           github-token: ${{ secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}

@@ -20,6 +20,7 @@ tools:
       key: improvement-coordinator-${{ github.workflow }}
 
 safe-outputs:
+  report-failure-as-issue: false
   create-issue:
     max: 1
     labels: [automation, coordination]

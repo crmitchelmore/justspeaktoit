@@ -24,7 +24,7 @@
 #
 # Source: githubnext/agentics/workflows/repository-quality-improver.md@4957663821dbb3260348084fa2f1659701950fef
 #
-# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"83dc9495566842663ece232650bd36d6e684bb3b517a197566d5aff3f2f0595b","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
+# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"0be5c1eebb85b82d478c07a29b9fe150afaf2f9d900cf56c04dc477aea4fb090","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
 
 name: "Repository Quality Improver"
 "on":
@@ -949,7 +949,7 @@ jobs:
           GH_AW_INFERENCE_ACCESS_ERROR: ${{ needs.agent.outputs.inference_access_error }}
           GH_AW_LOCKDOWN_CHECK_FAILED: ${{ needs.activation.outputs.lockdown_check_failed }}
           GH_AW_GROUP_REPORTS: "false"
-          GH_AW_FAILURE_REPORT_AS_ISSUE: "true"
+          GH_AW_FAILURE_REPORT_AS_ISSUE: "false"
           GH_AW_TIMEOUT_MINUTES: "20"
         with:
           github-token: ${{ secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}

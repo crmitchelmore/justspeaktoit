@@ -26,6 +26,7 @@ tools:
     repos: all
 
 safe-outputs:
+  report-failure-as-issue: false
   mentions: false
   allowed-github-references: []
   create-issue:

@@ -22,7 +22,7 @@
 #
 # Manually audit ready-for-development state for a specific issue
 #
-# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"27bccdd943308b949c7d8b1da3dcb1a9f703c4479b56793d0f5b481e4307fd69","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
+# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"3e03a9a9ecad3e2495687b7363f6d06155db50792a17e6974fd6b2f832571dc0","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
 
 name: "Issue Planning - Ready Check"
 "on":
@@ -944,7 +944,7 @@ jobs:
           GH_AW_INFERENCE_ACCESS_ERROR: ${{ needs.agent.outputs.inference_access_error }}
           GH_AW_LOCKDOWN_CHECK_FAILED: ${{ needs.activation.outputs.lockdown_check_failed }}
           GH_AW_GROUP_REPORTS: "false"
-          GH_AW_FAILURE_REPORT_AS_ISSUE: "true"
+          GH_AW_FAILURE_REPORT_AS_ISSUE: "false"
           GH_AW_TIMEOUT_MINUTES: "10"
         with:
           github-token: ${{ secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}

@@ -22,7 +22,7 @@
 #
 # Check for open improvement PRs before daily agents run to prevent duplicates
 #
-# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"54c45e1f13ddd864657ecf08604e043b0743e1ca1e6f3bf81e5ee99894f4fee2","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
+# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"0d3fc717ad6b455d7fc1096f0e1477cdd524c38358f7a87b3c730fb67aeec3c5","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
 
 name: "Improvement Coordinator"
 "on":
@@ -940,7 +940,7 @@ jobs:
           GH_AW_INFERENCE_ACCESS_ERROR: ${{ needs.agent.outputs.inference_access_error }}
           GH_AW_LOCKDOWN_CHECK_FAILED: ${{ needs.activation.outputs.lockdown_check_failed }}
           GH_AW_GROUP_REPORTS: "false"
-          GH_AW_FAILURE_REPORT_AS_ISSUE: "true"
+          GH_AW_FAILURE_REPORT_AS_ISSUE: "false"
           GH_AW_TIMEOUT_MINUTES: "10"
         with:
           github-token: ${{ secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}

@@ -17,6 +17,7 @@ tools:
     toolsets: [default, issues]
 
 safe-outputs:
+  report-failure-as-issue: false
   add-comment:
     max: 20
     target: "*"

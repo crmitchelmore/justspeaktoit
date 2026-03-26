@@ -25,7 +25,8 @@ tools:
     max-patch-size: 65536
     allowed-extensions: [".md", ".json"]
 
-safe-outputs: {}
+safe-outputs:
+  report-failure-as-issue: false
 
 timeout-minutes: 15
 engine: copilot

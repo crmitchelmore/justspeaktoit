@@ -51,3 +51,6 @@ Blocked on missing linked plan issue. Permissions and fork guards are consistent
 
 ## 2026-03-26 — PR #188 (add Riley Tan Design reviewer)
 Blocked on missing linked plan issue. Same pattern as PR #186. Implementation is clean: `permissions: {}` top-level, least-privilege job overrides, fork guard in lock.yml, `COPILOT_GITHUB_TOKEN` usage consistent with established pattern. The new design workflows mirror existing role workflows exactly. Primary blocker is governance — missing `Plan issue: #<n>` in PR body. PR #188 also incorporates the AgenTek improvements from PR #186 (which was closed without merge for the same reason).
+
+## 2026-03-26 — PR #191 (disable failure issue creation on all workflows)
+Blocked on missing linked plan issue. The change itself is security-neutral: pure noise-reduction config (`GH_AW_FAILURE_REPORT_AS_ISSUE: false`) applied consistently to all 31 workflows. No permissions, trust boundaries, or auth changes. Blocker is governance only.

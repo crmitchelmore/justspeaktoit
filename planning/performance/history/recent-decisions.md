@@ -49,3 +49,6 @@ Pure CI/agentic-workflow change (new planning roles, persona enrichment, inter-a
 
 ## 2026-03-26 — PR #188 (add Riley Tan Design/UX role)
 Pure CI/agentic-workflow change. No runtime code. Blocked on missing linked planning issue — same as PR #186. Fan-out increases 7→8 workflow runs/event; acceptable. Will approve immediately once a planning:ready-for-dev issue link is provided.
+
+## 2026-03-26 — PR #191 (disable failure issue creation on all workflows)
+Pure CI/workflow change. No runtime code. Blocked on missing linked planning issue — same class as PR #186/#188. Will approve immediately once planning:ready-for-dev issue link is provided. No app performance concern.

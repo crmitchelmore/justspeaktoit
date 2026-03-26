@@ -267,3 +267,70 @@ Use this recovery path:
 4. Let `PR Plan Review - Reconcile State` normalise the labels back to `plan-review:ready-to-merge` once all five approvals converge again.
 
 This recovery path re-runs the normal plan-review gate; it does not bypass or weaken it. PR plan-review role workflows should only respond on pull-request threads, while issue-planning threads should stay limited to the five issue-planning reviewers.
+
+## Operational workflows
+
+Beyond the planning and review loops, these workflows maintain the health and coordination of the agentic system itself.
+
+### Planning team synthesis
+
+When the reconciler transitions an issue to `planning:ready-for-dev`, it dispatches `Issue Planning - Synthesis`. This agent reads all five role comments and posts a single `### 🤝 Planning Team Summary` comment with:
+
+- **Agreements** — points where two or more roles converge
+- **Open tensions** — unresolved trade-offs between roles
+- **Guardrails** — combined non-blocking cautions as an implementer checklist
+- **Implementation brief** — scope summary and recommended first step
+
+The synthesis agent uses the shared `planning/team` memory branch to track recurring tensions and resolved patterns across issues.
+
+### Memory curation (bi-weekly)
+
+`Memory Curator` audits each role's memory:
+
+1. Graduates recurring decisions (3+ appearances) from `recent-decisions.md` to `principles.md`
+2. Prunes one-off decisions older than 60 days
+3. Verifies `repository-context.md` against the actual codebase
+4. Removes closed-issue files once learnings are captured
+5. Cross-pollinates discoveries that affect other roles
+
+### Repository context refresh (weekly)
+
+`Repository Context Refresh` inspects the codebase and updates each role's `repository-context.md` with current tech stack, module structure, data patterns, deployment shape, and agentic system inventory.
+
+### Improvement coordinator (daily)
+
+`Improvement Coordinator` inventories open improvement PRs and issues from the daily agents (test, perf, doc, quality). It detects duplicate scope, stale PRs, and failed checks, and creates a coordination report only when intervention is needed.
+
+### Stale issue cleanup (weekly)
+
+`Stale Issue Cleanup` auto-closes `[aw] ... failed` issues that are older than 7 days with no human engagement, provided the underlying workflow has had a successful run since the failure.
+
+## Shared team memory
+
+The `planning/team` branch holds cross-cutting knowledge that no single role owns:
+
+| File | Purpose |
+|------|---------|
+| `recurring-tensions.md` | Disagreement patterns that recur across issues (≥2 appearances) |
+| `resolved-patterns.md` | Standard agreements the team applies consistently (≥3 appearances) |
+| `issues/<number>.md` | Per-issue synthesis summary |
+
+This branch is read and written by the synthesis agent. Individual role agents read their own branch plus observe the team patterns through cross-role synthesis instructions in their prompts.
+
+## Failure remediation
+
+### Common failure patterns
+
+| Symptom | Likely cause | Fix |
+|---------|-------------|-----|
+| `[aw] ... failed` issues appearing | Cache expiration (7-day TTL) or network timeout | Re-run the failed workflow; `Stale Issue Cleanup` handles noise |
+| Digest mismatch on repo-memory push | Concurrent memory writes from overlapping runs | Re-run; the concurrency group on reconcile prevents most conflicts |
+| Agent output file ENOENT | Cascading failure from cache miss | Clear Actions caches and re-run |
+| Multiple improvement PRs touching same files | Daily agents running without coordination | `Improvement Coordinator` detects this; close duplicates manually |
+
+### Recovery checklist
+
+1. Check whether the failure is transient (one-off) or systemic (repeating across runs).
+2. For transient failures: re-run the workflow and let `Stale Issue Cleanup` close the old failure issue.
+3. For systemic failures: check Actions cache health, verify the `COPILOT_GITHUB_TOKEN` secret is valid, and inspect the CI Doctor's recent reports.
+4. If memory branches have diverged or corrupted, the `Memory Curator` will detect and flag inconsistencies on its next scheduled run.

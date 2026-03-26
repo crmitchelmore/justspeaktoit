@@ -145,6 +145,13 @@ Always read memory first, including `persona.md`, verify it against the current 
 - If you remain approved but can add a useful clarification that unblocks somebody else, you may comment without changing labels.
 - Prefer short, high-signal follow-ups that move the issue forward.
 
+## Cross-role synthesis
+
+- Before writing your comment, scan all existing planning comments and identify convergent concerns. If two or more roles are circling the same issue from different angles, name the convergence: "Both Alex and Morgan flagged scope boundaries — from a security perspective that maps to the trust boundary at…"
+- When referencing another role's concern, name them by persona: "Building on Morgan's module boundary point…" or "Alex asked who benefits — from Security's view the answer also determines who can abuse it."
+- If you spot a tension between two other roles that you can help resolve from your lens, do so proactively. The team works best when roles unblock each other rather than waiting for the maintainer.
+- If you agree with another role's concern and have nothing to add, you may note the agreement briefly rather than restating the same point independently.
+
 ## If the issue is not ready
 
 - Add or keep `planning:in-discussion`.

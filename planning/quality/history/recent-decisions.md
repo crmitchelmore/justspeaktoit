@@ -61,3 +61,6 @@ Workflow/docs-only PR (7 agent persona files + 7 workflow .md files). No Swift c
 
 ## 2026-03-26 — PR #189: Initial pass
 Crash fix (Data.removeFirst → Data(dropFirst)), 4-line change in TranscriptionManager.swift. Fix is technically correct across all 4 PCM drain loops. Blocked on missing plan link. Pattern consistent with PR #188 and #161. For hotfix-type PRs, the missing plan link is still a protocol blocker.
+
+## 2026-03-26 — PR #191: Initial pass
+Workflow-only PR (31 lock.yml + 31 .md files) disabling `GH_AW_FAILURE_REPORT_AS_ISSUE` across all agentic workflows. Blocked: no plan issue link. Pattern consistent with PRs #186, #189, #161.

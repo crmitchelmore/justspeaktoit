@@ -30,7 +30,7 @@ safe-outputs:
     hide-older-comments: true
   add-labels:
     target: "*"
-    max: 6
+    max: 7
     allowed:
       - plan-review:in-discussion
       - plan-review:needs-product
@@ -38,9 +38,10 @@ safe-outputs:
       - plan-review:needs-performance
       - plan-review:needs-quality
       - plan-review:needs-architecture
+      - plan-review:needs-design
   remove-labels:
     target: "*"
-    max: 6
+    max: 7
     allowed:
       - plan-review:ready-to-merge
       - plan-review:product-approved
@@ -48,6 +49,7 @@ safe-outputs:
       - plan-review:performance-approved
       - plan-review:quality-approved
       - plan-review:architecture-approved
+      - plan-review:design-approved
 
 timeout-minutes: 10
 engine: copilot
@@ -67,6 +69,7 @@ Initialise or reset the plan-review state for the selected pull request.
    - `plan-review:needs-performance`
    - `plan-review:needs-quality`
    - `plan-review:needs-architecture`
+   - `plan-review:needs-design`
 4. Remove these labels if present so the pull request cleanly re-enters plan review:
    - `plan-review:ready-to-merge`
    - `plan-review:product-approved`
@@ -74,8 +77,9 @@ Initialise or reset the plan-review state for the selected pull request.
    - `plan-review:performance-approved`
    - `plan-review:quality-approved`
    - `plan-review:architecture-approved`
+   - `plan-review:design-approved`
 5. Leave one short comment starting with `### 🔎 Plan Review Kickoff` that:
-   - explains that Product, Security, Performance, Code Quality, and Architecture reviewers will compare the PR against the approved issue plan and may reply to each other while implementation review is still moving,
+   - explains that Product, Security, Performance, Code Quality, Architecture, and Design reviewers will compare the PR against the approved issue plan and may reply to each other while implementation review is still moving,
    - tells maintainers to include `Plan issue: #<issue-number>` in the PR body, ideally alongside a closing reference such as `Closes #<issue-number>`,
    - tells maintainers to answer unresolved questions in-thread until the team converges on `plan-review:ready-to-merge`,
    - stays concise and operational.

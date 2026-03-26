@@ -8,6 +8,7 @@ on:
       - PR Plan Review - Performance
       - PR Plan Review - Code Quality
       - PR Plan Review - Architecture
+      - PR Plan Review - Design
     types: [completed]
   workflow_dispatch:
     inputs:
@@ -55,6 +56,7 @@ jobs:
               "plan-review:performance-approved": "plan-review:needs-performance",
               "plan-review:quality-approved": "plan-review:needs-quality",
               "plan-review:architecture-approved": "plan-review:needs-architecture",
+              "plan-review:design-approved": "plan-review:needs-design",
           }
 
           def gh_json(*args):
@@ -129,7 +131,7 @@ jobs:
                       "--repo",
                       REPO,
                       "--body",
-                      "### ✅ Plan Review Ready\n\nAll five plan reviewers have approved this pull request against the linked issue plan. `plan-review:ready-to-merge` is now set. If you push more commits or change the intended behaviour, the review lane should reopen.",
+                      "### ✅ Plan Review Ready\n\nAll six plan reviewers have approved this pull request against the linked issue plan. `plan-review:ready-to-merge` is now set. If you push more commits or change the intended behaviour, the review lane should reopen.",
                   )
               elif was_ready and not will_be_ready:
                   gh(

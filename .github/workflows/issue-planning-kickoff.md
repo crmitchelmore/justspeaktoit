@@ -27,7 +27,7 @@ safe-outputs:
     hide-older-comments: true
   add-labels:
     target: "*"
-    max: 7
+    max: 8
     allowed:
       - planning:in-discussion
       - planning:needs-product
@@ -36,9 +36,10 @@ safe-outputs:
       - planning:needs-quality
       - planning:needs-architecture
       - planning:needs-reliability
+      - planning:needs-design
   remove-labels:
     target: "*"
-    max: 12
+    max: 13
     allowed:
       - triage:pending-product-validation
       - triage:product-fit
@@ -51,6 +52,7 @@ safe-outputs:
       - planning:quality-approved
       - planning:architecture-approved
       - planning:reliability-approved
+      - planning:design-approved
 
 timeout-minutes: 10
 engine: copilot
@@ -71,6 +73,7 @@ Initialise or reset the planning state for the selected issue after an explicit 
    - `planning:needs-quality`
    - `planning:needs-architecture`
    - `planning:needs-reliability`
+   - `planning:needs-design`
 4. Remove these labels if present so the issue cleanly enters or re-enters planning:
    - `triage:pending-product-validation`
    - `triage:product-fit`
@@ -83,8 +86,9 @@ Initialise or reset the planning state for the selected issue after an explicit 
    - `planning:quality-approved`
    - `planning:architecture-approved`
    - `planning:reliability-approved`
+   - `planning:design-approved`
 5. Leave one short comment starting with `### 🗂️ Planning Kickoff` that:
-   - explains that Product, Security, Performance, Code Quality, Architecture, and Reliability reviewers will comment in-thread and may reply to each other while the plan is still moving,
+   - explains that Product, Security, Performance, Code Quality, Architecture, Reliability, and Design reviewers will comment in-thread and may reply to each other while the plan is still moving,
    - says this kickoff happened because a repository writer explicitly requested planning,
    - tells maintainers to answer unresolved questions in-thread until the team converges,
    - tells maintainers the issue is ready when `planning:ready-for-dev` appears and the next step is to open a pull request that includes `Plan issue: #<issue-number>` in the body,

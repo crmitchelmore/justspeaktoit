@@ -45,3 +45,6 @@ Approved immediately. Documentation-only change to `Docs/agentic-workflows.md` l
 
 ## 2026-03-25 — PR #181 (ignore closed-PR comments guard)
 Approved. Single-line guard `github.event.issue.state == 'open'` added to all 5 plan-review role workflows and the bot dispatcher. Security-positive: narrows execution scope, no permissions or trust boundary changes. All five approvals were already in place; this run confirmed the prior stance.
+
+## 2026-03-26 — PR #186 (AgenTek planning team improvements)
+Blocked on missing linked plan issue. Permissions and fork guards are consistent with established pattern. Stale-issue-cleanup auto-close (max 20/run) noted as meaningful irreversible action but appropriately scoped to `agentic-workflows` labelled issues with no human engagement.

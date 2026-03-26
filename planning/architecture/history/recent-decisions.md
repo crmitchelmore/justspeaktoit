@@ -68,3 +68,6 @@ Blocked: no linked planning issue. Structural implementation is clean — Design
 
 ## 2026-03-26 — PR #188 merged without architecture approval (second note)
 Follow-up run triggered by comment-id 4133249393. PR already merged to main before architecture approval was granted. No-op per protocol (closed/merged PR). Durable concern: planning lane PRs continue to merge without a linked plan issue and without architecture sign-off. Consider flagging to maintainer that the process is not gating merges.
+
+## 2026-03-26 — PR #191 (disable failure issue creation)
+Blocked: no linked planning issue. Change is purely `.github/`-scoped (31 workflow files, `report-failure-as-issue: false`). Same pattern as PR #186 and #188 — agentic workflow PRs landing without a plan issue. Clean diff, no architectural objection beyond missing linkage.

@@ -59,3 +59,6 @@ Closed-PR guard fix. All `.github/`-scoped. Issue #180 was `planning:ready-for-d
 
 ## 2026-03-26 — PR #186 (AgenTek planning improvements)
 Blocked: no linked planning issue, and structural asymmetry — Reliability added to issue-planning lane but PR plan-review lane (kickoff, ready-check, reviewer workflow) not updated. New roles need symmetric coverage across both lanes or deliberate scope note explaining why PR lane is intentionally narrower.
+
+## 2026-03-26 — PR #186 merged without architecture approval
+PR merged to main (commit c0623351) with two unresolved blockers: no linked plan issue and reliability role asymmetry (issue-planning has 6 approvers; pr-plan-review still has 5). Asymmetry is a durable follow-up concern: `pr-plan-review-reliability` workflow, kickoff label seeding, and ready-check label requirement are all missing. Flag in any future PR that touches the planning lane.

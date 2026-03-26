@@ -27,7 +27,7 @@
 #
 # Source: githubnext/agentics/workflows/daily-repo-status.md@4957663821dbb3260348084fa2f1659701950fef
 #
-# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"9d2e952c804d757c5086b6bc77d9ac4acf0a3fa91cdd29de9ade498e861143f7","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
+# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"fec0e69da093f57668a2ac3db557bcd3c825b98bce81349b4a143afdb52dba53","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
 
 name: "Daily Repo Status"
 "on":
@@ -914,7 +914,7 @@ jobs:
           GH_AW_INFERENCE_ACCESS_ERROR: ${{ needs.agent.outputs.inference_access_error }}
           GH_AW_LOCKDOWN_CHECK_FAILED: ${{ needs.activation.outputs.lockdown_check_failed }}
           GH_AW_GROUP_REPORTS: "false"
-          GH_AW_FAILURE_REPORT_AS_ISSUE: "true"
+          GH_AW_FAILURE_REPORT_AS_ISSUE: "false"
           GH_AW_TIMEOUT_MINUTES: "20"
         with:
           github-token: ${{ secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}

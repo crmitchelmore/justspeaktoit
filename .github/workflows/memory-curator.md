@@ -26,6 +26,7 @@ tools:
     allowed-extensions: [".md", ".json"]
 
 safe-outputs:
+  report-failure-as-issue: false
   add-comment: {}
 
 timeout-minutes: 20

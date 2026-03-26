@@ -28,6 +28,7 @@ tools:
 timeout-minutes: 30
 
 safe-outputs:
+  report-failure-as-issue: false
   create-pull-request:
     expires: 2d
     title-prefix: "[docs] "

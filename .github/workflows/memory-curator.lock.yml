@@ -22,7 +22,7 @@
 #
 # Curate and evolve planning role memories by graduating patterns and pruning stale entries
 #
-# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"0281b4c8c5618db37db031cc85886ff1f3e923fcd0ccfbc0bc15620d04149b6e","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
+# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"7369f16a5563d9ddb9c89ecdfcb11cff241bf612831c6c78077cb645ce3add80","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
 
 name: "Memory Curator"
 "on":
@@ -940,7 +940,7 @@ jobs:
           GH_AW_REPO_MEMORY_VALIDATION_ERROR_default: ${{ needs.push_repo_memory.outputs.validation_error_default }}
           GH_AW_REPO_MEMORY_PATCH_SIZE_EXCEEDED_default: ${{ needs.push_repo_memory.outputs.patch_size_exceeded_default }}
           GH_AW_GROUP_REPORTS: "false"
-          GH_AW_FAILURE_REPORT_AS_ISSUE: "true"
+          GH_AW_FAILURE_REPORT_AS_ISSUE: "false"
           GH_AW_TIMEOUT_MINUTES: "20"
         with:
           github-token: ${{ secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}

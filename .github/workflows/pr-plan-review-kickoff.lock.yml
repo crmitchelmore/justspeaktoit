@@ -22,7 +22,7 @@
 #
 # Seed PR plan-review labels and explain the implementation review flow
 #
-# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"d074d4465b71485ad451ca14fd7d76551fcb2fe9644c398abe0fe8ca0a98fb22","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
+# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"d3e31be53c484e511f026547043a74b2c1d25d2c6fef060ab158f887e4b9c3af","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
 
 name: "PR Plan Review - Kickoff"
 "on":
@@ -969,7 +969,7 @@ jobs:
           GH_AW_INFERENCE_ACCESS_ERROR: ${{ needs.agent.outputs.inference_access_error }}
           GH_AW_LOCKDOWN_CHECK_FAILED: ${{ needs.activation.outputs.lockdown_check_failed }}
           GH_AW_GROUP_REPORTS: "false"
-          GH_AW_FAILURE_REPORT_AS_ISSUE: "true"
+          GH_AW_FAILURE_REPORT_AS_ISSUE: "false"
           GH_AW_TIMEOUT_MINUTES: "10"
         with:
           github-token: ${{ secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}

@@ -22,7 +22,7 @@
 #
 # Manually audit ready-to-merge state for a specific pull request
 #
-# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"f51cf9d31a3da9179814f43be3f9547786cea2da1c885c2234c756a5d6e403a6","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
+# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"42a7258c2edf21994b227c52196e2366f4fcc931ac1bf1f69fa13e434c3dbc97","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
 
 name: "PR Plan Review - Ready Check"
 "on":
@@ -945,7 +945,7 @@ jobs:
           GH_AW_INFERENCE_ACCESS_ERROR: ${{ needs.agent.outputs.inference_access_error }}
           GH_AW_LOCKDOWN_CHECK_FAILED: ${{ needs.activation.outputs.lockdown_check_failed }}
           GH_AW_GROUP_REPORTS: "false"
-          GH_AW_FAILURE_REPORT_AS_ISSUE: "true"
+          GH_AW_FAILURE_REPORT_AS_ISSUE: "false"
           GH_AW_TIMEOUT_MINUTES: "10"
         with:
           github-token: ${{ secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}

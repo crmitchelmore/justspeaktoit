@@ -27,7 +27,7 @@
 #
 # Source: githubnext/agentics/workflows/ci-doctor.md@4957663821dbb3260348084fa2f1659701950fef
 #
-# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"f48dcdb82fdd650a728cb069003b219e72c4772233fd0a202eb4a0c609bee9af","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
+# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"6c1c392a3d05cbd8d687b613170088ad4b5a6fa4a6cf41983c77f2ab31f297ad","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
 
 name: "CI Failure Doctor"
 "on":
@@ -1014,7 +1014,7 @@ jobs:
           GH_AW_INFERENCE_ACCESS_ERROR: ${{ needs.agent.outputs.inference_access_error }}
           GH_AW_LOCKDOWN_CHECK_FAILED: ${{ needs.activation.outputs.lockdown_check_failed }}
           GH_AW_GROUP_REPORTS: "false"
-          GH_AW_FAILURE_REPORT_AS_ISSUE: "true"
+          GH_AW_FAILURE_REPORT_AS_ISSUE: "false"
           GH_AW_TIMEOUT_MINUTES: "10"
         with:
           github-token: ${{ secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}

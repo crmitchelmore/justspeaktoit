@@ -22,7 +22,7 @@
 #
 # Code Quality reviewer for PR plan-review discussions
 #
-# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"b69c990a1c766079fbbc335eebb7cc96f7a10c14e7e4169dbd0a219a5694a588","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
+# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"06c6fef620365834fb0797f7663b8a55800e4bacd33d1446987a32b201926c59","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
 
 name: "PR Plan Review - Code Quality"
 "on":
@@ -1030,7 +1030,7 @@ jobs:
           GH_AW_REPO_MEMORY_VALIDATION_ERROR_default: ${{ needs.push_repo_memory.outputs.validation_error_default }}
           GH_AW_REPO_MEMORY_PATCH_SIZE_EXCEEDED_default: ${{ needs.push_repo_memory.outputs.patch_size_exceeded_default }}
           GH_AW_GROUP_REPORTS: "false"
-          GH_AW_FAILURE_REPORT_AS_ISSUE: "true"
+          GH_AW_FAILURE_REPORT_AS_ISSUE: "false"
           GH_AW_TIMEOUT_MINUTES: "15"
         with:
           github-token: ${{ secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}

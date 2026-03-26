@@ -58,3 +58,6 @@ Workflow-only guard fix (closed-PR comments). Lock files + source .md files both
 
 ## 2026-03-26 — PR #186: Initial pass
 Workflow/docs-only PR (7 agent persona files + 7 workflow .md files). No Swift code changes. Blocked on first pass for missing plan link — no `Plan issue:`, `Closes #`, or similar in PR body. Precedent: PR #161 was similarly blocked then approved once plan confirmed. Pattern: always require explicit plan link even for small workflow-only PRs.
+
+## 2026-03-26 — PR #189: Initial pass
+Crash fix (Data.removeFirst → Data(dropFirst)), 4-line change in TranscriptionManager.swift. Fix is technically correct across all 4 PCM drain loops. Blocked on missing plan link. Pattern consistent with PR #188 and #161. For hotfix-type PRs, the missing plan link is still a protocol blocker.

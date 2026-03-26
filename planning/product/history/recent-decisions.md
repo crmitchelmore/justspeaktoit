@@ -53,3 +53,6 @@ Blocked: PR adds two new planning roles (Sam/Jordan), enriches all personas, and
 
 ## 2026-03-26 — PR #188 initial review
 Blocked: same pattern as PR #186. Adds Riley Tan as 8th planning role (Design/UX) with no linked planning issue. All personas updated + approval thresholds changed — significant scope that requires a `planning:ready-for-dev` issue. Crisp path to yes: raise and approve an issue scoping this role, then link it in the PR body.
+
+## 2026-03-26 — PR #189 initial review
+Blocked: crash fix (`Data.subdata` out-of-bounds from `removeFirst` startIndex shift) with no linked planning issue. Clear product value (prevents crash during live transcription) but protocol requires a plan issue. Lightweight path to yes: open or reference a bug issue and add `Refs #<n>` to the PR body. Applying same consistent standard as PRs #161, #186, #188.

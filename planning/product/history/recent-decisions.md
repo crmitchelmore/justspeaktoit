@@ -50,3 +50,6 @@ Approved. Plan issue #180 is planning:ready-for-dev with all 5 roles approved. P
 
 ## 2026-03-26 — PR #186 initial review
 Blocked: PR adds two new planning roles (Sam/Jordan), enriches all personas, and adds operational workflows. Significant scope. No linked planning issue anywhere in the PR body — same pattern as PR #161 which was also blocked for this reason. Needs a `planning:ready-for-dev` issue before Product can approve.
+
+## 2026-03-26 — PR #188 initial review
+Blocked: same pattern as PR #186. Adds Riley Tan as 8th planning role (Design/UX) with no linked planning issue. All personas updated + approval thresholds changed — significant scope that requires a `planning:ready-for-dev` issue. Crisp path to yes: raise and approve an issue scoping this role, then link it in the PR body.

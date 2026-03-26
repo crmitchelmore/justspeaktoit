@@ -62,3 +62,9 @@ Blocked: no linked planning issue, and structural asymmetry — Reliability adde
 
 ## 2026-03-26 — PR #186 merged without architecture approval
 PR merged to main (commit c0623351) with two unresolved blockers: no linked plan issue and reliability role asymmetry (issue-planning has 6 approvers; pr-plan-review still has 5). Asymmetry is a durable follow-up concern: `pr-plan-review-reliability` workflow, kickoff label seeding, and ready-check label requirement are all missing. Flag in any future PR that touches the planning lane.
+
+## 2026-03-26 — PR #188 (add Design role to planning team)
+Blocked: no linked planning issue. Structural implementation is clean — Design added symmetrically to both issue-planning (now 7 approvers) and PR-plan-review (now 6 approvers) lanes, consistent with the Reliability-excluded-from-PR-review pattern from PR #186. Reliability asymmetry from #186 persists but is not worsened. Cannot approve without a linked plan issue.
+
+## 2026-03-26 — PR #188 merged without architecture approval (second note)
+Follow-up run triggered by comment-id 4133249393. PR already merged to main before architecture approval was granted. No-op per protocol (closed/merged PR). Durable concern: planning lane PRs continue to merge without a linked plan issue and without architecture sign-off. Consider flagging to maintainer that the process is not gating merges.

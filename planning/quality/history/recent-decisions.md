@@ -55,3 +55,6 @@ Workflow guard tightening. State == 'open' check added to issue_comment path. Ke
 
 ## 2026-03-25 — PR #181
 Workflow-only guard fix (closed-PR comments). Lock files + source .md files both updated; guard consistent across all 6 changed files. Approved on first pass — plan scope exact match, no implementation surface concerns.
+
+## 2026-03-26 — PR #186: Initial pass
+Workflow/docs-only PR (7 agent persona files + 7 workflow .md files). No Swift code changes. Blocked on first pass for missing plan link — no `Plan issue:`, `Closes #`, or similar in PR body. Precedent: PR #161 was similarly blocked then approved once plan confirmed. Pattern: always require explicit plan link even for small workflow-only PRs.

@@ -48,3 +48,6 @@ Approved. Single-line guard `github.event.issue.state == 'open'` added to all 5 
 
 ## 2026-03-26 — PR #186 (AgenTek planning team improvements)
 Blocked on missing linked plan issue. Permissions and fork guards are consistent with established pattern. Stale-issue-cleanup auto-close (max 20/run) noted as meaningful irreversible action but appropriately scoped to `agentic-workflows` labelled issues with no human engagement.
+
+## 2026-03-26 — PR #188 (add Riley Tan Design reviewer)
+Blocked on missing linked plan issue. Same pattern as PR #186. Implementation is clean: `permissions: {}` top-level, least-privilege job overrides, fork guard in lock.yml, `COPILOT_GITHUB_TOKEN` usage consistent with established pattern. The new design workflows mirror existing role workflows exactly. Primary blocker is governance — missing `Plan issue: #<n>` in PR body. PR #188 also incorporates the AgenTek improvements from PR #186 (which was closed without merge for the same reason).

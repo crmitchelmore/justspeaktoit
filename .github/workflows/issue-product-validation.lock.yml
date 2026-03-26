@@ -1052,7 +1052,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event.issue.pull_request == null
     runs-on: ubuntu-slim
     outputs:
-      activated: ${{ steps.check_skip_bots.outputs.skip_bots_ok == 'true' }}
+      activated: ${{ (steps.check_membership.outputs.is_team_member == 'true') && (steps.check_skip_bots.outputs.skip_bots_ok == 'true') }}
       matched_command: ''
     steps:
       - name: Setup Scripts
@@ -1222,3 +1222,4 @@ jobs:
           name: safe-output-items
           path: /tmp/gh-aw/safe-output-items.jsonl
           if-no-files-found: ignore
+

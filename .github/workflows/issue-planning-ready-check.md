@@ -53,11 +53,12 @@ All of these must be present for the issue to be ready:
 - `planning:performance-approved`
 - `planning:quality-approved`
 - `planning:architecture-approved`
+- `planning:reliability-approved`
 
 ## Instructions
 
 1. Read the issue's current labels and recent planning comments.
-2. If all five approval labels are present:
+2. If all six approval labels are present:
    - add `planning:ready-for-dev` if it is missing,
    - remove `planning:in-discussion` if it is present,
    - leave one short comment starting with `### ✅ Planning Ready` only if you changed the ready state. The comment should also tell the implementer to open a pull request that includes `Plan issue: #<issue-number>` in the body so the PR review lane can compare implementation to the approved plan.

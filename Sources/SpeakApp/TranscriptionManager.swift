@@ -1260,7 +1260,7 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
           offset += Self.preferredChunkBytes
         }
         if offset > 0 {
-          pendingPCMData.removeFirst(offset)
+          pendingPCMData = Data(pendingPCMData.dropFirst(offset))
         }
 
         guard !pendingPCMData.isEmpty else { return }
@@ -1363,7 +1363,7 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
         offset += Self.preferredChunkBytes
       }
       if offset > 0 {
-        pendingPCMData.removeFirst(offset)
+        pendingPCMData = Data(pendingPCMData.dropFirst(offset))
       }
     }
   }
@@ -1878,7 +1878,7 @@ private extension ModulateLiveController {
           offset += Self.preferredChunkBytes
         }
         if offset > 0 {
-          pendingPCMData.removeFirst(offset)
+          pendingPCMData = Data(pendingPCMData.dropFirst(offset))
         }
 
         guard !pendingPCMData.isEmpty else { return }
@@ -1985,7 +1985,7 @@ private extension ModulateLiveController {
         offset += Self.preferredChunkBytes
       }
       if offset > 0 {
-        pendingPCMData.removeFirst(offset)
+        pendingPCMData = Data(pendingPCMData.dropFirst(offset))
       }
     }
   }

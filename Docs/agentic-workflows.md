@@ -172,6 +172,8 @@ The live issue ready-state reconciliation is handled by `Issue Planning - Reconc
 
 PR follow-ups are handled by `PR Plan Review - Bot Follow Up`, and `PR Plan Review - Reconcile State` owns the live `plan-review:ready-to-merge` transition. If a workflow cannot see the live issue or PR context clearly enough to verify the state, it should keep the thread open rather than guessing.
 
+PR plan-review role workflows and the bot follow-up dispatcher only activate on `issue_comment` events when the pull request is still open. Comments posted on closed or merged pull requests do not trigger any plan-review role response. Use `workflow_dispatch` if you need to re-run a role review on a PR that was closed and then reopened.
+
 ### How team personalities build memory
 
 Each named reviewer has a stable identity and an evolving repository memory:

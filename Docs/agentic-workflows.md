@@ -57,6 +57,8 @@ The team consists of:
   - signature habits: sketches boxes and arrows mentally, asks what breaks if a layer disappears, and keeps an allowed-seams map
 - **Jordan Park** (`Reliability`) — reviews deployment safety, failure modes, rollback plans, and operational burden
   - signature habits: always asks "what's the rollback plan?", keeps a mental blast-radius map, and prefers boring deployment patterns
+- **Riley Tan** (`Design`) — reviews visual quality, accessibility compliance, responsive layout, and M&S design standards
+  - signature habits: sketches wireframes in comments, believes in "show don't tell" with screenshots, flags WCAG AA violations immediately, and keeps a mental library of M&S design patterns
 - **Sam Chen** (`Engineering Manager`) — facilitates planning discussions, breaks deadlocks, and tracks cross-issue dependencies (non-approving)
   - signature habits: asks "what would need to be true for everyone to approve?", keeps a parking lot of deferred concerns, and reframes when roles talk past each other
 
@@ -93,6 +95,7 @@ Custom planning and plan-review workflows added in this repository:
 - `issue-planning-quality`
 - `issue-planning-architecture`
 - `issue-planning-reliability`
+- `issue-planning-design`
 - `issue-planning-em`
 - `issue-planning-ready-check` — manual agentic audit for a specific issue
 - `issue-planning-reconcile` — deterministic label reconciler that runs after role workflows finish
@@ -103,6 +106,7 @@ Custom planning and plan-review workflows added in this repository:
 - `pr-plan-review-performance`
 - `pr-plan-review-quality`
 - `pr-plan-review-architecture`
+- `pr-plan-review-design`
 - `pr-plan-review-ready-check` — manual agentic audit for a specific pull request
 - `pr-plan-review-reconcile` — deterministic label reconciler that runs after PR review workflows finish
 
@@ -126,12 +130,14 @@ Planning state is tracked with labels:
 - `planning:needs-quality`
 - `planning:needs-architecture`
 - `planning:needs-reliability`
+- `planning:needs-design`
 - `planning:product-approved`
 - `planning:security-approved`
 - `planning:performance-approved`
 - `planning:quality-approved`
 - `planning:architecture-approved`
 - `planning:reliability-approved`
+- `planning:design-approved`
 
 PR implementation review state is tracked with labels:
 
@@ -142,11 +148,13 @@ PR implementation review state is tracked with labels:
 - `plan-review:needs-performance`
 - `plan-review:needs-quality`
 - `plan-review:needs-architecture`
+- `plan-review:needs-design`
 - `plan-review:product-approved`
 - `plan-review:security-approved`
 - `plan-review:performance-approved`
 - `plan-review:quality-approved`
 - `plan-review:architecture-approved`
+- `plan-review:design-approved`
 
 ### Normal operating flow
 
@@ -160,23 +168,24 @@ PR implementation review state is tracked with labels:
 5. Once `triage:product-fit` is present, someone with repository write access comments `/doit` on the issue. The command can stand alone or appear inside a longer maintainer note; any other text in that comment is carried into planning as context.
 6. `Issue Planning - Command` verifies that the commenter has write access, clears the intake labels, applies the `planning:*` labels, and posts the `### 🗂️ Planning Kickoff` comment.
 7. `Issue Planning - Kickoff` remains available as the manual reset and re-entry path when maintainers want to restart planning explicitly.
-8. The five named teammates now join the thread:
+8. The six named teammates now join the thread:
    - Alex Hale (`Product`)
    - Priya Shah (`Security`)
    - Theo Quinn (`Performance`)
    - Casey Doyle (`Code Quality`)
    - Morgan Reed (`Architecture`)
+   - Riley Tan (`Design`)
 9. Jordan Park (`Reliability`) reviews deployment safety and failure modes. Sam Chen (`Engineering Manager`) facilitates when the team is stuck or diverging, but does not approve or block.
 10. Each reviewer comments in thread, asks focused follow-up questions, and bot-authored reviewer comments re-dispatch the other reviewers without letting a workflow react to its own comment directly.
 10. Maintainers answer unresolved questions in-thread, and those direct maintainer comments trigger the issue reviewers as well.
 11. If a maintainer explicitly asks a named role to respond, that role should leave a visible follow-up comment even if its approval label stays unchanged.
 12. If a maintainer correction or verified repository fact disproves an earlier assumption, reviewers should revisit any approval that depended on it rather than leaning on older labels or comments as if the corrected concern were already resolved.
 13. Role approval labels accumulate as concerns are resolved.
-14. `Issue Planning - Reconcile State` normalises the pending labels and applies `planning:ready-for-dev` once all six approvals are present.
+14. `Issue Planning - Reconcile State` normalises the pending labels and applies `planning:ready-for-dev` once all seven approvals are present.
 15. The implementer opens a pull request and includes `Plan issue: #<issue-number>` in the PR body, ideally alongside a closing reference such as `Closes #<issue-number>`.
-16. `PR Plan Review - Kickoff` seeds the `plan-review:*` labels and explains that the same five named roles will compare the implementation against the approved issue plan, the diff, and the verification evidence.
-17. The five PR reviewers discuss the pull request in thread, reply to each other when concerns intersect, and revisit approvals when new commits or corrections materially change the implementation.
-18. `PR Plan Review - Reconcile State` normalises the pending PR labels and applies `plan-review:ready-to-merge` once all five PR review approvals are present.
+16. `PR Plan Review - Kickoff` seeds the `plan-review:*` labels and explains that the same six named roles will compare the implementation against the approved issue plan, the diff, and the verification evidence.
+17. The six PR reviewers discuss the pull request in thread, reply to each other when concerns intersect, and revisit approvals when new commits or corrections materially change the implementation.
+18. `PR Plan Review - Reconcile State` normalises the pending PR labels and applies `plan-review:ready-to-merge` once all six PR review approvals are present.
 
 The live issue ready-state reconciliation is handled by `Issue Planning - Reconcile State` because bot-applied labels do not reliably trigger another agentic workflow run. Bot-to-bot planning follow-ups are handled by `Issue Planning - Bot Follow Up`, while the issue role workflows themselves keep `github-actions` in `skip-bots` to avoid self-loops.
 
@@ -200,26 +209,26 @@ The rule is simple: names stay stable, judgement improves, and quirks only deepe
 
 - the issue already has `triage:product-fit`
 - someone with repository write access is making the comment
-- the issue is ready for Alex, Priya, Theo, Casey, Morgan, and Jordan to start the full planning discussion (with Sam facilitating) rather than still needing Product clarification
+- the issue is ready for Alex, Priya, Theo, Casey, Morgan, Jordan, and Riley to start the full planning discussion (with Sam facilitating) rather than still needing Product clarification
 
 Do not use `/doit` while the issue still lacks `triage:product-fit`, or while it is in `triage:needs-clarification` or `triage:out-of-scope`. In those states, continue the Product discussion in-thread or update the issue until Product validation changes.
 
 `/doit` does not need to be the whole comment. A maintainer can write a short note such as scope guidance, a preferred option, or an answer to an open question in the same comment. The workflow will treat `/doit` as the command and carry the surrounding text into the kickoff comment as planning context.
 
-Once `/doit` is accepted, the issue moves into `planning:*` labels, the kickoff comment starts the six-role discussion (plus the EM facilitator), and maintainers should answer open questions in-thread until `planning:ready-for-dev` appears. If the `/doit` comment included extra text, that text is quoted into the kickoff comment as maintainer planning context. The resulting pull request should then include `Plan issue: #<issue-number>` in the body so the PR review lane can compare the implementation against the approved plan.
+Once `/doit` is accepted, the issue moves into `planning:*` labels, the kickoff comment starts the seven-role discussion (plus the EM facilitator), and maintainers should answer open questions in-thread until `planning:ready-for-dev` appears. If the `/doit` comment included extra text, that text is quoted into the kickoff comment as maintainer planning context. The resulting pull request should then include `Plan issue: #<issue-number>` in the body so the PR review lane can compare the implementation against the approved plan.
 
 ### Portable rollout pattern for other repositories
 
 Use this rollout order when you add the planning team elsewhere:
 
 1. Prove the Copilot-backed path first with a minimal verifier workflow. Do not assume secret validation alone proves inference works.
-2. Make Product validation the first gate for new issues, then add `issue-planning-command`, the issue-planning kickoff, bot-follow-up dispatcher, six role workflows plus the EM facilitator, ready-check, and reconcile workflow, plus the matching PR plan-review kickoff, bot-follow-up dispatcher, five role workflows, ready-check, and reconcile workflow.
+2. Make Product validation the first gate for new issues, then add `issue-planning-command`, the issue-planning kickoff, bot-follow-up dispatcher, seven role workflows plus the EM facilitator, ready-check, and reconcile workflow, plus the matching PR plan-review kickoff, bot-follow-up dispatcher, six role workflows, ready-check, and reconcile workflow.
 3. Name the team up front. Give each role a human name and 2-3 signature habits in `.github/agents/planning-<role>.agent.md`, and keep the role label explicit in comments.
 4. Create the intake, planning, and `plan-review:*` labels before live testing so all three stages have stable targets.
-5. Seed all six `planning/<role>` memory branches (plus `planning/em`) up front by creating `persona.md`, `principles.md`, `repository-context.md`, and `history/recent-decisions.md`, plus the `issues/` and `pull-requests/` directories, rather than waiting for first use.
+5. Seed all seven `planning/<role>` memory branches (plus `planning/em`) up front by creating `persona.md`, `principles.md`, `repository-context.md`, and `history/recent-decisions.md`, plus the `issues/` and `pull-requests/` directories, rather than waiting for first use.
 6. Before expecting repo-memory writes to work, verify that `planning/*` can accept workflow-created commits. On repositories with required signed commits, either provide an approved `planning/*` exemption or configure workflow commit signing before live rollout.
 7. Retest on at least one realistic issue and one workflow-health issue. Use the realistic issue as the main proof. For workflow-health issues, ask a concrete portability or design question; otherwise reviewers may collapse into one-shot approvals instead of a real discussion.
-8. Prove the intake gate as well as the planning gate: a new issue should get a Product fit review directly on open, Product should either validate or challenge its fit, and `/doit` from an authorised maintainer should be the only path that starts the full six-role planning discussion.
+8. Prove the intake gate as well as the planning gate: a new issue should get a Product fit review directly on open, Product should either validate or challenge its fit, and `/doit` from an authorised maintainer should be the only path that starts the full seven-role planning discussion.
 9. After an issue reaches `planning:ready-for-dev`, open a small same-repo pull request that includes `Plan issue: #<issue-number>` in the body and prove that the PR review lane reaches `plan-review:ready-to-merge` with real back-and-forth between roles.
 10. Keep `Issue Planning - Ready Check` and `PR Plan Review - Ready Check` as manual audit paths, and let the reconcile workflows own the live label normalisation.
 11. On strict repositories, do not declare the rollout complete until both the issue-planning and PR plan-review workflows can persist their role memory using an approved write path.
@@ -239,6 +248,7 @@ gh workflow run issue-planning-performance.lock.yml --ref <branch> -f issue_numb
 gh workflow run issue-planning-quality.lock.yml --ref <branch> -f issue_number=123
 gh workflow run issue-planning-architecture.lock.yml --ref <branch> -f issue_number=123
 gh workflow run issue-planning-reliability.lock.yml --ref <branch> -f issue_number=123
+gh workflow run issue-planning-design.lock.yml --ref <branch> -f issue_number=123
 gh workflow run issue-planning-em.lock.yml --ref <branch> -f issue_number=123
 gh workflow run issue-planning-reconcile.yml --ref <branch> -f issue_number=123
 gh workflow run issue-planning-ready-check.lock.yml --ref <branch> -f issue_number=123
@@ -249,6 +259,7 @@ gh workflow run pr-plan-review-security.lock.yml --ref <branch> -f pr_number=123
 gh workflow run pr-plan-review-performance.lock.yml --ref <branch> -f pr_number=123
 gh workflow run pr-plan-review-quality.lock.yml --ref <branch> -f pr_number=123
 gh workflow run pr-plan-review-architecture.lock.yml --ref <branch> -f pr_number=123
+gh workflow run pr-plan-review-design.lock.yml --ref <branch> -f pr_number=123
 gh workflow run pr-plan-review-reconcile.yml --ref <branch> -f pr_number=123
 gh workflow run pr-plan-review-ready-check.lock.yml --ref <branch> -f pr_number=123
 ```
@@ -275,10 +286,10 @@ Use this recovery path:
 
 1. Edit the PR body so it includes `Plan issue: #<issue-number>`, ideally alongside `Closes #<issue-number>` or an equivalent closing reference.
 2. If the thread still reflects the old state, add one maintainer clarification comment that points reviewers at the approved issue and answers any open questions that were resolved outside the first pass.
-3. Re-run `PR Plan Review - Kickoff` or the affected `pr-plan-review-<role>.lock.yml` workflows so the same five reviewers evaluate the updated PR state.
-4. Let `PR Plan Review - Reconcile State` normalise the labels back to `plan-review:ready-to-merge` once all five approvals converge again.
+3. Re-run `PR Plan Review - Kickoff` or the affected `pr-plan-review-<role>.lock.yml` workflows so the same six reviewers evaluate the updated PR state.
+4. Let `PR Plan Review - Reconcile State` normalise the labels back to `plan-review:ready-to-merge` once all six approvals converge again.
 
-This recovery path re-runs the normal plan-review gate; it does not bypass or weaken it. PR plan-review role workflows should only respond on pull-request threads, while issue-planning threads should stay limited to the six issue-planning reviewers and the EM facilitator.
+This recovery path re-runs the normal plan-review gate; it does not bypass or weaken it. PR plan-review role workflows should only respond on pull-request threads, while issue-planning threads should stay limited to the seven issue-planning reviewers and the EM facilitator.
 
 ## Operational workflows
 
@@ -286,7 +297,7 @@ Beyond the planning and review loops, these workflows maintain the health and co
 
 ### Planning team synthesis
 
-When the reconciler transitions an issue to `planning:ready-for-dev`, it dispatches `Issue Planning - Synthesis`. This agent reads all six technical role comments and Sam Chen's facilitation observations, then posts a single `### 🤝 Planning Team Summary` comment with:
+When the reconciler transitions an issue to `planning:ready-for-dev`, it dispatches `Issue Planning - Synthesis`. This agent reads all seven technical role comments and Sam Chen's facilitation observations, then posts a single `### 🤝 Planning Team Summary` comment with:
 
 - **Agreements** — points where two or more roles converge
 - **Open tensions** — unresolved trade-offs between roles

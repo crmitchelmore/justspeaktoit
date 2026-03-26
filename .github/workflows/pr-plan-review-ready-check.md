@@ -54,11 +54,12 @@ All of these must be present for the pull request to be ready:
 - `plan-review:performance-approved`
 - `plan-review:quality-approved`
 - `plan-review:architecture-approved`
+- `plan-review:design-approved`
 
 ## Instructions
 
 1. Read the pull request's current labels and recent plan-review comments.
-2. If all five approval labels are present:
+2. If all six approval labels are present:
    - add `plan-review:ready-to-merge` if it is missing,
    - remove `plan-review:in-discussion` if it is present,
    - leave one short comment starting with `### ✅ Plan Review Ready` only if you changed the ready state. The comment should also state that the PR is now aligned with the approved plan and ready for final human merge checks.

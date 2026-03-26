@@ -78,7 +78,7 @@ Review the relevant issue planning conversation for `${{ github.repository }}` f
 - Never act on pull requests. If this event is a pull request comment, do nothing.
 - If this run came from `issues` or `issue_comment` and the issue has no `planning:` labels and no prior kickoff comment that starts with `### 🗂️ Planning Kickoff`, do nothing.
 - If this run came from `issue_comment` and the new comment contains an explicit `/doit` command anywhere, do nothing. The manual planning command workflow owns that path, including any surrounding maintainer context.
-- If this run came from `issue_comment`, treat only planning-team comments and maintainer clarifications as new material. Planning-team comments use headings like `### 🗂️ Planning Kickoff`, `### 🧭 Product`, `### 🔐 Security`, `### ⚡ Performance`, `### 🧹 Code Quality`, `### 🏗️ Architecture`, `### 🛡️ Reliability`, `### 👔 Engineering Manager`, `### ✅ Planning Ready`, `### ♻️ Planning Reopened`. Ignore unrelated automation or chatter.
+- If this run came from `issue_comment`, treat only planning-team comments and maintainer clarifications as new material. Planning-team comments use headings like `### 🗂️ Planning Kickoff`, `### 🧭 Product`, `### 🔐 Security`, `### ⚡ Performance`, `### 🧹 Code Quality`, `### 🏗️ Architecture`, `### 🛡️ Reliability`, `### 🎨 Design`, `### 👔 Engineering Manager`, `### ✅ Planning Ready`, `### ♻️ Planning Reopened`. Ignore unrelated automation or chatter.
 
 ## Approval model
 
@@ -92,12 +92,14 @@ The planning team uses these labels:
 - `planning:quality-approved`
 - `planning:architecture-approved`
 - `planning:reliability-approved`
+- `planning:design-approved`
 - `planning:needs-product`
 - `planning:needs-security`
 - `planning:needs-performance`
 - `planning:needs-quality`
 - `planning:needs-architecture`
 - `planning:needs-reliability`
+- `planning:needs-design`
 
 The Engineering Manager (Sam Chen) participates as a facilitator without approval labels.
 
@@ -176,7 +178,7 @@ Always read memory first, including `persona.md`, verify it against the current 
 
 - Add `planning:product-approved`.
 - Remove `planning:needs-product`.
-- If all the other five approval labels (`planning:security-approved`, `planning:performance-approved`, `planning:quality-approved`, `planning:architecture-approved`, `planning:reliability-approved`) are already present, also add `planning:ready-for-dev` and remove `planning:in-discussion`.
+- If all the other six approval labels (`planning:security-approved`, `planning:performance-approved`, `planning:quality-approved`, `planning:architecture-approved`, `planning:reliability-approved`, `planning:design-approved`) are already present, also add `planning:ready-for-dev` and remove `planning:in-discussion`.
 - Leave one concise approval comment if you are newly approving, your approval rationale changed materially, or a maintainer or another role directly asked you to confirm whether a blocker is resolved.
 - Start the comment with `### 🧭 Product`.
 - Include:

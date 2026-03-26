@@ -79,7 +79,7 @@ Review the relevant pull request plan-review conversation for `${{ github.reposi
 - If this run came from `issue_comment`, only act when the comment belongs to a pull request.
 - If this run came from `issue_comment` and the pull request is closed or merged, do nothing.
 - If this run came from `issue_comment` and the pull request has no `plan-review:` labels and no prior kickoff comment that starts with `### 🔎 Plan Review Kickoff`, do nothing.
-- If this run came from `issue_comment`, treat only plan-review comments and maintainer clarifications as new material. Plan-review comments use headings like `### 🔎 Plan Review Kickoff`, `### 🧭 Product Review`, `### 🔐 Security Review`, `### ⚡ Performance Review`, `### 🧹 Code Quality Review`, `### 🏗️ Architecture Review`, `### ✅ Plan Review Ready`, `### ♻️ Plan Review Reopened`. Ignore unrelated automation or chatter.
+- If this run came from `issue_comment`, treat only plan-review comments and maintainer clarifications as new material. Plan-review comments use headings like `### 🔎 Plan Review Kickoff`, `### 🧭 Product Review`, `### 🔐 Security Review`, `### ⚡ Performance Review`, `### 🧹 Code Quality Review`, `### 🏗️ Architecture Review`, `### 🎨 Design Review`, `### ✅ Plan Review Ready`, `### ♻️ Plan Review Reopened`. Ignore unrelated automation or chatter.
 
 ## Approval model
 
@@ -92,11 +92,13 @@ The PR plan-review lane uses these labels:
 - `plan-review:performance-approved`
 - `plan-review:quality-approved`
 - `plan-review:architecture-approved`
+- `plan-review:design-approved`
 - `plan-review:needs-product`
 - `plan-review:needs-security`
 - `plan-review:needs-performance`
 - `plan-review:needs-quality`
 - `plan-review:needs-architecture`
+- `plan-review:needs-design`
 
 Your labels are:
 
@@ -172,7 +174,7 @@ Always read memory first, including `persona.md`. Ensure `planning/security/pull
 
 - Add `plan-review:security-approved`.
 - Remove `plan-review:needs-security`.
-- If all the other four approval labels (`plan-review:product-approved`, `plan-review:performance-approved`, `plan-review:quality-approved`, `plan-review:architecture-approved`) are already present, also add `plan-review:ready-to-merge` and remove `plan-review:in-discussion`.
+- If all the other five approval labels (`plan-review:product-approved`, `plan-review:performance-approved`, `plan-review:quality-approved`, `plan-review:architecture-approved`, `plan-review:design-approved`) are already present, also add `plan-review:ready-to-merge` and remove `plan-review:in-discussion`.
 - Leave one concise approval comment if you are newly approving, your approval rationale changed materially, or a maintainer or another role directly asked you to confirm whether a blocker is resolved.
 - Start the comment with `### 🔐 Security Review`.
 - Include:

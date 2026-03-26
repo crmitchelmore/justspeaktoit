@@ -22,7 +22,7 @@
 #
 # Seed the planning labels and explain the issue-planning flow after an explicit /doit request
 #
-# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"0dfba367919a08bac4b5a0d00ceff14217353c97cbf7e03b6bfb3e852a244133","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
+# gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"11b9c563fe9336325a1422a9859957d472926cf8629b5ed89892ebafa74ea47a","compiler_version":"v0.62.3","strict":true,"agent_id":"copilot"}
 
 name: "Issue Planning - Kickoff"
 "on":
@@ -335,7 +335,7 @@ jobs:
           mkdir -p /tmp/gh-aw/safeoutputs
           mkdir -p /tmp/gh-aw/mcp-logs/safeoutputs
           cat > ${RUNNER_TEMP}/gh-aw/safeoutputs/config.json << 'GH_AW_SAFE_OUTPUTS_CONFIG_EOF'
-          {"add_comment":{"max":1,"target":"*"},"add_labels":{"allowed":["planning:in-discussion","planning:needs-product","planning:needs-security","planning:needs-performance","planning:needs-quality","planning:needs-architecture","planning:needs-reliability"],"max":7,"target":"*"},"missing_data":{},"missing_tool":{},"noop":{"max":1},"remove_labels":{"allowed":["triage:pending-product-validation","triage:product-fit","triage:needs-clarification","triage:out-of-scope","planning:ready-for-dev","planning:product-approved","planning:security-approved","planning:performance-approved","planning:quality-approved","planning:architecture-approved","planning:reliability-approved"],"max":12}}
+          {"add_comment":{"max":1,"target":"*"},"add_labels":{"allowed":["planning:in-discussion","planning:needs-product","planning:needs-security","planning:needs-performance","planning:needs-quality","planning:needs-architecture","planning:needs-reliability","planning:needs-design"],"max":8,"target":"*"},"missing_data":{},"missing_tool":{},"noop":{"max":1},"remove_labels":{"allowed":["triage:pending-product-validation","triage:product-fit","triage:needs-clarification","triage:out-of-scope","planning:ready-for-dev","planning:product-approved","planning:security-approved","planning:performance-approved","planning:quality-approved","planning:architecture-approved","planning:reliability-approved","planning:design-approved"],"max":13}}
           GH_AW_SAFE_OUTPUTS_CONFIG_EOF
       - name: Write Safe Outputs Tools
         run: |
@@ -343,8 +343,8 @@ jobs:
           {
             "description_suffixes": {
               "add_comment": " CONSTRAINTS: Maximum 1 comment(s) can be added. Target: *.",
-              "add_labels": " CONSTRAINTS: Maximum 7 label(s) can be added. Only these labels are allowed: [\"planning:in-discussion\" \"planning:needs-product\" \"planning:needs-security\" \"planning:needs-performance\" \"planning:needs-quality\" \"planning:needs-architecture\" \"planning:needs-reliability\"]. Target: *.",
-              "remove_labels": " CONSTRAINTS: Maximum 12 label(s) can be removed. Only these labels can be removed: [triage:pending-product-validation triage:product-fit triage:needs-clarification triage:out-of-scope planning:ready-for-dev planning:product-approved planning:security-approved planning:performance-approved planning:quality-approved planning:architecture-approved planning:reliability-approved]. Target: *."
+              "add_labels": " CONSTRAINTS: Maximum 8 label(s) can be added. Only these labels are allowed: [\"planning:in-discussion\" \"planning:needs-product\" \"planning:needs-security\" \"planning:needs-performance\" \"planning:needs-quality\" \"planning:needs-architecture\" \"planning:needs-reliability\" \"planning:needs-design\"]. Target: *.",
+              "remove_labels": " CONSTRAINTS: Maximum 13 label(s) can be removed. Only these labels can be removed: [triage:pending-product-validation triage:product-fit triage:needs-clarification triage:out-of-scope planning:ready-for-dev planning:product-approved planning:security-approved planning:performance-approved planning:quality-approved planning:architecture-approved planning:reliability-approved planning:design-approved]. Target: *."
             },
             "repo_params": {},
             "dynamic_tools": []
@@ -1073,7 +1073,7 @@ jobs:
           GH_AW_ALLOWED_DOMAINS: "api.business.githubcopilot.com,api.enterprise.githubcopilot.com,api.github.com,api.githubcopilot.com,api.individual.githubcopilot.com,api.snapcraft.io,archive.ubuntu.com,azure.archive.ubuntu.com,crl.geotrust.com,crl.globalsign.com,crl.identrust.com,crl.sectigo.com,crl.thawte.com,crl.usertrust.com,crl.verisign.com,crl3.digicert.com,crl4.digicert.com,crls.ssl.com,github.com,host.docker.internal,json-schema.org,json.schemastore.org,keyserver.ubuntu.com,ocsp.digicert.com,ocsp.geotrust.com,ocsp.globalsign.com,ocsp.identrust.com,ocsp.sectigo.com,ocsp.ssl.com,ocsp.thawte.com,ocsp.usertrust.com,ocsp.verisign.com,packagecloud.io,packages.cloud.google.com,packages.microsoft.com,ppa.launchpad.net,raw.githubusercontent.com,registry.npmjs.org,s.symcb.com,s.symcd.com,security.ubuntu.com,telemetry.enterprise.githubcopilot.com,ts-crl.ws.symantec.com,ts-ocsp.ws.symantec.com,www.googleapis.com"
           GITHUB_SERVER_URL: ${{ github.server_url }}
           GITHUB_API_URL: ${{ github.api_url }}
-          GH_AW_SAFE_OUTPUTS_HANDLER_CONFIG: "{\"add_comment\":{\"hide_older_comments\":true,\"max\":1,\"target\":\"*\"},\"add_labels\":{\"allowed\":[\"planning:in-discussion\",\"planning:needs-product\",\"planning:needs-security\",\"planning:needs-performance\",\"planning:needs-quality\",\"planning:needs-architecture\",\"planning:needs-reliability\"],\"max\":7,\"target\":\"*\"},\"missing_data\":{},\"missing_tool\":{},\"noop\":{\"max\":1,\"report-as-issue\":\"true\"},\"remove_labels\":{\"allowed\":[\"triage:pending-product-validation\",\"triage:product-fit\",\"triage:needs-clarification\",\"triage:out-of-scope\",\"planning:ready-for-dev\",\"planning:product-approved\",\"planning:security-approved\",\"planning:performance-approved\",\"planning:quality-approved\",\"planning:architecture-approved\",\"planning:reliability-approved\"],\"max\":12,\"target\":\"*\"}}"
+          GH_AW_SAFE_OUTPUTS_HANDLER_CONFIG: "{\"add_comment\":{\"hide_older_comments\":true,\"max\":1,\"target\":\"*\"},\"add_labels\":{\"allowed\":[\"planning:in-discussion\",\"planning:needs-product\",\"planning:needs-security\",\"planning:needs-performance\",\"planning:needs-quality\",\"planning:needs-architecture\",\"planning:needs-reliability\",\"planning:needs-design\"],\"max\":8,\"target\":\"*\"},\"missing_data\":{},\"missing_tool\":{},\"noop\":{\"max\":1,\"report-as-issue\":\"true\"},\"remove_labels\":{\"allowed\":[\"triage:pending-product-validation\",\"triage:product-fit\",\"triage:needs-clarification\",\"triage:out-of-scope\",\"planning:ready-for-dev\",\"planning:product-approved\",\"planning:security-approved\",\"planning:performance-approved\",\"planning:quality-approved\",\"planning:architecture-approved\",\"planning:reliability-approved\",\"planning:design-approved\"],\"max\":13,\"target\":\"*\"}}"
         with:
           github-token: ${{ secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |

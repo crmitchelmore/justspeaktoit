@@ -47,3 +47,6 @@ Approved immediately. Same class as #149/#174/#176: targeted agentic-workflow re
 
 ## 2026-03-25 — PR #181 initial review
 Approved. Plan issue #180 is planning:ready-for-dev with all 5 roles approved. PR implements exactly the scoped trigger guard fix (issue_comment open-PR check + dispatcher mirror). Verification evidence present. No scope drift, no user-facing impact.
+
+## 2026-03-26 — PR #186 initial review
+Blocked: PR adds two new planning roles (Sam/Jordan), enriches all personas, and adds operational workflows. Significant scope. No linked planning issue anywhere in the PR body — same pattern as PR #161 which was also blocked for this reason. Needs a `planning:ready-for-dev` issue before Product can approve.

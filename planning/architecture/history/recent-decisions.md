@@ -56,3 +56,6 @@ Docs-only PR updating `Docs/agentic-workflows.md` with the three-step branch-pro
 
 ## 2026-03-25 — PR #181 architecture-approved (first pass)
 Closed-PR guard fix. All `.github/`-scoped. Issue #180 was `planning:ready-for-dev` with all five roles approved. Symmetric `github.event.issue.state == 'open'` guard added to `issue_comment` condition in all 5 role lock files and the bot dispatcher. `.md` sources updated to match. No app code. Approved first pass.
+
+## 2026-03-26 — PR #186 (AgenTek planning improvements)
+Blocked: no linked planning issue, and structural asymmetry — Reliability added to issue-planning lane but PR plan-review lane (kickoff, ready-check, reviewer workflow) not updated. New roles need symmetric coverage across both lanes or deliberate scope note explaining why PR lane is intentionally narrower.

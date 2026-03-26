@@ -46,3 +46,6 @@ Pure CI guard change linked to approved issue #180. Approved immediately — sam
 
 ## 2026-03-26 — PR #186 (AgenTek planning team improvements)
 Pure CI/agentic-workflow change (new planning roles, persona enrichment, inter-agent memory). No runtime code. Blocked only on missing linked planning issue — PR body has no Closes/Fixes/Refs link to a planning:ready-for-dev issue. Same class as approved PRs #175/#177/#181 but those had explicit issue links.
+
+## 2026-03-26 — PR #188 (add Riley Tan Design/UX role)
+Pure CI/agentic-workflow change. No runtime code. Blocked on missing linked planning issue — same as PR #186. Fan-out increases 7→8 workflow runs/event; acceptable. Will approve immediately once a planning:ready-for-dev issue link is provided.

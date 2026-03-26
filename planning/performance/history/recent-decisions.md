@@ -43,3 +43,6 @@ Pure CI guard change. Adds open-PR state check to prevent spurious workflow runs
 
 ## 2026-03-25 — PR #181 (ignore closed PR comments — implementation)
 Pure CI guard change linked to approved issue #180. Approved immediately — same pattern as PR #175/#177. All agentic-workflow CI-only PRs are outside app performance scope.
+
+## 2026-03-26 — PR #186 (AgenTek planning team improvements)
+Pure CI/agentic-workflow change (new planning roles, persona enrichment, inter-agent memory). No runtime code. Blocked only on missing linked planning issue — PR body has no Closes/Fixes/Refs link to a planning:ready-for-dev issue. Same class as approved PRs #175/#177/#181 but those had explicit issue links.

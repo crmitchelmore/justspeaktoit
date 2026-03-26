@@ -53,3 +53,8 @@ Blocked: PR adds two new planning roles (Sam/Jordan), enriches all personas, and
 
 ## 2026-03-26 — PR #188 initial review
 Blocked: same pattern as PR #186. Adds Riley Tan as 8th planning role (Design/UX) with no linked planning issue. All personas updated + approval thresholds changed — significant scope that requires a `planning:ready-for-dev` issue. Crisp path to yes: raise and approve an issue scoping this role, then link it in the PR body.
+
+## 2026-03-26 — PR #191
+Blocked pure CI housekeeping PR (disable workflow failure issue creation) because no planning issue linked. 
+The change is clearly scoped and low-risk. Path to yes is minimal: add a plan issue reference to the PR body.
+Pattern: even small agentic-workflow maintenance PRs need a linked plan issue for the review lane to function.

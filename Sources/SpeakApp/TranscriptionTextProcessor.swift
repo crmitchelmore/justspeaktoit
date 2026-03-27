@@ -57,25 +57,18 @@ final class TranscriptionTextProcessor {
         guard !clipboardContent.isEmpty else { return text }
 
         var result = text
-        let lowercased = text.lowercased()
 
         // Check custom triggers first (from settings)
         let customTriggers = appSettings.clipboardInsertionTriggers
             .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
+            .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
 
         let allTriggers = Self.clipboardTriggers.union(Set(customTriggers))
 
         for trigger in allTriggers {
-            if let range = lowercased.range(of: trigger) {
-                let originalRange = Range(
-                    uncheckedBounds: (
-                        result.index(result.startIndex, offsetBy: lowercased.distance(from: lowercased.startIndex, to: range.lowerBound)),
-                        result.index(result.startIndex, offsetBy: lowercased.distance(from: lowercased.startIndex, to: range.upperBound))
-                    )
-                )
-                result.replaceSubrange(originalRange, with: clipboardContent)
+            if let range = result.range(of: trigger, options: .caseInsensitive) {
+                result.replaceSubrange(range, with: clipboardContent)
                 // Re-process in case there are multiple triggers (with updated positions)
                 return expandClipboardCommands(in: result, depth: depth + 1)
             }

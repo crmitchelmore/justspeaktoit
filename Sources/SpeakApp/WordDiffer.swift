@@ -116,9 +116,11 @@ struct WordDiffer {
   private static func extractViaLCS(original: [String], edited: [String]) -> [WordChange] {
     guard !original.isEmpty, !edited.isEmpty else { return [] }
 
-    let table = buildLCSTable(original: original, edited: edited)
+    let originalLower = original.map { $0.lowercased() }
+    let editedLower = edited.map { $0.lowercased() }
+    let table = buildLCSTable(originalLower: originalLower, editedLower: editedLower)
     let (commonOriginalIndices, commonEditedIndices) = backtrackLCS(
-      table: table, original: original, edited: edited
+      table: table, originalLower: originalLower, editedLower: editedLower
     )
 
     // Find words that are not in common
@@ -145,13 +147,13 @@ struct WordDiffer {
     return changes
   }
 
-  private static func buildLCSTable(original: [String], edited: [String]) -> [[Int]] {
-    let rows = original.count
-    let cols = edited.count
+  private static func buildLCSTable(originalLower: [String], editedLower: [String]) -> [[Int]] {
+    let rows = originalLower.count
+    let cols = editedLower.count
     var table = [[Int]](repeating: [Int](repeating: 0, count: cols + 1), count: rows + 1)
     for rowIndex in 0..<rows {
       for columnIndex in 0..<cols {
-        if original[rowIndex].lowercased() == edited[columnIndex].lowercased() {
+        if originalLower[rowIndex] == editedLower[columnIndex] {
           table[rowIndex + 1][columnIndex + 1] = table[rowIndex][columnIndex] + 1
         } else {
           table[rowIndex + 1][columnIndex + 1] = max(
@@ -165,13 +167,13 @@ struct WordDiffer {
   }
 
   private static func backtrackLCS(
-    table: [[Int]], original: [String], edited: [String]
+    table: [[Int]], originalLower: [String], editedLower: [String]
   ) -> (Set<Int>, Set<Int>) {
     var commonOriginalIndices = Set<Int>()
     var commonEditedIndices = Set<Int>()
-    var row = original.count, col = edited.count
+    var row = originalLower.count, col = editedLower.count
     while row > 0 && col > 0 {
-      if original[row - 1].lowercased() == edited[col - 1].lowercased() {
+      if originalLower[row - 1] == editedLower[col - 1] {
         commonOriginalIndices.insert(row - 1)
         commonEditedIndices.insert(col - 1)
         row -= 1

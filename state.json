@@ -1,13 +1,1 @@
-{
-  "last_run": "2026-03-29",
-  "run_id": "23706263230",
-  "tasks_done": ["t4","t5","t7"],
-  "notes": ["macOS runner required","testX_condition_expected() naming","SpeakCoreTests/ for cross-platform tests","PRs created from existing test-assist branches","Issues 169,202,207,208,209 are duplicates to be closed"],
-  "prs": [
-    {"b":"test-assist/audio-buffer-pool-c458f9204b31f1c6","note":"18 AudioBufferPool tests","tmp_id":"aw_audiopr","run":"2026-03-29"},
-    {"b":"test-assist/any-codable-tests-23c993b9ca3bb2f6","note":"26 AnyCodable tests","tmp_id":"aw_anycodpr","run":"2026-03-29"},
-    {"b":"test-assist/openclaw-tests-20260328-3d6b34e72883f1a3","note":"24 OpenClawTypes+extractContent tests","tmp_id":"aw_openclawpr","run":"2026-03-29"}
-  ],
-  "backlog": ["APIKeyValidationDebugSnapshot"],
-  "task_last_run": {"t1":"2026-03-25","t2":"2026-03-25","t3":"2026-03-28","t4":"2026-03-29","t5":"2026-03-29","t6":null,"t7":"2026-03-29"}
-}
+{"last_run":"2026-03-30","run_id":"23738854944","tasks_done":["t3","t7"],"notes":["macOS runner required","SpeakCoreTests/ no heavy deps","testX_condition_expected() naming","CI runs on Linux - branches not persisted across runs - push PR in same run","AnyCodable+APIKeyValidation tests in PR aw_apipr 2026-03-30"],"prs":[{"b":"test-assist/api-key-validation-anycod-tests-20260330","note":"44 tests AnyCodable+APIKeyValidation","tmp_id":"aw_apipr","run":"2026-03-30"}],"backlog":["AudioBufferPool(macOS-only)","OpenClawTypes+extractContent"],"task_last_run":{"t1":"2026-03-25","t2":"2026-03-25","t3":"2026-03-30","t4":"2026-03-29","t5":"2026-03-29","t6":null,"t7":"2026-03-30"}}

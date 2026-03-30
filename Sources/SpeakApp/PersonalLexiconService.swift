@@ -7,6 +7,7 @@ final class PersonalLexiconService: ObservableObject {
 
   private let store: PersonalLexiconStore
   private let log = Logger(subsystem: "com.github.speakapp", category: "PersonalLexicon")
+  private var regexCache: [String: NSRegularExpression] = [:]
 
   init(store: PersonalLexiconStore) {
     self.store = store
@@ -19,6 +20,7 @@ final class PersonalLexiconService: ObservableObject {
     do {
       let loaded = try await store.load()
       rules = Self.normalised(rules: loaded)
+      regexCache.removeAll()
     } catch {
       log.error("Failed to refresh lexicon: \(error.localizedDescription, privacy: .public)")
     }
@@ -56,6 +58,7 @@ final class PersonalLexiconService: ObservableObject {
 
     rules.append(rule)
     rules = Self.normalised(rules: rules)
+    regexCache.removeAll()
     await persistSnapshot()
     return rule
   }
@@ -75,11 +78,13 @@ final class PersonalLexiconService: ObservableObject {
 
     rules[index] = sanitisedRule
     rules = Self.normalised(rules: rules)
+    regexCache.removeAll()
     await persistSnapshot()
   }
 
   func deleteRule(id: UUID) async {
     rules.removeAll { $0.id == id }
+    regexCache.removeAll()
     await persistSnapshot()
   }
 
@@ -168,6 +173,7 @@ final class PersonalLexiconService: ObservableObject {
       let loaded = try await store.load()
       await MainActor.run {
         self.rules = Self.normalised(rules: loaded)
+        self.regexCache.removeAll()
       }
     } catch {
       log.error("Failed to load lexicon: \(error.localizedDescription, privacy: .public)")
@@ -195,8 +201,15 @@ final class PersonalLexiconService: ObservableObject {
   private func apply(alias: String, with canonical: String, to text: String) -> (Int, String) {
     let escapedAlias = NSRegularExpression.escapedPattern(for: alias)
     let pattern = "(?i)\\b\(escapedAlias)\\b"
-    guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
-      return (0, text)
+    let regex: NSRegularExpression
+    if let cached = regexCache[alias] {
+      regex = cached
+    } else {
+      guard let compiled = try? NSRegularExpression(pattern: pattern, options: []) else {
+        return (0, text)
+      }
+      regexCache[alias] = compiled
+      regex = compiled
     }
     let fullRange = NSRange(location: 0, length: text.utf16.count)
     let matches = regex.numberOfMatches(in: text, options: [], range: fullRange)

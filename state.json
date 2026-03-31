@@ -1,1 +1,17 @@
-{"last_run":"2026-03-30","run_id":"23738854944","tasks_done":["t3","t7"],"notes":["macOS runner required","SpeakCoreTests/ no heavy deps","testX_condition_expected() naming","CI runs on Linux - branches not persisted across runs - push PR in same run","AnyCodable+APIKeyValidation tests in PR aw_apipr 2026-03-30"],"prs":[{"b":"test-assist/api-key-validation-anycod-tests-20260330","note":"44 tests AnyCodable+APIKeyValidation","tmp_id":"aw_apipr","run":"2026-03-30"}],"backlog":["AudioBufferPool(macOS-only)","OpenClawTypes+extractContent"],"task_last_run":{"t1":"2026-03-25","t2":"2026-03-25","t3":"2026-03-30","t4":"2026-03-29","t5":"2026-03-29","t6":null,"t7":"2026-03-30"}}
+{
+  "last_run": "2026-03-31",
+  "run_id": "23791123842",
+  "notes": [
+    "Tests require macOS runner; Sentry binary blocked on Linux CI",
+    "create_pull_request returns patch; PR created async",
+    "testX_condition_expected() naming convention"
+  ],
+  "prs": [
+    {"b": "test-assist/openclaw-types-extract-content-tests-20260331", "run": "2026-03-31"},
+    {"b": "test-assist/api-key-validation-anycod-tests-20260330", "issue": 219, "run": "2026-03-30"}
+  ],
+  "backlog": ["AudioBufferPool #212", "AnyCodable #213", "APIKey+AnyCodable #219", "TranscriptionProviderError"],
+  "stale_issues": [169, 202, 207, 208, 209, 214],
+  "monthly_issue": 170,
+  "task_last_run": {"t1": "2026-03-25", "t2": "2026-03-25", "t3": "2026-03-31", "t4": "2026-03-29", "t5": "2026-03-29", "t6": null, "t7": "2026-03-31"}
+}

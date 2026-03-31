@@ -1,23 +1,24 @@
 # Perf Improver Memory
 
 ## Commands
-- Build/Test: blocked by network in CI (Sentry binary download)
-- Lint: `swift package plugin --allow-writing-to-package-directory swiftlint --strict --target SpeakApp`
+Build/Test: blocked in CI (Sentry binary download firewall).
+Lint: `swift package plugin --allow-writing-to-package-directory swiftlint --strict --target SpeakApp`
 
-## Backlog (priority order)
-1. HIGH PersonalLexiconService regex cache — issue #152; draft PR branch: perf-assist/personal-lexicon-regex-cache (2026-03-30)
-2. MEDIUM HistoryManager incremental stats — issue #184
-3. MEDIUM TranscriptionTextProcessor lowercased+distance — issue #201
-4. MEDIUM TranscriptionTextProcessor clipboard String alloc — issue #204
-5. MEDIUM WordDiffer LCS lowercased — draft PR branch: perf-assist/word-differ-lcs-lowercase-precompute (2026-03-30)
-6. LOW HistoryManager.update() redundant sort
-7. LOW TranscriptionManager Deepgram string rebuild ~line 653
+## Backlog
+1. HIGH PersonalLexiconService NSRegularExpression cache — issue #216
+2. HIGH OpenClawChatCoordinator+HandsFree.removingAcknowledgementKeyword — NSRegularExpression per call (new 2026-03-31)
+3. MEDIUM HistoryManager incremental stats (3 dead O(1) methods unused)
+4. MEDIUM TranscriptionTextProcessor caseInsensitive search — issue #201
+5. MEDIUM TranscriptionTextProcessor clipboard alloc — issue #204
+6. MEDIUM WordDiffer LCS lowercased — issue #215
+7. LOW HistoryManager.update() redundant sort
+8. LOW TranscriptionManager Deepgram string rebuild ~line 653
 
-## Open Work
-- perf-assist/personal-lexicon-regex-cache: draft PR submitted 2026-03-30 (closes #152)
-- perf-assist/word-differ-lcs-lowercase-precompute: draft PR submitted 2026-03-30
+## Open Issues
+#201, #204, #215, #216 — all open, no human comments as of 2026-03-31.
 
 ## Round-Robin
-Last run (2026-03-30): Task 3, 4, 7. Next: Task 2, 5, 6
+Last run (2026-03-31): Tasks 2,5,6,7. Next: Tasks 3,4,7
 
-## Monthly Issue: #153
+## Monthly Issue
+#153 (March 2026, open)

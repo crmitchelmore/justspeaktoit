@@ -1,6 +1,6 @@
 # Recent Decisions
 
-<!-- changelog: 2026-03-29 — noted 2 pattern graduations; trimmed PR-block repetition; no stale entries (all <60 days) -->
+<!-- changelog: 2026-04-01 — added post-merge finding for PRs #186/#188/#189/#191 (merged despite product block); no stale entries removed (all <60 days) -->
 
 ## Graduated to principles (2026-03-29)
 - **Require plan-issue link on PRs**: 5 decisions (PRs #161, #186, #188, #189, #191) → now in `principles.md`
@@ -34,3 +34,6 @@ All approved immediately on first valid review. PRs had plan links, diffs matche
 
 ## 2026-03-26 — PRs #186, #188, #189, #191 (plan-issue link pattern, repeated)
 All blocked for missing `Plan issue: #<n>`. Pattern confirmed stable across significant and trivial scopes alike. Now a standing principle.
+
+## 2026-04-01 — Post-merge review: PRs #186, #188, #189, #191
+All four PRs were product-blocked for missing `Plan issue: #<n>`. All four were merged anyway (2026-03-26). The plan-link enforcement is advisory, not a hard merge gate. The principle remains valid as the correct Product stance, but the team should know blocks can be overridden by the maintainer. The plan-link principle needs re-evaluation of whether it should be framed as a "request" vs a "block".

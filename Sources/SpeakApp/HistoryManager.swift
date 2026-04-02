@@ -412,15 +412,14 @@ final class HistoryManager: ObservableObject {
     current.insert(item, at: 0)
     items = current
 
-    let stats = Self.calculateStatistics(for: allItemsOnDisk)
-    cachedStatistics = stats
-    statistics = stats
+    updateStatisticsForAppend(item)
 
     // Write to WAL instead of directly to disk
     await appendToWAL(WALEntry(operation: .append, item: item))
   }
 
   func update(_ item: HistoryItem) async {
+    let oldItem = allItemsOnDisk.first(where: { $0.id == item.id })
     if let diskIndex = allItemsOnDisk.firstIndex(where: { $0.id == item.id }) {
       allItemsOnDisk[diskIndex] = item
       allItemsOnDisk.sort { $0.createdAt > $1.createdAt }
@@ -432,9 +431,13 @@ final class HistoryManager: ObservableObject {
       items = updated.sorted { $0.createdAt > $1.createdAt }
     }
 
-    let stats = Self.calculateStatistics(for: allItemsOnDisk)
-    cachedStatistics = stats
-    statistics = stats
+    if let oldItem {
+      updateStatisticsForUpdate(oldItem: oldItem, newItem: item)
+    } else {
+      let stats = Self.calculateStatistics(for: allItemsOnDisk)
+      cachedStatistics = stats
+      statistics = stats
+    }
 
     // Write to WAL instead of directly to disk
     await appendToWAL(WALEntry(operation: .update, item: item))
@@ -446,9 +449,13 @@ final class HistoryManager: ObservableObject {
 
     items.removeAll { $0.id == id }
 
-    let stats = Self.calculateStatistics(for: allItemsOnDisk)
-    cachedStatistics = stats
-    statistics = stats
+    if let diskItem {
+      updateStatisticsForRemove(diskItem)
+    } else {
+      let stats = Self.calculateStatistics(for: allItemsOnDisk)
+      cachedStatistics = stats
+      statistics = stats
+    }
 
     // Write to WAL instead of directly to disk
     if let diskItem {

@@ -1,1 +1,28 @@
-{"last_run":"2026-04-02","run_id":"23894458766","notes":["macOS required","testX_condition_expected() naming","SpeakCoreTests/","TestHelpers.swift stubs: TranscriptionResult,TranscriptionSegment,ChatCostBreakdown,OpenClawChatMessage,OpenClawConversation"],"prs":[{"b":"test-assist/speakcore-test-helpers-20260402","run":"2026-04-02"}],"backlog":["AudioBufferPool","TranscriptionProviderError.errorDescription","OpenClawError.errorDescription","APIKeyValidationResult","OpenClawTypes"],"stale":[],"monthly_issue":"apr2026","task_last_run":{"t1":"2026-03-25","t2":"2026-03-25","t3":"2026-04-02","t4":"2026-04-01","t5":"2026-03-29","t6":"2026-04-02","t7":"2026-04-02"}}
+{
+  "last_run": "2026-04-03",
+  "run_id": "23941967611",
+  "notes": [
+    "macOS required",
+    "testX_condition_expected() naming",
+    "SpeakCoreTests/",
+    "TestHelpers.swift stubs: TranscriptionResult,TranscriptionSegment,ChatCostBreakdown,OpenClawChatMessage,OpenClawConversation"
+  ],
+  "prs": [
+    {"b": "test-assist/speakcore-test-helpers-20260402", "run": "2026-04-02", "note": "27 AnyCodable tests + TestHelpers"},
+    {"b": "test-assist/error-descriptions-20260403", "run": "2026-04-03", "note": "40 tests: errors, SensitiveHeaderRedactor, APIKeyValidation"}
+  ],
+  "backlog": [
+    "AudioBufferPool (complex, macOS only)",
+    "OpenClawTypes Codable round-trips"
+  ],
+  "monthly_issue": "apr2026 #231",
+  "task_last_run": {
+    "t1": "2026-03-25",
+    "t2": "2026-03-25",
+    "t3": "2026-04-03",
+    "t4": "2026-04-03",
+    "t5": "2026-03-29",
+    "t6": "2026-04-02",
+    "t7": "2026-04-03"
+  }
+}

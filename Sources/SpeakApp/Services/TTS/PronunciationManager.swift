@@ -7,10 +7,17 @@ final class PronunciationManager: ObservableObject {
     private static let storageKey = "pronunciationDictionary"
     private static let fileExtension = "json"
 
-    @Published private(set) var entries: [PronunciationEntry] = []
+    @Published private(set) var entries: [PronunciationEntry] = [] {
+        didSet { regexCache.removeAll() }
+    }
     @Published private(set) var isLoading = false
 
     private let defaults: UserDefaults
+    private struct RegexCacheKey: Hashable {
+        let pattern: String
+        let caseSensitive: Bool
+    }
+    private var regexCache: [RegexCacheKey: NSRegularExpression] = [:]
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -118,11 +125,19 @@ final class PronunciationManager: ObservableObject {
         } else {
             // Case-insensitive replacement with word boundaries
             let pattern = "\\b\(NSRegularExpression.escapedPattern(for: word))\\b"
-            guard let regex = try? NSRegularExpression(
-                pattern: pattern,
-                options: .caseInsensitive
-            ) else {
-                return text
+            let key = RegexCacheKey(pattern: pattern, caseSensitive: false)
+            let regex: NSRegularExpression
+            if let cached = regexCache[key] {
+                regex = cached
+            } else {
+                guard let compiled = try? NSRegularExpression(
+                    pattern: pattern,
+                    options: .caseInsensitive
+                ) else {
+                    return text
+                }
+                regexCache[key] = compiled
+                regex = compiled
             }
 
             let range = NSRange(text.startIndex..., in: text)
@@ -141,13 +156,20 @@ final class PronunciationManager: ObservableObject {
         replacement: String,
         caseSensitive: Bool
     ) -> String {
-        var options: NSRegularExpression.Options = []
-        if !caseSensitive {
-            options.insert(.caseInsensitive)
-        }
-
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: options) else {
-            return text
+        let key = RegexCacheKey(pattern: pattern, caseSensitive: caseSensitive)
+        let regex: NSRegularExpression
+        if let cached = regexCache[key] {
+            regex = cached
+        } else {
+            var options: NSRegularExpression.Options = []
+            if !caseSensitive {
+                options.insert(.caseInsensitive)
+            }
+            guard let compiled = try? NSRegularExpression(pattern: pattern, options: options) else {
+                return text
+            }
+            regexCache[key] = compiled
+            regex = compiled
         }
 
         let range = NSRange(text.startIndex..., in: text)

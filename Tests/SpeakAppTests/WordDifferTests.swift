@@ -111,4 +111,38 @@ final class WordDifferTests: XCTestCase {
         )
         XCTAssertTrue(changes.isEmpty, "Large insertions should be treated as rewrites, not corrections")
     }
+
+    // MARK: - Performance Baselines
+
+    /// Baseline: identical strings — exercises only the tokenise + findCommonEnds path (no LCS).
+    func testPerformance_findChanges_identicalStrings() {
+        let text = "the quick brown fox jumps over the lazy dog today and tomorrow"
+        measure {
+            for _ in 0..<500 {
+                _ = WordDiffer.findChanges(original: text, edited: text)
+            }
+        }
+    }
+
+    /// Baseline: single-word typo correction — the common hot path triggered by post-edit autocorrect.
+    func testPerformance_findChanges_singleWordReplacement() {
+        let original = "the quick brown fox jumps over the lazy dog"
+        let edited   = "the quick brown fox leaps over the lazy dog"
+        measure {
+            for _ in 0..<500 {
+                _ = WordDiffer.findChanges(original: original, edited: edited)
+            }
+        }
+    }
+
+    /// Baseline: unequal word counts in the middle — triggers the full LCS table-build path.
+    func testPerformance_findChanges_lcsPath() {
+        let original = "meeting with alice bob charlie and discussing the quarterly review report"
+        let edited   = "meeting with alice bob charlie and reviewing the quarterly report"
+        measure {
+            for _ in 0..<500 {
+                _ = WordDiffer.findChanges(original: original, edited: edited)
+            }
+        }
+    }
 }

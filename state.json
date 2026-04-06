@@ -1,29 +1,30 @@
 {
-  "last_run": "2026-04-05",
-  "run_id": "23998911865",
+  "last_run": "2026-04-06",
+  "run_id": "24027291140",
   "notes": [
     "macOS required for tests (Sentry binary blocks Linux)",
     "testX_condition_expected() naming convention",
     "SpeakCoreTests/ - use @testable import SpeakCore",
-    "TestHelpers.swift stubs: TranscriptionResult,TranscriptionSegment,ChatCostBreakdown,OpenClawChatMessage,OpenClawConversation"
+    "TestHelpers.swift stubs exist in previous (unconfirmed) PR branches",
+    "swift build --target SpeakCore compiles on Linux (exit 0); tests require macOS",
+    "safeoutputs-create_pull_request returns success+patch - PR numbers not always indexable immediately"
   ],
   "prs": [
-    {"b": "test-assist/speakcore-test-helpers-20260402-b1aaba8ab4f090ea", "run": "2026-04-05", "note": "27 AnyCodable tests + TestHelpers - DRAFT PR CREATED"},
-    {"b": "test-assist/error-descriptions-20260403-a882f612cd5f7eeb", "run": "2026-04-05", "note": "40 tests: errors, SensitiveHeaderRedactor, APIKeyValidation - DRAFT PR CREATED"}
+    {"b": "test-assist/openclaw-llm-codable-20260406-72471b7", "run": "2026-04-06", "note": "35 tests: OpenClawTypes (20) + LLMProtocols (15) Codable round-trips - DRAFT PR SUBMITTED"}
   ],
   "backlog": [
     "AudioBufferPool (complex, macOS only, os_unfair_lock)",
-    "OpenClawTypes Codable round-trips: OpenClawConversation, OpenClawChatMessage, OpenClawConnectConfig",
-    "LLMProtocols Codable round-trips: ChatMessage, ChatCostBreakdown, ChatResponse"
+    "Re-implement AnyCodable tests (previous branch not confirmed in remote)",
+    "Re-implement error description + SensitiveHeaderRedactor + APIKeyValidation tests (previous branches not confirmed)"
   ],
   "monthly_issue": "apr2026 #231",
   "task_last_run": {
     "t1": "2026-03-25",
     "t2": "2026-04-04",
-    "t3": "2026-04-04",
+    "t3": "2026-04-06",
     "t4": "2026-04-05",
     "t5": "2026-03-29",
     "t6": "2026-04-02",
-    "t7": "2026-04-05"
+    "t7": "2026-04-06"
   }
 }

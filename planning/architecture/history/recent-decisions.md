@@ -8,3 +8,6 @@ PR #209 is not accessible via the GitHub API (returns empty results for all meth
 
 ## 2026-04-07 — Issue #260 ([Test Improver] Codable round-trips)
 Issue #260 carries only `automation`, `testing`, and `agentic-workflows` labels — no `planning:` labels and no Planning Kickoff comment. Architecture review does not apply per the do-nothing rule.
+
+## 2026-04-07 — PR #256
+PR #256 is not accessible via the GitHub API (not in open or closed PR list, direct reads return empty). Likely merged, deleted, or removed. No action taken per protocol: cannot verify live PR context.

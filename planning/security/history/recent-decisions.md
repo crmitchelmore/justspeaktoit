@@ -78,3 +78,6 @@ GitHub context shows `issue-number: #246`, `pull-request-number: (empty)`. #246 
 
 ## 2026-04-07 — PR #265: Not a PR (issue_comment on issue #265)
 GitHub context shows `pull-request-number` is empty. #265 does not appear in the open PR list (only #267 and #128 are open). The `issue_comment` trigger fires on issue #265, which is an issue, not a PR. Per review protocol, took no action — the comment does not belong to a pull request.
+
+## 2026-04-07 — Issue #201: No access (private repo / MCP auth gap)
+All GitHub MCP reads returned empty arrays. Could not access issue body, labels, or comments. Took no action. Security stance unset. If re-triggered with valid context, review from scratch.

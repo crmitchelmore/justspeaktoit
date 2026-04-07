@@ -22,3 +22,8 @@ justspeaktoit — macOS + iOS voice-to-text app (Swift, SwiftUI)
 - Daily agents: perf-improver, test-improver, doc-updater, repo-status
 - Planning agents: product, security, performance, quality, architecture, reliability, design, EM
 - Coordination agent monitors backlog health
+
+## GitHub MCP Tooling Issue (observed 2026-04-07)
+GitHub MCP tools (issue_read, list_issues) consistently return [] for issues #202, #244, #250, #239.
+This appears to be a persistent infrastructure issue, not issue-specific.
+Cannot verify planning preconditions without issue data — defaulting to noop.

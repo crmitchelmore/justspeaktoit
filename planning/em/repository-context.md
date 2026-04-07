@@ -1,20 +1,24 @@
 # Repository Context
 
 ## Project
-**justspeaktoit** — cross-platform (macOS + iOS) voice transcription app built in Swift. macOS releases are automated via conventional commits (`feat:`, `fix:`, `perf:`). iOS releases are manual via workflow dispatch.
+justspeaktoit — macOS + iOS voice-to-text app (Swift, SwiftUI)
+- macOS app: SpeakApp (SwiftPM executable)
+- iOS app: SpeakiOSLib + SpeakiOSApp
+- Shared core: SpeakCore
 
-## Planning cadence
-- Planning triggered by `planning:` labels or `/doit` commands on issues.
-- Seven technical reviewer roles: Product (Alex), Security (Priya), Performance (Theo), Code Quality (Casey), Architecture (Morgan), Reliability (Jordan), Design (Riley).
-- EM (Sam) facilitates; does not approve or block.
+## Planning Workflow
+- 7 technical reviewers: Product (Alex), Security (Priya), Performance (Theo),
+  Code Quality (Casey), Architecture (Morgan), Reliability (Jordan), Design (Riley)
+- EM (Sam) facilitates, does not approve
+- Kickoff comment triggers role reviews; EM only comments when ≥3 roles in and team is stuck
+- Issue labels drive workflow triggers
 
-## Key architectural facts
-- `SpeakCore` — shared cross-platform library.
-- `SpeakApp` — macOS executable.
-- `SpeakiOSLib` — iOS library (must be `public` for Xcode access).
-- Keychain via `SecureStorage` / `SecureAppStorage`.
-- AssemblyAI for streaming transcription (v3 WebSocket).
-- Sentry EU region for error monitoring.
+## Release Cadence
+- macOS: automated via conventional commits → mac-v* tags
+- iOS: manual TestFlight workflow dispatch
+- Non-releasable types: chore, docs, ci, style, test, refactor, build
 
-## Recurring themes (to populate)
-- (To be filled as issues close)
+## Agentic Workflows
+- Daily agents: perf-improver, test-improver, doc-updater, repo-status
+- Planning agents: product, security, performance, quality, architecture, reliability, design, EM
+- Coordination agent monitors backlog health

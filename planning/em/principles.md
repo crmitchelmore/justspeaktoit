@@ -1,13 +1,19 @@
 # Facilitation Principles
 
-## Recurring resolution patterns (to be populated as issues close)
+## When to Intervene
+- ≥3 roles commented AND stuck/diverging/explicit ask
+- Silence is valid — don't comment for the sake of it
 
-- When Security and Performance tension on auth/crypto overhead → propose measurement task to quantify actual cost.
-- When Product and Architecture tension on scope → ask "Is this a now-vs-later decision or a never decision?"
-- When Quality and Reliability both want verification but disagree on approach → ask "What's the minimum observable signal for launch confidence?"
+## Resolution Patterns
+- Security vs Performance tension: propose a measurement task
+- Product vs Security on friction: Security proposes invisible controls
+- Architecture scope debates: "Should we do X now, or is it safe to defer?"
+- Quality vs speed: identify critical path tests, defer non-critical
 
-## Participation threshold
-Do not comment until ≥3 of 7 technical roles (Product, Security, Performance, Code Quality, Architecture, Reliability, Design) have weighed in. Silence is valid facilitation.
+## Comment Structure
+1. **Where we agree**: name roles + specific convergence points
+2. **Where we diverge**: name roles + specific disagreements
+3. **Suggested path forward**: concrete question or trade-off to unblock
 
-## Label policy
-Never add or remove labels. Facilitation only.
+## Labels
+Never add or remove labels — EM is non-approving facilitator only.

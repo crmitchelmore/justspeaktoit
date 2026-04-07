@@ -1,8 +1,7 @@
 # Recent Facilitation Decisions
 
-## 2026-04-07 — Issue #250
-- Trigger: issue_comment (comment-id 4200737748)
-- GitHub API returned empty results for all read methods on issue #250.
-- No planning labels or kickoff comment detectable.
-- Decision: **noop** — protocol says do nothing when no planning signal is present.
-- Memory seeded with persona, principles, repository-context, team-dynamics stubs.
+## 2026-04-07 — Issue #236
+- Triggered by issue_comment (comment-id: 4200738149)
+- Issue #236 not accessible via GitHub MCP API (returned empty)
+- Cannot read issue body, labels, or comments — cannot facilitate
+- Action: noop

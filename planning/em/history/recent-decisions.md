@@ -20,10 +20,10 @@
 - 0 of 7 technical roles commented
 - Action: noop
 
-## 2026-04-07 — Issue #204
-- Triggered by issue_comment (comment-id: 4201796315) from bravostation
-- Issue #204 not accessible via GitHub MCP API (both get and get_comments returned [])
-- Cannot read issue body, labels, comments, or planning role participation
-- Cannot verify facilitation preconditions (planning labels, kickoff, ≥3 role comments)
+## 2026-04-07 — Issue #246
+- Triggered by issue_comment (comment-id: 4201795567) from bravostation
+- Issue: [Perf Improver] O(N) map+join → O(1) incremental append in DeepgramLiveController
+- Issue body accessible via search; comments API returned empty
+- Labels confirm: only Jordan (Reliability) has approved so far
+- 1 of 7 technical roles commented — below EM threshold (≥3 required)
 - Action: noop
-- Pattern: Persistent GitHub MCP API infrastructure issue continues to affect all issues

@@ -179,14 +179,10 @@ final class HistoryManager: ObservableObject {
   private func appendToWAL(_ entry: WALEntry) async {
     pendingWrites.append(entry)
 
+    // Write the current in-memory pending list directly — avoids an O(n) disk
+    // read-decode-reencode cycle that would grow with each pending write.
     do {
-      var walEntries: [WALEntry] = []
-      if FileManager.default.fileExists(atPath: walURL.path) {
-        let data = try Data(contentsOf: walURL)
-        walEntries = (try? decoder.decode([WALEntry].self, from: data)) ?? []
-      }
-      walEntries.append(entry)
-      let data = try encoder.encode(walEntries)
+      let data = try encoder.encode(pendingWrites)
       try data.write(to: walURL, options: [.atomic])
     } catch {
       log.error("Failed to append to WAL: \(error.localizedDescription, privacy: .public)")
@@ -412,15 +408,14 @@ final class HistoryManager: ObservableObject {
     current.insert(item, at: 0)
     items = current
 
-    let stats = Self.calculateStatistics(for: allItemsOnDisk)
-    cachedStatistics = stats
-    statistics = stats
+    updateStatisticsForAppend(item)
 
     // Write to WAL instead of directly to disk
     await appendToWAL(WALEntry(operation: .append, item: item))
   }
 
   func update(_ item: HistoryItem) async {
+    let oldItem = allItemsOnDisk.first(where: { $0.id == item.id })
     if let diskIndex = allItemsOnDisk.firstIndex(where: { $0.id == item.id }) {
       allItemsOnDisk[diskIndex] = item
       allItemsOnDisk.sort { $0.createdAt > $1.createdAt }
@@ -432,9 +427,11 @@ final class HistoryManager: ObservableObject {
       items = updated.sorted { $0.createdAt > $1.createdAt }
     }
 
-    let stats = Self.calculateStatistics(for: allItemsOnDisk)
-    cachedStatistics = stats
-    statistics = stats
+    if let oldItem {
+      updateStatisticsForUpdate(oldItem: oldItem, newItem: item)
+    } else {
+      updateStatisticsForAppend(item)
+    }
 
     // Write to WAL instead of directly to disk
     await appendToWAL(WALEntry(operation: .update, item: item))
@@ -446,13 +443,14 @@ final class HistoryManager: ObservableObject {
 
     items.removeAll { $0.id == id }
 
-    let stats = Self.calculateStatistics(for: allItemsOnDisk)
-    cachedStatistics = stats
-    statistics = stats
-
-    // Write to WAL instead of directly to disk
     if let diskItem {
+      updateStatisticsForRemove(diskItem)
       await appendToWAL(WALEntry(operation: .remove, item: diskItem))
+    } else {
+      // Item wasn't tracked; recompute from scratch
+      let stats = Self.calculateStatistics(for: allItemsOnDisk)
+      cachedStatistics = stats
+      statistics = stats
     }
   }
 
@@ -549,6 +547,18 @@ final class HistoryManager: ObservableObject {
 
   // MARK: - Incremental Statistics Updates
 
+  /// Returns the effective recording duration for an item, matching `calculateStatistics` logic.
+  private nonisolated static func effectiveDuration(for item: HistoryItem) -> TimeInterval {
+    if item.recordingDuration > 0 {
+      return item.recordingDuration
+    }
+    if let start = item.phaseTimestamps.recordingStarted,
+       let end = item.phaseTimestamps.recordingEnded {
+      return max(0, end.timeIntervalSince(start))
+    }
+    return 0
+  }
+
   private func updateStatisticsForAppend(_ item: HistoryItem) {
     guard let cached = cachedStatistics else {
       cachedStatistics = Self.calculateStatistics(for: allItemsOnDisk)
@@ -557,7 +567,7 @@ final class HistoryManager: ObservableObject {
     }
 
     let newTotalSessions = cached.totalSessions + 1
-    let newCumulativeDuration = cached.cumulativeRecordingDuration + item.recordingDuration
+    let newCumulativeDuration = cached.cumulativeRecordingDuration + Self.effectiveDuration(for: item)
     let newTotalSpend = cached.totalSpend + (item.cost?.total ?? 0)
     let newErrorCount = cached.sessionsWithErrors + (item.errors.isEmpty ? 0 : 1)
     let newAverageLength = newTotalSessions > 0 ? newCumulativeDuration / Double(newTotalSessions) : 0
@@ -580,8 +590,9 @@ final class HistoryManager: ObservableObject {
       return
     }
 
+    let itemDuration = Self.effectiveDuration(for: item)
     let newTotalSessions = max(0, cached.totalSessions - 1)
-    let newCumulativeDuration = max(0, cached.cumulativeRecordingDuration - item.recordingDuration)
+    let newCumulativeDuration = max(0, cached.cumulativeRecordingDuration - itemDuration)
     let newTotalSpend = max(0, cached.totalSpend - (item.cost?.total ?? 0))
     let newErrorCount = max(0, cached.sessionsWithErrors - (item.errors.isEmpty ? 0 : 1))
     let newAverageLength = newTotalSessions > 0 ? newCumulativeDuration / Double(newTotalSessions) : 0
@@ -604,7 +615,7 @@ final class HistoryManager: ObservableObject {
       return
     }
 
-    let durationDelta = newItem.recordingDuration - oldItem.recordingDuration
+    let durationDelta = Self.effectiveDuration(for: newItem) - Self.effectiveDuration(for: oldItem)
     let costDelta = (newItem.cost?.total ?? 0) - (oldItem.cost?.total ?? 0)
     let errorDelta = (newItem.errors.isEmpty ? 0 : 1) - (oldItem.errors.isEmpty ? 0 : 1)
 

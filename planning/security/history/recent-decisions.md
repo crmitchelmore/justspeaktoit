@@ -57,3 +57,9 @@ Blocked on missing linked plan issue. The change itself is security-neutral: pur
 
 ## 2026-04-07 — Issue #223: No access (private repo / MCP auth gap)
 All GitHub MCP reads returned empty arrays. Could not access issue body, labels, or comments. Took no action. Security stance unset. If re-triggered with valid context, review from scratch.
+
+## 2026-04-07 — Issue #214: No access (private repo / MCP auth gap)
+All GitHub MCP reads returned empty arrays. Could not access issue body, labels, or comments. Took no action. Security stance unset. If re-triggered with valid context, review from scratch.
+
+## 2026-04-07 — PR #207: No access (private repo / MCP auth gap)
+All GitHub MCP reads returned empty arrays for PR #207. PR not found in open PR list — likely closed/merged or inaccessible due to MCP auth gap. Took no action per standing rule: do not approve on missing context, and do nothing if PR is closed/merged.

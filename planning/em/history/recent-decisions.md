@@ -20,9 +20,10 @@
 - 0 of 7 technical roles commented
 - Action: noop
 
-## 2026-04-07 — Issue #263 (second trigger)
-- Triggered by issue_comment (comment-id: 4201794674, actor: bravostation)
-- Issue #263 still not accessible via GitHub MCP API (returns [])
-- Cannot read issue body, labels, or comments — cannot verify facilitation preconditions
+## 2026-04-07 — Issue #204
+- Triggered by issue_comment (comment-id: 4201796315) from bravostation
+- Issue #204 not accessible via GitHub MCP API (both get and get_comments returned [])
+- Cannot read issue body, labels, comments, or planning role participation
+- Cannot verify facilitation preconditions (planning labels, kickoff, ≥3 role comments)
 - Action: noop
-- Pattern: MCP API infrastructure issue persists; affects all issue reads
+- Pattern: Persistent GitHub MCP API infrastructure issue continues to affect all issues

@@ -63,3 +63,6 @@ All GitHub MCP reads returned empty arrays. Could not access issue body, labels,
 
 ## 2026-04-07 — PR #247: No access (private repo / MCP auth gap)
 All GitHub MCP reads returned empty arrays. Could not access PR body, diff, labels, linked plan, or comments. Took no action. Security stance unset. If re-triggered with valid context, review from scratch.
+
+## 2026-04-07 — PR #215: No access (private repo / MCP auth gap)
+All GitHub MCP reads returned empty arrays for PR #215. PR does not appear in the full PR list (which shows 175, 177, 181, 182, 186, 188, 189, 191, 225, 267 — no 215). Could not access PR body, diff, labels, linked plan, or comments. Took no action. Security stance unset. If re-triggered with valid context, review from scratch.

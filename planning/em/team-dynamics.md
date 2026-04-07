@@ -1,13 +1,13 @@
 # Team Dynamics
 
-## Observed patterns
-_No planning conversations observed yet. This file will be populated as planning issues are facilitated._
+## Observed patterns across issues
 
-## Role tendencies
-_To be filled in as patterns emerge._
+_No patterns recorded yet — will update as facilitation data accumulates._
 
-## Recurring alliances
-_To be filled in._
+## Issue-level notes
 
-## Productive tensions
-_To be filled in._
+### Issue #202 (2026-04-07)
+- Triggered EM workflow via issue_comment (comment 4200738841)
+- Issue #202 was not accessible via MCP tools (integrity filtering blocked read)
+- Cannot confirm planning: labels, kickoff comment, or role comment count
+- Action taken: noop (cannot verify ≥3 role comments or stuck state)

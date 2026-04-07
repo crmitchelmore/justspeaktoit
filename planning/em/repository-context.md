@@ -1,18 +1,23 @@
 # Repository Context
 
 ## Project
-`crmitchelmore/justspeaktoit` — macOS + iOS voice-to-text app (JustSpeakToIt).
+JustSpeakToIt — macOS + iOS speech-to-text / voice assistant app (SwiftUI, Swift Package Manager, Tuist)
 
-## Tech stack
-- Swift, SwiftUI, SwiftPM, Tuist
-- macOS (SpeakApp target) + iOS (SpeakiOSLib target) + SpeakCore (shared)
-- AssemblyAI for live transcription, OpenAI for post-processing
-- Automated releases via conventional commits → `mac-v*` tags
+## Planning cadence
+- Issues labelled `planning:*` trigger the multi-role review workflow
+- Automated agents (Test Improver, Perf Improver, Coordination, Repo Status) create many issues — these use `automation` label and rarely receive planning-team reviews
+- Conventional commits drive auto-release: feat/fix/perf → mac-v* tag
 
-## Planning conventions
-- Planning labels: `planning:*` signal active planning conversations
-- Conventional commits drive automated mac releases (`feat:`, `fix:`, `perf:`)
-- Automated/agentic issues (label: `agentic-workflows`) are not planning issues
+## Team roles
+- Alex → Product
+- Priya → Security
+- Theo → Performance
+- Casey → Code Quality
+- Morgan → Architecture
+- Jordan → Reliability
+- Riley → Design
 
-## First EM run
-2026-04-07: First run observed issue #208 (closed, automated test-improver bot PR — no planning labels, no kickoff comment). No facilitation needed.
+## Observed issue patterns (seeded 2026-04-07)
+- Most open issues are automation-generated (test improver, perf improver, coordination)
+- Human-initiated planning issues tend to be feature or fix proposals with platform scope
+- Integrity filtering occasionally prevents reading older/lower-trust issues

@@ -1,17 +1,22 @@
 # Facilitation Principles
 
-## Core heuristics
-- Ask "what would need to be true for everyone to approve?" to drive convergence.
-- Surface hidden assumptions between roles before proposing solutions.
-- Propose smallest experiment/clarification to resolve deadlocks.
-- Never override technical judgement — help articulate it more precisely.
+## When to intervene
+- ≥3 of 7 technical roles (Product/Alex, Security/Priya, Performance/Theo, Quality/Casey, Architecture/Morgan, Reliability/Jordan, Design/Riley) have commented
+- AND: team is stuck, two roles are talking past each other, or maintainer explicitly asked
 
-## Common tensions (to watch for)
-- Security vs Product: auth friction vs user experience → resolves when Security proposes invisible controls.
-- Performance vs Architecture: premature optimisation vs structural debt → resolves with a measurement task.
-- Quality vs schedule: test coverage vs shipping → resolves by identifying critical paths only.
+## Recurring dynamics (general patterns)
+- Security ↔ Product: tension on auth/trust friction → resolves when Security proposes invisible controls
+- Performance ↔ Architecture: tension on premature optimization → resolves when Theo frames concern as a concrete measurable question
+- Quality ↔ everyone: Casey wants tests for everything → help prioritise critical paths only
+- Architecture tends to defer scope to Product but holds firm on coupling/structural decisions
 
-## Repository-specific
-- This repo ships macOS + iOS. Scope clarifications often needed (mac-only? cross-platform?).
-- Automated/agentic issues (bot-created PRs/issues) do not need planning facilitation.
-- `planning:` labels signal that a planning conversation is active on an issue.
+## Resolution strategies
+- Deadlock between 2 roles → propose smallest experiment or clarification that would resolve it
+- Open-ended performance worry → push Theo to a concrete question with a measurable threshold
+- Security hard-req vs risk-acceptance → help Priya distinguish; ensure team explicitly acknowledges residual risk
+- Operational concern raised late → help Jordan distinguish launch-blocking from post-launch-fixable
+
+## Repository-specific context
+- iOS and macOS tracks are separate; scoping issues to platform avoids cross-platform noise
+- Automated improvement agents (Test Improver, Perf Improver, etc.) create many issues — these rarely need facilitation
+- Planning labels gate the facilitation workflow

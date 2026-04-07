@@ -64,3 +64,6 @@ Crash fix (Data.removeFirst → Data(dropFirst)), 4-line change in Transcription
 
 ## 2026-03-26 — PR #191: Initial pass
 Workflow-only PR (31 lock.yml + 31 .md files) disabling `GH_AW_FAILURE_REPORT_AS_ISSUE` across all agentic workflows. Blocked: no plan issue link. Pattern consistent with PRs #186, #189, #161.
+
+## 2026-04-07 — Issue #246: Perf improvement for incremental transcript append
+Automated perf issue. Two focused concerns raised: (1) scope ambiguity on AssemblyAI (files section says Deepgram only, body says "can be handled"), (2) verification story covers performance (measure{}) but not correctness. `buildFinalResult()` map+join at line 948 correctly identified as a one-shot call, not a hot path — left out of scope. Pattern: always check whether a perf fix has a correctness regression test alongside the measurement, especially when branching logic (replace vs append) is involved.

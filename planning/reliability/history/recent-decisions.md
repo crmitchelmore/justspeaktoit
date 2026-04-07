@@ -7,3 +7,6 @@ Initialized reliability memory from repository inspection. Key facts verified:
 - iOS has App Store review delay as natural gate.
 - Sentry EU is the error monitoring layer.
 - Issue #255 could not be read via GitHub MCP API (returned empty array); noop taken.
+
+## 2026-04-07 — Issue #202 unreadable
+GitHub MCP API returned empty arrays for issue #202 (get, get_comments, get_labels all returned []). Cannot verify planning labels or kickoff comment. Noop taken per operating constraints. Same pattern as issue #255.

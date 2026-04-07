@@ -16,3 +16,6 @@ Issue #209 is a closed automated bot issue (Daily Test Improver) with labels `au
 
 ## 2026-04-07 — Issue #152 unreadable
 GitHub MCP API returned empty arrays for issue #152 (get, get_comments, get_labels all returned []). Same recurring pattern as issues #202, #255, #209. Cannot verify planning labels or kickoff comment. Noop taken per operating constraints.
+
+## 2026-04-07 — Issue #246 unreadable
+GitHub MCP API returned empty arrays for issue #246 (get, get_comments, get_labels all returned []). Same recurring pattern as issues #152, #202, #255. Cannot verify planning labels or kickoff comment. Noop taken per operating constraints — cannot approve or comment without verifiable issue context.

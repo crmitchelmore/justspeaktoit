@@ -19,3 +19,10 @@
 - No `planning:` labels on issue; no planning kickoff comment present
 - 0 of 7 technical roles commented
 - Action: noop
+
+## 2026-04-07 — Issue #263 (second trigger)
+- Triggered by issue_comment (comment-id: 4201794674, actor: bravostation)
+- Issue #263 still not accessible via GitHub MCP API (returns [])
+- Cannot read issue body, labels, or comments — cannot verify facilitation preconditions
+- Action: noop
+- Pattern: MCP API infrastructure issue persists; affects all issue reads

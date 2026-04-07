@@ -1,13 +1,14 @@
 # Team Dynamics
 
-## Observed patterns across issues
+## Observed patterns (to be populated as issues close)
 
-_No patterns recorded yet — will update as facilitation data accumulates._
+_No patterns recorded yet. This file will be updated after the first full planning cycle._
 
-## Issue-level notes
-
-### Issue #202 (2026-04-07)
-- Triggered EM workflow via issue_comment (comment 4200738841)
-- Issue #202 was not accessible via MCP tools (integrity filtering blocked read)
-- Cannot confirm planning: labels, kickoff comment, or role comment count
-- Action taken: noop (cannot verify ≥3 role comments or stuck state)
+## Role tendencies (initial priors, unconfirmed)
+- Security (Priya) likely to raise API key handling and Keychain access concerns.
+- Architecture (Morgan) likely to flag cross-platform coupling between SpeakCore/SpeakApp/SpeakiOSLib.
+- Performance (Theo) likely to focus on audio pipeline latency and streaming overhead.
+- Reliability (Jordan) likely to raise error recovery in WebSocket reconnection scenarios.
+- Product (Alex) likely to focus on user-visible scope and iOS vs macOS feature parity.
+- Quality (Casey) likely to ask about test coverage for new transcription paths.
+- Design (Riley) likely to raise Liquid Glass / HIG compliance for iOS 26+ UI changes.

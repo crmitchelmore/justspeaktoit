@@ -1,23 +1,20 @@
 # Repository Context
 
 ## Project
-JustSpeakToIt — macOS + iOS speech-to-text / voice assistant app (SwiftUI, Swift Package Manager, Tuist)
+**justspeaktoit** — cross-platform (macOS + iOS) voice transcription app built in Swift. macOS releases are automated via conventional commits (`feat:`, `fix:`, `perf:`). iOS releases are manual via workflow dispatch.
 
 ## Planning cadence
-- Issues labelled `planning:*` trigger the multi-role review workflow
-- Automated agents (Test Improver, Perf Improver, Coordination, Repo Status) create many issues — these use `automation` label and rarely receive planning-team reviews
-- Conventional commits drive auto-release: feat/fix/perf → mac-v* tag
+- Planning triggered by `planning:` labels or `/doit` commands on issues.
+- Seven technical reviewer roles: Product (Alex), Security (Priya), Performance (Theo), Code Quality (Casey), Architecture (Morgan), Reliability (Jordan), Design (Riley).
+- EM (Sam) facilitates; does not approve or block.
 
-## Team roles
-- Alex → Product
-- Priya → Security
-- Theo → Performance
-- Casey → Code Quality
-- Morgan → Architecture
-- Jordan → Reliability
-- Riley → Design
+## Key architectural facts
+- `SpeakCore` — shared cross-platform library.
+- `SpeakApp` — macOS executable.
+- `SpeakiOSLib` — iOS library (must be `public` for Xcode access).
+- Keychain via `SecureStorage` / `SecureAppStorage`.
+- AssemblyAI for streaming transcription (v3 WebSocket).
+- Sentry EU region for error monitoring.
 
-## Observed issue patterns (seeded 2026-04-07)
-- Most open issues are automation-generated (test improver, perf improver, coordination)
-- Human-initiated planning issues tend to be feature or fix proposals with platform scope
-- Integrity filtering occasionally prevents reading older/lower-trust issues
+## Recurring themes (to populate)
+- (To be filled as issues close)

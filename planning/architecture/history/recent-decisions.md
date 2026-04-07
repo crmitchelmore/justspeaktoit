@@ -11,3 +11,6 @@ Issue #260 carries only `automation`, `testing`, and `agentic-workflows` labels 
 
 ## 2026-04-07 — PR #252
 PR #252 is not accessible via the GitHub API (all read methods: get, get_comments, get_diff, get_files return empty results). It does not appear in the open or closed PR list. Cannot verify live PR context or linked planning issue. No action taken per protocol.
+
+## 2026-04-07 — Issue #212 ([Test Improver] Add AudioBufferPool unit tests)
+Issue #212 is not a pull request — it's a test-improver automation issue with labels `automation`, `testing`, `agentic-workflows`. The workflow was triggered by an `issue_comment` on this issue. Per protocol, no action taken: comment belongs to an issue, not a PR.

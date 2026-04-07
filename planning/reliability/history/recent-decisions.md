@@ -10,3 +10,6 @@ Initialized reliability memory from repository inspection. Key facts verified:
 
 ## 2026-04-07 — Issue #202 unreadable
 GitHub MCP API returned empty arrays for issue #202 (get, get_comments, get_labels all returned []). Cannot verify planning labels or kickoff comment. Noop taken per operating constraints. Same pattern as issue #255.
+
+## 2026-04-07 — Issue #209 skipped (no planning labels)
+Issue #209 is a closed automated bot issue (Daily Test Improver) with labels `automation`, `testing`, `agentic-workflows`. No `planning:` labels and no planning kickoff comment. Noop taken per operating constraints.

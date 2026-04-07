@@ -54,3 +54,6 @@ Blocked on missing linked plan issue. Same pattern as PR #186. Implementation is
 
 ## 2026-03-26 — PR #191 (disable failure issue creation on all workflows)
 Blocked on missing linked plan issue. The change itself is security-neutral: pure noise-reduction config (`GH_AW_FAILURE_REPORT_AS_ISSUE: false`) applied consistently to all 31 workflows. No permissions, trust boundaries, or auth changes. Blocker is governance only.
+
+## 2026-04-07 — Issue #223: No access (private repo / MCP auth gap)
+All GitHub MCP reads returned empty arrays. Could not access issue body, labels, or comments. Took no action. Security stance unset. If re-triggered with valid context, review from scratch.

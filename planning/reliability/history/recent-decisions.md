@@ -19,3 +19,6 @@ GitHub MCP API returned empty arrays for issue #152 (get, get_comments, get_labe
 
 ## 2026-04-07 — Issue #246 unreadable
 GitHub MCP API returned empty arrays for issue #246 (get, get_comments, get_labels all returned []). Same recurring pattern as issues #152, #202, #255. Cannot verify planning labels or kickoff comment. Noop taken per operating constraints — cannot approve or comment without verifiable issue context.
+
+## 2026-04-07 — Issue #201 unreadable (integrity-filtered)
+GitHub MCP API returned empty arrays for issue #201 (get, get_comments, get_labels all returned []). Confirmed integrity-filtered via search_issues. This is the 6th consecutive issue (after #152, #202, #246, #255, and one other) that has been unreadable. Noop taken per operating constraints — cannot approve or comment without verifiable issue context.

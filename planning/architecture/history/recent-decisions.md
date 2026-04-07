@@ -9,5 +9,5 @@ PR #209 is not accessible via the GitHub API (returns empty results for all meth
 ## 2026-04-07 — Issue #260 ([Test Improver] Codable round-trips)
 Issue #260 carries only `automation`, `testing`, and `agentic-workflows` labels — no `planning:` labels and no Planning Kickoff comment. Architecture review does not apply per the do-nothing rule.
 
-## 2026-04-07 — PR #252
-PR #252 is not accessible via the GitHub API (all read methods: get, get_comments, get_diff, get_files return empty results). It does not appear in the open or closed PR list. Cannot verify live PR context or linked planning issue. No action taken per protocol.
+## 2026-04-07 — Issue #204 ([Perf Improver] clipboard trigger matching)
+Issue #204 carries only `automation`, `performance`, and `agentic-workflows` labels — no `planning:` labels and no Planning Kickoff comment. Architecture review does not apply per the do-nothing rule.

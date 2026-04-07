@@ -73,5 +73,5 @@ All GitHub MCP reads returned empty arrays. PR #184 not found in open PR list. C
 ## 2026-04-07 — PR #166: Not a PR (issue_comment on issue #166)
 GitHub context shows `pull-request-number` is empty. PR #166 does not appear in the open PR list. The `issue_comment` trigger fires on issue #166, which is a planning issue, not a PR. Per review protocol, took no action — the comment does not belong to a pull request.
 
-## 2026-04-07 — PR #263: No access (private repo / MCP auth gap)
-All GitHub MCP reads returned empty arrays. PR #263 not found in open PR list (only #128 and #267 visible). Could not access PR body, diff, labels, linked plan, or comments. Took no action. Security stance unset. If re-triggered with valid context, review from scratch.
+## 2026-04-07 — PR #246: No access (private repo / MCP auth gap, likely not a PR)
+GitHub context shows `issue-number: #246`, `pull-request-number: (empty)`. #246 not in open PR list. Direct PR/issue reads returned empty. Per `issue_comment` protocol, took no action — comment does not appear to belong to a pull request.

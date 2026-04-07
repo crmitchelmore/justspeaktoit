@@ -13,3 +13,6 @@ GitHub MCP API returned empty arrays for issue #202 (get, get_comments, get_labe
 
 ## 2026-04-07 — Issue #209 skipped (no planning labels)
 Issue #209 is a closed automated bot issue (Daily Test Improver) with labels `automation`, `testing`, `agentic-workflows`. No `planning:` labels and no planning kickoff comment. Noop taken per operating constraints.
+
+## 2026-04-07 — Issue #152 unreadable
+GitHub MCP API returned empty arrays for issue #152 (get, get_comments, get_labels all returned []). Same recurring pattern as issues #202, #255, #209. Cannot verify planning labels or kickoff comment. Noop taken per operating constraints.

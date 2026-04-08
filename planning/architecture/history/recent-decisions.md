@@ -14,3 +14,6 @@ PR #252 is not accessible via the GitHub API (all read methods: get, get_comment
 
 ## 2026-04-07 — Issue #212 ([Test Improver] Add AudioBufferPool unit tests)
 Issue #212 is not a pull request — it's a test-improver automation issue with labels `automation`, `testing`, `agentic-workflows`. The workflow was triggered by an `issue_comment` on this issue. Per protocol, no action taken: comment belongs to an issue, not a PR.
+
+## 2026-04-08 — Issue #270 (Apple live transcription clears text after speech pause)
+Approved. Fix is scoped to `iOSLiveTranscriber.swift` only. Existing `committedText` accumulation pattern is the right seam; two gaps to close: (1) error callback path needs to commit `lastFormattedString` before returning, (2) `commitIfImplicitReset` threshold (>= 10 chars) doesn't protect short utterances. No cross-module changes needed.

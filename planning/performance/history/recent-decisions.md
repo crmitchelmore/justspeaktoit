@@ -58,3 +58,6 @@ Pure documentation-only PR. No runtime code changes. Blocked on missing linked p
 
 ## 2026-04-08 — Issue #270 (iOS Apple live transcription text reset)
 Approved. Fix is confined to `iOSLiveTranscriber.swift`: threshold adjustment and error-path commit. Both changes are O(1) on the existing hot path. Restart latency is pre-existing. Three roles (Architecture, Reliability, Quality) converged on error-path commit as the key gap — performance confirms it's cheap to fix.
+
+## 2026-04-08 — Issue #271 (fix: burger menu on landing page mobile)
+Pure landing-page CSS/JS fix. No app code. Approved immediately — entirely cold path. Pattern: all `landing-page/` changes are outside app performance scope.

@@ -25,3 +25,7 @@ GitHub MCP API returned empty arrays for issue #201 (get, get_comments, get_labe
 
 ## 2026-04-08 — Issue #270 (iOS transcription text loss on silence)
 Approved immediately at kickoff. iOS-only bug fix extending an existing pattern (`commitIfImplicitReset`, `restartRecognitionTask`). TestFlight provides natural staging gate. Key guardrails: address short-text threshold (< 10 chars), gradual-reset threshold, and add Sentry breadcrumb for observability. Task cancellation race in `restartRecognitionTask` appears safe due to `isShuttingDownRecognitionTask` flag, but flagged for implementation review.
+
+## 2026-04-08 — Issue #272 skipped (CI automation, no planning labels)
+Issue #272 is a closed CI Failure Doctor investigation (labels: automation, ci). No `planning:` labels, no kickoff comment. Noop taken per operating constraints. 
+Note: Issue #271 ("fix(web): burger menu breaks UI layout on iOS/mobile viewport") has `planning:needs-reliability` and is waiting for review — will be addressed when triggered by that issue.

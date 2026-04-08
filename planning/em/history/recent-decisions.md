@@ -27,3 +27,12 @@
 - Labels confirm: only Jordan (Reliability) has approved so far
 - 1 of 7 technical roles commented — below EM threshold (≥3 required)
 - Action: noop
+
+## 2026-04-08 — Issue #201
+- Triggered by issue_comment (comment-id: 4202947672) from bravostation
+- Issue: [Perf Improver] perf(mac): replace lowercased+distance with caseInsensitive search in TranscriptionTextProcessor
+- Labels: automation, performance, agentic-workflows — NO planning: labels
+- This is an automated Perf Improver bot issue, not a planning discussion
+- Comments API returned empty (persistent MCP infrastructure issue)
+- Per protocol: no planning: labels + cannot confirm planning kickoff = do nothing
+- Action: noop

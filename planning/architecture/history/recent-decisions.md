@@ -24,5 +24,5 @@ Approved. Fix is scoped to `TranscriptionManager.swift`. Deepgram path (line 653
 ## 2026-04-08 — Issue #276 (CI Failure Doctor — Architecture transient failure)
 Issue #276 carries only `automation` and `ci` labels — no `planning:` labels and no Planning Kickoff comment. It documents a transient CLI non-zero exit from the Issue Planning - Architecture workflow (run #24122401805). Architecture review does not apply per the do-nothing rule. This is the same recurring transient pattern documented in #272, #166, #158 per the issue body.
 
-## 2026-04-08 — Issue #271 (burger menu mobile layout)
-Approved. Fix scoped entirely to `landing-page/index.html` — no Swift modules touched. Root bugs: `nav__cta` not hidden at mobile width (causes nav overflow), and `nav__cta` has no z-index so sits behind the fixed overlay at z-index 101. Existing overlay pattern is sound; fix is CSS-property level. Non-blocking note: Download CTA not included in overlay — team's design choice, not a structural risk.
+## 2026-04-08 — PR #277 (Architecture PR Plan Review)
+PR #277 is not accessible via the GitHub API (all read methods return empty). Does not appear in open or closed PR list. Comment ID 4205723022 was the trigger. No action taken per protocol: cannot verify live PR context or linked planning issue. Same pattern as #209, #252, #256.

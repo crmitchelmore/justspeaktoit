@@ -52,3 +52,6 @@ Pure CI/agentic-workflow change. No runtime code. Blocked on missing linked plan
 
 ## 2026-03-26 — PR #191 (disable failure issue creation on all workflows)
 Pure CI/workflow change. No runtime code. Blocked on missing linked planning issue — same class as PR #186/#188. Will approve immediately once planning:ready-for-dev issue link is provided. No app performance concern.
+
+## 2026-04-08 — PR #128 (docs: release and transcription troubleshooting notes)
+Pure documentation-only PR. No runtime code changes. Blocked on missing linked planning issue — PR body has no Closes/Fixes/Refs link. Same class as PRs #186/#188/#191. No app performance concern whatsoever. Will approve immediately once a planning:ready-for-dev issue link is provided.

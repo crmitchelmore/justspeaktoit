@@ -40,3 +40,6 @@ Documentation-only PR with no linked planning issue. Blocked per protocol. All o
 
 ## 2026-04-08 — Issue #276: No action (MCP auth gap)
 All GitHub MCP reads returned empty arrays for issue #276 on this private repo. Consistent with documented pattern. Took no action; waiting for re-trigger with valid context.
+
+## 2026-04-08 — Issue #271: No action (MCP auth gap)
+All GitHub MCP reads returned empty arrays for issue #271. Consistent with documented pattern. Took no action; waiting for re-trigger with valid context.

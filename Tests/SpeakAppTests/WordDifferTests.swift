@@ -111,4 +111,51 @@ final class WordDifferTests: XCTestCase {
         )
         XCTAssertTrue(changes.isEmpty, "Large insertions should be treated as rewrites, not corrections")
     }
+
+    // MARK: - Performance Baselines
+    //
+    // These measure{} tests establish baselines for the three distinct hot paths
+    // in WordDiffer. Run locally in Xcode (Product → Test) to record initial
+    // baselines; subsequent runs will fail if performance regresses beyond 10%.
+    //
+    // Critical path summary:
+    //   1. identicalLongString – tokenise only, exits at `originalWords == editedWords`
+    //   2. singleWordCorrection – common-prefix/suffix isolation, 1:1 replacement check
+    //   3. lcsHeavyPath – forces O(n×m) `buildLCSTable` with repeated `.lowercased()` calls
+
+    /// Fast path: identical tokens → no diff work after tokenisation.
+    func testPerformance_findChanges_identicalLongString() {
+        let sentence = "the quick brown fox jumped over the lazy sleeping dog and ran away swiftly"
+        measure {
+            for _ in 0..<1_000 {
+                _ = WordDiffer.findChanges(original: sentence, edited: sentence)
+            }
+        }
+    }
+
+    /// Common prefix/suffix path: single-word correction, no LCS needed.
+    func testPerformance_findChanges_singleWordCorrection() {
+        let original = "please transcribe this sentence correctly every single time without errors"
+        let edited   = "please transcribe this sentence correctly every single time without mistakes"
+        measure {
+            for _ in 0..<1_000 {
+                _ = WordDiffer.findChanges(original: original, edited: edited)
+            }
+        }
+    }
+
+    /// LCS hot path: two extra words in the middle force `buildLCSTable` on a
+    /// 9×4 grid, exercising the O(n×m) inner loop and repeated `.lowercased()` calls.
+    /// Relevant to backlog item #240 (precompute lowercased tokens before LCS).
+    func testPerformance_findChanges_lcsHeavyPath() {
+        // After common prefix ("alice", "bob") and suffix ("larry") removal,
+        // originalMiddle has 9 words and editedMiddle has 4, forcing extractViaLCS.
+        let original = "alice bob charlie dave eve frank george henry ivan jack karl larry"
+        let edited   = "alice bob dave frank henry jack larry"
+        measure {
+            for _ in 0..<500 {
+                _ = WordDiffer.findChanges(original: original, edited: edited)
+            }
+        }
+    }
 }

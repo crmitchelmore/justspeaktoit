@@ -66,5 +66,4 @@ Pure landing-page CSS/JS fix. No app code. Approved immediately — entirely col
 One-line compile fix. No runtime cost. PR already merged before plan-review ran. No action taken per closed-PR protocol. Pattern: trivial import-scope compile fixes have zero app performance concern.
 
 ## 2026-04-08 — Issue #283
-Compile-fix PRs (missing import, type resolution) are auto-approved from performance.
-Import declarations have no runtime cost; no measurement required.
+One-line import fix (compile-time only). Approved without questions. Pattern: compile-only changes with no runtime path touched are instant approvals from the performance lane.

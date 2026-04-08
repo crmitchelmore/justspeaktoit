@@ -37,3 +37,6 @@ Self-contained local state management fix in `iOSLiveTranscriber.swift`. No new 
 
 ## 2026-04-08 — PR #128 (docs: release and transcription troubleshooting notes)
 Documentation-only PR with no linked planning issue. Blocked per protocol. All other roles also have `needs-*` labels — first pass. Docs content covers post-release verification, auto-release scope, AssemblyAI streaming notes, AX deferred readiness checks. Low inherent security risk but protocol requires linked issue before approval.
+
+## 2026-04-08 — Issue #276: No action (MCP auth gap)
+All GitHub MCP reads returned empty arrays for issue #276 on this private repo. Consistent with documented pattern. Took no action; waiting for re-trigger with valid context.

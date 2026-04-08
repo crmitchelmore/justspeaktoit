@@ -24,5 +24,5 @@ Approved. Fix is scoped to `TranscriptionManager.swift`. Deepgram path (line 653
 ## 2026-04-08 — Issue #276 (CI Failure Doctor — Architecture transient failure)
 Issue #276 carries only `automation` and `ci` labels — no `planning:` labels and no Planning Kickoff comment. It documents a transient CLI non-zero exit from the Issue Planning - Architecture workflow (run #24122401805). Architecture review does not apply per the do-nothing rule. This is the same recurring transient pattern documented in #272, #166, #158 per the issue body.
 
-## 2026-04-08 — Issue #277 (CI Failure Doctor — sentry-cocoa bump)
-Issue #277 carries only `automation` and `ci` labels — no `planning:` labels and no Planning Kickoff comment. Created by CI Failure Doctor for a transient CI failure after dependabot bumped sentry-cocoa 9.8.0 → 9.9.0. Issue is already closed. Architecture review does not apply per the do-nothing rule. Same pattern as #276, #260.
+## 2026-04-08 — Issue #271 (burger menu mobile layout)
+Approved. Fix scoped entirely to `landing-page/index.html` — no Swift modules touched. Root bugs: `nav__cta` not hidden at mobile width (causes nav overflow), and `nav__cta` has no z-index so sits behind the fixed overlay at z-index 101. Existing overlay pattern is sound; fix is CSS-property level. Non-blocking note: Download CTA not included in overlay — team's design choice, not a structural risk.

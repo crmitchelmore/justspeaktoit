@@ -1,0 +1,87 @@
+name: PR Plan Review - Bot Follow Up
+
+on:
+  issue_comment:
+    types: [created, edited]
+
+permissions:
+  actions: write
+  contents: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: pr-plan-review-follow-up-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    if: ${{ github.event.issue.pull_request != null && github.event.issue.state == 'open' }}
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      PR_NUMBER: ${{ github.event.issue.number }}
+      COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
+      COMMENT_BODY: ${{ github.event.comment.body }}
+    steps:
+      - name: Dispatch follow-up PR plan reviews
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+
+          repo = os.environ["REPO"]
+          pr_number = os.environ["PR_NUMBER"]
+          author = os.environ["COMMENT_AUTHOR"]
+          body = os.environ["COMMENT_BODY"].lstrip()
+
+          if author != "github-actions[bot]":
+              print("Non-bot comment; role workflows already handle maintainer follow-ups.")
+              sys.exit(0)
+
+          reviewers = {
+              "product": ("### 🧭 Product Review", "pr-plan-review-product.lock.yml"),
+              "security": ("### 🔐 Security Review", "pr-plan-review-security.lock.yml"),
+              "performance": ("### ⚡ Performance Review", "pr-plan-review-performance.lock.yml"),
+              "quality": ("### 🧹 Code Quality Review", "pr-plan-review-quality.lock.yml"),
+              "architecture": ("### 🏗️ Architecture Review", "pr-plan-review-architecture.lock.yml"),
+          }
+          kickoff_heading = "### 🔎 Plan Review Kickoff"
+          terminal_headings = ("### ✅ Plan Review Ready", "### ♻️ Plan Review Reopened")
+
+          if body.startswith(terminal_headings):
+              print("Terminal plan-review status comment; nothing to dispatch.")
+              sys.exit(0)
+
+          pr = json.loads(
+              subprocess.check_output(
+                  ["gh", "pr", "view", pr_number, "--repo", repo, "--json", "labels,isDraft"],
+                  text=True,
+              )
+          )
+          if pr.get("isDraft"):
+              print("Draft pull request; nothing to dispatch yet.")
+              sys.exit(0)
+
+          labels = {label["name"] for label in pr.get("labels", [])}
+          if not any(label.startswith("plan-review:") for label in labels) and not body.startswith(kickoff_heading):
+              print("Pull request is not in plan-review flow; nothing to dispatch.")
+              sys.exit(0)
+
+          if body.startswith(kickoff_heading):
+              workflows = [workflow for _, workflow in reviewers.values()]
+          else:
+              commenter = next((role for role, (heading, _) in reviewers.items() if body.startswith(heading)), None)
+              if commenter is None:
+                  print("Bot comment is not a plan-review reviewer comment; nothing to dispatch.")
+                  sys.exit(0)
+              workflows = [workflow for role, (_, workflow) in reviewers.items() if role != commenter]
+
+          for workflow in workflows:
+              cmd = ["gh", "workflow", "run", workflow, "--repo", repo, "-f", f"pr_number={pr_number}"]
+              print("+", " ".join(cmd))
+              subprocess.run(cmd, check=True)
+          PY

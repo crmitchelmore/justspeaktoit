@@ -1,0 +1,153 @@
+name: PR Plan Review - Reconcile State
+
+on:
+  workflow_run:
+    workflows:
+      - PR Plan Review - Product
+      - PR Plan Review - Security
+      - PR Plan Review - Performance
+      - PR Plan Review - Code Quality
+      - PR Plan Review - Architecture
+      - PR Plan Review - Design
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to reconcile (optional)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: pr-plan-review-reconcile
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.event == 'workflow_dispatch' ||
+      github.event.workflow_run.event == 'pull_request' ||
+      github.event.workflow_run.event == 'issue_comment'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reconcile PR plan-review labels
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.inputs.pr_number }}
+          WORKFLOW_RUN_PULL_REQUESTS: ${{ toJson(github.event.workflow_run.pull_requests) }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+
+          REPO = os.environ["REPO"]
+          PR_NUMBER = os.environ.get("PR_NUMBER", "").strip()
+          WORKFLOW_RUN_PULL_REQUESTS = json.loads(os.environ.get("WORKFLOW_RUN_PULL_REQUESTS") or "[]")
+          APPROVAL_TO_PENDING = {
+              "plan-review:product-approved": "plan-review:needs-product",
+              "plan-review:security-approved": "plan-review:needs-security",
+              "plan-review:performance-approved": "plan-review:needs-performance",
+              "plan-review:quality-approved": "plan-review:needs-quality",
+              "plan-review:architecture-approved": "plan-review:needs-architecture",
+              "plan-review:design-approved": "plan-review:needs-design",
+          }
+
+          def gh_json(*args):
+              return json.loads(subprocess.check_output(["gh", *args], text=True))
+
+          def gh(*args):
+              print("+", "gh", *args)
+              subprocess.run(["gh", *args], check=True)
+
+          if PR_NUMBER:
+              pr_numbers = [PR_NUMBER]
+          else:
+              pr_numbers = [str(item["number"]) for item in WORKFLOW_RUN_PULL_REQUESTS if item.get("number")]
+              if not pr_numbers:
+                  pr_numbers = [str(item["number"]) for item in gh_json("pr", "list", "--repo", REPO, "--state", "open", "--json", "number")]
+
+          reconciled = 0
+          for number in pr_numbers:
+              pr = gh_json(
+                  "pr",
+                  "view",
+                  str(number),
+                  "--repo",
+                  REPO,
+                  "--json",
+                  "number,labels,title,isDraft",
+              )
+              if pr.get("isDraft"):
+                  print(f"Skipping draft pull request #{number}.")
+                  continue
+
+              labels = {label["name"] for label in pr.get("labels", [])}
+              if not any(label.startswith("plan-review:") for label in labels):
+                  continue
+
+              all_approved = all(label in labels for label in APPROVAL_TO_PENDING)
+              desired_add = set()
+              desired_remove = set()
+
+              if all_approved:
+                  desired_add.add("plan-review:ready-to-merge")
+                  desired_remove.add("plan-review:in-discussion")
+              else:
+                  desired_add.add("plan-review:in-discussion")
+                  desired_remove.add("plan-review:ready-to-merge")
+
+              for approval_label, pending_label in APPROVAL_TO_PENDING.items():
+                  if approval_label in labels:
+                      desired_remove.add(pending_label)
+                  else:
+                      desired_add.add(pending_label)
+
+              add_labels = sorted(label for label in desired_add if label not in labels)
+              remove_labels = sorted(label for label in desired_remove if label in labels)
+
+              was_ready = "plan-review:ready-to-merge" in labels
+              will_be_ready = all_approved
+
+              if add_labels or remove_labels:
+                  cmd = ["pr", "edit", str(number), "--repo", REPO]
+                  if add_labels:
+                      cmd.extend(["--add-label", ",".join(add_labels)])
+                  if remove_labels:
+                      cmd.extend(["--remove-label", ",".join(remove_labels)])
+                  gh(*cmd)
+
+              if will_be_ready and not was_ready:
+                  gh(
+                      "pr",
+                      "comment",
+                      str(number),
+                      "--repo",
+                      REPO,
+                      "--body",
+                      "### ✅ Plan Review Ready\n\nAll six plan reviewers have approved this pull request against the linked issue plan. `plan-review:ready-to-merge` is now set. If you push more commits or change the intended behaviour, the review lane should reopen.",
+                  )
+              elif was_ready and not will_be_ready:
+                  gh(
+                      "pr",
+                      "comment",
+                      str(number),
+                      "--repo",
+                      REPO,
+                      "--body",
+                      "### ♻️ Plan Review Reopened\n\nAt least one plan-review approval is no longer present, so `plan-review:ready-to-merge` has been removed and this pull request is back in discussion.",
+                  )
+
+              print(
+                  f"Reconciled pull request #{number}: add={add_labels}, remove={remove_labels}, ready={will_be_ready}"
+              )
+              reconciled += 1
+
+          print(f"Reconciled {reconciled} pull request(s).")
+          PY

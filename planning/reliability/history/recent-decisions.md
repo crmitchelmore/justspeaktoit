@@ -37,3 +37,6 @@ Issue #279 is a closed "Daily Perf Improver" automated bot issue (github-actions
 
 ## 2026-04-08 — Issue #283 (fix missing SpeakCore import, iOS)
 Approved immediately. Compile-time-only fix (add `import SpeakCore` to SpeakiOSApp.swift). Verified OpenClawClient is in SpeakCore and usage is at line 93. No behavior change, no new failure modes. iOS TestFlight gate provides natural staging. Side note: fix(ios): commit type will trigger macOS auto-release (version bump, no behavior change) — acceptable known behavior.
+
+## 2026-04-08 — Issue #256 (test-only: error descriptions, header redactor, API validation)
+Approved immediately. Pure value-type test additions with zero production blast radius. Noted that `SensitiveHeaderRedactor` coverage is a reliability win — guards against silent credential-leak regressions in HTTP logging.

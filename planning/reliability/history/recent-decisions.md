@@ -28,3 +28,6 @@ Approved immediately at kickoff. iOS-only bug fix extending an existing pattern 
 
 ## 2026-04-08 — Issue #157 (HUD capture health panel, macOS)
 Approved. Purely additive read-only UI feature. Blast radius: HUD display layer only — no audio/transcription logic touched. Failure mode is graceful (stale display, not crash). Rollback: standard mac-v* re-tag. Combine subscriptions follow established setupBindings() pattern in MainManager. Static LatencyTier means zero measurement infrastructure. Security's categorical label guardrail is enforced by the type boundary (CaptureHealthSnapshot plain struct), which also bounds blast radius. No new monitoring surface needed.
+
+## 2026-04-08 — Issue #276 unreadable (integrity-filtered)
+GitHub MCP API returned empty arrays for issue #276 (issue_read, list_issues, search_issues all returned []). Same recurring integrity-filtering pattern. Cannot verify planning labels or kickoff comment. Noop taken per operating constraints.

@@ -31,3 +31,6 @@ Approved. Purely additive read-only UI feature. Blast radius: HUD display layer 
 
 ## 2026-04-08 — Issue #277 skipped (no planning labels, closed, automated CI issue)
 Issue #277 is a "CI Failure Doctor" automated issue (github-actions[bot]) about sentry-cocoa 9.8.0 → 9.9.0 bump failing CI. Labels: `automation`, `ci` — no `planning:` labels. Issue is already closed (state_reason: completed). No planning kickoff comment present. Noop per operating constraints. Notable content: sentry-cocoa minor bump (9.8→9.9) caused a transient CI failure likely due to SPM cache invalidation on a cold-cache run; no breaking API changes found. The CI failure investigation recommends: (1) manual re-run as first step, (2) `swift package resolve` pre-fetch with timeout-minutes guard, (3) stronger dependabot auto-merge gates for minor version bumps.
+
+## 2026-04-08 — Issue #279 skipped (automated Perf Improver, no planning labels)
+Issue #279 is a closed "Daily Perf Improver" automated bot issue (github-actions[bot]) proposing O(1) incremental stats and WAL write fix in HistoryManager. Labels: `automation`, `performance`, `agentic-workflows` — no `planning:` labels and no planning kickoff comment. Closed as `not_planned`. Noop per operating constraints.

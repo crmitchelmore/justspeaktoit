@@ -29,3 +29,6 @@ PR #277 is not accessible via the GitHub API (all read methods return empty). Do
 
 ## 2026-04-08 — Issue #279 (Perf Improver — HistoryManager O(1) stats and WAL fix)
 Issue #279 is a closed bot-generated issue from the Daily Perf Improver workflow with labels `automation`, `performance`, `agentic-workflows`. No `planning:` labels and no Planning Kickoff comment. Architecture review does not apply per the do-nothing rule. Issue is also already closed as not_planned.
+
+## 2026-04-08 — PR #282 (fix(ios): add missing SpeakCore import)
+PR #282 is already closed (merged). The workflow was triggered by `issue_comment` on a closed PR. Per protocol, no action taken. The fix was a single import change in `SpeakiOSApp.swift` to resolve `OpenClawClient` type not found. Same inaccessible-via-API pattern as #209, #252, #277.

@@ -26,3 +26,6 @@ Three failure modes: commitIfImplicitReset thresholds too coarse, error path dis
 
 ## 2026-04-08 — Issue #246: Approved (second pass)
 Scope resolved: Files section = Deepgram only. Correctness test deferred to PR stage as non-negotiable guardrail — XCTAssertEqual for final transcript text must accompany measure{}.
+
+## 2026-04-08 — PR #128: First pass (docs-only, missing plan link)
+Docs-only AGENTS.md update. Content quality is good. Single blocker: no linked planning issue. Pattern continues to apply: plan link required even for docs-only PRs.

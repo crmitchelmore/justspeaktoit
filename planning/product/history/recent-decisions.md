@@ -10,3 +10,6 @@ Confirmed: bot-authored Daily Test Improver issue. Out of scope for product vali
 
 ## 2026-04-08 — PR #128 docs review (initial)
 `docs:` only PR by owner — no plan link. Blocked per protocol. Clear path to yes: add any issue reference. Content itself is unambiguous and appropriate. Same advisory dynamic as PRs #186/#188/#189/#191 likely applies.
+
+## 2026-04-08 — Issue #271 (landing page mobile nav bug)
+Approved quickly. Static HTML landing page bug on primary conversion surface. Code-confirmed: `nav__cta` has no mobile-specific styling, hamburger overlay z-index stack is suspect. Scope bounded to one file. Product principle: conversion surface bugs warrant fast approval.

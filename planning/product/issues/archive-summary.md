@@ -13,3 +13,20 @@
 ## Pattern learned
 Fast approve for: well-evidenced problem, bounded scope, testable acceptance criteria, no user-facing product risk.
 Agentic/bot improver issues (#202, #216, #219 etc.) are out of product planning scope — do nothing.
+
+## Additional archived (Apr 2026 cleanup)
+- #251, #252, #255, #256 — bot-authored or out-of-scope automated improver issues; noop
+- #265 — check content
+- #270, #271 — landing page bug (#271 approved quickly, conversion surface fix)
+- #277 — check content
+- #279 — bot-authored Daily Perf Improver (closed not_planned); noop
+
+Individual issue files deleted to keep memory within size limits.
+
+## Batch archived 2026-04-08
+- #251, #252, #255 — check below
+- #251 — [Test Improver] bot issue; closed not_planned; noop
+- #252 — [Perf Improver] bot issue; closed not_planned; noop  
+- #255 — [Test Improver] bot issue; closed not_planned; noop
+- #256 — [Test Improver] bot issue; closed not_planned; noop
+- #265 — [Test Improver] bot issue; skipped; noop

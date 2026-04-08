@@ -20,3 +20,6 @@ Approved. Fix is scoped to `iOSLiveTranscriber.swift` only. Existing `committedT
 
 ## 2026-04-08 — Issue #246 (Incremental transcript append)
 Approved. Fix is scoped to `TranscriptionManager.swift`. Deepgram path (line 653) is append-only — incremental O(1) safe. AssemblyAI path (line 1195) has replace/append branches — rebuild only on replace, append otherwise. `buildResult` is cold path, leave as-is. No module boundaries crossed, no new abstractions.
+
+## 2026-04-08 — Issue #276 (CI Failure Doctor — Architecture transient failure)
+Issue #276 carries only `automation` and `ci` labels — no `planning:` labels and no Planning Kickoff comment. It documents a transient CLI non-zero exit from the Issue Planning - Architecture workflow (run #24122401805). Architecture review does not apply per the do-nothing rule. This is the same recurring transient pattern documented in #272, #166, #158 per the issue body.

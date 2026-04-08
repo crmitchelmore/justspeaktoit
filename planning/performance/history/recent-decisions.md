@@ -55,3 +55,6 @@ Pure CI/workflow change. No runtime code. Blocked on missing linked planning iss
 
 ## 2026-04-08 — PR #128 (docs: release and transcription troubleshooting notes)
 Pure documentation-only PR. No runtime code changes. Blocked on missing linked planning issue — PR body has no Closes/Fixes/Refs link. Same class as PRs #186/#188/#191. No app performance concern whatsoever. Will approve immediately once a planning:ready-for-dev issue link is provided.
+
+## 2026-04-08 — Issue #270 (iOS Apple live transcription text reset)
+Approved. Fix is confined to `iOSLiveTranscriber.swift`: threshold adjustment and error-path commit. Both changes are O(1) on the existing hot path. Restart latency is pre-existing. Three roles (Architecture, Reliability, Quality) converged on error-path commit as the key gap — performance confirms it's cheap to fix.

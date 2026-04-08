@@ -24,3 +24,12 @@
 ## Security storage
 - API keys in Keychain: service `com.github.speakapp.credentials`, account `speak-app-secrets`.
 - Missing key must degrade gracefully (show error, not crash).
+
+## Landing page
+- `landing-page/` directory: static site deployed to Cloudflare Pages
+- Deploy workflow: `.github/workflows/deploy-landing-page.yml`
+- Trigger: push to `main` with paths `landing-page/**`, or workflow_dispatch
+- No PR preview deployment; changes go live on main merge
+- Rollback: Cloudflare Pages dashboard (instant rollback to prior deployment)
+- No build step; pure static HTML/CSS/JS
+- Secrets used: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`

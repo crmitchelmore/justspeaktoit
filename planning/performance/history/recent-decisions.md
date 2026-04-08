@@ -61,3 +61,6 @@ Approved. Fix is confined to `iOSLiveTranscriber.swift`: threshold adjustment an
 
 ## 2026-04-08 — Issue #271 (fix: burger menu on landing page mobile)
 Pure landing-page CSS/JS fix. No app code. Approved immediately — entirely cold path. Pattern: all `landing-page/` changes are outside app performance scope.
+
+## 2026-04-08 — PR #282 (fix(ios): add missing SpeakCore import)
+One-line compile fix. No runtime cost. PR already merged before plan-review ran. No action taken per closed-PR protocol. Pattern: trivial import-scope compile fixes have zero app performance concern.

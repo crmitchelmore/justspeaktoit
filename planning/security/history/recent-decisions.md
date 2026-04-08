@@ -81,3 +81,6 @@ GitHub context shows `pull-request-number` is empty. #265 does not appear in the
 
 ## 2026-04-07 — Issue #201: No access (private repo / MCP auth gap)
 All GitHub MCP reads returned empty arrays. Could not access issue body, labels, or comments. Took no action. Security stance unset. If re-triggered with valid context, review from scratch.
+
+## 2026-04-08 — PR #265: Not a PR (repeated issue_comment on issue #265)
+Same as 2026-04-07 entry. issue_comment trigger fired again on issue #265. Open PR list confirmed: only #267 (dependabot sentry-cocoa bump) and #128 (docs). #265 is a planning issue, not a PR. Took no action per protocol.

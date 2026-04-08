@@ -1,43 +1,5 @@
 # Recent Decisions
 
-## 2026-03-25 — Seeded role memory
-Added `principles.md` and `repository-context.md` for the quality reviewer so future planning discussions start with verified repository context.
-
-## 2026-03-25 — Issue #149
-Approved because there is nothing substantive to implement from a code quality perspective.
-
-## 2026-03-25 — Issue #157
-Three blockers raised: (1) ownership shape for health state vs. recording state machine, (2) static vs. measured latency signal, (3) explicit update trigger list. CaptureHealthSnapshot belongs in SpeakApp, not SpeakCore. Test surface is SpeakAppTests unit tests.
-
-## 2026-03-25 — Issue #157 — Capture health HUD
-- Confirmed: `CaptureHealthSnapshot` as plain struct on `HUDManager` in `SpeakApp` only
-- Static `LatencyTier` sufficient for v1; measured latency is a v2 concern
-- Event-driven refreshes on exactly three publishers (permissions, device, model) — no polling
-- Dedicated `updateCaptureHealth(_:)` method enforces clean call sites
-- Key quality rule: plain struct with value semantics = trivially unit-testable without mocking
-
-## 2026-03-25 — Issue #149: Contents API correction
-
-Live throwaway-branch test showed `PUT /repos/{owner}/{repo}/contents/{path}` produced `verified: false`, `reason: unsigned` here. Do not treat Contents API writes as a signed-commit-safe default. For strict repos, prefer workflow commit signing as the portable default, with branch exemption as a repo-local fallback when governance allows it.
-
-## 2026-03-25 — Issue #149: Post-correction round 2
-- Contents API confirmed unsigned in this repo. Rollout contract must not use it.
-- Architecture comment 4122824374 is stale (still references Contents API). Does not resolve portability question.
-- Quality approval blocked until Architecture corrects stance and Security confirms preferred path (workflow signing vs branch exemption).
-- Proposed rollout contract: 5 checkpoints — pre-flight, choose path, verify end-to-end, document, correction protocol.
-
-## 2026-03-25 — Issue #149 (corrected): Agentic workflow live retest
-Previous memory for issue #149 was stale (referenced a different Contents API topic). Actual issue is a workflow smoke test. No code quality concerns — approved immediately. Pattern: for issues with no implementation surface, approve without conditions.
-
-## 2026-03-25 — PR #161
-- Blocked for missing Plan issue linkage. Protocol requires `Plan issue: #<n>` or closing keyword before any approval can be granted.
-
-## 2026-03-25 — Issue #162: Plan-linked PR review stage
-All five roles approved after maintainer provided explicit decisions on PR template syntax, label isolation, and memory scope. The pattern of requiring concrete deterministic implementation decisions (not just intent) before approval proved correct here — all gaps were closeable with a single maintainer synthesis comment.
-
-## 2026-03-25 — PR #161: Approved
-Implementation matches plan #162: PR template, label isolation, agent-based plan-link validation, and scoped role memory all delivered. Prior block was stale (plan link WAS present). Approved on second pass.
-
 ## 2026-03-25 — Issue #174: First pass
 Workflow/CI-only port from career-framework. Three gaps raised: missing smoke-test protocol, unspecified redundant-layer removal (issue-triage vs product-validation), and persona.md source. Confirmed repo fact: both kickoff and triage currently fire on issues:opened. No PR plan-review workflows exist yet.
 
@@ -70,3 +32,6 @@ Automated perf issue. Two focused concerns raised: (1) scope ambiguity on Assemb
 
 ## 2026-04-08 — Issue #270: First pass (iOS text-loss on pause)
 iOS-only SFSpeechRecognizer fix. Three concrete failure modes identified: (1) commitIfImplicitReset heuristic thresholds too coarse, (2) error path in handleRecognitionResult discards latestResult without committing, (3) silent task termination without isFinal. Key structural constraint: no SpeakiOSTests target in Package.swift — iOS commit logic cannot be unit-tested via make test. Pattern: when fix touches heuristic detection logic, require either extraction to testable pure function or explicit device-log verification story.
+
+## 2026-04-08 — Issue #270: Approved (second pass)
+Two blockers from first pass resolved by Architecture's (Morgan) comment: both failure modes confirmed (threshold miss + error path data loss), and the error-path fix shape is explicit (commit before return, guard by !isShuttingDownRecognitionTask). Structural verification limitation (no SpeakiOSTests) resolved with PR guardrail requiring device evidence. Pattern: when iOS-only code has no unit test target, approve with device verification guardrail instead of blocking on infrastructure that doesn't exist.

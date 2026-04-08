@@ -43,3 +43,6 @@ All GitHub MCP reads returned empty arrays for issue #276 on this private repo. 
 
 ## 2026-04-08 — Issue #271: No action (MCP auth gap)
 All GitHub MCP reads returned empty arrays for issue #271. Consistent with documented pattern. Took no action; waiting for re-trigger with valid context.
+
+## 2026-04-08 — Issue #271: Approved (landing page mobile layout fix)
+Static marketing site CSS/layout fix. No auth, credentials, API keys, or trust boundary changes. Approved immediately. MCP comment-read returned empty but issue body and labels confirmed via search tool.

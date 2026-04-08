@@ -1,32 +1,30 @@
 {
-  "last_run": "2026-04-07",
-  "run_id": "24075222884",
+  "last_run": "2026-04-08",
+  "run_id": "24129127734",
   "notes": [
     "macOS required for tests (Sentry binary blocks Linux)",
     "testX_condition_expected() naming convention",
     "SpeakCoreTests/ - use @testable import SpeakCore",
     "swift build --target SpeakCoreTests compiles on Linux (exit 0); tests require macOS",
-    "safeoutputs-create_pull_request returns success+patch - no PR number returned; previous runs created issues not PRs",
-    "All prior Test Improver 'PR' submissions appear as issues (is_pr=False) - branch may not have been pushed",
-    "Current confirmed branch: test-assist/anycod-apivalidation-20260407"
+    "safeoutputs-create_pull_request returns success+patch - no PR number returned",
+    "All prior Test Improver 'PR' submissions: branch pushed, patch created, no PR# returned"
   ],
   "prs": [
-    {"b": "test-assist/anycod-apivalidation-20260407", "run": "2026-04-07", "note": "45 tests: AnyCodable (25) + APIKeyValidationResult (20) - DRAFT PR SUBMITTED"}
+    {"b": "test-assist/openclaw-llm-tests-20260408", "run": "2026-04-08", "note": "33 tests: OpenClawTypes (13) + LLMProtocols (14) + OpenClawError (6)"},
+    {"b": "test-assist/anycod-apivalidation-20260407", "run": "2026-04-07", "note": "45 tests: AnyCodable (25) + APIKeyValidationResult (20)"}
   ],
   "backlog": [
     "AudioBufferPool (complex, macOS only, os_unfair_lock)",
-    "OpenClawTypes Codable round-trips (OpenClawConnectConfig, OpenClawChatMessage, OpenClawConversation)",
-    "LLMProtocols (ChatMessage, ChatCostBreakdown, ChatResponse Codable + Role enum)",
-    "OpenClawError.errorDescription (6 tests)"
+    "TranscriptionResult Codable edge cases (nil vs zero, partial fields)"
   ],
   "monthly_issue": "apr2026 #231",
   "task_last_run": {
     "t1": "2026-03-25",
     "t2": "2026-04-04",
-    "t3": "2026-04-07",
+    "t3": "2026-04-08",
     "t4": "2026-04-05",
     "t5": "2026-03-29",
     "t6": "2026-04-02",
-    "t7": "2026-04-07"
+    "t7": "2026-04-08"
   }
 }

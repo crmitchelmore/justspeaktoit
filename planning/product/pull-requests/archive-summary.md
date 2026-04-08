@@ -1,16 +1,13 @@
 # Archived PR Reviews (summary)
 
-## PR #161 (closed/merged)
-`docs:` type. Missing plan link — blocked. Merged anyway by maintainer. First instance establishing advisory-only enforcement pattern.
+## PR #161 (merged)
+`docs:` type. Missing plan link — blocked. Merged anyway by maintainer. First advisory-only enforcement pattern.
 
-## PR #175 (closed)
-Summary archived. Merged.
+## PRs #175, #177, #181 (merged)
+Various scopes. Missing plan links or resolved blockers. All merged. Advisory pattern confirmed.
 
-## PR #177 (closed)
-Summary archived. Merged.
+## PRs #186, #188, #189, #191 (merged 2026-03-26)
+All blocked for missing `Plan issue: #<n>`. All merged anyway by maintainer. Plan-link enforcement is advisory, not a hard gate.
 
-## PR #181 (closed)
-Summary archived. Merged.
-
-## PR #186, #188, #189, #191 (all closed/merged 2026-03-26)
-All blocked for missing `Plan issue: #<n>`. All merged anyway. Established: plan-link enforcement is advisory, not a hard merge gate. See principles.md.
+## Key pattern
+Product plan-link blocks are advisory-only in this repository. Maintainer retains override authority. Still correct to block per protocol, but should be framed as a "request" not a hard gate.

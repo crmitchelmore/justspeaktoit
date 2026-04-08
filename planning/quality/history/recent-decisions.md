@@ -29,3 +29,8 @@ Scope resolved: Files section = Deepgram only. Correctness test deferred to PR s
 
 ## 2026-04-08 — PR #128: First pass (docs-only, missing plan link)
 Docs-only AGENTS.md update. Content quality is good. Single blocker: no linked planning issue. Pattern continues to apply: plan link required even for docs-only PRs.
+
+## 2026-04-08 — Issue #271: Approved (first pass, web CSS/JS fix)
+Landing-page-only bug. No automated tests exist or are expected. Two guardrails surfaced from inspection:
+(1) `nav__cta` must be hidden on mobile — it's the root cause of the broken download button.
+(2) Body scroll lock required for iOS Safari overlay. Manual browser verification is the appropriate test bar for landing-page fixes.

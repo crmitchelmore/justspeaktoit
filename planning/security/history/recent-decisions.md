@@ -36,4 +36,4 @@ All GitHub MCP reads returned empty arrays for issue #277. Consistent with docum
 All GitHub MCP reads returned empty arrays for PR #282. Consistent with documented pattern. Took no action.
 
 ## 2026-04-08 — Issue #283: No action (MCP auth gap)
-All GitHub MCP reads returned empty arrays for issue #283 (workflow_dispatch trigger). Consistent with documented pattern. Took no action.
+All GitHub MCP reads returned empty arrays for issue #283. Consistent with documented pattern. Took no action.

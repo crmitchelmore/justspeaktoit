@@ -22,3 +22,6 @@ GitHub MCP API returned empty arrays for issue #246 (get, get_comments, get_labe
 
 ## 2026-04-07 — Issue #201 unreadable (integrity-filtered)
 GitHub MCP API returned empty arrays for issue #201 (get, get_comments, get_labels all returned []). Confirmed integrity-filtered via search_issues. This is the 6th consecutive issue (after #152, #202, #246, #255, and one other) that has been unreadable. Noop taken per operating constraints — cannot approve or comment without verifiable issue context.
+
+## 2026-04-08 — Issue #270 (iOS transcription text loss on silence)
+Approved immediately at kickoff. iOS-only bug fix extending an existing pattern (`commitIfImplicitReset`, `restartRecognitionTask`). TestFlight provides natural staging gate. Key guardrails: address short-text threshold (< 10 chars), gradual-reset threshold, and add Sentry breadcrumb for observability. Task cancellation race in `restartRecognitionTask` appears safe due to `isShuttingDownRecognitionTask` flag, but flagged for implementation review.

@@ -37,3 +37,6 @@ Landing-page-only bug. No automated tests exist or are expected. Two guardrails 
 
 ## 2026-04-08 — Issue #283: Approved (first pass, missing import fix)
 One-line import fix (`import SpeakCore` in SpeakiOSApp.swift). Build failure is the complete verification story. Pattern: compiler-enforced fixes with zero logic change approve immediately.
+
+## 2026-04-08 — Issue #256: Approved (first pass, test-only addition)
+Three new test files for SpeakCore. Source verified: TranscriptionProviderError (3 cases), OpenClawError (4 cases), SensitiveHeaderRedactor (public enum), APIKeyValidationResult (factory+Equatable+updatingOutcome). Issue description table had imprecise labels (isValid, displayMessage) that don't exist in source, but commit message was accurate and tests target correct API. Pattern: test-addition issues with pure value-type assertions and verifiable run commands approve on first pass once source is confirmed.

@@ -35,5 +35,5 @@ Issue #277 is a "CI Failure Doctor" automated issue (github-actions[bot]) about 
 ## 2026-04-08 — Issue #279 skipped (automated Perf Improver, no planning labels)
 Issue #279 is a closed "Daily Perf Improver" automated bot issue (github-actions[bot]) proposing O(1) incremental stats and WAL write fix in HistoryManager. Labels: `automation`, `performance`, `agentic-workflows` — no `planning:` labels and no planning kickoff comment. Closed as `not_planned`. Noop per operating constraints.
 
-## 2026-04-08 — Issue #283 (missing SpeakCore import, iOS compile fix)
-Approved immediately. One-line compile-time fix (`import SpeakCore` in `SpeakiOSApp.swift`). Zero blast radius — import statements have no runtime effect. Current failure mode IS the broken build; fix can only improve state. iOS TestFlight provides natural staging gate. No monitoring changes needed.
+## 2026-04-08 — Issue #283 (fix missing SpeakCore import, iOS)
+Approved immediately. Compile-time-only fix (add `import SpeakCore` to SpeakiOSApp.swift). Verified OpenClawClient is in SpeakCore and usage is at line 93. No behavior change, no new failure modes. iOS TestFlight gate provides natural staging. Side note: fix(ios): commit type will trigger macOS auto-release (version bump, no behavior change) — acceptable known behavior.

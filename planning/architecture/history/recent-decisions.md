@@ -18,5 +18,5 @@ Issue #212 is not a pull request — it's a test-improver automation issue with 
 ## 2026-04-08 — Issue #270 (Apple live transcription clears text after speech pause)
 Approved. Fix is scoped to `iOSLiveTranscriber.swift` only. Existing `committedText` accumulation pattern is the right seam; two gaps to close: (1) error callback path needs to commit `lastFormattedString` before returning, (2) `commitIfImplicitReset` threshold (>= 10 chars) doesn't protect short utterances. No cross-module changes needed.
 
-## 2026-04-08 — Issue/PR #272 (trigger: issue_comment)
-Item #272 is not accessible via the GitHub API — not found as an open or closed PR (highest seen: #267), and not retrievable as an issue. The comment trigger (comment-id: 4204431736) points to a non-existent or inaccessible item. Per protocol, architecture review cannot proceed without verifiable PR context. No action taken.
+## 2026-04-08 — Issue #246 (Incremental transcript append)
+Approved. Fix is scoped to `TranscriptionManager.swift`. Deepgram path (line 653) is append-only — incremental O(1) safe. AssemblyAI path (line 1195) has replace/append branches — rebuild only on replace, append otherwise. `buildResult` is cold path, leave as-is. No module boundaries crossed, no new abstractions.

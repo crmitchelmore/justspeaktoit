@@ -179,14 +179,10 @@ final class HistoryManager: ObservableObject {
   private func appendToWAL(_ entry: WALEntry) async {
     pendingWrites.append(entry)
 
+    // pendingWrites is the in-memory source of truth for the WAL; write it directly
+    // instead of reading the existing file first (avoids an O(n) disk-read per call).
     do {
-      var walEntries: [WALEntry] = []
-      if FileManager.default.fileExists(atPath: walURL.path) {
-        let data = try Data(contentsOf: walURL)
-        walEntries = (try? decoder.decode([WALEntry].self, from: data)) ?? []
-      }
-      walEntries.append(entry)
-      let data = try encoder.encode(walEntries)
+      let data = try encoder.encode(pendingWrites)
       try data.write(to: walURL, options: [.atomic])
     } catch {
       log.error("Failed to append to WAL: \(error.localizedDescription, privacy: .public)")
@@ -412,15 +408,15 @@ final class HistoryManager: ObservableObject {
     current.insert(item, at: 0)
     items = current
 
-    let stats = Self.calculateStatistics(for: allItemsOnDisk)
-    cachedStatistics = stats
-    statistics = stats
+    updateStatisticsForAppend(item)
 
     // Write to WAL instead of directly to disk
     await appendToWAL(WALEntry(operation: .append, item: item))
   }
 
   func update(_ item: HistoryItem) async {
+    let oldItem = allItemsOnDisk.first(where: { $0.id == item.id })
+
     if let diskIndex = allItemsOnDisk.firstIndex(where: { $0.id == item.id }) {
       allItemsOnDisk[diskIndex] = item
       allItemsOnDisk.sort { $0.createdAt > $1.createdAt }
@@ -432,9 +428,13 @@ final class HistoryManager: ObservableObject {
       items = updated.sorted { $0.createdAt > $1.createdAt }
     }
 
-    let stats = Self.calculateStatistics(for: allItemsOnDisk)
-    cachedStatistics = stats
-    statistics = stats
+    if let oldItem {
+      updateStatisticsForUpdate(oldItem: oldItem, newItem: item)
+    } else {
+      let stats = Self.calculateStatistics(for: allItemsOnDisk)
+      cachedStatistics = stats
+      statistics = stats
+    }
 
     // Write to WAL instead of directly to disk
     await appendToWAL(WALEntry(operation: .update, item: item))
@@ -446,9 +446,13 @@ final class HistoryManager: ObservableObject {
 
     items.removeAll { $0.id == id }
 
-    let stats = Self.calculateStatistics(for: allItemsOnDisk)
-    cachedStatistics = stats
-    statistics = stats
+    if let diskItem {
+      updateStatisticsForRemove(diskItem)
+    } else {
+      let stats = Self.calculateStatistics(for: allItemsOnDisk)
+      cachedStatistics = stats
+      statistics = stats
+    }
 
     // Write to WAL instead of directly to disk
     if let diskItem {
@@ -459,7 +463,13 @@ final class HistoryManager: ObservableObject {
   func removeAll() async {
     allItemsOnDisk = []
     items = []
-    let stats = Self.calculateStatistics(for: [])
+    let stats = HistoryStatistics(
+      totalSessions: 0,
+      cumulativeRecordingDuration: 0,
+      totalSpend: 0,
+      averageSessionLength: 0,
+      sessionsWithErrors: 0
+    )
     cachedStatistics = stats
     statistics = stats
 

@@ -13,3 +13,6 @@ Confirmed: bot-authored Daily Test Improver issue. Out of scope for product vali
 
 ## 2026-04-08 — Issue #271 (landing page mobile nav bug)
 Approved quickly. Static HTML landing page bug on primary conversion surface. Code-confirmed: `nav__cta` has no mobile-specific styling, hamburger overlay z-index stack is suspect. Scope bounded to one file. Product principle: conversion surface bugs warrant fast approval.
+
+## 2026-04-08 — Issue #283: one-line import fix, instant approval
+Critical bug (missing `import SpeakCore`) blocked all iOS TestFlight releases for 13+ days. Approved immediately — evidenced root cause, zero risk, one-line fix. Principle reinforced: well-evidenced one-line bug fixes blocking production pipelines should bypass normal deliberation.

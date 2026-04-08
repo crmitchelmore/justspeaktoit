@@ -26,3 +26,6 @@ Issue #276 carries only `automation` and `ci` labels — no `planning:` labels a
 
 ## 2026-04-08 — PR #277 (Architecture PR Plan Review)
 PR #277 is not accessible via the GitHub API (all read methods return empty). Does not appear in open or closed PR list. Comment ID 4205723022 was the trigger. No action taken per protocol: cannot verify live PR context or linked planning issue. Same pattern as #209, #252, #256.
+
+## 2026-04-08 — Issue #279 (Perf Improver — HistoryManager O(1) stats and WAL fix)
+Issue #279 is a closed bot-generated issue from the Daily Perf Improver workflow with labels `automation`, `performance`, `agentic-workflows`. No `planning:` labels and no Planning Kickoff comment. Architecture review does not apply per the do-nothing rule. Issue is also already closed as not_planned.

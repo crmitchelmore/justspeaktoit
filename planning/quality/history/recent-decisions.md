@@ -34,3 +34,6 @@ Docs-only AGENTS.md update. Content quality is good. Single blocker: no linked p
 Landing-page-only bug. No automated tests exist or are expected. Two guardrails surfaced from inspection:
 (1) `nav__cta` must be hidden on mobile — it's the root cause of the broken download button.
 (2) Body scroll lock required for iOS Safari overlay. Manual browser verification is the appropriate test bar for landing-page fixes.
+
+## 2026-04-08 — Issue #283: Approved (first pass, one-line import fix)
+Hard compiler error (`cannot find type 'OpenClawClient' in scope`). Fix: `import SpeakCore` in `SpeakiOSApp.swift`. Binary verification via CI build. Pattern: single-import fixes with compiler-verified correctness approve immediately — no quality blockers warranted.

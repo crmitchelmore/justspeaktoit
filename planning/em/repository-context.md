@@ -27,3 +27,7 @@ justspeaktoit — macOS + iOS voice-to-text app (Swift, SwiftUI)
 GitHub MCP tools (issue_read, list_issues) consistently return [] for issues #202, #244, #250, #239.
 This appears to be a persistent infrastructure issue, not issue-specific.
 Cannot verify planning preconditions without issue data — defaulting to noop.
+
+## GitHub MCP Tooling Note (updated 2026-04-08)
+`github-issue_read` (get, get_comments) returns [] for issue #276.
+Workaround: use `github-search_issues` with repo qualifier to retrieve issue metadata.

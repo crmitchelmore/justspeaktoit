@@ -67,3 +67,6 @@ Workflow-only PR (31 lock.yml + 31 .md files) disabling `GH_AW_FAILURE_REPORT_AS
 
 ## 2026-04-07 — Issue #246: Perf improvement for incremental transcript append
 Automated perf issue. Two focused concerns raised: (1) scope ambiguity on AssemblyAI (files section says Deepgram only, body says "can be handled"), (2) verification story covers performance (measure{}) but not correctness. `buildFinalResult()` map+join at line 948 correctly identified as a one-shot call, not a hot path — left out of scope. Pattern: always check whether a perf fix has a correctness regression test alongside the measurement, especially when branching logic (replace vs append) is involved.
+
+## 2026-04-08 — Issue #270: First pass (iOS text-loss on pause)
+iOS-only SFSpeechRecognizer fix. Three concrete failure modes identified: (1) commitIfImplicitReset heuristic thresholds too coarse, (2) error path in handleRecognitionResult discards latestResult without committing, (3) silent task termination without isFinal. Key structural constraint: no SpeakiOSTests target in Package.swift — iOS commit logic cannot be unit-tested via make test. Pattern: when fix touches heuristic detection logic, require either extraction to testable pure function or explicit device-log verification story.

@@ -29,3 +29,6 @@ Triggered by issue_comment (comment-id 4212471027). All MCP reads empty. Cannot 
 
 ## 2026-04-09 — Issue #283: Approved (missing SpeakCore import fix)
 One-line compile fix: `import SpeakCore` added to `SpeakiOSApp.swift`. `OpenClawClient` already referenced at line 93; no new surface, permissions, or trust boundary change. All 6 other roles approved. Approved immediately after code verification. Final label: `planning:ready-for-dev`.
+
+## 2026-04-09 — Issue #157: No action (MCP auth gap — workflow_dispatch re-trigger)
+Triggered by workflow_dispatch. Both issue get and get_comments returned empty arrays. Prior approval from initial review already on record in issues/157.md. No action taken — cannot evaluate any new comments or label changes without live issue context.

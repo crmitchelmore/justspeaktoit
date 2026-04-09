@@ -36,5 +36,5 @@ PR #282 is already closed (merged). The workflow was triggered by `issue_comment
 ## 2026-04-09 — PR #284 (Architecture PR Plan Review trigger)
 PR #284 is not accessible via the GitHub API (all read methods return empty). Does not appear in open or closed PR list. Comment ID 4212100470 was the trigger. No action taken per protocol: cannot verify live PR context or linked planning issue. Same recurring inaccessible-via-API pattern as #209, #252, #277, #282.
 
-## 2026-04-09 — Issue/PR #256 (re-triggered)
-#256 was re-triggered (comment-id 4212107416). GitHub API returns empty for all `issue_read` and `pull_request_read` methods. Previously documented as an inaccessible PR. No action taken per protocol: "Never act on pull requests; if this event is a pull request comment, do nothing." Same recurring inaccessible-via-API pattern as #209, #252, #277, #282, #284.
+## 2026-04-09 — Issue #285 (trigger: issue_comment #4212101482)
+Issue #285 is not accessible via the GitHub API (both `get` and `get_comments` return empty results). Cannot verify labels, body, or planning comment history. Per protocol, no action taken. Same recurring inaccessible-via-API pattern as #209, #252, #277, #282, #284. This pattern now spans at least 6 issues/PRs; likely a systemic API access constraint in this workflow environment.

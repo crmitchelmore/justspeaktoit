@@ -23,29 +23,14 @@ Self-contained local state management fix in `iOSLiveTranscriber.swift`. No new 
 ## 2026-04-08 — PR #128 (docs: release and transcription troubleshooting notes)
 Documentation-only PR with no linked planning issue. Blocked per protocol.
 
-## 2026-04-08 — Issue #276: No action (MCP auth gap)
-All GitHub MCP reads returned empty arrays for issue #276. Consistent with documented pattern. Took no action.
-
-## 2026-04-08 — Issue #271: No action (MCP auth gap)
-All GitHub MCP reads returned empty arrays for issue #271. Consistent with documented pattern. Took no action.
-
-## 2026-04-08 — Issue #277: No action (MCP auth gap)
-All GitHub MCP reads returned empty arrays for issue #277. Consistent with documented pattern. Took no action.
+## 2026-04-08 — Issues #271, #276, #277, #283, #263: No action (MCP auth gap)
+All GitHub MCP reads returned empty arrays. Consistent with documented pattern. Took no action.
 
 ## 2026-04-08 — PR #282: No action (MCP auth gap)
-All GitHub MCP reads returned empty arrays for PR #282. Consistent with documented pattern. Took no action.
+All GitHub MCP reads returned empty arrays. Consistent with documented pattern. Took no action.
 
-## 2026-04-08 — Issue #283: No action (MCP auth gap)
-All GitHub MCP reads returned empty arrays for issue #283. Consistent with documented pattern. Took no action.
+## 2026-04-09 — Issues #252, PR #228: No action (MCP auth gap)
+All GitHub MCP reads returned empty arrays. Consistent with documented pattern. Took no action.
 
-## 2026-04-08 — Issue #263: No action (MCP auth gap)
-All GitHub MCP reads returned empty arrays for issue #263. Consistent with documented pattern. Took no action.
-
-## 2026-04-09 — Issue #252: No action (MCP auth gap)
-All GitHub MCP reads returned empty arrays for issue #252 (get + get_comments). Consistent with documented pattern. Took no action.
-
-## 2026-04-09 — PR #228: No action (MCP auth gap)
-All GitHub MCP reads returned empty arrays for PR #228 (get, get_comments) and issue #228 (get). Consistent with documented pattern. Took no action.
-
-## 2026-04-09 — Issue #246: No action (MCP auth gap)
-All GitHub MCP reads returned empty arrays for issue #246 (get, get_comments, get_labels, list_issues). Consistent with documented pattern. Took no action.
+## 2026-04-09 — Issue #271 (second trigger): No action (MCP auth gap)
+Issue #271 re-triggered. All reads (get, get_comments, get_labels) returned empty arrays again. Consistent with documented pattern. Took no action. Pattern now observed twice on this issue specifically.

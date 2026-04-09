@@ -1,11 +1,10 @@
 {
-  "run":"2026-04-08","rid":"24131648513",
-  "notes":["macOS for tests","testX_cond_expected()","@testable import SpeakCore","swift build --target SpeakCore ok on Linux","create_pull_request returns patch only"],
+  "run":"2026-04-09","rid":"24183984037",
+  "notes":["macOS for tests","testX_cond_expected()","@testable import SpeakCore","swift build --target SpeakCore ok on Linux","create_pull_request returns patch only","Sentry binary blocks swift test on Linux - macOS CI needed"],
   "prs":[
-    {"b":"test-assist/openclaw-llm-tests-20260408","run":"2026-04-08","n":"36t:OpenClawTypes(15)+LLMProtos(15)+OpenClawError(6)"},
-    {"b":"test-assist/anycod-apivalidation-20260407-550ae7cde18820e3","run":"2026-04-07","n":"45t:AnyCodable(25)+APIKeyValidation(20)"}
+    {"b":"test-assist/anycod-apivalidation-20260409","run":"2026-04-09","n":"30t:AnyCodable(16)+APIKeyValidationResult(14)"}
   ],
-  "backlog":["AudioBufferPool(macOS)","TranscriptionResult Codable edges"],
-  "mi":"apr2026 #231",
-  "tlr":{"t1":"2026-04-08","t2":"2026-04-04","t3":"2026-04-08","t4":"2026-04-08","t5":"2026-04-08","t6":"2026-04-02","t7":"2026-04-08"}
+  "backlog":["AudioBufferPool(macOS)","TranscriptionResult Codable edges","OpenClawTypes/LLMProtocols/OpenClawError"],
+  "mi":"apr2026 new (prev #231 closed by maintainer)",
+  "tlr":{"t1":"2026-04-08","t2":"2026-04-04","t3":"2026-04-09","t4":"2026-04-08","t5":"2026-04-08","t6":"2026-04-02","t7":"2026-04-09"}
 }

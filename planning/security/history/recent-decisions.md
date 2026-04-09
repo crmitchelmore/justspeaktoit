@@ -27,5 +27,5 @@ All GitHub MCP reads returned empty arrays for issue #252. Consistent with docum
 ## 2026-04-09 — PR #271: No action (MCP auth gap — PR review trigger)
 Triggered by issue_comment (comment-id 4212471027). All MCP reads empty. Cannot evaluate trust boundaries, linked plan, labels, or draft status. No action taken.
 
-## 2026-04-09 — Issue #246 (re-trigger): No action (MCP auth gap)
-All GitHub MCP reads returned empty arrays again on re-trigger for issue #246. Consistent with documented pattern. Cannot evaluate. Noop.
+## 2026-04-09 — Issue #283: Approved (missing SpeakCore import fix)
+One-line compile fix: `import SpeakCore` added to `SpeakiOSApp.swift`. `OpenClawClient` already referenced at line 93; no new surface, permissions, or trust boundary change. All 6 other roles approved. Approved immediately after code verification. Final label: `planning:ready-for-dev`.

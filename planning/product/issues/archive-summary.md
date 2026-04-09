@@ -35,9 +35,5 @@ Individual issue files deleted to keep memory within size limits.
 - #283 — iOS missing SpeakCore import, blocks TestFlight; product-approved 2026-04-08
 
 ## Batch archived 2026-04-09
-- #228 — unable to retrieve context; noop
-- #236 — bot-authored Daily Test Improver; closed not_planned; noop
-- #270 — bot-authored or out-of-scope; noop
-- #271 — landing page mobile nav bug; product-approved 2026-04-08; conversion surface fix, bounded scope
-- #283 — iOS missing SpeakCore import blocking TestFlight; product-approved 2026-04-08; one-line critical fix
-- #284 — bot-authored Daily Perf Improver; closed; noop
+- #284 — check content (removed due to size constraints)
+- #246 — [Perf Improver] bot issue; DeepgramLiveController O(N)→O(1) transcript append; product-approved 2026-04-09 (was in planning pipeline with arch/design/reliability already approved)

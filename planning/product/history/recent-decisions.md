@@ -16,3 +16,7 @@ Approved quickly. Static HTML landing page bug on primary conversion surface. Co
 
 ## 2026-04-08 — Issue #283: one-line import fix, instant approval
 Critical bug (missing `import SpeakCore`) blocked all iOS TestFlight releases for 13+ days. Approved immediately — evidenced root cause, zero risk, one-line fix. Principle reinforced: well-evidenced one-line bug fixes blocking production pipelines should bypass normal deliberation.
+
+## 2026-04-09 — Issue #246: Fast-track approved perf-bot issue
+
+Approved automated perf improvement (O(N)→O(1) transcript append in DeepgramLiveController) immediately per principles. Code confirmed O(N) pattern at TranscriptionManager.swift:653. No user-facing changes; internal allocation reduction. Pattern: agentic perf-bot issues with code evidence + bounded scope get product approval without discussion.

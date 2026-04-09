@@ -35,3 +35,6 @@ One-line import fix (compile-time only). Approved without questions. Pattern: co
 
 ## 2026-04-08 — Issue #256 (test(core): error description, header redactor, API validation tests)
 Pure test-only additions to SpeakCoreTests. 40 value-type assertions, no runtime code. Approved immediately. Pattern: test-only issues with no production code changes have zero app performance concern — approve without questions.
+
+## 2026-04-09 — Issue #270 (re-approval after /doit label reset)
+Same issue, same fix, same approval reasoning as 2026-04-08. A second /doit reset all labels; re-approved immediately. Pattern: when /doit resets a previously fully-approved issue with no content changes, re-approval requires no new analysis — just confirm issue is unchanged and re-state prior rationale.

@@ -1,79 +1,49 @@
 # Repository Context
 
-<!-- changelog: 2026-04-02 — full refresh; added tech stack, module structure, data/auth, deployment, agentic system sections -->
+<!-- changelog: 2026-04-09 — updated latest release to mac-v0.29.2; added OpenClaw, TTS, Transport, PersonalLexicon, LivePolish, Deepgram-iOS entries; expanded SpeakCore module notes -->
 
 ## Durable facts for this role
-- Just Speak to It is a SwiftUI voice-transcription product spanning macOS and iOS, with macOS as the richer primary surface.
-- Core user moments are capture, live transcript, post-processing, smart output, and history/settings review.
-- Privacy-sensitive: supports on-device Apple Speech and explicit user control of cloud providers (AssemblyAI, Deepgram, RevAI).
-- Users manage API keys locally; features should not assume app-managed accounts or hidden back-end state.
-- Platform scope matters: hotkeys and accessibility-driven output are macOS-specific; iOS has different constraints.
-- Good product issues should name the platform, the user moment, and whether the value is privacy, speed, accuracy, or workflow convenience.
+- SwiftUI voice-transcription product (macOS primary, iOS expanding). Core moments: capture → live transcript → post-process → smart output → history + OpenClaw AI chat (iOS).
+- Privacy-sensitive: on-device Apple Speech + user-controlled cloud (AssemblyAI, Deepgram, RevAI, OpenAI, Modulate). API keys stored locally in Keychain.
+- Platform scope: hotkeys and accessibility output are macOS-only; OpenClaw hands-free and Deepgram live are iOS-specific.
+- Good issues name the platform, user moment, and value dimension (privacy / speed / accuracy / workflow).
 
 ## Technology stack
-- **Language**: Swift (swift-tools-version 5.9)
-- **UI framework**: SwiftUI
-- **Minimum platforms**: macOS 14, iOS 17
-- **Key dependencies**:
-  - Sparkle 2.6.0+ — macOS auto-update (appcast.xml-based)
-  - Sentry 9.3.0+ — error monitoring (EU region, org: tally-lz)
-  - SwiftLint 0.55.0+ / SwiftFormat 0.53.6+ — code quality
-- **Build toolchain**: SwiftPM (primary), Tuist (Xcode project generation), Xcode
+- Swift (swift-tools-version 5.9), SwiftUI; macOS 14+, iOS 17+
+- Sparkle 2.6.0+ (auto-update), Sentry 9.3.0+ (EU, org: tally-lz), SwiftLint 0.55.0+, SwiftFormat 0.53.6+
+- Build: SwiftPM primary; Tuist for Xcode project generation
 
 ## Module structure
-| Target | Type | Platform | Purpose |
-|---|---|---|---|
-| `SpeakCore` | Library | macOS + iOS | Shared types, protocols, Keychain storage |
-| `SpeakApp` | Executable | macOS 14 | Full macOS SwiftUI app |
-| `SpeakiOSLib` | Library | iOS 17 | iOS views + services (path: Sources/SpeakiOS) |
-| `SpeakSync` | Library | macOS + iOS | History sync engine (iCloud-backed) |
-| `SpeakHotKeys` | Library | macOS | Global hotkey support |
-| `SpeakHotKeysDemo` | Executable | macOS | Dev demo for hotkeys |
+- `SpeakCore` — macOS+iOS: shared types, protocols, Keychain, OpenClaw client, LLM abstractions, DeepgramLiveClient
+- `SpeakApp` — macOS 14 executable: full SwiftUI app
+- `SpeakiOSLib` — iOS 17 library: views + services (Sources/SpeakiOS)
+- `SpeakSync` — macOS+iOS: iCloud history sync
+- `SpeakHotKeys` — macOS: global hotkeys; `SpeakiOSApp/` — iOS `@main` (outside package)
+- Tests: `SpeakCoreTests`, `SpeakAppTests`; `landing-page/` — Cloudflare Pages
 
-- `SpeakiOSApp/` — iOS `@main` entry point (outside Swift package)
-- `Tests/SpeakCoreTests`, `Tests/SpeakAppTests` — XCTest suites
-- `landing-page/` — static marketing site (deploys to Cloudflare Pages)
-
-### Key source files (macOS)
-- `TranscriptionManager.swift` — AssemblyAI live controller, turn handling
-- `PostProcessingManager.swift` — LLM post-processing
-- `HUDManager.swift / HUDView.swift` — capture health HUD
-- `SmartTextOutput / TextOutput.swift` — accessibility insertion
-- `TranscriptionProviderRegistry.swift` — provider plug-in system
-- `WireUp.swift` — dependency wiring at startup
+### Notable source areas
+- **macOS**: `TranscriptionManager`, `PostProcessingManager`, `HUDView`, `TextOutput`, `WireUp`, `Transport/TransportServer`, `TextToSpeech/`, `LivePolishManager`, `PersonalLexiconService`
+- **iOS**: `OpenClawChatCoordinator[+HandsFree]`, `iOSLiveTranscriber`, `DeepgramLiveTranscriber`, `SendToMacService`
+- **SpeakCore**: `OpenClawClient`, `DeepgramLiveClient`, `LLMProtocols/ModelCatalog`, `SecureStorage`, `TranscriptionActivityAttributes`
 
 ## Data and auth
-- **Keychain**: `SecureStorage` (SpeakCore) and `SecureAppStorage` (SpeakApp) — service `com.github.speakapp.credentials`
-- **Transcription providers**: AssemblyAI (WebSocket streaming v3), Deepgram, RevAI, Apple Speech (on-device)
-- **Persistence**: UserDefaults / AppSettings for preferences; SpeakSync for history (iCloud container `iCloud.com.justspeaktoit.ios`)
-- **Error monitoring**: Sentry (DSN in `SentryManager.swift`); auth token in CI secret `SENTRY_AUTH_TOKEN`
-- **App Group**: `group.com.justspeaktoit.ios` (shared between app and widget)
+- **Keychain**: `SecureStorage` (SpeakCore) / `SecureAppStorage` (SpeakApp) — service `com.github.speakapp.credentials`
+- **Transcription**: AssemblyAI (WebSocket v3), Deepgram (live+REST), RevAI, OpenAI Whisper, Modulate, Apple Speech
+- **TTS**: System, Deepgram, Azure, ElevenLabs, OpenAI — all via `TTSProtocol`
+- **OpenClaw**: AI chat via `OpenClawClient`; iOS hands-free loop; Mac↔iOS via `SendToMacService`/`TransportServer`
+- **Persistence**: UserDefaults/AppSettings; SpeakSync history (iCloud `iCloud.com.justspeaktoit.ios`)
+- **Error monitoring**: Sentry EU (org: tally-lz, `SentryManager.swift`); CI secret: `SENTRY_AUTH_TOKEN`
+- **App Group**: `group.com.justspeaktoit.ios`
 
 ## Deployment
-- **macOS**: Fully automated — conventional commits on `main` → `auto-release.yml` → `mac-v*` tag → `release-mac.yml` (build, notarise, GitHub Release, appcast.xml, Homebrew tap)
-- **iOS TestFlight**: Manual workflow dispatch (`release-ios.yml`)
-- **iOS App Store**: Separate `release-appstore.yml`
-- **Landing page**: `deploy-landing-page.yml` — Cloudflare Pages, triggers on `landing-page/**` changes to `main`
-- **Current VERSION file**: 0.18.5 (hint only; tag is source of truth)
-- **Tag formats**: `mac-v*` (macOS releases), `ios-v*` (iOS releases)
-
-### CI pipeline
-- `ci.yml` — build + lint + test on PRs
-- `codeql.yml` — security scanning
-- `verify-basics` — sanity checks
+- **macOS**: automated — conventional commits → `auto-release.yml` → `mac-v*` tag → `release-mac.yml` (build, notarise, GitHub Release, appcast, Homebrew)
+- **iOS TestFlight**: manual dispatch (`release-ios.yml`); App Store: `release-appstore.yml`
+- **Landing page**: `deploy-landing-page.yml` — Cloudflare Pages on `landing-page/**` changes
+- **Latest release**: mac-v0.29.2 (2026-03-26); VERSION file 0.18.5 is stale hint; tag is source of truth
+- **CI**: `ci.yml` (build+lint+test), `codeql.yml` (security), `verify-basics`
 
 ## Agentic system
-**Active daily agents** (all run on schedule, produce issues/PRs automatically):
-- `daily-test-improver` — adds XCTest cases
-- `daily-perf-improver` — performance micro-optimisations
-- `daily-doc-updater` — documentation updates
-- `daily-repo-status` — repo health status issues
-- `improvement-coordinator` — orchestrates improvement agents
-- `repository-quality-improver` — code quality improvements
-- `agentics-maintenance` — maintains agentic workflow files
-- `stale-issue-cleanup` — closes stale issues
-- `ci-doctor` — diagnoses CI failures
-- `repository-context-refresh` — updates this file
+**Active daily agents**: `daily-test-improver`, `daily-perf-improver`, `daily-doc-updater`, `daily-repo-status`, `improvement-coordinator`, `repository-quality-improver`, `agentics-maintenance`, `stale-issue-cleanup`, `ci-doctor`, `repository-context-refresh`.
 
 **PR review agents**: architecture, design, performance, product, quality, security, reliability reviewers active on PRs.
 

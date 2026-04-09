@@ -30,3 +30,6 @@ Individual issue files deleted to keep memory within size limits.
 - #255 — [Test Improver] bot issue; closed not_planned; noop
 - #256 — [Test Improver] bot issue; closed not_planned; noop
 - #265 — [Test Improver] bot issue; skipped; noop
+
+- #277 — CI Doctor bot issue (sentry-cocoa bump); out of scope; noop
+- #283 — iOS missing SpeakCore import, blocks TestFlight; product-approved 2026-04-08

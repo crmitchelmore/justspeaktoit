@@ -36,5 +36,5 @@ PR #282 is already closed (merged). The workflow was triggered by `issue_comment
 ## 2026-04-09 — PR #284 (Architecture PR Plan Review trigger)
 PR #284 is not accessible via the GitHub API (all read methods return empty). Does not appear in open or closed PR list. Comment ID 4212100470 was the trigger. No action taken per protocol: cannot verify live PR context or linked planning issue. Same recurring inaccessible-via-API pattern as #209, #252, #277, #282.
 
-## 2026-04-09 — Issue #285 (trigger: issue_comment #4212101482)
-Issue #285 is not accessible via the GitHub API (both `get` and `get_comments` return empty results). Cannot verify labels, body, or planning comment history. Per protocol, no action taken. Same recurring inaccessible-via-API pattern as #209, #252, #277, #282, #284. This pattern now spans at least 6 issues/PRs; likely a systemic API access constraint in this workflow environment.
+## 2026-04-09 — Issue #263 (O(1) incremental stats and WAL fix in HistoryManager)
+Approved. Single file (`HistoryManager.swift`), single module (`SpeakApp`). WAL fix correctly uses `pendingWrites` (already canonical in-memory state) eliminating redundant disk read. Stats fix wires up three existing `updateStatisticsFor*` methods that were present but unused. New `effectiveDuration(for:)` private helper aligns incremental behavior with full `calculateStatistics`. No module boundaries crossed, no new seams. Issue is closed (bot couldn't create PR) but planning labels still active; approved regardless.

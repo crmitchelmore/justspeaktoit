@@ -37,11 +37,3 @@ Individual issue files deleted to keep memory within size limits.
 ## Batch archived 2026-04-09
 - #284 — check content (removed due to size constraints)
 - #246 — [Perf Improver] bot issue; DeepgramLiveController O(N)→O(1) transcript append; product-approved 2026-04-09 (was in planning pipeline with arch/design/reliability already approved)
-
-## Batch archived 2026-04-09 (size cleanup)
-- #228 — No context available (private repo MCP read failure); noop
-- #236 — [Test Improver] bot; closed not_planned; noop
-- #246 — [Perf Improver] DeepgramLiveController O(N)→O(1); product-approved 2026-04-09
-- #265 — [Test Improver] bot; noop
-- #279 — [Perf Improver] bot; closed not_planned; noop
-- #284 — [Perf Improver] bot; closed completed; noop

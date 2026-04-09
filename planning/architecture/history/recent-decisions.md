@@ -32,3 +32,6 @@ Issue #279 is a closed bot-generated issue from the Daily Perf Improver workflow
 
 ## 2026-04-08 — PR #282 (fix(ios): add missing SpeakCore import)
 PR #282 is already closed (merged). The workflow was triggered by `issue_comment` on a closed PR. Per protocol, no action taken. The fix was a single import change in `SpeakiOSApp.swift` to resolve `OpenClawClient` type not found. Same inaccessible-via-API pattern as #209, #252, #277.
+
+## 2026-04-09 — PR #284 (Architecture PR Plan Review trigger)
+PR #284 is not accessible via the GitHub API (all read methods return empty). Does not appear in open or closed PR list. Comment ID 4212100470 was the trigger. No action taken per protocol: cannot verify live PR context or linked planning issue. Same recurring inaccessible-via-API pattern as #209, #252, #277, #282.

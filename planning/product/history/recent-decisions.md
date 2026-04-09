@@ -20,6 +20,3 @@ Critical bug (missing `import SpeakCore`) blocked all iOS TestFlight releases fo
 ## 2026-04-09 — Issue #246: Fast-track approved perf-bot issue
 
 Approved automated perf improvement (O(N)→O(1) transcript append in DeepgramLiveController) immediately per principles. Code confirmed O(N) pattern at TranscriptionManager.swift:653. No user-facing changes; internal allocation reduction. Pattern: agentic perf-bot issues with code evidence + bounded scope get product approval without discussion.
-
-## 2026-04-09 — Issue #283: re-approved after label reset
-Labels were reset between runs (planning:needs-product re-appeared despite prior approval on 2026-04-08). Re-approved same day — issue and fix unchanged. Pattern: label resets can happen; always check live label state, not just memory.

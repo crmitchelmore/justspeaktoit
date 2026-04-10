@@ -1,5 +1,8 @@
 # Recent Decisions
 
+## 2026-04-10 — Issue #157 re-approval after /doit cycle
+Re-approved after /doit reset labels. Plan is structurally identical to first round (2026-03-25). New observation: Product (idle/ready visibility) and Design (recording+failure visibility) diverged on health panel phase. View-layer only — no architectural implication. Approved without change.
+
 ## 2026-04-08 — Issue #270 (Apple live transcription clears text after speech pause)
 Approved. Fix is scoped to `iOSLiveTranscriber.swift` only. Existing `committedText` accumulation pattern is the right seam; two gaps to close: (1) error callback path needs to commit `lastFormattedString` before returning, (2) `commitIfImplicitReset` threshold (>= 10 chars) doesn't protect short utterances. No cross-module changes needed.
 

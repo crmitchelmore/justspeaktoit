@@ -2,9 +2,6 @@
 
 <!-- Graduated decisions are recorded in principles.md. Only non-graduated recent learnings kept here. -->
 
-## 2026-04-10 — Issue #271 (landing page mobile nav bug) — final approval
-All 6 roles approved. Riley's -webkit-backdrop-filter containment diagnosis was the key unlock — the overlay being a child of `.nav` was the root cause of "UI breaks on iOS". Implementation guardrails well-documented. Product approved; planning:ready-for-dev added.
-
 ## 2026-04-01 — Post-merge review: PRs #186, #188, #189, #191
 All four PRs were product-blocked for missing `Plan issue: #<n>`. All four were merged anyway by maintainer (2026-03-26). The plan-link enforcement is advisory, not a hard merge gate. The principle remains the correct Product stance but blocks can be overridden. May need reframing as "request" vs "block".
 
@@ -23,3 +20,6 @@ Critical bug (missing `import SpeakCore`) blocked all iOS TestFlight releases fo
 ## 2026-04-09 — Issue #246: Fast-track approved perf-bot issue
 
 Approved automated perf improvement (O(N)→O(1) transcript append in DeepgramLiveController) immediately per principles. Code confirmed O(N) pattern at TranscriptionManager.swift:653. No user-facing changes; internal allocation reduction. Pattern: agentic perf-bot issues with code evidence + bounded scope get product approval without discussion.
+
+## 2026-04-10 — Issue #293: Security agent MCP bug, fast approved
+Human-authored infrastructure bug: Security planning agent MCP reads return empty arrays while all other agents work. Fast-approved per internal-tooling principle. Evidence: workflow run ID, 5 blocked issues cited. Root cause investigation points to Security-specific Copilot agent config delta.

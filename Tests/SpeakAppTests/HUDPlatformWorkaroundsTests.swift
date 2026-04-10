@@ -35,7 +35,7 @@ final class HUDPlatformWorkaroundsTests: XCTestCase {
     )
   }
 
-  func testGlassEffectDisabledForAllMacOS26Builds() {
+  func testGlassEffectDisabledForAllMacOS26Builds_OnlyEnablesOnMacOS27OrLater() {
     XCTAssertFalse(
       HUDPlatformWorkarounds.canUseGlassEffect(
         on: OperatingSystemVersion(majorVersion: 25, minorVersion: 6, patchVersion: 0)

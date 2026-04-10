@@ -18,6 +18,8 @@ enum HUDPlatformWorkarounds {
     shouldUseLegacyRendering()
   }
 
+  static let isGlassEffectEnabled: Bool = canUseGlassEffect()
+
   static var shouldAnimateHUD: Bool {
     !isLegacyRenderingEnabled
   }
@@ -33,6 +35,8 @@ enum HUDPlatformWorkarounds {
   static var isLegacyRenderingEnabled: Bool {
     false
   }
+
+  static let isGlassEffectEnabled: Bool = false
 
   static var shouldAnimateHUD: Bool {
     true

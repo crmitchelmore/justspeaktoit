@@ -39,5 +39,8 @@ Pure test-only additions to SpeakCoreTests. 40 value-type assertions, no runtime
 ## 2026-04-09 — Issue #270 (re-approval after /doit label reset)
 Same issue, same fix, same approval reasoning as 2026-04-08. A second /doit reset all labels; re-approved immediately. Pattern: when /doit resets a previously fully-approved issue with no content changes, re-approval requires no new analysis — just confirm issue is unchanged and re-state prior rationale.
 
+## 2026-04-10 — PR #298 (fix(mac): disable HUD glass effect on macOS 26)
+Merged before plan-review completed. `issue_comment` trigger on merged PR → noop per protocol. Notable: commit 2 adds `static let isGlassEffectEnabled` to cache `canUseGlassEffect()` — correct hot-path optimization (HUD renders per frame during recording; avoiding repeated `ProcessInfo.processInfo.operatingSystemVersion` reads is the right call). No linked planning issue in PR body. Pattern: hot-path `static let` caches for OS-version gates are always acceptable without a planning issue.
+
 ## 2026-04-10 — Issue #283 (re-approval after /doit label reset)
 Same as prior run. One-line compile-time import fix. /doit reset all labels on 2026-04-09. Re-approved immediately on 2026-04-10. All 7 roles had already approved. Re-approval triggered ready-for-dev. Pattern: identical to issue #270 reset pattern — no new analysis needed.

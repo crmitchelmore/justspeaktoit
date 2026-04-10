@@ -2,6 +2,9 @@
 
 <!-- Graduated decisions are recorded in principles.md. Only non-graduated recent learnings kept here. -->
 
+## 2026-04-10 — Issue #271 (landing page mobile nav bug) — final approval
+All 6 roles approved. Riley's -webkit-backdrop-filter containment diagnosis was the key unlock — the overlay being a child of `.nav` was the root cause of "UI breaks on iOS". Implementation guardrails well-documented. Product approved; planning:ready-for-dev added.
+
 ## 2026-04-01 — Post-merge review: PRs #186, #188, #189, #191
 All four PRs were product-blocked for missing `Plan issue: #<n>`. All four were merged anyway by maintainer (2026-03-26). The plan-link enforcement is advisory, not a hard merge gate. The principle remains the correct Product stance but blocks can be overridden. May need reframing as "request" vs "block".
 

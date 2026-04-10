@@ -11,8 +11,7 @@ enum HUDPlatformWorkarounds {
   static func canUseGlassEffect(
     on version: OperatingSystemVersion = ProcessInfo.processInfo.operatingSystemVersion
   ) -> Bool {
-    guard version.majorVersion >= 26 else { return false }
-    return !shouldUseLegacyRendering(for: version)
+    version.majorVersion >= 27
   }
 
   static var isLegacyRenderingEnabled: Bool {

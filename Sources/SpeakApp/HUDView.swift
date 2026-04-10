@@ -92,7 +92,7 @@ struct HUDOverlay: View {
   private func hudShell<Content: View>(_ view: Content) -> some View {
     let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
     #if compiler(>=6.1) && canImport(SwiftUI, _version: 7.0)
-    if #available(macOS 26.0, *), !shouldUseLegacyRendering {
+    if #available(macOS 26.0, *), HUDPlatformWorkarounds.canUseGlassEffect() {
       view
         .background(phaseTint)
         .glassEffect(.regular.tint(phaseColor.opacity(0.18)).interactive(), in: .rect(cornerRadius: 20))

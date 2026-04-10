@@ -20,6 +20,3 @@ Critical bug (missing `import SpeakCore`) blocked all iOS TestFlight releases fo
 ## 2026-04-09 — Issue #246: Fast-track approved perf-bot issue
 
 Approved automated perf improvement (O(N)→O(1) transcript append in DeepgramLiveController) immediately per principles. Code confirmed O(N) pattern at TranscriptionManager.swift:653. No user-facing changes; internal allocation reduction. Pattern: agentic perf-bot issues with code evidence + bounded scope get product approval without discussion.
-
-## 2026-04-10 — Issue #293: Security agent MCP bug, fast approved
-Human-authored infrastructure bug: Security planning agent MCP reads return empty arrays while all other agents work. Fast-approved per internal-tooling principle. Evidence: workflow run ID, 5 blocked issues cited. Root cause investigation points to Security-specific Copilot agent config delta.

@@ -38,3 +38,6 @@ Second /doit reset labels but plan unchanged from 2026-04-08 full team approval.
 
 ## 2026-04-11 — Issue #299: No action (issue_comment on closed bot issue)
 Workflow triggered by owner comment closing bot-generated perf planning issue #299. No PR attached. Rule: issue_comment trigger requires PR — no action taken. Pattern: agentic-workflow cleanup comments on bot issues fire the workflow but must be ignored.
+
+## 2026-04-11 — Issue #290 / Comment 4228852661: No action (issue_comment on closed bot issue)
+Trigger was issue_comment on issue #290 (bot-generated "Daily Test Improver" monthly activity issue, now closed). #290 is not a PR; pull-request-number was empty. Rule: issue_comment trigger requires the comment to belong to a PR. Pattern: same as #299 — agentic-workflow bot issues fire the plan-review workflow but must be ignored.

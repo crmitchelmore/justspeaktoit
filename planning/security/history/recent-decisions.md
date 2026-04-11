@@ -32,3 +32,6 @@ One-line compile fix: `import SpeakCore` added to `SpeakiOSApp.swift`. `OpenClaw
 
 ## 2026-04-09 — Issue #157: No action (MCP auth gap — workflow_dispatch re-trigger)
 Triggered by workflow_dispatch. Both issue get and get_comments returned empty arrays. Prior approval from initial review already on record in issues/157.md. No action taken — cannot evaluate any new comments or label changes without live issue context.
+
+## 2026-04-11 — PR #300: No action (PR already merged)
+Triggered by issue_comment from coderabbitai[bot] (rate-limit warning, not a plan-review comment). PR was already merged at 2026-04-11T08:33:59Z. No plan-review labels, no kickoff comment. Rule applied: issue_comment trigger on merged PR → do nothing. Workflow-only changes (gh-aw v0.62.3→v0.67.4, new helper workflows, start_issue_planning.py, Reliability/EM/Design roles); security surface unchanged.

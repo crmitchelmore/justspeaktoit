@@ -1,5 +1,8 @@
 # Recent Decisions
 
+## 2026-04-11 — Issue #299 (Perf Improver — WordDiffer LCS precompute)
+Issue #299 is a closed bot-generated issue from the Daily Perf Improver workflow with labels `automation`, `performance`, `agentic-workflows`. No `planning:` labels and no Planning Kickoff comment. Architecture review does not apply per the do-nothing rule. Triggering comment was a maintainer cleanup note closing the issue. Same pattern as #279.
+
 ## 2026-04-10 — Issue #157 re-approval after /doit cycle
 Re-approved after /doit reset labels. Plan is structurally identical to first round (2026-03-25). New observation: Product (idle/ready visibility) and Design (recording+failure visibility) diverged on health panel phase. View-layer only — no architectural implication. Approved without change.
 

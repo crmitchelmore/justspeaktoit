@@ -21,5 +21,8 @@ Critical bug (missing `import SpeakCore`) blocked all iOS TestFlight releases fo
 
 Approved automated perf improvement (O(N)→O(1) transcript append in DeepgramLiveController) immediately per principles. Code confirmed O(N) pattern at TranscriptionManager.swift:653. No user-facing changes; internal allocation reduction. Pattern: agentic perf-bot issues with code evidence + bounded scope get product approval without discussion.
 
+## 2026-04-11 — PR #300 review: merged before agent ran, agentic-workflow-only
+PR was already merged. No plan-review labels, no kickoff comment, no plan link. Agentic-workflow-only changes excluded from product review lane by convention. No action taken.
+
 ## 2026-04-11 — PR #290 review: GitHub MCP access unavailable
 Could not review PR #290 (private repo, no token, GitHub MCP tools not callable in agent context). Same infrastructure gap as issue #293 (security agent MCP failure). Called missing_tool. HEAD commit on main was `fix(mac): disable HUD glass effect on macOS 26` — PR may already be merged.

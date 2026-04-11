@@ -41,5 +41,5 @@ Approved immediately. Compile-time-only fix (add `import SpeakCore` to SpeakiOSA
 ## 2026-04-08 — Issue #263 (O(1) WAL + stats fix in HistoryManager)
 Approved with guardrail. WAL fix removes a defensive disk re-read that matters in one edge case: `replayWAL` fails due to storage write IO error (WAL file persists with valid entries, `pendingWrites = []`). Implementation must handle this case: check `pendingWrites.isEmpty && walURL exists` → fall back to disk read. Stats fix is safe (all three helpers guard against nil cachedStatistics). Pre-existing `flushImmediatelySync` deadlock pattern noted but not introduced here.
 
-## 2026-04-11 — Issue #294 skipped (automated CI Doctor, no planning labels)
-Issue #294 is a closed "CI Failure Doctor" automated issue about Issue Planning - Product agent timeout (run #24219459958). Labels: `automation`, `ci` — no `planning:` labels and no planning kickoff comment. Noop per operating constraints.
+## 2026-04-11 — Issue #290 skipped (automated Test Improver, no planning labels, closed)
+Issue #290 is "[Test Improver] Monthly Activity 2026-04" created by github-actions[bot]. Labels: `automation`, `testing` — no `planning:` labels and no planning kickoff comment. Already closed by maintainer (state_reason: completed). Noop per operating constraints. Same pattern as issues #279 and #209.

@@ -44,3 +44,6 @@ Merged before plan-review completed. `issue_comment` trigger on merged PR → no
 
 ## 2026-04-10 — Issue #283 (re-approval after /doit label reset)
 Same as prior run. One-line compile-time import fix. /doit reset all labels on 2026-04-09. Re-approved immediately on 2026-04-10. All 7 roles had already approved. Re-approval triggered ready-for-dev. Pattern: identical to issue #270 reset pattern — no new analysis needed.
+
+## 2026-04-11 — PR #300 (chore(agentic-workflows): sync improved planning flow)
+Pure agentic-workflow infra sync. 89 files changed, all in .github/ and Docs/agentic-workflows.md. Zero app runtime code. Per custom instructions, agentic-workflow surface PRs stay out of the specialist review lane by default — approved without requiring a linked planning issue. New retry workflows (issue-agent-retry.yml, pr-plan-review-rate-limit-retry.yml) use concurrency groups correctly (idempotent fan-out control). Pattern: large agentic-workflow sync PRs touching only .github/ are auto-approved from performance lens without planning issue requirement.

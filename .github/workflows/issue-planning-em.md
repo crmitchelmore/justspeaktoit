@@ -12,7 +12,32 @@ on:
         type: string
   skip-bots: [github-actions, "github-actions[bot]", copilot, dependabot, renovate]
 
-if: github.event_name == 'workflow_dispatch' || (github.event.issue.pull_request == null && github.event.issue.state == 'open' && !contains(join(github.event.issue.labels.*.name, ','), 'agentic-workflows') && contains(join(github.event.issue.labels.*.name, ','), 'planning:') && !contains(join(github.event.issue.labels.*.name, ','), 'planning:needs-product') && !contains(join(github.event.issue.labels.*.name, ','), 'planning:needs-security') && !contains(join(github.event.issue.labels.*.name, ','), 'planning:needs-performance') && !contains(join(github.event.issue.labels.*.name, ','), 'planning:needs-quality') && !contains(join(github.event.issue.labels.*.name, ','), 'planning:needs-architecture') && !contains(join(github.event.issue.labels.*.name, ','), 'planning:needs-reliability') && !contains(join(github.event.issue.labels.*.name, ','), 'planning:needs-design'))
+if: >-
+  github.event_name == 'workflow_dispatch' || (
+    github.event.issue.pull_request == null &&
+    github.event.issue.state == 'open' &&
+    !contains(join(github.event.issue.labels.*.name, ','), 'agentic-workflows') &&
+    contains(join(github.event.issue.labels.*.name, ','), 'planning:') &&
+    (
+      (
+        github.event_name == 'issue_comment' &&
+        (
+          github.event.comment.author_association == 'OWNER' ||
+          github.event.comment.author_association == 'MEMBER' ||
+          github.event.comment.author_association == 'COLLABORATOR'
+        )
+      ) ||
+      (
+        !contains(join(github.event.issue.labels.*.name, ','), 'planning:needs-product') &&
+        !contains(join(github.event.issue.labels.*.name, ','), 'planning:needs-security') &&
+        !contains(join(github.event.issue.labels.*.name, ','), 'planning:needs-performance') &&
+        !contains(join(github.event.issue.labels.*.name, ','), 'planning:needs-quality') &&
+        !contains(join(github.event.issue.labels.*.name, ','), 'planning:needs-architecture') &&
+        !contains(join(github.event.issue.labels.*.name, ','), 'planning:needs-reliability') &&
+        !contains(join(github.event.issue.labels.*.name, ','), 'planning:needs-design')
+      )
+    )
+  )
 
 permissions:
   contents: read

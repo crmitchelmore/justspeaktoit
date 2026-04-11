@@ -13,6 +13,11 @@ on:
         description: Maintainer login that should be treated as the planning initiator
         required: false
         type: string
+      comment_body:
+        description: Optional comment body to treat as the maintainer trigger context
+        required: false
+        default: ""
+        type: string
       auto_start:
         description: Start planning automatically for a maintainer-authored Product-fit issue
         required: false
@@ -37,8 +42,9 @@ jobs:
       REPO: ${{ github.repository }}
       ISSUE_NUMBER: ${{ github.event.inputs.issue_number || github.event.issue.number }}
       COMMENT_AUTHOR: ${{ github.event.inputs.initiator_login || github.event.comment.user.login || github.actor }}
-      COMMENT_BODY: ${{ github.event.comment.body || '' }}
+      COMMENT_BODY: ${{ github.event.inputs.comment_body || github.event.comment.body || '' }}
       AUTO_START: ${{ github.event.inputs.auto_start || 'false' }}
+      EVENT_NAME: ${{ github.event_name }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -59,10 +65,11 @@ jobs:
           author = os.environ["COMMENT_AUTHOR"]
           raw_body = os.environ.get("COMMENT_BODY", "")
           auto_start = os.environ.get("AUTO_START", "").strip().lower() == "true"
+          event_name = os.environ.get("EVENT_NAME", "")
           body = raw_body.lstrip()
           command_pattern = re.compile(r"(?i)(?:^|(?<=\s))/doit(?=$|[\s.!?,:;])")
 
-          if not auto_start and not command_pattern.search(body):
+          if event_name != "workflow_dispatch" and not auto_start and not command_pattern.search(body):
               print("Comment does not contain a /doit command; nothing to do.")
               sys.exit(0)
 

@@ -26,11 +26,13 @@ safe-outputs:
     title-prefix: "[agentic] "
     labels: [automation]
     max: 1
+    allowed-files: [".github/workflows/*.md", ".github/agents/*.agent.md", "Docs/agentic-workflows.md", "README.md"]
     protected-files: fallback-to-issue
   push-to-pull-request-branch:
     target: "*"
     title-prefix: "[agentic] "
     max: 1
+    allowed-files: [".github/workflows/*.md", ".github/agents/*.agent.md", "Docs/agentic-workflows.md", "README.md"]
   create-issue:
     title-prefix: "[agentic] "
     labels: [automation]

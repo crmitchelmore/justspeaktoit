@@ -40,7 +40,7 @@
 name: "Memory Curator"
 "on":
   schedule:
-  - cron: "24 19 */14 * *"
+  - cron: "12 12 */14 * *"
     # Friendly format: bi-weekly (scattered)
   workflow_dispatch:
     inputs:

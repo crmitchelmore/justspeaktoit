@@ -7,7 +7,7 @@ description: |
 
 on:
   workflow_run:
-    workflows: ["Daily Perf Improver", "Daily Test Improver", "Daily Documentation Updater", "Repository Quality Improver", "Issue Planning - Kickoff", "Issue Planning - Ready Check", "Issue Planning - Product", "Issue Planning - Security", "Issue Planning - Performance", "Issue Planning - Code Quality", "Issue Planning - Architecture"]  # Monitor the CI workflow specifically
+    workflows: ["Daily Perf Improver", "Daily Test Improver", "Daily Documentation Updater", "Repository Quality Improver", "Issue Planning - Kickoff", "Issue Planning - Ready Check", "Issue Planning - Product", "Issue Planning - Security", "Issue Planning - Performance", "Issue Planning - Code Quality", "Issue Planning - Architecture", "Issue Planning - Reliability", "Issue Planning - Design"]  # Monitor the CI workflow specifically
     types:
       - completed
     branches:

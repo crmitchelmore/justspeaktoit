@@ -42,7 +42,7 @@
 name: "Improvement Coordinator"
 "on":
   schedule:
-  - cron: "14 11 * * *"
+  - cron: "43 2 * * *"
     # Friendly format: daily (scattered)
   workflow_dispatch:
     inputs:

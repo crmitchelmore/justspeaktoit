@@ -40,7 +40,7 @@
 name: "Repository Context Refresh"
 "on":
   schedule:
-  - cron: "8 19 * * 4"
+  - cron: "26 22 * * 4"
     # Friendly format: weekly (scattered)
   workflow_dispatch:
     inputs:

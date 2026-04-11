@@ -145,7 +145,7 @@ Always read memory first, including `persona.md` and `team-dynamics.md`, verify 
     - do nothing because nothing material changed and nobody explicitly asked for your follow-up,
     - ask focused follow-up questions,
     - answer or narrow another role's concern from your lens,
-   - approve because your blockers are resolved.
+    - approve because your blockers are resolved.
 
 ## Conversation behaviour
 

@@ -40,7 +40,7 @@ safe-outputs:
       - planning:needs-design
   remove-labels:
     target: "*"
-    max: 13
+    max: 14
     allowed:
       - triage:pending-product-validation
       - triage:product-fit
@@ -56,7 +56,11 @@ safe-outputs:
       - planning:design-approved
 
 timeout-minutes: 10
-engine: copilot
+engine:
+  id: copilot
+  version: "1.0.20"
+  env:
+    COPILOT_EXP_COPILOT_CLI_MCP_ALLOWLIST: "false"
 ---
 # Issue Planning Kickoff
 
@@ -89,9 +93,10 @@ Initialise or reset the planning state for the selected issue after an explicit 
    - `planning:reliability-approved`
    - `planning:design-approved`
 5. Leave one short comment starting with `### 🗂️ Planning Kickoff` that:
-   - explains that Product, Security, Performance, Code Quality, Architecture, Reliability, and Design reviewers will comment in-thread and may reply to each other while the plan is still moving,
+   - explains that planning now advances one active specialist role at a time, starting with Product, and that the next reviewer joins only after the current role has either approved or finished its questions,
+   - explains that the Engineering Manager stays out of the normal specialist sequence until the specialist pass is complete or he explicitly challenges named roles to reply,
    - says this kickoff happened because a repository writer explicitly requested planning,
-   - tells maintainers to answer unresolved questions in-thread until the team converges,
-   - tells maintainers the issue is ready when `planning:ready-for-dev` appears and the next step is to open a pull request that includes `Plan issue: #<issue-number>` in the body,
+   - tells maintainers to answer the active role's unresolved questions in-thread until that role converges,
+   - tells maintainers the issue is ready when `planning:ready-for-dev` appears after both the seven specialist approvals and the latest Engineering Manager sign-off, and the next step is to open a pull request that includes `Plan issue: #<issue-number>` in the body,
    - stays concise and operational.
 6. Always leave a fresh kickoff comment when this workflow runs. If the labels were already correct, treat the new comment as the manual re-queue signal for the planning reviewers rather than doing nothing.

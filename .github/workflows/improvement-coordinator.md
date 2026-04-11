@@ -33,7 +33,7 @@ engine: copilot
 
 You coordinate the daily improvement agents in `${{ github.repository }}` to prevent duplicate work and conflicting PRs.
 
-## Daily improvement agents
+## Improvement agents
 
 The repository runs these autonomous improvement agents on a schedule:
 
@@ -43,6 +43,7 @@ The repository runs these autonomous improvement agents on a schedule:
 | Daily Perf Improver | `[Perf Improver]` | `performance, automation` |
 | Daily Doc Updater | `[docs]` | `documentation, automation` |
 | Repository Quality Improver | `[quality]` | `quality, automated-analysis` |
+| Agentic Improvement | `[agentic]` | `automation` |
 
 ## What to do
 

@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   dispatch:
-    if: ${{ github.event.issue.pull_request != null && github.event.issue.state == 'open' }}
+    if: ${{ github.event.issue.pull_request != null && github.event.issue.state == 'open' && !contains(join(github.event.issue.labels.*.name, ','), 'agentic-workflows') }}
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
@@ -48,6 +48,7 @@ jobs:
               "performance": ("### ⚡ Performance Review", "pr-plan-review-performance.lock.yml"),
               "quality": ("### 🧹 Code Quality Review", "pr-plan-review-quality.lock.yml"),
               "architecture": ("### 🏗️ Architecture Review", "pr-plan-review-architecture.lock.yml"),
+              "design": ("### 🎨 Design Review", "pr-plan-review-design.lock.yml"),
           }
           kickoff_heading = "### 🔎 Plan Review Kickoff"
           terminal_headings = ("### ✅ Plan Review Ready", "### ♻️ Plan Review Reopened")
@@ -84,4 +85,15 @@ jobs:
               cmd = ["gh", "workflow", "run", workflow, "--repo", repo, "-f", f"pr_number={pr_number}"]
               print("+", " ".join(cmd))
               subprocess.run(cmd, check=True)
+
+          # Also dispatch the fix agent so it can address actionable review feedback
+          # by pushing code changes to the PR branch.
+          is_plan_pr = any(label.startswith("plan-review:") for label in labels)
+          if is_plan_pr and not body.startswith(kickoff_heading):
+              try:
+                  fix_cmd = ["gh", "workflow", "run", "plan-pr-fix-agent.lock.yml", "--repo", repo, "-f", f"pr_number={pr_number}"]
+                  print("+", " ".join(fix_cmd))
+                  subprocess.run(fix_cmd, check=True)
+              except subprocess.CalledProcessError:
+                  print("Warning: failed to dispatch plan-pr-fix-agent (workflow may not exist yet)")
           PY

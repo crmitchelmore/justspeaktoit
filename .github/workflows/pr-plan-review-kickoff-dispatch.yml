@@ -1,0 +1,151 @@
+name: PR Plan Review - Kickoff Dispatch
+
+on:
+  workflow_run:
+    workflows:
+      - PR Plan Review - Kickoff
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to dispatch (optional)
+        required: false
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: pr-plan-review-kickoff-dispatch-${{ github.event.workflow_run.id || github.event.inputs.pr_number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       (github.event.workflow_run.event == 'pull_request' ||
+        github.event.workflow_run.event == 'workflow_dispatch'))
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      PR_NUMBER: ${{ github.event.inputs.pr_number }}
+      WORKFLOW_RUN_PULL_REQUESTS: ${{ toJson(github.event.workflow_run.pull_requests) }}
+      HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+    steps:
+      - name: Dispatch initial PR plan reviews
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+
+          repo = os.environ["REPO"]
+          manual_pr = os.environ.get("PR_NUMBER", "").strip()
+          workflow_run_prs = json.loads(os.environ.get("WORKFLOW_RUN_PULL_REQUESTS") or "[]")
+          head_branch = os.environ.get("HEAD_BRANCH", "").strip()
+
+          AGENTIC_WORKFLOW_PREFIXES = (
+              ".github/workflows/",
+              ".github/aw/",
+              ".github/agents/",
+          )
+          AGENTIC_WORKFLOW_FILES = {
+              ".github/copilot-instructions.md",
+              "Docs/agentic-workflows.md",
+              ".vscode/mcp.json",
+              ".vscode/settings.json",
+              ".gitattributes",
+          }
+
+          def gh_json(*args):
+              return json.loads(subprocess.check_output(["gh", *args], text=True))
+
+          def gh_lines(*args):
+              return [line.strip() for line in subprocess.check_output(["gh", *args], text=True).splitlines() if line.strip()]
+
+          def gh(*args):
+              print("+", "gh", *args)
+              subprocess.run(["gh", *args], check=True)
+
+          def is_agentic_workflow_maintenance_pr(paths):
+              return bool(paths) and all(
+                  any(path.startswith(prefix) for prefix in AGENTIC_WORKFLOW_PREFIXES) or path in AGENTIC_WORKFLOW_FILES
+                  for path in paths
+              )
+
+          if manual_pr:
+              pr_numbers = [manual_pr]
+          else:
+              pr_numbers = [str(item["number"]) for item in workflow_run_prs if item.get("number")]
+              if not pr_numbers and head_branch:
+                  prs = gh_json(
+                      "pr",
+                      "list",
+                      "--repo",
+                      repo,
+                      "--head",
+                      head_branch,
+                      "--state",
+                      "open",
+                      "--json",
+                      "number",
+                      "--limit",
+                      "10",
+                  )
+                  pr_numbers = [str(item["number"]) for item in prs if item.get("number")]
+
+          if not pr_numbers:
+              print("No open pull request found for kickoff dispatch; nothing to do.")
+              sys.exit(0)
+
+          reviewer_workflows = [
+              "pr-plan-review-product.lock.yml",
+              "pr-plan-review-security.lock.yml",
+              "pr-plan-review-performance.lock.yml",
+              "pr-plan-review-quality.lock.yml",
+              "pr-plan-review-architecture.lock.yml",
+              "pr-plan-review-design.lock.yml",
+          ]
+
+          for pr_number in pr_numbers:
+              pr = gh_json(
+                  "pr",
+                  "view",
+                  pr_number,
+                  "--repo",
+                  repo,
+                  "--json",
+                  "isDraft,labels,headRefName",
+              )
+              if pr.get("isDraft"):
+                  print(f"PR #{pr_number} is draft; skipping.")
+                  continue
+
+              if not manual_pr and (pr.get("headRefName") or "").startswith("renovate/"):
+                  print(f"PR #{pr_number} is a Renovate PR; skipping automatic specialist kickoff dispatch.")
+                  continue
+
+              files = gh_lines(
+                  "api",
+                  "--paginate",
+                  f"repos/{repo}/pulls/{pr_number}/files",
+                  "--jq",
+                  ".[].filename",
+              )
+              if is_agentic_workflow_maintenance_pr(files):
+                  print(f"PR #{pr_number} only changes agentic workflow maintenance files; skipping automatic specialist kickoff dispatch.")
+                  continue
+
+              labels = {label["name"] for label in pr.get("labels", [])}
+              if not any(label.startswith("plan-review:") for label in labels):
+                  print(f"PR #{pr_number} is not in the active plan-review lane; skipping.")
+                  continue
+
+              for workflow in reviewer_workflows:
+                  gh("workflow", "run", workflow, "--repo", repo, "-f", f"pr_number={pr_number}")
+          PY

@@ -34,7 +34,7 @@ Verify that GitHub Agentic Workflows can run successfully in this repository wit
 
 ## Task
 
-1. If the `issue_number` workflow input is present, read that GitHub issue, confirm that you can access the issue details, and add exactly one short comment confirming that the basics check succeeded for `DigitalInnovation/career-framework`.
+1. If the `issue_number` workflow input is present, read that GitHub issue, confirm that you can access the issue details, and add exactly one short comment confirming that the basics check succeeded for `crmitchelmore/justspeaktoit`.
 2. If no `issue_number` input is present, call `noop` with a short confirmation that the basics check succeeded on this branch.
 
 ## Guardrails

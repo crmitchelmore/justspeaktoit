@@ -7,7 +7,7 @@ description: |
 
 on:
   workflow_run:
-    workflows: ["Daily Perf Improver", "Daily Test Improver", "Daily Documentation Updater", "Repository Quality Improver", "Issue Planning - Kickoff", "Issue Planning - Ready Check", "Issue Planning - Product", "Issue Planning - Security", "Issue Planning - Performance", "Issue Planning - Code Quality", "Issue Planning - Architecture"]  # Monitor the CI workflow specifically
+    workflows: ["Daily Perf Improver", "Daily Test Improver", "Daily Documentation Updater", "Repository Quality Improver", "Issue Planning - Kickoff", "Issue Planning - Ready Check", "Issue Planning - Product", "Issue Planning - Security", "Issue Planning - Performance", "Issue Planning - Code Quality", "Issue Planning - Architecture", "Issue Planning - Reliability", "Issue Planning - Design"]  # Monitor the CI workflow specifically
     types:
       - completed
     branches:
@@ -33,7 +33,7 @@ tools:
 
 timeout-minutes: 10
 
-source: githubnext/agentics/workflows/ci-doctor.md@4957663821dbb3260348084fa2f1659701950fef
+source: githubnext/agentics/workflows/ci-doctor.md@97143ac59cb3a13ef2a77581f929f06719c7402a
 engine: copilot
 ---
 
@@ -78,7 +78,7 @@ You are the CI Failure Doctor, an expert investigative agent that analyzes faile
    - Dependency versions involved
    - Timing patterns
 
-### Phase 3: Historical Context Analysis  
+### Phase 3: Historical Context Analysis
 
 1. **Search Investigation History**: Use file-based storage to search for similar failures:
    - Read from cached investigation files in `/tmp/memory/investigations/`
@@ -92,7 +92,7 @@ You are the CI Failure Doctor, an expert investigative agent that analyzes faile
 
 1. **Categorize Failure Type**:
    - **Code Issues**: Syntax errors, logic bugs, test failures
-   - **Infrastructure**: Runner issues, network problems, resource constraints  
+   - **Infrastructure**: Runner issues, network problems, resource constraints
    - **Dependencies**: Version conflicts, missing packages, outdated libraries
    - **Configuration**: Workflow configuration, environment variables
    - **Flaky Tests**: Intermittent failures, timing issues
@@ -135,7 +135,7 @@ You are the CI Failure Doctor, an expert investigative agent that analyzes faile
    - **Prevention Strategies**: How to avoid similar failures
    - **AI Team Self-Improvement**: Give a short set of additional prompting instructions to copy-and-paste into instructions.md for AI coding agents to help prevent this type of failure in future
    - **Historical Context**: Similar past failures and their resolutions
-   
+
 2. **Actionable Deliverables**:
    - Create an issue with investigation results (if warranted)
    - Comment on related PR with analysis (if PR-triggered)

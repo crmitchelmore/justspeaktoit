@@ -1,0 +1,119 @@
+{
+  "version": 1,
+  "schedule": {
+    "cron": "0 8-20/2 * * *",
+    "timezone": "UTC",
+    "summary": "Every two hours from 08:00 to 20:00 UTC"
+  },
+  "scope": {
+    "editableGlobs": [
+      ".github/workflows/*.md",
+      ".github/agents/*.agent.md",
+      "Docs/agentic-workflows.md",
+      "README.md"
+    ],
+    "generatedViaCompile": [
+      ".github/workflows/*.lock.yml",
+      ".github/aw/actions-lock.json"
+    ],
+    "forbiddenGlobs": [
+      "src/**",
+      "tests/**",
+      "server.ts",
+      "ci/**",
+      "package.json",
+      "bun.lockb"
+    ]
+  },
+  "workflowTargets": [
+    "Issue Product Validation",
+    "Issue Planning -",
+    "Issue Ready to PR",
+    "PR Plan Review -",
+    "Memory Curator",
+    "Repository Context Refresh",
+    "Improvement Coordinator",
+    "Stale Issue Cleanup",
+    "Daily Test Improver",
+    "Daily Perf Improver",
+    "Daily Documentation Updater",
+    "Repository Quality Improver"
+  ],
+  "memoryBranches": [
+    "planning/product",
+    "planning/security",
+    "planning/performance",
+    "planning/quality",
+    "planning/architecture",
+    "planning/reliability",
+    "planning/design",
+    "planning/em",
+    "planning/team"
+  ],
+  "scorecardMetrics": [
+    {
+      "id": "workflow-failure-rate",
+      "description": "How often targeted agentic workflows end in failure or repeated reruns."
+    },
+    {
+      "id": "open-automation-backlog",
+      "description": "How many open automation PRs and issues are waiting for human attention."
+    },
+    {
+      "id": "memory-branch-drift",
+      "description": "Whether planning branches are missing expected files, clearly stale, or structurally inconsistent."
+    },
+    {
+      "id": "comment-noise",
+      "description": "Whether workflows are creating redundant, low-signal, or repetitive comments."
+    },
+    {
+      "id": "permission-surface",
+      "description": "Whether tool access, network scope, and permissions are broader than the workflow needs."
+    }
+  ],
+  "goldenCases": [
+    {
+      "id": "product-validation-boundary",
+      "description": "Product validation should ask for clarification or mark out-of-scope instead of escalating every ambiguous issue into full planning."
+    },
+    {
+      "id": "sequential-planning-lane",
+      "description": "Issue planning should keep one active specialist lane at a time and requeue only the role that is actually waiting."
+    },
+    {
+      "id": "em-challenge-loop",
+      "description": "Engineering Manager challenge comments should re-open only the named role lanes and should not duplicate earlier specialist commentary."
+    },
+    {
+      "id": "plan-review-seam-check",
+      "description": "PR plan review should block cleanly when the PR is missing exactly one linked planning-ready issue."
+    },
+    {
+      "id": "memory-durability",
+      "description": "Durable memory should keep recurring verified facts and remove stale, placeholder, or contradictory items."
+    },
+    {
+      "id": "do-nothing-on-low-signal",
+      "description": "When evidence is weak or the likely change is noisy, the agent should do nothing instead of producing speculative churn."
+    }
+  ],
+  "changePriorityOrder": [
+    "stop-doing-noisy-work",
+    "reduce-permissions",
+    "fix-repeated-failure",
+    "standardise-memory",
+    "tighten-output-format",
+    "docs-alignment"
+  ],
+  "ratchet": {
+    "maxChangesPerRun": 1,
+    "defaultActionWhenUncertain": "do-nothing",
+    "requirePrimaryMetric": true,
+    "requireNonRegression": true,
+    "nonRegressionChecks": [
+      "gh-aw-compile",
+      "git-diff-check"
+    ]
+  }
+}

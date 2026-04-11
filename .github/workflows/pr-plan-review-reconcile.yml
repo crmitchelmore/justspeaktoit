@@ -121,7 +121,29 @@ jobs:
                       cmd.extend(["--add-label", ",".join(add_labels)])
                   if remove_labels:
                       cmd.extend(["--remove-label", ",".join(remove_labels)])
-                  gh(*cmd)
+                  try:
+                      gh(*cmd)
+                  except subprocess.CalledProcessError:
+                      print(f"Warning: label edit failed for PR #{number}; creating missing labels")
+                      for label in add_labels:
+                          try:
+                              view_result = subprocess.run(
+                                  ["gh", "label", "view", label, "--repo", REPO],
+                                  check=False, capture_output=True, text=True,
+                              )
+                              if view_result.returncode == 0:
+                                  continue
+                              subprocess.run(
+                                  ["gh", "label", "create", label, "--repo", REPO, "--color", "C5DEF5"],
+                                  check=True, capture_output=True, text=True,
+                              )
+                          except subprocess.CalledProcessError:
+                              pass
+                      try:
+                          gh(*cmd)
+                      except subprocess.CalledProcessError:
+                          print(f"  Retry failed for PR #{number}; skipping")
+                          continue
 
               if will_be_ready and not was_ready:
                   gh(
@@ -148,6 +170,23 @@ jobs:
                   f"Reconciled pull request #{number}: add={add_labels}, remove={remove_labels}, ready={will_be_ready}"
               )
               reconciled += 1
+
+              # Dispatch the fix agent for plan PRs that have unresolved feedback.
+              # This runs after each plan-review agent completes, giving the fix
+              # agent a chance to address actionable code review comments.
+              is_plan_pr = (
+                  pr.get("title", "").startswith("[Plan]")
+                  or "automation" in labels
+              )
+              if is_plan_pr and not will_be_ready:
+                  try:
+                      subprocess.run(
+                          ["gh", "workflow", "run", "plan-pr-fix-agent.lock.yml", "--repo", REPO, "-f", f"pr_number={number}"],
+                          check=True,
+                      )
+                      print(f"Dispatched fix agent for PR #{number}")
+                  except subprocess.CalledProcessError:
+                      print(f"Warning: failed to dispatch fix agent for PR #{number} (workflow may not exist yet)")
 
           print(f"Reconciled {reconciled} pull request(s).")
           PY

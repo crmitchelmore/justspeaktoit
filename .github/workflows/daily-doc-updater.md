@@ -2,17 +2,19 @@
 name: Daily Documentation Updater
 description: Automatically reviews and updates documentation based on recent code changes
 on:
-  schedule: daily
+  schedule:
+    - cron: "11 14 * * *"
   workflow_dispatch:
 
 network:
   allowed:
-  - defaults
-  - dotnet
-  - node
-  - python
-  - rust
-  - java
+    - defaults
+    - github
+    - dotnet
+    - node
+    - python
+    - rust
+    - java
 
 permissions:
   contents: read
@@ -36,7 +38,7 @@ safe-outputs:
     draft: false
     protected-files: fallback-to-issue
 
-source: githubnext/agentics/workflows/daily-doc-updater.md@4957663821dbb3260348084fa2f1659701950fef
+source: githubnext/agentics/workflows/daily-doc-updater.md@97143ac59cb3a13ef2a77581f929f06719c7402a
 engine: copilot
 ---
 

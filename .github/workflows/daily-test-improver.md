@@ -11,7 +11,8 @@ description: |
   Always thoughtful, quality-focused, and mindful of test maintainability.
 
 on:
-  schedule: daily
+  schedule:
+    - cron: "14 4 * * *"
   workflow_dispatch:
   slash_command:
     name: test-assist
@@ -21,14 +22,19 @@ timeout-minutes: 30
 
 permissions: read-all
 
+checkout:
+  fetch: ["*"]
+  fetch-depth: 0
+
 network:
   allowed:
-  - defaults
-  - dotnet
-  - node
-  - python
-  - rust
-  - java
+    - defaults
+    - github
+    - dotnet
+    - node
+    - python
+    - rust
+    - java
 
 safe-outputs:
   report-failure-as-issue: false
@@ -62,7 +68,7 @@ tools:
     toolsets: [all]
   repo-memory: true
 
-source: githubnext/agentics/workflows/daily-test-improver.md@4957663821dbb3260348084fa2f1659701950fef
+source: githubnext/agentics/workflows/daily-test-improver.md@97143ac59cb3a13ef2a77581f929f06719c7402a
 engine: copilot
 ---
 

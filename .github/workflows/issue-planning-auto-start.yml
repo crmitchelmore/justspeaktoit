@@ -1,0 +1,133 @@
+name: Issue Planning - Auto Start
+
+on:
+  workflow_run:
+    workflows:
+      - Issue Product Validation
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Issue number to auto-start planning for (optional)
+        required: false
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+  issues: read
+
+concurrency:
+  group: issue-planning-auto-start
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       (github.event.workflow_run.event == 'issues' ||
+        github.event.workflow_run.event == 'issue_comment' ||
+        github.event.workflow_run.event == 'workflow_dispatch'))
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      ISSUE_NUMBER: ${{ github.event.inputs.issue_number }}
+    steps:
+      - name: Auto-start planning for maintainer-authored Product-fit issues
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+
+          REPO = os.environ["REPO"]
+          ISSUE_NUMBER = os.environ.get("ISSUE_NUMBER", "").strip()
+          WRITE_PERMISSIONS = {"write", "maintain", "admin"}
+
+          def gh_json(*args):
+              return json.loads(subprocess.check_output(["gh", *args], text=True))
+
+          def author_permission(login):
+              try:
+                  payload = gh_json("api", f"/repos/{REPO}/collaborators/{login}/permission")
+              except subprocess.CalledProcessError:
+                  return ""
+              return payload.get("permission", "")
+
+          def list_open_issues():
+              issues = []
+              page = 1
+              while True:
+                  batch = gh_json(
+                      "api",
+                      f"/repos/{REPO}/issues?state=open&labels=triage:product-fit&per_page=100&page={page}",
+                  )
+                  if not batch:
+                      break
+                  issues.extend(item for item in batch if "pull_request" not in item)
+                  page += 1
+              return issues
+
+          def issue_comments(issue_number):
+              comments = []
+              page = 1
+              while True:
+                  batch = gh_json(
+                      "api",
+                      f"/repos/{REPO}/issues/{issue_number}/comments?per_page=100&page={page}",
+                  )
+                  if not batch:
+                      break
+                  comments.extend(batch)
+                  page += 1
+              return comments
+
+          if ISSUE_NUMBER:
+              candidates = [
+                  gh_json("api", f"/repos/{REPO}/issues/{ISSUE_NUMBER}")
+              ]
+          else:
+              candidates = list_open_issues()
+
+          dispatched = 0
+          for issue in candidates:
+              labels = {label["name"] for label in issue.get("labels", [])}
+              if "triage:product-fit" not in labels:
+                  continue
+              if any(label.startswith("planning:") for label in labels):
+                  continue
+              comments = issue_comments(issue["number"]) if issue.get("comments", 0) else []
+              if any(comment.get("body", "").startswith("### 🗂️ Planning Kickoff") for comment in comments):
+                  continue
+
+              author = issue.get("user", {}).get("login", "")
+              permission = author_permission(author)
+              if permission not in WRITE_PERMISSIONS:
+                  print(
+                      f"Skipping issue #{issue['number']} ({issue['title']}): "
+                      f"@{author or 'unknown'} does not have repository write access."
+                  )
+                  continue
+
+              cmd = [
+                  "gh",
+                  "workflow",
+                  "run",
+                  "issue-planning-command.yml",
+                  "--repo",
+                  REPO,
+                  "-f",
+                  f"issue_number={issue['number']}",
+                  "-f",
+                  f"initiator_login={author}",
+                  "-f",
+                  "auto_start=true",
+              ]
+              print("+", " ".join(cmd))
+              subprocess.run(cmd, check=True)
+              dispatched += 1
+
+          print(f"Auto-started planning for {dispatched} issue(s).")
+          PY

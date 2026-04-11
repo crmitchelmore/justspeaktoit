@@ -412,7 +412,7 @@ jobs:
                 }
               },
               "add_labels": {
-                "defaultMax": 5,
+                "defaultMax": 4,
                 "fields": {
                   "item_number": {
                     "issueNumberOrTemporaryId": true
@@ -488,7 +488,7 @@ jobs:
                 }
               },
               "remove_labels": {
-                "defaultMax": 5,
+                "defaultMax": 4,
                 "fields": {
                   "item_number": {
                     "issueNumberOrTemporaryId": true
@@ -1224,4 +1224,3 @@ jobs:
           name: safe-outputs-items
           path: /tmp/gh-aw/safe-output-items.jsonl
           if-no-files-found: ignore
-

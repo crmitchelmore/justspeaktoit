@@ -27,7 +27,7 @@ safe-outputs:
     max: 1
 
 timeout-minutes: 20
-source: githubnext/agentics/workflows/repository-quality-improver.md@4957663821dbb3260348084fa2f1659701950fef
+source: githubnext/agentics/workflows/repository-quality-improver.md@97143ac59cb3a13ef2a77581f929f06719c7402a
 engine: copilot
 ---
 

@@ -15,13 +15,14 @@ concurrency:
 
 jobs:
   dispatch:
-    if: github.event.issue.pull_request == null
+    if: ${{ github.event.issue.pull_request == null && github.event.issue.state == 'open' && !contains(join(github.event.issue.labels.*.name, ','), 'agentic-workflows') }}
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
       ISSUE_NUMBER: ${{ github.event.issue.number }}
       COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
+      COMMENT_AUTHOR_ASSOCIATION: ${{ github.event.comment.author_association }}
       COMMENT_BODY: ${{ github.event.comment.body }}
     steps:
       - name: Dispatch follow-up planning reviews
@@ -29,54 +30,179 @@ jobs:
           python - <<'PY'
           import json
           import os
+          import re
           import subprocess
           import sys
 
           repo = os.environ["REPO"]
           issue_number = os.environ["ISSUE_NUMBER"]
           author = os.environ["COMMENT_AUTHOR"]
+          author_association = os.environ.get("COMMENT_AUTHOR_ASSOCIATION", "")
           body = os.environ["COMMENT_BODY"].lstrip()
+          command_pattern = re.compile(r"(?i)(?:^|(?<=\s))/doit(?=$|[\s.!?,:;])")
 
           if author != "github-actions[bot]":
               print("Non-bot comment; role workflows already handle maintainer follow-ups.")
               sys.exit(0)
 
-          reviewers = {
-              "product": ("### 🧭 Product", "issue-planning-product.lock.yml"),
-              "security": ("### 🔐 Security", "issue-planning-security.lock.yml"),
-              "performance": ("### ⚡ Performance", "issue-planning-performance.lock.yml"),
-              "quality": ("### 🧹 Code Quality", "issue-planning-quality.lock.yml"),
-              "architecture": ("### 🏗️ Architecture", "issue-planning-architecture.lock.yml"),
-          }
+          reviewers = [
+              ("product", "### 🧭 Product", "issue-planning-product.lock.yml", "planning:needs-product", {"product", "alex"}),
+              ("security", "### 🔐 Security", "issue-planning-security.lock.yml", "planning:needs-security", {"security", "priya"}),
+              ("performance", "### ⚡ Performance", "issue-planning-performance.lock.yml", "planning:needs-performance", {"performance", "theo"}),
+              ("quality", "### 🧹 Code Quality", "issue-planning-quality.lock.yml", "planning:needs-quality", {"quality", "code quality", "casey"}),
+              ("architecture", "### 🏗️ Architecture", "issue-planning-architecture.lock.yml", "planning:needs-architecture", {"architecture", "morgan"}),
+              ("reliability", "### 🛡️ Reliability", "issue-planning-reliability.lock.yml", "planning:needs-reliability", {"reliability", "jordan"}),
+              ("design", "### 🎨 Design", "issue-planning-design.lock.yml", "planning:needs-design", {"design", "riley"}),
+          ]
+          workflow_for_role = {role: workflow for role, _, workflow, _, _ in reviewers}
+          pending_label_for_role = {role: pending_label for role, _, _, pending_label, _ in reviewers}
           kickoff_heading = "### 🗂️ Planning Kickoff"
+          em_heading = "### 👔 Engineering Manager"
           terminal_headings = ("### ✅ Planning Ready", "### ♻️ Planning Reopened")
+          em_workflow = "issue-planning-em.lock.yml"
+
+          def gh_json(*args):
+              return json.loads(subprocess.check_output(["gh", *args], text=True))
+
+          def author_has_write_access(login):
+              if author_association in {"MEMBER", "OWNER"}:
+                  return True
+              try:
+                  permission_payload = gh_json(
+                      "api",
+                      f"/repos/{repo}/collaborators/{login}/permission",
+                  )
+              except subprocess.CalledProcessError:
+                  return False
+              return permission_payload.get("permission", "") in {"write", "maintain", "admin"}
+
+          def parse_requested_roles(comment_body):
+              for line in comment_body.splitlines():
+                  if not line.lower().startswith("reply requested from:"):
+                      continue
+                  requested = []
+                  for raw_role in line.split(":", 1)[1].split(","):
+                      normalised = raw_role.strip().lower()
+                      for role, _, _, _, aliases in reviewers:
+                          if normalised in aliases:
+                              if role not in requested:
+                                  requested.append(role)
+                              break
+                  return requested
+              return []
+
+          def latest_em_state(comments):
+              for comment in reversed(comments):
+                  comment_body = comment.get("body", "")
+                  if not comment_body.startswith(em_heading):
+                      continue
+                  decision = ""
+                  for line in comment_body.splitlines():
+                      if line.lower().startswith("decision:"):
+                          decision = line.split(":", 1)[1].strip().lower()
+                          break
+                  return decision, parse_requested_roles(comment_body)
+              return "", []
+
+          def next_pending_role(labels, skip_roles=None, requested_roles=None):
+              blocked = set(skip_roles or [])
+              if requested_roles:
+                  for role in requested_roles:
+                      if role in blocked:
+                          continue
+                      if pending_label_for_role[role] in labels:
+                          return role
+                  return None
+
+              for role, _, _, pending_label, _ in reviewers:
+                  if role in blocked:
+                      continue
+                  if pending_label in labels:
+                      return role
+              return None
+
+          def dispatch(workflows):
+              for workflow in workflows:
+                  cmd = ["gh", "workflow", "run", workflow, "--repo", repo, "-f", f"issue_number={issue_number}"]
+                  print("+", " ".join(cmd))
+                  subprocess.run(cmd, check=True)
 
           if body.startswith(terminal_headings):
               print("Terminal planning status comment; nothing to dispatch.")
               sys.exit(0)
 
-          issue = json.loads(
-              subprocess.check_output(
-                  ["gh", "issue", "view", issue_number, "--repo", repo, "--json", "labels"],
-                  text=True,
-              )
+          issue = gh_json(
+              "issue",
+              "view",
+              issue_number,
+              "--repo",
+              repo,
+              "--json",
+              "labels,comments",
           )
           labels = {label["name"] for label in issue.get("labels", [])}
+          comments = issue.get("comments", [])
           if not any(label.startswith("planning:") for label in labels) and not body.startswith(kickoff_heading):
               print("Issue is not in planning flow; nothing to dispatch.")
               sys.exit(0)
 
+          em_decision, requested_roles = latest_em_state(comments)
+
           if body.startswith(kickoff_heading):
-              workflows = [workflow for _, workflow in reviewers.values()]
+              print("Kickoff comment already dispatched Product directly; nothing to dispatch.")
+              sys.exit(0)
+          elif author != "github-actions[bot]":
+              if command_pattern.search(body):
+                  print("Maintainer /doit comment; planning command workflow owns this path.")
+                  sys.exit(0)
+              if not author_has_write_access(author):
+                  print("Non-maintainer comment; nothing to dispatch.")
+                  sys.exit(0)
+
+              if em_decision == "challenge" and requested_roles:
+                  next_role = next_pending_role(labels, requested_roles=requested_roles)
+              else:
+                  next_role = next_pending_role(labels)
+
+              if next_role is not None:
+                  dispatch([workflow_for_role[next_role]])
+              else:
+                  dispatch([em_workflow])
+              sys.exit(0)
+          elif body.startswith(em_heading):
+              if "Decision: challenge" not in body:
+                  print("EM comment is not a challenge; nothing to dispatch.")
+                  sys.exit(0)
+              requested_roles = parse_requested_roles(body)
+              if not requested_roles:
+                  print("EM challenge did not name any reply targets; nothing to dispatch.")
+                  sys.exit(0)
+              next_role = next_pending_role(labels, requested_roles=requested_roles)
+              if next_role is None:
+                  print("All requested roles are already resolved; nothing to dispatch.")
+                  sys.exit(0)
+              dispatch([workflow_for_role[next_role]])
+              sys.exit(0)
           else:
-              commenter = next((role for role, (heading, _) in reviewers.items() if body.startswith(heading)), None)
+              commenter = next((role for role, heading, _, _, _ in reviewers if body.startswith(heading)), None)
               if commenter is None:
                   print("Bot comment is not a planning reviewer comment; nothing to dispatch.")
                   sys.exit(0)
-              workflows = [workflow for role, (_, workflow) in reviewers.items() if role != commenter]
+              if "approval status: approved" not in body.lower():
+                  print("Reviewer is still waiting on answers; hold the lane on this role.")
+                  sys.exit(0)
 
-          for workflow in workflows:
-              cmd = ["gh", "workflow", "run", workflow, "--repo", repo, "-f", f"issue_number={issue_number}"]
-              print("+", " ".join(cmd))
-              subprocess.run(cmd, check=True)
+              if em_decision == "challenge" and commenter in requested_roles:
+                  next_role = next_pending_role(labels, skip_roles={commenter}, requested_roles=requested_roles)
+                  if next_role is not None:
+                      dispatch([workflow_for_role[next_role]])
+                  else:
+                      dispatch([em_workflow])
+                  sys.exit(0)
+
+              next_role = next_pending_role(labels, skip_roles={commenter})
+              if next_role is not None:
+                  dispatch([workflow_for_role[next_role]])
+              else:
+                  dispatch([em_workflow])
           PY

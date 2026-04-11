@@ -12,16 +12,19 @@ on:
         description: "Pull request number to review"
         required: true
         type: string
-  skip-bots: [github-actions, copilot, dependabot, renovate]
+  skip-bots: [github-actions, "github-actions[bot]", copilot, dependabot, renovate]
 
-if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && github.event.issue.state == 'open') }}
+if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(join(github.event.pull_request.labels.*.name, ','), 'plan-review:')) || (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && github.event.issue.state == 'open' && !contains(join(github.event.issue.labels.*.name, ','), 'agentic-workflows') && contains(join(github.event.issue.labels.*.name, ','), 'plan-review:')) }}
 
 permissions:
   contents: read
   issues: read
   pull-requests: read
 
-network: defaults
+network:
+  allowed:
+    - defaults
+    - github
 
 tools:
   github:
@@ -62,10 +65,16 @@ safe-outputs:
       - plan-review:needs-product
       - plan-review:product-approved
 
+  noop:
+    report-as-issue: false
+
 timeout-minutes: 15
 
 engine:
   id: copilot
+  version: "1.0.20"
+  env:
+    COPILOT_EXP_COPILOT_CLI_MCP_ALLOWLIST: "false"
   agent: planning-product
 ---
 # Product PR Plan Reviewer
@@ -78,7 +87,6 @@ Review the relevant pull request plan-review conversation for `${{ github.reposi
 - Otherwise review the triggering pull request #${{ github.event.pull_request.number || github.event.issue.number }}.
 - If the pull request is still a draft, do nothing.
 - If this run came from `issue_comment`, only act when the comment belongs to a pull request.
-- If this run came from `issue_comment` and the pull request is closed or merged, do nothing.
 - If this run came from `issue_comment` and the pull request has no `plan-review:` labels and no prior kickoff comment that starts with `### 🔎 Plan Review Kickoff`, do nothing.
 - If this run came from `issue_comment`, treat only plan-review comments and maintainer clarifications as new material. Plan-review comments use headings like `### 🔎 Plan Review Kickoff`, `### 🧭 Product Review`, `### 🔐 Security Review`, `### ⚡ Performance Review`, `### 🧹 Code Quality Review`, `### 🏗️ Architecture Review`, `### 🎨 Design Review`, `### ✅ Plan Review Ready`, `### ♻️ Plan Review Reopened`. Ignore unrelated automation or chatter.
 

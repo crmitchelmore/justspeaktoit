@@ -40,24 +40,24 @@ You maintain the `repository-context.md` file for a planning role in `${{ github
 Inspect the repository and record durable facts that repeatedly affect planning decisions:
 
 ### Technology stack
-- Runtime, framework, and language versions (check `Package.swift`, `*.xcodeproj`, etc.)
+- Runtime, framework, and language versions (check `package.json`, `tsconfig.json`, etc.)
 - Key dependencies and their purposes
 - Build and test toolchain
 
 ### Module structure
 - Top-level directory layout and what each directory owns
-- App targets vs framework targets
-- Key entry points and architecture patterns
+- Server vs client boundary
+- Key entry points (`server.ts`, `src/App.tsx`, etc.)
 
 ### Data and auth
-- Data persistence approach (Core Data, UserDefaults, Keychain, etc.)
-- Authentication and API integration patterns
-- Key configuration and environment variable sources
+- Database type and ORM/query approach
+- Authentication mechanism (OAuth, session, etc.)
+- Key environment variables and configuration sources
 
 ### Deployment
-- CI/CD pipeline shape (build → test → archive → release)
-- Distribution method (App Store, TestFlight, direct)
-- Supported platforms and minimum OS versions
+- CI/CD pipeline shape (build → deploy → verify)
+- Hosting platform and infrastructure (Azure, BrightCloud, etc.)
+- Environments (dev, production regions)
 
 ### Agentic system
 - Number and names of planning agents

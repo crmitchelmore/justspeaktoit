@@ -3,6 +3,21 @@ name: Issue Planning - Command
 on:
   issue_comment:
     types: [created, edited]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Issue number to start planning for
+        required: true
+        type: string
+      initiator_login:
+        description: Maintainer login that should be treated as the planning initiator
+        required: false
+        type: string
+      auto_start:
+        description: Start planning automatically for a maintainer-authored Product-fit issue
+        required: false
+        default: "false"
+        type: string
 
 permissions:
   actions: write
@@ -10,20 +25,26 @@ permissions:
   issues: write
 
 concurrency:
-  group: issue-planning-command-${{ github.event.issue.number }}
+  group: issue-planning-command-${{ github.event.issue.number || github.event.inputs.issue_number }}
   cancel-in-progress: false
 
 jobs:
   dispatch:
-    if: github.event.issue.pull_request == null
+    if: github.event_name == 'workflow_dispatch' || github.event.issue.pull_request == null
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
-      ISSUE_NUMBER: ${{ github.event.issue.number }}
-      COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
-      COMMENT_BODY: ${{ github.event.comment.body }}
+      ISSUE_NUMBER: ${{ github.event.inputs.issue_number || github.event.issue.number }}
+      COMMENT_AUTHOR: ${{ github.event.inputs.initiator_login || github.event.comment.user.login || github.actor }}
+      COMMENT_BODY: ${{ github.event.comment.body || '' }}
+      AUTO_START: ${{ github.event.inputs.auto_start || 'false' }}
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: 1
       - name: Accept /doit and start planning
         run: |
           python - <<'PY'
@@ -36,19 +57,21 @@ jobs:
           repo = os.environ["REPO"]
           issue_number = os.environ["ISSUE_NUMBER"]
           author = os.environ["COMMENT_AUTHOR"]
-          raw_body = os.environ["COMMENT_BODY"]
+          raw_body = os.environ.get("COMMENT_BODY", "")
+          auto_start = os.environ.get("AUTO_START", "").strip().lower() == "true"
           body = raw_body.lstrip()
           command_pattern = re.compile(r"(?i)(?:^|(?<=\s))/doit(?=$|[\s.!?,:;])")
 
-          if not command_pattern.search(body):
+          if not auto_start and not command_pattern.search(body):
               print("Comment does not contain a /doit command; nothing to do.")
               sys.exit(0)
 
           context_lines = []
-          for line in raw_body.splitlines():
-              cleaned_line = command_pattern.sub("", line).strip()
-              if cleaned_line:
-                  context_lines.append(cleaned_line)
+          if not auto_start:
+              for line in raw_body.splitlines():
+                  cleaned_line = command_pattern.sub("", line).strip()
+                  if cleaned_line:
+                      context_lines.append(cleaned_line)
 
           command_context = "\n".join(context_lines)
           if len(command_context) > 600:
@@ -71,6 +94,12 @@ jobs:
               permission = ""
 
           if permission not in {"write", "maintain", "admin"}:
+              if auto_start:
+                  print(
+                      f"Auto-start skipped because @{author} does not currently have repository write access "
+                      f"(permission: {permission or 'none'})."
+                  )
+                  sys.exit(0)
               gh(
                   "issue",
                   "comment",
@@ -96,30 +125,15 @@ jobs:
               "labels,title",
           )
           labels = {label["name"] for label in issue.get("labels", [])}
-
-          planning_labels = {
-              "planning:in-discussion",
-              "planning:needs-product",
-              "planning:needs-security",
-              "planning:needs-performance",
-              "planning:needs-quality",
-              "planning:needs-architecture",
-          }
-          reset_labels = {
-              "triage:pending-product-validation",
-              "triage:product-fit",
-              "triage:needs-clarification",
-              "triage:out-of-scope",
-              "planning:ready-for-dev",
-              "planning:product-approved",
-              "planning:security-approved",
-              "planning:performance-approved",
-              "planning:quality-approved",
-              "planning:architecture-approved",
-          }
           has_planning_state = any(label.startswith("planning:") for label in labels)
 
           if "triage:product-fit" not in labels and not has_planning_state:
+              if auto_start:
+                  print(
+                      f"Auto-start skipped because issue #{issue_number} is not currently marked "
+                      "`triage:product-fit`."
+                  )
+                  sys.exit(0)
               gh(
                   "issue",
                   "comment",
@@ -136,35 +150,20 @@ jobs:
               )
               sys.exit(0)
 
-          add_labels = sorted(label for label in planning_labels if label not in labels)
-          remove_labels = sorted(label for label in reset_labels if label in labels)
-          if add_labels or remove_labels:
-              cmd = ["issue", "edit", issue_number, "--repo", repo]
-              if add_labels:
-                  cmd.extend(["--add-label", ",".join(add_labels)])
-              if remove_labels:
-                  cmd.extend(["--remove-label", ",".join(remove_labels)])
-              gh(*cmd)
-
-          gh(
-              "issue",
-              "comment",
-              issue_number,
+          cmd = [
+              "python3",
+              ".github/scripts/start_issue_planning.py",
               "--repo",
               repo,
-              "--body",
-                  (
-                      "### 🗂️ Planning Kickoff\n\n"
-                      f"`/doit` from `@{author}` was accepted, so Product, Security, Performance, Code Quality, and Architecture are now joining this thread. "
-                      "Answer unresolved questions in-thread until the team converges."
-                      + (
-                          "\n\n**Maintainer context from the `/doit` comment:**\n"
-                          + "\n".join(f"> {line}" for line in command_context.splitlines())
-                          if command_context
-                          else ""
-                      )
-                      + "\n\n"
-                      + f"When `planning:ready-for-dev` appears, open a pull request that includes `Plan issue: #{issue_number}` in the body."
-                  ),
-          )
+              "--issue-number",
+              issue_number,
+              "--author",
+              author,
+              "--mode",
+              "auto" if auto_start else "manual",
+          ]
+          if command_context:
+              cmd.extend(["--context", command_context])
+          print("+", " ".join(cmd))
+          subprocess.run(cmd, check=True)
           PY

@@ -14,7 +14,10 @@ permissions:
   issues: read
   pull-requests: read
 
-network: defaults
+network:
+  allowed:
+    - defaults
+    - github
 
 tools:
   github:
@@ -40,7 +43,11 @@ safe-outputs:
       - plan-review:ready-to-merge
 
 timeout-minutes: 10
-engine: copilot
+engine:
+  id: copilot
+  version: "1.0.20"
+  env:
+    COPILOT_EXP_COPILOT_CLI_MCP_ALLOWLIST: "false"
 ---
 # PR Plan Review Ready Check
 

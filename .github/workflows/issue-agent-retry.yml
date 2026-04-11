@@ -1,0 +1,98 @@
+name: Issue Agent Retry
+
+on:
+  workflow_run:
+    workflows:
+      - Issue Planning - Product
+      - Issue Planning - Security
+      - Issue Planning - Performance
+      - Issue Planning - Code Quality
+      - Issue Planning - Architecture
+      - Issue Planning - Reliability
+      - Issue Planning - Design
+      - Issue Planning - Engineering Manager
+      - Issue Planning - Synthesis
+      - Issue Planning - Ready Check
+      - Issue Ready to PR
+    types: [completed]
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: issue-agent-retry-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+  cancel-in-progress: false
+
+jobs:
+  rerun:
+    if: github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      RUN_ID: ${{ github.event.workflow_run.id }}
+      RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+      WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+    steps:
+      - name: Retry failed issue agent workflow
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+          import time
+
+          repo = os.environ["REPO"]
+          run_id = os.environ["RUN_ID"]
+          run_attempt = int(os.environ.get("RUN_ATTEMPT") or "1")
+          workflow_name = os.environ["WORKFLOW_NAME"]
+          max_attempts = 3
+
+          result = subprocess.run(
+              ["gh", "run", "view", run_id, "--repo", repo, "--json", "jobs"],
+              check=False,
+              capture_output=True,
+              text=True,
+          )
+          if result.returncode != 0:
+              sys.stderr.write(result.stdout)
+              sys.stderr.write(result.stderr)
+              raise SystemExit(result.returncode)
+
+          payload = json.loads(result.stdout or "{}")
+          failed_jobs = [
+              job for job in payload.get("jobs", [])
+              if (job.get("conclusion") or "").lower() == "failure"
+          ]
+          failed_job_names = {
+              (job.get("name") or "").strip().lower()
+              for job in failed_jobs
+          }
+
+          if "agent" not in failed_job_names:
+              print(
+                  f"Run {run_id} for '{workflow_name}' did not fail in the agent job; "
+                  "skipping automatic rerun."
+              )
+              raise SystemExit(0)
+
+          if run_attempt >= max_attempts:
+              print(
+                  f"Run {run_id} for '{workflow_name}' exhausted {run_attempt} attempts "
+                  "after repeated agent failures."
+              )
+              raise SystemExit(0)
+
+          delay_seconds = 75 * run_attempt
+          print(
+              f"Run {run_id} for '{workflow_name}' failed in the agent job. "
+              f"Waiting {delay_seconds} seconds before rerunning attempt "
+              f"{run_attempt + 1}/{max_attempts}."
+          )
+          time.sleep(delay_seconds)
+
+          subprocess.run(["gh", "run", "rerun", run_id, "--repo", repo], check=True)
+          print(f"Requested rerun for '{workflow_name}' (run {run_id}).")
+          PY

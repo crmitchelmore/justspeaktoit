@@ -11,7 +11,8 @@ description: |
   Always methodical, measurement-driven, and mindful of trade-offs.
 
 on:
-  schedule: daily
+  schedule:
+    - cron: "13 23 * * *"
   workflow_dispatch:
   slash_command:
     name: perf-assist
@@ -21,14 +22,19 @@ timeout-minutes: 60
 
 permissions: read-all
 
+checkout:
+  fetch: ["*"]
+  fetch-depth: 0
+
 network:
   allowed:
-  - defaults
-  - dotnet
-  - node
-  - python
-  - rust
-  - java
+    - defaults
+    - github
+    - dotnet
+    - node
+    - python
+    - rust
+    - java
 
 safe-outputs:
   report-failure-as-issue: false
@@ -62,7 +68,7 @@ tools:
   bash: true
   repo-memory: true
 
-source: githubnext/agentics/workflows/daily-perf-improver.md@4957663821dbb3260348084fa2f1659701950fef
+source: githubnext/agentics/workflows/daily-perf-improver.md@97143ac59cb3a13ef2a77581f929f06719c7402a
 engine: copilot
 ---
 
@@ -157,23 +163,23 @@ Always do Task 7 (Update Monthly Activity Summary Issue) every run. In all comme
 4. For the selected goal:
 
    a. Create a fresh branch off the default branch: `perf-assist/<desc>`.
-   
+
    b. **Before implementing**: Establish baseline measurements using appropriate methods:
       - Synthetic benchmarks for algorithm changes
       - User journey tests for UX improvements
       - Load tests for scalability work
       - Build time comparisons for developer experience
-   
+
    c. Implement the optimization. Consider approaches like:
       - **Code optimization**: Algorithm improvements, data structure changes, caching
       - **User experience**: Reducing load times, improving responsiveness, optimizing assets
       - **System efficiency**: Resource utilization, concurrency, I/O optimization
       - **Build/test performance**: Faster builds, parallelized tests, reduced CI duration
-   
+
    d. **After implementing**: Measure again with the same methodology. Document both baseline and new measurements.
-   
+
    e. Ensure the code still works - run tests. Add new tests if appropriate.
-   
+
    f. If no improvement: iterate, try a different approach, or revert. Record the attempt in memory as a learning.
 
 5. **Finalize changes**:

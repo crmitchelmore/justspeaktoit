@@ -35,3 +35,6 @@ Pattern: when label state contradicts memory, re-verify issue scope before re-ap
 
 ## 2026-04-09 — Issue #270: Re-approved (second /doit reset labels)
 Second /doit reset labels but plan unchanged from 2026-04-08 full team approval. Pattern: when second /doit resets labels, verify plan is unchanged and re-approve immediately.
+
+## 2026-04-11 — Issue #299: No action (issue_comment on closed bot issue)
+Workflow triggered by owner comment closing bot-generated perf planning issue #299. No PR attached. Rule: issue_comment trigger requires PR — no action taken. Pattern: agentic-workflow cleanup comments on bot issues fire the workflow but must be ignored.

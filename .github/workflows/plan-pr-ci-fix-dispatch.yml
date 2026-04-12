@@ -1,0 +1,93 @@
+name: Plan PR - CI Fix Dispatch
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+      - Verify basics
+    types: [completed]
+
+permissions:
+  actions: write
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: plan-pr-ci-fix-${{ github.event.workflow_run.head_branch || github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Dispatch fix agent for failing plan PRs
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+
+          repo = os.environ["REPO"]
+          run_id = "${{ github.event.workflow_run.id }}"
+          head_branch = "${{ github.event.workflow_run.head_branch }}"
+
+          if not head_branch.startswith("plan-issue/"):
+              print(f"Branch '{head_branch}' is not a plan-issue branch; skipping.")
+              sys.exit(0)
+
+          prs = json.loads(
+              subprocess.check_output(
+                  [
+                      "gh",
+                      "pr",
+                      "list",
+                      "--repo",
+                      repo,
+                      "--head",
+                      head_branch,
+                      "--json",
+                      "number,title,body,labels,isDraft",
+                      "--limit",
+                      "1",
+                  ],
+                  text=True,
+              )
+          )
+          if not prs:
+              print(f"No open PR found for branch '{head_branch}'; skipping.")
+              sys.exit(0)
+
+          pr = prs[0]
+          pr_number = str(pr["number"])
+          body = pr.get("body") or ""
+          labels = {label["name"] for label in pr.get("labels", [])}
+
+          is_plan_pr = (
+              pr.get("title", "").startswith("[Plan]")
+              or "automation" in labels
+              or "Plan issue: #" in body
+          )
+          if not is_plan_pr:
+              print(f"PR #{pr_number} is not a plan PR; skipping.")
+              sys.exit(0)
+
+          if pr.get("isDraft"):
+              print(f"PR #{pr_number} is a draft; skipping.")
+              sys.exit(0)
+
+          print(f"CI failure on plan PR #{pr_number} (branch: {head_branch}, run: {run_id})")
+          print(f"Dispatching plan-pr-fix-agent for PR #{pr_number}")
+
+          subprocess.run(
+              ["gh", "workflow", "run", "plan-pr-fix-agent.lock.yml", "--repo", repo, "-f", f"pr_number={pr_number}"],
+              check=True,
+          )
+          print("Dispatched successfully.")
+          PY

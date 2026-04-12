@@ -19,8 +19,8 @@ The required GitHub Actions secret is:
 
 Recommended configuration:
 
-- preferred: a fine-grained personal access token with the `Copilot Requests` permission enabled
-- also supported by Copilot CLI: OAuth tokens from the GitHub CLI app / Copilot CLI app
+- required: a fine-grained personal access token (`github_pat_...`) with the `Copilot Requests` permission enabled
+- not supported: OAuth tokens from the GitHub CLI app / Copilot CLI app (`gho_...`)
 - not supported: classic personal access tokens (`ghp_...`)
 
 ## Standard workflows installed

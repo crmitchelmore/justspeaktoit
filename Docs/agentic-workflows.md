@@ -22,6 +22,7 @@ Recommended configuration:
 - required: a fine-grained personal access token (`github_pat_...`) with the `Copilot Requests` permission enabled
 - not supported: OAuth tokens from the GitHub CLI app / Copilot CLI app (`gho_...`)
 - not supported: classic personal access tokens (`ghp_...`)
+- current repo pin: Copilot-engine workflows are explicitly pinned to GitHub Copilot CLI `1.0.21`, matching the current upstream known-good runtime
 
 ## Standard workflows installed
 

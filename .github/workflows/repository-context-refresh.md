@@ -29,7 +29,9 @@ safe-outputs:
   report-failure-as-issue: false
 
 timeout-minutes: 15
-engine: copilot
+engine:
+  id: copilot
+  version: "1.0.21"
 ---
 # Repository Context Refresh
 

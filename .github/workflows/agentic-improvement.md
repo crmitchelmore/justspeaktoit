@@ -21,19 +21,18 @@ network:
 
 safe-outputs:
   report-failure-as-issue: false
+  max-patch-size: 10240
   create-pull-request:
     draft: true
     title-prefix: "[agentic] "
     labels: [automation]
     max: 1
-    max-patch-size: 65536
     allowed-files: [".github/workflows/*.md", ".github/agents/*.agent.md", "Docs/agentic-workflows.md", "README.md"]
     protected-files: fallback-to-issue
   push-to-pull-request-branch:
     target: "*"
     title-prefix: "[agentic] "
     max: 1
-    max-patch-size: 65536
     allowed-files: [".github/workflows/*.md", ".github/agents/*.agent.md", "Docs/agentic-workflows.md", "README.md"]
   create-issue:
     title-prefix: "[agentic] "
@@ -49,7 +48,9 @@ tools:
     - id: agentic-ops-state
       key: agentic-ops-${{ github.workflow }}
 
-engine: copilot
+engine:
+  id: copilot
+  version: "1.0.21"
 ---
 
 # Agentic Improvement

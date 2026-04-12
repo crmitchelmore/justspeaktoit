@@ -68,7 +68,7 @@ timeout-minutes: 15
 
 engine:
   id: copilot
-  version: "1.0.20"
+  version: "1.0.21"
   env:
     COPILOT_EXP_COPILOT_CLI_MCP_ALLOWLIST: "false"
   agent: planning-performance

@@ -27,7 +27,9 @@ safe-outputs:
     expires: 1d
 
 timeout-minutes: 10
-engine: copilot
+engine:
+  id: copilot
+  version: "1.0.21"
 ---
 # Improvement Coordinator
 

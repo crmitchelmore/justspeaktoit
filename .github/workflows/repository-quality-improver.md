@@ -28,7 +28,9 @@ safe-outputs:
 
 timeout-minutes: 20
 source: githubnext/agentics/workflows/repository-quality-improver.md@97143ac59cb3a13ef2a77581f929f06719c7402a
-engine: copilot
+engine:
+  id: copilot
+  version: "1.0.21"
 ---
 
 # Repository Quality Improvement Agent

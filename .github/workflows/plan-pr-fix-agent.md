@@ -60,7 +60,9 @@ safe-outputs:
     max: 4
 
 timeout-minutes: 30
-engine: copilot
+engine:
+  id: copilot
+  version: "1.0.21"
 ---
 # Plan PR Fix Agent
 

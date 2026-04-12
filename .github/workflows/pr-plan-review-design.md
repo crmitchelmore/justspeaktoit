@@ -12,9 +12,9 @@ on:
         description: "Pull request number to review"
         required: true
         type: string
-  skip-bots: [github-actions, "github-actions[bot]", copilot, dependabot, renovate]
+  skip-bots: [github-actions, "github-actions[bot]", copilot, dependabot, renovate, "coderabbitai[bot]", "gemini-code-assist[bot]", "augmentcode[bot]", "greptile-apps[bot]"]
 
-if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(join(github.event.pull_request.labels.*.name, ','), 'plan-review:')) || (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && github.event.issue.state == 'open' && !contains(join(github.event.issue.labels.*.name, ','), 'agentic-workflows') && contains(join(github.event.issue.labels.*.name, ','), 'plan-review:')) }}
+if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && !contains(join(github.event.pull_request.labels.*.name, ','), 'agentic-workflows') && contains(join(github.event.pull_request.labels.*.name, ','), 'plan-review:')) || (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && github.event.issue.state == 'open' && !contains(join(github.event.issue.labels.*.name, ','), 'agentic-workflows') && contains(join(github.event.issue.labels.*.name, ','), 'plan-review:')) }}
 
 permissions:
   contents: read

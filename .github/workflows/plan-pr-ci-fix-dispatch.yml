@@ -53,7 +53,7 @@ jobs:
                       "--head",
                       head_branch,
                       "--json",
-                      "number,title,body,labels,isDraft",
+                      "number,title,isDraft",
                       "--limit",
                       "1",
                   ],
@@ -66,14 +66,8 @@ jobs:
 
           pr = prs[0]
           pr_number = str(pr["number"])
-          body = pr.get("body") or ""
-          labels = {label["name"] for label in pr.get("labels", [])}
 
-          is_plan_pr = (
-              pr.get("title", "").startswith("[Plan]")
-              or "automation" in labels
-              or "Plan issue: #" in body
-          )
+          is_plan_pr = pr.get("title", "").startswith("[Plan]")
           if not is_plan_pr:
               print(f"PR #{pr_number} is not a plan PR; skipping.")
               sys.exit(0)

@@ -15,7 +15,7 @@ on:
         description: "Pull request number to fix"
         required: true
         type: string
-  skip-bots: [copilot, dependabot, renovate]
+  skip-bots: [github-actions, "github-actions[bot]", copilot, dependabot, renovate]
 
 if: >-
   github.event_name == 'workflow_dispatch' ||
@@ -49,6 +49,7 @@ tools:
   edit:
 
 safe-outputs:
+  report-failure-as-issue: false
   add-comment:
     max: 2
     target: "*"
@@ -142,7 +143,7 @@ When pushing fixes:
 
 When leaving a comment after pushing fixes:
 
-```
+```markdown
 ### 🔧 Fixes Applied
 
 **Addressed feedback:**

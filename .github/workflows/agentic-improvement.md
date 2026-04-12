@@ -28,9 +28,10 @@ safe-outputs:
     labels: [automation]
     max: 1
     allowed-files: [".github/workflows/*.md", ".github/agents/*.agent.md", "Docs/agentic-workflows.md", "README.md"]
-    protected-files: fallback-to-issue
+    protected-files: allowed
   push-to-pull-request-branch:
     target: "*"
+    protected-files: allowed
     title-prefix: "[agentic] "
     max: 1
     allowed-files: [".github/workflows/*.md", ".github/agents/*.agent.md", "Docs/agentic-workflows.md", "README.md"]

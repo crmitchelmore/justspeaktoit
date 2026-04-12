@@ -25,7 +25,9 @@ safe-outputs:
     max: 20
 
 timeout-minutes: 10
-engine: copilot
+engine:
+  id: copilot
+  version: "1.0.21"
 ---
 # Stale Issue Cleanup
 

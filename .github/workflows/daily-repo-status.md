@@ -33,7 +33,9 @@ safe-outputs:
     labels: [report, daily-status]
     close-older-issues: true
 source: githubnext/agentics/workflows/daily-repo-status.md@97143ac59cb3a13ef2a77581f929f06719c7402a
-engine: copilot
+engine:
+  id: copilot
+  version: "1.0.21"
 ---
 
 # Daily Repo Status

@@ -34,7 +34,9 @@ tools:
 timeout-minutes: 10
 
 source: githubnext/agentics/workflows/ci-doctor.md@97143ac59cb3a13ef2a77581f929f06719c7402a
-engine: copilot
+engine:
+  id: copilot
+  version: "1.0.21"
 ---
 
 # CI Failure Doctor

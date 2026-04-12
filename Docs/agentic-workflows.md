@@ -22,6 +22,16 @@ Recommended configuration:
 - required: a fine-grained personal access token (`github_pat_...`) with the `Copilot Requests` permission enabled
 - not supported: OAuth tokens from the GitHub CLI app / Copilot CLI app (`gho_...`)
 - not supported: classic personal access tokens (`ghp_...`)
+- current repo pin: Copilot-engine workflows are explicitly pinned to GitHub Copilot CLI `1.0.21`, matching the current upstream known-good runtime
+
+### Troubleshooting Copilot failures
+
+Two failure classes look similar in Actions, but need different fixes:
+
+- **Validation failure in `Validate COPILOT_GITHUB_TOKEN secret`** means the repository secret is the wrong token type. `COPILOT_GITHUB_TOKEN` must be a fine-grained PAT (`github_pat_...`), not `gho_...` or `ghp_...`.
+- **Agent failure after successful token validation** means auth is probably fine and the next thing to inspect is the Copilot runtime itself. In this repository, the key signal was the agent process exiting with code `1` and zero stdout/stderr after installing the pinned Copilot CLI version.
+
+When triaging, check the latest run history before changing the secret: a later bad token can mask an earlier runtime regression.
 
 ## Standard workflows installed
 

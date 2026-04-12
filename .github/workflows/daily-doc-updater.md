@@ -39,7 +39,9 @@ safe-outputs:
     protected-files: fallback-to-issue
 
 source: githubnext/agentics/workflows/daily-doc-updater.md@97143ac59cb3a13ef2a77581f929f06719c7402a
-engine: copilot
+engine:
+  id: copilot
+  version: "1.0.21"
 ---
 
 # Daily Documentation Updater

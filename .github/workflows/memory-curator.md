@@ -30,7 +30,9 @@ safe-outputs:
   add-comment: {}
 
 timeout-minutes: 20
-engine: copilot
+engine:
+  id: copilot
+  version: "1.0.21"
 ---
 # Memory Curator
 

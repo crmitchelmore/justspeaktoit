@@ -9,19 +9,17 @@ safeoutputs MCP: HTTP JSON-RPC http://host.docker.internal:80/mcp/safeoutputs; a
 ## Backlog
 1. MEDIUM #201: TranscriptionTextProcessor .caseInsensitive regex
 2. MEDIUM #252: NSRegex cache (PersonalLexiconService + PronunciationManager)
-3. LOW #246: DeepgramLiveController O(N) rebuild
 
-## Monthly: #228 April 2026. Updated 2026-04-11.
+## Monthly: New issue created April 2026 (2026-04-12 run). #228 was closed by maintainer.
 
 ## Round-Robin
-Last (2026-04-11 run 5): Tasks 3,7
-Next: Tasks 2,5,6,7
+Last (2026-04-12 run 6): Tasks 3,7
+Next: Tasks 1,2,5,6,7
 
 ## Open PRs
-- #258: worddifer-measure-baselines-v2 (2026-04-09)
-- #263: historymanager-o1-stats-wal-v2 (2026-04-09)
-- NEW: worddifer-lcs-precompute-v3 (2026-04-11, draft)
+- NEW: perf-assist/incremental-transcript-append (2026-04-12, draft) — closes #246
 
 ## Notes
 GitHub MCP read tools return empty (non-functional). Use safeoutputs HTTP MCP directly.
-Duplicate tracking: #215→#240, #204→#201, #152/#216/#227→#252
+Previous PRs #258/#263 deleted by maintainer. Issue #228 closed by maintainer.
+Issue #246 had /doit from bravostation + planning:ready-for-dev — implemented and PR submitted.

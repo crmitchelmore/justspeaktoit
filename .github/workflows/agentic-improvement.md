@@ -115,6 +115,7 @@ Inspect:
 2. **Open automation work**
    - inspect open PRs and issues labeled `automation`
    - if an open `[agentic]` PR already exists, prefer maintaining it instead of opening a second one
+   - if open `[agentic]` issues already cover the same topic, count that as sufficient documentation and stop at no-op instead of creating a duplicate issue
 
 3. **Memory branch quality**
    - inspect recent activity and layout across the configured `planning/*` branches
@@ -210,6 +211,8 @@ The PR description must include:
 Keep the PR small and reviewable.
 
 ## Issue rules
+
+Before creating an issue, search open issues for `[agentic]` titles covering the same topic. If a matching issue already exists, do nothing and signal a no-op instead.
 
 If there is a real problem but the safe next step is not an automatic patch, create one focused issue.
 

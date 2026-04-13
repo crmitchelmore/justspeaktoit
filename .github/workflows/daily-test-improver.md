@@ -30,11 +30,6 @@ network:
   allowed:
     - defaults
     - github
-    - dotnet
-    - node
-    - python
-    - rust
-    - java
 
 safe-outputs:
   report-failure-as-issue: false

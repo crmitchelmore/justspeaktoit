@@ -62,7 +62,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Build iOS Library
-        run: swift build --target SpeakiOSLib
+        run: swift build --disable-dependency-cache --target SpeakiOSLib
 
       - name: Test SpeakCore (iOS Simulator)
         run: |
@@ -81,4 +81,4 @@ jobs:
 
       - name: SwiftLint
         run: |
-          swift package plugin --allow-writing-to-package-directory swiftlint --strict --baseline .swiftlint-baseline.json
+          swift package --disable-dependency-cache plugin --allow-writing-to-package-directory swiftlint --strict --baseline .swiftlint-baseline.json

@@ -1,25 +1,25 @@
 # Perf Improver Memory
 
 ## Commands
-`swift build --target SpeakCore` ✅ in sandbox
-Full build/test blocked by Sentry firewall.
+`swift build --target SpeakCore` ✅ in sandbox (ModelCatalog.swift compiles cleanly)
+Full build/test blocked by Sentry firewall (os.log in AudioBufferPool on Linux).
 SwiftLint: `swift package plugin --allow-writing-to-package-directory swiftlint --strict --target SpeakApp`
-safeoutputs MCP: HTTP JSON-RPC http://host.docker.internal:80/mcp/safeoutputs; auth from mcp-config.json
 
 ## Backlog
-1. MEDIUM #201: TranscriptionTextProcessor .caseInsensitive regex
-2. MEDIUM #252: NSRegex cache (PersonalLexiconService + PronunciationManager)
+1. MEDIUM: HistoryView.apply(filter:) builds intermediate strings on every search keystroke; short-circuit with early exits
+2. (Exhausted previous items: #201 closed not_planned, #252 closed completed, #246 handled by PR #325)
 
-## Monthly: New issue created April 2026 (2026-04-12 run). #228 was closed by maintainer.
+## Monthly: Issue #312 for April 2026 (updated 2026-04-13 run).
 
 ## Round-Robin
-Last (2026-04-12 run 6): Tasks 3,7
-Next: Tasks 1,2,5,6,7
+Last (2026-04-13 run 7): Tasks 2,3,7
+Next: Tasks 1,4,5,6,7
 
 ## Open PRs
-- NEW: perf-assist/incremental-transcript-append (2026-04-12, draft) — closes #246
+- NEW: perf-assist/modelcatalog-cached-alloptions (2026-04-13) — cache allOptions + O(1) friendlyName
 
 ## Notes
-GitHub MCP read tools return empty (non-functional). Use safeoutputs HTTP MCP directly.
-Previous PRs #258/#263 deleted by maintainer. Issue #228 closed by maintainer.
-Issue #246 had /doit from bravostation + planning:ready-for-dev — implemented and PR submitted.
+GitHub MCP read tools functional for list/read operations.
+Previous PR #311 (branch perf-assist/incremental-transcript-append-291822ed02e85aa1) is open as an issue — superseded by PR #325 from issue-ready-to-pr workflow.
+Issue #246 had /doit — PR #325 created by issue-ready-to-pr.
+Issues #201 (not_planned) and #252 (completed) are closed — respect maintainer decisions.

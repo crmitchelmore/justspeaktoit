@@ -1,10 +1,10 @@
 {
-  "run":"2026-04-10","rid":"24237125329",
-  "notes":["macOS for tests","testX_cond_expected()","@testable import SpeakCore","swift build --target SpeakCore ok on Linux","safeoutputs tools only callable via general-purpose subagent (not directly available to main agent)","Sentry binary blocks swift test on Linux - macOS CI needed"],
+  "run":"2026-04-13","rid":"24327038014",
+  "notes":["macOS for tests","testX_cond_expected()","@testable import SpeakCore","swift build --target SpeakCore ok on Linux","safeoutputs tools only callable via general-purpose subagent (not directly available to main agent)","Sentry binary blocks swift test on Linux - macOS CI needed","os.log and SwiftUI/CloudKit block swift test on Linux entirely"],
   "prs":[
-    {"b":"test-assist/openclaw-llm-types-20260410","run":"2026-04-10","n":"35t:OpenClawTypes(11)+OpenClawError(6)+LLMProtocols(18)","pr":296}
+    {"b":"test-assist/openclaw-extract-provider-tests-20260413","run":"2026-04-13","n":"23t:OpenClawExtractContent(13)+TranscriptionProviderError(6)+TranscriptionProviderMetadata(4)"}
   ],
-  "backlog":["AudioBufferPool(macOS)","OpenClawClientReceive message routing"],
-  "mi":"apr2026 #290",
-  "tlr":{"t1":"2026-04-08","t2":"2026-04-04","t3":"2026-04-10","t4":"2026-04-08","t5":"2026-04-08","t6":"2026-04-02","t7":"2026-04-10"}
+  "backlog":["AudioBufferPool(macOS)","OpenClawClientReceive message routing (needs WebSocket mock)","SettingsSync UserDefaults fallback path"],
+  "mi":"apr2026 (new issue from run 24327038014, aw_monthly04)",
+  "tlr":{"t1":"2026-04-08","t2":"2026-04-13","t3":"2026-04-13","t4":"2026-04-08","t5":"2026-04-08","t6":"2026-04-02","t7":"2026-04-13"}
 }

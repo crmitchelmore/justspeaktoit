@@ -35,6 +35,7 @@ final class MainManager: ObservableObject {
 
   private let appSettings: AppSettings
   private let permissionsManager: PermissionsManager
+  private let audioInputDeviceManager: AudioInputDeviceManager
   private let hotKeyManager: HotKeyManager
   private let audioFileManager: AudioFileManager
   private let transcriptionManager: TranscriptionManager
@@ -92,6 +93,7 @@ final class MainManager: ObservableObject {
   init(
     appSettings: AppSettings,
     permissionsManager: PermissionsManager,
+    audioInputDeviceManager: AudioInputDeviceManager,
     hotKeyManager: HotKeyManager,
     audioFileManager: AudioFileManager,
     transcriptionManager: TranscriptionManager,
@@ -107,6 +109,7 @@ final class MainManager: ObservableObject {
   ) {
     self.appSettings = appSettings
     self.permissionsManager = permissionsManager
+    self.audioInputDeviceManager = audioInputDeviceManager
     self.hotKeyManager = hotKeyManager
     self.audioFileManager = audioFileManager
     self.transcriptionManager = transcriptionManager
@@ -188,6 +191,7 @@ final class MainManager: ObservableObject {
 
     recordingSoundPlayer.preload()
     configureHotKeys()
+    setupCaptureHealthBindings()
 
     // Observe app termination to clean up timer
     willTerminateObserver = NotificationCenter.default.addObserver(
@@ -245,6 +249,114 @@ final class MainManager: ObservableObject {
   private func clearRetryData() {
     cachedRetryData = nil
     canRetryPostProcessing = false
+  }
+
+  // MARK: - Capture Health
+
+  private func setupCaptureHealthBindings() {
+    // Push updated snapshot whenever microphone permission changes.
+    permissionsManager.$statuses
+      .receive(on: RunLoop.main)
+      .sink { [weak self] _ in
+        self?.pushCaptureHealthIfActive()
+      }
+      .store(in: &cancellables)
+
+    // Push updated snapshot whenever the selected input device changes.
+    audioInputDeviceManager.$selectedDeviceUID
+      .receive(on: RunLoop.main)
+      .sink { [weak self] _ in
+        self?.pushCaptureHealthIfActive()
+      }
+      .store(in: &cancellables)
+
+    // Push updated snapshot whenever the device list changes (hardware plug/unplug).
+    audioInputDeviceManager.$devices
+      .receive(on: RunLoop.main)
+      .sink { [weak self] _ in
+        self?.pushCaptureHealthIfActive()
+      }
+      .store(in: &cancellables)
+
+    // Push updated snapshot whenever the live transcription model changes.
+    appSettings.$liveTranscriptionModel
+      .receive(on: RunLoop.main)
+      .sink { [weak self] _ in
+        self?.pushCaptureHealthIfActive()
+      }
+      .store(in: &cancellables)
+
+    // Push updated snapshot whenever the batch transcription model changes.
+    appSettings.$batchTranscriptionModel
+      .receive(on: RunLoop.main)
+      .sink { [weak self] _ in
+        self?.pushCaptureHealthIfActive()
+      }
+      .store(in: &cancellables)
+
+    // Push updated snapshot on every HUD phase transition so all `finishFailure` paths
+    // (not just `cleanupAfterFailure`) also receive fresh health data.
+    hudManager.$snapshot
+      .map(\.phase)
+      .removeDuplicates()
+      .receive(on: RunLoop.main)
+      .sink { [weak self] phase in
+        guard let self else { return }
+        switch phase {
+        case .recording, .failure:
+          self.hudManager.updateCaptureHealth(self.buildCaptureHealthSnapshot())
+        default:
+          break
+        }
+      }
+      .store(in: &cancellables)
+  }
+
+  /// Rebuild and forward a `CaptureHealthSnapshot` only when the HUD is visible in a
+  /// phase that renders the health row (recording or failure). This avoids unnecessary
+  /// snapshot builds during idle / transcribing / delivering phases.
+  private func pushCaptureHealthIfActive() {
+    let phase = hudManager.snapshot.phase
+    guard case .recording = phase else {
+      if case .failure = phase {
+        hudManager.updateCaptureHealth(buildCaptureHealthSnapshot())
+      }
+      return
+    }
+    hudManager.updateCaptureHealth(buildCaptureHealthSnapshot())
+  }
+
+  /// Builds a `CaptureHealthSnapshot` from the current manager state.
+  func buildCaptureHealthSnapshot() -> CaptureHealthSnapshot {
+    let micStatus = permissionsManager.status(for: .microphone)
+    let micPermission: CaptureHealthSnapshot.MicrophonePermission
+    switch micStatus {
+    case .granted:
+      micPermission = .granted
+    case .denied, .restricted:
+      micPermission = .denied
+    case .notDetermined:
+      micPermission = .notDetermined
+    }
+
+    let deviceName = audioInputDeviceManager.currentSelectionDisplayName
+
+    let activeModel: String
+    switch appSettings.transcriptionMode {
+    case .liveNative:
+      activeModel = appSettings.liveTranscriptionModel
+    case .batchRemote:
+      activeModel = appSettings.batchTranscriptionModel
+    }
+    let providerLabel = ModelCatalog.friendlyName(for: activeModel)
+    let latencyTier = ModelCatalog.allOptions.first(where: { $0.id == activeModel })?.latencyTier ?? .medium
+
+    return CaptureHealthSnapshot(
+      microphonePermission: micPermission,
+      inputDeviceName: deviceName,
+      providerLabel: providerLabel,
+      latencyTier: latencyTier
+    )
   }
 
   func userRequestedStopDueToError() {
@@ -393,6 +505,7 @@ final class MainManager: ObservableObject {
     }
 
     if appSettings.showHUDDuringSessions {
+      hudManager.updateCaptureHealth(buildCaptureHealthSnapshot())
       hudManager.beginRecording()
     }
 

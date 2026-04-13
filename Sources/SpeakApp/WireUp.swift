@@ -278,6 +278,7 @@ enum WireUp {
     let main = MainManager(
       appSettings: settings,
       permissionsManager: permissions,
+      audioInputDeviceManager: audioDevices,
       hotKeyManager: hotKeys,
       audioFileManager: audio,
       transcriptionManager: transcription,

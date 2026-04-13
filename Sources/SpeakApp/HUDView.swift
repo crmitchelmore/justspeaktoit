@@ -70,6 +70,15 @@ struct HUDOverlay: View {
       if case .recording = manager.snapshot.phase, settings.showLiveTranscriptInHUD {
         transcriptSection
       }
+
+      // Capture health row: shown during recording and failure phases.
+      switch manager.snapshot.phase {
+      case .recording, .failure:
+        captureHealthRow
+          .padding(.top, 4)
+      default:
+        EmptyView()
+      }
     }
     .padding(.horizontal, 24)
     .padding(.vertical, 16)
@@ -176,6 +185,37 @@ struct HUDOverlay: View {
         .padding(.top, 4)
         .accessibilityHint("Press Command-R to retry the operation")
     }
+  }
+
+  @ViewBuilder
+  private var captureHealthRow: some View {
+    let health = manager.captureHealth
+    let micColor: Color = health.microphonePermission == .denied ? phaseColor : .secondary
+    HStack(spacing: 8) {
+      Image(systemName: health.microphonePermission == .denied ? "mic.slash.fill" : "mic.fill")
+        .font(.system(size: 10, weight: .semibold))
+        .foregroundStyle(micColor)
+        .accessibilityLabel("Microphone permission: \(health.microphonePermission == .granted ? "Granted" : health.microphonePermission == .denied ? "Denied" : "Unknown")")
+
+      Text(health.inputDeviceName)
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+        .truncationMode(.tail)
+        .help(health.inputDeviceName)
+        .accessibilityLabel("Input device: \(health.inputDeviceName)")
+
+      Text(health.providerLabel)
+        .font(.caption2)
+        .foregroundStyle(.tertiary)
+        .lineLimit(1)
+        .truncationMode(.tail)
+        .accessibilityLabel("Transcription provider: \(health.providerLabel)")
+
+      LatencyBadgeCompact(tier: health.latencyTier)
+        .accessibilityLabel("Latency: \(health.latencyTier.displayName)")
+    }
+    .accessibilityElement(children: .combine)
   }
 
   private var phaseColor: Color {

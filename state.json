@@ -1,10 +1,11 @@
 {
-  "run":"2026-04-13","rid":"24327038014",
-  "notes":["macOS for tests","testX_cond_expected()","@testable import SpeakCore","swift build --target SpeakCore ok on Linux","safeoutputs tools only callable via general-purpose subagent (not directly available to main agent)","Sentry binary blocks swift test on Linux - macOS CI needed","os.log and SwiftUI/CloudKit block swift test on Linux entirely"],
+  "run":"2026-04-14","rid":"24382046975",
+  "notes":["macOS for tests","testX_cond_expected()","@testable import SpeakCore","swift build --target SpeakCore blocked by os.log on Linux","Sentry binary blocks swift test on Linux - macOS CI needed","os.log and SwiftUI/CloudKit block swift test on Linux entirely","AppSettingsDefaultsTests uses custom UserDefaults suite via DI - SettingsSync uses singleton so tearDown cleanup used instead","ConfigTransferPayload.timestamp is a mutable var (settable in tests)","ConfigTransferError is not Equatable - use pattern matching in XCTAssertThrowsError"],
   "prs":[
-    {"b":"test-assist/openclaw-extract-provider-tests-20260413","run":"2026-04-13","n":"23t:OpenClawExtractContent(13)+TranscriptionProviderError(6)+TranscriptionProviderMetadata(4)"}
+    {"b":"test-assist/settings-sync-config-transfer-20260414","run":"2026-04-14","n":"SettingsSyncTests(11)+ConfigTransferManagerTests(19)","tmp":"aw_pr001"},
+    {"b":"test-assist/openclaw-extract-provider-tests-20260414","run":"2026-04-14","n":"OpenClawContentExtractionTests(13)+TranscriptionProviderTests(10)","tmp":"aw_pr002"}
   ],
-  "backlog":["AudioBufferPool(macOS)","OpenClawClientReceive message routing (needs WebSocket mock)","SettingsSync UserDefaults fallback path"],
-  "mi":"apr2026 (new issue from run 24327038014, aw_monthly04)",
-  "tlr":{"t1":"2026-04-08","t2":"2026-04-13","t3":"2026-04-13","t4":"2026-04-08","t5":"2026-04-08","t6":"2026-04-02","t7":"2026-04-13"}
+  "backlog":["AudioBufferPool(macOS)","OpenClawClientReceive message routing (needs WebSocket mock)"],
+  "mi":"apr2026 issue#315",
+  "tlr":{"t1":"2026-04-08","t2":"2026-04-13","t3":"2026-04-14","t4":"2026-04-14","t5":"2026-04-08","t6":"2026-04-14","t7":"2026-04-14"}
 }

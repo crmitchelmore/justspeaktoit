@@ -1,4 +1,5 @@
 import SwiftUI
+import SpeakCore
 import SpeakiOSLib
 import UIKit
 

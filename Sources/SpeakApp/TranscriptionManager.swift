@@ -1993,6 +1993,409 @@ private extension ModulateLiveController {
 // swiftlint:enable nesting
 // swiftlint:enable type_body_length
 
+// MARK: - ElevenLabs Live Controller
+
+/// Wraps ElevenLabsLiveClient to conform to LiveTranscriptionController.
+/// Resamples audio from device sample rate (typically 48kHz) to 16kHz for ElevenLabs Scribe v2.
+final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
+  weak var delegate: LiveTranscriptionSessionDelegate?
+  private(set) var isRunning: Bool = false
+
+  private let appSettings: AppSettings
+  private let permissionsManager: PermissionsManager
+  private let audioDeviceManager: AudioInputDeviceManager
+  private let secureStorage: SecureAppStorage
+  private var client: ElevenLabsLiveClient?
+  private var currentModel: String?
+  private var currentLanguage: String?
+  private var activeInputSession: AudioInputDeviceManager.SessionContext?
+  private let audioEngine = AVAudioEngine()
+  private let logger = Logger(subsystem: "com.speak.app", category: "ElevenLabsLiveController")
+  private let audioProcessor = ElevenLabsAudioProcessor()
+  private var hasFinished: Bool = false
+
+  private let targetSampleRate: Double = 16_000
+  private var targetFormat: AVAudioFormat?
+  private var streamingStartTime: Date?
+  private var finalSegments: [TranscriptionSegment] = []
+  private var currentInterim: String = ""
+  private var fullTranscript: String = ""
+
+  init(
+    appSettings: AppSettings,
+    permissionsManager: PermissionsManager,
+    audioDeviceManager: AudioInputDeviceManager,
+    secureStorage: SecureAppStorage
+  ) {
+    self.appSettings = appSettings
+    self.permissionsManager = permissionsManager
+    self.audioDeviceManager = audioDeviceManager
+    self.secureStorage = secureStorage
+  }
+
+  func configure(language: String?, model: String) {
+    currentModel = model
+    currentLanguage = language
+    logger.info("Configured ElevenLabs with model: \(model)")
+  }
+
+  func start() async throws {
+    guard await ensurePermissions() else {
+      logger.error("ElevenLabs live transcription: permissions missing")
+      throw TranscriptionManagerError.permissionsMissing
+    }
+
+    let apiKey = try await elevenLabsAPIKey()
+
+    activeInputSession = await audioDeviceManager.beginUsingPreferredInput()
+    resetStartState()
+
+    do {
+      let inputNode = audioEngine.inputNode
+      inputNode.removeTap(onBus: 0)
+      let inputFormat = inputNode.outputFormat(forBus: 0)
+      logger.info("ElevenLabs input format: \(inputFormat.sampleRate)Hz, \(inputFormat.channelCount) channels")
+
+      guard let outputFormat = AVAudioFormat(
+        commonFormat: .pcmFormatInt16,
+        sampleRate: targetSampleRate,
+        channels: 1,
+        interleaved: true
+      ) else {
+        throw ElevenLabsLiveError.connectionFailed
+      }
+      targetFormat = outputFormat
+
+      let modelID = elevenLabsModelID(from: currentModel)
+      let newClient = ElevenLabsLiveClient(
+        apiKey: apiKey,
+        model: modelID,
+        language: currentLanguage,
+        sampleRate: 16000
+      )
+      client = newClient
+
+      newClient.start(
+        onTranscript: { [weak self] text, isFinal in
+          Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.handleTranscript(text: text, isFinal: isFinal)
+          }
+        },
+        onError: { [weak self] error in
+          Task { @MainActor [weak self] in
+            guard let self else { return }
+            if !self.isRunning { return }
+            self.logger.error("ElevenLabs error: \(error.localizedDescription)")
+            self.delegate?.liveTranscriber(self, didFail: error)
+          }
+        }
+      )
+
+      audioProcessor.setRunning(true)
+      let processor = audioProcessor
+      let log = logger
+      let clientRef = newClient
+      inputNode.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { buffer, _ in
+        processor.handleAudioTap(
+          buffer,
+          inputFormat: inputFormat,
+          outputFormat: outputFormat,
+          client: clientRef,
+          logger: log
+        )
+      }
+
+      audioEngine.prepare()
+      try audioEngine.start()
+      isRunning = true
+      streamingStartTime = Date()
+      logger.info("ElevenLabs live transcription started")
+    } catch {
+      await cleanupAfterFailedStart()
+      throw error
+    }
+  }
+
+  func stop() async {
+    guard isRunning else { return }
+    guard !hasFinished else { return }
+    hasFinished = true
+
+    audioEngine.stop()
+    audioEngine.inputNode.removeTap(onBus: 0)
+    isRunning = false
+
+    if let client {
+      audioProcessor.flushPendingAudio(to: client)
+      audioProcessor.setRunning(false)
+      client.sendEndOfStream()
+      // Brief wait for remaining final transcripts from the server
+      try? await Task.sleep(for: .seconds(1))
+      client.stop()
+    } else {
+      audioProcessor.setRunning(false)
+    }
+
+    let result = buildFinalResult()
+    await MainActor.run {
+      delegate?.liveTranscriber(self, didFinishWith: result)
+    }
+
+    await endActiveInputSession()
+    client = nil
+  }
+
+  private func handleTranscript(text: String, isFinal: Bool) {
+    if isFinal {
+      let segment = TranscriptionSegment(startTime: 0, endTime: 0, text: text)
+      finalSegments.append(segment)
+      fullTranscript = finalSegments.map(\.text).joined(separator: " ")
+      currentInterim = ""
+      delegate?.liveTranscriber(self, didUpdatePartial: fullTranscript)
+    } else {
+      currentInterim = text
+      let displayText = fullTranscript.isEmpty ? currentInterim : fullTranscript + " " + currentInterim
+      delegate?.liveTranscriber(self, didUpdatePartial: displayText)
+    }
+  }
+
+  // Audio processor that resamples and batches audio for ElevenLabs Scribe v2.
+  // Scribe v2 minimum frame: 100ms (3 200 bytes @ 16kHz PCM16 mono).
+  private final class ElevenLabsAudioProcessor: @unchecked Sendable {
+    /// Scribe v2 minimum chunk: 100ms @ 16kHz PCM16 mono = 3 200 bytes.
+    private static let minimumChunkBytes = 3200
+    private static let preferredChunkBytes = 3200
+
+    private let queue = DispatchQueue(label: "com.speak.app.elevenlabs.audioProcessing")
+    private var isRunning: Bool = false
+    private var cachedConverter: AVAudioConverter?
+    private var cachedInputFormat: AVAudioFormat?
+    private var reusableOutputBuffer: AVAudioPCMBuffer?
+    private var pendingPCMData = Data()
+
+    func setRunning(_ running: Bool) {
+      queue.sync {
+        isRunning = running
+        if !running {
+          cachedConverter = nil
+          cachedInputFormat = nil
+          reusableOutputBuffer = nil
+          pendingPCMData.removeAll(keepingCapacity: false)
+        }
+      }
+    }
+
+    func flushPendingAudio(to client: ElevenLabsLiveClient) {
+      queue.sync {
+        guard !pendingPCMData.isEmpty else { return }
+
+        var offset = 0
+        while pendingPCMData.count - offset >= Self.preferredChunkBytes {
+          let chunk = pendingPCMData.subdata(in: offset..<(offset + Self.preferredChunkBytes))
+          client.sendAudio(chunk)
+          offset += Self.preferredChunkBytes
+        }
+        if offset > 0 {
+          pendingPCMData = Data(pendingPCMData.dropFirst(offset))
+        }
+
+        guard !pendingPCMData.isEmpty else { return }
+        // Pad to minimum chunk size to avoid sub-100ms frame rejection
+        if pendingPCMData.count < Self.minimumChunkBytes {
+          pendingPCMData.append(
+            contentsOf: repeatElement(0, count: Self.minimumChunkBytes - pendingPCMData.count))
+        }
+        client.sendAudio(pendingPCMData)
+        pendingPCMData.removeAll(keepingCapacity: false)
+      }
+    }
+
+    func handleAudioTap(
+      _ buffer: AVAudioPCMBuffer,
+      inputFormat: AVAudioFormat,
+      outputFormat: AVAudioFormat,
+      client: ElevenLabsLiveClient,
+      logger: Logger
+    ) {
+      guard let copied = copyPCMBuffer(buffer) else { return }
+      queue.async { [weak self] in
+        guard let self, self.isRunning else { return }
+        self.processAndSendAudio(copied, from: inputFormat, to: outputFormat, client: client, logger: logger)
+      }
+    }
+
+    private func copyPCMBuffer(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+      let frameLength = buffer.frameLength
+      guard let copy = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: frameLength) else {
+        return nil
+      }
+      copy.frameLength = frameLength
+      let src = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: buffer.audioBufferList))
+      let dst = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: copy.audioBufferList))
+      for idx in 0..<min(src.count, dst.count) {
+        let srcBuf = src[idx]
+        guard let srcData = srcBuf.mData, let dstData = dst[idx].mData else { continue }
+        dstData.copyMemory(from: srcData, byteCount: Int(srcBuf.mDataByteSize))
+        dst[idx].mDataByteSize = srcBuf.mDataByteSize
+      }
+      return copy
+    }
+
+    private func processAndSendAudio(
+      _ buffer: AVAudioPCMBuffer,
+      from inputFormat: AVAudioFormat,
+      to outputFormat: AVAudioFormat,
+      client: ElevenLabsLiveClient,
+      logger: Logger
+    ) {
+      let converter: AVAudioConverter
+      if let cached = cachedConverter, cachedInputFormat == inputFormat {
+        converter = cached
+      } else {
+        guard let newConverter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
+          logger.error("Failed to create audio converter for ElevenLabs")
+          return
+        }
+        cachedConverter = newConverter
+        cachedInputFormat = inputFormat
+        converter = newConverter
+      }
+
+      let ratio = outputFormat.sampleRate / inputFormat.sampleRate
+      let outputFrameCapacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio)
+
+      let outputBuffer: AVAudioPCMBuffer
+      if let reusable = reusableOutputBuffer, reusable.frameCapacity >= outputFrameCapacity {
+        reusable.frameLength = 0
+        outputBuffer = reusable
+      } else {
+        guard let newBuffer = AVAudioPCMBuffer(
+          pcmFormat: outputFormat, frameCapacity: outputFrameCapacity
+        ) else { return }
+        reusableOutputBuffer = newBuffer
+        outputBuffer = newBuffer
+      }
+
+      converter.reset()
+      var error: NSError?
+      let status = converter.convert(to: outputBuffer, error: &error) { _, outStatus in
+        outStatus.pointee = .haveData
+        return buffer
+      }
+
+      guard status != .error, error == nil else { return }
+      guard let int16Data = outputBuffer.int16ChannelData else { return }
+      let frameLength = Int(outputBuffer.frameLength)
+      let data = Data(bytes: int16Data[0], count: frameLength * 2)
+      pendingPCMData.append(data)
+
+      var offset = 0
+      while pendingPCMData.count - offset >= Self.preferredChunkBytes {
+        let chunk = pendingPCMData.subdata(in: offset..<(offset + Self.preferredChunkBytes))
+        client.sendAudio(chunk)
+        offset += Self.preferredChunkBytes
+      }
+      if offset > 0 {
+        pendingPCMData = Data(pendingPCMData.dropFirst(offset))
+      }
+    }
+  }
+}
+
+private extension ElevenLabsLiveController {
+  func ensurePermissions() async -> Bool {
+    let microphone = await permissionsManager.request(.microphone)
+    let speech = await permissionsManager.request(.speechRecognition)
+    return microphone.isGranted && speech.isGranted
+  }
+
+  func elevenLabsAPIKey() async throws -> String {
+    do {
+      let apiKey = try await secureStorage.secret(identifier: "elevenlabs.apiKey")
+      guard !apiKey.isEmpty else {
+        logger.error("ElevenLabs API key is empty")
+        throw ElevenLabsLiveError.missingAPIKey
+      }
+      return apiKey
+    } catch let error as SecureAppStorageError {
+      if case .valueNotFound = error {
+        logger.error("ElevenLabs API key not found")
+        throw ElevenLabsLiveError.missingAPIKey
+      }
+      throw error
+    } catch {
+      throw error
+    }
+  }
+
+  func elevenLabsModelID(from model: String?) -> String {
+    guard let model else { return "scribe_v2" }
+    // Strip the "elevenlabs/" prefix to get the bare model ID for the WebSocket init message
+    let prefix = "elevenlabs/"
+    return model.hasPrefix(prefix) ? String(model.dropFirst(prefix.count)) : model
+  }
+
+  func resetStartState() {
+    client = nil
+    targetFormat = nil
+    finalSegments = []
+    currentInterim = ""
+    fullTranscript = ""
+    streamingStartTime = nil
+    hasFinished = false
+    isRunning = false
+  }
+
+  func cleanupAfterFailedStart() async {
+    audioEngine.stop()
+    audioEngine.inputNode.removeTap(onBus: 0)
+    isRunning = false
+    audioProcessor.setRunning(false)
+    client?.stop()
+    client = nil
+    targetFormat = nil
+    streamingStartTime = nil
+    finalSegments = []
+    currentInterim = ""
+    fullTranscript = ""
+    await endActiveInputSession()
+  }
+
+  func buildFinalResult() -> TranscriptionResult {
+    var text = finalSegments.map(\.text).joined(separator: " ")
+    let trimmedInterim = currentInterim.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !trimmedInterim.isEmpty {
+      if !text.isEmpty { text += " " }
+      text += trimmedInterim
+    }
+
+    let streamingDuration: TimeInterval
+    if let startTime = streamingStartTime {
+      streamingDuration = Date().timeIntervalSince(startTime)
+    } else {
+      streamingDuration = 0
+    }
+
+    return TranscriptionResult(
+      text: text,
+      segments: finalSegments,
+      confidence: nil,
+      duration: streamingDuration,
+      modelIdentifier: currentModel ?? "elevenlabs/scribe-v2-streaming",
+      cost: nil,
+      rawPayload: nil,
+      debugInfo: nil
+    )
+  }
+
+  func endActiveInputSession() async {
+    guard let session = activeInputSession else { return }
+    activeInputSession = nil
+    await audioDeviceManager.endUsingPreferredInput(session: session)
+  }
+}
+
 // MARK: - Switching Live Transcriber
 
 struct LiveTranscriptionControllerReusePolicy {
@@ -2031,6 +2434,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   private var deepgramController: DeepgramLiveController
   private var modulateController: ModulateLiveController
   private var assemblyAIController: AssemblyAILiveController
+  private var elevenLabsController: ElevenLabsLiveController
   private var currentLanguage: String?
   private var currentModel: String?
   private var invalidateBeforeNextStart: Bool = false
@@ -2068,6 +2472,12 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       secureStorage: secureStorage
     )
     assemblyAIController = AssemblyAILiveController(
+      appSettings: appSettings,
+      permissionsManager: permissionsManager,
+      audioDeviceManager: audioDeviceManager,
+      secureStorage: secureStorage
+    )
+    elevenLabsController = ElevenLabsLiveController(
       appSettings: appSettings,
       permissionsManager: permissionsManager,
       audioDeviceManager: audioDeviceManager,
@@ -2125,6 +2535,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     if model.hasPrefix("assemblyai/") { return assemblyAIController }
     if model.hasPrefix("deepgram/") { return deepgramController }
     if model.hasPrefix("modulate/") { return modulateController }
+    if model.hasPrefix("elevenlabs/") { return elevenLabsController }
     return nativeController
   }
 
@@ -2133,7 +2544,8 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       nativeController,
       deepgramController,
       modulateController,
-      assemblyAIController
+      assemblyAIController,
+      elevenLabsController
     ]
     let model = currentModel ?? appSettings.liveTranscriptionModel
     for controller in controllers {
@@ -2170,6 +2582,12 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       secureStorage: secureStorage
     )
     assemblyAIController = AssemblyAILiveController(
+      appSettings: appSettings,
+      permissionsManager: permissionsManager,
+      audioDeviceManager: audioDeviceManager,
+      secureStorage: secureStorage
+    )
+    elevenLabsController = ElevenLabsLiveController(
       appSettings: appSettings,
       permissionsManager: permissionsManager,
       audioDeviceManager: audioDeviceManager,

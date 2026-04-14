@@ -13,7 +13,8 @@ public enum SensitiveHeaderRedactor {
         "x-access-token",
         "openai-api-key",
         "deepgram-api-key",
-        "anthropic-api-key"
+        "anthropic-api-key",
+        "xi-api-key"
     ]
     
     /// Redacts sensitive headers in a dictionary by masking values

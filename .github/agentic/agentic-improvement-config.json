@@ -8,7 +8,9 @@
   "scope": {
     "editableGlobs": [
       ".github/workflows/*.md",
+      ".github/workflows/*.yml",
       ".github/agents/*.agent.md",
+      ".github/agentic/*.json",
       "Docs/agentic-workflows.md",
       "README.md"
     ],

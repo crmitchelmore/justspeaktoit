@@ -27,14 +27,14 @@ safe-outputs:
     title-prefix: "[agentic] "
     labels: [automation]
     max: 1
-    allowed-files: [".github/workflows/*.md", ".github/agents/*.agent.md", "Docs/agentic-workflows.md", "README.md"]
+    allowed-files: [".github/workflows/*.md", ".github/workflows/*.yml", ".github/agents/*.agent.md", ".github/agentic/*.json", "Docs/agentic-workflows.md", "README.md"]
     protected-files: allowed
   push-to-pull-request-branch:
     target: "*"
     protected-files: allowed
     title-prefix: "[agentic] "
     max: 1
-    allowed-files: [".github/workflows/*.md", ".github/agents/*.agent.md", "Docs/agentic-workflows.md", "README.md"]
+    allowed-files: [".github/workflows/*.md", ".github/workflows/*.yml", ".github/agents/*.agent.md", ".github/agentic/*.json", "Docs/agentic-workflows.md", "README.md"]
   create-issue:
     title-prefix: "[agentic] "
     labels: [automation]
@@ -84,12 +84,22 @@ Read cached state from:
 
 - `/tmp/gh-aw/cache-memory/agentic-ops-state/`
 
+## Recency check
+
+Before changing anything, check whether there has been meaningful new evidence since the last run:
+
+1. Run `git log --oneline --since='2 hours ago' -- .github/ Docs/ README.md` to inspect recent workflow-system commits.
+2. Review recent outcomes for the configured target workflows.
+3. If nothing meaningful changed and no new failures, drift, or duplicate-noise patterns appeared, do nothing.
+
 ## Constrained action space
 
 You may edit only:
 
 - `.github/workflows/*.md`
+- `.github/workflows/*.yml`
 - `.github/agents/*.agent.md`
+- `.github/agentic/*.json`
 - `Docs/agentic-workflows.md`
 - `README.md`
 

@@ -105,6 +105,13 @@ final class TranscriptionManager: ObservableObject {
     }
   }
 
+  /// Marks the live transcription controllers as stale so the next session start re-reads
+  /// credentials from Keychain. Call this when a credential the live controllers depend on
+  /// is removed from Settings.
+  func invalidateLiveControllers() {
+    liveController.markControllersStale()
+  }
+
   func cancelLiveTranscription() {
     guard isLiveTranscribing else { return }
     continuation?.resume(throwing: TranscriptionManagerError.liveSessionNotRunning)
@@ -2203,7 +2210,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   }
 
   @MainActor
-  private func markControllersStale() {
+  func markControllersStale() {
     invalidateBeforeNextStart = true
   }
 }

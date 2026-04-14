@@ -1629,30 +1629,54 @@ struct SettingsView: View {
       }
     }()
 
+    let cardTitle = provider == .elevenlabs ? "ElevenLabs API Key" : "\(provider.displayName) (TTS)"
+    let cardDescription: String = {
+      if provider == .azure {
+        return "For Azure Text-to-Speech, use format: 'your-api-key:your-region' (e.g., 'abc123:eastus')"
+      }
+      if provider == .elevenlabs {
+        return "Stored securely in your macOS Keychain. " +
+          "Enables ElevenLabs Text-to-Speech and Scribe transcription. " +
+          "Your key must have both the Text-to-Speech and Speech-to-Text scopes enabled."
+      }
+      return "Stored securely in your macOS Keychain. Used only for \(provider.displayName) text-to-speech voice synthesis."
+    }()
+    let cardKeyFieldLabel = provider == .elevenlabs ? "ElevenLabs API Key" : "\(provider.displayName) TTS API Key"
+    let cardTooltip = provider == .elevenlabs
+      ? "Manage your ElevenLabs API key for Text-to-Speech and Scribe transcription."
+      : "Manage your \(provider.displayName) API key for text-to-speech synthesis."
+    let cardSaveTooltip = provider == .elevenlabs
+      ? "Securely store your ElevenLabs key. The key must have Text-to-Speech and Speech-to-Text scopes."
+      : "Securely store your \(provider.displayName) key for voice synthesis."
+    let cardValidateTooltip = provider == .elevenlabs
+      ? "Verify your ElevenLabs key covers both Text-to-Speech and Scribe transcription."
+      : "Confirm that your \(provider.displayName) key is still valid."
+    let onRemoveAction: (() -> Void)? = isStored
+      ? (provider == .elevenlabs ? { removeElevenLabsAPIKey() } : { removeTTSProviderAPIKey(provider) })
+      : nil
+
     return apiKeyCard(
-      title: "\(provider.displayName) (TTS)",
+      title: cardTitle,
       systemImage: systemImage,
       tint: tintColor,
       statusIcon: isStored ? "checkmark.seal.fill" : "key.fill",
       statusTint: tintColor,
       isStored: isStored,
-      descriptionText: provider == .azure
-        ? "For Azure Text-to-Speech, use format: 'your-api-key:your-region' (e.g., 'abc123:eastus')"
-        : "Stored securely in your macOS Keychain. Used only for \(provider.displayName) text-to-speech voice synthesis.",
-      keyFieldLabel: "\(provider.displayName) TTS API Key",
+      descriptionText: cardDescription,
+      keyFieldLabel: cardKeyFieldLabel,
       keyBinding: ttsBinding(for: provider.rawValue),
       onSave: { saveTTSProviderAPIKey(provider) },
       onValidate: isStored ? { checkTTSProviderKeyValidity(provider) } : nil,
-      onRemove: isStored ? { removeTTSProviderAPIKey(provider) } : nil,
+      onRemove: onRemoveAction,
       isSaveDisabled: saveDisabled,
       isValidateDisabled: validateDisabled,
       isRemoveDisabled: removeDisabled,
       validationState: validationState,
-      tooltip: "Manage your \(provider.displayName) API key for text-to-speech synthesis.",
+      tooltip: cardTooltip,
       saveButtonTitle: isStored ? "Replace Key" : "Save Key",
-      saveTooltip: "Securely store your \(provider.displayName) key for voice synthesis.",
+      saveTooltip: cardSaveTooltip,
       validateButtonTitle: "Check Validity",
-      validateTooltip: "Confirm that your \(provider.displayName) key is still valid.",
+      validateTooltip: cardValidateTooltip,
       removeButtonTitle: "Remove Key",
       removeTooltip: "Forget this key from Speak and your Keychain.",
       link: website.isEmpty ? nil : URL(string: website),
@@ -1926,7 +1950,7 @@ struct SettingsView: View {
           try await environment.secureStorage.storeSecret(
             value,
             identifier: provider.apiKeyIdentifier,
-            label: "\(provider.displayName) TTS API Key"
+            label: provider == .elevenlabs ? "ElevenLabs API Key" : "\(provider.displayName) TTS API Key"
           )
 
           let result = validation.updatingOutcome(
@@ -1997,7 +2021,29 @@ struct SettingsView: View {
     }
   }
 
-  private func checkOpenRouterKeyValidity() {
+  /// Dedicated removal helper for the shared ElevenLabs key (covers TTS + Scribe).
+  /// Invalidates live transcription controllers FIRST so the next session start re-reads
+  /// credentials from Keychain, then clears the Keychain entry and validation state.
+  private func removeElevenLabsAPIKey() {
+    // Mark stale before any async work so controller invalidation is guaranteed
+    // even if the UI state update throws (fail-safe order per architecture review).
+    environment.transcription.invalidateLiveControllers()
+    Task {
+      do {
+        try await environment.secureStorage.removeSecret(
+          identifier: TTSProvider.elevenlabs.apiKeyIdentifier
+        )
+        await MainActor.run {
+          ttsProviderAPIKeys[TTSProvider.elevenlabs.rawValue] = ""
+          ttsProviderValidationStates[TTSProvider.elevenlabs.rawValue] = .idle
+        }
+      } catch {
+        // Handle error silently
+      }
+    }
+  }
+
+
     apiKeyValidationState = .validating
 
     Task {

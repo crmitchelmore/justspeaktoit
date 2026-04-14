@@ -105,25 +105,55 @@ actor ElevenLabsClient: TextToSpeechClient {
   }
 
   func validateAPIKey(_ key: String) async -> APIKeyValidationResult {
-    let url = baseURL.appendingPathComponent("user")
-    var request = URLRequest(url: url)
-    request.setValue(key, forHTTPHeaderField: "xi-api-key")
+    // Step 1: Verify the key is valid via the user endpoint.
+    let userURL = baseURL.appendingPathComponent("user")
+    var userRequest = URLRequest(url: userURL)
+    userRequest.setValue(key, forHTTPHeaderField: "xi-api-key")
 
     do {
-      let (_, response) = try await session.data(for: request)
-      guard let httpResponse = response as? HTTPURLResponse else {
+      let (_, userResponse) = try await session.data(for: userRequest)
+      guard let httpUserResponse = userResponse as? HTTPURLResponse else {
         return .failure(message: "Invalid response")
       }
-
-      if httpResponse.statusCode == 200 {
-        return .success(message: "API key is valid")
-      } else if httpResponse.statusCode == 401 {
+      if httpUserResponse.statusCode == 401 {
         return .failure(message: "Invalid API key")
-      } else {
-        return .failure(message: "HTTP \(httpResponse.statusCode)")
+      }
+      guard httpUserResponse.statusCode == 200 else {
+        return .failure(message: "HTTP \(httpUserResponse.statusCode)")
       }
     } catch {
       return .failure(message: error.localizedDescription)
+    }
+
+    // Step 2: Probe Scribe (speech-to-text) access. A TTS-only restricted key will be
+    // denied at the STT endpoint (403), confirming it lacks Scribe scope.
+    let scribeURL = baseURL.appendingPathComponent("speech-to-text")
+    var scribeRequest = URLRequest(url: scribeURL)
+    scribeRequest.httpMethod = "GET"
+    scribeRequest.setValue(key, forHTTPHeaderField: "xi-api-key")
+
+    do {
+      let (_, scribeResponse) = try await session.data(for: scribeRequest)
+      guard let httpScribeResponse = scribeResponse as? HTTPURLResponse else {
+        return .failure(message: "Could not verify Scribe access")
+      }
+      switch httpScribeResponse.statusCode {
+      case 401:
+        return .failure(message: "Invalid API key")
+      case 403:
+        return .failure(
+          message: "API key does not have Scribe transcription access. " +
+            "Enable the Speech-to-Text scope on your ElevenLabs API key."
+        )
+      default:
+        // 405 (Method Not Allowed) and other non-auth responses mean the key can reach
+        // the endpoint — Scribe scope is confirmed.
+        return .success(
+          message: "API key is valid for Text-to-Speech and Scribe transcription"
+        )
+      }
+    } catch {
+      return .failure(message: "Could not verify Scribe access: \(error.localizedDescription)")
     }
   }
 

@@ -1539,8 +1539,8 @@ struct SettingsView: View {
         linkLabel: nil
       )
 
-      // Transcription Providers (Dynamic)
-      ForEach(transcriptionProviders) { provider in
+      // Transcription Providers (Dynamic) — ElevenLabs excluded; it shares the TTS card below
+      ForEach(transcriptionProviders.filter { $0.id != "elevenlabs" }) { provider in
         providerAPIKeyCard(for: provider)
           .id("transcription-\(provider.id)")
       }
@@ -1628,6 +1628,38 @@ struct SettingsView: View {
       case .system: return ""
       }
     }()
+
+    // ElevenLabs is the shared credential card for both TTS and Scribe transcription.
+    // Keep it out of the transcription-provider ForEach; one card covers both capabilities.
+    if provider == .elevenlabs {
+      return apiKeyCard(
+        title: "ElevenLabs API Key",
+        systemImage: systemImage,
+        tint: tintColor,
+        statusIcon: isStored ? "checkmark.seal.fill" : "key.fill",
+        statusTint: tintColor,
+        isStored: isStored,
+        descriptionText: "Stored securely in your macOS Keychain. Used for ElevenLabs Text-to-Speech voice synthesis and Scribe transcription. The key must have both TTS and speech-to-text permissions.",
+        keyFieldLabel: "ElevenLabs API Key",
+        keyBinding: ttsBinding(for: provider.rawValue),
+        onSave: { saveTTSProviderAPIKey(provider) },
+        onValidate: isStored ? { checkTTSProviderKeyValidity(provider) } : nil,
+        onRemove: isStored ? { removeElevenLabsAPIKey() } : nil,
+        isSaveDisabled: saveDisabled,
+        isValidateDisabled: validateDisabled,
+        isRemoveDisabled: removeDisabled,
+        validationState: validationState,
+        tooltip: "Manage your ElevenLabs API key. One key covers both voice synthesis (TTS) and Scribe transcription (STT).",
+        saveButtonTitle: isStored ? "Replace Key" : "Save Key",
+        saveTooltip: "Securely store your ElevenLabs key. It will be used for both TTS and Scribe transcription.",
+        validateButtonTitle: "Check Validity",
+        validateTooltip: "Confirm that your ElevenLabs key has access to both TTS and Scribe transcription.",
+        removeButtonTitle: "Remove Key",
+        removeTooltip: "Forget this key from Speak and your Keychain. Disables both ElevenLabs TTS and Scribe transcription.",
+        link: URL(string: website),
+        linkLabel: "Get API Key"
+      )
+    }
 
     return apiKeyCard(
       title: "\(provider.displayName) (TTS)",
@@ -1990,6 +2022,27 @@ struct SettingsView: View {
         await MainActor.run {
           ttsProviderAPIKeys[provider.rawValue] = ""
           ttsProviderValidationStates[provider.rawValue] = .idle
+        }
+      } catch {
+        // Handle error silently
+      }
+    }
+  }
+
+  /// Shared removal helper for the ElevenLabs credential.
+  /// Invalidates the live controller cache before clearing Keychain and UI state
+  /// so no stale ElevenLabs session can be reused after removal (fail-safe ordering).
+  private func removeElevenLabsAPIKey() {
+    // Invalidate first — must happen before any Keychain or UI state mutation
+    environment.transcription.invalidateLiveControllerCache()
+    Task {
+      do {
+        try await environment.secureStorage.removeSecret(
+          identifier: TTSProvider.elevenlabs.apiKeyIdentifier
+        )
+        await MainActor.run {
+          ttsProviderAPIKeys[TTSProvider.elevenlabs.rawValue] = ""
+          ttsProviderValidationStates[TTSProvider.elevenlabs.rawValue] = .idle
         }
       } catch {
         // Handle error silently

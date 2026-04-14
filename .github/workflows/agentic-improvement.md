@@ -84,6 +84,14 @@ Read cached state from:
 
 - `/tmp/gh-aw/cache-memory/agentic-ops-state/`
 
+## Recency check
+
+Before changing anything, check whether there has been meaningful new evidence since the last run:
+
+1. Run `git log --oneline --since='2 hours ago' -- .github/ Docs/ README.md` to inspect recent workflow-system commits.
+2. Review recent outcomes for the configured target workflows.
+3. If nothing meaningful changed and no new failures, drift, or duplicate-noise patterns appeared, do nothing.
+
 ## Constrained action space
 
 You may edit only:

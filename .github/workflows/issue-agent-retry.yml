@@ -37,7 +37,7 @@ jobs:
     steps:
       - name: Retry failed issue agent workflow
         run: |
-          python - <<'PY'
+          python3 - <<'PY'
           import json
           import os
           import subprocess
@@ -93,6 +93,6 @@ jobs:
           )
           time.sleep(delay_seconds)
 
-          subprocess.run(["gh", "run", "rerun", run_id, "--repo", repo], check=True)
+          subprocess.run(["gh", "run", "rerun", run_id, "--repo", repo, "--failed"], check=True)
           print(f"Requested rerun for '{workflow_name}' (run {run_id}).")
           PY

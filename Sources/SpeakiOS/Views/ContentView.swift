@@ -19,6 +19,7 @@ final class TranscriberCoordinator: ObservableObject {
     
     private var appleTranscriber: iOSLiveTranscriber?
     private var deepgramTranscriber: DeepgramLiveTranscriber?
+    private var elevenLabsTranscriber: ElevenLabsLiveTranscriber?
     private var startTime: Date?
     
     init() {
@@ -28,6 +29,9 @@ final class TranscriberCoordinator: ObservableObject {
     var modelDisplayName: String {
         if currentModel.hasPrefix("deepgram") {
             return "Deepgram"
+        }
+        if currentModel.hasPrefix("elevenlabs") {
+            return "ElevenLabs"
         }
         return "Apple Speech"
     }
@@ -47,6 +51,11 @@ final class TranscriberCoordinator: ObservableObject {
         
         // Fallback to Apple Speech if Deepgram selected but no API key
         if currentModel.hasPrefix("deepgram") && !settings.hasDeepgramKey {
+            currentModel = "apple/local/SFSpeechRecognizer"
+        }
+
+        // Fallback to Apple Speech if ElevenLabs selected but no API key
+        if currentModel.hasPrefix("elevenlabs") && !settings.hasElevenLabsKey {
             currentModel = "apple/local/SFSpeechRecognizer"
         }
         
@@ -70,6 +79,26 @@ final class TranscriberCoordinator: ObservableObject {
             
             deepgramTranscriber = transcriber
             appleTranscriber = nil
+            elevenLabsTranscriber = nil
+            
+            try await transcriber.start()
+            isRunning = true
+        } else if currentModel.hasPrefix("elevenlabs") {
+            // Use ElevenLabs
+            let transcriber = ElevenLabsLiveTranscriber(audioSessionManager: audioSessionManager)
+            transcriber.configure(apiKey: settings.elevenLabsAPIKey)
+            transcriber.modelID = currentModel.replacingOccurrences(of: "elevenlabs/", with: "")
+            
+            transcriber.onPartialResult = { [weak self] text, isFinal in
+                self?.handlePartialResult(text: self?.elevenLabsTranscriber?.partialText ?? text, isFinal: isFinal)
+            }
+            transcriber.onError = { [weak self] error in
+                self?.handleError(error)
+            }
+            
+            elevenLabsTranscriber = transcriber
+            deepgramTranscriber = nil
+            appleTranscriber = nil
             
             try await transcriber.start()
             isRunning = true
@@ -87,6 +116,7 @@ final class TranscriberCoordinator: ObservableObject {
             
             appleTranscriber = transcriber
             deepgramTranscriber = nil
+            elevenLabsTranscriber = nil
             
             try await transcriber.start()
             isRunning = true
@@ -140,6 +170,19 @@ final class TranscriberCoordinator: ObservableObject {
             
             startTime = nil
             return result
+        } else if let elevenlabs = elevenLabsTranscriber {
+            let result = await elevenlabs.stop()
+            elevenLabsTranscriber = nil
+            
+            // Record to history
+            iOSHistoryManager.shared.recordTranscription(
+                text: result.text,
+                model: currentModel,
+                duration: result.duration
+            )
+            
+            startTime = nil
+            return result
         } else if let apple = appleTranscriber {
             let result = await apple.stop()
             appleTranscriber = nil
@@ -170,8 +213,10 @@ final class TranscriberCoordinator: ObservableObject {
     
     func cancel() {
         deepgramTranscriber?.cancel()
+        elevenLabsTranscriber?.cancel()
         appleTranscriber?.cancel()
         deepgramTranscriber = nil
+        elevenLabsTranscriber = nil
         appleTranscriber = nil
         isRunning = false
         startTime = nil

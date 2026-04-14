@@ -19,6 +19,7 @@ public final class TranscriptionRecordingService: ObservableObject {
 
     private var appleTranscriber: iOSLiveTranscriber?
     private var deepgramTranscriber: DeepgramLiveTranscriber?
+    private var elevenLabsTranscriber: ElevenLabsLiveTranscriber?
     private var startTime: Date?
     private var currentModel: String = ""
 
@@ -31,6 +32,7 @@ public final class TranscriptionRecordingService: ObservableObject {
 
     private var modelDisplayName: String {
         if currentModel.hasPrefix("deepgram") { return "Deepgram" }
+        if currentModel.hasPrefix("elevenlabs") { return "ElevenLabs" }
         return "Apple Speech"
     }
 
@@ -51,6 +53,11 @@ public final class TranscriptionRecordingService: ObservableObject {
 
         // Fallback to Apple Speech if Deepgram selected but no API key
         if currentModel.hasPrefix("deepgram") && !settings.hasDeepgramKey {
+            currentModel = "apple/local/SFSpeechRecognizer"
+        }
+
+        // Fallback to Apple Speech if ElevenLabs selected but no API key
+        if currentModel.hasPrefix("elevenlabs") && !settings.hasElevenLabsKey {
             currentModel = "apple/local/SFSpeechRecognizer"
         }
 
@@ -76,6 +83,27 @@ public final class TranscriptionRecordingService: ObservableObject {
 
                 deepgramTranscriber = transcriber
                 appleTranscriber = nil
+                elevenLabsTranscriber = nil
+                try await transcriber.start()
+            } else if currentModel.hasPrefix("elevenlabs") {
+                let transcriber = ElevenLabsLiveTranscriber(audioSessionManager: audioSessionManager)
+                transcriber.configure(apiKey: settings.elevenLabsAPIKey)
+                transcriber.modelID = currentModel.replacingOccurrences(of: "elevenlabs/", with: "")
+
+                transcriber.onPartialResult = { [weak self] text, isFinal in
+                    Task { @MainActor in
+                        self?.handlePartialResult(text: text)
+                    }
+                }
+                transcriber.onError = { [weak self] error in
+                    Task { @MainActor in
+                        self?.handleError(error)
+                    }
+                }
+
+                elevenLabsTranscriber = transcriber
+                deepgramTranscriber = nil
+                appleTranscriber = nil
                 try await transcriber.start()
             } else {
                 let transcriber = iOSLiveTranscriber(audioSessionManager: audioSessionManager)
@@ -93,6 +121,7 @@ public final class TranscriptionRecordingService: ObservableObject {
 
                 appleTranscriber = transcriber
                 deepgramTranscriber = nil
+                elevenLabsTranscriber = nil
                 try await transcriber.start()
             }
 
@@ -100,6 +129,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         } catch {
             startTime = nil
             deepgramTranscriber = nil
+            elevenLabsTranscriber = nil
             appleTranscriber = nil
             sharedState.clearRecordingState()
             activityManager.endActivity()
@@ -117,6 +147,9 @@ public final class TranscriptionRecordingService: ObservableObject {
         if let deepgram = deepgramTranscriber {
             result = await deepgram.stop()
             deepgramTranscriber = nil
+        } else if let elevenlabs = elevenLabsTranscriber {
+            result = await elevenlabs.stop()
+            elevenLabsTranscriber = nil
         } else if let apple = appleTranscriber {
             result = await apple.stop()
             appleTranscriber = nil
@@ -167,8 +200,10 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// Cancels recording without saving.
     public func cancelRecording() {
         deepgramTranscriber?.cancel()
+        elevenLabsTranscriber?.cancel()
         appleTranscriber?.cancel()
         deepgramTranscriber = nil
+        elevenLabsTranscriber = nil
         appleTranscriber = nil
         isRunning = false
         startTime = nil

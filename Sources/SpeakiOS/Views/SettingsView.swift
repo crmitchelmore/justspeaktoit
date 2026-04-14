@@ -33,6 +33,23 @@ public final class AppSettings: ObservableObject {
         didSet { saveToKeychain(key: openRouterAPIKey, for: "openrouter.apiKey") }
     }
 
+    @Published public var elevenLabsAPIKey: String {
+        didSet {
+            Task {
+                if self.elevenLabsAPIKey.isEmpty {
+                    try? await Self.elevenLabsStorage.removeSecret(identifier: "elevenlabs.apiKey")
+                } else {
+                    try? await Self.elevenLabsStorage.storeSecret(self.elevenLabsAPIKey, identifier: "elevenlabs.apiKey")
+                }
+            }
+        }
+    }
+
+    // MARK: - Shared SecureStorage for ElevenLabs key (SpeakCore canonical pattern)
+    private static let elevenLabsStorage = SecureStorage(
+        configuration: SecureStorageConfiguration(service: "com.speak.ios.credentials")
+    )
+
     @Published public var liveActivitiesEnabled: Bool {
         didSet { UserDefaults.standard.set(liveActivitiesEnabled, forKey: "liveActivitiesEnabled") }
     }
@@ -85,7 +102,15 @@ public final class AppSettings: ObservableObject {
 
     private init() {
         let selectedRaw = UserDefaults.standard.string(forKey: "selectedModel") ?? "apple/local/SFSpeechRecognizer"
-        let selected = selectedRaw.hasPrefix("deepgram/") ? "deepgram/nova-3" : selectedRaw
+        // Normalize known model prefixes to their default model IDs
+        let selected: String
+        if selectedRaw.hasPrefix("deepgram/") {
+            selected = "deepgram/nova-3"
+        } else if selectedRaw.hasPrefix("elevenlabs/") {
+            selected = "elevenlabs/scribe_v1"
+        } else {
+            selected = selectedRaw
+        }
         let deepgram = Self.loadFromKeychain(for: "deepgram.apiKey") ?? ""
         let openRouter = Self.loadFromKeychain(for: "openrouter.apiKey") ?? ""
 
@@ -102,6 +127,7 @@ public final class AppSettings: ObservableObject {
         self.selectedModel = selected
         self.deepgramAPIKey = deepgram
         self.openRouterAPIKey = openRouter
+        self.elevenLabsAPIKey = ""
         self.liveActivitiesEnabled = liveActivities
         self.autoStartRecording = autoStart
         self.postProcessingEnabled = postEnabled
@@ -111,6 +137,15 @@ public final class AppSettings: ObservableObject {
 
         // Auto-configure default provider on first launch or when saved model requires missing key
         configureDefaultProviderIfNeeded()
+
+        // Load ElevenLabs key asynchronously from SecureStorage (SpeakCore canonical path).
+        // The @Published property is set after init; didSet will re-store the same value, which is harmless.
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            if let key = try? await Self.elevenLabsStorage.secret(identifier: "elevenlabs.apiKey"), !key.isEmpty {
+                self.elevenLabsAPIKey = key
+            }
+        }
     }
 
     /// Configure default transcription provider based on available API keys.
@@ -119,6 +154,7 @@ public final class AppSettings: ObservableObject {
         let isFirstLaunch = !UserDefaults.standard.bool(forKey: "hasLaunchedBefore")
         let needsDeepgramKey = selectedModel.hasPrefix("deepgram") && !hasDeepgramKey
 
+        // Note: ElevenLabs key is loaded async; its fallback is handled at recording time.
         if isFirstLaunch || needsDeepgramKey {
             if hasDeepgramKey {
                 selectedModel = "deepgram/nova-3"
@@ -133,11 +169,14 @@ public final class AppSettings: ObservableObject {
     public func reconfigureDefaultProvider() {
         if hasDeepgramKey {
             selectedModel = "deepgram/nova-3"
+        } else if hasElevenLabsKey {
+            selectedModel = "elevenlabs/scribe_v1"
         }
     }
 
     public var hasDeepgramKey: Bool { !deepgramAPIKey.isEmpty }
     public var hasOpenRouterKey: Bool { !openRouterAPIKey.isEmpty }
+    public var hasElevenLabsKey: Bool { !elevenLabsAPIKey.isEmpty }
 
     // MARK: - Keychain Helpers
 
@@ -204,10 +243,19 @@ public struct SettingsView: View {
 
                     // Deepgram options (always shown, but warn if no key)
                     Text("Deepgram Nova-3").tag("deepgram/nova-3")
+
+                    // ElevenLabs Scribe (always shown, but warn if no key)
+                    Text("ElevenLabs Scribe").tag("elevenlabs/scribe_v1")
                 }
 
                 if settings.selectedModel.hasPrefix("deepgram") && !settings.hasDeepgramKey {
                     Label("Add Deepgram API key below to use this model", systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                        .font(.caption)
+                }
+
+                if settings.selectedModel.hasPrefix("elevenlabs") && !settings.hasElevenLabsKey {
+                    Label("Add ElevenLabs API key below to use this model", systemImage: "exclamationmark.triangle")
                         .foregroundStyle(.orange)
                         .font(.caption)
                 }
@@ -277,6 +325,15 @@ public struct SettingsView: View {
                     Spacer()
                     Text(settings.hasDeepgramKey ? "Stored" : "Missing")
                         .foregroundStyle(settings.hasDeepgramKey ? .green : .secondary)
+                }
+                .accessibilityElement(children: .combine)
+
+                HStack {
+                    Label("ElevenLabs", systemImage: "mic.and.signal.meter")
+                        .accessibilityLabel("ElevenLabs API Key")
+                    Spacer()
+                    Text(settings.hasElevenLabsKey ? "Stored" : "Missing")
+                        .foregroundStyle(settings.hasElevenLabsKey ? .green : .secondary)
                 }
                 .accessibilityElement(children: .combine)
 
@@ -485,6 +542,7 @@ struct APIKeysView: View {
     @ObservedObject var settings: AppSettings
     @State private var deepgramKey = ""
     @State private var openRouterKey = ""
+    @State private var elevenLabsKey = ""
     @State private var isValidating = false
     @State private var validationMessage: String?
     @State private var showingValidation = false
@@ -507,6 +565,29 @@ struct APIKeysView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Get your API key from deepgram.com")
                     if settings.hasDeepgramKey {
+                        Text("✓ API key is stored")
+                            .foregroundStyle(.green)
+                    }
+                }
+                .font(.caption)
+            }
+
+            Section {
+                SecureField("API Key", text: $elevenLabsKey)
+                    .textContentType(.password)
+                    .autocorrectionDisabled()
+
+                if settings.hasElevenLabsKey && elevenLabsKey.isEmpty {
+                    Button("Clear Stored Key", role: .destructive) {
+                        settings.elevenLabsAPIKey = ""
+                    }
+                }
+            } header: {
+                Label("ElevenLabs", systemImage: "mic.and.signal.meter")
+            } footer: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Get your API key from elevenlabs.io")
+                    if settings.hasElevenLabsKey {
                         Text("✓ API key is stored")
                             .foregroundStyle(.green)
                     }
@@ -546,7 +627,7 @@ struct APIKeysView: View {
                     Button("Save") {
                         saveKeys()
                     }
-                    .disabled(deepgramKey.isEmpty && openRouterKey.isEmpty)
+                    .disabled(deepgramKey.isEmpty && openRouterKey.isEmpty && elevenLabsKey.isEmpty)
                 }
             }
         }
@@ -576,6 +657,21 @@ struct APIKeysView: View {
                     settings.reconfigureDefaultProvider()
                 case .failure(let message):
                     messages.append("✗ Deepgram: \(message)")
+                }
+            }
+
+            // Validate and save ElevenLabs key
+            if !elevenLabsKey.isEmpty {
+                let validator = ElevenLabsSTTAPIKeyValidator()
+                let result = await validator.validate(elevenLabsKey)
+
+                switch result.outcome {
+                case .success:
+                    settings.elevenLabsAPIKey = elevenLabsKey
+                    elevenLabsKey = ""
+                    messages.append("✓ ElevenLabs API key validated and saved")
+                case .failure(let message):
+                    messages.append("✗ ElevenLabs: \(message)")
                 }
             }
 
@@ -618,6 +714,12 @@ struct PrivacyView: View {
                     title: "Deepgram",
                     description: "Audio streamed to Deepgram servers for transcription."
                 )
+
+                FeatureRow(
+                    icon: "mic.and.signal.meter",
+                    title: "ElevenLabs",
+                    description: "Audio streamed to ElevenLabs servers for transcription."
+                )
             }
 
             Section("API Keys") {
@@ -634,6 +736,7 @@ struct PrivacyView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     InfoRow(label: "Apple Speech", value: "On-device only")
                     InfoRow(label: "Deepgram", value: "During transcription")
+                    InfoRow(label: "ElevenLabs", value: "During transcription")
                     InfoRow(label: "Send to Mac", value: "Local network only")
                     InfoRow(label: "iCloud Sync", value: "Settings & keys (optional)")
                 }

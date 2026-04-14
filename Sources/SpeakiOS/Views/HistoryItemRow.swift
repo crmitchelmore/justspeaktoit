@@ -95,6 +95,8 @@ struct HistoryItemRow: View {
     private var modelDisplayName: String {
         if item.model.contains("deepgram") {
             return "Deepgram"
+        } else if item.model.contains("elevenlabs") {
+            return "ElevenLabs"
         } else if item.model.contains("apple") {
             return "Apple Speech"
         }

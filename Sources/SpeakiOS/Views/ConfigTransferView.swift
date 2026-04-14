@@ -117,7 +117,7 @@ struct QRCodeGeneratorView: View {
             )
         )
         
-        let knownKeys = ["deepgram.apiKey", "openrouter.apiKey", "openai.apiKey"]
+        let knownKeys = ["deepgram.apiKey", "openrouter.apiKey", "openai.apiKey", "elevenlabs.apiKey"]
         for key in knownKeys {
             if let value = try? await storage.secret(identifier: key), !value.isEmpty {
                 secrets[key] = value

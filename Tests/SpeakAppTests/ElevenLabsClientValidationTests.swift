@@ -10,8 +10,8 @@ final class ElevenLabsMockURLProtocol: URLProtocol {
     /// Map request URL path suffix → (statusCode, data)
     static var handlers: [(String) -> (Int, Data)?] = []
 
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override static func canInit(with request: URLRequest) -> Bool { true }
+    override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
         let path = request.url?.path ?? ""
@@ -57,7 +57,7 @@ final class ElevenLabsClientValidationTests: XCTestCase {
     func testValidateAPIKey_withTTSOnlyRestrictedKey_returnsInvalid() async {
         let session = makeMockSession(handlers: [
             { path in path.hasSuffix("/user") ? (200, Data()) : nil },
-            { path in path.hasSuffix("/speech-to-text") ? (403, Data()) : nil },
+            { path in path.hasSuffix("/speech-to-text") ? (403, Data()) : nil }
         ])
         let client = ElevenLabsClient(secureStorage: makeSecureStorage(), session: session)
         let result = await client.validateAPIKey("test-tts-only-key")
@@ -72,7 +72,7 @@ final class ElevenLabsClientValidationTests: XCTestCase {
     func testValidateAPIKey_withFullAccessKey_returnsSuccess() async {
         let session = makeMockSession(handlers: [
             { path in path.hasSuffix("/user") ? (200, Data()) : nil },
-            { path in path.hasSuffix("/speech-to-text") ? (422, Data()) : nil },
+            { path in path.hasSuffix("/speech-to-text") ? (422, Data()) : nil }
         ])
         let client = ElevenLabsClient(secureStorage: makeSecureStorage(), session: session)
         let result = await client.validateAPIKey("test-full-access-key")
@@ -91,7 +91,7 @@ final class ElevenLabsClientValidationTests: XCTestCase {
             { path in
                 if path.hasSuffix("/speech-to-text") { scribeProbed = true }
                 return nil
-            },
+            }
         ])
         let client = ElevenLabsClient(secureStorage: makeSecureStorage(), session: session)
         let result = await client.validateAPIKey("bad-key")

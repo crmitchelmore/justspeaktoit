@@ -139,7 +139,10 @@ actor ElevenLabsClient: TextToSpeechClient {
         return .failure(message: "Invalid Scribe response")
       }
       if scribeHTTP.statusCode == 403 {
-        return .failure(message: "API key does not have Scribe (speech-to-text) access. Use a key with both TTS and Scribe permissions.")
+        return .failure(
+          message: "API key does not have Scribe (speech-to-text) access. Use a key with both "
+            + "TTS and Scribe permissions."
+        )
       }
       // 422 (missing required audio) and 400 (bad request) both indicate the key has Scribe access
       return .success(message: "API key is valid for Text-to-Speech and Scribe transcription")

@@ -1592,6 +1592,7 @@ struct SettingsView: View {
     )
   }
 
+  // swiftlint:disable:next cyclomatic_complexity function_body_length
   private func ttsProviderAPIKeyCard(for provider: TTSProvider) -> some View {
     let isStored = settings.trackedAPIKeyIdentifiers.contains(provider.apiKeyIdentifier)
     let validationState = ttsProviderValidationStates[provider.rawValue] ?? .idle
@@ -1639,7 +1640,8 @@ struct SettingsView: View {
         statusIcon: isStored ? "checkmark.seal.fill" : "key.fill",
         statusTint: tintColor,
         isStored: isStored,
-        descriptionText: "Stored securely in your macOS Keychain. Used for ElevenLabs Text-to-Speech voice synthesis and Scribe transcription. The key must have both TTS and speech-to-text permissions.",
+        descriptionText: "Stored securely in your macOS Keychain. Used for ElevenLabs Text-to-Speech "
+          + "voice synthesis and Scribe transcription. The key must have both TTS and speech-to-text permissions.",
         keyFieldLabel: "ElevenLabs API Key",
         keyBinding: ttsBinding(for: provider.rawValue),
         onSave: { saveTTSProviderAPIKey(provider) },
@@ -1649,13 +1651,17 @@ struct SettingsView: View {
         isValidateDisabled: validateDisabled,
         isRemoveDisabled: removeDisabled,
         validationState: validationState,
-        tooltip: "Manage your ElevenLabs API key. One key covers both voice synthesis (TTS) and Scribe transcription (STT).",
+        tooltip: "Manage your ElevenLabs API key. One key covers both voice synthesis (TTS) "
+          + "and Scribe transcription (STT).",
         saveButtonTitle: isStored ? "Replace Key" : "Save Key",
-        saveTooltip: "Securely store your ElevenLabs key. It will be used for both TTS and Scribe transcription.",
+        saveTooltip: "Securely store your ElevenLabs key. It will be used for both TTS "
+          + "and Scribe transcription.",
         validateButtonTitle: "Check Validity",
-        validateTooltip: "Confirm that your ElevenLabs key has access to both TTS and Scribe transcription.",
+        validateTooltip: "Confirm that your ElevenLabs key has access to both TTS "
+          + "and Scribe transcription.",
         removeButtonTitle: "Remove Key",
-        removeTooltip: "Forget this key from Speak and your Keychain. Disables both ElevenLabs TTS and Scribe transcription.",
+        removeTooltip: "Forget this key from Speak and your Keychain. Disables both ElevenLabs "
+          + "TTS and Scribe transcription.",
         link: URL(string: website),
         linkLabel: "Get API Key"
       )

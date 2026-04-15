@@ -12,8 +12,8 @@ final class ElevenLabsKeyRemovalTests: XCTestCase {
     func testMarkControllersStale_setsIsCacheStaleTrue() {
         let settings = AppSettings()
         let permissions = PermissionsManager()
-        let audioDevices = AudioInputDeviceManager()
-        let secureStorage = SecureAppStorage()
+        let audioDevices = AudioInputDeviceManager(appSettings: settings)
+        let secureStorage = SecureAppStorage(permissionsManager: permissions, appSettings: settings)
 
         let transcriber = SwitchingLiveTranscriber(
             appSettings: settings,

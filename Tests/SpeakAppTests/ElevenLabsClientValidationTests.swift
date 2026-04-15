@@ -6,7 +6,7 @@ import XCTest
 // MARK: - MockURLProtocol
 
 /// A URLProtocol subclass that intercepts requests and returns pre-configured responses.
-final class MockURLProtocol: URLProtocol {
+final class ElevenLabsMockURLProtocol: URLProtocol {
     /// Map request URL path suffix → (statusCode, data)
     static var handlers: [(String) -> (Int, Data)?] = []
 
@@ -15,7 +15,7 @@ final class MockURLProtocol: URLProtocol {
 
     override func startLoading() {
         let path = request.url?.path ?? ""
-        for handler in MockURLProtocol.handlers {
+        for handler in ElevenLabsMockURLProtocol.handlers {
             if let (statusCode, body) = handler(path) {
                 let response = HTTPURLResponse(
                     url: request.url!,
@@ -37,13 +37,20 @@ final class MockURLProtocol: URLProtocol {
 
 // MARK: - Tests
 
+@MainActor
 final class ElevenLabsClientValidationTests: XCTestCase {
 
     private func makeMockSession(handlers: [(String) -> (Int, Data)?]) -> URLSession {
-        MockURLProtocol.handlers = handlers
         let config = URLSessionConfiguration.ephemeral
-        config.protocolClasses = [MockURLProtocol.self]
+        ElevenLabsMockURLProtocol.handlers = handlers
+        config.protocolClasses = [ElevenLabsMockURLProtocol.self]
         return URLSession(configuration: config)
+    }
+
+    private func makeSecureStorage() -> SecureAppStorage {
+        let settings = AppSettings()
+        let permissions = PermissionsManager()
+        return SecureAppStorage(permissionsManager: permissions, appSettings: settings)
     }
 
     // Plan requirement: TTS-only restricted key → `/user` 200, `/speech-to-text` 403 → `.invalid`
@@ -52,7 +59,7 @@ final class ElevenLabsClientValidationTests: XCTestCase {
             { path in path.hasSuffix("/user") ? (200, Data()) : nil },
             { path in path.hasSuffix("/speech-to-text") ? (403, Data()) : nil },
         ])
-        let client = ElevenLabsClient(secureStorage: SecureAppStorage(), session: session)
+        let client = ElevenLabsClient(secureStorage: makeSecureStorage(), session: session)
         let result = await client.validateAPIKey("test-tts-only-key")
         if case .failure = result.outcome {
             // Expected: TTS-only key lacks Scribe permission
@@ -67,7 +74,7 @@ final class ElevenLabsClientValidationTests: XCTestCase {
             { path in path.hasSuffix("/user") ? (200, Data()) : nil },
             { path in path.hasSuffix("/speech-to-text") ? (422, Data()) : nil },
         ])
-        let client = ElevenLabsClient(secureStorage: SecureAppStorage(), session: session)
+        let client = ElevenLabsClient(secureStorage: makeSecureStorage(), session: session)
         let result = await client.validateAPIKey("test-full-access-key")
         if case .success = result.outcome {
             // Expected: full-access key has both TTS and Scribe
@@ -86,7 +93,7 @@ final class ElevenLabsClientValidationTests: XCTestCase {
                 return nil
             },
         ])
-        let client = ElevenLabsClient(secureStorage: SecureAppStorage(), session: session)
+        let client = ElevenLabsClient(secureStorage: makeSecureStorage(), session: session)
         let result = await client.validateAPIKey("bad-key")
         if case .failure = result.outcome {
             XCTAssertFalse(scribeProbed, "Scribe endpoint should not be probed for an invalid key")

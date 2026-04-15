@@ -144,7 +144,8 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
         Option(
             id: "elevenlabs/scribe-v2-streaming",
             displayName: "ElevenLabs Scribe v2 (Streaming)",
-            description: "ElevenLabs Scribe v2 real-time WebSocket transcription. Reuses your ElevenLabs API key — the key must have speech-to-text (Scribe) access.",
+            description: "ElevenLabs Scribe v2 real-time WebSocket transcription. Reuses your "
+                + "ElevenLabs API key — the key must have speech-to-text (Scribe) access.",
             estimatedLatencyMs: 200, latencyTier: .fast)
     ]
 

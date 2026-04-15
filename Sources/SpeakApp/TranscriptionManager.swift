@@ -274,7 +274,6 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
     currentModel = model
   }
 
-  // swiftlint:disable:next function_body_length
   func start() async throws {
     guard await ensurePermissions() else {
       throw TranscriptionManagerError.permissionsMissing
@@ -1062,6 +1061,7 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
     logger.info("Configured AssemblyAI with model: \(model)")
   }
 
+  // swiftlint:disable:next function_body_length
   // swiftlint:disable:next function_body_length
   func start() async throws {
     guard await ensurePermissions() else {
@@ -2041,6 +2041,7 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
     logger.info("Configured ElevenLabs with model: \(model)")
   }
 
+  // swiftlint:disable:next function_body_length
   func start() async throws {
     guard await ensurePermissions() else {
       throw TranscriptionManagerError.permissionsMissing

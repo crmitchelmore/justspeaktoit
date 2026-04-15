@@ -1,11 +1,12 @@
 {
-  "run":"2026-04-14","rid":"24382046975",
-  "notes":["macOS for tests","testX_cond_expected()","@testable import SpeakCore","swift build --target SpeakCore blocked by os.log on Linux","Sentry binary blocks swift test on Linux - macOS CI needed","os.log and SwiftUI/CloudKit block swift test on Linux entirely","AppSettingsDefaultsTests uses custom UserDefaults suite via DI - SettingsSync uses singleton so tearDown cleanup used instead","ConfigTransferPayload.timestamp is a mutable var (settable in tests)","ConfigTransferError is not Equatable - use pattern matching in XCTAssertThrowsError"],
+  "run":"2026-04-15","rid":"24437528202",
+  "notes":["macOS for tests","testX_cond_expected()","@testable import SpeakCore","swift build --target SpeakCore blocked by os.log on Linux (AudioBufferPool)","Sentry binary blocks swift test on Linux - macOS CI needed","os.log and SwiftUI/CloudKit block swift test on Linux entirely","AppSettingsDefaultsTests uses custom UserDefaults suite via DI - SettingsSync uses singleton so tearDown cleanup used instead","ConfigTransferPayload.timestamp is a mutable var (settable in tests)","ConfigTransferError is not Equatable - use pattern matching in XCTAssertThrowsError","AnyCodable roundtrip tests need Swift type casts - use (value as? T) not direct comparisons","SensitiveHeaderRedactor.isSensitiveValue is private - test indirectly via redactSensitiveHeaders"],
   "prs":[
-    {"b":"test-assist/settings-sync-config-transfer-20260414","run":"2026-04-14","n":"SettingsSyncTests(11)+ConfigTransferManagerTests(19)","tmp":"aw_pr001"},
-    {"b":"test-assist/openclaw-extract-provider-tests-20260414","run":"2026-04-14","n":"OpenClawContentExtractionTests(13)+TranscriptionProviderTests(10)","tmp":"aw_pr002"}
+    {"b":"test-assist/settings-sync-config-transfer-20260414","run":"2026-04-14","n":"SettingsSyncTests(11)+ConfigTransferManagerTests(19)","pr":334},
+    {"b":"test-assist/openclaw-extract-provider-tests-20260414","run":"2026-04-14","n":"OpenClawContentExtractionTests(13)+TranscriptionProviderTests(10)","pr":335},
+    {"b":"test-assist/sensitive-header-redactor-anycoding-20260415","run":"2026-04-15","n":"SensitiveHeaderRedactorTests(21)+AnyCodableTests(16)","pr":null}
   ],
-  "backlog":["AudioBufferPool(macOS)","OpenClawClientReceive message routing (needs WebSocket mock)"],
+  "backlog":["AudioBufferPool(macOS)","OpenClawClientReceive message routing (needs WebSocket mock)","APIKeyValidationDebugSnapshot - header auto-redaction on init"],
   "mi":"apr2026 issue#315",
-  "tlr":{"t1":"2026-04-08","t2":"2026-04-13","t3":"2026-04-14","t4":"2026-04-14","t5":"2026-04-08","t6":"2026-04-14","t7":"2026-04-14"}
+  "tlr":{"t1":"2026-04-08","t2":"2026-04-15","t3":"2026-04-15","t4":"2026-04-14","t5":"2026-04-08","t6":"2026-04-14","t7":"2026-04-15"}
 }

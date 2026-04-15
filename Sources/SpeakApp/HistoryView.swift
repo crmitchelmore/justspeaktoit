@@ -14,6 +14,7 @@ struct HistoryView: View {
   @State private var endDate: Date = Date()
   @State private var historyItems: [HistoryItem] = []
   @State private var selectedModelFilter: String? = nil
+  @State private var availableModels: [String] = []
   @State private var historyStats: HistoryStatistics = .init(
     totalSessions: 0,
     cumulativeRecordingDuration: 0,
@@ -124,10 +125,9 @@ struct HistoryView: View {
     return apply(filter: filter, to: historyItems)
   }
 
-  /// All unique models used across history items
-  private var availableModels: [String] {
-    let allModels = historyItems.flatMap { $0.modelsUsed }
-    let unique = Set(allModels)
+  /// All unique models used across history items, cached to avoid re-computing on every render.
+  private func computeAvailableModels(from items: [HistoryItem]) -> [String] {
+    let unique = Set(items.flatMap { $0.modelsUsed })
     return unique.sorted { ModelCatalog.friendlyName(for: $0) < ModelCatalog.friendlyName(for: $1) }
   }
 
@@ -162,6 +162,7 @@ struct HistoryView: View {
       }
       .onAppear {
         historyItems = environment.history.allItems
+        availableModels = computeAvailableModels(from: historyItems)
         historyStats = environment.history.statistics
         // Delay to show skeleton briefly for improved perceived performance
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -176,6 +177,7 @@ struct HistoryView: View {
         withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
           historyItems = updated
         }
+        availableModels = computeAvailableModels(from: updated)
         guard let newest = items.first else { return }
         let wasPresent = previous.contains(where: { $0.id == newest.id })
         if !wasPresent {

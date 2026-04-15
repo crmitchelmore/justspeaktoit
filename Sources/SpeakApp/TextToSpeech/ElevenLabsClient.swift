@@ -105,23 +105,47 @@ actor ElevenLabsClient: TextToSpeechClient {
   }
 
   func validateAPIKey(_ key: String) async -> APIKeyValidationResult {
-    let url = baseURL.appendingPathComponent("user")
-    var request = URLRequest(url: url)
-    request.setValue(key, forHTTPHeaderField: "xi-api-key")
+    // Step 1: verify the key is valid at all
+    let userURL = baseURL.appendingPathComponent("user")
+    var userRequest = URLRequest(url: userURL)
+    userRequest.setValue(key, forHTTPHeaderField: "xi-api-key")
 
     do {
-      let (_, response) = try await session.data(for: request)
-      guard let httpResponse = response as? HTTPURLResponse else {
+      let (_, userResponse) = try await session.data(for: userRequest)
+      guard let userHTTP = userResponse as? HTTPURLResponse else {
         return .failure(message: "Invalid response")
       }
-
-      if httpResponse.statusCode == 200 {
-        return .success(message: "API key is valid")
-      } else if httpResponse.statusCode == 401 {
+      if userHTTP.statusCode == 401 {
         return .failure(message: "Invalid API key")
-      } else {
-        return .failure(message: "HTTP \(httpResponse.statusCode)")
       }
+      guard userHTTP.statusCode == 200 else {
+        return .failure(message: "HTTP \(userHTTP.statusCode)")
+      }
+    } catch {
+      return .failure(message: error.localizedDescription)
+    }
+
+    // Step 2: probe Scribe capability — a TTS-only restricted key returns 403 here
+    let scribeURL = baseURL.appendingPathComponent("speech-to-text")
+    var scribeRequest = URLRequest(url: scribeURL)
+    scribeRequest.httpMethod = "POST"
+    scribeRequest.setValue(key, forHTTPHeaderField: "xi-api-key")
+    scribeRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    scribeRequest.httpBody = try? JSONSerialization.data(withJSONObject: [:])
+
+    do {
+      let (_, scribeResponse) = try await session.data(for: scribeRequest)
+      guard let scribeHTTP = scribeResponse as? HTTPURLResponse else {
+        return .failure(message: "Invalid Scribe response")
+      }
+      if scribeHTTP.statusCode == 403 {
+        return .failure(
+          message: "API key does not have Scribe (speech-to-text) access. Use a key with both "
+            + "TTS and Scribe permissions."
+        )
+      }
+      // 422 (missing required audio) and 400 (bad request) both indicate the key has Scribe access
+      return .success(message: "API key is valid for Text-to-Speech and Scribe transcription")
     } catch {
       return .failure(message: error.localizedDescription)
     }

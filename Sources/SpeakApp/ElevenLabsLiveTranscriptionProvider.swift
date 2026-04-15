@@ -43,15 +43,15 @@ private struct ElevenLabsTranscriptMessage: Decodable {
 
 // MARK: - Live Transcriber (WebSocket client)
 
-/// Streams raw PCM audio to ElevenLabs Scribe v1 real-time API and delivers partial/final
+/// Streams raw PCM audio to ElevenLabs Scribe v2 real-time API and delivers partial/final
 /// transcript callbacks.  Auth uses `xi-api-key` header — no URL-level key exposure.
 final class ElevenLabsLiveTranscriber: @unchecked Sendable {
     // Connection URL is constructed in connectWebSocket(); never logged.
     private static let websocketHost = "api.elevenlabs.io"
     private static let websocketPath = "/v1/speech-to-text/realtime"
 
-    /// Minimum PCM chunk size: 50 ms at 16 kHz PCM16 mono (same floor as AssemblyAI).
-    static let minimumChunkBytes = 1_600
+    /// Minimum PCM chunk size: 100 ms at 16 kHz PCM16 mono.
+    static let minimumChunkBytes = 3_200
     /// Preferred PCM chunk size: 100 ms at 16 kHz PCM16 mono.
     static let preferredChunkBytes = 3_200
 
@@ -71,7 +71,7 @@ final class ElevenLabsLiveTranscriber: @unchecked Sendable {
 
     init(
         apiKey: String,
-        modelID: String = "scribe_v1",
+        modelID: String = "scribe_v2",
         sampleRate: Int = 16000,
         session: URLSession = .shared,
         bufferPool: AudioBufferPool = AudioBufferPool(poolSize: 10, bufferSize: 4096)

@@ -2064,12 +2064,14 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
       }
       targetFormat = outputFormat
 
-      // Strip "elevenlabs/" prefix to get the bare model ID for the API (e.g. "scribe_v1").
+      // Convert catalog IDs like "elevenlabs/scribe-v2-streaming" into API model IDs like "scribe_v2".
       let modelID: String
       if let model = currentModel, model.hasPrefix("elevenlabs/") {
-        modelID = String(model.dropFirst("elevenlabs/".count)).replacingOccurrences(of: "-", with: "_")
+        let suffixless = String(model.dropFirst("elevenlabs/".count)).replacingOccurrences(
+          of: "-streaming", with: "")
+        modelID = suffixless.replacingOccurrences(of: "-", with: "_")
       } else {
-        modelID = "scribe_v1"
+        modelID = "scribe_v2"
       }
 
       let newTranscriber = ElevenLabsLiveTranscriber(
@@ -2378,7 +2380,7 @@ private extension ElevenLabsLiveController {
       segments: finalSegments,
       confidence: nil,
       duration: streamingDuration,
-      modelIdentifier: currentModel ?? "elevenlabs/scribe-v1-streaming",
+      modelIdentifier: currentModel ?? "elevenlabs/scribe-v2-streaming",
       cost: nil,
       rawPayload: nil,
       debugInfo: nil

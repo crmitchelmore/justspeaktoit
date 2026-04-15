@@ -6,18 +6,18 @@ Full build/test blocked by Sentry firewall (os.log in AudioBufferPool on Linux).
 SwiftLint: `swift package plugin --allow-writing-to-package-directory swiftlint --strict --target SpeakApp`
 
 ## Backlog
-1. MEDIUM: HistoryView.availableModels re-computed on every render; could be derived once when historyItems changes
-2. (Previous items exhausted or implemented)
+1. MEDIUM: PronunciationManager.applySimpleReplacement creates NSRegularExpression on every call (per entry, per TTS invocation); cache compiled regexes keyed on (pattern, caseSensitive)
 
-## Monthly: Issue #312 for April 2026 (updated 2026-04-14 run).
+## Monthly: Issue #312 for April 2026 (updated 2026-04-15 run).
 
 ## Round-Robin
-Last (2026-04-14 run 8): Tasks 1,4,5,6,7 (+ Task 3: new PR for HistoryView filter)
-Next: Tasks 2,3,7
+Last (2026-04-15 run 9): Tasks 2,3,7
+Next: Tasks 1,4,5,6,7
 
 ## Open PRs
 - #332: perf-assist/modelcatalog-cached-alloptions (2026-04-13) — cache allOptions + O(1) friendlyName
-- NEW (branch perf-assist/history-filter-early-exit, 2026-04-14): early-exit HistoryView filter, eliminate per-item string allocations
+- #368: perf-assist/history-filter-early-exit (2026-04-14) — early-exit HistoryView filter, eliminate per-item string allocations
+- NEW (branch perf-assist/historyview-cache-available-models, 2026-04-15): cache availableModels as @State, recompute only on historyItems change
 
 ## Notes
 GitHub MCP read tools functional for list/read operations.

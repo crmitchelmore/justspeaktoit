@@ -195,7 +195,16 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
         Option(
             id: "assemblyai/universal-2", displayName: "AssemblyAI Universal-2",
             description: "Fast and reliable batch transcription from AssemblyAI.",
-            estimatedLatencyMs: 1200, latencyTier: .medium)
+            estimatedLatencyMs: 1200, latencyTier: .medium),
+        Option(
+            id: "elevenlabs/scribe_v1", displayName: "ElevenLabs Scribe v1",
+            description: "ElevenLabs Scribe: high-accuracy speech-to-text with word-level timestamps.",
+            estimatedLatencyMs: 800, latencyTier: .fast),
+        Option(
+            id: "elevenlabs/scribe_v1_experimental",
+            displayName: "ElevenLabs Scribe v1 (Experimental)",
+            description: "ElevenLabs Scribe experimental model with cutting-edge accuracy improvements.",
+            estimatedLatencyMs: 900, latencyTier: .fast)
     ]
 
     // Curated, static set for transcript cleanup (OpenRouter) with pricing + tags.

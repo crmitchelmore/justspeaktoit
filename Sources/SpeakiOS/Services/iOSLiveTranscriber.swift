@@ -5,6 +5,7 @@ import Speech
 import SpeakCore
 import os.log
 
+// swiftlint:disable file_length
 /// iOS-native live transcription using Apple Speech framework.
 @MainActor
 // swiftlint:disable:next type_body_length
@@ -404,3 +405,4 @@ public final class iOSLiveTranscriber: ObservableObject {
     }
 }
 #endif
+// swiftlint:enable file_length

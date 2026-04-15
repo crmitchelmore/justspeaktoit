@@ -66,8 +66,12 @@ final class IncrementalTranscriptAppendTests: XCTestCase {
     // MARK: - Performance
 
     func testIncrementalAppend_performance() {
-        let segments = (0..<50).map { i in
-            TranscriptionSegment(startTime: Double(i), endTime: Double(i) + 1, text: "word\(i)")
+        let segments = (0..<50).map { segmentIndex in
+            TranscriptionSegment(
+                startTime: Double(segmentIndex),
+                endTime: Double(segmentIndex) + 1,
+                text: "word\(segmentIndex)"
+            )
         }
         let expected = segments.map(\.text).joined(separator: " ")
 
@@ -85,8 +89,12 @@ final class IncrementalTranscriptAppendTests: XCTestCase {
     }
 
     func testMapJoin_performance_baseline() {
-        let segments = (0..<50).map { i in
-            TranscriptionSegment(startTime: Double(i), endTime: Double(i) + 1, text: "word\(i)")
+        let segments = (0..<50).map { segmentIndex in
+            TranscriptionSegment(
+                startTime: Double(segmentIndex),
+                endTime: Double(segmentIndex) + 1,
+                text: "word\(segmentIndex)"
+            )
         }
 
         var accumulated: [TranscriptionSegment] = []

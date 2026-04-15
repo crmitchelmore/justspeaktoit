@@ -650,7 +650,11 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
         text: text
       )
       finalSegments.append(segment)
-      fullTranscript = finalSegments.map(\.text).joined(separator: " ")
+      if fullTranscript.isEmpty {
+        fullTranscript = text
+      } else {
+        fullTranscript += " " + text
+      }
       currentInterim = ""
       print("[DeepgramLiveController] Final segment #\(finalSegments.count) (length: \(text.count)) - fullTranscript length: \(fullTranscript.count)")
 

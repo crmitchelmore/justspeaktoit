@@ -826,26 +826,47 @@
       transition: all 0.3s ease;
     }
 
+    /* Mobile overlay (sibling of nav, avoids iOS Safari backdrop-filter containment) */
+    .mobile-nav-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: var(--color-bg);
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      gap: 2.5rem;
+      z-index: 200;
+    }
+
+    .mobile-nav-overlay.open {
+      display: flex;
+    }
+
+    .mobile-nav-overlay .nav__link {
+      color: var(--color-text-muted);
+      text-decoration: none;
+      font-weight: 500;
+      font-size: 1.25rem;
+      transition: color 0.2s ease;
+    }
+
+    .mobile-nav-overlay .nav__link:hover {
+      color: var(--color-text);
+    }
+
     @media (max-width: 768px) {
       .nav__hamburger {
         display: block;
-        z-index: 102;
+        z-index: 210;
+      }
+
+      .nav__cta {
+        display: none;
       }
 
       .nav__links {
         display: none;
-        position: fixed;
-        inset: 0;
-        background: var(--color-bg);
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-        gap: 2.5rem;
-        z-index: 101;
-      }
-
-      .nav__links.open {
-        display: flex;
       }
 
       .nav__links .nav__link {
@@ -905,12 +926,20 @@
       <li><a href="#faq" class="nav__link">FAQ</a></li>
     </ul>
     <a href="#download" class="nav__cta">Download Free</a>
-    <button class="nav__hamburger" aria-label="Toggle menu">
+    <button class="nav__hamburger" aria-label="Toggle menu" aria-expanded="false">
       <span></span>
       <span></span>
       <span></span>
     </button>
   </nav>
+
+  <!-- Mobile navigation overlay (sibling of nav to avoid iOS Safari backdrop-filter containment) -->
+  <div class="mobile-nav-overlay" id="mobile-nav-overlay" aria-hidden="true">
+    <a href="#features" class="nav__link">Features</a>
+    <a href="#pricing" class="nav__link">Pricing</a>
+    <a href="#platforms" class="nav__link">Platforms</a>
+    <a href="#faq" class="nav__link">FAQ</a>
+  </div>
 
   <!-- Hero -->
   <section class="hero">
@@ -1352,15 +1381,48 @@
     });
 
     // Mobile menu toggle
-    document.querySelector('.nav__hamburger').addEventListener('click', () => {
-      document.querySelector('.nav__links').classList.toggle('open');
+    const hamburger = document.querySelector('.nav__hamburger');
+    const mobileOverlay = document.getElementById('mobile-nav-overlay');
+
+    function openMenu() {
+      mobileOverlay.classList.add('open');
+      mobileOverlay.setAttribute('aria-hidden', 'false');
+      hamburger.setAttribute('aria-expanded', 'true');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeMenu() {
+      mobileOverlay.classList.remove('open');
+      mobileOverlay.setAttribute('aria-hidden', 'true');
+      hamburger.setAttribute('aria-expanded', 'false');
+      document.body.style.overflow = '';
+    }
+
+    hamburger.addEventListener('click', () => {
+      if (mobileOverlay.classList.contains('open')) {
+        closeMenu();
+      } else {
+        openMenu();
+      }
     });
 
-    // Close mobile menu when a link is clicked
-    document.querySelectorAll('.nav__links .nav__link').forEach(link => {
-      link.addEventListener('click', () => {
-        document.querySelector('.nav__links').classList.remove('open');
-      });
+    // Close when a nav link is tapped
+    mobileOverlay.querySelectorAll('.nav__link').forEach(link => {
+      link.addEventListener('click', closeMenu);
+    });
+
+    // Close on backdrop tap (click outside the links)
+    mobileOverlay.addEventListener('click', (e) => {
+      if (e.target === mobileOverlay) {
+        closeMenu();
+      }
+    });
+
+    // Close on Escape key
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && mobileOverlay.classList.contains('open')) {
+        closeMenu();
+      }
     });
 
     // Brew install copy-to-clipboard

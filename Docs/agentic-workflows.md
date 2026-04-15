@@ -124,7 +124,7 @@ Custom planning and plan-review workflows added in this repository:
 - `pr-plan-review-architecture`
 - `pr-plan-review-design`
 - `pr-plan-review-rate-limit-retry` — reruns a PR plan-review workflow with backoff when the Copilot agent fails only because of a transient model rate limit
-- `issue-agent-retry` — reruns failed issue-planning and `Issue Ready to PR` workflows when the failing job is the agent job, so transient Copilot runtime failures do not leave issues stuck
+- `issue-agent-retry` — reruns only the failed jobs in failed issue-planning and `Issue Ready to PR` workflow runs when the failing job is the agent job, so transient Copilot runtime failures do not leave issues stuck
 - `pr-plan-review-ready-check` — manual agentic audit for a specific pull request
 - `pr-plan-review-reconcile` — deterministic label reconciler that runs after PR review workflows finish
 
@@ -394,3 +394,22 @@ Use this recovery path:
 4. Let `PR Plan Review - Reconcile State` normalise the labels back to `plan-review:ready-to-merge` once all six approvals converge again.
 
 This recovery path re-runs the normal plan-review gate; it does not bypass or weaken it. PR plan-review role workflows should only respond on pull-request threads, while issue-planning threads should stay limited to the eight issue-planning participants (seven specialist reviewers plus the EM challenge/sign-off role).
+
+#### Implementation note: PR plan-review trigger guard
+
+PR plan-review `issue_comment` workflows guard entry by checking whether the issue HTML URL contains `/pull/` rather than relying on `issue.pull_request != null`. The latter can be `null` or absent for certain event shapes (notably plain issue comments), which caused issue comments to incorrectly trigger PR review workflows and attach stray `plan-review:*` labels to issues. The URL shape check (`html_url` contains `/pull/`) is the durable guard.
+
+#### Plan PR CI-fix dispatch: fork detection and broader plan PR matching
+
+The `plan-pr-ci-fix-dispatch` workflow now:
+
+- Skips PRs that originate from a fork repository (checks `head.repo.full_name !== repo`) to prevent dispatching fix agents to external contributor branches.
+- Identifies a PR as a plan PR when the title starts with `[Plan]`, the PR carries an `automation` label, or the body contains `Plan issue: #` — previously only the title check was applied.
+
+#### Agentic self-improver: recency check before acting
+
+Before making any changes, `agentic-improvement` now runs a recency check:
+
+1. Run `git log --oneline --since='2 hours ago' -- .github/ Docs/ README.md` to inspect recent workflow-system commits.
+2. Review recent outcomes for the configured target workflows.
+3. If nothing meaningful changed and no new failures, drift, or duplicate-noise patterns appeared, exit without making changes to avoid no-op churn.

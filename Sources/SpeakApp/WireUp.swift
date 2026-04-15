@@ -2,6 +2,8 @@ import AppKit
 import Foundation
 import SpeakSync
 
+// swiftlint:disable file_length
+
 @MainActor
 final class AppEnvironment: ObservableObject {
   let settings: AppSettings
@@ -229,6 +231,7 @@ enum WireUp {
     static let `default` = BootstrapOptions()
   }
 
+  // swiftlint:disable:next function_body_length
   static func bootstrap(
     options: BootstrapOptions = .default
   ) -> AppEnvironment {
@@ -278,6 +281,7 @@ enum WireUp {
     let main = MainManager(
       appSettings: settings,
       permissionsManager: permissions,
+      audioInputDeviceManager: audioDevices,
       hotKeyManager: hotKeys,
       audioFileManager: audio,
       transcriptionManager: transcription,
@@ -407,3 +411,4 @@ enum WireUp {
   }
 }
 // @Implement: This file should wire up and configure all app dependencies based on the approach laid out in this talk https://www.infoq.com/presentations/8-lines-code-refactoring/
+// swiftlint:enable file_length

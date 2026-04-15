@@ -5,6 +5,7 @@ import Speech
 import SpeakCore
 import os.log
 
+// swiftlint:disable file_length
 /// iOS-native live transcription using Apple Speech framework.
 @MainActor
 // swiftlint:disable:next type_body_length
@@ -280,6 +281,13 @@ public final class iOSLiveTranscriber: ObservableObject {
                isShuttingDownRecognitionTask || !isRunning {
                 return
             }
+            // Commit any in-progress text before propagating the error so a
+            // silence-timeout error doesn't silently drop the user's dictation.
+            if !isShuttingDownRecognitionTask, !lastFormattedString.isEmpty {
+                committedText = [committedText, lastFormattedString]
+                    .filter { !$0.isEmpty }.joined(separator: " ")
+                lastFormattedString = ""
+            }
             print("[iOSLiveTranscriber] Recognition error: \(error.localizedDescription)")
             self.error = iOSTranscriptionError.recognitionFailed(error)
             onError?(self.error!)
@@ -329,7 +337,7 @@ public final class iOSLiveTranscriber: ObservableObject {
     /// shorter than the previous result, commit the old text to prevent loss.
     private func commitIfImplicitReset(currentText: String, isFinal: Bool) {
         guard !isFinal,
-              lastFormattedString.count >= 10,
+              lastFormattedString.count >= 1,
               currentText.count < lastFormattedString.count / 2
         else { return }
         print("[iOSLiveTranscriber] Implicit text reset – "
@@ -397,3 +405,4 @@ public final class iOSLiveTranscriber: ObservableObject {
     }
 }
 #endif
+// swiftlint:enable file_length

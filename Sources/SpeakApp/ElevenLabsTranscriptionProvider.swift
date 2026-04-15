@@ -220,6 +220,12 @@ private struct ElevenLabsTranscriptionResponse: Decodable {
     }
 
     let text: String
-    let language_code: String?
+    let languageCode: String?
     let words: [Word]?
+
+    enum CodingKeys: String, CodingKey {
+        case text
+        case languageCode = "language_code"
+        case words
+    }
 }

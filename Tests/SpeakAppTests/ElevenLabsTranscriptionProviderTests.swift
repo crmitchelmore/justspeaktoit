@@ -80,7 +80,9 @@ final class ElevenLabsTranscriptionProviderTests: XCTestCase {
                 httpVersion: nil,
                 headerFields: ["Content-Type": "application/json"]
             )!
-            let json = #"{"text":"hello world","language_code":"en","words":[{"text":"hello","type":"word","start":0.0,"end":0.5},{"text":"world","type":"word","start":0.6,"end":1.0}]}"#
+            let json = #"{"text":"hello world","language_code":"en","words":["#
+                + #"{"text":"hello","type":"word","start":0.0,"end":0.5},"#
+                + #"{"text":"world","type":"word","start":0.6,"end":1.0}]}"#
             return (response, Data(json.utf8))
         }
         defer { MockURLProtocol.requestHandler = nil }
@@ -92,10 +94,18 @@ final class ElevenLabsTranscriptionProviderTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: audioURL) }
 
         // Use try? because AVURLAsset may fail to determine duration for synthetic test audio
-        _ = try? await provider.transcribeFile(at: audioURL, apiKey: "test-key", model: "elevenlabs/scribe_v1", language: nil)
+        _ = try? await provider.transcribeFile(
+            at: audioURL,
+            apiKey: "test-key",
+            model: "elevenlabs/scribe_v1",
+            language: nil
+        )
 
         let capturedRequest = await requestObserver.capturedRequest()
-        let captured = try XCTUnwrap(capturedRequest, "Request should have been sent to ElevenLabs even when duration loading fails")
+        let captured = try XCTUnwrap(
+            capturedRequest,
+            "Request should have been sent to ElevenLabs even when duration loading fails"
+        )
         XCTAssertEqual(captured.value(forHTTPHeaderField: "xi-api-key"), "test-key")
     }
 
@@ -121,10 +131,18 @@ final class ElevenLabsTranscriptionProviderTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: audioURL) }
 
         // Use try? because AVURLAsset may fail to determine duration for synthetic test audio
-        _ = try? await provider.transcribeFile(at: audioURL, apiKey: "test-key", model: "elevenlabs/scribe_v1", language: "fr_FR")
+        _ = try? await provider.transcribeFile(
+            at: audioURL,
+            apiKey: "test-key",
+            model: "elevenlabs/scribe_v1",
+            language: "fr_FR"
+        )
 
         let capturedRequest = await requestObserver.capturedRequest()
-        _ = try XCTUnwrap(capturedRequest, "Request should have been sent to ElevenLabs even when duration loading fails")
+        _ = try XCTUnwrap(
+            capturedRequest,
+            "Request should have been sent to ElevenLabs even when duration loading fails"
+        )
         let capturedBody = await requestObserver.capturedBody()
         let body = try XCTUnwrap(capturedBody)
         let bodyString = String(data: body, encoding: .utf8) ?? ""
@@ -153,7 +171,12 @@ final class ElevenLabsTranscriptionProviderTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: audioURL) }
 
         do {
-            _ = try await provider.transcribeFile(at: audioURL, apiKey: "bad-key", model: "elevenlabs/scribe_v1", language: nil)
+            _ = try await provider.transcribeFile(
+                at: audioURL,
+                apiKey: "bad-key",
+                model: "elevenlabs/scribe_v1",
+                language: nil
+            )
             XCTFail("Expected a TranscriptionProviderError.httpError to be thrown")
         } catch {
             XCTAssertTrue(error.localizedDescription.contains("401"), "Unexpected error: \(error)")
@@ -179,7 +202,12 @@ final class ElevenLabsTranscriptionProviderTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: audioURL) }
 
         do {
-            _ = try await provider.transcribeFile(at: audioURL, apiKey: "test-key", model: "elevenlabs/scribe_v1", language: nil)
+            _ = try await provider.transcribeFile(
+                at: audioURL,
+                apiKey: "test-key",
+                model: "elevenlabs/scribe_v1",
+                language: nil
+            )
             XCTFail("Expected httpError to be thrown for 500 response")
         } catch {
             XCTAssertTrue(error.localizedDescription.contains("500"), "Unexpected error: \(error)")

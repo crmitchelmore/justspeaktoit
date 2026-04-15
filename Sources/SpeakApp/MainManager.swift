@@ -90,6 +90,7 @@ final class MainManager: ObservableObject {
     }
   }
 
+  // swiftlint:disable:next function_body_length
   init(
     appSettings: AppSettings,
     permissionsManager: PermissionsManager,

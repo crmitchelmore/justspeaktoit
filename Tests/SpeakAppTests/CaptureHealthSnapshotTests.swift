@@ -16,19 +16,19 @@ final class CaptureHealthSnapshotTests: XCTestCase {
   }
 
   func testSnapshot_equality_sameValues() {
-    let a = CaptureHealthSnapshot(
+    let snapshotA = CaptureHealthSnapshot(
       microphonePermission: .granted,
       inputDeviceName: "MacBook Mic",
       providerLabel: "AssemblyAI Universal",
       latencyTier: .fast
     )
-    let b = CaptureHealthSnapshot(
+    let snapshotB = CaptureHealthSnapshot(
       microphonePermission: .granted,
       inputDeviceName: "MacBook Mic",
       providerLabel: "AssemblyAI Universal",
       latencyTier: .fast
     )
-    XCTAssertEqual(a, b)
+    XCTAssertEqual(snapshotA, snapshotB)
   }
 
   func testSnapshot_equality_differentPermission() {

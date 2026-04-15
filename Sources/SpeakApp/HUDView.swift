@@ -191,11 +191,21 @@ struct HUDOverlay: View {
   private var captureHealthRow: some View {
     let health = manager.captureHealth
     let micColor: Color = health.microphonePermission == .denied ? phaseColor : .secondary
+    let microphonePermissionLabel = {
+      switch health.microphonePermission {
+      case .granted:
+        return "Granted"
+      case .denied:
+        return "Denied"
+      default:
+        return "Unknown"
+      }
+    }()
     HStack(spacing: 8) {
       Image(systemName: health.microphonePermission == .denied ? "mic.slash.fill" : "mic.fill")
         .font(.system(size: 10, weight: .semibold))
         .foregroundStyle(micColor)
-        .accessibilityLabel("Microphone permission: \(health.microphonePermission == .granted ? "Granted" : health.microphonePermission == .denied ? "Denied" : "Unknown")")
+        .accessibilityLabel("Microphone permission: \(microphonePermissionLabel)")
 
       Text(health.inputDeviceName)
         .font(.caption2)

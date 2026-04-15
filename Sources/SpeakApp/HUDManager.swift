@@ -55,6 +55,8 @@ final class HUDManager: ObservableObject {
   @Published var isExpanded: Bool = false
 
   @Published private(set) var snapshot: Snapshot = .hidden
+  /// Current capture-health data shown in the HUD during recording and failure phases.
+  @Published private(set) var captureHealth: CaptureHealthSnapshot = .empty
   /// Normalized audio level (0.0 to 1.0) during recording phase
   @Published private(set) var audioLevel: Float = 0
 
@@ -151,6 +153,10 @@ final class HUDManager: ObservableObject {
     invalidateTimers()
     audioLevel = 0
     snapshot = .hidden
+  }
+
+  func updateCaptureHealth(_ health: CaptureHealthSnapshot) {
+    captureHealth = health
   }
 
   private func transition(

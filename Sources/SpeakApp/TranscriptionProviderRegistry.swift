@@ -15,6 +15,7 @@ actor TranscriptionProviderRegistry {
         providers["deepgram"] = DeepgramTranscriptionProvider()
         providers["modulate"] = ModulateTranscriptionProvider()
         providers["assemblyai"] = AssemblyAITranscriptionProvider()
+        providers["elevenlabs"] = ElevenLabsTranscriptionProvider()
     }
 
     func allProviders() -> [TranscriptionProviderMetadata] {

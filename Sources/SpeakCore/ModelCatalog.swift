@@ -142,7 +142,8 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             description: "AssemblyAI's u3-rt-pro streaming model for higher real-time transcription accuracy.",
             estimatedLatencyMs: 250, latencyTier: .fast),
         Option(
-            id: "elevenlabs/scribe-v2-streaming", displayName: "ElevenLabs Scribe v2 (Streaming)",
+            id: "elevenlabs/scribe-v2-streaming",
+            displayName: "ElevenLabs Scribe v2 (Streaming)",
             description: "ElevenLabs Scribe v2 real-time WebSocket transcription. Reuses your ElevenLabs API key — the key must have speech-to-text (Scribe) access.",
             estimatedLatencyMs: 200, latencyTier: .fast)
     ]

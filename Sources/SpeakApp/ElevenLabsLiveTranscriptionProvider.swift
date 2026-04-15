@@ -20,7 +20,8 @@ enum ElevenLabsLiveError: LocalizedError {
         case .connectionFailed:
             return "Failed to establish WebSocket connection to ElevenLabs."
         case .invalidAPIKeyOrMissingScribeAccess:
-            return "ElevenLabs API key is invalid or does not have speech-to-text (Scribe) access. Check your key in Settings → ElevenLabs."
+            return "ElevenLabs API key is invalid or does not have speech-to-text (Scribe) access. "
+                + "Check your key in Settings → ElevenLabs."
         }
     }
 }
@@ -38,7 +39,12 @@ private struct ElevenLabsTranscriptEvent: Decodable {
 
 private struct ElevenLabsTranscriptMessage: Decodable {
     let type: String
-    let transcript_event: ElevenLabsTranscriptEvent?
+    let transcriptEvent: ElevenLabsTranscriptEvent?
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case transcriptEvent = "transcript_event"
+    }
 }
 
 // MARK: - Live Transcriber (WebSocket client)
@@ -227,7 +233,7 @@ final class ElevenLabsLiveTranscriber: @unchecked Sendable {
             switch envelope.type {
             case "transcript":
                 let msg = try JSONDecoder().decode(ElevenLabsTranscriptMessage.self, from: data)
-                guard let event = msg.transcript_event, !event.text.isEmpty else { return }
+                guard let event = msg.transcriptEvent, !event.text.isEmpty else { return }
                 let isFinal = event.type == "final"
                 currentOnTranscript()?(event.text, isFinal)
             case "close_connection":
@@ -246,9 +252,10 @@ final class ElevenLabsLiveTranscriber: @unchecked Sendable {
             return ElevenLabsLiveError.invalidAPIKeyOrMissingScribeAccess
         }
         let description = nsError.localizedDescription.lowercased()
-        if description.contains("401") || description.contains("unauthorized")
-            || description.contains("403") || description.contains("forbidden")
-        {
+        if description.contains("401")
+            || description.contains("unauthorized")
+            || description.contains("403")
+            || description.contains("forbidden") {
             return ElevenLabsLiveError.invalidAPIKeyOrMissingScribeAccess
         }
         return error

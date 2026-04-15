@@ -274,6 +274,7 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
     currentModel = model
   }
 
+  // swiftlint:disable:next function_body_length
   func start() async throws {
     guard await ensurePermissions() else {
       throw TranscriptionManagerError.permissionsMissing
@@ -2165,7 +2166,6 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
     transcriber = nil
   }
 
-  // swiftlint:disable:next nesting
   private final class ElevenLabsAudioProcessor: @unchecked Sendable {
     private static let minimumChunkBytes = ElevenLabsLiveTranscriber.minimumChunkBytes
     private static let preferredChunkBytes = ElevenLabsLiveTranscriber.preferredChunkBytes

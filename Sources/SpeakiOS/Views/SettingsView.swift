@@ -39,7 +39,10 @@ public final class AppSettings: ObservableObject {
                 if self.elevenLabsAPIKey.isEmpty {
                     try? await Self.elevenLabsStorage.removeSecret(identifier: "elevenlabs.apiKey")
                 } else {
-                    try? await Self.elevenLabsStorage.storeSecret(self.elevenLabsAPIKey, identifier: "elevenlabs.apiKey")
+                    try? await Self.elevenLabsStorage.storeSecret(
+                        self.elevenLabsAPIKey,
+                        identifier: "elevenlabs.apiKey"
+                    )
                 }
             }
         }

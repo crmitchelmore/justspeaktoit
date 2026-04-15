@@ -102,8 +102,8 @@ public final class ElevenLabsLiveClient: @unchecked Sendable {
         var buffer = bufferPool.checkout()
         buffer.reserveCapacity(frameCount * 2)
 
-        for i in 0..<frameCount {
-            let sample = samples[i]
+        for sampleIndex in 0..<frameCount {
+            let sample = samples[sampleIndex]
             let clampedSample = max(-1.0, min(1.0, sample))
             let int16Sample = Int16(clampedSample * Float(Int16.max))
             withUnsafeBytes(of: int16Sample.littleEndian) { bytes in
@@ -204,7 +204,7 @@ public final class ElevenLabsLiveClient: @unchecked Sendable {
                 return
             }
 
-            let isFinal = response.speech_event_type == "FINAL_TRANSCRIPT"
+            let isFinal = response.speechEventType == "FINAL_TRANSCRIPT"
             onTranscript?(transcript, isFinal)
 
         } catch {
@@ -222,8 +222,13 @@ public final class ElevenLabsLiveClient: @unchecked Sendable {
 
 private struct ElevenLabsStreamResponse: Decodable {
     /// "PARTIAL_TRANSCRIPT" or "FINAL_TRANSCRIPT"
-    let speech_event_type: String?
+    let speechEventType: String?
     let transcript: String?
+
+    enum CodingKeys: String, CodingKey {
+        case speechEventType = "speech_event_type"
+        case transcript
+    }
 }
 
 // MARK: - Error Types

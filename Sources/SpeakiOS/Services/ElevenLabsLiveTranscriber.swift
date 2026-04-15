@@ -246,7 +246,11 @@ public final class ElevenLabsLiveTranscriber: ObservableObject {
         isRunning = false
         audioSessionManager.deactivate()
 
-        SpeakLogger.logTranscription(event: "stop", model: "elevenlabs/\(modelID)", wordCount: result.text.split(separator: " ").count)
+        SpeakLogger.logTranscription(
+            event: "stop",
+            model: "elevenlabs/\(modelID)",
+            wordCount: result.text.split(separator: " ").count
+        )
         onFinalResult?(result)
 
         return result

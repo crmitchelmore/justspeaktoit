@@ -39,7 +39,7 @@ public final class TranscriptionRecordingService: ObservableObject {
     // MARK: - Public API
 
     /// Starts a headless recording session with Live Activity.
-    public func startRecording() async throws {
+    public func startRecording() async throws { // swiftlint:disable:this function_body_length
         guard !isRunning else { return }
 
         let settings = AppSettings.shared
@@ -70,7 +70,7 @@ public final class TranscriptionRecordingService: ObservableObject {
                 transcriber.configure(apiKey: settings.deepgramAPIKey)
                 transcriber.model = currentModel.replacingOccurrences(of: "deepgram/", with: "")
 
-                transcriber.onPartialResult = { [weak self] text, isFinal in
+                transcriber.onPartialResult = { [weak self] text, _ in
                     Task { @MainActor in
                         self?.handlePartialResult(text: text)
                     }
@@ -90,7 +90,7 @@ public final class TranscriptionRecordingService: ObservableObject {
                 transcriber.configure(apiKey: settings.elevenLabsAPIKey)
                 transcriber.modelID = currentModel.replacingOccurrences(of: "elevenlabs/", with: "")
 
-                transcriber.onPartialResult = { [weak self] text, isFinal in
+                transcriber.onPartialResult = { [weak self] text, _ in
                     Task { @MainActor in
                         self?.handlePartialResult(text: text)
                     }
@@ -108,7 +108,7 @@ public final class TranscriptionRecordingService: ObservableObject {
             } else {
                 let transcriber = iOSLiveTranscriber(audioSessionManager: audioSessionManager)
 
-                transcriber.onPartialResult = { [weak self] text, isFinal in
+                transcriber.onPartialResult = { [weak self] text, _ in
                     Task { @MainActor in
                         self?.handlePartialResult(text: text)
                     }

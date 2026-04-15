@@ -2,6 +2,7 @@
 import SwiftUI
 import SpeakCore
 
+// swiftlint:disable file_length
 /// Unified transcriber that switches between Apple Speech and Deepgram.
 /// Integrates with Live Activity for lock screen presence.
 @MainActor
@@ -12,20 +13,20 @@ final class TranscriberCoordinator: ObservableObject {
     @Published private(set) var currentModel: String = "apple/local/SFSpeechRecognizer"
     @Published private(set) var confidence: Double?
     @Published private(set) var wordCount: Int = 0
-    
+
     private let audioSessionManager: AudioSessionManager
     private let activityManager = TranscriptionActivityManager.shared
     private let sharedState = SharedTranscriptionState.shared
-    
+
     private var appleTranscriber: iOSLiveTranscriber?
     private var deepgramTranscriber: DeepgramLiveTranscriber?
     private var elevenLabsTranscriber: ElevenLabsLiveTranscriber?
     private var startTime: Date?
-    
+
     init() {
         self.audioSessionManager = AudioSessionManager()
     }
-    
+
     var modelDisplayName: String {
         if currentModel.hasPrefix("deepgram") {
             return "Deepgram"
@@ -35,12 +36,13 @@ final class TranscriberCoordinator: ObservableObject {
         }
         return "Apple Speech"
     }
-    
+
     private var elapsedSeconds: Int {
         guard let start = startTime else { return 0 }
         return Int(Date().timeIntervalSince(start))
     }
-    
+
+    // swiftlint:disable:next function_body_length
     func start() async throws {
         let settings = AppSettings.shared
         currentModel = settings.selectedModel
@@ -48,7 +50,7 @@ final class TranscriberCoordinator: ObservableObject {
         wordCount = 0
         startTime = Date()
         sharedState.clear()
-        
+
         // Fallback to Apple Speech if Deepgram selected but no API key
         if currentModel.hasPrefix("deepgram") && !settings.hasDeepgramKey {
             currentModel = "apple/local/SFSpeechRecognizer"
@@ -58,29 +60,29 @@ final class TranscriberCoordinator: ObservableObject {
         if currentModel.hasPrefix("elevenlabs") && !settings.hasElevenLabsKey {
             currentModel = "apple/local/SFSpeechRecognizer"
         }
-        
+
         // Start Live Activity (if enabled)
         if settings.liveActivitiesEnabled {
             activityManager.startActivity(provider: modelDisplayName)
         }
-        
+
         if currentModel.hasPrefix("deepgram") {
             // Use Deepgram
             let transcriber = DeepgramLiveTranscriber(audioSessionManager: audioSessionManager)
             transcriber.configure(apiKey: settings.deepgramAPIKey)
             transcriber.model = currentModel.replacingOccurrences(of: "deepgram/", with: "")
-            
+
             transcriber.onPartialResult = { [weak self] text, isFinal in
                 self?.handlePartialResult(text: self?.deepgramTranscriber?.partialText ?? text, isFinal: isFinal)
             }
             transcriber.onError = { [weak self] error in
                 self?.handleError(error)
             }
-            
+
             deepgramTranscriber = transcriber
             appleTranscriber = nil
             elevenLabsTranscriber = nil
-            
+
             try await transcriber.start()
             isRunning = true
         } else if currentModel.hasPrefix("elevenlabs") {
@@ -88,24 +90,24 @@ final class TranscriberCoordinator: ObservableObject {
             let transcriber = ElevenLabsLiveTranscriber(audioSessionManager: audioSessionManager)
             transcriber.configure(apiKey: settings.elevenLabsAPIKey)
             transcriber.modelID = currentModel.replacingOccurrences(of: "elevenlabs/", with: "")
-            
+
             transcriber.onPartialResult = { [weak self] text, isFinal in
                 self?.handlePartialResult(text: self?.elevenLabsTranscriber?.partialText ?? text, isFinal: isFinal)
             }
             transcriber.onError = { [weak self] error in
                 self?.handleError(error)
             }
-            
+
             elevenLabsTranscriber = transcriber
             deepgramTranscriber = nil
             appleTranscriber = nil
-            
+
             try await transcriber.start()
             isRunning = true
         } else {
             // Use Apple Speech
             let transcriber = iOSLiveTranscriber(audioSessionManager: audioSessionManager)
-            
+
             transcriber.onPartialResult = { [weak self] text, isFinal in
                 self?.handlePartialResult(text: self?.appleTranscriber?.partialText ?? text, isFinal: isFinal)
                 self?.confidence = self?.appleTranscriber?.confidence
@@ -113,23 +115,23 @@ final class TranscriberCoordinator: ObservableObject {
             transcriber.onError = { [weak self] error in
                 self?.handleError(error)
             }
-            
+
             appleTranscriber = transcriber
             deepgramTranscriber = nil
             elevenLabsTranscriber = nil
-            
+
             try await transcriber.start()
             isRunning = true
         }
     }
-    
+
     private func handlePartialResult(text: String, isFinal: Bool) {
         partialText = text
         wordCount = text.split(separator: " ").count
-        
+
         // Update shared state for copy actions
         sharedState.updateTranscript(text)
-        
+
         // Update Live Activity (if enabled)
         if AppSettings.shared.liveActivitiesEnabled {
             activityManager.updateActivity(
@@ -140,64 +142,64 @@ final class TranscriberCoordinator: ObservableObject {
             )
         }
     }
-    
+
     private func handleError(_ error: Error) {
         self.error = error
         if AppSettings.shared.liveActivitiesEnabled {
             activityManager.reportError(error.localizedDescription)
         }
     }
-    
+
     func stop() async -> TranscriptionResult {
         isRunning = false
         let duration = elapsedSeconds
-        
+
         // Complete Live Activity (if enabled)
         if AppSettings.shared.liveActivitiesEnabled {
             activityManager.completeActivity(finalWordCount: wordCount, duration: duration)
         }
-        
+
         if let deepgram = deepgramTranscriber {
             let result = await deepgram.stop()
             deepgramTranscriber = nil
-            
+
             // Record to history
             iOSHistoryManager.shared.recordTranscription(
                 text: result.text,
                 model: currentModel,
                 duration: result.duration
             )
-            
+
             startTime = nil
             return result
         } else if let elevenlabs = elevenLabsTranscriber {
             let result = await elevenlabs.stop()
             elevenLabsTranscriber = nil
-            
+
             // Record to history
             iOSHistoryManager.shared.recordTranscription(
                 text: result.text,
                 model: currentModel,
                 duration: result.duration
             )
-            
+
             startTime = nil
             return result
         } else if let apple = appleTranscriber {
             let result = await apple.stop()
             appleTranscriber = nil
-            
+
             // Record to history
             iOSHistoryManager.shared.recordTranscription(
                 text: result.text,
                 model: currentModel,
                 duration: result.duration
             )
-            
+
             startTime = nil
             return result
         }
-        
+
         startTime = nil
         return TranscriptionResult(
             text: partialText,
@@ -210,7 +212,7 @@ final class TranscriberCoordinator: ObservableObject {
             debugInfo: nil
         )
     }
-    
+
     func cancel() {
         deepgramTranscriber?.cancel()
         elevenLabsTranscriber?.cancel()
@@ -227,6 +229,7 @@ final class TranscriberCoordinator: ObservableObject {
     }
 }
 
+// swiftlint:disable:next type_body_length
 public struct ContentView: View {
     @StateObject private var coordinator = TranscriberCoordinator()
     @ObservedObject private var settings = AppSettings.shared
@@ -236,9 +239,9 @@ public struct ContentView: View {
     @State private var showingPostProcessing = false
     @State private var displayText = ""  // Text shown in UI (may be post-processed)
     @Namespace private var controlsNamespace
-    
+
     public init() {}
-    
+
     public var body: some View {
         NavigationStack {
             ZStack {
@@ -264,7 +267,7 @@ public struct ContentView: View {
                             .padding()
                             .id("transcript")
                         }
-                        .onChange(of: coordinator.partialText) { _, newText in
+                        .onChange(of: coordinator.partialText) { _, _ in
                             // Update display text when recording (unless we have post-processed text)
                             if coordinator.isRunning {
                                 displayText = ""  // Clear post-processed text during new recording
@@ -274,14 +277,14 @@ public struct ContentView: View {
                             }
                         }
                     }
-                    
+
                     Spacer(minLength: 120) // Space for floating controls
                 }
-                
+
                 // Controls layer - floating glass controls
                 VStack {
                     Spacer()
-                    
+
                     // Floating control cluster with Liquid Glass
                     floatingControls
                         .padding(.horizontal, 20)
@@ -305,7 +308,7 @@ public struct ContentView: View {
                         }
                     }
                 }
-                
+
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 16) {
                         NavigationLink {
@@ -314,7 +317,7 @@ public struct ContentView: View {
                             Image(systemName: "clock.arrow.circlepath")
                         }
                         .accessibilityLabel("History")
-                        
+
                         NavigationLink {
                             SettingsView()
                         } label: {
@@ -353,9 +356,9 @@ public struct ContentView: View {
             }
         }
     }
-    
+
     // MARK: - Floating Controls with Glass Effect
-    
+
     @ViewBuilder
     private var floatingControls: some View {
         #if compiler(>=6.1) && canImport(SwiftUI, _version: 7.0)
@@ -368,7 +371,7 @@ public struct ContentView: View {
         floatingControlsFallback
         #endif
     }
-    
+
     #if compiler(>=6.1) && canImport(SwiftUI, _version: 7.0)
     @available(iOS 26.0, *)
     @ViewBuilder
@@ -389,7 +392,7 @@ public struct ContentView: View {
                 .tint(coordinator.isRunning ? .red : .brandAccent)
                 .clipShape(Circle())
                 .accessibilityLabel(coordinator.isRunning ? "Stop recording" : "Start recording")
-                
+
                 // Secondary actions (only visible when there's text and not recording)
                 if hasTextToShow && !coordinator.isRunning {
                     // Polish/Post-process button
@@ -405,7 +408,7 @@ public struct ContentView: View {
                     .clipShape(Circle())
                     .accessibilityLabel("Polish transcript")
                     .transition(.scale.combined(with: .opacity))
-                    
+
                     // Copy button
                     Button {
                         copyToClipboard()
@@ -426,7 +429,7 @@ public struct ContentView: View {
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: coordinator.isRunning)
     }
     #endif
-    
+
     @ViewBuilder
     private var floatingControlsFallback: some View {
         HStack(spacing: 16) {
@@ -444,7 +447,7 @@ public struct ContentView: View {
             .tint(coordinator.isRunning ? .red : .accentColor)
             .clipShape(Circle())
             .accessibilityLabel(coordinator.isRunning ? "Stop recording" : "Start recording")
-            
+
             // Secondary actions (only visible when there's text and not recording)
             if hasTextToShow && !coordinator.isRunning {
                 // Polish/Post-process button
@@ -460,7 +463,7 @@ public struct ContentView: View {
                 .clipShape(Circle())
                 .accessibilityLabel("Polish transcript")
                 .transition(.scale.combined(with: .opacity))
-                
+
                 // Copy button
                 Button {
                     copyToClipboard()
@@ -478,24 +481,24 @@ public struct ContentView: View {
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: hasTextToShow)
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: coordinator.isRunning)
     }
-    
+
     // MARK: - Computed Properties
-    
+
     private var hasTextToShow: Bool {
         !displayText.isEmpty || !coordinator.partialText.isEmpty
     }
-    
+
     private var currentText: String {
         displayText.isEmpty ? coordinator.partialText : displayText
     }
-    
+
     // MARK: - Actions
-    
+
     private func toggleRecording() async {
         if coordinator.isRunning {
             let result = await coordinator.stop()
             print("[ContentView] Final result: \(result.text.count) chars, duration: \(result.duration)s")
-            
+
             // Auto post-process if enabled
             if settings.autoPostProcess && settings.hasOpenRouterKey && !result.text.isEmpty {
                 showingPostProcessing = true
@@ -511,7 +514,7 @@ public struct ContentView: View {
             }
         }
     }
-    
+
     private func copyToClipboard() {
         UIPasteboard.general.string = currentText
         copied = true
@@ -526,3 +529,4 @@ public struct ContentView: View {
     ContentView()
 }
 #endif
+// swiftlint:enable file_length

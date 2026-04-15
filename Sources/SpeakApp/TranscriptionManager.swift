@@ -116,6 +116,13 @@ final class TranscriptionManager: ObservableObject {
     livePartialText = ""
   }
 
+  /// Marks the live controller cache as stale so it re-reads credentials on next start.
+  /// Call this before removing a credential from Keychain to ensure no stale session is reused.
+  @MainActor
+  func invalidateLiveControllerCache() {
+    liveController.markControllersStale()
+  }
+
   func transcribeFile(at url: URL) async throws -> TranscriptionResult {
     let model = appSettings.batchTranscriptionModel
     let registry = TranscriptionProviderRegistry.shared
@@ -2206,8 +2213,11 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     }
   }
 
+  /// Whether the controller cache has been marked stale and will reset on next start.
+  var isCacheStale: Bool { invalidateBeforeNextStart }
+
   @MainActor
-  private func markControllersStale() {
+  func markControllersStale() {
     invalidateBeforeNextStart = true
   }
 }

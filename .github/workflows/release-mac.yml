@@ -212,14 +212,26 @@ jobs:
           ditto -c -k --keepParent "$APP_PATH" "$RUNNER_TEMP/$PRODUCT_NAME.zip"
           
           # Submit for notarization (don't wait, use polling to avoid timeout)
+          set +e
           SUBMIT_OUTPUT=$(xcrun notarytool submit "$RUNNER_TEMP/$PRODUCT_NAME.zip" \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_ID_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" 2>&1)
-          
+          SUBMIT_EXIT_CODE=$?
+          set -e
+
           echo "$SUBMIT_OUTPUT"
-          
+
+          if [ $SUBMIT_EXIT_CODE -ne 0 ]; then
+            echo "Initial notarization submission failed"
+            exit $SUBMIT_EXIT_CODE
+          fi
+
           SUBMISSION_ID=$(echo "$SUBMIT_OUTPUT" | grep -E "^\s*id:" | head -1 | awk '{print $2}')
+          if [ -z "$SUBMISSION_ID" ]; then
+            echo "Failed to parse notarization submission ID"
+            exit 1
+          fi
           echo "Submission ID: $SUBMISSION_ID"
           
           # Poll for completion with retries

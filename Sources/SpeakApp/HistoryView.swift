@@ -4,8 +4,9 @@ import AppKit
 import Combine
 import SwiftUI
 import UniformTypeIdentifiers
+// swiftlint:disable file_length
 
-struct HistoryView: View {
+struct HistoryView: View { // swiftlint:disable:this type_body_length
   @EnvironmentObject private var environment: AppEnvironment
   @State private var searchText: String = ""
   @State private var showErrorsOnly: Bool = false

@@ -37,16 +37,26 @@ When triaging, check the latest run history before changing the secret: a later 
 
 These catalogue workflows were added from `githubnext/agentics` and compiled into lock files:
 
-- `daily-repo-status` — posts a daily repository status issue
+- `daily-repo-status` — maintains a rolling repository status issue when there is meaningful maintainer-facing change
 - `daily-doc-updater` — proposes documentation updates as PRs
-- `daily-test-improver` — improves tests and test coverage over time
-- `daily-perf-improver` — proposes performance improvements over time
-- `repository-quality-improver` — raises focused quality-analysis issues
-- `ci-doctor` — investigates failures in the installed automation workflows
+- `daily-test-improver` — improves tests and test coverage over time, using the monthly summary and only opening focused durable issues when warranted
+- `daily-perf-improver` — proposes performance improvements over time, using the monthly summary and only opening focused durable issues when warranted
+- `repository-quality-improver` — raises concise, deduplicated quality issues only when they represent durable work
+- `ci-doctor` — investigates recurring or structural failures in the installed automation workflows while keeping transient one-offs out of the issue tracker
 - `agentics-maintenance` — generated maintenance workflow for expiring agentic outputs
 - `verify-basics` — lightweight push/manual smoke test for validating the Copilot-backed gh-aw path in this repository
 
 We originally installed the stock `issue-triage` workflow too, but removed it after the overlap assessment: Product validation is now the first intake gate, so a separate anonymous triage step only added churn.
+
+## Issue churn guardrails
+
+To keep the issue tracker high-signal:
+
+- create automated issues only for durable maintainer work
+- prefer updating a rolling issue, monthly summary, or existing issue/PR for status and follow-up
+- suppress no-op issue reporting on scheduled workflows
+- keep automated issue bodies short: problem, evidence, next action, done when
+- for improver agents, maintain existing automation PRs/issues before opening new work; cap new PR creation to one item at a time and pause new PRs when a small backlog already exists
 
 ## Issue planning team
 
@@ -224,6 +234,8 @@ PR follow-ups are handled by `PR Plan Review - Bot Follow Up`, and `PR Plan Revi
 
 Important implementation detail: comments created with the default `GITHUB_TOKEN` do not emit fresh `issue_comment` events for other workflows to consume, so comment-based fan-out is not reliable on its own. In this repository the durable fan-out paths are explicit `workflow_dispatch` calls and `workflow_run`-triggered reconcilers, not bot comments pretending to be a second webhook.
 
+Another workflow-authoring gotcha from this repository: if safe-outputs uses `add_comment` with `target: "*"`, the emitted comment action still needs an explicit `issue_number` or `item_number`. If that identifier is missing, safe-outputs can apply labels first and then fail the run on the comment step, leaving the thread partly updated and the workflow red.
+
 The same applies to issues created by agentic workflow runs: GitHub does not emit a fresh `issues.opened` event for downstream workflows when the issue was opened with `GITHUB_TOKEN`. This repository therefore uses `Issue Product Validation - Agentic Follow Up` to look for new bot-authored issue outputs and dispatch `Issue Product Validation` explicitly.
 
 ### How team personalities build memory
@@ -297,7 +309,7 @@ These workflows keep the agentic system healthy over time:
 - Duplicate or overlapping improvement PRs
 - Stale improvement PRs open for more than 5 days
 - Failed improvement PRs that need attention
-- Creates a coordination report issue only when action is needed
+- Updates a single coordination issue only when action is needed
 
 ### Stale failure cleanup
 

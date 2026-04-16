@@ -182,6 +182,7 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
 - Use platform tags in scope: `feat(mac):`, `fix(ios):` — these feed Sparkle release notes
 - Pull requests should describe motivation, note user-visible changes, and reference related issues
 - Include `make test` output or screenshots when UI shifts
+- Direct pushes to `main` are blocked by branch protection; create a branch and PR even for small fixes, then merge through the normal repo gate.
 
 ### Automated Release Process
 - Every push to `main` triggers `.github/workflows/auto-release.yml`

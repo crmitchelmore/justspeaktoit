@@ -39,6 +39,8 @@ safe-outputs:
     title-prefix: "[agentic] "
     labels: [automation]
     max: 1
+  noop:
+    report-as-issue: false
 
 tools:
   edit:
@@ -223,6 +225,8 @@ Keep the PR small and reviewable.
 Before creating an issue, search open issues for `[agentic]` titles covering the same topic. If a matching issue already exists, do nothing and signal a no-op instead.
 
 If there is a real problem but the safe next step is not an automatic patch, create one focused issue.
+
+If the finding is status-only, already cleared, or can be handled directly in one bounded PR, do not open an issue.
 
 The issue should include:
 

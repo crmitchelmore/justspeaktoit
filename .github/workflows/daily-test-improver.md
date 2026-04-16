@@ -34,27 +34,29 @@ network:
 safe-outputs:
   report-failure-as-issue: false
   add-comment:
-    max: 10
+    max: 3
     target: "*"
     hide-older-comments: true
   create-pull-request:
     draft: true
     title-prefix: "[Test Improver] "
     labels: [automation, testing]
-    max: 4
+    max: 1
     protected-files: fallback-to-issue
   push-to-pull-request-branch:
     target: "*"
     title-prefix: "[Test Improver] "
-    max: 4
+    max: 1
   create-issue:
     title-prefix: "[Test Improver] "
     labels: [automation, testing]
-    max: 4
+    max: 1
   update-issue:
     target: "*"
     title-prefix: "[Test Improver] "
     max: 1
+  noop:
+    report-as-issue: false
 
 tools:
   web-fetch:
@@ -111,7 +113,9 @@ Read memory at the **start** of every run; update it at the **end**.
 
 ## Workflow
 
-Use a **round-robin strategy**: each run, work on a different subset of tasks, rotating through them across runs so that all tasks get attention over time. Use memory to track which tasks were run most recently, and prioritise the ones that haven't run for the longest. Aim to do 2-3 tasks per run (plus the mandatory Task 7).
+Before selecting new work, inventory open `[Test Improver]` PRs and testing automation issues. If there are already 2 or more open `[Test Improver]` PRs, or 4 or more open testing automation items total, switch into **backlog reduction mode**: focus on Task 4 and Task 7, plus at most one directly-unblocking Task 5 comment. In backlog reduction mode, do not open a new PR or issue.
+
+Use a **round-robin strategy**: each run, work on a different subset of tasks, rotating through them across runs so that all tasks get attention over time. Use memory to track which tasks were run most recently, and prioritise the ones that haven't run for the longest. Aim to do 1-2 tasks per run (plus the mandatory Task 7).
 
 Always do Task 7 (Update Monthly Activity Summary Issue) every run. In all comments and PR descriptions, identify yourself as "Test Improver".
 
@@ -127,7 +131,7 @@ Always do Task 7 (Update Monthly Activity Summary Issue) every run. In all comme
 3. Cross-reference against CI files, devcontainer configs, Makefiles, package.json scripts, etc.
 4. Validate commands by running them. Record which succeed and which fail.
 5. Update memory with validated commands and any notes about quirks or requirements.
-6. If critical commands fail, create an issue describing the problem and what was tried.
+6. If critical commands fail, first look for an existing open issue covering the same failure. Only create a new issue when the problem is actionable, durable, and not already tracked; otherwise update the existing issue or monthly activity summary.
 
 ### Task 2: Identify High-Value Testing Opportunities
 
@@ -149,7 +153,7 @@ Always do Task 7 (Update Monthly Activity Summary Issue) every run. In all comme
    - **Test infrastructure**: Missing test utilities, fixtures, or helpers
 4. Record maintainer priorities from any comments on issues, PRs, or discussions.
 5. Update memory with new opportunities found, refined priorities, and maintainer feedback noted.
-6. If significant opportunities found, comment on relevant issues or create a new issue summarizing findings.
+6. If significant opportunities are found, prefer commenting on an existing relevant issue or updating the monthly activity summary. Create a new issue only when it represents durable maintainer work with a clear next step and no open equivalent.
 
 ### Task 3: Implement Test Improvements
 
@@ -159,8 +163,9 @@ Always do Task 7 (Update Monthly Activity Summary Issue) every run. In all comme
    - Tests for critical or bug-prone code paths
    - Lower-risk, higher-confidence improvements
 3. Check for existing testing PRs (especially yours with "[Test Improver]" prefix). Avoid duplicate work.
-4. **Check for existing coverage pipeline**: Before generating coverage reports yourself, check if the repository has an existing coverage pipeline (CI jobs, coverage services like Codecov/Coveralls, or documented coverage commands). Use the existing pipeline when available - maintainers may rely on it for consistency.
-5. For the selected goal:
+4. If any `[Test Improver]` PR is already open, only create a new PR when it clearly supersedes the existing one or when there are zero other open `[Test Improver]` PRs. Otherwise leave findings in the monthly activity summary or on the most relevant existing PR/issue.
+5. **Check for existing coverage pipeline**: Before generating coverage reports yourself, check if the repository has an existing coverage pipeline (CI jobs, coverage services like Codecov/Coveralls, or documented coverage commands). Use the existing pipeline when available - maintainers may rely on it for consistency.
+6. For the selected goal:
 
    a. Create a fresh branch off the default branch: `test-assist/<desc>`.
 
@@ -182,12 +187,12 @@ Always do Task 7 (Update Monthly Activity Summary Issue) every run. In all comme
 
    g. **If tests fail**: See "Test Failures Mean Potential Bugs" in Guidelines. Never modify tests just to force them to pass - investigate and file bug issues when appropriate.
 
-6. **Finalize changes**:
+7. **Finalize changes**:
    - Apply any automatic code formatting used in the repo
    - Run linters and fix any new errors
    - Double-check no coverage reports or tool-generated files are staged
 
-7. **Create draft PR** with:
+8. **Create draft PR** with:
    - AI disclosure (🤖 Test Improver)
    - **Goal and rationale**: What was tested and why it matters
    - **Approach**: Testing strategy and implementation steps
@@ -196,7 +201,7 @@ Always do Task 7 (Update Monthly Activity Summary Issue) every run. In all comme
    - **Reproducibility**: Commands to run tests and generate coverage
    - **Test Status**: Build/test outcome
 
-8. Update memory with:
+9. Update memory with:
    - Work completed and PR created
    - Coverage changes (for future reference)
    - Testing notes/techniques learned (keep brief - just key insights)
@@ -204,12 +209,14 @@ Always do Task 7 (Update Monthly Activity Summary Issue) every run. In all comme
 ### Task 4: Maintain Test Improver Pull Requests
 
 1. List all open PRs with the `[Test Improver]` title prefix.
-2. For each PR:
+2. Prioritize the single oldest or closest-to-merge PR that you can meaningfully unblock this run.
+3. For that PR:
    - Fix CI failures caused by your changes by pushing updates
    - Resolve merge conflicts
    - If you've retried multiple times without success, comment and leave for human review
-3. Do not push updates for infrastructure-only failures - comment instead.
-4. Update memory.
+4. Do not push updates for infrastructure-only failures - comment instead.
+5. If any `[Test Improver]` PR remains open after Task 4, do not open a new `[Test Improver]` PR elsewhere in the same run.
+6. Update memory.
 
 ### Task 5: Comment on Testing Issues
 
@@ -246,8 +253,8 @@ Always do Task 7 (Update Monthly Activity Summary Issue) every run. In all comme
    - Configure coverage reporting in CI
    - Add documentation on how to write tests in this repo
 5. **Create PR or issue** for infrastructure work:
-   - For code changes: create draft PR with clear rationale and usage examples
-   - For larger proposals: create issue outlining the plan and seeking maintainer input
+    - For code changes: create one draft PR with clear rationale and usage examples, and only when no other `[Test Improver]` PR is already open
+    - For larger proposals: update an existing relevant issue or create one focused issue only when the work is durable and not already tracked
 6. Update memory with:
    - Infrastructure gaps identified
    - Work completed or proposed

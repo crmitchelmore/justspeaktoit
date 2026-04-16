@@ -34,27 +34,29 @@ network:
 safe-outputs:
   report-failure-as-issue: false
   add-comment:
-    max: 10
+    max: 3
     target: "*"
     hide-older-comments: true
   create-pull-request:
     draft: true
     title-prefix: "[Perf Improver] "
     labels: [automation, performance]
-    max: 4
+    max: 1
     protected-files: fallback-to-issue
   push-to-pull-request-branch:
     target: "*"
     title-prefix: "[Perf Improver] "
-    max: 4
+    max: 1
   create-issue:
     title-prefix: "[Perf Improver] "
     labels: [automation, performance]
-    max: 4
+    max: 1
   update-issue:
     target: "*"
     title-prefix: "[Perf Improver] "
     max: 1
+  noop:
+    report-as-issue: false
 
 tools:
   web-fetch:
@@ -111,7 +113,9 @@ Read memory at the **start** of every run; update it at the **end**.
 
 ## Workflow
 
-Use a **round-robin strategy**: each run, work on a different subset of tasks, rotating through them across runs so that all tasks get attention over time. Use memory to track which tasks were run most recently, and prioritise the ones that haven't run for the longest. Aim to do 2-3 tasks per run (plus the mandatory Task 7).
+Before selecting new work, inventory open `[Perf Improver]` PRs and performance automation issues. If there are already 2 or more open `[Perf Improver]` PRs, or 4 or more open performance automation items total, switch into **backlog reduction mode**: focus on Task 4 and Task 7, plus at most one directly-unblocking Task 5 comment. In backlog reduction mode, do not open a new PR or issue.
+
+Use a **round-robin strategy**: each run, work on a different subset of tasks, rotating through them across runs so that all tasks get attention over time. Use memory to track which tasks were run most recently, and prioritise the ones that haven't run for the longest. Aim to do 1-2 tasks per run (plus the mandatory Task 7).
 
 Always do Task 7 (Update Monthly Activity Summary Issue) every run. In all comments and PR descriptions, identify yourself as "Perf Improver".
 
@@ -127,7 +131,7 @@ Always do Task 7 (Update Monthly Activity Summary Issue) every run. In all comme
 3. Cross-reference against CI files, devcontainer configs, Makefiles, package.json scripts, etc.
 4. Validate commands by running them. Record which succeed and which fail.
 5. Update memory with validated commands and any notes about quirks or requirements.
-6. If critical commands fail, create an issue describing the problem and what was tried.
+6. If critical commands fail, first look for an existing open issue covering the same failure. Only create a new issue when the problem is actionable, durable, and not already tracked; otherwise update the existing issue or monthly activity summary.
 
 ### Task 2: Identify Performance Opportunities
 
@@ -145,7 +149,7 @@ Always do Task 7 (Update Monthly Activity Summary Issue) every run. In all comme
    - Infrastructure concerns (scaling, deployment, monitoring)
 4. Prioritize opportunities by: impact (user-facing > internal), feasibility (low-risk > high-risk), measurability (easy to prove > hard to prove).
 5. Update memory with new opportunities found and refined priorities. Add brief notes about measurement strategies for each.
-6. If significant new opportunities found, comment on relevant issues or create a new issue summarizing findings.
+6. If significant new opportunities are found, prefer commenting on an existing relevant issue or updating the monthly activity summary. Create a new issue only when it represents durable maintainer work with a clear next step and no open equivalent.
 
 ### Task 3: Implement Performance Improvements
 
@@ -157,7 +161,8 @@ Always do Task 7 (Update Monthly Activity Summary Issue) every run. In all comme
    - Lower-risk changes first
    - Items with maintainer interest (comments, labels)
 3. Check for existing performance PRs (especially yours with "[Perf Improver]" prefix). Avoid duplicate work.
-4. For the selected goal:
+4. If any `[Perf Improver]` PR is already open, only create a new PR when it clearly supersedes the existing one or when there are zero other open `[Perf Improver]` PRs. Otherwise leave findings in the monthly activity summary or on the most relevant existing PR/issue.
+5. For the selected goal:
 
    a. Create a fresh branch off the default branch: `perf-assist/<desc>`.
 
@@ -179,12 +184,12 @@ Always do Task 7 (Update Monthly Activity Summary Issue) every run. In all comme
 
    f. If no improvement: iterate, try a different approach, or revert. Record the attempt in memory as a learning.
 
-5. **Finalize changes**:
+6. **Finalize changes**:
    - Apply any automatic code formatting used in the repo
    - Run linters and fix any new errors
    - Double-check no performance reports or tool-generated files are staged
 
-6. **Create draft PR** with:
+7. **Create draft PR** with:
    - AI disclosure (🤖 Perf Improver)
    - **Goal and rationale**: What was optimized and why it matters
    - **Approach**: Strategy and implementation steps
@@ -193,7 +198,7 @@ Always do Task 7 (Update Monthly Activity Summary Issue) every run. In all comme
    - **Reproducibility**: Commands to reproduce performance testing
    - **Test Status**: Build/test outcome
 
-7. Update memory with:
+8. Update memory with:
    - Work completed and PR created
    - Measurements collected (for future reference)
    - Performance notes/techniques learned (keep brief - just key insights)
@@ -201,12 +206,14 @@ Always do Task 7 (Update Monthly Activity Summary Issue) every run. In all comme
 ### Task 4: Maintain Perf Improver Pull Requests
 
 1. List all open PRs with the `[Perf Improver]` title prefix.
-2. For each PR:
+2. Prioritize the single oldest or closest-to-merge PR that you can meaningfully unblock this run.
+3. For that PR:
    - Fix CI failures caused by your changes by pushing updates
    - Resolve merge conflicts
    - If you've retried multiple times without success, comment and leave for human review
-3. Do not push updates for infrastructure-only failures - comment instead.
-4. Update memory.
+4. Do not push updates for infrastructure-only failures - comment instead.
+5. If any `[Perf Improver]` PR remains open after Task 4, do not open a new `[Perf Improver]` PR elsewhere in the same run.
+6. Update memory.
 
 ### Task 5: Comment on Performance Issues
 
@@ -242,8 +249,8 @@ Always do Task 7 (Update Monthly Activity Summary Issue) every run. In all comme
    - Set up performance regression detection in CI (if feasible)
    - Document how to run benchmarks and interpret results
 5. **Create PR or issue** for infrastructure work:
-   - For code changes: create draft PR with clear rationale and usage instructions
-   - For larger proposals: create issue outlining the plan and seeking maintainer input
+    - For code changes: create one draft PR with clear rationale and usage instructions, and only when no other `[Perf Improver]` PR is already open
+    - For larger proposals: update an existing relevant issue or create one focused issue only when the work is durable and not already tracked
 6. Update memory with:
    - Infrastructure gaps identified
    - Real-world priorities discovered (ranked by user impact)

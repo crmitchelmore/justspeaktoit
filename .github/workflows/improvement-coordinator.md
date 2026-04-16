@@ -22,9 +22,16 @@ tools:
 safe-outputs:
   report-failure-as-issue: false
   create-issue:
+    title-prefix: "[coordination] "
     max: 1
     labels: [automation, coordination]
     expires: 1d
+  update-issue:
+    target: "*"
+    title-prefix: "[coordination] "
+    max: 1
+  noop:
+    report-as-issue: false
 
 timeout-minutes: 10
 engine:
@@ -84,17 +91,21 @@ Save the current inventory to cache memory at `/tmp/gh-aw/cache-memory/improveme
 
 ### 4. Report (if needed)
 
-If you find conflicts, stale work, or more than 6 open improvement items, create a single coordination issue with:
+If you find conflicts, stale work, more than 2 open improvement PRs, or more than 4 open improvement items total, maintain a single coordination issue with:
 
-- Title: `[coordination] Improvement agent status — $(date +%Y-%m-%d)`
-- A table of all open improvement PRs and issues
-- Specific recommendations (close stale PR X, PR Y and Z overlap on file F)
+- Title: `[coordination] Improvement agent status`
+- Counts for open improvement PRs and issues
+- Only the concrete overlaps, stale items, or blocked items that need maintainer action
+- At most 5 specific recommendations (close stale PR X, PR Y and Z overlap on file F, pause new PR creation until backlog drops)
 - Tag with `automation, coordination` labels
 
-If everything looks healthy (no conflicts, ≤6 open items, no stale PRs), do nothing.
+If an open coordination issue already exists, update it in place instead of creating a fresh dated issue.
+
+If everything looks healthy (no conflicts, ≤2 open improvement PRs, ≤4 open items total, no stale PRs), do nothing.
 
 ## Operating constraints
 
-- Never modify PRs or issues directly. Only create a coordination report.
+- Never modify PRs or issues directly beyond creating or updating the single coordination report.
 - Never close or merge anything.
+- Never create purely informational daily status issues.
 - Keep the report actionable and concise.

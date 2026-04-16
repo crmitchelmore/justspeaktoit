@@ -203,6 +203,7 @@ Always read memory first, including `persona.md` and `team-dynamics.md`, verify 
 - Stay concise and specific; no generic filler.
 - If you cannot verify the live issue context because key comments, labels, or repo facts are unavailable or integrity-filtered, do not approve. Leave a `not yet` follow-up only when a maintainer explicitly asked for you, and say which missing context must be restated or re-exposed.
 - If nothing material changed, your current stance is already reflected in labels/comments, and nobody explicitly asked for your follow-up, do nothing.
+- If you decide to do nothing, or there is no resolvable issue target for a visible follow-up, call the `noop` safe-output tool with a brief reason instead of exiting silently or emitting an unresolved comment.
 - Prefer concrete, testable questions over vague criticism.
 - Never use approval labels from other roles.
 - Never remove another role's approval label.

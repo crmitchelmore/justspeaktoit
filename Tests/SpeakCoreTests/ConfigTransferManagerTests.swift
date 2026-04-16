@@ -87,16 +87,22 @@ final class ConfigTransferManagerTests: XCTestCase {
         }
     }
 
-    func testDecodePayload_validBase64ButCorruptedData_throwsError() {
+    func testDecodePayload_validBase64ButCorruptedData_throwsDecodingFailed() {
         // "Hello World" base64 — decodes to bytes that, after deobfuscation, won't be valid JSON
-        XCTAssertThrowsError(try sut.decodePayload("SGVsbG8gV29ybGQ="))
+        XCTAssertThrowsError(try sut.decodePayload("SGVsbG8gV29ybGQ=")) { error in
+            guard let transferError = error as? ConfigTransferError,
+                  case .decodingFailed = transferError else {
+                XCTFail("Expected ConfigTransferError.decodingFailed, got \(error)")
+                return
+            }
+        }
     }
 
-    func testDecodePayload_emptyString_throwsInvalidFormat() {
+    func testDecodePayload_emptyString_throwsDecodingFailed() {
         XCTAssertThrowsError(try sut.decodePayload("")) { error in
             guard let transferError = error as? ConfigTransferError,
-                  case .invalidFormat = transferError else {
-                XCTFail("Expected ConfigTransferError.invalidFormat, got \(error)")
+                  case .decodingFailed = transferError else {
+                XCTFail("Expected ConfigTransferError.decodingFailed, got \(error)")
                 return
             }
         }

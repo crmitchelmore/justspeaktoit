@@ -186,7 +186,11 @@ public final class ConfigTransferManager {
         }
         
         let deobfuscated = deobfuscate(data: data)
-        return try decoder.decode(ConfigTransferPayload.self, from: deobfuscated)
+        do {
+            return try decoder.decode(ConfigTransferPayload.self, from: deobfuscated)
+        } catch {
+            throw ConfigTransferError.decodingFailed
+        }
     }
     
     /// Validates that a payload is recent (within 10 minutes) to prevent replay.

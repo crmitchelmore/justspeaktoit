@@ -307,16 +307,19 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
         )
     ]
 
-    public static var allOptions: [Option] {
-        liveTranscription + batchTranscription + postProcessing
-    }
+    public static let allOptions: [Option] = liveTranscription + batchTranscription + postProcessing
+
+    // O(1) lookup cache keyed on lowercased model ID (first entry wins for cross-category duplicates).
+    private static let optionsByID: [String: Option] = Dictionary(
+        allOptions.map { ($0.id.lowercased(), $0) },
+        uniquingKeysWith: { first, _ in first }
+    )
 
     public static func friendlyName(for identifier: String) -> String {
         let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "—" }
 
-        if let exact = allOptions.first(where: { $0.id.caseInsensitiveCompare(trimmed) == .orderedSame }
-        ) {
+        if let exact = optionsByID[trimmed.lowercased()] {
             return exact.displayName
         }
 

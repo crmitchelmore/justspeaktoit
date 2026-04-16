@@ -120,6 +120,31 @@ swift package plugin --allow-writing-to-package-directory swiftlint --strict --t
 swift package plugin --allow-writing-to-package-directory swiftformat --target SpeakApp
 ```
 
+## Transcription Providers
+
+Just Speak to It supports multiple transcription backends on macOS and iOS.
+
+### macOS
+
+| Provider | Mode | Model IDs | Notes |
+|---|---|---|---|
+| Apple (on-device) | Live | `apple/default` | No API key required |
+| Deepgram | Live | `deepgram/nova-3` | Requires Deepgram API key |
+| AssemblyAI | Live | `assemblyai/universal-streaming` | Requires AssemblyAI API key |
+| ElevenLabs Scribe | Live | `elevenlabs/scribe-v1-streaming` | Requires ElevenLabs API key (same key as TTS) |
+| ElevenLabs Scribe | Batch | `elevenlabs/scribe_v1`, `elevenlabs/scribe_v1_experimental` | Requires ElevenLabs API key |
+| OpenAI Whisper | Batch | `openai/whisper-1` | Via OpenRouter or direct |
+| Rev AI | Batch | `rev/machine` | Requires Rev AI API key |
+
+### iOS
+
+| Provider | Mode | Notes |
+|---|---|---|
+| Apple Speech (on-device) | Live | Default, no API key required |
+| ElevenLabs Scribe | Live | Requires ElevenLabs API key configured in Settings → API Keys |
+
+API keys are stored in the Keychain. A single ElevenLabs key covers both TTS and Scribe STT — no separate STT credential is needed.
+
 ## Secrets & API Keys
 
 `SecureAppStorage` keeps every secret inside a single Keychain item named `speak-app-secrets` under the service `com.github.speakapp.credentials`. The value is a semicolon-delimited list with `NAME=value` pairs, for example:
@@ -144,11 +169,19 @@ At launch the app hydrates this blob into memory and serves typed accessors to t
 
 ## iOS App
 
-The iOS app uses Apple Speech for on-device live transcription:
+The iOS app supports multiple live transcription providers:
+
+- **Apple Speech** (on-device, default) — `iOSLiveTranscriber` via `SFSpeechRecognizer` with partial results
+- **ElevenLabs Scribe** (cloud) — live streaming via `ElevenLabsLiveTranscriber`; requires an ElevenLabs API key configured in Settings → API Keys
+
+Key components:
 
 - **AudioSessionManager** - iOS audio session lifecycle management
 - **iOSLiveTranscriber** - SFSpeechRecognizer integration with partial results
+- **ElevenLabsLiveTranscriber** - ElevenLabs Scribe live streaming (16 kHz PCM16 over WebSocket)
 - **ContentView** - Start/Stop recording, live transcript display, copy to clipboard
+
+The selected transcription model is persisted via `AppSettings`. If ElevenLabs is selected but no API key is present, the app falls back to Apple Speech at recording time.
 
 Open `"Just Speak to It.xcworkspace"` in Xcode to build and run on device/simulator.
 

@@ -17,38 +17,42 @@ final class AnyCodableTests: XCTestCase {
     // MARK: - Decode primitives
 
     func testDecode_string_returnsString() throws {
-        let json = #""hello""#.data(using: .utf8)!
+        let json = Data(#""hello""#.utf8)
         let decoded = try JSONDecoder().decode(AnyCodable.self, from: json)
         XCTAssertEqual(decoded.value as? String, "hello")
     }
 
     func testDecode_integer_returnsInt() throws {
-        let json = "42".data(using: .utf8)!
+        let json = Data("42".utf8)
         let decoded = try JSONDecoder().decode(AnyCodable.self, from: json)
         XCTAssertEqual(decoded.value as? Int, 42)
     }
 
     func testDecode_double_returnsDouble() throws {
-        let json = "3.14".data(using: .utf8)!
+        let json = Data("3.14".utf8)
         let decoded = try JSONDecoder().decode(AnyCodable.self, from: json)
-        XCTAssertEqual(decoded.value as? Double, 3.14, accuracy: 0.001)
+        guard let value = decoded.value as? Double else {
+            XCTFail("Expected Double, got \(Swift.type(of: decoded.value))")
+            return
+        }
+        XCTAssertEqual(value, 3.14, accuracy: 0.001)
     }
 
     func testDecode_bool_returnsBool() throws {
-        let jsonTrue = "true".data(using: .utf8)!
-        let jsonFalse = "false".data(using: .utf8)!
+        let jsonTrue = Data("true".utf8)
+        let jsonFalse = Data("false".utf8)
         XCTAssertEqual((try JSONDecoder().decode(AnyCodable.self, from: jsonTrue)).value as? Bool, true)
         XCTAssertEqual((try JSONDecoder().decode(AnyCodable.self, from: jsonFalse)).value as? Bool, false)
     }
 
     func testDecode_null_returnsNSNull() throws {
-        let json = "null".data(using: .utf8)!
+        let json = Data("null".utf8)
         let decoded = try JSONDecoder().decode(AnyCodable.self, from: json)
         XCTAssertTrue(decoded.value is NSNull)
     }
 
     func testDecode_array_returnsArray() throws {
-        let json = #"[1, "two", true]"#.data(using: .utf8)!
+        let json = Data(#"[1, "two", true]"#.utf8)
         let decoded = try JSONDecoder().decode(AnyCodable.self, from: json)
         let array = decoded.value as? [Any]
         XCTAssertNotNil(array)
@@ -59,7 +63,7 @@ final class AnyCodableTests: XCTestCase {
     }
 
     func testDecode_dict_returnsDictionary() throws {
-        let json = #"{"key": "value", "num": 10}"#.data(using: .utf8)!
+        let json = Data(#"{"key": "value", "num": 10}"#.utf8)
         let decoded = try JSONDecoder().decode(AnyCodable.self, from: json)
         let dict = decoded.value as? [String: Any]
         XCTAssertNotNil(dict)
@@ -117,14 +121,14 @@ final class AnyCodableTests: XCTestCase {
     // MARK: - Nested structures
 
     func testDecode_nestedDict_isAccessible() throws {
-        let json = #"{"outer": {"inner": 42}}"#.data(using: .utf8)!
+        let json = Data(#"{"outer": {"inner": 42}}"#.utf8)
         let decoded = try JSONDecoder().decode(AnyCodable.self, from: json)
         let outer = (decoded.value as? [String: Any])?["outer"] as? [String: Any]
         XCTAssertEqual(outer?["inner"] as? Int, 42)
     }
 
     func testDecode_arrayOfDicts_isAccessible() throws {
-        let json = #"[{"id": 1}, {"id": 2}]"#.data(using: .utf8)!
+        let json = Data(#"[{"id": 1}, {"id": 2}]"#.utf8)
         let decoded = try JSONDecoder().decode(AnyCodable.self, from: json)
         let arr = decoded.value as? [[String: Any]]
         XCTAssertEqual(arr?.count, 2)

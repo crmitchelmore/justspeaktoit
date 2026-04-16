@@ -122,28 +122,18 @@ swift package plugin --allow-writing-to-package-directory swiftformat --target S
 
 ## Transcription Providers
 
-Just Speak to It supports multiple transcription backends on macOS and iOS.
+Just Speak to It supports multiple live and batch transcription backends on macOS and iOS. `Sources/SpeakCore/ModelCatalog.swift` is the canonical source for current built-in model identifiers and display names.
 
 ### macOS
 
-| Provider | Mode | Model IDs | Notes |
-|---|---|---|---|
-| Apple (on-device) | Live | `apple/default` | No API key required |
-| Deepgram | Live | `deepgram/nova-3` | Requires Deepgram API key |
-| AssemblyAI | Live | `assemblyai/universal-streaming` | Requires AssemblyAI API key |
-| ElevenLabs Scribe | Live | `elevenlabs/scribe-v1-streaming` | Requires ElevenLabs API key (same key as TTS) |
-| ElevenLabs Scribe | Batch | `elevenlabs/scribe_v1`, `elevenlabs/scribe_v1_experimental` | Requires ElevenLabs API key |
-| OpenAI Whisper | Batch | `openai/whisper-1` | Via OpenRouter or direct |
-| Rev AI | Batch | `rev/machine` | Requires Rev AI API key |
+- **Live**: Apple Speech (`apple/local/SFSpeechRecognizer`), Apple Dictation (`apple/local/Dictation`), Deepgram (`deepgram/nova-3-streaming`), Modulate (`modulate/velma-2-stt-streaming`), AssemblyAI (`assemblyai/universal-streaming`, `assemblyai/universal-streaming-english`, `assemblyai/universal-streaming-multilingual`, `assemblyai/u3-rt-pro-streaming`), and ElevenLabs Scribe (`elevenlabs/scribe-v2-streaming`).
+- **Batch**: OpenAI Whisper (`openai/whisper-1`), Rev.ai (`revai/default`), Deepgram (`deepgram/nova-3`), Modulate (`modulate/velma-2-stt-batch`, `modulate/velma-2-stt-batch-english-vfast`), AssemblyAI (`assemblyai/universal-3-pro`, `assemblyai/universal-2`), ElevenLabs Scribe (`elevenlabs/scribe_v1`, `elevenlabs/scribe_v1_experimental`), and OpenRouter audio models such as `google/gemini-2.0-flash-001`, `google/gemini-2.0-flash-lite-001`, and `openai/gpt-4o-audio-preview-2024-12-17`.
+- API keys are stored in the Keychain. The same ElevenLabs key is reused for both TTS and Scribe STT.
 
 ### iOS
 
-| Provider | Mode | Notes |
-|---|---|---|
-| Apple Speech (on-device) | Live | Default, no API key required |
-| ElevenLabs Scribe | Live | Requires ElevenLabs API key configured in Settings → API Keys |
-
-API keys are stored in the Keychain. A single ElevenLabs key covers both TTS and Scribe STT — no separate STT credential is needed.
+- **Live**: Apple Speech (`apple/local/SFSpeechRecognizer`), Deepgram (`deepgram/nova-3`), and ElevenLabs Scribe (`elevenlabs/scribe_v1`).
+- If Deepgram or ElevenLabs is selected without a configured API key, recording falls back to Apple Speech.
 
 ## Secrets & API Keys
 
@@ -172,16 +162,19 @@ At launch the app hydrates this blob into memory and serves typed accessors to t
 The iOS app supports multiple live transcription providers:
 
 - **Apple Speech** (on-device, default) — `iOSLiveTranscriber` via `SFSpeechRecognizer` with partial results
-- **ElevenLabs Scribe** (cloud) — live streaming via `ElevenLabsLiveTranscriber`; requires an ElevenLabs API key configured in Settings → API Keys
+- **Deepgram** (cloud) — `DeepgramLiveTranscriber` over WebSocket when a Deepgram key is configured
+- **ElevenLabs Scribe** (cloud) — `ElevenLabsLiveTranscriber` over WebSocket when an ElevenLabs key is configured
 
 Key components:
 
 - **AudioSessionManager** - iOS audio session lifecycle management
 - **iOSLiveTranscriber** - SFSpeechRecognizer integration with partial results
+- **DeepgramLiveTranscriber** - Deepgram live streaming for cloud transcription
 - **ElevenLabsLiveTranscriber** - ElevenLabs Scribe live streaming (16 kHz PCM16 over WebSocket)
+- **TranscriptionRecordingService** - Provider selection, fallback handling, and recording lifecycle
 - **ContentView** - Start/Stop recording, live transcript display, copy to clipboard
 
-The selected transcription model is persisted via `AppSettings`. If ElevenLabs is selected but no API key is present, the app falls back to Apple Speech at recording time.
+The selected transcription model is persisted via `AppSettings`. If Deepgram or ElevenLabs is selected but the corresponding API key is missing, recording falls back to Apple Speech at start time.
 
 Open `"Just Speak to It.xcworkspace"` in Xcode to build and run on device/simulator.
 

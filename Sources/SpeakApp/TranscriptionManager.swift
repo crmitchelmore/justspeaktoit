@@ -1199,12 +1199,18 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
         finalSegments.indices.contains(existingIndex)
       {
         finalSegments[existingIndex] = segment
+        // Replaced an existing turn — must rebuild from scratch
+        fullTranscript = finalSegments.map(\.text).joined(separator: " ")
       } else {
         finalSegments.append(segment)
         finalSegmentIndexByTurnOrder[turn.turn_order] = finalSegments.count - 1
+        // Appended a new turn — incremental update
+        if fullTranscript.isEmpty {
+          fullTranscript = turn.transcript
+        } else {
+          fullTranscript.append(contentsOf: " \(turn.transcript)")
+        }
       }
-
-      fullTranscript = finalSegments.map(\.text).joined(separator: " ")
       currentInterim = ""
       currentTurnOrder = -1
       delegate?.liveTranscriber(self, didUpdatePartial: fullTranscript)

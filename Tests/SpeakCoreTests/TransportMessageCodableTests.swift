@@ -5,15 +5,15 @@ import XCTest
 final class TransportMessageCodableTests: XCTestCase {
 
     private let encoder: JSONEncoder = {
-        let e = JSONEncoder()
-        e.dateEncodingStrategy = .iso8601
-        return e
+        let jsonEncoder = JSONEncoder()
+        jsonEncoder.dateEncodingStrategy = .iso8601
+        return jsonEncoder
     }()
 
     private let decoder: JSONDecoder = {
-        let d = JSONDecoder()
-        d.dateDecodingStrategy = .iso8601
-        return d
+        let jsonDecoder = JSONDecoder()
+        jsonDecoder.dateDecodingStrategy = .iso8601
+        return jsonDecoder
     }()
 
     // MARK: - .ping / .pong (no payload)
@@ -151,7 +151,13 @@ final class TransportMessageCodableTests: XCTestCase {
 
     func testTranscriptChunk_roundtrip() throws {
         let date = Date(timeIntervalSince1970: 1_000_000)
-        let msg = TranscriptChunkMessage(sessionId: "s1", sequenceNumber: 7, text: "Hi there", isFinal: true, timestamp: date)
+        let msg = TranscriptChunkMessage(
+            sessionId: "s1",
+            sequenceNumber: 7,
+            text: "Hi there",
+            isFinal: true,
+            timestamp: date
+        )
         let data = try encoder.encode(TransportMessage.transcriptChunk(msg))
         let decoded = try decoder.decode(TransportMessage.self, from: data)
         guard case .transcriptChunk(let result) = decoded else {
@@ -200,7 +206,7 @@ final class TransportMessageCodableTests: XCTestCase {
 
     func testDecode_unknownType_throws() {
         let json = #"{"type":"unknown_type"}"#
-        let data = json.data(using: .utf8)!
+        let data = Data(json.utf8)
         XCTAssertThrowsError(try decoder.decode(TransportMessage.self, from: data))
     }
 

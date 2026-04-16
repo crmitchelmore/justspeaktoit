@@ -81,7 +81,7 @@ final class APIKeyValidationTests: XCTestCase {
     }
 
     func testSnapshot_equatable() {
-        let s1 = APIKeyValidationDebugSnapshot(
+        let firstSnapshot = APIKeyValidationDebugSnapshot(
             url: "https://api.example.com",
             method: "GET",
             requestHeaders: ["Accept": "application/json"],
@@ -91,7 +91,7 @@ final class APIKeyValidationTests: XCTestCase {
             responseBody: "{}",
             errorDescription: nil
         )
-        let s2 = APIKeyValidationDebugSnapshot(
+        let secondSnapshot = APIKeyValidationDebugSnapshot(
             url: "https://api.example.com",
             method: "GET",
             requestHeaders: ["Accept": "application/json"],
@@ -101,7 +101,7 @@ final class APIKeyValidationTests: XCTestCase {
             responseBody: "{}",
             errorDescription: nil
         )
-        XCTAssertEqual(s1, s2)
+        XCTAssertEqual(firstSnapshot, secondSnapshot)
     }
 
     // MARK: - APIKeyValidationResult: factory methods
@@ -187,14 +187,14 @@ final class APIKeyValidationTests: XCTestCase {
     // MARK: - APIKeyValidationResult: Equatable
 
     func testResult_equatable_sameOutcome() {
-        let r1 = APIKeyValidationResult.success(message: "OK")
-        let r2 = APIKeyValidationResult.success(message: "OK")
-        XCTAssertEqual(r1, r2)
+        let firstResult = APIKeyValidationResult.success(message: "OK")
+        let secondResult = APIKeyValidationResult.success(message: "OK")
+        XCTAssertEqual(firstResult, secondResult)
     }
 
     func testResult_equatable_differentOutcome() {
-        let r1 = APIKeyValidationResult.success(message: "OK")
-        let r2 = APIKeyValidationResult.failure(message: "Bad")
-        XCTAssertNotEqual(r1, r2)
+        let firstResult = APIKeyValidationResult.success(message: "OK")
+        let secondResult = APIKeyValidationResult.failure(message: "Bad")
+        XCTAssertNotEqual(firstResult, secondResult)
     }
 }

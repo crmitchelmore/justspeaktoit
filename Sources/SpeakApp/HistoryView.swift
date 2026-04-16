@@ -471,7 +471,7 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
 
       if !requestedModels.isEmpty {
         let itemModels = Set(item.modelsUsed.map { $0.lowercased() })
-        if requestedModels.intersection(itemModels).isEmpty {
+        if requestedModels.isDisjoint(with: itemModels) {
           return false
         }
       }

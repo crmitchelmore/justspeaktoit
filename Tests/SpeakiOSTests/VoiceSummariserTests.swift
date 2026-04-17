@@ -4,7 +4,22 @@ import XCTest
 @testable import SpeakiOSLib
 
 private final class VoiceSummariserMockURLProtocol: URLProtocol {
-    nonisolated(unsafe) static var requestHandler: (@Sendable (URLRequest) async throws -> (HTTPURLResponse, Data))?
+    private static let handlerQueue = DispatchQueue(label: "VoiceSummariserMockURLProtocol.handler")
+    private static var requestHandler: (@Sendable (URLRequest) async throws -> (HTTPURLResponse, Data))?
+
+    static func setRequestHandler(
+        _ handler: (@Sendable (URLRequest) async throws -> (HTTPURLResponse, Data))?
+    ) {
+        handlerQueue.sync {
+            requestHandler = handler
+        }
+    }
+
+    static func currentRequestHandler() -> (@Sendable (URLRequest) async throws -> (HTTPURLResponse, Data))? {
+        handlerQueue.sync {
+            requestHandler
+        }
+    }
 
     override static func canInit(with request: URLRequest) -> Bool {
         true
@@ -15,7 +30,7 @@ private final class VoiceSummariserMockURLProtocol: URLProtocol {
     }
 
     override func startLoading() {
-        guard let handler = Self.requestHandler else {
+        guard let handler = Self.currentRequestHandler() else {
             XCTFail("VoiceSummariserMockURLProtocol.requestHandler was not set")
             return
         }
@@ -73,7 +88,7 @@ final class VoiceSummariserTests: XCTestCase {
     """
 
     override func tearDown() {
-        VoiceSummariserMockURLProtocol.requestHandler = nil
+        VoiceSummariserMockURLProtocol.setRequestHandler(nil)
         super.tearDown()
     }
 
@@ -85,7 +100,8 @@ final class VoiceSummariserTests: XCTestCase {
     }
 
     func testSummarise_sendsExpectedRequestAndTrimsResponse() async throws {
-        VoiceSummariserMockURLProtocol.requestHandler = { request in
+        let expectedUserContent = markdownInput
+        VoiceSummariserMockURLProtocol.setRequestHandler { request in
             XCTAssertEqual(request.httpMethod, "POST")
             XCTAssertEqual(request.url?.absoluteString, "https://openrouter.ai/api/v1/chat/completions")
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-key")
@@ -101,7 +117,7 @@ final class VoiceSummariserTests: XCTestCase {
             XCTAssertEqual(messages.count, 2)
             XCTAssertEqual(messages.first?["role"] as? String, "system")
             XCTAssertEqual(messages.last?["role"] as? String, "user")
-            XCTAssertEqual(messages.last?["content"] as? String, self.markdownInput)
+            XCTAssertEqual(messages.last?["content"] as? String, expectedUserContent)
 
             let data = Data(
                 """
@@ -132,7 +148,7 @@ final class VoiceSummariserTests: XCTestCase {
     }
 
     func testSummarise_throwsAPIErrorForNonSuccessResponse() async {
-        VoiceSummariserMockURLProtocol.requestHandler = { request in
+        VoiceSummariserMockURLProtocol.setRequestHandler { request in
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
                 statusCode: 429,
@@ -155,7 +171,7 @@ final class VoiceSummariserTests: XCTestCase {
     }
 
     func testSummarise_throwsInvalidResponseForMalformedPayload() async {
-        VoiceSummariserMockURLProtocol.requestHandler = { request in
+        VoiceSummariserMockURLProtocol.setRequestHandler { request in
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
                 statusCode: 200,

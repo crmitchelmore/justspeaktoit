@@ -128,9 +128,9 @@ final class LiveClientErrorTests: XCTestCase {
     }
 
     func testChatMessage_defaultID_isUnique() {
-        let a = ChatMessage(role: .user, content: "Hello")
-        let b = ChatMessage(role: .user, content: "Hello")
-        XCTAssertNotEqual(a.id, b.id)
+        let firstMessage = ChatMessage(role: .user, content: "Hello")
+        let secondMessage = ChatMessage(role: .user, content: "Hello")
+        XCTAssertNotEqual(firstMessage.id, secondMessage.id)
     }
 
     func testChatMessage_codableRoundTrip() throws {

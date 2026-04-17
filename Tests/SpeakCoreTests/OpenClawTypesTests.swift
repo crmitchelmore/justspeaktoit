@@ -68,8 +68,8 @@ final class OpenClawTypesTests: XCTestCase {
 
     func testConnectionState_error_carriesMessage() {
         let msg = "connection refused"
-        if case .error(let s) = OpenClawConnectionState.error(msg) {
-            XCTAssertEqual(s, msg)
+        if case .error(let errorMessage) = OpenClawConnectionState.error(msg) {
+            XCTAssertEqual(errorMessage, msg)
         } else {
             XCTFail("Expected .error with message")
         }
@@ -84,9 +84,9 @@ final class OpenClawTypesTests: XCTestCase {
     }
 
     func testChatMessage_defaultID_isUnique() {
-        let a = OpenClawChatMessage(role: "user", content: "A")
-        let b = OpenClawChatMessage(role: "user", content: "B")
-        XCTAssertNotEqual(a.id, b.id)
+        let firstMessage = OpenClawChatMessage(role: "user", content: "A")
+        let secondMessage = OpenClawChatMessage(role: "user", content: "B")
+        XCTAssertNotEqual(firstMessage.id, secondMessage.id)
     }
 
     func testChatMessage_customID() {
@@ -143,9 +143,9 @@ final class OpenClawTypesTests: XCTestCase {
     }
 
     func testConversation_defaultID_isUnique() {
-        let a = OpenClawConversation(sessionKey: "s1")
-        let b = OpenClawConversation(sessionKey: "s1")
-        XCTAssertNotEqual(a.id, b.id)
+        let firstConversation = OpenClawConversation(sessionKey: "s1")
+        let secondConversation = OpenClawConversation(sessionKey: "s1")
+        XCTAssertNotEqual(firstConversation.id, secondConversation.id)
     }
 
     func testConversation_withMessages() {

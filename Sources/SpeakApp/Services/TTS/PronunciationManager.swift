@@ -3,7 +3,7 @@ import Foundation
 /// Manages the pronunciation dictionary for TTS processing.
 /// Handles loading, saving, applying replacements, and import/export.
 @MainActor
-final class PronunciationManager: ObservableObject {
+final class PronunciationManager: ObservableObject { // swiftlint:disable:this type_body_length
     private static let storageKey = "pronunciationDictionary"
     private static let fileExtension = "json"
 

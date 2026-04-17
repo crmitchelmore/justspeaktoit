@@ -3,7 +3,7 @@ import Foundation
 /// Manages the pronunciation dictionary for TTS processing.
 /// Handles loading, saving, applying replacements, and import/export.
 @MainActor
-final class PronunciationManager: ObservableObject {
+final class PronunciationManager: ObservableObject { // swiftlint:disable:this type_body_length
     private static let storageKey = "pronunciationDictionary"
     private static let fileExtension = "json"
 
@@ -11,6 +11,9 @@ final class PronunciationManager: ObservableObject {
     @Published private(set) var isLoading = false
 
     private let defaults: UserDefaults
+
+    // Cache compiled NSRegularExpression instances; key = "<options.rawValue>:<pattern>"
+    private var regexCache: [String: NSRegularExpression] = [:]
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -118,10 +121,7 @@ final class PronunciationManager: ObservableObject {
         } else {
             // Case-insensitive replacement with word boundaries
             let pattern = "\\b\(NSRegularExpression.escapedPattern(for: word))\\b"
-            guard let regex = try? NSRegularExpression(
-                pattern: pattern,
-                options: .caseInsensitive
-            ) else {
+            guard let regex = cachedRegex(pattern: pattern, options: .caseInsensitive) else {
                 return text
             }
 
@@ -146,7 +146,7 @@ final class PronunciationManager: ObservableObject {
             options.insert(.caseInsensitive)
         }
 
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: options) else {
+        guard let regex = cachedRegex(pattern: pattern, options: options) else {
             return text
         }
 
@@ -157,6 +157,18 @@ final class PronunciationManager: ObservableObject {
             range: range,
             withTemplate: replacement
         )
+    }
+
+    private func cachedRegex(pattern: String, options: NSRegularExpression.Options) -> NSRegularExpression? {
+        let key = "\(options.rawValue):\(pattern)"
+        if let cached = regexCache[key] {
+            return cached
+        }
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: options) else {
+            return nil
+        }
+        regexCache[key] = regex
+        return regex
     }
 
     // MARK: - SSML Support

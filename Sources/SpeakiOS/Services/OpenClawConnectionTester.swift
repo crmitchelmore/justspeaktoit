@@ -1,4 +1,3 @@
-#if os(iOS)
 import Foundation
 import SpeakCore
 
@@ -16,9 +15,7 @@ enum OpenClawConnectionTester {
     }
 
     static func test(rawURL: String, token: String) async -> Result {
-        let normalisedURL = OpenClawClient.normaliseGatewayURL(rawURL)
-
-        guard let url = URL(string: normalisedURL) else {
+        guard let url = normalisedURL(from: rawURL) else {
             return .failure("Invalid URL")
         }
 
@@ -34,6 +31,11 @@ enum OpenClawConnectionTester {
 
             waitForChallenge(task: task, token: token, start: start, cont: cont)
         }
+    }
+
+    static func normalisedURL(from rawURL: String) -> URL? {
+        let normalisedURL = OpenClawClient.normaliseGatewayURL(rawURL)
+        return URL(string: normalisedURL)
     }
 
     /// Wait for the `connect.challenge` event from the gateway.
@@ -141,7 +143,7 @@ enum OpenClawConnectionTester {
     }
 
     /// Evaluate whether the connect response indicates success.
-    private static func evaluateConnectResponse(_ json: [String: Any], elapsed: Int) -> Result {
+    static func evaluateConnectResponse(_ json: [String: Any], elapsed: Int) -> Result {
         if let err = json["error"] as? [String: Any],
            let msg = err["message"] as? String {
             return .failure(msg)
@@ -175,4 +177,3 @@ enum OpenClawConnectionTester {
         cont.resume(returning: state)
     }
 }
-#endif

@@ -1,4 +1,3 @@
-#if os(iOS)
 import Foundation
 import SpeakCore
 
@@ -7,7 +6,7 @@ import SpeakCore
 /// TTS-optimised system prompt that strips markdown, shortens responses,
 /// and preserves key information.
 @MainActor
-public final class VoiceSummariser: ObservableObject {
+public final class VoiceSummariser {
     private let session: URLSession
 
     public init(session: URLSession = .shared) {
@@ -104,4 +103,3 @@ public enum VoiceSummariserError: LocalizedError {
         }
     }
 }
-#endif

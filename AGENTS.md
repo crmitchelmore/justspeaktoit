@@ -202,10 +202,6 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
 - After each push, re-check unresolved review threads (especially CodeRabbit), as new threads can be created on updated diffs and still block merge.
 - If admin merge fails with `All comments must be resolved.`, resolve the remaining review threads before retrying.
 
-### Agentic workflow maintenance
-- When porting agentic workflows from another repository, keep only the generic workflow mechanics; strip source-project names, infra references, docs links, and unrelated workflows.
-- For gh-aw / Copilot workflows, `COPILOT_GITHUB_TOKEN` must be a fine-grained PAT (`github_pat_...`) with `Copilot Requests`. Classic PATs (`ghp_...`) and OAuth tokens (`gho_...`) fail activation.
-
 ## SwiftUI Concurrency Patterns
 
 ### Singleton ObservableObjects

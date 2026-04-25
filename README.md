@@ -8,20 +8,6 @@
 
 Native macOS and iOS voice transcription app built with SwiftUI. Speak naturally and get accurate text - on-device or via cloud APIs.
 
-## Agentic planning team
-
-This repository uses a named five-role planning and implementation review team:
-
-- **Alex Hale** (`Product`) keeps work aligned with user value and product direction
-- **Priya Shah** (`Security`) tests trust boundaries, auth, and data-handling assumptions
-- **Theo Quinn** (`Performance`) asks for the metric, the hot path, and the realistic cost bound
-- **Casey Doyle** (`Code Quality`) protects maintainability, testability, and operational clarity
-- **Morgan Reed** (`Architecture`) guards system boundaries, sequencing, and coupling
-
-Every new issue goes straight to Product validation. Once Product marks an issue `triage:product-fit`, someone with repository write access can comment `/doit` — either on its own or inside a longer maintainer note — to start the five-role planning discussion. Any surrounding text is carried into the kickoff comment as planning context. Pull requests that include `Plan issue: #<number>` in the body are then reviewed by the same team against the approved plan.
-
-See [`Docs/agentic-workflows.md`](Docs/agentic-workflows.md) for the workflow setup and [`Docs/team-personalities.md`](Docs/team-personalities.md) for the persona map, memory model, and interaction diagrams.
-
 ## Features
 
 - 🎤 **Live transcription** with real-time display

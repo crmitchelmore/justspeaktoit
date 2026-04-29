@@ -20,10 +20,11 @@ enum OpenRouterClientError: LocalizedError {
   }
 }
 
-actor OpenRouterAPIClient: StreamingChatLLMClient, BatchTranscriptionClient {
+actor OpenRouterAPIClient: StreamingChatLLMClient, BatchTranscriptionClient { // swiftlint:disable:this type_body_length
   private let baseURL = URL(string: "https://openrouter.ai/api/v1")!
   private let session: URLSession
   private let secureStorage: SecureAppStorage
+  private let apiKeyOverride: String?
   private let logger = Logger(subsystem: "com.github.speakapp", category: "OpenRouter")
   private let apiKeyIdentifier = "openrouter.apiKey"
   private let titleHeaderValue = "SpeakApp (macOS)"
@@ -40,13 +41,21 @@ actor OpenRouterAPIClient: StreamingChatLLMClient, BatchTranscriptionClient {
     let message: String
   }
 
-  init(secureStorage: SecureAppStorage, session: URLSession = .shared) {
+  init(
+    secureStorage: SecureAppStorage,
+    session: URLSession = .shared,
+    apiKeyOverride: String? = nil
+  ) {
     self.secureStorage = secureStorage
     self.session = session
+    self.apiKeyOverride = apiKeyOverride
   }
 
   func hasStoredAPIKey() async -> Bool {
-    await secureStorage.hasSecret(identifier: apiKeyIdentifier)
+    if await storedAPIKey() != nil {
+      return true
+    }
+    return await secureStorage.hasSecret(identifier: apiKeyIdentifier)
   }
 
   func requiresRemoteAccess(for model: String) -> Bool {
@@ -59,7 +68,7 @@ actor OpenRouterAPIClient: StreamingChatLLMClient, BatchTranscriptionClient {
     model: String,
     temperature: Double
   ) async throws -> ChatResponse {
-    if let key = try? await secureStorage.secret(identifier: apiKeyIdentifier), !key.isEmpty {
+    if let key = await storedAPIKey() {
       return try await performRemoteChat(
         apiKey: key,
         systemPrompt: systemPrompt,
@@ -72,7 +81,7 @@ actor OpenRouterAPIClient: StreamingChatLLMClient, BatchTranscriptionClient {
     return performLocalChatFallback(systemPrompt: systemPrompt, messages: messages)
   }
 
-  nonisolated func sendChatStreaming(
+  nonisolated func sendChatStreaming( // swiftlint:disable:this cyclomatic_complexity function_body_length
     systemPrompt: String?,
     messages: [ChatMessage],
     model: String,
@@ -81,13 +90,12 @@ actor OpenRouterAPIClient: StreamingChatLLMClient, BatchTranscriptionClient {
     AsyncThrowingStream { continuation in
       Task {
         do {
-          let key = try await self.secureStorage.secret(identifier: self.apiKeyIdentifier)
-          guard !key.isEmpty else {
+          guard let key = await self.storedAPIKey() else {
             continuation.finish(throwing: OpenRouterClientError.apiKeyMissing)
             return
           }
 
-          let url = await self.baseURL.appendingPathComponent("chat/completions")
+          let url = self.baseURL.appendingPathComponent("chat/completions")
           var request = URLRequest(url: url)
           request.httpMethod = "POST"
           request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -147,10 +155,8 @@ actor OpenRouterAPIClient: StreamingChatLLMClient, BatchTranscriptionClient {
     -> TranscriptionResult
   {
     let cleanedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
-    let rawKey = try? await secureStorage.secret(identifier: apiKeyIdentifier)
-    let key = rawKey?.trimmingCharacters(in: .whitespacesAndNewlines)
 
-    if let key, !key.isEmpty {
+    if let key = await storedAPIKey() {
       return try await performRemoteTranscription(
         apiKey: key, url: url, model: cleanedModel, language: language)
     }
@@ -160,6 +166,17 @@ actor OpenRouterAPIClient: StreamingChatLLMClient, BatchTranscriptionClient {
     }
 
     throw OpenRouterClientError.apiKeyMissing
+  }
+
+  private func storedAPIKey() async -> String? {
+    if let apiKeyOverride {
+      let trimmed = apiKeyOverride.trimmingCharacters(in: .whitespacesAndNewlines)
+      return trimmed.isEmpty ? nil : trimmed
+    }
+
+    let rawKey = try? await secureStorage.secret(identifier: apiKeyIdentifier)
+    let key = rawKey?.trimmingCharacters(in: .whitespacesAndNewlines)
+    return key?.isEmpty == false ? key : nil
   }
 
   func validateAPIKey(_ key: String) async -> APIKeyValidationResult {
@@ -481,30 +498,33 @@ actor OpenRouterAPIClient: StreamingChatLLMClient, BatchTranscriptionClient {
     model: String,
     language: String?
   ) async throws -> TranscriptionResult {
-    let endpoint = baseURL.appendingPathComponent("audio/transcriptions")
+    let endpoint = baseURL.appendingPathComponent("chat/completions")
     var request = URLRequest(url: endpoint)
     request.httpMethod = "POST"
-    let boundary = "Boundary-\(UUID().uuidString)"
-    request.setValue(
-      "multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
     applyBrandHeaders(&request)
 
     let audioData = try Data(contentsOf: url)
-    var body = Data()
-    body.appendFormField(named: "model", value: model, boundary: boundary)
-    if let language {
-      body.appendFormField(named: "language", value: language, boundary: boundary)
-    }
-    body.appendFileField(
-      named: "file",
-      filename: url.lastPathComponent,
-      mimeType: "audio/m4a",
-      fileData: audioData,
-      boundary: boundary
+    let prompt = transcriptionPrompt(language: language)
+    let payload = OpenRouterAudioTranscriptionRequest(
+      model: model,
+      temperature: 0,
+      messages: [
+        OpenRouterAudioTranscriptionRequest.Message(
+          role: "user",
+          content: [
+            .text(prompt),
+            .inputAudio(
+              data: audioData.base64EncodedString(),
+              format: audioInputFormat(for: url)
+            )
+          ]
+        )
+      ],
+      stream: false
     )
-    body.appendString("--\(boundary)--\r\n")
-    request.httpBody = body
+    request.httpBody = try JSONEncoder().encode(payload)
 
     let (data, response) = try await session.data(for: request)
     guard let http = response as? HTTPURLResponse else {
@@ -515,9 +535,17 @@ actor OpenRouterAPIClient: StreamingChatLLMClient, BatchTranscriptionClient {
       throw OpenRouterClientError.httpStatus(http.statusCode, body)
     }
 
-    let decoded = try JSONDecoder().decode(OpenRouterTranscriptionResponse.self, from: data)
+    let decoded = try JSONDecoder().decode(OpenRouterChatResponse.self, from: data)
+    guard
+      let text = decoded.choices
+        .compactMap({ $0.message?.content.trimmingCharacters(in: .whitespacesAndNewlines) })
+        .first(where: { !$0.isEmpty })
+    else {
+      throw OpenRouterClientError.invalidResponse
+    }
+
     return try await buildTranscriptionResult(
-      response: decoded,
+      text: text,
       audioURL: url,
       model: model,
       payload: data
@@ -623,8 +651,31 @@ actor OpenRouterAPIClient: StreamingChatLLMClient, BatchTranscriptionClient {
     return normalized
   }
 
+  private func transcriptionPrompt(language: String?) -> String {
+    let trimmedLanguage = language?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    if trimmedLanguage.isEmpty {
+      return "Transcribe this audio file. Return only the transcript text, with no commentary."
+    }
+
+    return "Transcribe this audio file using locale \(trimmedLanguage). "
+      + "Return only the transcript text, with no commentary."
+  }
+
+  private func audioInputFormat(for url: URL) -> String {
+    switch url.pathExtension.lowercased() {
+    case "wav", "mp3", "aiff", "aac", "ogg", "flac", "m4a", "pcm16", "pcm24":
+      return url.pathExtension.lowercased()
+    case "m4b":
+      return "m4a"
+    case "wave":
+      return "wav"
+    default:
+      return "m4a"
+    }
+  }
+
   private func buildTranscriptionResult(
-    response: OpenRouterTranscriptionResponse,
+    text: String,
     audioURL: URL,
     model: String,
     payload: Data
@@ -632,19 +683,12 @@ actor OpenRouterAPIClient: StreamingChatLLMClient, BatchTranscriptionClient {
     let asset = AVURLAsset(url: audioURL)
     let durationTime = try await asset.load(.duration)
     let duration = durationTime.seconds
-    let segments =
-      response.segments?.map { segment in
-        TranscriptionSegment(
-          startTime: segment.start,
-          endTime: segment.end,
-          text: segment.text
-        )
-      } ?? [TranscriptionSegment(startTime: 0, endTime: duration, text: response.text)]
+    let segments = [TranscriptionSegment(startTime: 0, endTime: duration, text: text)]
 
     return TranscriptionResult(
-      text: response.text,
+      text: text,
       segments: segments,
-      confidence: response.confidence,
+      confidence: nil,
       duration: duration,
       modelIdentifier: model,
       cost: nil,
@@ -723,18 +767,6 @@ private struct OpenRouterChatResponse: Decodable {
   let usage: Usage?
 }
 
-private struct OpenRouterTranscriptionResponse: Decodable {
-  struct Segment: Decodable {
-    let start: TimeInterval
-    let end: TimeInterval
-    let text: String
-  }
-
-  let text: String
-  let segments: [Segment]?
-  let confidence: Double?
-}
-
 private struct OpenRouterValidationResponse: Decodable {
   struct ValidationData: Decodable {
     let valid: Bool?
@@ -756,6 +788,47 @@ private struct OpenRouterStreamingChatRequest: Encodable {
   let stream: Bool
 }
 
+private struct OpenRouterAudioTranscriptionRequest: Encodable {
+  struct Message: Encodable {
+    let role: String
+    let content: [OpenRouterAudioContentPart]
+  }
+
+  let model: String
+  let temperature: Double
+  let messages: [Message]
+  let stream: Bool
+}
+
+private enum OpenRouterAudioContentPart: Encodable {
+  case text(String)
+  case inputAudio(data: String, format: String)
+
+  private enum CodingKeys: String, CodingKey {
+    case type
+    case text
+    case inputAudio = "input_audio"
+  }
+
+  func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    switch self {
+    case .text(let text):
+      try container.encode("text", forKey: .type)
+      try container.encode(text, forKey: .text)
+    case .inputAudio(let data, let format):
+      try container.encode("input_audio", forKey: .type)
+      let inputAudio = OpenRouterInputAudio(data: data, format: format)
+      try container.encode(inputAudio, forKey: .inputAudio)
+    }
+  }
+}
+
+private struct OpenRouterInputAudio: Encodable {
+  let data: String
+  let format: String
+}
+
 private struct OpenRouterStreamChunk: Decodable {
   struct Choice: Decodable {
     struct Delta: Decodable {
@@ -768,4 +841,4 @@ private struct OpenRouterStreamChunk: Decodable {
   let choices: [Choice]
 }
 
-// @Implement: This class is responsible for interacting with the OpenRouter API and implements the LLMProtocols to do so. It takes the api key from SecureAppStorage
+// swiftlint:disable:this file_length

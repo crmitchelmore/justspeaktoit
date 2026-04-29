@@ -643,7 +643,7 @@ final class MainManager: ObservableObject {
         if let payload = result.rawPayload {
           session.networkExchanges.append(
             HistoryNetworkExchange(
-              url: URL(string: "https://openrouter.ai/api/v1/responses")!,
+              url: URL(string: "https://openrouter.ai/api/v1/chat/completions")!,
               method: "POST",
               requestHeaders: [
                 "Model": result.modelIdentifier,
@@ -1043,7 +1043,7 @@ final class MainManager: ObservableObject {
       if let payload = result.rawPayload {
         session.networkExchanges.append(
           HistoryNetworkExchange(
-            url: URL(string: "https://openrouter.ai/api/v1/responses")!,
+            url: URL(string: "https://openrouter.ai/api/v1/chat/completions")!,
             method: "POST",
             requestHeaders: [
               "Model": result.modelIdentifier,

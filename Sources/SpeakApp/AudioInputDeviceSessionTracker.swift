@@ -12,7 +12,7 @@ struct AudioInputDeviceSessionTracker {
   private var didChangeDevice = false
 
   var hasActiveSession: Bool {
-    !self.activeSessionIDs.isEmpty
+    !activeSessionIDs.isEmpty
   }
 
   mutating func beginSession(
@@ -20,14 +20,14 @@ struct AudioInputDeviceSessionTracker {
     didChangeDevice: Bool,
     id: UUID = UUID()
   ) -> Context {
-    let participatesInSharedSession = didChangeDevice || self.hasActiveSession
+    let participatesInSharedSession = didChangeDevice || hasActiveSession
 
     if participatesInSharedSession {
-      if self.activeSessionIDs.isEmpty {
+      if activeSessionIDs.isEmpty {
         self.previousDeviceID = previousDeviceID
         self.didChangeDevice = didChangeDevice
       }
-      self.activeSessionIDs.insert(id)
+      activeSessionIDs.insert(id)
     }
 
     return Context(
@@ -38,12 +38,12 @@ struct AudioInputDeviceSessionTracker {
 
   mutating func endSession(_ context: Context) -> AudioDeviceID? {
     guard context.participatesInSharedSession else { return nil }
-    self.activeSessionIDs.remove(context.id)
-    guard self.activeSessionIDs.isEmpty else { return nil }
+    activeSessionIDs.remove(context.id)
+    guard activeSessionIDs.isEmpty else { return nil }
 
-    let deviceToRestore = self.didChangeDevice ? self.previousDeviceID : nil
-    self.previousDeviceID = nil
-    self.didChangeDevice = false
+    let deviceToRestore = didChangeDevice ? previousDeviceID : nil
+    previousDeviceID = nil
+    didChangeDevice = false
     return deviceToRestore
   }
 }

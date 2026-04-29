@@ -25,8 +25,8 @@ actor OpenRouterAPIClient: StreamingChatLLMClient, BatchTranscriptionClient { //
   private let session: URLSession
   private let secureStorage: SecureAppStorage
   private let apiKeyOverride: String?
+  private let apiKeyIdentifier: String
   private let logger = Logger(subsystem: "com.github.speakapp", category: "OpenRouter")
-  private let apiKeyIdentifier = "openrouter.apiKey"
   private let titleHeaderValue = "SpeakApp (macOS)"
   private let refererHeaderValue = "https://github.com/speak"
 
@@ -44,18 +44,17 @@ actor OpenRouterAPIClient: StreamingChatLLMClient, BatchTranscriptionClient { //
   init(
     secureStorage: SecureAppStorage,
     session: URLSession = .shared,
-    apiKeyOverride: String? = nil
+    apiKeyOverride: String? = nil,
+    apiKeyIdentifier: String = "openrouter.apiKey"
   ) {
     self.secureStorage = secureStorage
     self.session = session
     self.apiKeyOverride = apiKeyOverride
+    self.apiKeyIdentifier = apiKeyIdentifier
   }
 
   func hasStoredAPIKey() async -> Bool {
-    if await storedAPIKey() != nil {
-      return true
-    }
-    return await secureStorage.hasSecret(identifier: apiKeyIdentifier)
+    await storedAPIKey() != nil
   }
 
   func requiresRemoteAccess(for model: String) -> Bool {
@@ -171,12 +170,14 @@ actor OpenRouterAPIClient: StreamingChatLLMClient, BatchTranscriptionClient { //
   private func storedAPIKey() async -> String? {
     if let apiKeyOverride {
       let trimmed = apiKeyOverride.trimmingCharacters(in: .whitespacesAndNewlines)
-      return trimmed.isEmpty ? nil : trimmed
+      if !trimmed.isEmpty {
+        return trimmed
+      }
     }
 
     let rawKey = try? await secureStorage.secret(identifier: apiKeyIdentifier)
     let key = rawKey?.trimmingCharacters(in: .whitespacesAndNewlines)
-    return key?.isEmpty == false ? key : nil
+    return key.flatMap { $0.isEmpty ? nil : $0 }
   }
 
   func validateAPIKey(_ key: String) async -> APIKeyValidationResult {
@@ -662,9 +663,10 @@ actor OpenRouterAPIClient: StreamingChatLLMClient, BatchTranscriptionClient { //
   }
 
   private func audioInputFormat(for url: URL) -> String {
-    switch url.pathExtension.lowercased() {
+    let ext = url.pathExtension.lowercased()
+    switch ext {
     case "wav", "mp3", "aiff", "aac", "ogg", "flac", "m4a", "pcm16", "pcm24":
-      return url.pathExtension.lowercased()
+      return ext
     case "m4b":
       return "m4a"
     case "wave":

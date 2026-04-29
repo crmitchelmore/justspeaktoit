@@ -9,27 +9,7 @@ final class OpenRouterAPIClientTests: XCTestCase {
     let requestObserver = OpenRouterRequestObserver()
     OpenRouterMockURLProtocol.requestHandler = { request in
       await requestObserver.store(request: request)
-      let response = HTTPURLResponse(
-        url: try XCTUnwrap(request.url),
-        statusCode: 200,
-        httpVersion: nil,
-        headerFields: ["Content-Type": "application/json"]
-      )!
-      let json = """
-      {
-        "choices": [
-          {
-            "index": 0,
-            "finish_reason": "stop",
-            "message": {
-              "role": "assistant",
-              "content": "hello world"
-            }
-          }
-        ]
-      }
-      """
-      return (response, Data(json.utf8))
+      return try makeOpenRouterResponse(for: request)
     }
     defer {
       OpenRouterMockURLProtocol.requestHandler = nil
@@ -58,6 +38,42 @@ final class OpenRouterAPIClientTests: XCTestCase {
 
     try assertRequestMetadata(request, body: body)
     try assertAudioInputPayload(body)
+  }
+
+  func testBlankAPIKeyOverrideFallsBackToStoredKey() async throws {
+    let secureStorage = makeSecureStorage()
+    let apiKeyIdentifier = "openrouter.apiKey.\(UUID().uuidString)"
+    try await secureStorage.storeSecret("stored-openrouter-key", identifier: apiKeyIdentifier)
+    let requestObserver = OpenRouterRequestObserver()
+    OpenRouterMockURLProtocol.requestHandler = { request in
+      await requestObserver.store(request: request)
+      return try makeOpenRouterResponse(for: request)
+    }
+    defer {
+      OpenRouterMockURLProtocol.requestHandler = nil
+    }
+
+    let client = OpenRouterAPIClient(
+      secureStorage: secureStorage,
+      session: makeMockSession(),
+      apiKeyOverride: "   ",
+      apiKeyIdentifier: apiKeyIdentifier
+    )
+    let audioURL = try makeAudioFile(extension: "m4a", data: Data("fakeaudiodata".utf8))
+    defer {
+      try? FileManager.default.removeItem(at: audioURL)
+    }
+
+    _ = try? await client.transcribeFile(
+      at: audioURL,
+      model: "google/gemini-2.0-flash-001",
+      language: "en_GB"
+    )
+
+    let capturedRequest = await requestObserver.capturedRequest()
+    let request = try XCTUnwrap(capturedRequest)
+    XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer stored-openrouter-key")
+    try? await secureStorage.removeSecret(identifier: apiKeyIdentifier)
   }
 
   func testProviderRegistryDoesNotClaimOpenRouterOpenAIModel() async {
@@ -124,6 +140,30 @@ final class OpenRouterAPIClientTests: XCTestCase {
     try data.write(to: url)
     return url
   }
+}
+
+private func makeOpenRouterResponse(for request: URLRequest) throws -> (HTTPURLResponse, Data) {
+  let response = HTTPURLResponse(
+    url: try XCTUnwrap(request.url),
+    statusCode: 200,
+    httpVersion: nil,
+    headerFields: ["Content-Type": "application/json"]
+  )!
+  let json = """
+  {
+    "choices": [
+      {
+        "index": 0,
+        "finish_reason": "stop",
+        "message": {
+          "role": "assistant",
+          "content": "hello world"
+        }
+      }
+    ]
+  }
+  """
+  return (response, Data(json.utf8))
 }
 
 private typealias OpenRouterRequestHandler =

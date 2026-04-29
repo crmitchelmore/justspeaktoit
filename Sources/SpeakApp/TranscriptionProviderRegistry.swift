@@ -28,9 +28,14 @@ actor TranscriptionProviderRegistry {
 
     func provider(forModel model: String) -> (any TranscriptionProvider)? {
         // Extract provider ID from model string (e.g., "openai/whisper-1" -> "openai")
-        let components = model.split(separator: "/")
+        let trimmedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        let components = trimmedModel.split(separator: "/")
         guard let providerID = components.first else { return nil }
-        return providers[String(providerID)]
+        guard let provider = providers[String(providerID)] else { return nil }
+
+        let supportedIDs = provider.supportedModels().map(\.id)
+        guard supportedIDs.contains(trimmedModel) else { return nil }
+        return provider
     }
 
     func allSupportedModels() -> [ModelCatalog.Option] {

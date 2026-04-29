@@ -80,9 +80,11 @@ final class TranscriptionManager: ObservableObject {
   }
 
   func stopLiveTranscription() async throws -> TranscriptionResult {
-    // If there was a mid-session error, throw it now
+    // If there was a mid-session error, still stop the controller so audio resources
+    // and preferred input-device sessions are released before surfacing the failure.
     if let error = pendingError {
       pendingError = nil
+      await liveController.stop()
       isLiveTranscribing = false
       throw error
     }

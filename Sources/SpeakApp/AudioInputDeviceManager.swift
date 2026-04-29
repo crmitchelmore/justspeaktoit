@@ -2,7 +2,10 @@ import AVFoundation
 import CoreAudio
 import os.log
 
+// swiftlint:disable file_length
+
 @MainActor
+// swiftlint:disable:next type_body_length
 final class AudioInputDeviceManager: ObservableObject {
   struct Device: Identifiable, Equatable {
     let id: String
@@ -28,10 +31,7 @@ final class AudioInputDeviceManager: ObservableObject {
     }
   }
 
-  struct SessionContext {
-    fileprivate let previousDeviceID: AudioDeviceID?
-    fileprivate let didChangeDevice: Bool
-  }
+  typealias SessionContext = AudioInputDeviceSessionTracker.Context
 
   static let systemDefaultToken = "__system_default_input__"
 
@@ -43,6 +43,7 @@ final class AudioInputDeviceManager: ObservableObject {
   private let logger = Logger(subsystem: "com.github.speakapp", category: "AudioInput")
   private var devicesListener: AudioObjectPropertyListenerBlock?
   private var defaultDeviceListener: AudioObjectPropertyListenerBlock?
+  private var sessionTracker = AudioInputDeviceSessionTracker()
 
   init(appSettings: AppSettings) {
     self.appSettings = appSettings
@@ -128,36 +129,41 @@ final class AudioInputDeviceManager: ObservableObject {
   }
 
   func beginUsingPreferredInput() async -> SessionContext {
-    let preferredUID = selectedDeviceUID ?? appSettings.preferredAudioInputUID
+    if self.sessionTracker.hasActiveSession {
+      self.logger.debug("Joining active preferred input device session")
+      return self.sessionTracker.beginSession(previousDeviceID: nil, didChangeDevice: false)
+    }
+
+    let preferredUID = self.selectedDeviceUID ?? self.appSettings.preferredAudioInputUID
     guard
       let uid = preferredUID,
-      let targetDeviceID = deviceID(forUID: uid),
-      let currentDefaultID = currentDefaultInputDeviceID(),
+      let targetDeviceID = self.deviceID(forUID: uid),
+      let currentDefaultID = self.currentDefaultInputDeviceID(),
       targetDeviceID != currentDefaultID
     else {
-      return SessionContext(previousDeviceID: nil, didChangeDevice: false)
+      return self.sessionTracker.beginSession(previousDeviceID: nil, didChangeDevice: false)
     }
 
-    if setDefaultInputDevice(to: targetDeviceID) {
-      refreshDevices()
-      logger.debug("Activated preferred input device with UID \(uid, privacy: .public)")
-      return SessionContext(previousDeviceID: currentDefaultID, didChangeDevice: true)
+    if self.setDefaultInputDevice(to: targetDeviceID) {
+      self.refreshDevices()
+      self.logger.debug("Activated preferred input device with UID \(uid, privacy: .public)")
+      return self.sessionTracker.beginSession(previousDeviceID: currentDefaultID, didChangeDevice: true)
     }
 
-    logger.error("Failed to activate preferred input \(uid, privacy: .public); continuing with system default")
-    return SessionContext(previousDeviceID: nil, didChangeDevice: false)
+    self.logger.error("Failed to activate preferred input \(uid, privacy: .public); continuing with system default")
+    return self.sessionTracker.beginSession(previousDeviceID: nil, didChangeDevice: false)
   }
 
   func endUsingPreferredInput(session: SessionContext) async {
-    guard session.didChangeDevice, let previous = session.previousDeviceID else {
+    guard let previous = self.sessionTracker.endSession(session) else {
       return
     }
 
-    if setDefaultInputDevice(to: previous) {
-      refreshDevices()
-      logger.debug("Restored previous input device after session")
+    if self.setDefaultInputDevice(to: previous) {
+      self.refreshDevices()
+      self.logger.debug("Restored previous input device after session")
     } else {
-      logger.error("Failed to restore previous input device after session")
+      self.logger.error("Failed to restore previous input device after session")
     }
   }
 

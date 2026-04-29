@@ -1271,6 +1271,8 @@ final class MainManager: ObservableObject {
           return "OpenRouter rejected \(displayName) (status \(code)): \(detail)"
         }
         return "OpenRouter responded with status \(code) while using \(displayName)."
+      case .audioFileTooLarge:
+        return routerError.localizedDescription
       }
     }
 

@@ -7,6 +7,7 @@ enum OpenRouterClientError: LocalizedError {
   case apiKeyMissing
   case invalidResponse
   case httpStatus(Int, String)
+  case audioFileTooLarge(fileSize: Int64, limit: Int64)
 
   var errorDescription: String? {
     switch self {
@@ -16,6 +17,10 @@ enum OpenRouterClientError: LocalizedError {
       return "The server returned an invalid response."
     case .httpStatus(let code, let body):
       return "OpenRouter responded with status \(code): \(body)"
+    case .audioFileTooLarge(let fileSize, let limit):
+      let fileSizeDescription = ByteCountFormatter.string(fromByteCount: fileSize, countStyle: .file)
+      let limitDescription = ByteCountFormatter.string(fromByteCount: limit, countStyle: .file)
+      return "Audio file is too large for OpenRouter reprocessing (\(fileSizeDescription), limit \(limitDescription))."
     }
   }
 }
@@ -26,6 +31,7 @@ actor OpenRouterAPIClient: StreamingChatLLMClient, BatchTranscriptionClient { //
   private let secureStorage: SecureAppStorage
   private let apiKeyOverride: String?
   private let apiKeyIdentifier: String
+  private let maximumInlineAudioBytes: Int64
   private let logger = Logger(subsystem: "com.github.speakapp", category: "OpenRouter")
   private let titleHeaderValue = "SpeakApp (macOS)"
   private let refererHeaderValue = "https://github.com/speak"
@@ -45,12 +51,14 @@ actor OpenRouterAPIClient: StreamingChatLLMClient, BatchTranscriptionClient { //
     secureStorage: SecureAppStorage,
     session: URLSession = .shared,
     apiKeyOverride: String? = nil,
-    apiKeyIdentifier: String = "openrouter.apiKey"
+    apiKeyIdentifier: String = "openrouter.apiKey",
+    maximumInlineAudioBytes: Int64 = 50 * 1024 * 1024
   ) {
     self.secureStorage = secureStorage
     self.session = session
     self.apiKeyOverride = apiKeyOverride
     self.apiKeyIdentifier = apiKeyIdentifier
+    self.maximumInlineAudioBytes = maximumInlineAudioBytes
   }
 
   func hasStoredAPIKey() async -> Bool {
@@ -506,6 +514,7 @@ actor OpenRouterAPIClient: StreamingChatLLMClient, BatchTranscriptionClient { //
     request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
     applyBrandHeaders(&request)
 
+    try enforceInlineAudioSizeLimit(for: url)
     let audioData = try Data(contentsOf: url)
     let prompt = transcriptionPrompt(language: language)
     let payload = OpenRouterAudioTranscriptionRequest(
@@ -674,6 +683,25 @@ actor OpenRouterAPIClient: StreamingChatLLMClient, BatchTranscriptionClient { //
     default:
       return "m4a"
     }
+  }
+
+  private func enforceInlineAudioSizeLimit(for url: URL) throws {
+    let fileSize = try audioFileSize(for: url)
+    guard fileSize <= maximumInlineAudioBytes else {
+      throw OpenRouterClientError.audioFileTooLarge(
+        fileSize: fileSize,
+        limit: maximumInlineAudioBytes
+      )
+    }
+  }
+
+  private func audioFileSize(for url: URL) throws -> Int64 {
+    if let fileSize = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize {
+      return Int64(fileSize)
+    }
+
+    let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+    return (attributes[.size] as? NSNumber)?.int64Value ?? 0
   }
 
   private func buildTranscriptionResult(

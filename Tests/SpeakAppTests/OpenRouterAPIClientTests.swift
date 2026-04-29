@@ -5,7 +5,7 @@ import XCTest
 
 @MainActor
 final class OpenRouterAPIClientTests: XCTestCase {
-  func testTranscribeFileUsesChatCompletionsJSONAudioInput() async throws {
+  func testTranscribeFileWithAudioInput_UsesChatCompletionsJSONPayload() async throws {
     let requestObserver = OpenRouterRequestObserver()
     OpenRouterMockURLProtocol.requestHandler = { request in
       await requestObserver.store(request: request)
@@ -40,7 +40,7 @@ final class OpenRouterAPIClientTests: XCTestCase {
     try assertAudioInputPayload(body)
   }
 
-  func testBlankAPIKeyOverrideFallsBackToStoredKey() async throws {
+  func testBlankAPIKeyOverride_UsesStoredKey() async throws {
     let secureStorage = makeSecureStorage()
     let apiKeyIdentifier = "openrouter.apiKey.\(UUID().uuidString)"
     try await secureStorage.storeSecret("stored-openrouter-key", identifier: apiKeyIdentifier)
@@ -76,7 +76,7 @@ final class OpenRouterAPIClientTests: XCTestCase {
     try? await secureStorage.removeSecret(identifier: apiKeyIdentifier)
   }
 
-  func testProviderRegistryDoesNotClaimOpenRouterOpenAIModel() async {
+  func testProviderRegistryWithOpenRouterOpenAIModel_DoesNotClaimDedicatedProvider() async {
     let provider = await TranscriptionProviderRegistry.shared.provider(
       forModel: "openai/gpt-4o-audio-preview-2024-12-17"
     )
@@ -84,10 +84,43 @@ final class OpenRouterAPIClientTests: XCTestCase {
     XCTAssertNil(provider)
   }
 
-  func testProviderRegistryStillClaimsDedicatedOpenAIWhisperModel() async {
+  func testProviderRegistryWithDedicatedOpenAIWhisperModel_ReturnsOpenAIProvider() async {
     let provider = await TranscriptionProviderRegistry.shared.provider(forModel: "openai/whisper-1")
 
     XCTAssertEqual(provider?.metadata.id, "openai")
+  }
+
+  func testTranscribeFileWithOversizedAudio_ThrowsBeforeEncodingPayload() async throws {
+    OpenRouterMockURLProtocol.requestHandler = { _ in
+      XCTFail("Oversized audio should be rejected before sending a request")
+      throw OpenRouterClientError.invalidResponse
+    }
+    defer {
+      OpenRouterMockURLProtocol.requestHandler = nil
+    }
+
+    let client = OpenRouterAPIClient(
+      secureStorage: makeSecureStorage(),
+      session: makeMockSession(),
+      apiKeyOverride: "test-openrouter-key",
+      maximumInlineAudioBytes: 4
+    )
+    let audioURL = try makeAudioFile(extension: "m4a", data: Data("fakeaudiodata".utf8))
+    defer {
+      try? FileManager.default.removeItem(at: audioURL)
+    }
+
+    do {
+      _ = try await client.transcribeFile(
+        at: audioURL,
+        model: "google/gemini-2.0-flash-001",
+        language: "en_GB"
+      )
+      XCTFail("Expected oversized audio to be rejected")
+    } catch OpenRouterClientError.audioFileTooLarge(let fileSize, let limit) {
+      XCTAssertEqual(fileSize, 13)
+      XCTAssertEqual(limit, 4)
+    }
   }
 
   private func assertRequestMetadata(_ request: URLRequest, body: Data) throws {

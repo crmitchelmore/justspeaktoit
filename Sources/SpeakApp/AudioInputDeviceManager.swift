@@ -2,8 +2,6 @@ import AVFoundation
 import CoreAudio
 import os.log
 
-// swiftlint:disable file_length
-
 @MainActor
 // swiftlint:disable:next type_body_length
 final class AudioInputDeviceManager: ObservableObject {
@@ -445,4 +443,4 @@ final class AudioInputDeviceManager: ObservableObject {
     let status = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &value)
     return status == noErr ? value : nil
   }
-}
+} // swiftlint:disable:this file_length

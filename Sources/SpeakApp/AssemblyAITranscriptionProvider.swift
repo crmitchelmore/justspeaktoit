@@ -642,36 +642,14 @@ struct AssemblyAITranscriptionProvider: TranscriptionProvider {
   }
 
   private func mapLiveSpeechModel(from model: String, language: String?) -> AssemblyAILiveSpeechModelConfig {
-    let name = model.split(separator: "/").last.map(String.init) ?? model
-    switch name {
-    case "universal-streaming-english":
-      return AssemblyAILiveSpeechModelConfig(
-        speechModel: "universal-streaming-english",
-        languageDetectionEnabled: false
-      )
-    case "universal-streaming-multilingual":
-      return AssemblyAILiveSpeechModelConfig(
-        speechModel: "universal-streaming-multilingual",
-        languageDetectionEnabled: true
-      )
-    case "u3-rt-pro-streaming", "u3-rt-pro":
-      return AssemblyAILiveSpeechModelConfig(
-        speechModel: "u3-rt-pro",
-        languageDetectionEnabled: false
-      )
-    default:
-      let languageCode = language.map { extractLanguageCode(from: $0) } ?? "en"
-      if languageCode.hasPrefix("en") {
-        return AssemblyAILiveSpeechModelConfig(
-          speechModel: "universal-streaming-english",
-          languageDetectionEnabled: false
-        )
-      }
-      return AssemblyAILiveSpeechModelConfig(
-        speechModel: "universal-streaming-multilingual",
-        languageDetectionEnabled: true
-      )
-    }
+    // The catalog now exposes only u3-rt-pro for live AssemblyAI. Older saved IDs
+    // (universal-streaming/-english/-multilingual) are migrated transparently to u3-rt-pro,
+    // which already handles English and multilingual content with high accuracy.
+    _ = language
+    return AssemblyAILiveSpeechModelConfig(
+      speechModel: "u3-rt-pro",
+      languageDetectionEnabled: false
+    )
   }
 
   private func extractLanguageCode(from locale: String) -> String {

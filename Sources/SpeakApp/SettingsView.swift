@@ -90,7 +90,6 @@ struct SettingsView: View {
   @State private var showSystemPromptPreview = false
   @State private var systemPromptPreview = ""
   @State private var showingConfigTransfer = false
-  @State private var showingAssemblyAIPreprocessingAlert = false
   @State private var soundPreviewPlayer: RecordingSoundPlayer?
   private let openRouterKeyIdentifier = "openrouter.apiKey"
 
@@ -245,17 +244,11 @@ struct SettingsView: View {
       transcriptionProviders = await TranscriptionProviderRegistry.shared.allProviders()
       syncAssemblyAIKeytermsFromPronunciation()
     }
-    .onChange(of: settings.liveTranscriptionModel) { oldValue, newValue in
-      let oldIsAssembly = oldValue.localizedCaseInsensitiveContains("assemblyai")
+    .onChange(of: settings.liveTranscriptionModel) { _, newValue in
       let newIsAssembly = newValue.localizedCaseInsensitiveContains("assemblyai")
       if newIsAssembly {
         settings.postProcessingEnabled = false
         syncAssemblyAIKeytermsFromPronunciation()
-        if !oldIsAssembly {
-          DispatchQueue.main.async {
-            showingAssemblyAIPreprocessingAlert = true
-          }
-        }
       }
     }
     .onChange(of: settings.assemblyAIKeyterms) { _, _ in
@@ -266,16 +259,6 @@ struct SettingsView: View {
     }
     .onReceive(environment.pronunciationManager.$entries) { _ in
       syncAssemblyAIKeytermsFromPronunciation()
-    }
-    .alert("AssemblyAI Pre-processing", isPresented: $showingAssemblyAIPreprocessingAlert) {
-      Button("OK") {
-        sidebarSelection = .settings(.postProcessing)
-      }
-    } message: {
-      Text(
-        "Custom prompt-based pre-processing is disabled for AssemblyAI live streaming."
-          + " Use Keyterms for recognition guidance."
-      )
     }
   }
 

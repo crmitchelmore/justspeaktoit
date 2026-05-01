@@ -61,6 +61,7 @@ private struct ElevenLabsErrorMessage: Decodable {
 /// - Auth: `xi-api-key` header
 /// - Audio: JSON `input_audio_chunk` messages with base64 PCM (NOT raw binary)
 /// - Commit: `commit_strategy=vad` keeps server-side VAD; manual `commit:true` flushes on stop
+// swiftlint:disable type_body_length
 final class ElevenLabsLiveTranscriber: @unchecked Sendable {
     // Connection URL is constructed in connectWebSocket(); never logged.
     private static let websocketHost = "api.elevenlabs.io"
@@ -280,6 +281,7 @@ final class ElevenLabsLiveTranscriber: @unchecked Sendable {
         }
     }
 
+    // swiftlint:disable:next cyclomatic_complexity
     private func parseResponse(_ json: String) {
         guard let data = json.data(using: .utf8) else { return }
         do {
@@ -310,7 +312,8 @@ final class ElevenLabsLiveTranscriber: @unchecked Sendable {
                  "insufficient_audio_activity", "commit_throttled", "unaccepted_terms":
                 let err = try? JSONDecoder().decode(ElevenLabsErrorMessage.self, from: data)
                 let detail = err?.error ?? envelope.messageType
-                logger.error("ElevenLabs server error (\(envelope.messageType, privacy: .public)): \(detail, privacy: .public)")
+                let mt = envelope.messageType
+                logger.error("ElevenLabs server error (\(mt, privacy: .public)): \(detail, privacy: .public)")
                 currentOnError()?(NSError(
                     domain: "ElevenLabs", code: -1,
                     userInfo: [NSLocalizedDescriptionKey: "ElevenLabs: \(detail)"]
@@ -375,3 +378,5 @@ private extension ElevenLabsLiveTranscriber {
         withStateLock { onError }
     }
 }
+
+// swiftlint:enable type_body_length

@@ -289,7 +289,10 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
 
     do {
       let envelope = try JSONDecoder().decode(AssemblyAIStreamEnvelope.self, from: data)
-      switch envelope.type {
+      // u3-rt-pro (api_version 2025-05-12) omits the "type" field on Turn messages.
+      // Treat any message without a type but with a turn_order as a Turn.
+      let resolvedType = envelope.type ?? (envelope.turn_order != nil ? "Turn" : "")
+      switch resolvedType {
       case "Turn":
         let turn = try JSONDecoder().decode(AssemblyAITurnResponse.self, from: data)
         currentOnTranscript()?(turn)
@@ -300,8 +303,10 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
         logger.info("AssemblyAI session started — \(json.prefix(200))")
       case "Termination":
         logger.info("AssemblyAI session terminated by server")
+      case "SpeechStarted", "":
+        break
       default:
-        logger.debug("Unhandled AssemblyAI message type: \(envelope.type)")
+        logger.debug("Unhandled AssemblyAI message type: \(resolvedType)")
       }
     } catch {
       logger.debug("Failed to parse AssemblyAI response: \(error.localizedDescription)")
@@ -683,7 +688,9 @@ struct AssemblyAITranscriptionProvider: TranscriptionProvider {
 // MARK: - Streaming Response Models
 
 private struct AssemblyAIStreamEnvelope: Decodable {
-  let type: String
+  let type: String?
+  // swiftlint:disable:next identifier_name
+  let turn_order: Int?
 }
 
 private struct AssemblyAILiveSpeechModelConfig {
@@ -692,7 +699,7 @@ private struct AssemblyAILiveSpeechModelConfig {
 }
 
 struct AssemblyAITurnResponse: Decodable {
-  let type: String
+  let type: String?
   let turn_order: Int
   let turn_is_formatted: Bool
   let end_of_turn: Bool

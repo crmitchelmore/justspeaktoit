@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import AVFoundation
 import Foundation
 import os.log
@@ -51,6 +52,11 @@ private struct SonioxStreamResponse: Decodable {
         case errorCode = "error_code"
         case errorMessage = "error_message"
     }
+}
+
+protocol SonioxFinalizationDelegate: AnyObject {
+    /// Soniox emitted a `finished: true` signal — caller should release any pending stop().
+    func sonioxDidFinishStream()
 }
 
 // MARK: - Provider
@@ -144,6 +150,11 @@ final class SonioxLiveTranscriber: @unchecked Sendable {
     private var onError: ((Error) -> Void)?
     private var isStopping: Bool = false
     private var didSendConfig: Bool = false
+    /// Cumulative final-token text. Soniox sends each final token exactly once;
+    /// we accumulate them so the live transcript grows monotonically instead of
+    /// being clobbered by per-batch emits.
+    private var accumulatedFinalText: String = ""
+    weak var finalizationDelegate: SonioxFinalizationDelegate?
 
     init(
         apiKey: String,
@@ -164,6 +175,7 @@ final class SonioxLiveTranscriber: @unchecked Sendable {
         withStateLock {
             isStopping = false
             didSendConfig = false
+            accumulatedFinalText = ""
             self.onTranscript = onTranscript
             self.onError = onError
         }
@@ -298,9 +310,9 @@ final class SonioxLiveTranscriber: @unchecked Sendable {
         }
     }
 
-    /// Aggregates Soniox token deltas into a single transcript callback.
-    /// The server may send overlapping batches of finalised + non-final tokens; we
-    /// emit the union as either an interim or a final update depending on the run.
+    /// Soniox tokens carry their own whitespace inside `text`; we accumulate
+    /// finals into a running buffer and emit `(accumulated + non_final, false)`
+    /// for every batch. The cumulative final commit is fired by `flushFinal()`.
     private func parseResponse(_ json: String) {
         guard let data = json.data(using: .utf8) else { return }
         do {
@@ -314,23 +326,48 @@ final class SonioxLiveTranscriber: @unchecked Sendable {
                 ))
                 return
             }
-            guard let tokens = response.tokens, !tokens.isEmpty else { return }
-            let finalText = tokens
-                .filter { $0.isFinal == true }
-                .map(\.text)
-                .joined()
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let interimText = tokens
-                .map(\.text)
-                .joined()
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if !finalText.isEmpty {
-                currentOnTranscript()?(finalText, true)
-            } else if !interimText.isEmpty {
-                currentOnTranscript()?(interimText, false)
+
+            let tokens = response.tokens ?? []
+            if !tokens.isEmpty {
+                var newFinals = ""
+                var nonFinals = ""
+                for token in tokens {
+                    if token.isFinal == true {
+                        newFinals.append(token.text)
+                    } else {
+                        nonFinals.append(token.text)
+                    }
+                }
+
+                let display: String = withStateLock {
+                    accumulatedFinalText.append(newFinals)
+                    return accumulatedFinalText + nonFinals
+                }
+                let trimmed = display.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    currentOnTranscript()?(trimmed, false)
+                }
+            }
+
+            if response.finished == true {
+                flushFinal()
+                finalizationDelegate?.sonioxDidFinishStream()
             }
         } catch {
             logger.debug("Failed to parse Soniox response: \(error.localizedDescription)")
+        }
+    }
+
+    /// Emit the accumulated final transcript as a single `(text, true)` callback.
+    /// Safe to call multiple times — second call is a no-op.
+    func flushFinal() {
+        let text: String? = withStateLock {
+            let snapshot = accumulatedFinalText.trimmingCharacters(in: .whitespacesAndNewlines)
+            accumulatedFinalText = ""
+            return snapshot.isEmpty ? nil : snapshot
+        }
+        if let text {
+            currentOnTranscript()?(text, true)
         }
     }
 
@@ -376,3 +413,4 @@ final class SonioxLiveTranscriber: @unchecked Sendable {
         withStateLock { onError }
     }
 }
+// swiftlint:enable file_length

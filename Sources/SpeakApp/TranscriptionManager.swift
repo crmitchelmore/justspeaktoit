@@ -2080,15 +2080,8 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
       }
       targetFormat = outputFormat
 
-      // Convert catalog IDs like "elevenlabs/scribe-v2-streaming" into API model IDs like "scribe_v2".
-      let modelID: String
-      if let model = currentModel, model.hasPrefix("elevenlabs/") {
-        let suffixless = String(model.dropFirst("elevenlabs/".count)).replacingOccurrences(
-          of: "-streaming", with: "")
-        modelID = suffixless.replacingOccurrences(of: "-", with: "_")
-      } else {
-        modelID = "scribe_v2"
-      }
+      // ElevenLabs realtime API requires the `_realtime` suffixed model ID.
+      let modelID = "scribe_v2_realtime"
 
       let newTranscriber = ElevenLabsLiveTranscriber(
         apiKey: apiKey,
@@ -2165,8 +2158,11 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
       audioProcessor.flushPendingAudio(to: transcriber)
       await transcriber.waitForPendingSends()
       audioProcessor.setRunning(false)
-      // Brief grace period so the server can deliver any final transcript before the socket closes.
-      try? await Task.sleep(for: .seconds(0.5))
+      // Manual commit flushes any VAD-buffered audio so the server emits
+      // a final committed_transcript for the trailing words. Wait briefly
+      // for that final to arrive before closing the socket.
+      transcriber.sendCommit()
+      try? await Task.sleep(for: .seconds(1.5))
       transcriber.stop()
     } else {
       audioProcessor.setRunning(false)

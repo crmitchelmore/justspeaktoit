@@ -29,28 +29,39 @@ enum ElevenLabsLiveError: LocalizedError {
 // MARK: - WebSocket response types
 
 private struct ElevenLabsStreamEnvelope: Decodable {
-    let type: String
-}
-
-private struct ElevenLabsTranscriptEvent: Decodable {
-    let text: String
-    let type: String   // "partial" or "final"
+    let messageType: String
+    private enum CodingKeys: String, CodingKey { case messageType = "message_type" }
 }
 
 private struct ElevenLabsTranscriptMessage: Decodable {
-    let type: String
-    let transcriptEvent: ElevenLabsTranscriptEvent?
-
+    let messageType: String
+    let text: String?
     private enum CodingKeys: String, CodingKey {
-        case type
-        case transcriptEvent = "transcript_event"
+        case messageType = "message_type"
+        case text
+    }
+}
+
+private struct ElevenLabsErrorMessage: Decodable {
+    let messageType: String
+    let error: String?
+    private enum CodingKeys: String, CodingKey {
+        case messageType = "message_type"
+        case error
     }
 }
 
 // MARK: - Live Transcriber (WebSocket client)
 
-/// Streams raw PCM audio to ElevenLabs Scribe v2 real-time API and delivers partial/final
-/// transcript callbacks.  Auth uses `xi-api-key` header — no URL-level key exposure.
+// Streams raw PCM audio to ElevenLabs Scribe Realtime API and delivers partial/final
+// transcript callbacks.
+//
+// Protocol reference: https://elevenlabs.io/docs/api-reference/speech-to-text/v-1-speech-to-text-realtime
+// - URL: `wss://api.elevenlabs.io/v1/speech-to-text/realtime`
+// - Auth: `xi-api-key` header
+// - Audio: JSON `input_audio_chunk` messages with base64 PCM (NOT raw binary)
+// - Commit: `commit_strategy=vad` keeps server-side VAD; manual `commit:true` flushes on stop
+// swiftlint:disable type_body_length
 final class ElevenLabsLiveTranscriber: @unchecked Sendable {
     // Connection URL is constructed in connectWebSocket(); never logged.
     private static let websocketHost = "api.elevenlabs.io"
@@ -74,10 +85,13 @@ final class ElevenLabsLiveTranscriber: @unchecked Sendable {
     private var onTranscript: ((String, Bool) -> Void)?
     private var onError: ((Error) -> Void)?
     private var isStopping: Bool = false
+    private var sessionStarted: Bool = false
+    private var preStartAudioBuffer: [Data] = []
+    private static let preStartByteLimit = 16_000 * 2 * 5 // 5s of 16kHz PCM16
 
     init(
         apiKey: String,
-        modelID: String = "scribe_v2",
+        modelID: String = "scribe_v2_realtime",
         sampleRate: Int = 16000,
         session: URLSession = .shared,
         bufferPool: AudioBufferPool = AudioBufferPool(poolSize: 10, bufferSize: 4096)
@@ -95,6 +109,8 @@ final class ElevenLabsLiveTranscriber: @unchecked Sendable {
     ) {
         withStateLock {
             isStopping = false
+            sessionStarted = false
+            preStartAudioBuffer = []
             self.onTranscript = onTranscript
             self.onError = onError
         }
@@ -102,28 +118,68 @@ final class ElevenLabsLiveTranscriber: @unchecked Sendable {
     }
 
     func sendAudio(_ audioData: Data) {
-        guard let task = currentWebSocketTask(), task.state == .running else { return }
+        // Buffer audio until session_started arrives so we don't lose the first words.
+        let snapshot = withStateLock { () -> (URLSessionWebSocketTask?, Bool) in
+            (webSocketTask, sessionStarted)
+        }
+        guard let task = snapshot.0, task.state == .running, snapshot.1 else {
+            withStateLock {
+                preStartAudioBuffer.append(audioData)
+                var totalBytes = preStartAudioBuffer.reduce(0) { $0 + $1.count }
+                while totalBytes > Self.preStartByteLimit, !preStartAudioBuffer.isEmpty {
+                    totalBytes -= preStartAudioBuffer.removeFirst().count
+                }
+            }
+            return
+        }
+        sendAudioFrame(audioData, on: task)
+    }
 
-        var buffer = bufferPool.checkout()
-        buffer.append(audioData)
+    private func sendAudioFrame(_ audioData: Data, on task: URLSessionWebSocketTask) {
+        let payload: [String: Any] = [
+            "message_type": "input_audio_chunk",
+            "audio_base_64": audioData.base64EncodedString(),
+            "sample_rate": sampleRate
+        ]
+        guard
+            let json = try? JSONSerialization.data(withJSONObject: payload, options: []),
+            let text = String(data: json, encoding: .utf8)
+        else { return }
 
-        let dataToSend = buffer
-        let message = URLSessionWebSocketTask.Message.data(dataToSend)
         let sendGroup = pendingSendGroup
         sendGroup.enter()
-
-        task.send(message) { [weak self] error in
+        task.send(.string(text)) { [weak self] error in
             defer { sendGroup.leave() }
             guard let self else { return }
-            var returnBuffer = buffer
-            self.bufferPool.returnBuffer(&returnBuffer)
-
             if let error {
                 if self.isStoppingState() || self.shouldIgnoreSocketError(error) { return }
-                self.logger.error("Failed to send audio: \(error.localizedDescription)")
+                self.logger.error("Failed to send audio: \(error.localizedDescription, privacy: .public)")
                 self.currentOnError()?(error)
             }
         }
+    }
+
+    /// Flush any audio buffered before `session_started` arrived.
+    private func flushPreStartAudio() {
+        let (task, frames) = withStateLock { () -> (URLSessionWebSocketTask?, [Data]) in
+            let pending = preStartAudioBuffer
+            preStartAudioBuffer = []
+            return (webSocketTask, pending)
+        }
+        guard let task, task.state == .running, !frames.isEmpty else { return }
+        logger.info("Flushing \(frames.count) pre-start audio frames to ElevenLabs")
+        for frame in frames {
+            sendAudioFrame(frame, on: task)
+        }
+    }
+
+    /// Send a manual commit to flush any pending VAD-buffered audio before stop.
+    func sendCommit() {
+        guard let task = currentWebSocketTask(), task.state == .running else { return }
+        let payload = #"{"message_type":"input_audio_chunk","audio_base_64":"","commit":true}"#
+        let sendGroup = pendingSendGroup
+        sendGroup.enter()
+        task.send(.string(payload)) { _ in sendGroup.leave() }
     }
 
     func stop() {
@@ -166,7 +222,8 @@ final class ElevenLabsLiveTranscriber: @unchecked Sendable {
         urlComponents.path = Self.websocketPath
         urlComponents.queryItems = [
             URLQueryItem(name: "model_id", value: modelID),
-            URLQueryItem(name: "inactivity_timeout", value: "10")
+            URLQueryItem(name: "audio_format", value: "pcm_\(sampleRate)"),
+            URLQueryItem(name: "commit_strategy", value: "vad")
         ]
 
         guard let url = urlComponents.url else {
@@ -189,7 +246,7 @@ final class ElevenLabsLiveTranscriber: @unchecked Sendable {
             return
         }
 
-        logger.info("ElevenLabs WebSocket connecting")
+        logger.info("ElevenLabs WebSocket connecting (model: \(self.modelID, privacy: .public))")
         receiveMessages()
     }
 
@@ -205,7 +262,7 @@ final class ElevenLabsLiveTranscriber: @unchecked Sendable {
                 if self.isStoppingState() { return }
                 if self.shouldIgnoreSocketError(error) { return }
                 let mapped = self.mapConnectionError(error)
-                self.logger.error("WebSocket receive error: \(error.localizedDescription)")
+                self.logger.error("WebSocket receive error: \(error.localizedDescription, privacy: .public)")
                 self.currentOnError()?(mapped)
             }
         }
@@ -224,22 +281,49 @@ final class ElevenLabsLiveTranscriber: @unchecked Sendable {
         }
     }
 
+    // swiftlint:disable:next cyclomatic_complexity
     private func parseResponse(_ json: String) {
-        logger.debug("ElevenLabs response (length: \(json.count))")
         guard let data = json.data(using: .utf8) else { return }
-
         do {
             let envelope = try JSONDecoder().decode(ElevenLabsStreamEnvelope.self, from: data)
-            switch envelope.type {
-            case "transcript":
+            switch envelope.messageType {
+            case "session_started":
+                logger.info("ElevenLabs session started")
+                withStateLock { sessionStarted = true }
+                flushPreStartAudio()
+
+            case "partial_transcript":
                 let msg = try JSONDecoder().decode(ElevenLabsTranscriptMessage.self, from: data)
-                guard let event = msg.transcriptEvent, !event.text.isEmpty else { return }
-                let isFinal = event.type == "final"
-                currentOnTranscript()?(event.text, isFinal)
-            case "close_connection":
-                logger.info("ElevenLabs server sent close_connection")
+                guard let text = msg.text, !text.isEmpty else { return }
+                currentOnTranscript()?(text, false)
+
+            case "committed_transcript", "committed_transcript_with_timestamps":
+                let msg = try JSONDecoder().decode(ElevenLabsTranscriptMessage.self, from: data)
+                guard let text = msg.text, !text.isEmpty else { return }
+                currentOnTranscript()?(text, true)
+
+            case "auth_error":
+                logger.error("ElevenLabs auth error: \(json.prefix(200), privacy: .public)")
+                currentOnError()?(ElevenLabsLiveError.invalidAPIKeyOrMissingScribeAccess)
+
+            case "input_error", "transcriber_error", "rate_limited",
+                 "quota_exceeded", "queue_overflow", "resource_exhausted",
+                 "session_time_limit_exceeded", "chunk_size_exceeded",
+                 "insufficient_audio_activity", "commit_throttled", "unaccepted_terms":
+                let err = try? JSONDecoder().decode(ElevenLabsErrorMessage.self, from: data)
+                let detail = err?.error ?? envelope.messageType
+                let kind = envelope.messageType
+                logger.error("ElevenLabs server error (\(kind, privacy: .public)): \(detail, privacy: .public)")
+                currentOnError()?(NSError(
+                    domain: "ElevenLabs", code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: "ElevenLabs: \(detail)"]
+                ))
+
+            case "session_closed":
+                logger.info("ElevenLabs server closed session")
+
             default:
-                logger.debug("Unhandled ElevenLabs message type: \(envelope.type)")
+                logger.debug("Unhandled ElevenLabs message type: \(envelope.messageType, privacy: .public)")
             }
         } catch {
             logger.debug("Failed to parse ElevenLabs response: \(error.localizedDescription)")
@@ -294,3 +378,5 @@ private extension ElevenLabsLiveTranscriber {
         withStateLock { onError }
     }
 }
+
+// swiftlint:enable type_body_length

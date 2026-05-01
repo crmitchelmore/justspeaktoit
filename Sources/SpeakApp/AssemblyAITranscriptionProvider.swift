@@ -689,6 +689,7 @@ struct AssemblyAITranscriptionProvider: TranscriptionProvider {
 
 private struct AssemblyAIStreamEnvelope: Decodable {
   let type: String?
+  // swiftlint:disable:next identifier_name
   let turn_order: Int?
 }
 

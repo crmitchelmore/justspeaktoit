@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import AVFoundation
 import Foundation
 import os.log
@@ -412,3 +413,4 @@ final class SonioxLiveTranscriber: @unchecked Sendable {
         withStateLock { onError }
     }
 }
+// swiftlint:enable file_length

@@ -30,16 +30,17 @@ enum SonioxLiveError: LocalizedError {
 
 // MARK: - WebSocket response types
 
-private struct SonioxStreamResponse: Decodable {
-    struct Token: Decodable {
-        let text: String
-        let isFinal: Bool?
-        private enum CodingKeys: String, CodingKey {
-            case text
-            case isFinal = "is_final"
-        }
+private struct SonioxToken: Decodable {
+    let text: String
+    let isFinal: Bool?
+    private enum CodingKeys: String, CodingKey {
+        case text
+        case isFinal = "is_final"
     }
-    let tokens: [Token]?
+}
+
+private struct SonioxStreamResponse: Decodable {
+    let tokens: [SonioxToken]?
     let finished: Bool?
     let errorCode: Int?
     let errorMessage: String?
@@ -93,8 +94,7 @@ struct SonioxTranscriptionProvider: TranscriptionProvider {
         request.httpMethod = "POST"
         request.setValue("Bearer \(trimmed)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = #"{"usage_type":"transcribe_websocket","expires_in_seconds":60}"#
-            .data(using: .utf8)
+        request.httpBody = Data(#"{"usage_type":"transcribe_websocket","expires_in_seconds":60}"#.utf8)
 
         do {
             let (_, response) = try await session.data(for: request)

@@ -371,7 +371,6 @@ private extension AssemblyAILiveTranscriber {
 
 // MARK: - AssemblyAI Transcription Provider
 
-// swiftlint:disable type_body_length
 struct AssemblyAITranscriptionProvider: TranscriptionProvider {
   let metadata = TranscriptionProviderMetadata(
     id: "assemblyai",
@@ -680,7 +679,6 @@ struct AssemblyAITranscriptionProvider: TranscriptionProvider {
     )
   }
 }
-// swiftlint:enable type_body_length
 
 // MARK: - Streaming Response Models
 

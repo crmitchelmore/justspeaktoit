@@ -2411,6 +2411,7 @@ private extension ElevenLabsLiveController {
 
 // MARK: - Soniox Live Controller
 
+// swiftlint:disable:next type_body_length
 /// Wraps SonioxLiveTranscriber to conform to LiveTranscriptionController protocol.
 final class SonioxLiveController: NSObject, LiveTranscriptionController {
   weak var delegate: LiveTranscriptionSessionDelegate?

@@ -2411,7 +2411,7 @@ private extension ElevenLabsLiveController {
 
 // MARK: - Soniox Live Controller
 
-// swiftlint:disable:next type_body_length
+// swiftlint:disable type_body_length
 /// Wraps SonioxLiveTranscriber to conform to LiveTranscriptionController protocol.
 final class SonioxLiveController: NSObject, LiveTranscriptionController {
   weak var delegate: LiveTranscriptionSessionDelegate?
@@ -2735,6 +2735,7 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController {
     }
   }
 }
+// swiftlint:enable type_body_length
 
 private extension SonioxLiveController {
   func ensurePermissions() async -> Bool {

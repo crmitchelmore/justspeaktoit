@@ -2413,7 +2413,7 @@ private extension ElevenLabsLiveController {
 
 // swiftlint:disable type_body_length
 /// Wraps SonioxLiveTranscriber to conform to LiveTranscriptionController protocol.
-final class SonioxLiveController: NSObject, LiveTranscriptionController {
+final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxFinalizationDelegate {
   weak var delegate: LiveTranscriptionSessionDelegate?
   private(set) var isRunning: Bool = false
 
@@ -2496,6 +2496,7 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController {
         sampleRate: 16000
       )
       transcriber = newTranscriber
+      newTranscriber.finalizationDelegate = self
 
       newTranscriber.start(
         onTranscript: { [weak self] text, isFinal in
@@ -2563,6 +2564,18 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController {
     }
   }
 
+  // MARK: - SonioxFinalizationDelegate
+
+  nonisolated func sonioxDidFinishStream() {
+    Task { @MainActor [weak self] in
+      guard let self else { return }
+      if let continuation = self.stopContinuation {
+        self.stopContinuation = nil
+        continuation.resume()
+      }
+    }
+  }
+
   func stop() async {
     guard isRunning else { return }
     guard !hasFinished else { return }
@@ -2576,6 +2589,11 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController {
       audioProcessor.flushPendingAudio(to: transcriber)
       await transcriber.waitForPendingSends()
       audioProcessor.setRunning(false)
+      // Flush any accumulated final tokens as our single final commit, then
+      // signal end-of-stream. The wait below releases as soon as the server
+      // returns finished:true (via SonioxFinalizationDelegate) or the WebSocket
+      // closes (via onError), whichever comes first.
+      transcriber.flushFinal()
       transcriber.signalEndOfStream()
 
       // Wait for the final tokens or 2s timeout. Both paths nil-out stopContinuation idempotently.

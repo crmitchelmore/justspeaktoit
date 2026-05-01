@@ -575,7 +575,7 @@ final class MainManager: ObservableObject {
 
       if appSettings.transcriptionMode == .liveNative {
         session.transcriptionStarted = Date()
-        hudManager.beginTranscribing()
+        hudManager.beginTranscribing(subheadline: "Finalising transcript")
         let result = try await transcriptionManager.stopLiveTranscription()
         session.transcriptionEnded = Date()
         session.transcriptionResult = result

@@ -112,9 +112,9 @@ final class HUDManager: ObservableObject {
     isExpanded.toggle()
   }
 
-  func beginTranscribing() {
+  func beginTranscribing(subheadline: String = "Preparing raw transcript") {
     audioLevel = 0
-    transition(.transcribing, headline: "Transcribing", subheadline: "Preparing raw transcript")
+    transition(.transcribing, headline: "Transcribing", subheadline: subheadline)
   }
 
   func beginPostProcessing() {

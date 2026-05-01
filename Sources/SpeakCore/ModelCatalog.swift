@@ -124,23 +124,14 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             description: "Real-time multilingual WebSocket transcription with diarization and signal detection.",
             estimatedLatencyMs: 220, latencyTier: .fast),
         Option(
-            id: "assemblyai/universal-streaming", displayName: "AssemblyAI Universal (Streaming, Auto)",
-            description: "Auto-selects English or multilingual v3 streaming based on your preferred locale.",
+            id: "assemblyai/u3-rt-pro-streaming", displayName: "AssemblyAI Universal-3 Pro (Streaming)",
+            description: "AssemblyAI's u3-rt-pro real-time model. Multilingual with high English accuracy.",
             estimatedLatencyMs: 250, latencyTier: .fast),
         Option(
-            id: "assemblyai/universal-streaming-english",
-            displayName: "AssemblyAI Universal (Streaming, English)",
-            description: "English-only Universal-Streaming v3 with turn-based transcription.",
-            estimatedLatencyMs: 230, latencyTier: .fast),
-        Option(
-            id: "assemblyai/universal-streaming-multilingual",
-            displayName: "AssemblyAI Universal (Streaming, Multilingual)",
-            description: "Universal-Streaming v3 with language detection across supported multilingual speech.",
-            estimatedLatencyMs: 260, latencyTier: .fast),
-        Option(
-            id: "assemblyai/u3-rt-pro-streaming", displayName: "AssemblyAI U3-RT Pro (Streaming)",
-            description: "AssemblyAI's u3-rt-pro streaming model for higher real-time transcription accuracy.",
-            estimatedLatencyMs: 250, latencyTier: .fast),
+            id: "soniox/stt-rt-preview-streaming",
+            displayName: "Soniox Real-time (Preview)",
+            description: "Soniox real-time WebSocket STT (stt-rt-preview) with multilingual support and low latency.",
+            estimatedLatencyMs: 220, latencyTier: .fast),
         Option(
             id: "elevenlabs/scribe-v2-streaming",
             displayName: "ElevenLabs Scribe v2 (Streaming)",

@@ -303,8 +303,9 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
     }
     guard shouldRetry else { return false }
 
+    let detail = error.localizedDescription
     logger.warning(
-      "AssemblyAI EU endpoint failed before session begin (\(error.localizedDescription, privacy: .public)); retrying global endpoint"
+      "AssemblyAI EU endpoint failed before session begin (\(detail, privacy: .public)); retrying global"
     )
     taskToCancel?.cancel(with: .goingAway, reason: nil)
     connectWebSocket(using: .global)

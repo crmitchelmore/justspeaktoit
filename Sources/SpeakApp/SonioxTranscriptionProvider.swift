@@ -129,6 +129,7 @@ struct SonioxTranscriptionProvider: TranscriptionProvider {
 
 // MARK: - Live Transcriber (WebSocket client)
 
+// swiftlint:disable type_body_length
 final class SonioxLiveTranscriber: @unchecked Sendable {
     private static let websocketHost = "stt-rt.soniox.com"
     private static let websocketPath = "/transcribe-websocket"
@@ -437,4 +438,5 @@ final class SonioxLiveTranscriber: @unchecked Sendable {
         withStateLock { onError }
     }
 }
+// swiftlint:enable type_body_length
 // swiftlint:enable file_length

@@ -2506,6 +2506,12 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController {
         onError: { [weak self] error in
           Task { @MainActor [weak self] in
             guard let self else { return }
+            // Always release a pending stop() continuation so we don't burn the
+            // 2s timeout when an error/close arrives during shutdown.
+            if let continuation = self.stopContinuation {
+              self.stopContinuation = nil
+              continuation.resume()
+            }
             if !self.isRunning { return }
             self.delegate?.liveTranscriber(self, didFail: error)
           }

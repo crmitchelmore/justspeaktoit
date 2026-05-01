@@ -35,6 +35,9 @@ actor TranscriptionProviderRegistry {
         guard let provider = providers[String(providerID)] else { return nil }
 
         let supportedIDs = provider.supportedModels().map(\.id)
+        // Live-only providers (e.g. Soniox) intentionally expose an empty batch
+        // catalogue; treat that as "any model under this prefix is owned by us".
+        if supportedIDs.isEmpty { return provider }
         guard supportedIDs.contains(trimmedModel) else { return nil }
         return provider
     }

@@ -205,6 +205,17 @@ final class SonioxLiveTranscriber: @unchecked Sendable {
         task.send(.data(Data())) { _ in sendGroup.leave() }
     }
 
+    /// Send Soniox `{"type":"finalize"}` to force any in-flight non-final tokens
+    /// to be returned as final tokens. Must be called *before* `signalEndOfStream`
+    /// so the server has a chance to finalize before closing.
+    func sendFinalize() {
+        guard let task = currentWebSocketTask(), task.state == .running else { return }
+        let payload = #"{"type":"finalize"}"#
+        let sendGroup = pendingSendGroup
+        sendGroup.enter()
+        task.send(.string(payload)) { _ in sendGroup.leave() }
+    }
+
     func stop() {
         let task = withStateLock { () -> URLSessionWebSocketTask? in
             guard !isStopping else { return nil }
@@ -331,7 +342,15 @@ final class SonioxLiveTranscriber: @unchecked Sendable {
             if !tokens.isEmpty {
                 var newFinals = ""
                 var nonFinals = ""
+                var sawFinalizationMarker = false
                 for token in tokens {
+                    // Soniox emits `<fin>` to acknowledge a manual `finalize` request
+                    // and `<end>` when the session is fully finished. Don't display
+                    // them; treat both as a signal that buffered finals are committed.
+                    if token.text == "<fin>" || token.text == "<end>" {
+                        sawFinalizationMarker = true
+                        continue
+                    }
                     if token.isFinal == true {
                         newFinals.append(token.text)
                     } else {
@@ -346,6 +365,11 @@ final class SonioxLiveTranscriber: @unchecked Sendable {
                 let trimmed = display.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !trimmed.isEmpty {
                     currentOnTranscript()?(trimmed, false)
+                }
+
+                if sawFinalizationMarker {
+                    flushFinal()
+                    finalizationDelegate?.sonioxDidFinishStream()
                 }
             }
 

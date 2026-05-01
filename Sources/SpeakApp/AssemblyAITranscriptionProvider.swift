@@ -37,6 +37,11 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
   private var currentEndpointHost: EndpointHost = .europe
   private var hasAttemptedGlobalFallback: Bool = false
   private var sessionDidBegin: Bool = false
+  /// Audio frames captured before `Begin` arrives. AssemblyAI's WebSocket
+  /// rejects audio sent before the session is established, and the EU→global
+  /// retry path can otherwise lose the first second or two of speech.
+  private var preBeginAudioBuffer: [Data] = []
+  private static let preBeginAudioByteLimit = 16_000 * 2 * 5 // 5s of 16kHz PCM16
 
   init(
     apiKey: String,
@@ -66,6 +71,7 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
       self.onError = onError
       hasAttemptedGlobalFallback = false
       sessionDidBegin = false
+      preBeginAudioBuffer = []
       currentEndpointHost = preferredEndpointHost
       return currentEndpointHost
     }
@@ -125,8 +131,29 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
   }
 
   func sendAudio(_ audioData: Data) {
-    guard let webSocketTask = currentWebSocketTask(), webSocketTask.state == .running else { return }
+    // If the session hasn't begun yet (or we're between EU and global retry),
+    // buffer the audio so we don't drop the start of an utterance. The buffer
+    // is bounded; oldest frames are discarded if speech outpaces the handshake.
+    let snapshot = withStateLock { () -> (URLSessionWebSocketTask?, Bool) in
+      (webSocketTask, sessionDidBegin)
+    }
+    let task = snapshot.0
+    let didBegin = snapshot.1
+    guard let task, task.state == .running, didBegin else {
+      withStateLock {
+        preBeginAudioBuffer.append(audioData)
+        var totalBytes = preBeginAudioBuffer.reduce(0) { $0 + $1.count }
+        while totalBytes > Self.preBeginAudioByteLimit, !preBeginAudioBuffer.isEmpty {
+          totalBytes -= preBeginAudioBuffer.removeFirst().count
+        }
+      }
+      return
+    }
 
+    sendAudioFrame(audioData, on: task)
+  }
+
+  private func sendAudioFrame(_ audioData: Data, on webSocketTask: URLSessionWebSocketTask) {
     var buffer = bufferPool.checkout()
     buffer.append(audioData)
 
@@ -146,6 +173,20 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
         self.logger.error("Failed to send audio: \(error.localizedDescription)")
         self.currentOnError()?(error)
       }
+    }
+  }
+
+  /// Flush any audio that arrived before the WebSocket session began.
+  private func flushPreBeginAudio() {
+    let (task, frames) = withStateLock { () -> (URLSessionWebSocketTask?, [Data]) in
+      let pending = preBeginAudioBuffer
+      preBeginAudioBuffer = []
+      return (webSocketTask, pending)
+    }
+    guard let task, task.state == .running, !frames.isEmpty else { return }
+    logger.info("Flushing \(frames.count) pre-Begin audio frames to AssemblyAI")
+    for frame in frames {
+      sendAudioFrame(frame, on: task)
     }
   }
 
@@ -237,7 +278,7 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
         if self.isStoppingState() { return }
         if self.retryWithGlobalEndpointIfNeeded(after: error) { return }
         if self.shouldIgnoreSocketError(error) { return }
-        self.logger.error("WebSocket receive error: \(error.localizedDescription)")
+        self.logger.error("WebSocket receive error: \(error.localizedDescription, privacy: .public)")
         self.currentOnError()?(error)
       }
     }
@@ -263,7 +304,7 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
     guard shouldRetry else { return false }
 
     logger.warning(
-      "AssemblyAI EU endpoint failed before session begin (\(error.localizedDescription)); retrying global endpoint"
+      "AssemblyAI EU endpoint failed before session begin (\(error.localizedDescription, privacy: .public)); retrying global endpoint"
     )
     taskToCancel?.cancel(with: .goingAway, reason: nil)
     connectWebSocket(using: .global)
@@ -300,7 +341,8 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
         withStateLock {
           sessionDidBegin = true
         }
-        logger.info("AssemblyAI session started — \(json.prefix(200))")
+        logger.info("AssemblyAI session started — \(json.prefix(200), privacy: .public)")
+        flushPreBeginAudio()
       case "Termination":
         logger.info("AssemblyAI session terminated by server")
       case "SpeechStarted", "":

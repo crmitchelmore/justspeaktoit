@@ -2589,14 +2589,14 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
       audioProcessor.flushPendingAudio(to: transcriber)
       await transcriber.waitForPendingSends()
       audioProcessor.setRunning(false)
-      // Flush any accumulated final tokens as our single final commit, then
-      // signal end-of-stream. The wait below releases as soon as the server
-      // returns finished:true (via SonioxFinalizationDelegate) or the WebSocket
-      // closes (via onError), whichever comes first.
-      transcriber.flushFinal()
-      transcriber.signalEndOfStream()
+      // Ask Soniox to finalize any in-flight non-final tokens so the trailing
+      // words of the utterance get returned as final tokens. The server replies
+      // with a `<fin>` marker token (handled in parseResponse) which fires the
+      // SonioxFinalizationDelegate and resumes the continuation below.
+      transcriber.sendFinalize()
 
-      // Wait for the final tokens or 2s timeout. Both paths nil-out stopContinuation idempotently.
+      // Wait for `<fin>`/`finished:true` or a 2s timeout. Both paths nil-out
+      // stopContinuation idempotently.
       await withCheckedContinuation { continuation in
         stopContinuation = continuation
         Task { @MainActor [weak self] in
@@ -2606,6 +2606,10 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
           cont.resume()
         }
       }
+
+      // Now flush any accumulated finals (covers the timeout path) and close.
+      transcriber.flushFinal()
+      transcriber.signalEndOfStream()
       transcriber.stop()
     } else {
       audioProcessor.setRunning(false)

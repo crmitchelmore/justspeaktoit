@@ -53,14 +53,14 @@ private struct ElevenLabsErrorMessage: Decodable {
 
 // MARK: - Live Transcriber (WebSocket client)
 
-/// Streams raw PCM audio to ElevenLabs Scribe Realtime API and delivers partial/final
-/// transcript callbacks.
-///
-/// Protocol reference: https://elevenlabs.io/docs/api-reference/speech-to-text/v-1-speech-to-text-realtime
-/// - URL: `wss://api.elevenlabs.io/v1/speech-to-text/realtime`
-/// - Auth: `xi-api-key` header
-/// - Audio: JSON `input_audio_chunk` messages with base64 PCM (NOT raw binary)
-/// - Commit: `commit_strategy=vad` keeps server-side VAD; manual `commit:true` flushes on stop
+// Streams raw PCM audio to ElevenLabs Scribe Realtime API and delivers partial/final
+// transcript callbacks.
+//
+// Protocol reference: https://elevenlabs.io/docs/api-reference/speech-to-text/v-1-speech-to-text-realtime
+// - URL: `wss://api.elevenlabs.io/v1/speech-to-text/realtime`
+// - Auth: `xi-api-key` header
+// - Audio: JSON `input_audio_chunk` messages with base64 PCM (NOT raw binary)
+// - Commit: `commit_strategy=vad` keeps server-side VAD; manual `commit:true` flushes on stop
 // swiftlint:disable type_body_length
 final class ElevenLabsLiveTranscriber: @unchecked Sendable {
     // Connection URL is constructed in connectWebSocket(); never logged.
@@ -312,8 +312,8 @@ final class ElevenLabsLiveTranscriber: @unchecked Sendable {
                  "insufficient_audio_activity", "commit_throttled", "unaccepted_terms":
                 let err = try? JSONDecoder().decode(ElevenLabsErrorMessage.self, from: data)
                 let detail = err?.error ?? envelope.messageType
-                let mt = envelope.messageType
-                logger.error("ElevenLabs server error (\(mt, privacy: .public)): \(detail, privacy: .public)")
+                let kind = envelope.messageType
+                logger.error("ElevenLabs server error (\(kind, privacy: .public)): \(detail, privacy: .public)")
                 currentOnError()?(NSError(
                     domain: "ElevenLabs", code: -1,
                     userInfo: [NSLocalizedDescriptionKey: "ElevenLabs: \(detail)"]

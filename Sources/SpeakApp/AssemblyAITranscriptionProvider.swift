@@ -20,6 +20,10 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
   private let apiKey: String
   private let sampleRate: Int
   private var webSocketTask: URLSessionWebSocketTask?
+  /// Dedicated URLSession for WebSocket traffic. Using `URLSession.shared`
+  /// across both REST + WebSocket appears to trigger intermittent
+  /// "Socket is not connected" (ENOTCONN) failures during the wss handshake
+  /// on macOS. A dedicated, default-configured session avoids that.
   private let session: URLSession
   private let bufferPool: AudioBufferPool
   private let logger = Logger(subsystem: "com.speak.app", category: "AssemblyAILiveTranscriber")
@@ -49,7 +53,7 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
     keyterms: [String] = [],
     speechModel: String = "universal-streaming-english",
     languageDetectionEnabled: Bool = false,
-    session: URLSession = .shared,
+    session: URLSession? = nil,
     bufferPool: AudioBufferPool = AudioBufferPool(poolSize: 10, bufferSize: 4096)
   ) {
     self.apiKey = apiKey
@@ -57,7 +61,14 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
     self.keyterms = keyterms
     self.speechModel = speechModel
     self.languageDetectionEnabled = languageDetectionEnabled
-    self.session = session
+    if let session {
+      self.session = session
+    } else {
+      let config = URLSessionConfiguration.default
+      config.waitsForConnectivity = true
+      config.timeoutIntervalForRequest = 30
+      self.session = URLSession(configuration: config)
+    }
     self.bufferPool = bufferPool
   }
 
@@ -89,7 +100,10 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
       URLQueryItem(name: "encoding", value: "pcm_s16le"),
       URLQueryItem(name: "format_turns", value: "true"),
       URLQueryItem(name: "speech_model", value: speechModel),
-      URLQueryItem(name: "min_turn_silence", value: Self.minimumTurnSilenceMs)
+      URLQueryItem(name: "min_turn_silence", value: Self.minimumTurnSilenceMs),
+      // Auth via query token avoids intermittent URLSession WebSocket
+      // handshake failures observed when only the Authorization header is set.
+      URLQueryItem(name: "token", value: apiKey)
     ]
 
     // AssemblyAI streaming v3 only supports keyterms_prompt (not arbitrary prompts).
@@ -665,13 +679,16 @@ struct AssemblyAITranscriptionProvider: TranscriptionProvider {
     language: String? = nil
   ) -> AssemblyAILiveTranscriber {
     let config = mapLiveSpeechModel(from: model, language: language)
+    // Pass session: nil so AssemblyAILiveTranscriber builds its own dedicated
+    // URLSession for the WebSocket; the REST `session` (URLSession.shared) has
+    // shown intermittent ENOTCONN handshake failures for the wss upgrade.
     return AssemblyAILiveTranscriber(
       apiKey: apiKey,
       sampleRate: sampleRate,
       keyterms: keyterms,
       speechModel: config.speechModel,
       languageDetectionEnabled: config.languageDetectionEnabled,
-      session: session,
+      session: nil,
       bufferPool: bufferPool
     )
   }

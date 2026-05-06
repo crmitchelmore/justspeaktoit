@@ -290,8 +290,17 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
         self.receiveMessages()
       case .failure(let error):
         if self.isStoppingState() { return }
+        // URLSessionWebSocketTask fires spurious ENOTCONN (POSIX 57) callbacks
+        // around the wss handshake on macOS — sometimes before Begin, sometimes
+        // after — but the underlying connection still works and Turn messages
+        // arrive on subsequent receive() calls. Re-arm receive() rather than
+        // bubbling the error; the isStoppingState() guard above (set on
+        // Terminate/Termination) breaks us out when the session actually ends.
+        if self.shouldIgnoreSocketError(error) {
+          self.receiveMessages()
+          return
+        }
         if self.retryWithFallbackEndpointIfNeeded(after: error) { return }
-        if self.shouldIgnoreSocketError(error) { return }
         self.logger.error("WebSocket receive error: \(error.localizedDescription, privacy: .public)")
         self.currentOnError()?(error)
       }
@@ -363,6 +372,7 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
         flushPreBeginAudio()
       case "Termination":
         logger.info("AssemblyAI session terminated by server")
+        withStateLock { isStopping = true }
       case "SpeechStarted", "":
         break
       default:

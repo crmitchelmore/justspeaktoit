@@ -61,16 +61,32 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
     self.keyterms = keyterms
     self.speechModel = speechModel
     self.languageDetectionEnabled = languageDetectionEnabled
+    self.bufferPool = bufferPool
+    let delegate = AssemblyAIWebSocketDelegate()
+    self.delegate = delegate
     if let session {
       self.session = session
     } else {
       let config = URLSessionConfiguration.default
       config.waitsForConnectivity = true
       config.timeoutIntervalForRequest = 30
-      self.session = URLSession(configuration: config)
+      self.session = URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
     }
-    self.bufferPool = bufferPool
+    delegate.logger = logger
+    self.ownsSession = (session == nil)
   }
+
+  private let ownsSession: Bool
+
+  deinit {
+    // Sessions created with a delegate retain that delegate strongly
+    // until invalidated; only invalidate sessions we own (tests inject one).
+    if ownsSession {
+      session.invalidateAndCancel()
+    }
+  }
+
+  private let delegate: AssemblyAIWebSocketDelegate
 
   func start(
     onTranscript: @escaping (AssemblyAITurnResponse) -> Void,
@@ -847,6 +863,67 @@ private struct AssemblyAIBatchWord: Decodable {
   let start: Int
   let end: Int
   let confidence: Double?
+}
+
+// MARK: - WebSocket Diagnostic Delegate
+
+private final class AssemblyAIWebSocketDelegate: NSObject, URLSessionWebSocketDelegate, URLSessionTaskDelegate {
+  var logger: Logger?
+
+  func urlSession(
+    _ session: URLSession,
+    webSocketTask: URLSessionWebSocketTask,
+    didOpenWithProtocol protocol: String?
+  ) {
+    logger?.info("AssemblyAI WS didOpen protocol=\(`protocol` ?? "<nil>", privacy: .public)")
+  }
+
+  func urlSession(
+    _ session: URLSession,
+    webSocketTask: URLSessionWebSocketTask,
+    didCloseWith closeCode: URLSessionWebSocketTask.CloseCode,
+    reason: Data?
+  ) {
+    let reasonStr = reason.flatMap { String(data: $0, encoding: .utf8) } ?? "<nil>"
+    logger?.info(
+      "AssemblyAI WS didClose code=\(closeCode.rawValue, privacy: .public) reason=\(reasonStr, privacy: .public)"
+    )
+  }
+
+  func urlSession(
+    _ session: URLSession,
+    task: URLSessionTask,
+    didCompleteWithError error: Error?
+  ) {
+    if let error = error as NSError? {
+      let domain = error.domain
+      let code = error.code
+      let desc = error.localizedDescription
+      logger?.error(
+        // swiftlint:disable:next line_length
+        "AssemblyAI WS didComplete error domain=\(domain, privacy: .public) code=\(code, privacy: .public) desc=\(desc, privacy: .public)"
+      )
+    } else {
+      logger?.info("AssemblyAI WS didComplete (no error)")
+    }
+  }
+
+  func urlSession(
+    _ session: URLSession,
+    taskIsWaitingForConnectivity task: URLSessionTask
+  ) {
+    logger?.info("AssemblyAI WS waiting for connectivity")
+  }
+
+  func urlSession(
+    _ session: URLSession,
+    task: URLSessionTask,
+    didReceive challenge: URLAuthenticationChallenge,
+    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+  ) {
+    logger?.info("AssemblyAI WS auth challenge: \(challenge.protectionSpace.authenticationMethod, privacy: .public)")
+    completionHandler(.performDefaultHandling, nil)
+  }
 }
 
 // MARK: - Error Types

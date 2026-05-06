@@ -138,19 +138,28 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
 
     logger.info("AssemblyAI WebSocket connecting via \(host.rawValue)")
     receiveMessages()
-    scheduleBeginTimeout()
+    scheduleBeginTimeout(for: task)
   }
 
   private static let beginTimeoutSeconds: Double = 8
 
-  private func scheduleBeginTimeout() {
-    DispatchQueue.global().asyncAfter(deadline: .now() + Self.beginTimeoutSeconds) { [weak self] in
-      guard let self else { return }
-      let (didBegin, stopping) = self.withStateLock { (self.sessionDidBegin, self.isStopping) }
-      guard !didBegin, !stopping else { return }
+  private func scheduleBeginTimeout(for task: URLSessionWebSocketTask) {
+    DispatchQueue.global().asyncAfter(deadline: .now() + Self.beginTimeoutSeconds) { [weak self, weak task] in
+      guard let self, let task else { return }
+      let shouldFire = self.withStateLock { () -> Bool in
+        // Only act if THIS connection is still the active one and Begin
+        // hasn't arrived. Fallback retries swap webSocketTask, and we don't
+        // want a stale timeout from an aborted attempt to surface an error.
+        guard !self.sessionDidBegin, !self.isStopping else { return false }
+        guard self.webSocketTask === task else { return false }
+        self.isStopping = true
+        return true
+      }
+      guard shouldFire else { return }
       self.logger.error(
         "AssemblyAI WebSocket Begin not received within \(Self.beginTimeoutSeconds, privacy: .public)s; surfacing error"
       )
+      task.cancel(with: .goingAway, reason: nil)
       self.currentOnError()?(AssemblyAIError.streamingFailed("Begin timeout"))
     }
   }

@@ -2159,10 +2159,11 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
       await transcriber.waitForPendingSends()
       audioProcessor.setRunning(false)
       // Manual commit flushes any VAD-buffered audio so the server emits
-      // a final committed_transcript for the trailing words. Wait briefly
-      // for that final to arrive before closing the socket.
+      // a final committed_transcript for the trailing words. Await that
+      // event-driven (with timeout) instead of a fixed sleep so the HUD
+      // doesn't sit on "Finalising transcript".
       transcriber.sendCommit()
-      try? await Task.sleep(for: .seconds(1.5))
+      await transcriber.awaitCommitFinal(timeout: 1.5)
       transcriber.stop()
     } else {
       audioProcessor.setRunning(false)

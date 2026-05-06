@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import AVFoundation
 import Foundation
 import os.log
@@ -89,6 +90,12 @@ final class ElevenLabsLiveTranscriber: @unchecked Sendable {
     private var preStartAudioBuffer: [Data] = []
     private static let preStartByteLimit = 16_000 * 2 * 5 // 5s of 16kHz PCM16
 
+    /// True after `sendCommit()` has been called; clears once the next
+    /// `committed_transcript` arrives (or the await timeout fires).
+    private var awaitingCommitFinal: Bool = false
+    /// Continuation resumed by the next `committed_transcript` after a manual commit.
+    private var commitContinuation: CheckedContinuation<Void, Never>?
+
     init(
         apiKey: String,
         modelID: String = "scribe_v2_realtime",
@@ -176,10 +183,43 @@ final class ElevenLabsLiveTranscriber: @unchecked Sendable {
     /// Send a manual commit to flush any pending VAD-buffered audio before stop.
     func sendCommit() {
         guard let task = currentWebSocketTask(), task.state == .running else { return }
+        withStateLock { awaitingCommitFinal = true }
         let payload = #"{"message_type":"input_audio_chunk","audio_base_64":"","commit":true}"#
         let sendGroup = pendingSendGroup
         sendGroup.enter()
         task.send(.string(payload)) { _ in sendGroup.leave() }
+    }
+
+    /// Awaits the next `committed_transcript` after `sendCommit()`. Returns as soon
+    /// as the server delivers the final, or after `timeout` seconds — whichever
+    /// comes first. Both paths nil-out the continuation so resume is idempotent.
+    func awaitCommitFinal(timeout: TimeInterval = 1.5) async {
+        // If we never sent a commit (or already received one), return immediately.
+        let needsWait = withStateLock { awaitingCommitFinal }
+        guard needsWait else { return }
+
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let shouldWait = withStateLock { () -> Bool in
+                guard awaitingCommitFinal else { return false }
+                commitContinuation = continuation
+                return true
+            }
+            if !shouldWait {
+                continuation.resume()
+                return
+            }
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(timeout))
+                guard let self else { return }
+                let pending = self.withStateLock { () -> CheckedContinuation<Void, Never>? in
+                    let saved = self.commitContinuation
+                    self.commitContinuation = nil
+                    self.awaitingCommitFinal = false
+                    return saved
+                }
+                pending?.resume()
+            }
+        }
     }
 
     func stop() {
@@ -192,6 +232,15 @@ final class ElevenLabsLiveTranscriber: @unchecked Sendable {
             return webSocketTask
         }
         bufferPool.logMetrics()
+
+        // Resume any in-flight commit awaiter so callers don't deadlock on stop().
+        let pending = withStateLock { () -> CheckedContinuation<Void, Never>? in
+            let saved = commitContinuation
+            commitContinuation = nil
+            awaitingCommitFinal = false
+            return saved
+        }
+        pending?.resume()
 
         guard let task, task.state == .running else { return }
         task.cancel(with: .normalClosure, reason: nil)
@@ -299,8 +348,19 @@ final class ElevenLabsLiveTranscriber: @unchecked Sendable {
 
             case "committed_transcript", "committed_transcript_with_timestamps":
                 let msg = try JSONDecoder().decode(ElevenLabsTranscriptMessage.self, from: data)
-                guard let text = msg.text, !text.isEmpty else { return }
-                currentOnTranscript()?(text, true)
+                if let text = msg.text, !text.isEmpty {
+                    currentOnTranscript()?(text, true)
+                }
+                // If a manual commit (sent during stop) is being awaited, resume
+                // the continuation so the HUD doesn't sit on "Finalising".
+                let pending = withStateLock { () -> CheckedContinuation<Void, Never>? in
+                    guard awaitingCommitFinal else { return nil }
+                    awaitingCommitFinal = false
+                    let saved = commitContinuation
+                    commitContinuation = nil
+                    return saved
+                }
+                pending?.resume()
 
             case "auth_error":
                 logger.error("ElevenLabs auth error: \(json.prefix(200), privacy: .public)")

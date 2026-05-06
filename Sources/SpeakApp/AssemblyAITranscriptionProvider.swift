@@ -290,12 +290,27 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
         self.receiveMessages()
       case .failure(let error):
         if self.isStoppingState() { return }
+        // URLSessionWebSocketTask fires spurious ENOTCONN (POSIX 57) callbacks
+        // around the wss handshake on macOS — sometimes before Begin, sometimes
+        // after — but the underlying connection still works and Turn messages
+        // arrive on subsequent receive() calls. Retry indefinitely; the
+        // isStoppingState() guard above (set on Terminate/Termination) breaks
+        // us out when the session actually ends.
+        if self.isSpuriousENOTCONN(error) {
+          self.receiveMessages()
+          return
+        }
         if self.retryWithFallbackEndpointIfNeeded(after: error) { return }
         if self.shouldIgnoreSocketError(error) { return }
         self.logger.error("WebSocket receive error: \(error.localizedDescription, privacy: .public)")
         self.currentOnError()?(error)
       }
     }
+  }
+
+  private func isSpuriousENOTCONN(_ error: Error) -> Bool {
+    let nsError = error as NSError
+    return nsError.domain == NSPOSIXErrorDomain && nsError.code == 57
   }
 
   private func retryWithFallbackEndpointIfNeeded(after error: Error) -> Bool {
@@ -363,6 +378,7 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
         flushPreBeginAudio()
       case "Termination":
         logger.info("AssemblyAI session terminated by server")
+        withStateLock { isStopping = true }
       case "SpeechStarted", "":
         break
       default:

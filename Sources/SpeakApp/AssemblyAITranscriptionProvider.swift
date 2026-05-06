@@ -138,6 +138,21 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
 
     logger.info("AssemblyAI WebSocket connecting via \(host.rawValue)")
     receiveMessages()
+    scheduleBeginTimeout()
+  }
+
+  private static let beginTimeoutSeconds: Double = 8
+
+  private func scheduleBeginTimeout() {
+    DispatchQueue.global().asyncAfter(deadline: .now() + Self.beginTimeoutSeconds) { [weak self] in
+      guard let self else { return }
+      let (didBegin, stopping) = self.withStateLock { (self.sessionDidBegin, self.isStopping) }
+      guard !didBegin, !stopping else { return }
+      self.logger.error(
+        "AssemblyAI WebSocket Begin not received within \(Self.beginTimeoutSeconds, privacy: .public)s; surfacing error"
+      )
+      self.currentOnError()?(AssemblyAIError.streamingFailed("Begin timeout"))
+    }
   }
 
   private func makeWebSocketURL(for host: EndpointHost) -> URLComponents? {
@@ -296,8 +311,13 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
         // arrive on subsequent receive() calls. Re-arm receive() rather than
         // bubbling the error; the isStoppingState() guard above (set on
         // Terminate/Termination) breaks us out when the session actually ends.
+        // We re-arm via asyncAfter (not the completion handler thread) so we
+        // don't starve URLSession's delegate queue and prevent it from
+        // delivering the Begin/Turn frames.
         if self.shouldIgnoreSocketError(error) {
-          self.receiveMessages()
+          DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.01) { [weak self] in
+            self?.receiveMessages()
+          }
           return
         }
         if self.retryWithFallbackEndpointIfNeeded(after: error) { return }
@@ -827,6 +847,7 @@ enum AssemblyAIError: LocalizedError {
   case connectionFailed
   case sendFailed
   case missingAPIKey
+  case streamingFailed(String)
 
   var errorDescription: String? {
     switch self {
@@ -838,6 +859,8 @@ enum AssemblyAIError: LocalizedError {
       return "Failed to send audio data to AssemblyAI"
     case .missingAPIKey:
       return "AssemblyAI API key is missing. Please configure it in Settings."
+    case .streamingFailed(let detail):
+      return "AssemblyAI streaming failed: \(detail)"
     }
   }
 }

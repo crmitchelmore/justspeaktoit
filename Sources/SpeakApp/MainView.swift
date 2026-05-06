@@ -24,6 +24,26 @@ struct MainView: View {
         NSApp.windows.first?.makeKeyAndOrderFront(nil)
       }
     }
+    .alert(
+      environment.main.missingLiveAPIKeyAlert?.title ?? "API key required",
+      isPresented: Binding(
+        get: { environment.main.missingLiveAPIKeyAlert != nil },
+        set: { if !$0 { environment.main.missingLiveAPIKeyAlert = nil } }
+      ),
+      presenting: environment.main.missingLiveAPIKeyAlert
+    ) { alert in
+      Button("Add API Key") {
+        let target = "transcription-\(alert.provider.id)"
+        environment.apiKeysScrollTarget = target
+        selection = .settings(.apiKeys)
+        environment.main.missingLiveAPIKeyAlert = nil
+      }
+      Button("Cancel", role: .cancel) {
+        environment.main.missingLiveAPIKeyAlert = nil
+      }
+    } message: { alert in
+      Text(alert.message)
+    }
   }
 
   @ViewBuilder

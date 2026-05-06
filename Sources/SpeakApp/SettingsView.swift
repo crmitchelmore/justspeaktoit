@@ -1491,9 +1491,10 @@ struct SettingsView: View {
   }
 
   private var apiKeySettings: some View {
-    LazyVStack(spacing: 20) {
-      // OpenRouter (Legacy)
-      apiKeyCard(
+    ScrollViewReader { proxy in
+      LazyVStack(spacing: 20) {
+        // OpenRouter (Legacy)
+        apiKeyCard(
         title: "OpenRouter",
         systemImage: "network",
         tint: .green,
@@ -1532,6 +1533,22 @@ struct SettingsView: View {
       ForEach([TTSProvider.elevenlabs, .openai, .azure, .deepgram]) { provider in
         ttsProviderAPIKeyCard(for: provider)
           .id("tts-\(provider.id)")
+      }
+    }
+    .onAppear {
+        if let target = environment.apiKeysScrollTarget {
+          DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            withAnimation { proxy.scrollTo(target, anchor: .top) }
+            environment.apiKeysScrollTarget = nil
+          }
+        }
+      }
+      .onChange(of: environment.apiKeysScrollTarget) { _, newValue in
+        guard let target = newValue else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+          withAnimation { proxy.scrollTo(target, anchor: .top) }
+          environment.apiKeysScrollTarget = nil
+        }
       }
     }
   }

@@ -176,6 +176,18 @@ final class TranscriptionManager: ObservableObject {
     return await openRouter.hasStoredAPIKey()
   }
 
+  /// Returns the metadata for the live-transcription provider whose API key is
+  /// missing — `nil` if the current live model needs no key, or its key is set.
+  /// Used for the "API key required" pre-flight alert before a live recording.
+  func missingLiveAPIKeyProvider() async -> TranscriptionProviderMetadata? {
+    let model = appSettings.liveTranscriptionModel
+    let registry = TranscriptionProviderRegistry.shared
+    guard await registry.requiresAPIKey(for: model) else { return nil }
+    guard let provider = await registry.provider(forModel: model) else { return nil }
+    if await hasAPIKey(for: provider.metadata) { return nil }
+    return provider.metadata
+  }
+
   private func getAPIKey(for metadata: TranscriptionProviderMetadata) async throws -> String {
     guard let key = try? await secureStorage.secret(identifier: metadata.apiKeyIdentifier) else {
       throw TranscriptionProviderError.apiKeyMissing

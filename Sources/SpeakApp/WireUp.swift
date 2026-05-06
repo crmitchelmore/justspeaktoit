@@ -28,6 +28,11 @@ final class AppEnvironment: ObservableObject {
   let transportServer: TransportServer
   private let hudPresenter: HUDWindowPresenter
 
+  /// Coordinator state for cross-view navigation. When set, MainView selects
+  /// the API Keys settings tab and the apiKeySettings view scrolls to the
+  /// matching `.id("transcription-<provider.id>")` section.
+  @Published var apiKeysScrollTarget: String?
+
   private(set) var statusBarController: StatusBarController?
   private(set) var menuBarManager: MenuBarManager?
   private(set) var dockMenuManager: DockMenuManager?

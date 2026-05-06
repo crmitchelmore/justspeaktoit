@@ -33,9 +33,9 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
   private var keyterms: [String]
   private let speechModel: String
   private let languageDetectionEnabled: Bool
-  private let preferredEndpointHost: EndpointHost = .europe
-  private var currentEndpointHost: EndpointHost = .europe
-  private var hasAttemptedGlobalFallback: Bool = false
+  private let preferredEndpointHost: EndpointHost = .global
+  private var currentEndpointHost: EndpointHost = .global
+  private var hasAttemptedHostFallback: Bool = false
   private var sessionDidBegin: Bool = false
   /// Audio frames captured before `Begin` arrives. AssemblyAI's WebSocket
   /// rejects audio sent before the session is established, and the EU→global
@@ -69,7 +69,7 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
       isStopping = false
       self.onTranscript = onTranscript
       self.onError = onError
-      hasAttemptedGlobalFallback = false
+      hasAttemptedHostFallback = false
       sessionDidBegin = false
       preBeginAudioBuffer = []
       currentEndpointHost = preferredEndpointHost
@@ -276,7 +276,7 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
         self.receiveMessages()
       case .failure(let error):
         if self.isStoppingState() { return }
-        if self.retryWithGlobalEndpointIfNeeded(after: error) { return }
+        if self.retryWithFallbackEndpointIfNeeded(after: error) { return }
         if self.shouldIgnoreSocketError(error) { return }
         self.logger.error("WebSocket receive error: \(error.localizedDescription, privacy: .public)")
         self.currentOnError()?(error)
@@ -284,19 +284,20 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
     }
   }
 
-  private func retryWithGlobalEndpointIfNeeded(after error: Error) -> Bool {
+  private func retryWithFallbackEndpointIfNeeded(after error: Error) -> Bool {
     var taskToCancel: URLSessionWebSocketTask?
+    var fallback: EndpointHost = .global
     let shouldRetry = withStateLock { () -> Bool in
       guard
         !isStopping,
-        currentEndpointHost == .europe,
-        !hasAttemptedGlobalFallback,
+        !hasAttemptedHostFallback,
         !sessionDidBegin
       else {
         return false
       }
-      hasAttemptedGlobalFallback = true
-      currentEndpointHost = .global
+      hasAttemptedHostFallback = true
+      fallback = (currentEndpointHost == .europe) ? .global : .europe
+      currentEndpointHost = fallback
       taskToCancel = webSocketTask
       webSocketTask = nil
       return true
@@ -304,11 +305,13 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
     guard shouldRetry else { return false }
 
     let detail = error.localizedDescription
+    let host = fallback.rawValue
     logger.warning(
-      "AssemblyAI EU endpoint failed before session begin (\(detail, privacy: .public)); retrying global"
+      // swiftlint:disable:next line_length
+      "AssemblyAI endpoint failed before session begin (\(detail, privacy: .public)); retrying \(host, privacy: .public)"
     )
     taskToCancel?.cancel(with: .goingAway, reason: nil)
-    connectWebSocket(using: .global)
+    connectWebSocket(using: fallback)
     return true
   }
 

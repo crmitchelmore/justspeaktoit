@@ -26,6 +26,11 @@ final class MainManager: ObservableObject {
   @Published private(set) var lastErrorMessage: String?
   @Published private(set) var canRetryPostProcessing: Bool = false
 
+  /// Set when a live-recording attempt is aborted because the selected
+  /// transcription provider has no API key stored. Observed by `MainView`
+  /// to present an alert with an "Add API Key" deep-link CTA.
+  @Published var missingLiveAPIKeyAlert: MissingLiveAPIKeyAlert?
+
   /// Whether live text insertion is enabled based on current settings
   private var liveInsertionEnabled: Bool {
     appSettings.speedMode.usesLivePolish && appSettings.textOutputMethod != .clipboardOnly
@@ -465,8 +470,26 @@ final class MainManager: ObservableObject {
     }
   }
 
+  /// Returns true (and sets `missingLiveAPIKeyAlert`) when the chosen live
+  /// transcription model needs an API key that has not been stored. Callers
+  /// should abort the session start when this returns true.
+  private func presentMissingLiveAPIKeyAlertIfNeeded() async -> Bool {
+    guard appSettings.transcriptionMode == .liveNative else { return false }
+    guard let missing = await transcriptionManager.missingLiveAPIKeyProvider() else {
+      return false
+    }
+    let modelID = appSettings.liveTranscriptionModel
+    let modelName = ModelCatalog.liveTranscription.first { $0.id == modelID }?.displayName ?? modelID
+    missingLiveAPIKeyAlert = MissingLiveAPIKeyAlert(
+      provider: missing,
+      modelDisplayName: modelName
+    )
+    return true
+  }
+
   private func startSession(trigger: SessionTriggerSource) async {
     guard activeSession == nil else { return }
+    if await presentMissingLiveAPIKeyAlertIfNeeded() { return }
 
     // Failsafe: if live transcription is still running but we have no activeSession,
     // cancel it so the app can always recover without requiring a restart.

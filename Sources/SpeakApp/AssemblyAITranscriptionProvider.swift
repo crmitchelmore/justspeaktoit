@@ -73,6 +73,17 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
       self.session = URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
     }
     delegate.logger = logger
+    self.ownsSession = (session == nil)
+  }
+
+  private let ownsSession: Bool
+
+  deinit {
+    // Sessions created with a delegate retain that delegate strongly
+    // until invalidated; only invalidate sessions we own (tests inject one).
+    if ownsSession {
+      session.invalidateAndCancel()
+    }
   }
 
   private let delegate: AssemblyAIWebSocketDelegate

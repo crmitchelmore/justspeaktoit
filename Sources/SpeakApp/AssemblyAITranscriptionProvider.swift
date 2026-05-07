@@ -122,11 +122,15 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
       URLQueryItem(name: "token", value: apiKey)
     ]
 
-    // AssemblyAI streaming v3 only supports keyterms_prompt (not arbitrary prompts).
-    // The preprocessing prompt is applied post-transcription; only keyterms are sent to the WebSocket.
-    let validTerms = keyterms.filter { !$0.isEmpty && $0.count <= 50 }.prefix(100)
-    for term in validTerms {
-      urlComponents.queryItems?.append(URLQueryItem(name: "keyterms_prompt", value: term))
+    // AssemblyAI streaming v3 expects keyterms_prompt as a single JSON-array
+    // query parameter (e.g. ?keyterms_prompt=["foo","bar"]), NOT as repeated
+    // params — sending repeated params triggers close code 3006 with
+    // "Invalid 'keyterms_prompt': Value error, Invalid JSON array".
+    let validTerms = Array(keyterms.filter { !$0.isEmpty && $0.count <= 50 }.prefix(100))
+    if !validTerms.isEmpty,
+       let jsonData = try? JSONSerialization.data(withJSONObject: validTerms),
+       let jsonString = String(data: jsonData, encoding: .utf8) {
+      urlComponents.queryItems?.append(URLQueryItem(name: "keyterms_prompt", value: jsonString))
     }
     if languageDetectionEnabled {
       urlComponents.queryItems?.append(URLQueryItem(name: "language_detection", value: "true"))

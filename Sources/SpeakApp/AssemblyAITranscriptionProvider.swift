@@ -428,7 +428,8 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
         // Unknown / typeless. Could be diagnostic text from server.
         logger.info("AssemblyAI typeless WS message: \(json.prefix(500), privacy: .public)")
       default:
-        logger.info("Unhandled AssemblyAI message type=\(resolvedType, privacy: .public): \(json.prefix(500), privacy: .public)")
+        let body = json.prefix(500)
+        logger.info("Unhandled AssemblyAI type=\(resolvedType, privacy: .public): \(body, privacy: .public)")
       }
     } catch {
       logger.debug("Failed to parse AssemblyAI response: \(error.localizedDescription)")

@@ -1235,17 +1235,10 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
         continuation.resume()
       }
     } else {
-      // Ongoing turn — replace interim (AssemblyAI sends full turn text each time)
+      // Ongoing turn — replace interim (AssemblyAI v3 sends the full running
+      // transcript text on every Turn frame, including non-final words).
       currentTurnOrder = turn.turn_order
-
-      var displayTranscript = turn.transcript
-      if let lastWord = turn.words?.last, !lastWord.word_is_final {
-        if !displayTranscript.isEmpty {
-          displayTranscript += " "
-        }
-        displayTranscript += lastWord.text
-      }
-      currentInterim = displayTranscript
+      currentInterim = turn.transcript
       rebuildDisplay()
     }
   }

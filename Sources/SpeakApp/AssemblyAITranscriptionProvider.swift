@@ -56,7 +56,7 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
     session: URLSession? = nil,
     bufferPool: AudioBufferPool = AudioBufferPool(poolSize: 10, bufferSize: 4096)
   ) {
-    self.apiKey = apiKey
+    self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
     self.sampleRate = sampleRate
     self.keyterms = keyterms
     self.speechModel = speechModel
@@ -397,7 +397,7 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
   }
 
   private func parseResponse(_ json: String) {
-    logger.debug("Received AssemblyAI response (length: \(json.count))")
+    logger.info("AssemblyAI WS frame received (\(json.count) bytes)")
     guard let data = json.data(using: .utf8) else { return }
 
     do {
@@ -418,10 +418,17 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
       case "Termination":
         logger.info("AssemblyAI session terminated by server")
         withStateLock { isStopping = true }
-      case "SpeechStarted", "":
+      case "SpeechStarted":
         break
+      case "Error":
+        // AssemblyAI sends an Error text frame just before closing with code 3006/4xxx.
+        // Surface it at .info so users can capture it from `log show` filters.
+        logger.error("AssemblyAI server Error frame: \(json.prefix(500), privacy: .public)")
+      case "":
+        // Unknown / typeless. Could be diagnostic text from server.
+        logger.info("AssemblyAI typeless WS message: \(json.prefix(500), privacy: .public)")
       default:
-        logger.debug("Unhandled AssemblyAI message type: \(resolvedType)")
+        logger.info("Unhandled AssemblyAI message type=\(resolvedType, privacy: .public): \(json.prefix(500), privacy: .public)")
       }
     } catch {
       logger.debug("Failed to parse AssemblyAI response: \(error.localizedDescription)")

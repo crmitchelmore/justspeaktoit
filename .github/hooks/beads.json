@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bd prime"
+          }
+        ],
+        "matcher": ""
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bd prime"
+          }
+        ],
+        "matcher": ""
+      }
+    ]
+  }
+}

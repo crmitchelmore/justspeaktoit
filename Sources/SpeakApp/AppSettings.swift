@@ -805,7 +805,12 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       liveStopGracePeriod = stored
     } else {
       let legacy = defaults.object(forKey: DefaultsKey.deepgramStopGracePeriod.rawValue) as? Double
-      liveStopGracePeriod = legacy ?? 0
+      let migrated = legacy ?? 0
+      liveStopGracePeriod = migrated
+      // `didSet` does not fire during init, so persist the migrated value
+      // explicitly — otherwise the next launch would re-read the legacy key
+      // and the new key would never be populated.
+      defaults.set(migrated, forKey: DefaultsKey.liveStopGracePeriod.rawValue)
     }
     trackedAPIKeyIdentifiers =
       defaults.array(forKey: DefaultsKey.trackedKeyIdentifiers.rawValue) as? [String] ?? []

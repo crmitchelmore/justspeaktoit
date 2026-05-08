@@ -1411,7 +1411,6 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
       audioProcessor.flushPendingAudio(to: transcriber)
       await transcriber.waitForPendingSends()
       audioProcessor.setRunning(false)
-      await applyLiveStopGrace(appSettings.liveStopGracePeriod)
       // Send ForceEndpoint *without* closing the socket so the formatted
       // final Turn can arrive on the same WebSocket while we wait below.
       // Skip the wait when the AssemblyAI session never received its
@@ -1436,6 +1435,10 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
           }
         }
       }
+      // Apply the user grace AFTER the finalisation budget but BEFORE
+      // tearing down the socket — extra trailing-finals window without
+      // delaying the ForceEndpoint signal.
+      await applyLiveStopGrace(appSettings.liveStopGracePeriod)
       // Only now tear down the socket (sends Terminate + cancel).
       transcriber.stop()
     } else {

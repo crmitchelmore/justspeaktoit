@@ -169,9 +169,17 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
         let budget: TimeInterval = 0.5
         await withCheckedContinuation { continuation in
             stopContinuation = continuation
-            Task { @MainActor [weak self] in
+            // Capture continuation explicitly so a deallocated transcriber
+            // never leaks an unresumed continuation. We also identity-check
+            // against `stopContinuation` to avoid double-resuming if a real
+            // .completed event already fired before the budget elapsed.
+            Task(priority: .userInitiated) { [weak self, continuation] in
                 try? await Task.sleep(for: .seconds(budget))
-                guard let self, let cont = self.stopContinuation else { return }
+                guard let self else {
+                    continuation.resume()
+                    return
+                }
+                guard let cont = self.stopContinuation else { return }
                 self.stopContinuation = nil
                 cont.resume()
             }
@@ -457,6 +465,7 @@ public enum OpenAIRealtimeError: LocalizedError, Sendable {
 
 // MARK: - WebSocket client
 
+// swiftlint:disable type_body_length
 /// WebSocket client for the OpenAI Realtime API in transcription mode.
 /// Off-MainActor; `@unchecked Sendable` with `NSLock` state guarding,
 /// matching the macOS implementation.
@@ -490,6 +499,7 @@ final class OpenAIRealtimeWebSocketClient: @unchecked Sendable {
     private var sessionReady: Bool = false
     private var readyWaitTokens: [WaitToken] = []
     private var preReadyAudioBuffer: [Data] = []
+    private var preReadyAudioBufferBytes: Int = 0
     private static let preReadyAudioByteLimit = 24_000 * 2 * 5 // 5s of 24 kHz PCM16
 
     init(apiKey: String, model: String, language: String?, sampleRate: Int) {
@@ -512,6 +522,7 @@ final class OpenAIRealtimeWebSocketClient: @unchecked Sendable {
             isStopping = false
             sessionReady = false
             preReadyAudioBuffer = []
+            preReadyAudioBufferBytes = 0
             self.onEvent = onEvent
             self.onError = onError
         }
@@ -579,9 +590,9 @@ final class OpenAIRealtimeWebSocketClient: @unchecked Sendable {
         let action: AudioSendAction = withStateLock {
             if isStopping { return .drop }
             if !sessionReady {
-                let currentBytes = preReadyAudioBuffer.reduce(0) { $0 + $1.count }
-                if currentBytes + pcmData.count <= Self.preReadyAudioByteLimit {
+                if preReadyAudioBufferBytes + pcmData.count <= Self.preReadyAudioByteLimit {
                     preReadyAudioBuffer.append(pcmData)
+                    preReadyAudioBufferBytes += pcmData.count
                 }
                 return .buffer
             }
@@ -638,6 +649,7 @@ final class OpenAIRealtimeWebSocketClient: @unchecked Sendable {
         let (task, frames): (URLSessionWebSocketTask?, [Data]) = withStateLock {
             let pending = preReadyAudioBuffer
             preReadyAudioBuffer = []
+            preReadyAudioBufferBytes = 0
             return (webSocketTask, pending)
         }
         guard let task, task.state == .running, !frames.isEmpty else { return }
@@ -661,8 +673,15 @@ final class OpenAIRealtimeWebSocketClient: @unchecked Sendable {
     }
 
     private func sendJSONOnTask(_ payload: [String: Any], task: URLSessionWebSocketTask) {
-        guard let data = try? JSONSerialization.data(withJSONObject: payload),
-              let text = String(data: data, encoding: .utf8) else {
+        let data: Data
+        do {
+            data = try JSONSerialization.data(withJSONObject: payload)
+        } catch {
+            logger.error("Failed to serialize OpenAI Realtime payload: \(error.localizedDescription)")
+            return
+        }
+        guard let text = String(data: data, encoding: .utf8) else {
+            logger.error("Failed to encode OpenAI Realtime payload as UTF-8")
             return
         }
         pendingSendGroup.enter()
@@ -829,4 +848,5 @@ private final class WaitToken: @unchecked Sendable {
         }
     }
 }
+// swiftlint:enable type_body_length
 #endif

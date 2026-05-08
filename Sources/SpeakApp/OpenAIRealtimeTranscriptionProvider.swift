@@ -168,6 +168,9 @@ final class OpenAIRealtimeLiveTranscriber: @unchecked Sendable {
       defer { sendGroup.leave() }
       if let error, let self, !self.isStoppingState() {
         self.logger.error("Failed to commit input buffer: \(error.localizedDescription)")
+        // Surface this — without it, a failed commit can leave callers
+        // waiting indefinitely for a final transcript that will never come.
+        self.currentOnError()?(error)
       }
     }
   }
@@ -316,9 +319,12 @@ final class OpenAIRealtimeLiveTranscriber: @unchecked Sendable {
       case .failure(let error):
         if self.isStoppingState() { return }
         if self.shouldIgnoreSocketError(error) {
-          DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.01) { [weak self] in
-            self?.receiveMessages()
-          }
+          // ENOTCONN / "Socket is not connected" is terminal — a
+          // URLSessionWebSocketTask cannot be reused for receiving once
+          // disconnected. Stop the receive loop instead of spinning every
+          // 10 ms; higher-level reconnect logic (or stop()) is responsible
+          // for replacing the task.
+          self.logger.info("WebSocket receive loop ending (socket disconnected)")
           return
         }
         self.logger.error("WebSocket receive error: \(error.localizedDescription, privacy: .public)")

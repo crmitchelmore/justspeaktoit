@@ -109,7 +109,7 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
       transcriber = provider.createLiveTranscriber(
         apiKey: apiKey,
         model: realtimeName,
-        language: currentLanguage,
+        language: currentLanguage.map(Self.extractLanguageCode(from:)),
         // OpenAI Realtime's transcription `prompt` is a glossary-style
         // bias — use the AssemblyAI keyterms list as a comma-joined hint.
         // We deliberately do *not* forward the post-processing system prompt
@@ -127,7 +127,11 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
         onError: { [weak self] error in
           Task { @MainActor [weak self] in
             guard let self else { return }
-            if !self.isRunning { return }
+            // NOTE: we no longer drop errors that arrive before isRunning
+            // flips true. WebSocket failures during the connecting window
+            // (invalid API key, 401, DNS, etc.) used to be swallowed,
+            // leaving the user with a session that ran locally but never
+            // produced text. Surface them via the delegate.
             self.delegate?.liveTranscriber(self, didFail: error)
           }
         }
@@ -228,7 +232,7 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
       logger.info("OpenAI Realtime session ready (config applied)")
     case .delta(let text, let itemId):
       let key = itemId.isEmpty ? "_pending" : itemId
-      if !itemOrder.contains(key), finalsByItem[key] == nil {
+      if currentDeltasByItem[key] == nil, finalsByItem[key] == nil {
         itemOrder.append(key)
       }
       currentDeltasByItem[key, default: ""].append(text)
@@ -236,7 +240,7 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
     case .completed(let transcript, let itemId):
       let key = itemId.isEmpty ? "_pending" : itemId
       let isNewItem = !preStopCompletedItemIDs.contains(key)
-      if !itemOrder.contains(key) {
+      if currentDeltasByItem[key] == nil, finalsByItem[key] == nil {
         itemOrder.append(key)
       }
       finalsByItem[key] = transcript
@@ -327,6 +331,14 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
   private func trimmedKeytermsPrompt() -> String? {
     let raw = appSettings.assemblyAIKeyterms.trimmingCharacters(in: .whitespacesAndNewlines)
     return raw.isEmpty ? nil : raw
+  }
+
+  /// Normalises a BCP-47 locale identifier (e.g. "en-GB", "en_US") to the
+  /// ISO-639-1 two-letter code OpenAI Realtime expects (e.g. "en"). Mirrors
+  /// the helper used by every other transcription provider.
+  static func extractLanguageCode(from locale: String) -> String {
+    let components = locale.split(whereSeparator: { $0 == "_" || $0 == "-" })
+    return components.first.map(String.init)?.lowercased() ?? locale.lowercased()
   }
 
   private func openAIAPIKey() async throws -> String {
@@ -473,7 +485,11 @@ private final class OpenAIRealtimeAudioProcessor: @unchecked Sendable {
       outputBuffer = newBuffer
     }
 
-    converter.reset()
+    // NOTE: We deliberately do NOT call converter.reset() between chunks —
+    // doing so wipes the resampler's filter history and priming/trailing
+    // frames, which audibly clicks at chunk boundaries (~50 Hz). The
+    // converter is only created once per inputFormat (cachedConverter), so
+    // its state is the *correct* thing to preserve across taps.
     var error: NSError?
     let status = converter.convert(to: outputBuffer, error: &error) { _, outStatus in
       outStatus.pointee = .haveData

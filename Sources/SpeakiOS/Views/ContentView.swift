@@ -192,55 +192,19 @@ final class TranscriberCoordinator: ObservableObject {
         if let deepgram = deepgramTranscriber {
             let result = await deepgram.stop()
             deepgramTranscriber = nil
-
-            // Record to history
-            iOSHistoryManager.shared.recordTranscription(
-                text: result.text,
-                model: currentModel,
-                duration: result.duration
-            )
-
-            startTime = nil
-            return result
+            return finishStop(with: result)
         } else if let elevenlabs = elevenLabsTranscriber {
             let result = await elevenlabs.stop()
             elevenLabsTranscriber = nil
-
-            // Record to history
-            iOSHistoryManager.shared.recordTranscription(
-                text: result.text,
-                model: currentModel,
-                duration: result.duration
-            )
-
-            startTime = nil
-            return result
+            return finishStop(with: result)
         } else if let openai = openAITranscriber {
             let result = await openai.stop()
             openAITranscriber = nil
-
-            // Record to history
-            iOSHistoryManager.shared.recordTranscription(
-                text: result.text,
-                model: currentModel,
-                duration: result.duration
-            )
-
-            startTime = nil
-            return result
+            return finishStop(with: result)
         } else if let apple = appleTranscriber {
             let result = await apple.stop()
             appleTranscriber = nil
-
-            // Record to history
-            iOSHistoryManager.shared.recordTranscription(
-                text: result.text,
-                model: currentModel,
-                duration: result.duration
-            )
-
-            startTime = nil
-            return result
+            return finishStop(with: result)
         }
 
         startTime = nil
@@ -254,6 +218,16 @@ final class TranscriberCoordinator: ObservableObject {
             rawPayload: nil,
             debugInfo: nil
         )
+    }
+
+    private func finishStop(with result: TranscriptionResult) -> TranscriptionResult {
+        iOSHistoryManager.shared.recordTranscription(
+            text: result.text,
+            model: currentModel,
+            duration: result.duration
+        )
+        startTime = nil
+        return result
     }
 
     func cancel() {

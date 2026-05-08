@@ -681,7 +681,12 @@ struct APIKeysView: View {
                     Button("Save") {
                         saveKeys()
                     }
-                    .disabled(deepgramKey.isEmpty && openRouterKey.isEmpty && openAIKey.isEmpty && elevenLabsKey.isEmpty)
+                    .disabled(
+                        deepgramKey.isEmpty
+                            && openRouterKey.isEmpty
+                            && openAIKey.isEmpty
+                            && elevenLabsKey.isEmpty
+                    )
                 }
             }
         }

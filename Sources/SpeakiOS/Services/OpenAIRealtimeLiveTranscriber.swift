@@ -240,7 +240,7 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
         let client = OpenAIRealtimeWebSocketClient(
             apiKey: apiKey,
             model: realtimeName,
-            language: language,
+            language: language.map(Self.extractLanguageCode(from:)),
             sampleRate: Int(Self.targetSampleRate)
         )
         transcriber = client
@@ -375,7 +375,7 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
             SpeakLogger.transcription.info("OpenAI Realtime session ready (config applied)")
         case .delta(let text, let itemId):
             let key = itemId.isEmpty ? "_pending" : itemId
-            if !itemOrder.contains(key), finalsByItem[key] == nil {
+            if currentDeltasByItem[key] == nil, finalsByItem[key] == nil {
                 itemOrder.append(key)
             }
             currentDeltasByItem[key, default: ""].append(text)
@@ -384,7 +384,7 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
         case .completed(let transcript, let itemId):
             let key = itemId.isEmpty ? "_pending" : itemId
             let isNewItem = !preStopCompletedItemIDs.contains(key)
-            if !itemOrder.contains(key) {
+            if currentDeltasByItem[key] == nil, finalsByItem[key] == nil {
                 itemOrder.append(key)
             }
             finalsByItem[key] = transcript
@@ -425,6 +425,14 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
             name = String(name.dropLast("-streaming".count))
         }
         return name
+    }
+
+    /// Normalises a BCP-47 locale identifier (e.g. "en-GB", "en_US") to the
+    /// ISO-639-1 two-letter code OpenAI Realtime expects (e.g. "en"). Mirrors
+    /// the helper used by the macOS provider.
+    static func extractLanguageCode(from locale: String) -> String {
+        let components = locale.split(whereSeparator: { $0 == "_" || $0 == "-" })
+        return components.first.map(String.init)?.lowercased() ?? locale.lowercased()
     }
 }
 

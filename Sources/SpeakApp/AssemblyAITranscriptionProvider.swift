@@ -288,6 +288,24 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
     }
   }
 
+  /// Sends `ForceEndpoint` to AssemblyAI without tearing down the socket so
+  /// the server flushes the in-flight turn as a final formatted Turn message
+  /// over the still-open WebSocket. The controller calls this, awaits the
+  /// final Turn (or its budget timeout), and only *then* invokes `stop()` to
+  /// send Terminate and close the socket. Sending ForceEndpoint and Terminate
+  /// in the same `stop()` call closed the socket before the formatted final
+  /// Turn could arrive — the budget burned on a dead socket.
+  func sendForceEndpoint() {
+    let task = withStateLock { webSocketTask }
+    guard let task, task.state == .running else { return }
+    let forceMsg = #"{"type":"ForceEndpoint"}"#
+    task.send(.string(forceMsg)) { [weak self] error in
+      if let error {
+        self?.logger.error("ForceEndpoint send failed: \(error.localizedDescription)")
+      }
+    }
+  }
+
   func stop() {
     let task = withStateLock { () -> URLSessionWebSocketTask? in
       guard !isStopping else { return nil }
@@ -482,6 +500,14 @@ extension AssemblyAILiveTranscriber {
         self?.logger.error("Failed to send config update: \(error.localizedDescription)")
       }
     }
+  }
+
+  /// Whether the AssemblyAI server has acknowledged the session with a
+  /// `Begin` message. The post-stop finalisation budget is meaningless if
+  /// the session never began (no audio reached the server, no Turn will
+  /// ever be returned), so the controller can use this to skip the wait.
+  func didReceiveBegin() -> Bool {
+    withStateLock { sessionDidBegin }
   }
 }
 

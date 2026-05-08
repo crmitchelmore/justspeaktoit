@@ -231,6 +231,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     case preferredLocale
     case postRecordingTailDuration
     case deepgramStopGracePeriod
+    case liveStopGracePeriod
     case preferredAudioInputUID
     case defaultTTSVoice
     case ttsSpeed
@@ -483,8 +484,13 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     didSet { store(postRecordingTailDuration, key: .postRecordingTailDuration) }
   }
 
-  @Published var deepgramStopGracePeriod: TimeInterval {
-    didSet { store(deepgramStopGracePeriod, key: .deepgramStopGracePeriod) }
+  /// Extra grace period (in seconds) the live controllers wait, on top of
+  /// each provider's hard-coded `postStopFinalizeBudget`, before tearing the
+  /// stream down. Useful when the user wants to capture the final word that
+  /// some providers (notably Deepgram) only finalise a beat after the audio
+  /// stops. Applied uniformly to every live transcription provider.
+  @Published var liveStopGracePeriod: TimeInterval {
+    didSet { store(liveStopGracePeriod, key: .liveStopGracePeriod) }
   }
 
   @Published private(set) var trackedAPIKeyIdentifiers: [String] {
@@ -790,8 +796,22 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     }
     postRecordingTailDuration =
       defaults.object(forKey: DefaultsKey.postRecordingTailDuration.rawValue) as? Double ?? 0.5
-    deepgramStopGracePeriod =
-      defaults.object(forKey: DefaultsKey.deepgramStopGracePeriod.rawValue) as? Double ?? 0
+    // Migration: reuse the legacy `deepgramStopGracePeriod` value the first
+    // time the user launches a build that has the generic
+    // `liveStopGracePeriod`. After this, the legacy key is left intact (not
+    // deleted) so a downgrade still has its setting; only the new key is
+    // written from now on.
+    if let stored = defaults.object(forKey: DefaultsKey.liveStopGracePeriod.rawValue) as? Double {
+      liveStopGracePeriod = stored
+    } else {
+      let legacy = defaults.object(forKey: DefaultsKey.deepgramStopGracePeriod.rawValue) as? Double
+      let migrated = legacy ?? 0
+      liveStopGracePeriod = migrated
+      // `didSet` does not fire during init, so persist the migrated value
+      // explicitly — otherwise the next launch would re-read the legacy key
+      // and the new key would never be populated.
+      defaults.set(migrated, forKey: DefaultsKey.liveStopGracePeriod.rawValue)
+    }
     trackedAPIKeyIdentifiers =
       defaults.array(forKey: DefaultsKey.trackedKeyIdentifiers.rawValue) as? [String] ?? []
 

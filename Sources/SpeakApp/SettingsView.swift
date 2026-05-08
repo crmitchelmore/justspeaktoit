@@ -814,20 +814,30 @@ struct SettingsView: View {
       }
       .speakTooltip("Decide how much breathing room Speak gives you after releasing your shortcut.")
 
-      SettingsCard(title: "Deepgram stop grace", systemImage: "waveform.and.mic", tint: Color.brandAccentDeep) {
+      SettingsCard(
+        title: "Live stop grace",
+        systemImage: "waveform.and.mic",
+        tint: Color.brandAccentDeep
+      ) {
         VStack(alignment: .leading, spacing: 12) {
-          Text("After stopping, keep the Deepgram stream open briefly to capture final words.")
+          Text(
+            """
+            After stopping, keep the live transcription stream open briefly so providers \
+            can flush their final words. Applied to every live model (Deepgram, AssemblyAI, \
+            OpenAI Realtime, ElevenLabs, Soniox, Modulate).
+            """
+          )
             .font(.caption)
             .foregroundStyle(.secondary)
           HStack {
             Slider(
-              value: settingsBinding(\AppSettings.deepgramStopGracePeriod),
+              value: settingsBinding(\AppSettings.liveStopGracePeriod),
               in: 0...2,
               step: 0.1
             )
-            .speakTooltip("Delay closing the Deepgram live stream after you stop recording.")
+            .speakTooltip("Extra delay before closing the live transcription stream after you stop recording.")
             Text(
-              settings.deepgramStopGracePeriod,
+              settings.liveStopGracePeriod,
               format: .number.precision(.fractionLength(1))
             )
             .font(.caption.monospacedDigit())
@@ -838,7 +848,7 @@ struct SettingsView: View {
           }
         }
       }
-      .speakTooltip("Helps reduce last-word cutoffs with Deepgram live transcription.")
+      .speakTooltip("Helps reduce last-word cutoffs across all live transcription providers.")
 
       SettingsCard(title: "Silence detection", systemImage: "waveform.slash", tint: Color.brandAccentWarm) {
         VStack(alignment: .leading, spacing: 12) {

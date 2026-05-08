@@ -6,6 +6,17 @@ import Speech
 
 // swiftlint:disable file_length
 
+/// Applies the user-configured extra stop-grace period uniformly across all
+/// live transcription providers. This sits on top of each provider's
+/// hard-coded `LiveModelCapabilities.postStopFinalizeBudget` and lets the
+/// user buy themselves a bit of extra trailing-audio finalisation time
+/// (originally a Deepgram-only knob, now generalised).
+func applyLiveStopGrace(_ period: TimeInterval) async {
+  let grace = max(period, 0)
+  guard grace > 0 else { return }
+  try? await Task.sleep(for: .seconds(grace))
+}
+
 enum TranscriptionManagerError: LocalizedError {
   case liveSessionAlreadyRunning
   case liveSessionNotRunning
@@ -826,14 +837,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
 
     audioProcessor.setRunning(false)
 
-    let gracePeriod = max(appSettings.deepgramStopGracePeriod, 0)
-    if gracePeriod > 0 {
-      do {
-        try await Task.sleep(nanoseconds: UInt64(gracePeriod * 1_000_000_000))
-      } catch {
-        // Ignored: sleep cancellation simply means we stop immediately.
-      }
-    }
+    await applyLiveStopGrace(appSettings.liveStopGracePeriod)
 
     transcriber?.stop()
 
@@ -1407,13 +1411,20 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
       audioProcessor.flushPendingAudio(to: transcriber)
       await transcriber.waitForPendingSends()
       audioProcessor.setRunning(false)
-      transcriber.stop()
+      // Send ForceEndpoint *without* closing the socket so the formatted
+      // final Turn can arrive on the same WebSocket while we wait below.
+      // Skip the wait when the AssemblyAI session never received its
+      // `Begin` ack — there is no Turn to wait for.
+      let serverBegan = transcriber.didReceiveBegin()
+      if serverBegan {
+        transcriber.sendForceEndpoint()
+      }
       // Wait for the final Turn response (resumed in handleTurn) or the
       // model-specific finalize budget, whichever comes first. Both paths
       // nil-out stopContinuation under the MainActor before resuming, so
       // resume is idempotent.
       let budget = appSettings.liveModelCapabilities.postStopFinalizeBudget
-      if budget > 0 {
+      if budget > 0, serverBegan {
         await withCheckedContinuation { continuation in
           stopContinuation = continuation
           Task { @MainActor [weak self] in
@@ -1424,6 +1435,12 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
           }
         }
       }
+      // Apply the user grace AFTER the finalisation budget but BEFORE
+      // tearing down the socket — extra trailing-finals window without
+      // delaying the ForceEndpoint signal.
+      await applyLiveStopGrace(appSettings.liveStopGracePeriod)
+      // Only now tear down the socket (sends Terminate + cancel).
+      transcriber.stop()
     } else {
       audioProcessor.setRunning(false)
     }
@@ -1610,6 +1627,7 @@ final class ModulateLiveController: NSObject, LiveTranscriptionController {
       audioProcessor.flushPendingAudio(to: transcriber)
       await transcriber.waitForPendingSends()
       audioProcessor.setRunning(false)
+      await applyLiveStopGrace(appSettings.liveStopGracePeriod)
       transcriber.signalEndOfStream()
 
       // Wait for the final response (resumed in finished/error callbacks) or a 2s timeout.
@@ -2168,6 +2186,7 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
       audioProcessor.flushPendingAudio(to: transcriber)
       await transcriber.waitForPendingSends()
       audioProcessor.setRunning(false)
+      await applyLiveStopGrace(appSettings.liveStopGracePeriod)
       // Manual commit flushes any VAD-buffered audio so the server emits
       // a final committed_transcript for the trailing words. Await that
       // event-driven (with timeout) instead of a fixed sleep so the HUD
@@ -2596,6 +2615,7 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
       audioProcessor.flushPendingAudio(to: transcriber)
       await transcriber.waitForPendingSends()
       audioProcessor.setRunning(false)
+      await applyLiveStopGrace(appSettings.liveStopGracePeriod)
       // Ask Soniox to finalize any in-flight non-final tokens so the trailing
       // words of the utterance get returned as final tokens. The server replies
       // with a `<fin>` marker token (handled in parseResponse) which fires the

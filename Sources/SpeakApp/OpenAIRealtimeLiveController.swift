@@ -180,7 +180,7 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
     if let transcriber {
       // 1. Make sure the OpenAI session has acknowledged our config so any
       //    pre-ready buffered audio has somewhere correct to land.
-      _ = await transcriber.awaitSessionReady(timeout: 1.0)
+      let sessionReady = await transcriber.awaitSessionReady(timeout: 1.0)
       // 2. Flush local resampler tail into the transcriber (which will send
       //    immediately now that the session is ready, or buffer briefly if
       //    the readiness timeout lapsed).
@@ -188,6 +188,7 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
       // 3. Await all pending audio appends so the server has the full tail.
       await transcriber.waitForPendingSends()
       audioProcessor.setRunning(false)
+      await applyLiveStopGrace(appSettings.liveStopGracePeriod)
       // 4. Commit; the commit send is also tracked by pendingSendGroup.
       transcriber.commitInputBuffer()
       // 5. Await the commit send completion before starting the finalize
@@ -197,8 +198,10 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
 
       // 6. Wait for a *new* `.completed` event triggered by our commit, or
       //    the model-specific finalize budget, whichever comes first.
+      //    Skip the wait entirely when the session never became ready —
+      //    no audio was ever processed and no `.completed` will arrive.
       let budget = appSettings.liveModelCapabilities.postStopFinalizeBudget
-      if budget > 0 {
+      if budget > 0, sessionReady {
         await withCheckedContinuation { continuation in
           stopContinuation = continuation
           Task { @MainActor [weak self] in

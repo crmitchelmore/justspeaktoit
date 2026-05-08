@@ -575,6 +575,14 @@ final class MainManager: ObservableObject {
 
     state = .processing
     session.recordingEnded = Date()
+    if appSettings.transcriptionMode == .liveNative {
+      // Move the HUD off the "Recording" timer immediately. Otherwise the
+      // user sees the recording timer frozen at the release time while we
+      // close the audio file and drain the live provider's finalisation
+      // budget — which on AssemblyAI can be ~2s and reads as a hang for
+      // very short presses where the WebSocket `Begin` never arrived.
+      hudManager.beginTranscribing(subheadline: "Finalising transcript")
+    }
     let stopDescription: String
     if tailDuration > 0 {
       let tailText = String(format: "%.1f", tailDuration)
@@ -598,7 +606,6 @@ final class MainManager: ObservableObject {
 
       if appSettings.transcriptionMode == .liveNative {
         session.transcriptionStarted = Date()
-        hudManager.beginTranscribing(subheadline: "Finalising transcript")
         let result = try await transcriptionManager.stopLiveTranscription()
         session.transcriptionEnded = Date()
         session.transcriptionResult = result

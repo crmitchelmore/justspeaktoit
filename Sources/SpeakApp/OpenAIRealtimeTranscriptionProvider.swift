@@ -239,7 +239,7 @@ final class OpenAIRealtimeLiveTranscriber: @unchecked Sendable {
     if let language, !language.isEmpty {
       transcription["language"] = language
     }
-    if let prompt, !prompt.isEmpty {
+    if let prompt, !prompt.isEmpty, OpenAIRealtimeLiveTranscriber.modelSupportsPrompt(model) {
       transcription["prompt"] = prompt
     }
 
@@ -542,6 +542,18 @@ struct OpenAIRealtimeTranscriptionProvider {
   static func realtimeModelName(from catalogID: String) -> String {
     let suffix = catalogID.split(separator: "/").last.map(String.init) ?? catalogID
     return suffix.replacingOccurrences(of: "-streaming", with: "")
+  }
+}
+
+extension OpenAIRealtimeLiveTranscriber {
+  /// OpenAI Realtime only accepts `input_audio_transcription.prompt` for the
+  /// GPT-4o transcription models. `gpt-realtime-whisper` (Whisper-1) rejects
+  /// the parameter with `invalid_value`. Returning false here means the
+  /// provider silently drops the prompt for unsupported models rather than
+  /// failing the whole session.
+  static func modelSupportsPrompt(_ realtimeModel: String) -> Bool {
+    let name = realtimeModel.lowercased()
+    return name.hasPrefix("gpt-4o-transcribe") || name.hasPrefix("gpt-4o-mini-transcribe")
   }
 }
 

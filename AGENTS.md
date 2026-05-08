@@ -373,6 +373,7 @@ bd close <id>         # Complete work
 - Use `bd` for ALL task tracking -- do NOT use TodoWrite, TaskCreate, or markdown TODO lists
 - Run `bd prime` for detailed command reference and session close protocol
 - Use `bd remember` for persistent knowledge -- do NOT use MEMORY.md files
+- Keep Beads automation on Copilot CLI surfaces (`AGENTS.md` and repo-local `.github/hooks/*.json`); do NOT add Claude-specific Beads files such as `CLAUDE.md` or `.claude/settings.json`
 
 ## Session Completion
 

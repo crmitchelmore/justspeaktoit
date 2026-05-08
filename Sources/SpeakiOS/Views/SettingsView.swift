@@ -185,10 +185,10 @@ public final class AppSettings: ObservableObject {
         }
     }
 
-    public var hasDeepgramKey: Bool { !deepgramAPIKey.isEmpty }
-    public var hasOpenRouterKey: Bool { !openRouterAPIKey.isEmpty }
-    public var hasOpenAIKey: Bool { !openAIAPIKey.isEmpty }
-    public var hasElevenLabsKey: Bool { !elevenLabsAPIKey.isEmpty }
+    public var hasDeepgramKey: Bool { !deepgramAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    public var hasOpenRouterKey: Bool { !openRouterAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    public var hasOpenAIKey: Bool { !openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    public var hasElevenLabsKey: Bool { !elevenLabsAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     // MARK: - Keychain Helpers
 
@@ -786,6 +786,12 @@ struct PrivacyView: View {
                     title: "ElevenLabs",
                     description: "Audio streamed to ElevenLabs servers for transcription."
                 )
+
+                FeatureRow(
+                    icon: "waveform.badge.mic",
+                    title: "OpenAI",
+                    description: "Audio streamed to OpenAI servers for transcription (gpt-realtime-whisper)."
+                )
             }
 
             Section("API Keys") {
@@ -803,6 +809,7 @@ struct PrivacyView: View {
                     InfoRow(label: "Apple Speech", value: "On-device only")
                     InfoRow(label: "Deepgram", value: "During transcription")
                     InfoRow(label: "ElevenLabs", value: "During transcription")
+                    InfoRow(label: "OpenAI", value: "During transcription")
                     InfoRow(label: "Send to Mac", value: "Local network only")
                     InfoRow(label: "iCloud Sync", value: "Settings & keys (optional)")
                 }

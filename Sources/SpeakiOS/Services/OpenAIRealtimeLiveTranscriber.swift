@@ -98,7 +98,13 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
         try await ensureMicrophonePermission()
         try configureAudioSession()
         connectClient(apiKey: apiKey)
-        try startAudioEngine()
+        do {
+            try startAudioEngine()
+        } catch {
+            transcriber?.stop()
+            transcriber = nil
+            throw error
+        }
         resetState()
 
         print("[OpenAIRealtimeLiveTranscriber] Started")

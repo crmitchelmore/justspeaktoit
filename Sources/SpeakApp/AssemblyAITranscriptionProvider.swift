@@ -288,6 +288,24 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
     }
   }
 
+  /// Sends `ForceEndpoint` to AssemblyAI without tearing down the socket so
+  /// the server flushes the in-flight turn as a final formatted Turn message
+  /// over the still-open WebSocket. The controller calls this, awaits the
+  /// final Turn (or its budget timeout), and only *then* invokes `stop()` to
+  /// send Terminate and close the socket. Sending ForceEndpoint and Terminate
+  /// in the same `stop()` call closed the socket before the formatted final
+  /// Turn could arrive — the budget burned on a dead socket.
+  func sendForceEndpoint() {
+    let task = withStateLock { webSocketTask }
+    guard let task, task.state == .running else { return }
+    let forceMsg = #"{"type":"ForceEndpoint"}"#
+    task.send(.string(forceMsg)) { [weak self] error in
+      if let error {
+        self?.logger.error("ForceEndpoint send failed: \(error.localizedDescription)")
+      }
+    }
+  }
+
   func stop() {
     let task = withStateLock { () -> URLSessionWebSocketTask? in
       guard !isStopping else { return nil }

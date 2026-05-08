@@ -14,7 +14,7 @@ import Speech
 func applyLiveStopGrace(_ period: TimeInterval) async {
   let grace = max(period, 0)
   guard grace > 0 else { return }
-  try? await Task.sleep(nanoseconds: UInt64(grace * 1_000_000_000))
+  try? await Task.sleep(for: .seconds(grace))
 }
 
 enum TranscriptionManagerError: LocalizedError {
@@ -1412,18 +1412,19 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
       await transcriber.waitForPendingSends()
       audioProcessor.setRunning(false)
       await applyLiveStopGrace(appSettings.liveStopGracePeriod)
-      transcriber.stop()
+      // Send ForceEndpoint *without* closing the socket so the formatted
+      // final Turn can arrive on the same WebSocket while we wait below.
+      // Skip the wait when the AssemblyAI session never received its
+      // `Begin` ack — there is no Turn to wait for.
+      let serverBegan = transcriber.didReceiveBegin()
+      if serverBegan {
+        transcriber.sendForceEndpoint()
+      }
       // Wait for the final Turn response (resumed in handleTurn) or the
       // model-specific finalize budget, whichever comes first. Both paths
       // nil-out stopContinuation under the MainActor before resuming, so
       // resume is idempotent.
       let budget = appSettings.liveModelCapabilities.postStopFinalizeBudget
-      // Skip the finalisation wait entirely when the AssemblyAI session
-      // never received its `Begin` ack — there is no Turn to wait for and
-      // the server has nothing to flush. This keeps very-short presses
-      // (sub-second) from blocking the HUD on "Finalising" for the full
-      // budget.
-      let serverBegan = transcriber.didReceiveBegin()
       if budget > 0, serverBegan {
         await withCheckedContinuation { continuation in
           stopContinuation = continuation
@@ -1435,6 +1436,8 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
           }
         }
       }
+      // Only now tear down the socket (sends Terminate + cancel).
+      transcriber.stop()
     } else {
       audioProcessor.setRunning(false)
     }

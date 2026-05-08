@@ -483,6 +483,14 @@ extension AssemblyAILiveTranscriber {
       }
     }
   }
+
+  /// Whether the AssemblyAI server has acknowledged the session with a
+  /// `Begin` message. The post-stop finalisation budget is meaningless if
+  /// the session never began (no audio reached the server, no Turn will
+  /// ever be returned), so the controller can use this to skip the wait.
+  func didReceiveBegin() -> Bool {
+    withStateLock { sessionDidBegin }
+  }
 }
 
 private extension AssemblyAILiveTranscriber {

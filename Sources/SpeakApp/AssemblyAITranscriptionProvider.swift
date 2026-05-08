@@ -301,11 +301,28 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
 
     guard let task, task.state == .running else { return }
 
-    // Send ForceEndpoint to flush the current turn before terminating
+    // Send ForceEndpoint to flush the current turn before terminating.
+    //
+    // NOTE: Previously this used a 2.0s sleep before sending Terminate, on the
+    // assumption that we needed to wait for the formatted final Turn response
+    // before tearing down the socket. That wait is already handled higher up
+    // by AssemblyAILiveController.stop() (its `stopContinuation` waits for the
+    // final Turn to be observed in handleTurn, with its own timeout). Holding
+    // the socket open here for an additional 2s just inflates the perceived
+    // "finalising" delay — particularly noticeable on long utterances where
+    // the server-side formatting pass already consumes most of the controller
+    // budget.
+    //
+    // We now send Terminate immediately after ForceEndpoint, with a small
+    // safety delay to give URLSession a moment to flush the ForceEndpoint
+    // frame onto the wire before we send Terminate / cancel the task. If this
+    // ever proves too aggressive (e.g. AssemblyAI starts dropping the
+    // ForceEndpoint when Terminate races it), increase `safetyDelay` or
+    // restore a longer wait.
     let forceMsg = #"{"type":"ForceEndpoint"}"#
+    let safetyDelay: DispatchTimeInterval = .milliseconds(150)
     task.send(.string(forceMsg)) { [weak self] _ in
-      // Wait long enough for the final Turn response to arrive before terminating
-      DispatchQueue.global().asyncAfter(deadline: .now() + 2.0) {
+      DispatchQueue.global().asyncAfter(deadline: .now() + safetyDelay) {
         let terminateMsg = #"{"type":"Terminate"}"#
         task.send(.string(terminateMsg)) { _ in }
         task.cancel(with: .normalClosure, reason: nil)

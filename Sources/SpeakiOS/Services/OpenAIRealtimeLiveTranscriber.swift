@@ -609,6 +609,7 @@ final class OpenAIRealtimeWebSocketClient: @unchecked Sendable {
                 "session": [
                     "input_audio_format": "pcm16",
                     "input_audio_transcription": transcription,
+                    "input_audio_noise_reduction": ["type": "near_field"],
                     "turn_detection": NSNull()
                 ]
             ]

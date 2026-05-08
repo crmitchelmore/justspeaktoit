@@ -740,8 +740,9 @@ struct SettingsView: View {
               .foregroundStyle(.secondary)
           }
 
-          if settings.isAssemblyAIModel {
-            Text("Note: AssemblyAI may take up to ~2s to finalise after you stop, "
+          if settings.isAssemblyAIModel && capabilities.postStopFinalizeBudget > 0 {
+            let budgetSeconds = String(format: "%.1f", capabilities.postStopFinalizeBudget)
+            Text("Note: AssemblyAI may take up to ~\(budgetSeconds)s to finalise after you stop, "
                  + "because it formats the full turn server-side.")
               .font(.caption)
               .foregroundStyle(.secondary)

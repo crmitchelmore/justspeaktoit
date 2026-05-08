@@ -194,9 +194,15 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       }
     }
 
-    /// Bridge to `SpeakCore.SpeedModeID` — the raw values are kept in sync
-    /// so this is a pure string match.
-    var coreID: SpeedModeID { SpeedModeID(rawValue: rawValue) ?? .instant }
+    /// Bridge to `SpeakCore.SpeedModeID`. Use a switch so adding a new
+    /// `SpeedMode` is a compile error until a corresponding `SpeedModeID`
+    /// mapping is added (rather than silently falling back to `.instant`).
+    var coreID: SpeedModeID {
+      switch self {
+      case .instant: return .instant
+      case .livePolish: return .livePolish
+      }
+    }
   }
 
   enum DefaultsKey: String {

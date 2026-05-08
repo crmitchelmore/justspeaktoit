@@ -12,7 +12,9 @@ import os.log
 /// pair, collapsed into a single `ObservableObject` to match the existing
 /// iOS provider shape (`DeepgramLiveTranscriber`, `ElevenLabsLiveTranscriber`).
 ///
-/// Endpoint: `wss://api.openai.com/v1/realtime?intent=transcription`.
+/// Endpoint:
+/// - Beta (default): `wss://api.openai.com/v1/realtime?intent=transcription`
+/// - GA (gpt-realtime-whisper): `wss://api.openai.com/v1/realtime?model=<name>`
 /// Audio: PCM16 mono @ 24 kHz, base64 in `input_audio_buffer.append`.
 /// On stop we wait for the session config ack, flush, send
 /// `input_audio_buffer.commit`, then wait for the final `.completed` event
@@ -537,7 +539,14 @@ final class OpenAIRealtimeWebSocketClient: @unchecked Sendable {
             onError(OpenAIRealtimeError.connectionFailed("Invalid URL"))
             return
         }
-        components.queryItems = [URLQueryItem(name: "intent", value: "transcription")]
+        // GA Realtime models (e.g. `gpt-realtime-whisper`) reject the beta
+        // `?intent=transcription` endpoint with `invalid_model`. They must use
+        // `?model=<name>` and omit the `OpenAI-Beta` header.
+        if Self.isGARealtimeTranscriptionModel(model) {
+            components.queryItems = [URLQueryItem(name: "model", value: model)]
+        } else {
+            components.queryItems = [URLQueryItem(name: "intent", value: "transcription")]
+        }
         guard let url = components.url else {
             onError(OpenAIRealtimeError.connectionFailed("Invalid URL components"))
             return
@@ -545,7 +554,9 @@ final class OpenAIRealtimeWebSocketClient: @unchecked Sendable {
 
         var request = URLRequest(url: url)
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("realtime=v1", forHTTPHeaderField: "OpenAI-Beta")
+        if !Self.isGARealtimeTranscriptionModel(model) {
+            request.setValue("realtime=v1", forHTTPHeaderField: "OpenAI-Beta")
+        }
 
         let task = session.webSocketTask(with: request)
         withStateLock { webSocketTask = task }
@@ -575,15 +586,41 @@ final class OpenAIRealtimeWebSocketClient: @unchecked Sendable {
         transcription["model"] = model
         if let language { transcription["language"] = language }
 
-        let payload: [String: Any] = [
-            "type": "transcription_session.update",
-            "session": [
-                "input_audio_format": "pcm16",
-                "input_audio_transcription": transcription,
-                "turn_detection": NSNull()
+        let payload: [String: Any]
+        if Self.isGARealtimeTranscriptionModel(model) {
+            // GA shape: unified `session.update` with nested `audio.input`.
+            payload = [
+                "type": "session.update",
+                "session": [
+                    "type": "transcription",
+                    "audio": [
+                        "input": [
+                            "format": ["type": "audio/pcm", "rate": sampleRate],
+                            "transcription": transcription,
+                            "noise_reduction": ["type": "near_field"],
+                            "turn_detection": NSNull()
+                        ]
+                    ]
+                ]
             ]
-        ]
+        } else {
+            payload = [
+                "type": "transcription_session.update",
+                "session": [
+                    "input_audio_format": "pcm16",
+                    "input_audio_transcription": transcription,
+                    "input_audio_noise_reduction": ["type": "near_field"],
+                    "turn_detection": NSNull()
+                ]
+            ]
+        }
         sendJSON(payload)
+    }
+
+    /// Models only available on the GA Realtime endpoint. Mirrors the macOS
+    /// helper of the same name.
+    static func isGARealtimeTranscriptionModel(_ realtimeModel: String) -> Bool {
+        realtimeModel.lowercased().hasPrefix("gpt-realtime-whisper")
     }
 
     func sendAudio(_ pcmData: Data) {
@@ -788,9 +825,9 @@ enum OpenAIRealtimeEventParser {
         }
 
         switch type {
-        case "transcription_session.created":
+        case "transcription_session.created", "session.created":
             return [.event(.sessionCreated)]
-        case "transcription_session.updated":
+        case "transcription_session.updated", "session.updated":
             return [.event(.sessionReady)]
         case "conversation.item.input_audio_transcription.delta":
             let itemId = (object["item_id"] as? String) ?? ""

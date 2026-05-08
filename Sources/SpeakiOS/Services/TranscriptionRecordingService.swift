@@ -20,6 +20,7 @@ public final class TranscriptionRecordingService: ObservableObject {
     private var appleTranscriber: iOSLiveTranscriber?
     private var deepgramTranscriber: DeepgramLiveTranscriber?
     private var elevenLabsTranscriber: ElevenLabsLiveTranscriber?
+    private var openAITranscriber: OpenAIRealtimeLiveTranscriber?
     private var startTime: Date?
     private var currentModel: String = ""
 
@@ -33,6 +34,7 @@ public final class TranscriptionRecordingService: ObservableObject {
     private var modelDisplayName: String {
         if currentModel.hasPrefix("deepgram") { return "Deepgram" }
         if currentModel.hasPrefix("elevenlabs") { return "ElevenLabs" }
+        if currentModel.hasPrefix("openai") { return "OpenAI gpt-realtime-whisper" }
         return "Apple Speech"
     }
 
@@ -58,6 +60,11 @@ public final class TranscriptionRecordingService: ObservableObject {
 
         // Fallback to Apple Speech if ElevenLabs selected but no API key
         if currentModel.hasPrefix("elevenlabs") && !settings.hasElevenLabsKey {
+            currentModel = "apple/local/SFSpeechRecognizer"
+        }
+
+        // Fallback to Apple Speech if OpenAI selected but no API key
+        if currentModel.hasPrefix("openai") && !settings.hasOpenAIKey {
             currentModel = "apple/local/SFSpeechRecognizer"
         }
 
@@ -104,6 +111,28 @@ public final class TranscriptionRecordingService: ObservableObject {
                 elevenLabsTranscriber = transcriber
                 deepgramTranscriber = nil
                 appleTranscriber = nil
+                openAITranscriber = nil
+                try await transcriber.start()
+            } else if currentModel.hasPrefix("openai") {
+                let transcriber = OpenAIRealtimeLiveTranscriber(audioSessionManager: audioSessionManager)
+                transcriber.configure(apiKey: settings.openAIAPIKey)
+                transcriber.modelID = currentModel.replacingOccurrences(of: "openai/", with: "")
+
+                transcriber.onPartialResult = { [weak self] text, _ in
+                    Task { @MainActor in
+                        self?.handlePartialResult(text: text)
+                    }
+                }
+                transcriber.onError = { [weak self] error in
+                    Task { @MainActor in
+                        self?.handleError(error)
+                    }
+                }
+
+                openAITranscriber = transcriber
+                elevenLabsTranscriber = nil
+                deepgramTranscriber = nil
+                appleTranscriber = nil
                 try await transcriber.start()
             } else {
                 let transcriber = iOSLiveTranscriber(audioSessionManager: audioSessionManager)
@@ -122,6 +151,7 @@ public final class TranscriptionRecordingService: ObservableObject {
                 appleTranscriber = transcriber
                 deepgramTranscriber = nil
                 elevenLabsTranscriber = nil
+                openAITranscriber = nil
                 try await transcriber.start()
             }
 
@@ -130,6 +160,7 @@ public final class TranscriptionRecordingService: ObservableObject {
             startTime = nil
             deepgramTranscriber = nil
             elevenLabsTranscriber = nil
+            openAITranscriber = nil
             appleTranscriber = nil
             sharedState.clearRecordingState()
             activityManager.endActivity()
@@ -150,6 +181,9 @@ public final class TranscriptionRecordingService: ObservableObject {
         } else if let elevenlabs = elevenLabsTranscriber {
             result = await elevenlabs.stop()
             elevenLabsTranscriber = nil
+        } else if let openai = openAITranscriber {
+            result = await openai.stop()
+            openAITranscriber = nil
         } else if let apple = appleTranscriber {
             result = await apple.stop()
             appleTranscriber = nil
@@ -201,9 +235,11 @@ public final class TranscriptionRecordingService: ObservableObject {
     public func cancelRecording() {
         deepgramTranscriber?.cancel()
         elevenLabsTranscriber?.cancel()
+        openAITranscriber?.cancel()
         appleTranscriber?.cancel()
         deepgramTranscriber = nil
         elevenLabsTranscriber = nil
+        openAITranscriber = nil
         appleTranscriber = nil
         isRunning = false
         startTime = nil

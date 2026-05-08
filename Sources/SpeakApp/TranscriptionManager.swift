@@ -2884,6 +2884,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   private var assemblyAIController: AssemblyAILiveController
   private var elevenlabsController: ElevenLabsLiveController
   private var sonioxController: SonioxLiveController
+  private var openAIRealtimeController: OpenAIRealtimeLiveController
   private var currentLanguage: String?
   private var currentModel: String?
   private var invalidateBeforeNextStart: Bool = false
@@ -2933,6 +2934,12 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       secureStorage: secureStorage
     )
     sonioxController = SonioxLiveController(
+      appSettings: appSettings,
+      permissionsManager: permissionsManager,
+      audioDeviceManager: audioDeviceManager,
+      secureStorage: secureStorage
+    )
+    openAIRealtimeController = OpenAIRealtimeLiveController(
       appSettings: appSettings,
       permissionsManager: permissionsManager,
       audioDeviceManager: audioDeviceManager,
@@ -2992,6 +2999,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     if model.hasPrefix("modulate/") { return modulateController }
     if model.hasPrefix("elevenlabs/") { return elevenlabsController }
     if model.hasPrefix("soniox/") { return sonioxController }
+    if model.hasPrefix("openai/gpt-realtime-whisper") { return openAIRealtimeController }
     return nativeController
   }
 
@@ -3002,7 +3010,8 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       modulateController,
       assemblyAIController,
       elevenlabsController,
-      sonioxController
+      sonioxController,
+      openAIRealtimeController
     ]
     let model = currentModel ?? appSettings.liveTranscriptionModel
     for controller in controllers {
@@ -3051,6 +3060,12 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       secureStorage: secureStorage
     )
     sonioxController = SonioxLiveController(
+      appSettings: appSettings,
+      permissionsManager: permissionsManager,
+      audioDeviceManager: audioDeviceManager,
+      secureStorage: secureStorage
+    )
+    openAIRealtimeController = OpenAIRealtimeLiveController(
       appSettings: appSettings,
       permissionsManager: permissionsManager,
       audioDeviceManager: audioDeviceManager,

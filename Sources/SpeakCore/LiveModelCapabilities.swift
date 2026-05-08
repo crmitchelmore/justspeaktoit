@@ -90,6 +90,15 @@ extension ModelCatalog {
         "assemblyai/u3-rt-pro-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish],
             postStopFinalizeBudget: 2.0
+        ),
+
+        // OpenAI Realtime gpt-realtime-whisper: emits incremental
+        // transcription deltas during the session and a per-item completed
+        // event. We use a small post-stop budget to wait for the in-flight
+        // commit to round-trip, then close the socket.
+        "openai/gpt-realtime-whisper-streaming": LiveModelCapabilities(
+            supportedSpeedModes: [.instant, .livePolish],
+            postStopFinalizeBudget: 0.5
         )
     ]
 }

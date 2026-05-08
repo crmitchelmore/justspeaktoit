@@ -101,7 +101,14 @@ final class OpenAIRealtimeLiveTranscriber: @unchecked Sendable {
       currentOnError()?(OpenAIRealtimeError.invalidURL)
       return
     }
-    components.queryItems = [URLQueryItem(name: "intent", value: "transcription")]
+    // GA Realtime models (e.g. `gpt-realtime-whisper`) reject the beta
+    // `?intent=transcription` endpoint with `invalid_model`. They must use
+    // the GA URL form `?model=<name>` and omit the `OpenAI-Beta` header.
+    if OpenAIRealtimeLiveTranscriber.isGARealtimeTranscriptionModel(model) {
+      components.queryItems = [URLQueryItem(name: "model", value: model)]
+    } else {
+      components.queryItems = [URLQueryItem(name: "intent", value: "transcription")]
+    }
     guard let url = components.url else {
       currentOnError()?(OpenAIRealtimeError.invalidURL)
       return
@@ -109,8 +116,11 @@ final class OpenAIRealtimeLiveTranscriber: @unchecked Sendable {
 
     var request = URLRequest(url: url)
     request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-    // Required by the Realtime API while it's in beta.
-    request.setValue("realtime=v1", forHTTPHeaderField: "OpenAI-Beta")
+    if !OpenAIRealtimeLiveTranscriber.isGARealtimeTranscriptionModel(model) {
+      // Required by the Realtime API while it's in beta. GA endpoints reject
+      // this header, so only set it on the legacy beta path.
+      request.setValue("realtime=v1", forHTTPHeaderField: "OpenAI-Beta")
+    }
 
     let task = session.webSocketTask(with: request)
     let shouldReceive = withStateLock { () -> Bool in
@@ -243,18 +253,40 @@ final class OpenAIRealtimeLiveTranscriber: @unchecked Sendable {
       transcription["prompt"] = prompt
     }
 
-    // `turn_detection: null` keeps the session push-to-talk: the server won't
-    // auto-finalise on silence; we explicitly commit on stop. This mirrors
-    // the AssemblyAI / Deepgram UX where the user controls the boundaries.
-    let payload: [String: Any] = [
-      "type": "transcription_session.update",
-      "session": [
-        "input_audio_format": "pcm16",
-        "input_audio_transcription": transcription,
-        "input_audio_noise_reduction": ["type": "near_field"],
-        "turn_detection": NSNull()
+    let payload: [String: Any]
+    if OpenAIRealtimeLiveTranscriber.isGARealtimeTranscriptionModel(model) {
+      // GA shape: single `session.update` event with `session.type =
+      // "transcription"`. Transcription config nests under
+      // `session.audio.input.transcription`. `turn_detection: null` keeps the
+      // session push-to-talk so we control commit boundaries.
+      payload = [
+        "type": "session.update",
+        "session": [
+          "type": "transcription",
+          "audio": [
+            "input": [
+              "format": ["type": "audio/pcm", "rate": sampleRate],
+              "transcription": transcription,
+              "noise_reduction": ["type": "near_field"],
+              "turn_detection": NSNull()
+            ]
+          ]
+        ]
       ]
-    ]
+    } else {
+      // Beta shape: dedicated `transcription_session.update` event with
+      // flat `input_audio_*` fields. Used by `whisper-1`, `gpt-4o-transcribe`,
+      // and `gpt-4o-mini-transcribe`.
+      payload = [
+        "type": "transcription_session.update",
+        "session": [
+          "input_audio_format": "pcm16",
+          "input_audio_transcription": transcription,
+          "input_audio_noise_reduction": ["type": "near_field"],
+          "turn_detection": NSNull()
+        ]
+      ]
+    }
 
     guard let data = try? JSONSerialization.data(withJSONObject: payload),
       let json = String(data: data, encoding: .utf8)
@@ -461,12 +493,13 @@ enum OpenAIRealtimeEventParser {
     guard let type = object["type"] as? String else { return [] }
 
     switch type {
-    case "transcription_session.created":
+    case "transcription_session.created", "session.created":
       // `created` confirms the socket is open with default config; we still
       // need to wait for `updated` (the ack of *our* session.update) before
-      // sending audio.
+      // sending audio. GA Realtime emits the unprefixed `session.*` names;
+      // beta emits `transcription_session.*`.
       return [.event(.sessionCreated)]
-    case "transcription_session.updated":
+    case "transcription_session.updated", "session.updated":
       return [.event(.sessionReady)]
     case "conversation.item.input_audio_transcription.delta":
       let delta = (object["delta"] as? String) ?? ""
@@ -554,6 +587,16 @@ extension OpenAIRealtimeLiveTranscriber {
   static func modelSupportsPrompt(_ realtimeModel: String) -> Bool {
     let name = realtimeModel.lowercased()
     return name.hasPrefix("gpt-4o-transcribe") || name.hasPrefix("gpt-4o-mini-transcribe")
+  }
+
+  /// Models that are only available on the GA Realtime endpoint and reject
+  /// the legacy `?intent=transcription` beta path with `invalid_model`. The
+  /// GA endpoint uses `?model=<name>`, drops the `OpenAI-Beta` header, and
+  /// uses the unified `session.update` event with `session.type =
+  /// "transcription"` instead of `transcription_session.update`.
+  static func isGARealtimeTranscriptionModel(_ realtimeModel: String) -> Bool {
+    let name = realtimeModel.lowercased()
+    return name.hasPrefix("gpt-realtime-whisper")
   }
 }
 

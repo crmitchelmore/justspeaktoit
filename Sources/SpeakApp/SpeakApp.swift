@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 #if canImport(Sentry)
 import Sentry
 #endif
@@ -167,8 +168,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.activate(ignoringOtherApps: true)
             NSApp.windows.first?.makeKeyAndOrderFront(nil)
         }
-        
-        // Check if running from DMG and offer to move to Applications
+        DispatchQueue.global(qos: .utility).async { _ = AVAudioEngine() } // Sentry JUSTSPEAKTOIT-A
         checkAndOfferDMGCleanup()
     }
     

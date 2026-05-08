@@ -164,8 +164,6 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   enum SpeedMode: String, CaseIterable, Identifiable {
     case instant       // Mode A: Raw, no LLM
     case livePolish    // Mode B: Incremental tail rewrite
-    case liveStructured // Mode C: Lightweight formatting
-    case utteranceFinalize // Mode D: Boundary-triggered heavy pass
 
     var id: String { rawValue }
 
@@ -175,10 +173,6 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
         return "Instant"
       case .livePolish:
         return "Auto-Clean"
-      case .liveStructured:
-        return "Auto-Format"
-      case .utteranceFinalize:
-        return "Smart Pause"
       }
     }
 
@@ -188,28 +182,25 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
         return "Raw transcription with no AI cleanup. Fastest output."
       case .livePolish:
         return "AI cleans up spelling and punctuation as you speak."
-      case .liveStructured:
-        return "AI adds formatting and structure in real-time."
-      case .utteranceFinalize:
-        return "AI processes text when you pause speaking."
       }
     }
 
     var usesLivePolish: Bool {
       switch self {
-      case .instant, .utteranceFinalize:
+      case .instant:
         return false
-      case .livePolish, .liveStructured:
+      case .livePolish:
         return true
       }
     }
 
-    var usesBoundaryFinalize: Bool {
+    /// Bridge to `SpeakCore.SpeedModeID`. Use a switch so adding a new
+    /// `SpeedMode` is a compile error until a corresponding `SpeedModeID`
+    /// mapping is added (rather than silently falling back to `.instant`).
+    var coreID: SpeedModeID {
       switch self {
-      case .utteranceFinalize:
-        return true
-      case .instant, .livePolish, .liveStructured:
-        return false
+      case .instant: return .instant
+      case .livePolish: return .livePolish
       }
     }
   }
@@ -584,7 +575,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   // Speed Mode Settings (Live Polish)
   @Published var speedMode: SpeedMode {
     didSet {
-      if speedMode != .instant && !supportsSpeedModeProcessing {
+      if !supports(speedMode: speedMode) {
         speedMode = .instant
         return
       }
@@ -657,8 +648,15 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     didSet { store(Double(recordingSoundVolume), key: .recordingSoundVolume) }
   }
 
-  private var supportsSpeedModeProcessing: Bool {
-    transcriptionMode == .liveNative && liveTranscriptionModel.contains("streaming")
+  /// Per-model capability lookup for the currently selected live model.
+  var liveModelCapabilities: LiveModelCapabilities {
+    guard transcriptionMode == .liveNative else { return .default }
+    return ModelCatalog.liveCapabilities(for: liveTranscriptionModel)
+  }
+
+  /// Whether the currently selected live model supports the given speed mode.
+  func supports(speedMode mode: SpeedMode) -> Bool {
+    liveModelCapabilities.supportedSpeedModes.contains(mode.coreID)
   }
 
   var isAssemblyAIModel: Bool {
@@ -670,7 +668,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   }
 
   private func enforceSpeedModeConstraints() {
-    if speedMode != .instant && !supportsSpeedModeProcessing {
+    if !supports(speedMode: speedMode) {
       speedMode = .instant
     }
     if speedMode != .instant {

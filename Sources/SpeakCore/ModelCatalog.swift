@@ -137,7 +137,13 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             displayName: "ElevenLabs Scribe v2 (Streaming)",
             description: "ElevenLabs Scribe v2 real-time WebSocket transcription. Reuses your "
                 + "ElevenLabs API key — the key must have speech-to-text (Scribe) access.",
-            estimatedLatencyMs: 200, latencyTier: .fast)
+            estimatedLatencyMs: 200, latencyTier: .fast),
+        Option(
+            id: "openai/gpt-realtime-whisper-streaming",
+            displayName: "OpenAI Whisper Realtime (Streaming)",
+            description: "OpenAI's gpt-realtime-whisper — low-latency streaming transcription with "
+                + "built-in noise reduction. Reuses your OpenAI API key.",
+            estimatedLatencyMs: 250, latencyTier: .fast)
     ]
 
     public static let batchTranscription: [Option] = [

@@ -265,7 +265,7 @@ final class OpenAIRealtimeLiveTranscriber: @unchecked Sendable {
           "type": "transcription",
           "audio": [
             "input": [
-              "format": ["type": "audio/pcm", "rate": 24_000],
+              "format": ["type": "audio/pcm", "rate": sampleRate],
               "transcription": transcription,
               "noise_reduction": ["type": "near_field"],
               "turn_detection": NSNull()
@@ -493,12 +493,13 @@ enum OpenAIRealtimeEventParser {
     guard let type = object["type"] as? String else { return [] }
 
     switch type {
-    case "transcription_session.created":
+    case "transcription_session.created", "session.created":
       // `created` confirms the socket is open with default config; we still
       // need to wait for `updated` (the ack of *our* session.update) before
-      // sending audio.
+      // sending audio. GA Realtime emits the unprefixed `session.*` names;
+      // beta emits `transcription_session.*`.
       return [.event(.sessionCreated)]
-    case "transcription_session.updated":
+    case "transcription_session.updated", "session.updated":
       return [.event(.sessionReady)]
     case "conversation.item.input_audio_transcription.delta":
       let delta = (object["delta"] as? String) ?? ""

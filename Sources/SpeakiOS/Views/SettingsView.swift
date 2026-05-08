@@ -33,6 +33,10 @@ public final class AppSettings: ObservableObject {
         didSet { saveToKeychain(key: openRouterAPIKey, for: "openrouter.apiKey") }
     }
 
+    @Published public var openAIAPIKey: String {
+        didSet { saveToKeychain(key: openAIAPIKey, for: "openai.apiKey") }
+    }
+
     @Published public var elevenLabsAPIKey: String {
         didSet {
             Task {
@@ -111,11 +115,14 @@ public final class AppSettings: ObservableObject {
             selected = "deepgram/nova-3"
         } else if selectedRaw.hasPrefix("elevenlabs/") {
             selected = "elevenlabs/scribe_v1"
+        } else if selectedRaw.hasPrefix("openai/") {
+            selected = "openai/gpt-realtime-whisper-streaming"
         } else {
             selected = selectedRaw
         }
         let deepgram = Self.loadFromKeychain(for: "deepgram.apiKey") ?? ""
         let openRouter = Self.loadFromKeychain(for: "openrouter.apiKey") ?? ""
+        let openAI = Self.loadFromKeychain(for: "openai.apiKey") ?? ""
 
         // Default Live Activities to true if not set
         let liveActivities = UserDefaults.standard.object(forKey: "liveActivitiesEnabled") as? Bool ?? true
@@ -130,6 +137,7 @@ public final class AppSettings: ObservableObject {
         self.selectedModel = selected
         self.deepgramAPIKey = deepgram
         self.openRouterAPIKey = openRouter
+        self.openAIAPIKey = openAI
         self.elevenLabsAPIKey = ""
         self.liveActivitiesEnabled = liveActivities
         self.autoStartRecording = autoStart
@@ -179,6 +187,7 @@ public final class AppSettings: ObservableObject {
 
     public var hasDeepgramKey: Bool { !deepgramAPIKey.isEmpty }
     public var hasOpenRouterKey: Bool { !openRouterAPIKey.isEmpty }
+    public var hasOpenAIKey: Bool { !openAIAPIKey.isEmpty }
     public var hasElevenLabsKey: Bool { !elevenLabsAPIKey.isEmpty }
 
     // MARK: - Keychain Helpers
@@ -249,6 +258,15 @@ public struct SettingsView: View {
 
                     // ElevenLabs Scribe (always shown, but warn if no key)
                     Text("ElevenLabs Scribe").tag("elevenlabs/scribe_v1")
+
+                    // OpenAI gpt-realtime-whisper streaming
+                    Text("OpenAI gpt-realtime-whisper").tag("openai/gpt-realtime-whisper-streaming")
+                }
+
+                if settings.selectedModel.hasPrefix("openai/") && !settings.hasOpenAIKey {
+                    Label("Add OpenAI API key below to use this model", systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                        .font(.caption)
                 }
 
                 if settings.selectedModel.hasPrefix("deepgram") && !settings.hasDeepgramKey {
@@ -346,6 +364,15 @@ public struct SettingsView: View {
                     Spacer()
                     Text(settings.hasOpenRouterKey ? "Stored" : "Missing")
                         .foregroundStyle(settings.hasOpenRouterKey ? .green : .secondary)
+                }
+                .accessibilityElement(children: .combine)
+
+                HStack {
+                    Label("OpenAI", systemImage: "brain.head.profile")
+                        .accessibilityLabel("OpenAI API Key")
+                    Spacer()
+                    Text(settings.hasOpenAIKey ? "Stored" : "Missing")
+                        .foregroundStyle(settings.hasOpenAIKey ? .green : .secondary)
                 }
                 .accessibilityElement(children: .combine)
 
@@ -545,6 +572,7 @@ struct APIKeysView: View {
     @ObservedObject var settings: AppSettings
     @State private var deepgramKey = ""
     @State private var openRouterKey = ""
+    @State private var openAIKey = ""
     @State private var elevenLabsKey = ""
     @State private var isValidating = false
     @State private var validationMessage: String?
@@ -620,6 +648,29 @@ struct APIKeysView: View {
                 }
                 .font(.caption)
             }
+
+            Section {
+                SecureField("API Key", text: $openAIKey)
+                    .textContentType(.password)
+                    .autocorrectionDisabled()
+
+                if settings.hasOpenAIKey && openAIKey.isEmpty {
+                    Button("Clear Stored Key", role: .destructive) {
+                        settings.openAIAPIKey = ""
+                    }
+                }
+            } header: {
+                Label("OpenAI", systemImage: "brain.head.profile")
+            } footer: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Get your API key from platform.openai.com. Used by gpt-realtime-whisper streaming.")
+                    if settings.hasOpenAIKey {
+                        Text("✓ API key is stored")
+                            .foregroundStyle(.green)
+                    }
+                }
+                .font(.caption)
+            }
         }
         .navigationTitle("API Keys")
         .toolbar {
@@ -630,7 +681,7 @@ struct APIKeysView: View {
                     Button("Save") {
                         saveKeys()
                     }
-                    .disabled(deepgramKey.isEmpty && openRouterKey.isEmpty && elevenLabsKey.isEmpty)
+                    .disabled(deepgramKey.isEmpty && openRouterKey.isEmpty && openAIKey.isEmpty && elevenLabsKey.isEmpty)
                 }
             }
         }
@@ -683,6 +734,13 @@ struct APIKeysView: View {
                 settings.openRouterAPIKey = openRouterKey
                 openRouterKey = ""
                 messages.append("✓ OpenRouter key saved")
+            }
+
+            // Save OpenAI key (no cheap validation endpoint)
+            if !openAIKey.isEmpty {
+                settings.openAIAPIKey = openAIKey
+                openAIKey = ""
+                messages.append("✓ OpenAI key saved")
             }
 
             isValidating = false

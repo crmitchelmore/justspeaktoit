@@ -539,14 +539,13 @@ final class OpenAIRealtimeWebSocketClient: @unchecked Sendable {
             onError(OpenAIRealtimeError.connectionFailed("Invalid URL"))
             return
         }
-        // GA Realtime models (e.g. `gpt-realtime-whisper`) reject the beta
-        // `?intent=transcription` endpoint with `invalid_model`. They must use
-        // `?model=<name>` and omit the `OpenAI-Beta` header.
-        if Self.isGARealtimeTranscriptionModel(model) {
-            components.queryItems = [URLQueryItem(name: "model", value: model)]
-        } else {
-            components.queryItems = [URLQueryItem(name: "intent", value: "transcription")]
-        }
+        // All GA transcription models share the same `?intent=transcription`
+        // URL with a unified `session.update` payload. The legacy
+        // `?model=<name>` URL creates a realtime conversation session and
+        // rejects transcription `session.update` events. The legacy
+        // `OpenAI-Beta: realtime=v1` header pins the server to the old
+        // schema and rejects `session.type`, so we omit it.
+        components.queryItems = [URLQueryItem(name: "intent", value: "transcription")]
         guard let url = components.url else {
             onError(OpenAIRealtimeError.connectionFailed("Invalid URL components"))
             return
@@ -554,9 +553,6 @@ final class OpenAIRealtimeWebSocketClient: @unchecked Sendable {
 
         var request = URLRequest(url: url)
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        if !Self.isGARealtimeTranscriptionModel(model) {
-            request.setValue("realtime=v1", forHTTPHeaderField: "OpenAI-Beta")
-        }
 
         let task = session.webSocketTask(with: request)
         withStateLock { webSocketTask = task }
@@ -586,41 +582,23 @@ final class OpenAIRealtimeWebSocketClient: @unchecked Sendable {
         transcription["model"] = model
         if let language { transcription["language"] = language }
 
-        let payload: [String: Any]
-        if Self.isGARealtimeTranscriptionModel(model) {
-            // GA shape: unified `session.update` with nested `audio.input`.
-            payload = [
-                "type": "session.update",
-                "session": [
-                    "type": "transcription",
-                    "audio": [
-                        "input": [
-                            "format": ["type": "audio/pcm", "rate": sampleRate],
-                            "transcription": transcription,
-                            "noise_reduction": ["type": "near_field"],
-                            "turn_detection": NSNull()
-                        ]
+        let payload: [String: Any] = [
+            // Unified GA shape for all transcription models. The legacy
+            // `transcription_session.update` event was removed during GA.
+            "type": "session.update",
+            "session": [
+                "type": "transcription",
+                "audio": [
+                    "input": [
+                        "format": ["type": "audio/pcm", "rate": sampleRate],
+                        "transcription": transcription,
+                        "noise_reduction": ["type": "near_field"],
+                        "turn_detection": NSNull()
                     ]
                 ]
             ]
-        } else {
-            payload = [
-                "type": "transcription_session.update",
-                "session": [
-                    "input_audio_format": "pcm16",
-                    "input_audio_transcription": transcription,
-                    "input_audio_noise_reduction": ["type": "near_field"],
-                    "turn_detection": NSNull()
-                ]
-            ]
-        }
+        ]
         sendJSON(payload)
-    }
-
-    /// Models only available on the GA Realtime endpoint. Mirrors the macOS
-    /// helper of the same name.
-    static func isGARealtimeTranscriptionModel(_ realtimeModel: String) -> Bool {
-        realtimeModel.lowercased().hasPrefix("gpt-realtime-whisper")
     }
 
     func sendAudio(_ pcmData: Data) {

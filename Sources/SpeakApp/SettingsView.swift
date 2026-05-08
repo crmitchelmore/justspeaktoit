@@ -725,22 +725,31 @@ struct SettingsView: View {
       }
       .speakTooltip("Choose which transcription flow Speak uses and the locale it should prefer.")
       SettingsCard(title: "Processing Speed", systemImage: "gauge.with.dots.needle.67percent", tint: Color.brandLagoon) {
-        let speedModeAvailable = settings.transcriptionMode == .liveNative
-          && settings.liveTranscriptionModel.contains("streaming")
+        let capabilities = settings.liveModelCapabilities
+        let anyEnhancedModeAvailable = AppSettings.SpeedMode.allCases
+          .contains { $0 != .instant && capabilities.supportedSpeedModes.contains($0.coreID) }
 
         VStack(alignment: .leading, spacing: 12) {
-          Text("Auto-clean/format modes require a streaming live transcription model and disable post-processing.")
+          Text("Auto-clean modes require a streaming live transcription model and disable post-processing.")
             .font(.callout)
             .foregroundStyle(.secondary)
 
-          if !speedModeAvailable {
+          if !anyEnhancedModeAvailable {
             Text("To enable these modes, select a streaming Live Model (e.g., Deepgram Nova-3 Streaming).")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+
+          if settings.isAssemblyAIModel {
+            Text("Note: AssemblyAI may take up to ~2s to finalise after you stop, "
+                 + "because it formats the full turn server-side.")
               .font(.caption)
               .foregroundStyle(.secondary)
           }
 
           VStack(spacing: 8) {
             ForEach(AppSettings.SpeedMode.allCases) { mode in
+              let isSupported = settings.supports(speedMode: mode)
               Button {
                 settings.speedMode = mode
               } label: {
@@ -770,8 +779,8 @@ struct SettingsView: View {
                 )
               }
               .buttonStyle(.plain)
-              .disabled(mode != .instant && !speedModeAvailable)
-              .opacity(mode != .instant && !speedModeAvailable ? 0.6 : 1.0)
+              .disabled(!isSupported)
+              .opacity(isSupported ? 1.0 : 0.6)
             }
           }
         }
@@ -2645,10 +2654,6 @@ struct SettingsView: View {
       return "bolt.fill"
     case .livePolish:
       return "sparkles"
-    case .liveStructured:
-      return "list.bullet.rectangle"
-    case .utteranceFinalize:
-      return "pause.circle"
     }
   }
 

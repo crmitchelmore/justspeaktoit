@@ -1408,15 +1408,20 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
       await transcriber.waitForPendingSends()
       audioProcessor.setRunning(false)
       transcriber.stop()
-      // Wait for the final Turn response (resumed in handleTurn) or a 2s timeout, whichever first.
-      // Both paths nil-out stopContinuation under the MainActor before resuming, so resume is idempotent.
-      await withCheckedContinuation { continuation in
-        stopContinuation = continuation
-        Task { @MainActor [weak self] in
-          try? await Task.sleep(for: .seconds(2))
-          guard let self, let cont = self.stopContinuation else { return }
-          self.stopContinuation = nil
-          cont.resume()
+      // Wait for the final Turn response (resumed in handleTurn) or the
+      // model-specific finalize budget, whichever comes first. Both paths
+      // nil-out stopContinuation under the MainActor before resuming, so
+      // resume is idempotent.
+      let budget = appSettings.liveModelCapabilities.postStopFinalizeBudget
+      if budget > 0 {
+        await withCheckedContinuation { continuation in
+          stopContinuation = continuation
+          Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(budget))
+            guard let self, let cont = self.stopContinuation else { return }
+            self.stopContinuation = nil
+            cont.resume()
+          }
         }
       }
     } else {

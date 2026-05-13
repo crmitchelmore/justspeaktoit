@@ -94,6 +94,10 @@ final class LocalModelManager: ObservableObject {
     installState(for: modelID) == .installed
   }
 
+  func isModelLoaded(_ modelID: String) -> Bool {
+    activePipelines[modelID] != nil
+  }
+
   func model(for modelID: String) -> LocalTranscriptionModel? {
     availableModels.first { $0.id == modelID }
   }

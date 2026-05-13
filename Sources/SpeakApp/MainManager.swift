@@ -521,6 +521,9 @@ final class MainManager: ObservableObject {
     guard appSettings.transcriptionMode == .localModel else {
       return "Preparing raw transcript"
     }
+    if LocalModelManager.shared.isModelLoaded(appSettings.localTranscriptionModel) {
+      return "Transcribing locally on this Mac"
+    }
     return "Loading local model and transcribing. First run can take a minute."
   }
 

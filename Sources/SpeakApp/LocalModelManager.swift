@@ -111,7 +111,7 @@ final class LocalModelManager: ObservableObject {
     let resolvedModel = Self.resolveHuggingFaceModel(repoID: repoID, modelName: modelName)
 
     let model = LocalTranscriptionModel(
-      id: "local/whisperkit/huggingface/\(slug(repoID))/\(slug(resolvedModel.modelName))",
+      id: Self.huggingFaceModelID(repoID: repoID, modelName: resolvedModel.modelName),
       displayName: "\(resolvedModel.displayName) from \(repoID)",
       modelName: resolvedModel.modelName,
       engine: "whisperkit",
@@ -121,9 +121,7 @@ final class LocalModelManager: ObservableObject {
       tags: [.quality]
     )
 
-    importedModels.removeAll {
-      $0.id == model.id || ($0.modelRepo == model.modelRepo && $0.modelName == model.modelName)
-    }
+    importedModels.removeAll { $0.id == model.id || ($0.modelRepo == model.modelRepo && $0.modelName == model.modelName) }
     importedModels.append(model)
     try saveImportedModels()
     installStates[model.id] = markerExists(for: model) ? .installed : .notInstalled
@@ -223,7 +221,7 @@ final class LocalModelManager: ObservableObject {
       let data = try Data(contentsOf: importedModelsURL)
       let records = try JSONDecoder().decode([ImportedModelRecord].self, from: data)
       var didMigrate = false
-      importedModels = records.map { record in
+      let migratedModels = records.map { record in
         let model = record.model
         let resolved = Self.resolveHuggingFaceModel(
           repoID: model.modelRepo ?? "",
@@ -231,9 +229,10 @@ final class LocalModelManager: ObservableObject {
         )
         guard resolved.modelName != model.modelName || model.approximateSizeMB <= 0 else { return model }
         didMigrate = true
+        let repoID = model.modelRepo ?? "Hugging Face"
         return LocalTranscriptionModel(
-          id: model.id,
-          displayName: "\(resolved.displayName) from \(model.modelRepo ?? "Hugging Face")",
+          id: Self.huggingFaceModelID(repoID: repoID, modelName: resolved.modelName),
+          displayName: "\(resolved.displayName) from \(repoID)",
           modelName: resolved.modelName,
           engine: model.engine,
           modelRepo: model.modelRepo,
@@ -243,6 +242,7 @@ final class LocalModelManager: ObservableObject {
           supportsLiveStreaming: model.supportsLiveStreaming
         )
       }
+      importedModels = Self.deduplicateModels(migratedModels)
       if didMigrate {
         try? saveImportedModels()
       }
@@ -257,13 +257,26 @@ final class LocalModelManager: ObservableObject {
     try data.write(to: importedModelsURL, options: .atomic)
   }
 
-  private func slug(_ value: String) -> String {
+  nonisolated static func huggingFaceModelID(repoID: String, modelName: String) -> String {
+    "local/whisperkit/huggingface/\(slug(repoID))/\(slug(modelName))"
+  }
+
+  private nonisolated static func slug(_ value: String) -> String {
     value
       .lowercased()
       .map { character in
         character.isLetter || character.isNumber || character == "-" || character == "/" ? character : "-"
       }
       .reduce(into: "") { result, character in result.append(character) }
+  }
+
+  private nonisolated static func deduplicateModels(_ models: [LocalTranscriptionModel]) -> [LocalTranscriptionModel] {
+    var seenIDs = Set<String>()
+    return models.reversed().compactMap { model in
+      guard !seenIDs.contains(model.id) else { return nil }
+      seenIDs.insert(model.id)
+      return model
+    }.reversed()
   }
 
   nonisolated static func resolveHuggingFaceModel(repoID: String, modelName: String) -> ResolvedHuggingFaceModel {

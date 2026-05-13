@@ -26,6 +26,21 @@ final class LocalModelManagerTests: XCTestCase {
         XCTAssertEqual(resolved.approximateSizeMB, 954)
     }
 
+    func testHuggingFaceModelID_usesResolvedModelNameForInstallMarker() {
+        let resolved = LocalModelManager.resolveHuggingFaceModel(
+            repoID: "argmaxinc/whisperkit-coreml",
+            modelName: "openai_whisper-large-v3_turbo"
+        )
+
+        XCTAssertEqual(
+            LocalModelManager.huggingFaceModelID(
+                repoID: "argmaxinc/whisperkit-coreml",
+                modelName: resolved.modelName
+            ),
+            "local/whisperkit/huggingface/argmaxinc/whisperkit-coreml/openai-whisper-large-v3-turbo-954mb"
+        )
+    }
+
     func testResolveHuggingFaceModel_preservesUnknownRepoModelAndParsesSizeSuffix() {
         let resolved = LocalModelManager.resolveHuggingFaceModel(
             repoID: "example/custom-whisperkit",

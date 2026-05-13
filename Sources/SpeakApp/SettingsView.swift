@@ -58,6 +58,7 @@ struct SettingsView: View {
   @EnvironmentObject private var audioDevices: AudioInputDeviceManager
   @ObservedObject private var updaterManager = UpdaterManager.shared
   @ObservedObject private var localModels = LocalModelManager.shared
+  @ObservedObject private var sherpaRuntime = SherpaOnnxRuntimeManager.shared
   private static let localeOptions: [LocaleOption] = [
     LocaleOption(displayName: "English (United States)", identifier: "en_US"),
     LocaleOption(displayName: "English (United Kingdom)", identifier: "en_GB"),
@@ -1295,7 +1296,8 @@ struct SettingsView: View {
           Text(
             """
             These are local-only streaming candidates, not cloud providers. \
-            They are separate from Local Batch/WhisperKit models and use sherpa-onnx for Apple Silicon-friendly on-device streaming.
+            They are separate from Local Batch/WhisperKit models and use sherpa-onnx for \
+            Apple Silicon-friendly on-device streaming.
             """
           )
           .font(.caption)
@@ -1303,9 +1305,14 @@ struct SettingsView: View {
         }
       }
 
-      Label("Local Streaming is local-only. sherpa-onnx download/run is being wired in for this prerelease; recording stays blocked until the runtime is available.", systemImage: "lock.shield")
+      Label(
+        "Local Streaming is local-only. sherpa-onnx runs on this Mac and never sends audio to the cloud.",
+        systemImage: "lock.shield"
+      )
         .font(.caption)
         .foregroundStyle(.orange)
+
+      localStreamingRuntimeControls
 
       VStack(alignment: .leading, spacing: 8) {
         Text("Available local streaming candidates")
@@ -1324,7 +1331,7 @@ struct SettingsView: View {
             .fill(Color(nsColor: .controlBackgroundColor))
         )
         if let source = selectedRecommendedStreamingSource {
-          Text("\(source.runtime) · local only · download/run not available until this runtime is integrated.")
+          Text("\(source.runtime) · local only · install the runtime and download the model to start streaming.")
             .font(.caption)
             .foregroundStyle(.secondary)
         }
@@ -1389,6 +1396,7 @@ struct SettingsView: View {
     )
   }
 
+  // swiftlint:disable:next function_body_length
   private func localStreamingSourceRow(_ source: LocalStreamingModelSource) -> some View {
     HStack(alignment: .top, spacing: 12) {
       Image(systemName: "antenna.radiowaves.left.and.right")
@@ -1406,7 +1414,7 @@ struct SettingsView: View {
             .padding(.vertical, 3)
             .background(Capsule().fill(Color.orange.opacity(0.12)))
         }
-        Text("Requires \(source.runtime) before Speak can download and run it.")
+        Text("\(source.runtime) · \(localStreamingInstallLabel(for: source))")
           .font(.caption)
           .foregroundStyle(.secondary)
         Text("Local only - no cloud transcription")
@@ -1426,9 +1434,25 @@ struct SettingsView: View {
             settings.localStreamingModelSource = source.id
           }
         }
-        Button("Download") {}
-          .disabled(true)
-          .speakTooltip("Download is disabled until a compatible local streaming runtime is wired into Speak.")
+        switch sherpaRuntime.modelStates[source.id] ?? .notInstalled {
+        case .installed:
+          Text("Downloaded")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.green)
+        case .installing:
+          ProgressView()
+            .controlSize(.small)
+        case .notInstalled, .failed:
+          Button("Download") {
+            Task { await sherpaRuntime.installModel(source) }
+          }
+          .disabled(!sherpaRuntime.runtimeState.isInstalled)
+          .speakTooltip(
+            sherpaRuntime.runtimeState.isInstalled
+              ? "Download this sherpa-onnx model for local-only streaming."
+              : "Install the sherpa-onnx runtime first."
+          )
+        }
         Button("Remove") {
           localModels.deleteStreamingModelSource(source)
           if settings.localStreamingModelSource == source.id {
@@ -1444,6 +1468,84 @@ struct SettingsView: View {
       RoundedRectangle(cornerRadius: 12, style: .continuous)
         .fill(Color(nsColor: .controlBackgroundColor))
     )
+  }
+
+  private var localStreamingRuntimeControls: some View {
+    HStack(alignment: .center, spacing: 10) {
+      Image(systemName: sherpaRuntimeIcon)
+        .foregroundStyle(sherpaRuntimeTint)
+        .frame(width: 24)
+      VStack(alignment: .leading, spacing: 2) {
+        Text("sherpa-onnx local streaming runtime")
+          .font(.caption.weight(.semibold))
+        Text(sherpaRuntimeDetail)
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+      }
+      Spacer()
+      switch sherpaRuntime.runtimeState {
+      case .installed:
+        Text("Installed")
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.green)
+      case .installing:
+        ProgressView()
+          .controlSize(.small)
+      case .notInstalled, .failed:
+        Button("Install Runtime") {
+          Task { await sherpaRuntime.installRuntime() }
+        }
+      }
+    }
+    .padding(10)
+    .background(
+      RoundedRectangle(cornerRadius: 10, style: .continuous)
+        .fill(Color(nsColor: .controlBackgroundColor).opacity(0.7))
+    )
+  }
+
+  private var sherpaRuntimeIcon: String {
+    switch sherpaRuntime.runtimeState {
+    case .installed: return "checkmark.circle.fill"
+    case .installing: return "arrow.down.circle"
+    case .failed: return "exclamationmark.triangle.fill"
+    case .notInstalled: return "shippingbox"
+    }
+  }
+
+  private var sherpaRuntimeTint: Color {
+    switch sherpaRuntime.runtimeState {
+    case .installed: return .green
+    case .installing: return .orange
+    case .failed: return .red
+    case .notInstalled: return .secondary
+    }
+  }
+
+  private var sherpaRuntimeDetail: String {
+    switch sherpaRuntime.runtimeState {
+    case .installed:
+      return "Ready for local streaming on this Mac."
+    case .installing:
+      return "Installing the pinned Python sherpa-onnx package."
+    case .failed(let message):
+      return message
+    case .notInstalled:
+      return "Experimental prerelease runtime. Requires Python 3 and installs sherpa-onnx locally."
+    }
+  }
+
+  private func localStreamingInstallLabel(for source: LocalStreamingModelSource) -> String {
+    switch sherpaRuntime.modelStates[source.id] ?? .notInstalled {
+    case .installed:
+      return "downloaded and ready"
+    case .installing:
+      return "downloading model files"
+    case .failed(let message):
+      return "download failed: \(message)"
+    case .notInstalled:
+      return "not downloaded"
+    }
   }
 
   @ViewBuilder

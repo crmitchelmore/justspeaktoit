@@ -22,7 +22,10 @@ enum LocalModelError: LocalizedError {
     case .invalidHuggingFaceRepo(let repo):
       return "\(repo) is not a valid Hugging Face repo ID. Use owner/repo, for example argmaxinc/whisperkit-coreml."
     case .invalidHuggingFaceModel:
-      return "Enter the WhisperKit model variant or folder name to download."
+      return """
+      Enter a supported local model name. Local Batch expects a WhisperKit variant; \
+      Local Streaming expects a sherpa-onnx Zipformer source.
+      """
     }
   }
 }
@@ -52,12 +55,7 @@ final class LocalModelManager: ObservableObject {
       repoID: "csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17",
       modelName: "streaming-zipformer-en-20M-2023-02-17",
       runtime: "sherpa-onnx streaming runtime"
-    ),
-    LocalStreamingModelSource(
-      repoID: "k2-fsa/sherpa-onnx",
-      modelName: "sherpa-onnx streaming model zoo",
-      runtime: "sherpa-onnx streaming runtime"
-    ),
+    )
   ]
 
   private var activePipelines: [String: WhisperKit] = [:]
@@ -166,6 +164,9 @@ final class LocalModelManager: ObservableObject {
     }
 
     let source = LocalStreamingModelSource(repoID: repoID, modelName: modelName)
+    guard Self.isSupportedStreamingSource(source) else {
+      throw LocalModelError.invalidHuggingFaceModel
+    }
     try addStreamingModelSource(source)
     return source
   }
@@ -314,7 +315,11 @@ final class LocalModelManager: ObservableObject {
     guard fileManager.fileExists(atPath: streamingModelSourcesURL.path) else { return }
     do {
       let data = try Data(contentsOf: streamingModelSourcesURL)
-      streamingModelSources = try JSONDecoder().decode([LocalStreamingModelSource].self, from: data)
+      let decoded = try JSONDecoder().decode([LocalStreamingModelSource].self, from: data)
+      streamingModelSources = decoded.filter(Self.isSupportedStreamingSource)
+      if streamingModelSources.count != decoded.count {
+        try? saveStreamingModelSources()
+      }
     } catch {
       logger.error("Failed to load local streaming model sources: \(error.localizedDescription, privacy: .public)")
     }
@@ -362,6 +367,14 @@ final class LocalModelManager: ObservableObject {
       return "whisper.cpp streaming runtime"
     }
     return "Streaming ASR runtime"
+  }
+
+  nonisolated static func isSupportedStreamingSource(_ source: LocalStreamingModelSource) -> Bool {
+    let text = "\(source.id) \(source.repoID) \(source.modelName) \(source.runtime)".lowercased()
+    guard !text.contains("parakeet"), !text.contains("nemo"), !text.contains("nvidia") else {
+      return false
+    }
+    return text.contains("sherpa") && text.contains("zipformer")
   }
 
   nonisolated static func resolveHuggingFaceModel(repoID: String, modelName: String) -> ResolvedHuggingFaceModel {

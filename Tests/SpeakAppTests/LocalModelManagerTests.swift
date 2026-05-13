@@ -72,4 +72,22 @@ final class LocalModelManagerTests: XCTestCase {
         }
         XCTAssertTrue(hasSherpa)
     }
+
+    func testSupportedStreamingSource_rejectsStaleParakeetSource() {
+        let source = LocalStreamingModelSource(
+            repoID: "nvidia/parakeet-tdt-0.6b-v2",
+            modelName: "parakeet-tdt-0.6b-v2",
+            runtime: "NeMo / Parakeet runtime"
+        )
+
+        XCTAssertFalse(LocalModelManager.isSupportedStreamingSource(source))
+    }
+
+    @MainActor
+    func testRecommendedStreamingSources_onlyIncludeDownloadableZipformerModels() {
+        let sources = LocalModelManager.recommendedStreamingModelSources
+
+        XCTAssertFalse(sources.contains { $0.repoID == "k2-fsa/sherpa-onnx" })
+        XCTAssertTrue(sources.allSatisfy(LocalModelManager.isSupportedStreamingSource))
+    }
 }

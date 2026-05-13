@@ -761,10 +761,14 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
         rawValue: defaults.string(forKey: DefaultsKey.localTranscriptionMode.rawValue)
           ?? LocalTranscriptionMode.batch.rawValue
       ) ?? .batch
+    let storedLocalStreamingSource = defaults.string(forKey: DefaultsKey.localStreamingModelSource.rawValue)
+    let defaultLocalStreamingSource = LocalModelManager.recommendedStreamingModelSources.first?.id ?? ""
+    let supportedLocalStreamingIDs = Set(LocalModelManager.recommendedStreamingModelSources.map(\.id))
+      .union(LocalModelManager.shared.streamingModelSources.map(\.id))
     localStreamingModelSource =
-      defaults.string(forKey: DefaultsKey.localStreamingModelSource.rawValue)
-      ?? LocalModelManager.recommendedStreamingModelSources.first?.id
-      ?? ""
+      supportedLocalStreamingIDs.contains(storedLocalStreamingSource ?? "")
+      ? storedLocalStreamingSource ?? defaultLocalStreamingSource
+      : defaultLocalStreamingSource
     preferredLocaleIdentifier =
       defaults.string(forKey: DefaultsKey.preferredLocale.rawValue) ?? Locale.current.identifier
     preferredAudioInputUID = defaults.string(forKey: DefaultsKey.preferredAudioInputUID.rawValue)

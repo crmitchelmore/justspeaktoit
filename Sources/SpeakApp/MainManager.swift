@@ -36,6 +36,11 @@ final class MainManager: ObservableObject {
     appSettings.speedMode.usesLivePolish && appSettings.textOutputMethod != .clipboardOnly
   }
 
+  private var isStreamingTranscriptionMode: Bool {
+    appSettings.transcriptionMode == .liveNative
+      || (appSettings.transcriptionMode == .localModel && appSettings.localTranscriptionMode == .streaming)
+  }
+
   private var cachedRetryData: RetryData?
 
   private let appSettings: AppSettings
@@ -354,7 +359,9 @@ final class MainManager: ObservableObject {
     case .batchRemote:
       activeModel = appSettings.batchTranscriptionModel
     case .localModel:
-      activeModel = appSettings.localTranscriptionModel
+      activeModel = appSettings.localTranscriptionMode == .streaming
+        ? appSettings.localStreamingModelSource
+        : appSettings.localTranscriptionModel
     }
     let providerLabel = captureHealthProviderLabel(for: activeModel)
     let latencyTier = ModelCatalog.allOptions.first(where: { $0.id == activeModel })?.latencyTier ?? .medium
@@ -370,6 +377,11 @@ final class MainManager: ObservableObject {
   private func captureHealthProviderLabel(for modelID: String) -> String {
     guard appSettings.transcriptionMode == .localModel else {
       return ModelCatalog.friendlyName(for: modelID)
+    }
+    if appSettings.localTranscriptionMode == .streaming {
+      let source = LocalModelManager.shared.streamingModelSources.first { $0.id == modelID }
+        ?? LocalModelManager.recommendedStreamingModelSources.first { $0.id == modelID }
+      return source?.modelName ?? "Local Streaming"
     }
     guard let localModel = LocalModelManager.shared.model(for: modelID) else {
       return ModelCatalog.friendlyName(for: modelID)
@@ -505,21 +517,6 @@ final class MainManager: ObservableObject {
     return true
   }
 
-  private func localStreamingUnavailableMessage() -> String? {
-    guard appSettings.transcriptionMode == .localModel,
-      appSettings.localTranscriptionMode == .streaming
-    else { return nil }
-    let selectedSource = LocalModelManager.shared.streamingModelSources.first {
-      $0.id == appSettings.localStreamingModelSource
-    } ?? LocalModelManager.recommendedStreamingModelSources.first {
-      $0.id == appSettings.localStreamingModelSource
-    }
-    guard let selectedSource else {
-      return "Choose a Local Streaming candidate first. Local Streaming stays on this Mac and needs a compatible on-device runtime before recording can start."
-    }
-    return "\(selectedSource.modelName) needs \(selectedSource.runtime) before local streaming can start. Choose Local Batch for this prerelease."
-  }
-
   private func rawTranscriptionSubheadline() -> String {
     guard appSettings.transcriptionMode == .localModel else {
       return "Preparing raw transcript"
@@ -533,12 +530,6 @@ final class MainManager: ObservableObject {
   private func startSession(trigger: SessionTriggerSource) async {
     guard activeSession == nil else { return }
     if await presentMissingLiveAPIKeyAlertIfNeeded() { return }
-    if let message = localStreamingUnavailableMessage() {
-      lastErrorMessage = message
-      state = .failed(message)
-      hudManager.finishFailure(message: message)
-      return
-    }
 
     // Failsafe: if live transcription is still running but we have no activeSession,
     // cancel it so the app can always recover without requiring a restart.
@@ -585,7 +576,7 @@ final class MainManager: ObservableObject {
     do {
       _ = try await audioFileManager.startRecording()
       startAudioLevelMonitoring()
-      if appSettings.transcriptionMode == .liveNative {
+      if isStreamingTranscriptionMode {
         try await transcriptionManager.startLiveTranscription()
       }
     } catch {
@@ -624,7 +615,7 @@ final class MainManager: ObservableObject {
 
     state = .processing
     session.recordingEnded = Date()
-    if appSettings.transcriptionMode == .liveNative {
+    if isStreamingTranscriptionMode {
       // Move the HUD off the "Recording" timer immediately. Otherwise the
       // user sees the recording timer frozen at the release time while we
       // close the audio file and drain the live provider's finalisation
@@ -653,7 +644,7 @@ final class MainManager: ObservableObject {
       session.recordingSummary = summary
       session.recordingEnded = summary.startedAt.addingTimeInterval(summary.duration)
 
-      if appSettings.transcriptionMode == .liveNative {
+      if isStreamingTranscriptionMode {
         session.transcriptionStarted = Date()
         let result = try await transcriptionManager.stopLiveTranscription()
         session.transcriptionEnded = Date()
@@ -668,7 +659,22 @@ final class MainManager: ObservableObject {
         }
         // Log network exchange for live transcription
         let durationStr = String(format: "%.1f", result.duration)
-        if result.modelIdentifier.contains("deepgram") {
+        if result.modelIdentifier.hasPrefix("local/streaming/") {
+          session.networkExchanges.append(
+            HistoryNetworkExchange(
+              url: URL(string: "local://sherpa-onnx/\(result.modelIdentifier)")!,
+              method: "On-Device",
+              requestHeaders: [
+                "Model": result.modelIdentifier,
+                "Duration": "\(durationStr)s"
+              ],
+              requestBodyPreview: "Local streaming audio (\(durationStr) seconds)",
+              responseCode: 200,
+              responseHeaders: [:],
+              responseBodyPreview: "Transcript: \(String(result.text.prefix(500)))"
+            )
+          )
+        } else if result.modelIdentifier.contains("deepgram") {
           session.networkExchanges.append(
             HistoryNetworkExchange(
               url: URL(string: "wss://api.deepgram.com/v1/listen")!,

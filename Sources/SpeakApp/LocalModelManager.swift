@@ -108,19 +108,22 @@ final class LocalModelManager: ObservableObject {
     guard !modelName.isEmpty else {
       throw LocalModelError.invalidHuggingFaceModel
     }
+    let resolvedModel = Self.resolveHuggingFaceModel(repoID: repoID, modelName: modelName)
 
     let model = LocalTranscriptionModel(
-      id: "local/whisperkit/huggingface/\(slug(repoID))/\(slug(modelName))",
-      displayName: "\(modelName) from \(repoID)",
-      modelName: modelName,
+      id: "local/whisperkit/huggingface/\(slug(repoID))/\(slug(resolvedModel.modelName))",
+      displayName: "\(resolvedModel.displayName) from \(repoID)",
+      modelName: resolvedModel.modelName,
       engine: "whisperkit",
       modelRepo: repoID,
-      approximateSizeMB: 0,
+      approximateSizeMB: resolvedModel.approximateSizeMB,
       description: "Imported from Hugging Face. WhisperKit will download the matching Core ML files from \(repoID).",
       tags: [.quality]
     )
 
-    importedModels.removeAll { $0.id == model.id }
+    importedModels.removeAll {
+      $0.id == model.id || ($0.modelRepo == model.modelRepo && $0.modelName == model.modelName)
+    }
     importedModels.append(model)
     try saveImportedModels()
     installStates[model.id] = markerExists(for: model) ? .installed : .notInstalled
@@ -188,7 +191,12 @@ final class LocalModelManager: ObservableObject {
     if let existing = activePipelines[model.id] {
       return existing
     }
-    let config = WhisperKitConfig(model: model.modelName, modelRepo: model.modelRepo)
+    let config = WhisperKitConfig(
+      model: model.modelName,
+      modelRepo: model.modelRepo,
+      verbose: false,
+      load: true
+    )
     let pipe = try await WhisperKit(config)
     activePipelines[model.id] = pipe
     return pipe
@@ -214,7 +222,30 @@ final class LocalModelManager: ObservableObject {
     do {
       let data = try Data(contentsOf: importedModelsURL)
       let records = try JSONDecoder().decode([ImportedModelRecord].self, from: data)
-      importedModels = records.map(\.model)
+      var didMigrate = false
+      importedModels = records.map { record in
+        let model = record.model
+        let resolved = Self.resolveHuggingFaceModel(
+          repoID: model.modelRepo ?? "",
+          modelName: model.modelName
+        )
+        guard resolved.modelName != model.modelName || model.approximateSizeMB <= 0 else { return model }
+        didMigrate = true
+        return LocalTranscriptionModel(
+          id: model.id,
+          displayName: "\(resolved.displayName) from \(model.modelRepo ?? "Hugging Face")",
+          modelName: resolved.modelName,
+          engine: model.engine,
+          modelRepo: model.modelRepo,
+          approximateSizeMB: resolved.approximateSizeMB,
+          description: model.description,
+          tags: model.tags,
+          supportsLiveStreaming: model.supportsLiveStreaming
+        )
+      }
+      if didMigrate {
+        try? saveImportedModels()
+      }
     } catch {
       logger.error("Failed to load imported Hugging Face models: \(error.localizedDescription, privacy: .public)")
     }
@@ -234,6 +265,108 @@ final class LocalModelManager: ObservableObject {
       }
       .reduce(into: "") { result, character in result.append(character) }
   }
+
+  nonisolated static func resolveHuggingFaceModel(repoID: String, modelName: String) -> ResolvedHuggingFaceModel {
+    let repo = repoID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    let trimmedName = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard repo == "argmaxinc/whisperkit-coreml" else {
+      return ResolvedHuggingFaceModel(
+        modelName: trimmedName,
+        displayName: trimmedName,
+        approximateSizeMB: sizeFromModelName(trimmedName) ?? 0
+      )
+    }
+
+    let lookupKey = trimmedName.lowercased()
+    if let known = knownArgmaxWhisperKitModels[lookupKey] {
+      return known
+    }
+    return ResolvedHuggingFaceModel(
+      modelName: trimmedName,
+      displayName: trimmedName,
+      approximateSizeMB: sizeFromModelName(trimmedName) ?? 0
+    )
+  }
+
+  private nonisolated static func sizeFromModelName(_ modelName: String) -> Int? {
+    let suffix = modelName.split(separator: "_").last.map(String.init) ?? ""
+    guard suffix.lowercased().hasSuffix("mb") else { return nil }
+    return Int(suffix.dropLast(2))
+  }
+
+  private nonisolated static let knownArgmaxWhisperKitModels: [String: ResolvedHuggingFaceModel] = {
+    func model(_ aliases: [String], name: String, displayName: String, size: Int) -> [(String, ResolvedHuggingFaceModel)] {
+      aliases.map {
+        (
+          $0,
+          ResolvedHuggingFaceModel(modelName: name, displayName: displayName, approximateSizeMB: size)
+        )
+      }
+    }
+
+    let models = [
+      model(
+        ["tiny", "whisper-tiny", "openai_whisper-tiny"],
+        name: "openai_whisper-tiny",
+        displayName: "Whisper Tiny",
+        size: 75
+      ),
+      model(
+        ["base", "whisper-base", "openai_whisper-base"],
+        name: "openai_whisper-base",
+        displayName: "Whisper Base",
+        size: 145
+      ),
+      model(
+        ["small", "whisper-small", "openai_whisper-small", "openai_whisper-small_216mb"],
+        name: "openai_whisper-small_216MB",
+        displayName: "Whisper Small",
+        size: 216
+      ),
+      model(
+        ["distil-large-v3", "distil-whisper_distil-large-v3", "distil-whisper_distil-large-v3_594mb"],
+        name: "distil-whisper_distil-large-v3_594MB",
+        displayName: "Distil-Whisper Large v3",
+        size: 594
+      ),
+      model(
+        [
+          "distil-large-v3-turbo",
+          "distil-large-v3_turbo",
+          "distil-whisper_distil-large-v3_turbo",
+          "distil-whisper_distil-large-v3_turbo_600mb",
+        ],
+        name: "distil-whisper_distil-large-v3_turbo_600MB",
+        displayName: "Distil-Whisper Large v3 Turbo",
+        size: 600
+      ),
+      model(
+        [
+          "large-v3-turbo",
+          "large-v3_turbo",
+          "openai_whisper-large-v3-v20240930_turbo",
+          "openai_whisper-large-v3-v20240930_turbo_632mb",
+        ],
+        name: "openai_whisper-large-v3-v20240930_turbo_632MB",
+        displayName: "Whisper Large v3 Turbo",
+        size: 632
+      ),
+      model(
+        ["openai_whisper-large-v3_turbo", "openai_whisper-large-v3_turbo_954mb"],
+        name: "openai_whisper-large-v3_turbo_954MB",
+        displayName: "Whisper Large v3 Turbo",
+        size: 954
+      ),
+    ].flatMap { $0 }
+
+    return Dictionary(uniqueKeysWithValues: models)
+  }()
+}
+
+struct ResolvedHuggingFaceModel: Equatable, Sendable {
+  let modelName: String
+  let displayName: String
+  let approximateSizeMB: Int
 }
 
 private struct ImportedModelRecord: Codable {

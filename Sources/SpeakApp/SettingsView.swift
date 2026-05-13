@@ -1006,14 +1006,26 @@ struct SettingsView: View {
             )
 
             Text(
-              "Downloaded models are separate from Apple Speech. They run through WhisperKit after you download them and never require an API key."
+              "Downloaded models are separate from Apple Speech and cloud providers. Offline models run through WhisperKit after you download them; streaming local models use a separate runtime path."
             )
             .font(.caption)
             .foregroundStyle(.secondary)
 
+            Picker("Local transcription type", selection: settingsBinding(\AppSettings.localTranscriptionMode)) {
+              ForEach(AppSettings.LocalTranscriptionMode.allCases) { mode in
+                Text(mode.displayName).tag(mode)
+              }
+            }
+            .pickerStyle(.segmented)
+
             localModelQuickStart
             selectedLocalModelCallout
-            huggingFaceModelImport
+
+            if settings.localTranscriptionMode == .batch {
+              huggingFaceModelImport
+            } else {
+              localStreamingStatus
+            }
 
             ModelPicker(
               title: "Local Model",
@@ -1067,11 +1079,20 @@ struct SettingsView: View {
                   .fill(Color.green.opacity(0.12))
               )
           }
+          Text(model.supportsLiveStreaming ? "Streaming" : "Offline")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(model.supportsLiveStreaming ? Color.brandAccentDeep : Color.secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(
+              Capsule()
+                .fill(model.supportsLiveStreaming ? Color.brandAccentDeep.opacity(0.12) : Color.secondary.opacity(0.12))
+            )
         }
         Text(model.description)
           .font(.caption)
           .foregroundStyle(.secondary)
-        Text("\(model.engine.capitalized) · ~\(model.approximateSizeMB) MB")
+        Text(localModelSizeLabel(for: model))
           .font(.caption2.monospacedDigit())
           .foregroundStyle(.tertiary)
         if case .failed(let message) = state {
@@ -1089,6 +1110,7 @@ struct SettingsView: View {
           if !isSelected {
             Button("Use") {
               settings.localTranscriptionModel = model.id
+              Task { await localModels.install(model) }
             }
           }
           Button("Delete") {
@@ -1099,7 +1121,7 @@ struct SettingsView: View {
         VStack(alignment: .trailing, spacing: 6) {
           ProgressView()
             .controlSize(.small)
-          Text("Downloading")
+          Text("Preparing")
             .font(.caption2)
             .foregroundStyle(.secondary)
         }
@@ -1112,6 +1134,7 @@ struct SettingsView: View {
           if !isSelected {
             Button("Use") {
               settings.localTranscriptionModel = model.id
+              Task { await localModels.install(model) }
             }
           }
         }
@@ -1128,18 +1151,22 @@ struct SettingsView: View {
     VStack(alignment: .leading, spacing: 8) {
       localModelStep(
         number: "1",
-        title: "Choose Local Model mode",
-        detail: "This switches recordings away from cloud batch transcription."
+        title: "Choose Local mode",
+        detail: "This switches recordings away from cloud providers."
       )
       localModelStep(
         number: "2",
-        title: "Download a WhisperKit model",
-        detail: "Tiny is fastest; Small is more accurate and uses more disk."
+        title: settings.localTranscriptionMode == .batch ? "Download a WhisperKit model" : "Install a streaming-capable runtime",
+        detail: settings.localTranscriptionMode == .batch
+          ? "Tiny is fastest; Small is more accurate and uses more disk."
+          : "Local streaming needs a dedicated runtime such as Parakeet/NeMo before it can run."
       )
       localModelStep(
         number: "3",
         title: "Record normally",
-        detail: "Speak transcribes after recording stops, offline on this Mac."
+        detail: settings.localTranscriptionMode == .batch
+          ? "Speak transcribes after recording stops, offline on this Mac."
+          : "Streaming local models will show partial text live once a compatible runtime is installed."
       )
     }
     .padding(12)
@@ -1167,65 +1194,109 @@ struct SettingsView: View {
   }
 
   private var huggingFaceModelImport: some View {
-      VStack(alignment: .leading, spacing: 12) {
-        HStack(alignment: .top, spacing: 10) {
-          Image(systemName: "globe")
-            .foregroundStyle(Color.green)
-            .frame(width: 24)
-          VStack(alignment: .leading, spacing: 3) {
-            Text("Find more models on Hugging Face")
-              .font(.subheadline.weight(.semibold))
-            Text(
-              """
-              Browse WhisperKit/Core ML model repos, then paste the Hugging Face repo ID and model variant here. \
-              WhisperKit models are offline batch models in this prerelease; live local streaming is not enabled yet.
-              """
-            )
-            .font(.caption)
-            .foregroundStyle(.secondary)
-          }
-        }
-
-        Button {
-          openHuggingFaceModelSearch()
-        } label: {
-          Label("Browse compatible Hugging Face models", systemImage: "magnifyingglass")
-        }
-
-        VStack(alignment: .leading, spacing: 8) {
-          TextField("Repo ID, e.g. argmaxinc/whisperkit-coreml", text: $huggingFaceRepoID)
-            .textFieldStyle(.roundedBorder)
-          TextField("Model variant, e.g. tiny, base, small", text: $huggingFaceModelName)
-            .textFieldStyle(.roundedBorder)
-        }
-
-        HStack {
-          Button {
-            installHuggingFaceModel()
-          } label: {
-            Label("Install from Hugging Face", systemImage: "arrow.down.circle")
-          }
-          .disabled(!canImportHuggingFaceModel)
-
-          Spacer()
-        }
-
-        if let huggingFaceImportError {
-          Text(huggingFaceImportError)
-            .font(.caption)
-            .foregroundStyle(.red)
+    VStack(alignment: .leading, spacing: 12) {
+      HStack(alignment: .top, spacing: 10) {
+        Image(systemName: "globe")
+          .foregroundStyle(Color.green)
+          .frame(width: 24)
+        VStack(alignment: .leading, spacing: 3) {
+          Text("Find more models on Hugging Face")
+            .font(.subheadline.weight(.semibold))
+          Text(
+            """
+            Browse WhisperKit/Core ML model repos, then paste the Hugging Face repo ID and model variant here. \
+            WhisperKit models are offline batch models in this prerelease; live local streaming is not enabled yet.
+            """
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
         }
       }
-      .padding(12)
-      .background(
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
-          .stroke(Color.green.opacity(0.25), lineWidth: 1)
-          .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-              .fill(Color(nsColor: .controlBackgroundColor).opacity(0.55))
-          )
-      )
+
+      Button {
+        openHuggingFaceModelSearch()
+      } label: {
+        Label("Browse compatible Hugging Face models", systemImage: "magnifyingglass")
+      }
+
+      VStack(alignment: .leading, spacing: 8) {
+        TextField("Repo ID, e.g. argmaxinc/whisperkit-coreml", text: $huggingFaceRepoID)
+          .textFieldStyle(.roundedBorder)
+        TextField("Model variant, e.g. tiny, base, small", text: $huggingFaceModelName)
+          .textFieldStyle(.roundedBorder)
+      }
+
+      HStack {
+        Button {
+          installHuggingFaceModel()
+        } label: {
+          Label("Install from Hugging Face", systemImage: "arrow.down.circle")
+        }
+        .disabled(!canImportHuggingFaceModel)
+
+        Spacer()
+      }
+
+      if let huggingFaceImportError {
+        Text(huggingFaceImportError)
+          .font(.caption)
+          .foregroundStyle(.red)
+      }
     }
+    .padding(12)
+    .background(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .stroke(Color.green.opacity(0.25), lineWidth: 1)
+        .background(
+          RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(Color(nsColor: .controlBackgroundColor).opacity(0.55))
+        )
+    )
+  }
+
+  private var localStreamingStatus: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      HStack(alignment: .top, spacing: 10) {
+        Image(systemName: "antenna.radiowaves.left.and.right")
+          .foregroundStyle(Color.orange)
+          .frame(width: 24)
+        VStack(alignment: .leading, spacing: 3) {
+          Text("Local streaming is a separate model/runtime path")
+            .font(.subheadline.weight(.semibold))
+          Text(
+            """
+            WhisperKit Hugging Face models are offline batch models in this prerelease. \
+            True local streaming should use a streaming ASR family such as NVIDIA Parakeet or NeMo RNNT/TDT, \
+            which needs a dedicated macOS runtime before it can be enabled here.
+            """
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        }
+      }
+
+      if localStreamingModels.isEmpty {
+        Label("No streaming-capable local models are installed yet.", systemImage: "exclamationmark.triangle")
+          .font(.caption)
+          .foregroundStyle(.orange)
+      } else {
+        ForEach(localStreamingModels) { model in
+          localModelRow(model)
+        }
+      }
+
+      Button {
+        openLocalStreamingModelSearch()
+      } label: {
+        Label("Browse local streaming ASR models", systemImage: "magnifyingglass")
+      }
+    }
+    .padding(12)
+    .background(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .fill(Color.orange.opacity(0.08))
+    )
+  }
 
   @ViewBuilder
   private var selectedLocalModelCallout: some View {
@@ -1240,7 +1311,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 3) {
           Text(selectedLocalModelStatusTitle(for: state, model: model))
             .font(.subheadline.weight(.semibold))
-          Text(selectedLocalModelStatusDetail(for: state))
+          Text(selectedLocalModelStatusDetail(for: state, model: model))
             .font(.caption)
             .foregroundStyle(.secondary)
         }
@@ -1264,7 +1335,13 @@ struct SettingsView: View {
   ) -> some View {
     switch state {
     case .installed:
-      if settings.transcriptionMode == .localModel {
+      if settings.transcriptionMode == .localModel,
+        settings.localTranscriptionMode == .streaming,
+        !model.supportsLiveStreaming {
+        Button("Use Offline") {
+          settings.localTranscriptionMode = .batch
+        }
+      } else if settings.transcriptionMode == .localModel {
         Label("Ready", systemImage: "checkmark.circle.fill")
           .font(.caption.weight(.semibold))
           .foregroundStyle(.green)
@@ -1295,6 +1372,10 @@ struct SettingsView: View {
     localModels.availableModelOptions
   }
 
+  private var localStreamingModels: [LocalTranscriptionModel] {
+    localTranscriptionModels.filter(\.supportsLiveStreaming)
+  }
+
   private var canImportHuggingFaceModel: Bool {
     huggingFaceRepoID.split(separator: "/").count == 2
       && !huggingFaceModelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -1303,6 +1384,13 @@ struct SettingsView: View {
   private func openHuggingFaceModelSearch() {
     guard let url = URL(
       string: "https://huggingface.co/models?library=coreml&sort=downloads&search=whisperkit%20whisper"
+    ) else { return }
+    NSWorkspace.shared.open(url)
+  }
+
+  private func openLocalStreamingModelSearch() {
+    guard let url = URL(
+      string: "https://huggingface.co/models?pipeline_tag=automatic-speech-recognition&sort=downloads&search=parakeet%20streaming"
     ) else { return }
     NSWorkspace.shared.open(url)
   }
@@ -1319,6 +1407,13 @@ struct SettingsView: View {
     } catch {
       huggingFaceImportError = error.localizedDescription
     }
+  }
+
+  private func localModelSizeLabel(for model: LocalTranscriptionModel) -> String {
+    guard model.approximateSizeMB > 0 else {
+      return "\(model.engine.capitalized) · size confirmed during download"
+    }
+    return "\(model.engine.capitalized) · ~\(model.approximateSizeMB) MB"
   }
 
   private func selectedLocalModelStatusIcon(for state: LocalModelManager.InstallState) -> String {
@@ -1340,6 +1435,9 @@ struct SettingsView: View {
   ) -> String {
     switch state {
     case .installed:
+      if settings.localTranscriptionMode == .streaming, !model.supportsLiveStreaming {
+        return "\(model.displayName) is offline-only"
+      }
       return settings.transcriptionMode == .localModel
         ? "\(model.displayName) is ready"
         : "\(model.displayName) is downloaded"
@@ -1352,9 +1450,15 @@ struct SettingsView: View {
     }
   }
 
-  private func selectedLocalModelStatusDetail(for state: LocalModelManager.InstallState) -> String {
+  private func selectedLocalModelStatusDetail(
+    for state: LocalModelManager.InstallState,
+    model: LocalTranscriptionModel
+  ) -> String {
     switch state {
     case .installed:
+      if settings.localTranscriptionMode == .streaming, !model.supportsLiveStreaming {
+        return "This model can transcribe after recording stops, but it cannot stream live."
+      }
       return settings.transcriptionMode == .localModel
         ? "Hold your recording shortcut; transcription runs locally when you stop."
         : "Switch to Local Model mode to run this model instead of a cloud provider."

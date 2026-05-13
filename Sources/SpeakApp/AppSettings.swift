@@ -36,11 +36,27 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     var displayName: String {
       switch self {
       case .liveNative:
-        return "Live (Streaming)"
+        return "Remote Live"
       case .batchRemote:
-        return "Batch (Remote)"
+        return "Remote Batch"
       case .localModel:
-        return "Local Model"
+        return "Local"
+      }
+    }
+  }
+
+  enum LocalTranscriptionMode: String, CaseIterable, Identifiable {
+    case batch = "batch"
+    case streaming = "streaming"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+      switch self {
+      case .batch:
+        return "Offline"
+      case .streaming:
+        return "Streaming"
       }
     }
   }
@@ -214,6 +230,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     case liveTranscriptionModel
     case batchTranscriptionModel
     case localTranscriptionModel
+    case localTranscriptionMode
     case postProcessingEnabled
     case postProcessingModel
     case postProcessingTemperature
@@ -323,6 +340,10 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
 
   @Published var localTranscriptionModel: String {
     didSet { store(localTranscriptionModel, key: .localTranscriptionModel) }
+  }
+
+  @Published var localTranscriptionMode: LocalTranscriptionMode {
+    didSet { store(localTranscriptionMode.rawValue, key: .localTranscriptionMode) }
   }
 
   @Published var preferredLocaleIdentifier: String {
@@ -730,6 +751,11 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
         defaults.string(forKey: DefaultsKey.batchTranscriptionModel.rawValue))
     localTranscriptionModel =
       defaults.string(forKey: DefaultsKey.localTranscriptionModel.rawValue) ?? Self.defaultLocalTranscriptionModel
+    localTranscriptionMode =
+      LocalTranscriptionMode(
+        rawValue: defaults.string(forKey: DefaultsKey.localTranscriptionMode.rawValue)
+          ?? LocalTranscriptionMode.batch.rawValue
+      ) ?? .batch
     preferredLocaleIdentifier =
       defaults.string(forKey: DefaultsKey.preferredLocale.rawValue) ?? Locale.current.identifier
     preferredAudioInputUID = defaults.string(forKey: DefaultsKey.preferredAudioInputUID.rawValue)

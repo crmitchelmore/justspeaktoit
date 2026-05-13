@@ -489,9 +489,34 @@ final class MainManager: ObservableObject {
     return true
   }
 
+  private func localStreamingUnavailableMessage() -> String? {
+    guard appSettings.transcriptionMode == .localModel,
+      appSettings.localTranscriptionMode == .streaming
+    else { return nil }
+    guard let model = LocalModelManager.shared.model(for: appSettings.localTranscriptionModel),
+      model.supportsLiveStreaming
+    else {
+      return "The selected local model is offline-only. Choose Local › Offline or install a streaming-capable local model."
+    }
+    return "Local streaming needs a streaming runtime before it can start. Choose Local › Offline for this prerelease."
+  }
+
+  private func rawTranscriptionSubheadline() -> String {
+    guard appSettings.transcriptionMode == .localModel else {
+      return "Preparing raw transcript"
+    }
+    return "Loading local model and transcribing. First run can take a minute."
+  }
+
   private func startSession(trigger: SessionTriggerSource) async {
     guard activeSession == nil else { return }
     if await presentMissingLiveAPIKeyAlertIfNeeded() { return }
+    if let message = localStreamingUnavailableMessage() {
+      lastErrorMessage = message
+      state = .failed(message)
+      hudManager.finishFailure(message: message)
+      return
+    }
 
     // Failsafe: if live transcription is still running but we have no activeSession,
     // cancel it so the app can always recover without requiring a restart.
@@ -653,7 +678,7 @@ final class MainManager: ObservableObject {
           )
         }
       } else {
-        hudManager.beginTranscribing()
+        hudManager.beginTranscribing(subheadline: rawTranscriptionSubheadline())
         session.transcriptionStarted = Date()
         if appSettings.transcriptionMode == .batchRemote {
           guard
@@ -1062,7 +1087,7 @@ final class MainManager: ObservableObject {
     guard let url = item.audioFileURL else { return }
 
     state = .processing
-    hudManager.beginTranscribing()
+    hudManager.beginTranscribing(subheadline: rawTranscriptionSubheadline())
 
     let session = ActiveSession(
       gesture: .uiButton, hotKeyDescription: item.trigger.hotKeyDescription)

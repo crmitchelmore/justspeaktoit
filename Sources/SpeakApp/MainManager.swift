@@ -509,12 +509,15 @@ final class MainManager: ObservableObject {
     guard appSettings.transcriptionMode == .localModel,
       appSettings.localTranscriptionMode == .streaming
     else { return nil }
-    guard let model = LocalModelManager.shared.model(for: appSettings.localTranscriptionModel),
-      model.supportsLiveStreaming
-    else {
-      return "The selected local model is offline-only. Choose Local › Offline or install a streaming-capable local model."
+    let selectedSource = LocalModelManager.shared.streamingModelSources.first {
+      $0.id == appSettings.localStreamingModelSource
+    } ?? LocalModelManager.recommendedStreamingModelSources.first {
+      $0.id == appSettings.localStreamingModelSource
     }
-    return "Local streaming needs a streaming runtime before it can start. Choose Local › Offline for this prerelease."
+    guard let selectedSource else {
+      return "Choose a Local Streaming candidate first. Local Streaming stays on this Mac and needs a compatible on-device runtime before recording can start."
+    }
+    return "\(selectedSource.modelName) needs \(selectedSource.runtime) before local streaming can start. Choose Local Batch for this prerelease."
   }
 
   private func rawTranscriptionSubheadline() -> String {

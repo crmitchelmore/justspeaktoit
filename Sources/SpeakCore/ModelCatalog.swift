@@ -35,6 +35,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
         case cheap
         case quality
         case leading
+        case privacy
 
         public var displayName: String {
             switch self {
@@ -42,6 +43,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             case .cheap: return "Cheap"
             case .quality: return "Quality"
             case .leading: return "Leading"
+            case .privacy: return "Private"
             }
         }
     }
@@ -207,6 +209,15 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
     // Curated, static set for transcript cleanup (OpenRouter) with pricing + tags.
     // Pricing is based on OpenRouter's /api/v1/models at time of writing.
     public static let postProcessing: [Option] = [
+        Option(
+            id: "local/post-processing/rules",
+            displayName: "Local Cleanup (Offline)",
+            description: "Runs entirely on this Mac. Applies safe transcript cleanup without sending text to a cloud LLM.",
+            estimatedLatencyMs: 50,
+            latencyTier: .instant,
+            tags: [.fast, .cheap, .privacy]
+        ),
+
         // Fast / cheap cleanup
         Option(
             id: "openai/gpt-4o-mini",

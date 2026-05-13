@@ -105,4 +105,11 @@ final class ModelCatalogTests: XCTestCase {
         XCTAssertEqual(ModelRouting.family(for: "apple/local/SFSpeechRecognizer"), .appleSpeech)
         XCTAssertEqual(ModelRouting.family(for: "local/whisperkit/tiny"), .downloadedLocal(engine: "whisperkit"))
     }
+
+    func testModelRouting_treatsLocalCleanupAsPostProcessing() {
+        XCTAssertEqual(
+            ModelRouting.family(for: "local/post-processing/rules"),
+            .postProcessing(provider: "local")
+        )
+    }
 }

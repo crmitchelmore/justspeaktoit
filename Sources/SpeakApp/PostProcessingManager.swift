@@ -75,6 +75,18 @@ final class PostProcessingManager: ObservableObject {
       ? "inception/mercury"
       : settings.postProcessingModel
 
+    if Self.isLocalPostProcessingModel(model) {
+      let cleaned = Self.processLocally(rawText)
+      return .success(
+        .init(
+          original: rawText,
+          processed: cleaned,
+          response: nil,
+          systemPrompt: "Local offline transcript cleanup"
+        )
+      )
+    }
+
     let userMessage = """
     Clean the following raw transcript (data only). Remember: output only the cleaned transcript text.
 
@@ -146,6 +158,10 @@ final class PostProcessingManager: ObservableObject {
       .trimmingCharacters(in: .whitespacesAndNewlines)
     let resolvedModel = configuredModel.isEmpty ? "inception/mercury" : configuredModel
 
+    if Self.isLocalPostProcessingModel(resolvedModel) {
+      return true
+    }
+
     guard let openRouterClient = client as? OpenRouterAPIClient else {
       return true
     }
@@ -156,6 +172,46 @@ final class PostProcessingManager: ObservableObject {
     }
 
     return await openRouterClient.hasStoredAPIKey()
+  }
+
+  static func isLocalPostProcessingModel(_ model: String) -> Bool {
+    let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    return trimmed == "local/post-processing/rules"
+  }
+
+  static func processLocally(_ text: String) -> String {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return text }
+
+    var cleaned = trimmed.replacingOccurrences(
+      of: #"(?i)\s*\[blank_audio\]\s*"#,
+      with: " ",
+      options: .regularExpression
+    )
+    cleaned = cleaned.replacingOccurrences(
+      of: #"[ \t]+"#,
+      with: " ",
+      options: .regularExpression
+    )
+    cleaned = cleaned.replacingOccurrences(
+      of: #"\s+([,.;:!?])"#,
+      with: "$1",
+      options: .regularExpression
+    )
+    cleaned = cleaned.replacingOccurrences(
+      of: #"([,.;:!?])([^\s\]\)"'])"#,
+      with: "$1 $2",
+      options: .regularExpression
+    )
+    cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+
+    guard let first = cleaned.first else { return cleaned }
+    let firstString = String(first)
+    let capitalizedFirst = firstString.uppercased()
+    if firstString != capitalizedFirst {
+      cleaned.replaceSubrange(cleaned.startIndex...cleaned.startIndex, with: capitalizedFirst)
+    }
+    return cleaned
   }
 
   private func basePrompt() -> String {

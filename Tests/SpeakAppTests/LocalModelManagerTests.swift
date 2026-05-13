@@ -61,4 +61,15 @@ final class LocalModelManagerTests: XCTestCase {
             "NeMo / Parakeet streaming runtime"
         )
     }
+
+    @MainActor
+    func testRecommendedStreamingSources_includeSelectableParakeetCandidate() {
+        let sources = LocalModelManager.recommendedStreamingModelSources
+        let hasParakeet = sources.contains {
+            $0.repoID == "nvidia/parakeet-tdt-0.6b-v2"
+                && $0.modelName == "parakeet-tdt-0.6b-v2"
+                && $0.runtime == "NeMo / Parakeet streaming runtime"
+        }
+        XCTAssertTrue(hasParakeet)
+    }
 }

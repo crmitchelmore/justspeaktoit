@@ -97,6 +97,8 @@ struct SettingsView: View {
   @State private var huggingFaceImportError: String?
   @State private var streamingHuggingFaceRepoID: String = "nvidia/parakeet-tdt-0.6b-v2"
   @State private var streamingHuggingFaceModelName: String = "parakeet-tdt-0.6b-v2"
+  @State private var selectedRecommendedStreamingSourceID: String =
+    LocalModelManager.recommendedStreamingModelSources.first?.id ?? ""
   @State private var streamingHuggingFaceImportError: String?
   private let openRouterKeyIdentifier = "openrouter.apiKey"
 
@@ -1281,17 +1283,47 @@ struct SettingsView: View {
         }
       }
 
-      Label("Streaming download/runtime support is not wired in this prerelease yet; recording is blocked until a local streaming runtime is available.", systemImage: "lock.shield")
+      Label("Local Streaming is local-only, but download/run is blocked until a compatible on-device streaming runtime is wired in.", systemImage: "lock.shield")
         .font(.caption)
         .foregroundStyle(.orange)
+
+      VStack(alignment: .leading, spacing: 8) {
+        Text("Available local streaming candidates")
+          .font(.caption.weight(.semibold))
+        Picker("Available local streaming candidates", selection: $selectedRecommendedStreamingSourceID) {
+          ForEach(LocalModelManager.recommendedStreamingModelSources) { source in
+            Text(source.displayName).tag(source.id)
+          }
+        }
+        .labelsHidden()
+        .pickerStyle(.menu)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+          RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        if let source = selectedRecommendedStreamingSource {
+          Text("\(source.runtime) · local only · download/run not available until this runtime is integrated.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        Button {
+          addSelectedStreamingModelSource()
+        } label: {
+          Label("Add Selected Streaming Candidate", systemImage: "plus.circle")
+        }
+      }
 
       Button {
         openLocalStreamingModelSearch()
       } label: {
-        Label("Browse local streaming ASR models on Hugging Face", systemImage: "magnifyingglass")
+        Label("Browse more local streaming ASR models on Hugging Face", systemImage: "magnifyingglass")
       }
 
       VStack(alignment: .leading, spacing: 8) {
+        Text("Advanced: add a Hugging Face source manually")
+          .font(.caption.weight(.semibold))
         TextField("Repo ID, e.g. nvidia/parakeet-tdt-0.6b-v2", text: $streamingHuggingFaceRepoID)
           .textFieldStyle(.roundedBorder)
         TextField("Model name, e.g. parakeet-tdt-0.6b-v2", text: $streamingHuggingFaceModelName)
@@ -1302,7 +1334,7 @@ struct SettingsView: View {
         Button {
           addStreamingModelSource()
         } label: {
-          Label("Add Local Streaming Source", systemImage: "plus.circle")
+          Label("Add Manual Streaming Source", systemImage: "plus.circle")
         }
         .disabled(!canAddStreamingModelSource)
 
@@ -1361,8 +1393,27 @@ struct SettingsView: View {
 
       Spacer()
 
-      Button("Remove") {
-        localModels.deleteStreamingModelSource(source)
+      VStack(alignment: .trailing, spacing: 8) {
+        if settings.localStreamingModelSource == source.id {
+          Text("Selected")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.orange)
+        } else {
+          Button("Use") {
+            settings.localStreamingModelSource = source.id
+          }
+        }
+        Button("Download") {}
+          .disabled(true)
+          .speakTooltip("Download is disabled until a compatible local streaming runtime is wired into Speak.")
+        Button("Remove") {
+          localModels.deleteStreamingModelSource(source)
+          if settings.localStreamingModelSource == source.id {
+            settings.localStreamingModelSource = localModels.streamingModelSources.first?.id
+              ?? LocalModelManager.recommendedStreamingModelSources.first?.id
+              ?? ""
+          }
+        }
       }
     }
     .padding(12)
@@ -1466,6 +1517,12 @@ struct SettingsView: View {
       && !streamingHuggingFaceModelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 
+  private var selectedRecommendedStreamingSource: LocalStreamingModelSource? {
+    LocalModelManager.recommendedStreamingModelSources.first {
+      $0.id == selectedRecommendedStreamingSourceID
+    } ?? LocalModelManager.recommendedStreamingModelSources.first
+  }
+
   private func openHuggingFaceModelSearch() {
     guard let url = URL(
       string: "https://huggingface.co/models?library=coreml&sort=downloads&search=whisperkit%20whisper"
@@ -1496,11 +1553,23 @@ struct SettingsView: View {
 
   private func addStreamingModelSource() {
     do {
-      _ = try localModels.addStreamingModelSource(
+      let source = try localModels.addStreamingModelSource(
         repoID: streamingHuggingFaceRepoID,
         modelName: streamingHuggingFaceModelName
       )
       streamingHuggingFaceImportError = nil
+      settings.localStreamingModelSource = source.id
+    } catch {
+      streamingHuggingFaceImportError = error.localizedDescription
+    }
+  }
+
+  private func addSelectedStreamingModelSource() {
+    guard let source = selectedRecommendedStreamingSource else { return }
+    do {
+      _ = try localModels.addStreamingModelSource(source)
+      streamingHuggingFaceImportError = nil
+      settings.localStreamingModelSource = source.id
     } catch {
       streamingHuggingFaceImportError = error.localizedDescription
     }
@@ -1788,11 +1857,20 @@ struct SettingsView: View {
 
           ModelPicker(
             title: "Post-processing Model",
-            help: "We clean up the transcript before delivery using this model.",
+            help: "Choose cloud LLM cleanup or local-only offline cleanup before delivery.",
             options: ModelCatalog.postProcessing,
             value: settingsBinding(\AppSettings.postProcessingModel),
             usesDetailedChooser: true
           )
+
+          if PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel) {
+            SettingsInlineInfo(
+              title: "Local cleanup stays on this Mac",
+              message:
+                "This mode applies safe offline transcript cleanup without OpenRouter or a cloud LLM. Custom prompts, translation, and creative formatting need a cloud post-processing model until a local text-generation runtime is available.",
+              systemImage: "lock.shield"
+            )
+          }
 
           VStack(alignment: .leading) {
             HStack {
@@ -1807,7 +1885,13 @@ struct SettingsView: View {
             }
             Slider(
               value: settingsBinding(\AppSettings.postProcessingTemperature), in: 0...1, step: 0.05)
+            .disabled(PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel))
             .speakTooltip("Lower values stay close to your words; higher values let Speak be more creative.")
+            if PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel) {
+              Text("Temperature only affects cloud LLM cleanup.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
           }
         }
       }
@@ -1815,12 +1899,17 @@ struct SettingsView: View {
 
       SettingsCard(title: "Transcription Prompt", systemImage: "quote.bubble", tint: Color.mint) {
         VStack(alignment: .leading, spacing: 8) {
-          Text("This prompt is sent to an LLM after transcription (post-processing). Requires an OpenRouter API key.")
+          Text(
+            PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel)
+              ? "Local cleanup does not send prompts anywhere. Choose a cloud post-processing model to use custom LLM instructions."
+              : "This prompt is sent to an LLM after transcription (post-processing). Requires an OpenRouter API key."
+          )
             .font(.caption)
             .foregroundStyle(.secondary)
           TextEditor(text: settingsBinding(\AppSettings.postProcessingSystemPrompt))
             .font(.body.monospaced())
             .frame(minHeight: 200)
+            .disabled(PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel))
             .overlay(
               RoundedRectangle(cornerRadius: 12)
                 .stroke(Color.mint.opacity(0.2), lineWidth: 1)
@@ -3356,6 +3445,32 @@ private struct LocaleOption: Identifiable, Equatable {
   var id: String { identifier }
 }
 
+private struct SettingsInlineInfo: View {
+  let title: String
+  let message: String
+  let systemImage: String
+
+  var body: some View {
+    HStack(alignment: .top, spacing: 10) {
+      Image(systemName: systemImage)
+        .foregroundStyle(Color.brandLagoon)
+        .frame(width: 20)
+      VStack(alignment: .leading, spacing: 3) {
+        Text(title)
+          .font(.caption.weight(.semibold))
+        Text(message)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+    }
+    .padding(12)
+    .background(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .fill(Color.brandLagoon.opacity(0.08))
+    )
+  }
+}
+
 private struct SettingsCard<Content: View>: View {
   let title: String
   let systemImage: String
@@ -3438,6 +3553,7 @@ private struct ModelPicker: View {
       case .cheap: return Color.green.opacity(0.14)
       case .quality: return Color.brandAccent.opacity(0.12)
       case .leading: return Color.brandAccentWarm.opacity(0.14)
+      case .privacy: return Color.brandLagoon.opacity(0.14)
       }
     }
 
@@ -3447,6 +3563,7 @@ private struct ModelPicker: View {
       case .cheap: return .green
       case .quality: return .brandAccent
       case .leading: return .brandAccentWarm
+      case .privacy: return .brandLagoon
       }
     }
   }

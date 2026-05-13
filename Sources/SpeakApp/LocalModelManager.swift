@@ -42,6 +42,24 @@ final class LocalModelManager: ObservableObject {
   @Published private(set) var importedModels: [LocalTranscriptionModel] = []
   @Published private(set) var streamingModelSources: [LocalStreamingModelSource] = []
 
+  static let recommendedStreamingModelSources: [LocalStreamingModelSource] = [
+    LocalStreamingModelSource(
+      repoID: "nvidia/parakeet-tdt-0.6b-v2",
+      modelName: "parakeet-tdt-0.6b-v2",
+      runtime: "NeMo / Parakeet streaming runtime"
+    ),
+    LocalStreamingModelSource(
+      repoID: "nvidia/parakeet-tdt-1.1b",
+      modelName: "parakeet-tdt-1.1b",
+      runtime: "NeMo / Parakeet streaming runtime"
+    ),
+    LocalStreamingModelSource(
+      repoID: "ggerganov/whisper.cpp",
+      modelName: "whisper.cpp streaming server",
+      runtime: "whisper.cpp streaming runtime"
+    ),
+  ]
+
   private var activePipelines: [String: WhisperKit] = [:]
   private let fileManager: FileManager
   private let logger = Logger(subsystem: "com.github.speakapp", category: "LocalModelManager")
@@ -147,12 +165,13 @@ final class LocalModelManager: ObservableObject {
       throw LocalModelError.invalidHuggingFaceModel
     }
 
-    let source = LocalStreamingModelSource(
-      id: "local/streaming/huggingface/\(Self.slug(repoID))/\(Self.slug(modelName))",
-      repoID: repoID,
-      modelName: modelName,
-      runtime: Self.streamingRuntimeHint(for: repoID, modelName: modelName)
-    )
+    let source = LocalStreamingModelSource(repoID: repoID, modelName: modelName)
+    try addStreamingModelSource(source)
+    return source
+  }
+
+  @discardableResult
+  func addStreamingModelSource(_ source: LocalStreamingModelSource) throws -> LocalStreamingModelSource {
     streamingModelSources.removeAll { $0.id == source.id }
     streamingModelSources.append(source)
     try saveStreamingModelSources()
@@ -316,7 +335,7 @@ final class LocalModelManager: ObservableObject {
     "local/whisperkit/huggingface/\(slug(repoID))/\(slug(modelName))"
   }
 
-  private nonisolated static func slug(_ value: String) -> String {
+  nonisolated static func slug(_ value: String) -> String {
     value
       .lowercased()
       .map { character in
@@ -456,6 +475,15 @@ struct LocalStreamingModelSource: Codable, Equatable, Identifiable, Sendable {
   let repoID: String
   let modelName: String
   let runtime: String
+
+  init(repoID: String, modelName: String, runtime: String? = nil) {
+    let repoID = repoID.trimmingCharacters(in: .whitespacesAndNewlines)
+    let modelName = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
+    self.id = "local/streaming/huggingface/\(LocalModelManager.slug(repoID))/\(LocalModelManager.slug(modelName))"
+    self.repoID = repoID
+    self.modelName = modelName
+    self.runtime = runtime ?? LocalModelManager.streamingRuntimeHint(for: repoID, modelName: modelName)
+  }
 
   var displayName: String {
     "\(modelName) from \(repoID)"

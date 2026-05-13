@@ -39,6 +39,9 @@ public enum ModelRouting {
         if provider == "apple" {
             return .appleSpeech
         }
+        if ModelCatalog.postProcessing.contains(where: { $0.id == trimmed }) {
+            return .postProcessing(provider: provider)
+        }
         if provider == "local" {
             return .downloadedLocal(engine: components.dropFirst().first?.lowercased() ?? "unknown")
         }
@@ -47,9 +50,6 @@ public enum ModelRouting {
         }
         if ModelCatalog.batchTranscription.contains(where: { $0.id == trimmed }) {
             return .cloudBatch(provider: provider)
-        }
-        if ModelCatalog.postProcessing.contains(where: { $0.id == trimmed }) {
-            return .postProcessing(provider: provider)
         }
         return .unknown(provider: provider)
     }

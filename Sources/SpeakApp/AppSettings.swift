@@ -231,6 +231,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     case batchTranscriptionModel
     case localTranscriptionModel
     case localTranscriptionMode
+    case localStreamingModelSource
     case postProcessingEnabled
     case postProcessingModel
     case postProcessingTemperature
@@ -344,6 +345,10 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
 
   @Published var localTranscriptionMode: LocalTranscriptionMode {
     didSet { store(localTranscriptionMode.rawValue, key: .localTranscriptionMode) }
+  }
+
+  @Published var localStreamingModelSource: String {
+    didSet { store(localStreamingModelSource, key: .localStreamingModelSource) }
   }
 
   @Published var preferredLocaleIdentifier: String {
@@ -756,6 +761,10 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
         rawValue: defaults.string(forKey: DefaultsKey.localTranscriptionMode.rawValue)
           ?? LocalTranscriptionMode.batch.rawValue
       ) ?? .batch
+    localStreamingModelSource =
+      defaults.string(forKey: DefaultsKey.localStreamingModelSource.rawValue)
+      ?? LocalModelManager.recommendedStreamingModelSources.first?.id
+      ?? ""
     preferredLocaleIdentifier =
       defaults.string(forKey: DefaultsKey.preferredLocale.rawValue) ?? Locale.current.identifier
     preferredAudioInputUID = defaults.string(forKey: DefaultsKey.preferredAudioInputUID.rawValue)

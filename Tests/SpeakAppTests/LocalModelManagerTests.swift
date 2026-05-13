@@ -52,24 +52,24 @@ final class LocalModelManagerTests: XCTestCase {
         XCTAssertEqual(resolved.approximateSizeMB, 123)
     }
 
-    func testStreamingRuntimeHint_identifiesParakeetModels() {
+    func testStreamingRuntimeHint_identifiesSherpaModels() {
         XCTAssertEqual(
             LocalModelManager.streamingRuntimeHint(
-                for: "nvidia/parakeet-tdt-0.6b-v2",
-                modelName: "parakeet-tdt-0.6b-v2"
+                for: "csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26",
+                modelName: "streaming-zipformer-en-2023-06-26"
             ),
-            "NeMo / Parakeet streaming runtime"
+            "sherpa-onnx streaming runtime"
         )
     }
 
     @MainActor
-    func testRecommendedStreamingSources_includeSelectableParakeetCandidate() {
+    func testRecommendedStreamingSources_includeSelectableSherpaCandidate() {
         let sources = LocalModelManager.recommendedStreamingModelSources
-        let hasParakeet = sources.contains {
-            $0.repoID == "nvidia/parakeet-tdt-0.6b-v2"
-                && $0.modelName == "parakeet-tdt-0.6b-v2"
-                && $0.runtime == "NeMo / Parakeet streaming runtime"
+        let hasSherpa = sources.contains {
+            $0.repoID == "csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26"
+                && $0.modelName == "streaming-zipformer-en-2023-06-26"
+                && $0.runtime == "sherpa-onnx streaming runtime"
         }
-        XCTAssertTrue(hasParakeet)
+        XCTAssertTrue(hasSherpa)
     }
 }

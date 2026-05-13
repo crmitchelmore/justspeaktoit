@@ -44,19 +44,19 @@ final class LocalModelManager: ObservableObject {
 
   static let recommendedStreamingModelSources: [LocalStreamingModelSource] = [
     LocalStreamingModelSource(
-      repoID: "nvidia/parakeet-tdt-0.6b-v2",
-      modelName: "parakeet-tdt-0.6b-v2",
-      runtime: "NeMo / Parakeet streaming runtime"
+      repoID: "csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26",
+      modelName: "streaming-zipformer-en-2023-06-26",
+      runtime: "sherpa-onnx streaming runtime"
     ),
     LocalStreamingModelSource(
-      repoID: "nvidia/parakeet-tdt-1.1b",
-      modelName: "parakeet-tdt-1.1b",
-      runtime: "NeMo / Parakeet streaming runtime"
+      repoID: "csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17",
+      modelName: "streaming-zipformer-en-20M-2023-02-17",
+      runtime: "sherpa-onnx streaming runtime"
     ),
     LocalStreamingModelSource(
-      repoID: "ggerganov/whisper.cpp",
-      modelName: "whisper.cpp streaming server",
-      runtime: "whisper.cpp streaming runtime"
+      repoID: "k2-fsa/sherpa-onnx",
+      modelName: "sherpa-onnx streaming model zoo",
+      runtime: "sherpa-onnx streaming runtime"
     ),
   ]
 
@@ -355,11 +355,8 @@ final class LocalModelManager: ObservableObject {
 
   nonisolated static func streamingRuntimeHint(for repoID: String, modelName: String) -> String {
     let searchText = "\(repoID) \(modelName)".lowercased()
-    if searchText.contains("parakeet") {
-      return "NeMo / Parakeet streaming runtime"
-    }
-    if searchText.contains("nemo") || searchText.contains("rnnt") || searchText.contains("tdt") {
-      return "NeMo RNNT/TDT streaming runtime"
+    if searchText.contains("sherpa") || searchText.contains("zipformer") || searchText.contains("onnx") {
+      return "sherpa-onnx streaming runtime"
     }
     if searchText.contains("whisper.cpp") || searchText.contains("ggml") || searchText.contains("gguf") {
       return "whisper.cpp streaming runtime"

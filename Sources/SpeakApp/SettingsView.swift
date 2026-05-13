@@ -95,8 +95,9 @@ struct SettingsView: View {
   @State private var huggingFaceRepoID: String = "argmaxinc/whisperkit-coreml"
   @State private var huggingFaceModelName: String = "tiny"
   @State private var huggingFaceImportError: String?
-  @State private var streamingHuggingFaceRepoID: String = "nvidia/parakeet-tdt-0.6b-v2"
-  @State private var streamingHuggingFaceModelName: String = "parakeet-tdt-0.6b-v2"
+  @State private var streamingHuggingFaceRepoID: String =
+    "csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26"
+  @State private var streamingHuggingFaceModelName: String = "streaming-zipformer-en-2023-06-26"
   @State private var selectedRecommendedStreamingSourceID: String =
     LocalModelManager.recommendedStreamingModelSources.first?.id ?? ""
   @State private var streamingHuggingFaceImportError: String?
@@ -1168,7 +1169,7 @@ struct SettingsView: View {
         title: settings.localTranscriptionMode == .batch ? "Download a local batch model" : "Add local streaming model sources",
         detail: settings.localTranscriptionMode == .batch
           ? "WhisperKit/Core ML models run locally after recording stops."
-          : "Streaming candidates are tracked separately because they need a local runtime such as Parakeet/NeMo or whisper.cpp."
+          : "Streaming candidates are tracked separately because they need the sherpa-onnx local runtime."
       )
       localModelStep(
         number: "3",
@@ -1275,7 +1276,7 @@ struct SettingsView: View {
           Text(
             """
             These are local-only streaming candidates, not cloud providers. \
-            They are separate from Local Batch/WhisperKit models and need a compatible on-device runtime before they can be downloaded and run in Speak.
+            They are separate from Local Batch/WhisperKit models and use sherpa-onnx for Apple Silicon-friendly on-device streaming.
             """
           )
           .font(.caption)
@@ -1283,7 +1284,7 @@ struct SettingsView: View {
         }
       }
 
-      Label("Local Streaming is local-only, but download/run is blocked until a compatible on-device streaming runtime is wired in.", systemImage: "lock.shield")
+      Label("Local Streaming is local-only. sherpa-onnx download/run is being wired in for this prerelease; recording stays blocked until the runtime is available.", systemImage: "lock.shield")
         .font(.caption)
         .foregroundStyle(.orange)
 
@@ -1324,9 +1325,12 @@ struct SettingsView: View {
       VStack(alignment: .leading, spacing: 8) {
         Text("Advanced: add a Hugging Face source manually")
           .font(.caption.weight(.semibold))
-        TextField("Repo ID, e.g. nvidia/parakeet-tdt-0.6b-v2", text: $streamingHuggingFaceRepoID)
+        TextField(
+          "Repo ID, e.g. csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26",
+          text: $streamingHuggingFaceRepoID
+        )
           .textFieldStyle(.roundedBorder)
-        TextField("Model name, e.g. parakeet-tdt-0.6b-v2", text: $streamingHuggingFaceModelName)
+        TextField("Model name, e.g. streaming-zipformer-en-2023-06-26", text: $streamingHuggingFaceModelName)
           .textFieldStyle(.roundedBorder)
       }
 
@@ -1532,7 +1536,7 @@ struct SettingsView: View {
 
   private func openLocalStreamingModelSearch() {
     guard let url = URL(
-      string: "https://huggingface.co/models?pipeline_tag=automatic-speech-recognition&sort=downloads&search=parakeet%20streaming"
+      string: "https://huggingface.co/models?pipeline_tag=automatic-speech-recognition&sort=downloads&search=sherpa-onnx%20streaming%20zipformer"
     ) else { return }
     NSWorkspace.shared.open(url)
   }

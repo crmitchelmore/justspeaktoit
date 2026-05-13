@@ -356,7 +356,7 @@ final class MainManager: ObservableObject {
     case .localModel:
       activeModel = appSettings.localTranscriptionModel
     }
-    let providerLabel = ModelCatalog.friendlyName(for: activeModel)
+    let providerLabel = captureHealthProviderLabel(for: activeModel)
     let latencyTier = ModelCatalog.allOptions.first(where: { $0.id == activeModel })?.latencyTier ?? .medium
 
     return CaptureHealthSnapshot(
@@ -365,6 +365,22 @@ final class MainManager: ObservableObject {
       providerLabel: providerLabel,
       latencyTier: latencyTier
     )
+  }
+
+  private func captureHealthProviderLabel(for modelID: String) -> String {
+    guard appSettings.transcriptionMode == .localModel else {
+      return ModelCatalog.friendlyName(for: modelID)
+    }
+    guard let localModel = LocalModelManager.shared.model(for: modelID) else {
+      return ModelCatalog.friendlyName(for: modelID)
+    }
+    return shortLocalModelDisplayName(localModel.displayName)
+  }
+
+  private func shortLocalModelDisplayName(_ displayName: String) -> String {
+    let suffixRange = displayName.range(of: " from ", options: [.caseInsensitive, .backwards])
+    guard let suffixRange else { return displayName }
+    return String(displayName[..<suffixRange.lowerBound])
   }
 
   func userRequestedStopDueToError() {

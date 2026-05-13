@@ -1342,9 +1342,15 @@ struct SettingsView: View {
           settings.localTranscriptionMode = .batch
         }
       } else if settings.transcriptionMode == .localModel {
-        Label("Ready", systemImage: "checkmark.circle.fill")
-          .font(.caption.weight(.semibold))
-          .foregroundStyle(.green)
+        VStack(alignment: .trailing, spacing: 6) {
+          Label("Ready", systemImage: "checkmark.circle.fill")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.green)
+          Button("Prepare Model") {
+            Task { await localModels.install(model) }
+          }
+          .font(.caption)
+        }
       } else {
         Button("Use Local Mode") {
           settings.transcriptionMode = .localModel

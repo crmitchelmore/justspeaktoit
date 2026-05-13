@@ -994,6 +994,9 @@ struct SettingsView: View {
           .font(.caption)
           .foregroundStyle(.secondary)
 
+          localModelQuickStart
+          selectedLocalModelCallout
+
           ModelPicker(
             title: "Local Model",
             help: "Used when Transcription Mode is set to Local Model.",
@@ -1024,14 +1027,28 @@ struct SettingsView: View {
 
   private func localModelRow(_ model: LocalTranscriptionModel) -> some View {
     let state = localModels.installState(for: model.id)
+    let isSelected = model.id == settings.localTranscriptionModel
     return HStack(alignment: .top, spacing: 12) {
       Image(systemName: localModelIcon(for: state))
         .foregroundStyle(localModelTint(for: state))
         .frame(width: 24)
 
       VStack(alignment: .leading, spacing: 4) {
-        Text(model.displayName)
-          .font(.subheadline.weight(.semibold))
+        HStack(spacing: 8) {
+          Text(model.displayName)
+            .font(.subheadline.weight(.semibold))
+          if isSelected {
+            Text("Selected")
+              .font(.caption2.weight(.semibold))
+              .foregroundStyle(Color.green)
+              .padding(.horizontal, 8)
+              .padding(.vertical, 3)
+              .background(
+                Capsule()
+                  .fill(Color.green.opacity(0.12))
+              )
+          }
+        }
         Text(model.description)
           .font(.caption)
           .foregroundStyle(.secondary)
@@ -1049,15 +1066,35 @@ struct SettingsView: View {
 
       switch state {
       case .installed:
-        Button("Delete") {
-          localModels.delete(model)
+        VStack(alignment: .trailing, spacing: 8) {
+          if !isSelected {
+            Button("Use") {
+              settings.localTranscriptionModel = model.id
+            }
+          }
+          Button("Delete") {
+            localModels.delete(model)
+          }
         }
       case .installing:
-        ProgressView()
-          .controlSize(.small)
+        VStack(alignment: .trailing, spacing: 6) {
+          ProgressView()
+            .controlSize(.small)
+          Text("Downloading")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
       case .notInstalled, .failed:
-        Button("Download") {
-          Task { await localModels.install(model) }
+        VStack(alignment: .trailing, spacing: 8) {
+          Button(isSelected ? "Download" : "Download & Use") {
+            settings.localTranscriptionModel = model.id
+            Task { await localModels.install(model) }
+          }
+          if !isSelected {
+            Button("Use") {
+              settings.localTranscriptionModel = model.id
+            }
+          }
         }
       }
     }
@@ -1066,6 +1103,154 @@ struct SettingsView: View {
       RoundedRectangle(cornerRadius: 12, style: .continuous)
         .fill(Color(nsColor: .controlBackgroundColor))
     )
+  }
+
+  private var localModelQuickStart: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      localModelStep(
+        number: "1",
+        title: "Choose Local Model mode",
+        detail: "This switches recordings away from cloud batch transcription."
+      )
+      localModelStep(
+        number: "2",
+        title: "Download a WhisperKit model",
+        detail: "Tiny is fastest; Small is more accurate and uses more disk."
+      )
+      localModelStep(
+        number: "3",
+        title: "Record normally",
+        detail: "Speak transcribes after recording stops, offline on this Mac."
+      )
+    }
+    .padding(12)
+    .background(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .fill(Color.green.opacity(0.08))
+    )
+  }
+
+  private func localModelStep(number: String, title: String, detail: String) -> some View {
+    HStack(alignment: .top, spacing: 10) {
+      Text(number)
+        .font(.caption.weight(.bold))
+        .foregroundStyle(.white)
+        .frame(width: 20, height: 20)
+        .background(Circle().fill(Color.green))
+      VStack(alignment: .leading, spacing: 2) {
+        Text(title)
+          .font(.caption.weight(.semibold))
+        Text(detail)
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+      }
+    }
+  }
+
+  @ViewBuilder
+  private var selectedLocalModelCallout: some View {
+    if let model = selectedLocalModel {
+      let state = localModels.installState(for: model.id)
+      HStack(alignment: .center, spacing: 12) {
+        Image(systemName: selectedLocalModelStatusIcon(for: state))
+          .foregroundStyle(localModelTint(for: state))
+          .font(.title3)
+          .frame(width: 24)
+
+        VStack(alignment: .leading, spacing: 3) {
+          Text(selectedLocalModelStatusTitle(for: state, model: model))
+            .font(.subheadline.weight(.semibold))
+          Text(selectedLocalModelStatusDetail(for: state))
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+
+        Spacer()
+
+        selectedLocalModelAction(for: state, model: model)
+      }
+      .padding(12)
+      .background(
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+          .fill(Color(nsColor: .controlBackgroundColor))
+      )
+    }
+  }
+
+  @ViewBuilder
+  private func selectedLocalModelAction(
+    for state: LocalModelManager.InstallState,
+    model: LocalTranscriptionModel
+  ) -> some View {
+    switch state {
+    case .installed:
+      if settings.transcriptionMode == .localModel {
+        Label("Ready", systemImage: "checkmark.circle.fill")
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.green)
+      } else {
+        Button("Use Local Mode") {
+          settings.transcriptionMode = .localModel
+        }
+      }
+    case .installing:
+      ProgressView()
+        .controlSize(.small)
+    case .notInstalled, .failed:
+      Button("Download Selected") {
+        Task { await localModels.install(model) }
+      }
+    }
+  }
+
+  private var selectedLocalModel: LocalTranscriptionModel? {
+    ModelCatalog.localTranscription.first { $0.id == settings.localTranscriptionModel }
+  }
+
+  private func selectedLocalModelStatusIcon(for state: LocalModelManager.InstallState) -> String {
+    switch state {
+    case .installed:
+      return settings.transcriptionMode == .localModel ? "checkmark.circle.fill" : "switch.2"
+    case .installing:
+      return "arrow.down.circle.fill"
+    case .notInstalled:
+      return "arrow.down.circle"
+    case .failed:
+      return "exclamationmark.triangle.fill"
+    }
+  }
+
+  private func selectedLocalModelStatusTitle(
+    for state: LocalModelManager.InstallState,
+    model: LocalTranscriptionModel
+  ) -> String {
+    switch state {
+    case .installed:
+      return settings.transcriptionMode == .localModel
+        ? "\(model.displayName) is ready"
+        : "\(model.displayName) is downloaded"
+    case .installing:
+      return "Downloading \(model.displayName)"
+    case .notInstalled:
+      return "Download \(model.displayName)"
+    case .failed:
+      return "Download failed"
+    }
+  }
+
+  private func selectedLocalModelStatusDetail(for state: LocalModelManager.InstallState) -> String {
+    switch state {
+    case .installed:
+      return settings.transcriptionMode == .localModel
+        ? "Hold your recording shortcut; transcription runs locally when you stop."
+        : "Switch to Local Model mode to run this model instead of a cloud provider."
+    case .installing:
+      return "Keep Settings open while the model download finishes."
+    case .notInstalled:
+      return "Download once, then this Mac can transcribe with it offline."
+    case .failed(let message):
+      return message
+    }
   }
 
   private func localModelIcon(for state: LocalModelManager.InstallState) -> String {

@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>JustSpeakToIt — Voice-First Transcription for Mac & iOS</title>
-  <meta name="description" content="Transform your voice into text instantly. Bring your own API keys for pennies per hour. Native Mac & iOS apps with on-device and cloud transcription.">
-  <meta property="og:title" content="JustSpeakToIt — Voice-First Transcription">
-  <meta property="og:description" content="Transform your voice into text instantly. Native Mac & iOS apps with bring-your-own-keys pricing.">
+  <title>JustSpeakToIt — Live Streaming Transcription for Mac & iOS</title>
+  <meta name="description" content="Live streaming speech-to-text with Deepgram Nova-3, AssemblyAI Universal-3 Pro, Soniox, ElevenLabs Scribe v2, OpenAI Realtime Whisper, Modulate Velma-2, and Apple on-device models.">
+  <meta property="og:title" content="JustSpeakToIt — Live Streaming Transcription">
+  <meta property="og:description" content="Native Mac & iOS apps focused on low-latency live transcription with bring-your-own-keys pricing.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://justspeaktoit.com">
   <meta name="twitter:card" content="summary_large_image">
@@ -231,7 +231,7 @@
     .hero__subtitle {
       font-size: clamp(1.1rem, 2.5vw, 1.35rem);
       color: var(--color-text-muted);
-      max-width: 600px;
+      max-width: 720px;
       margin-bottom: 3rem;
       opacity: 0;
       animation: fadeInUp 0.8s var(--ease-out-expo) 0.6s forwards;
@@ -430,6 +430,139 @@
       height: 60px;
       background: linear-gradient(to bottom, transparent, rgba(255,255,255,0.2), transparent);
     }
+
+    /* Live Models */
+    .live-models {
+      position: relative;
+      isolation: isolate;
+    }
+
+    .live-models::before {
+      content: '';
+      position: absolute;
+      inset: 5rem 1rem auto;
+      height: 420px;
+      background:
+        radial-gradient(circle at 18% 20%, rgba(45, 212, 191, 0.22), transparent 32%),
+        radial-gradient(circle at 86% 12%, rgba(255, 106, 61, 0.26), transparent 38%),
+        linear-gradient(135deg, rgba(255, 255, 255, 0.05), transparent);
+      border-radius: 42px;
+      filter: blur(2px);
+      opacity: 0.85;
+      z-index: -1;
+    }
+
+    .live-models__grid {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 1rem;
+    }
+
+    .live-model-card {
+      min-height: 220px;
+      background:
+        linear-gradient(145deg, rgba(26, 37, 51, 0.94), rgba(11, 15, 20, 0.92)),
+        radial-gradient(circle at 15% 15%, rgba(255, 106, 61, 0.16), transparent 45%);
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      border-radius: 24px;
+      padding: 1.5rem;
+      position: relative;
+      overflow: hidden;
+      transition: transform 0.35s var(--ease-out-expo), border-color 0.35s ease, box-shadow 0.35s ease;
+      grid-column: span 4;
+    }
+
+    .live-model-card--hero {
+      grid-column: span 6;
+      min-height: 270px;
+    }
+
+    .live-model-card::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px);
+      background-size: 28px 28px;
+      mask-image: linear-gradient(to bottom, black, transparent 78%);
+      pointer-events: none;
+    }
+
+    .live-model-card:hover {
+      transform: translateY(-6px);
+      border-color: rgba(45, 212, 191, 0.36);
+      box-shadow: 0 28px 70px rgba(0, 0, 0, 0.36), 0 0 32px rgba(45, 212, 191, 0.08);
+    }
+
+    .live-model-card__meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 2.25rem;
+      position: relative;
+      z-index: 1;
+    }
+
+    .live-model-card__provider {
+      color: var(--color-secondary);
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    .live-model-card__latency {
+      border: 1px solid rgba(74, 222, 128, 0.28);
+      background: rgba(74, 222, 128, 0.08);
+      color: var(--color-success);
+      border-radius: 999px;
+      padding: 0.35rem 0.7rem;
+      font-size: 0.76rem;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .live-model-card__title {
+      font-family: var(--font-display);
+      font-size: clamp(1.45rem, 3vw, 2rem);
+      font-weight: 900;
+      line-height: 1.08;
+      margin-bottom: 0.85rem;
+      position: relative;
+      z-index: 1;
+    }
+
+    .live-model-card__description {
+      color: var(--color-text-muted);
+      font-size: 0.95rem;
+      line-height: 1.65;
+      position: relative;
+      z-index: 1;
+    }
+
+    .live-model-card__pulse {
+      position: absolute;
+      right: 1.5rem;
+      bottom: 1.5rem;
+      display: flex;
+      align-items: end;
+      gap: 0.25rem;
+      opacity: 0.34;
+    }
+
+    .live-model-card__pulse span {
+      width: 5px;
+      border-radius: 99px;
+      background: linear-gradient(to top, var(--color-secondary), var(--color-accent-warm));
+      animation: wave 1.15s ease-in-out infinite;
+    }
+
+    .live-model-card__pulse span:nth-child(1) { height: 20px; animation-delay: 0s; }
+    .live-model-card__pulse span:nth-child(2) { height: 34px; animation-delay: 0.12s; }
+    .live-model-card__pulse span:nth-child(3) { height: 48px; animation-delay: 0.24s; }
+    .live-model-card__pulse span:nth-child(4) { height: 26px; animation-delay: 0.36s; }
 
     /* Section styling */
     section {
@@ -885,6 +1018,16 @@
         margin: 0 auto;
       }
 
+      .live-models__grid {
+        grid-template-columns: 1fr;
+      }
+
+      .live-model-card,
+      .live-model-card--hero {
+        grid-column: auto;
+        min-height: 0;
+      }
+
       .byok-section {
         padding: 2.5rem 1.5rem;
         margin: 2rem 1rem;
@@ -920,6 +1063,7 @@
       JustSpeakToIt
     </a>
     <ul class="nav__links">
+      <li><a href="#models" class="nav__link">Live Models</a></li>
       <li><a href="#features" class="nav__link">Features</a></li>
       <li><a href="#pricing" class="nav__link">Pricing</a></li>
       <li><a href="#platforms" class="nav__link">Platforms</a></li>
@@ -935,6 +1079,7 @@
 
   <!-- Mobile navigation overlay (sibling of nav to avoid iOS Safari backdrop-filter containment) -->
   <div class="mobile-nav-overlay" id="mobile-nav-overlay" aria-hidden="true">
+    <a href="#models" class="nav__link">Live Models</a>
     <a href="#features" class="nav__link">Features</a>
     <a href="#pricing" class="nav__link">Pricing</a>
     <a href="#platforms" class="nav__link">Platforms</a>
@@ -945,13 +1090,13 @@
   <section class="hero">
     <div class="hero__badge">
       <span class="hero__badge-dot"></span>
-      Open Source · MIT Licensed
+      Live streaming models now front and centre
     </div>
     <h1 class="hero__title">
-      <span class="hero__title-accent">Speak.</span> We'll handle the rest.
+      <span class="hero__title-accent">Speak live.</span> See the words arrive.
     </h1>
     <p class="hero__subtitle">
-      The fastest way to turn your voice into text. Native apps for Mac and iOS with on-device privacy and bring-your-own-keys pricing.
+      Low-latency speech-to-text for Mac and iOS, built around streaming providers like Deepgram Nova-3, AssemblyAI Universal-3 Pro, ElevenLabs Scribe v2, Soniox, OpenAI Realtime Whisper, Modulate Velma-2, and Apple on-device recognition.
     </p>
     <div class="hero__actions">
       <a href="https://github.com/crmitchelmore/justspeaktoit/releases/latest" class="btn btn--primary" target="_blank" rel="noopener">
@@ -992,14 +1137,111 @@
       </div>
       <div class="pricing-highlight__divider"></div>
       <div class="pricing-highlight__item">
-        <div class="pricing-highlight__value pricing-highlight__value--secondary">~$0.006</div>
-        <div class="pricing-highlight__label">Per minute with BYOK</div>
+        <div class="pricing-highlight__value pricing-highlight__value--secondary">7</div>
+        <div class="pricing-highlight__label">Live model options</div>
       </div>
       <div class="pricing-highlight__divider"></div>
       <div class="pricing-highlight__item">
-        <div class="pricing-highlight__value">∞</div>
-        <div class="pricing-highlight__label">On-device (free)</div>
+        <div class="pricing-highlight__value">BYOK</div>
+        <div class="pricing-highlight__label">No transcription markup</div>
       </div>
+    </div>
+  </section>
+
+  <!-- Live Models -->
+  <section class="live-models" id="models">
+    <div class="section-header reveal">
+      <div class="section-header__eyebrow">Live Streaming</div>
+      <h2 class="section-header__title">Choose the engine for the moment</h2>
+      <p class="section-header__description">
+        JustSpeakToIt is tuned for streaming-first transcription: interim text while you speak, polished finals when the provider supports them, and instant insertion into the app you are already using.
+      </p>
+    </div>
+
+    <div class="live-models__grid">
+      <article class="live-model-card live-model-card--hero reveal">
+        <div class="live-model-card__meta">
+          <span class="live-model-card__provider">Deepgram</span>
+          <span class="live-model-card__latency">~200ms</span>
+        </div>
+        <h3 class="live-model-card__title">Nova-3 Streaming</h3>
+        <p class="live-model-card__description">
+          Fast WebSocket transcription with interim results for the lowest-friction everyday dictation flow.
+        </p>
+        <div class="live-model-card__pulse" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+      </article>
+
+      <article class="live-model-card live-model-card--hero reveal">
+        <div class="live-model-card__meta">
+          <span class="live-model-card__provider">AssemblyAI</span>
+          <span class="live-model-card__latency">~250ms</span>
+        </div>
+        <h3 class="live-model-card__title">Universal-3 Pro Streaming</h3>
+        <p class="live-model-card__description">
+          High-accuracy multilingual streaming with formatted turn finalisation when you want cleaner long-form output.
+        </p>
+        <div class="live-model-card__pulse" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+      </article>
+
+      <article class="live-model-card reveal">
+        <div class="live-model-card__meta">
+          <span class="live-model-card__provider">OpenAI</span>
+          <span class="live-model-card__latency">~250ms</span>
+        </div>
+        <h3 class="live-model-card__title">Realtime Whisper</h3>
+        <p class="live-model-card__description">
+          Streaming transcription with built-in noise reduction using your existing OpenAI API key.
+        </p>
+        <div class="live-model-card__pulse" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+      </article>
+
+      <article class="live-model-card reveal">
+        <div class="live-model-card__meta">
+          <span class="live-model-card__provider">ElevenLabs</span>
+          <span class="live-model-card__latency">~200ms</span>
+        </div>
+        <h3 class="live-model-card__title">Scribe v2 Streaming</h3>
+        <p class="live-model-card__description">
+          Real-time Scribe transcription for teams already using ElevenLabs speech workflows.
+        </p>
+        <div class="live-model-card__pulse" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+      </article>
+
+      <article class="live-model-card reveal">
+        <div class="live-model-card__meta">
+          <span class="live-model-card__provider">Soniox</span>
+          <span class="live-model-card__latency">~220ms</span>
+        </div>
+        <h3 class="live-model-card__title">Real-time Preview</h3>
+        <p class="live-model-card__description">
+          Low-latency multilingual WebSocket STT for fast feedback across more languages.
+        </p>
+        <div class="live-model-card__pulse" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+      </article>
+
+      <article class="live-model-card reveal">
+        <div class="live-model-card__meta">
+          <span class="live-model-card__provider">Modulate</span>
+          <span class="live-model-card__latency">~220ms</span>
+        </div>
+        <h3 class="live-model-card__title">Velma-2 Streaming</h3>
+        <p class="live-model-card__description">
+          Multilingual live transcription with diarisation and signal-detection oriented provider support.
+        </p>
+        <div class="live-model-card__pulse" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+      </article>
+
+      <article class="live-model-card reveal">
+        <div class="live-model-card__meta">
+          <span class="live-model-card__provider">Apple</span>
+          <span class="live-model-card__latency">~50ms</span>
+        </div>
+        <h3 class="live-model-card__title">On-device Speech</h3>
+        <p class="live-model-card__description">
+          Private local recognition for instant, free dictation when cloud accuracy is not required.
+        </p>
+        <div class="live-model-card__pulse" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+      </article>
     </div>
   </section>
 
@@ -1033,24 +1275,24 @@
   <section id="features">
     <div class="section-header reveal">
       <div class="section-header__eyebrow">Features</div>
-      <h2 class="section-header__title">Built for speed and privacy</h2>
+      <h2 class="section-header__title">Built around live words, not waiting</h2>
       <p class="section-header__description">
-        A native app that feels like magic. No electron, no bloat—just fast, reliable transcription.
+        A native app that feels immediate. No Electron, no bloat--just fast streaming transcripts, safe key storage, and polished text insertion.
       </p>
     </div>
 
     <div class="features-grid">
       <div class="feature-card reveal">
         <div class="feature-card__icon">⚡</div>
-        <h3 class="feature-card__title">Instant Hotkey Access</h3>
+        <h3 class="feature-card__title">Streaming-First Dictation</h3>
         <p class="feature-card__description">
-          Double-tap Fn, hold-to-record, or use a custom shortcut to start recording from anywhere. Your transcript appears right where your cursor is.
+          Double-tap Fn, hold-to-record, or use a custom shortcut. Watch live text arrive as you speak, then insert the final transcript where your cursor is.
         </p>
       </div>
 
       <div class="feature-card reveal">
         <div class="feature-card__icon">🔒</div>
-        <h3 class="feature-card__title">On-Device Transcription</h3>
+        <h3 class="feature-card__title">Private On-Device Fallback</h3>
         <p class="feature-card__description">
           Use Apple's built-in speech recognition for completely private, offline transcription. Your audio never leaves your device.
         </p>
@@ -1068,7 +1310,7 @@
         <div class="feature-card__icon">🧠</div>
         <h3 class="feature-card__title">AI Post-Processing</h3>
         <p class="feature-card__description">
-          Optional LLM cleanup using GPT-4o, Claude, Gemini, or Mistral—removes filler words, fixes punctuation, and polishes your prose.
+          Optional Live Polish and post-processing using GPT-4o, Claude, Gemini, or Mistral--removes filler words, fixes punctuation, and polishes your prose.
         </p>
       </div>
 
@@ -1118,21 +1360,21 @@
   <section>
     <div class="section-header reveal">
       <div class="section-header__eyebrow">How It Works</div>
-      <h2 class="section-header__title">Three steps to faster writing</h2>
+      <h2 class="section-header__title">Three steps to live text</h2>
     </div>
 
     <div class="how-it-works">
       <div class="step reveal">
         <h3 class="step__title">Activate</h3>
         <p class="step__description">
-          Double-tap Fn or click the menu bar icon. A subtle HUD appears showing you're recording.
+          Double-tap Fn or click the menu bar icon. A subtle HUD appears with your active live model.
         </p>
       </div>
 
       <div class="step reveal">
         <h3 class="step__title">Speak</h3>
         <p class="step__description">
-          Just talk naturally. See live transcription as you speak, with real-time feedback.
+          Just talk naturally. Streaming providers return interim text while you are still speaking.
         </p>
       </div>
 
@@ -1147,20 +1389,20 @@
 
   <!-- BYOK Section -->
   <div class="byok-section reveal" id="byok">
-    <h2 class="byok-section__title">Bring Your Own Keys</h2>
+    <h2 class="byok-section__title">Bring Your Own Streaming Keys</h2>
     <p class="byok-section__description">
-      Use your existing API keys from any supported provider. 
+      Use your existing API keys from supported live transcription providers.
       Pay only for what you use—typically <strong>$0.36 per hour</strong> or less. 
       No subscriptions, no hidden fees, no data selling.
     </p>
     <div class="provider-logos">
-      <span class="provider-logo">Deepgram Nova-3</span>
-      <span class="provider-logo">AssemblyAI</span>
-      <span class="provider-logo">OpenAI Whisper</span>
-      <span class="provider-logo">Rev.ai</span>
-      <span class="provider-logo">Google Gemini</span>
-      <span class="provider-logo">OpenRouter</span>
-      <span class="provider-logo">Apple (Free)</span>
+      <span class="provider-logo">Deepgram Nova-3 Streaming</span>
+      <span class="provider-logo">AssemblyAI Universal-3 Pro</span>
+      <span class="provider-logo">OpenAI Realtime Whisper</span>
+      <span class="provider-logo">ElevenLabs Scribe v2</span>
+      <span class="provider-logo">Soniox Real-time</span>
+      <span class="provider-logo">Modulate Velma-2</span>
+      <span class="provider-logo">Apple Speech (Free)</span>
     </div>
   </div>
 
@@ -1182,7 +1424,8 @@
           <li>Menu bar app with global hotkeys</li>
           <li>Direct text insertion via Accessibility</li>
           <li>Live transcription preview HUD</li>
-          <li>All providers + AI post-processing</li>
+          <li>Deepgram, AssemblyAI, OpenAI, ElevenLabs, Soniox, Modulate, and Apple live models</li>
+          <li>Live Polish + AI post-processing</li>
           <li>OpenClaw AI chat with hands-free mode</li>
           <li>Install via Homebrew or direct download</li>
           <li>Requires macOS 14+</li>
@@ -1194,7 +1437,7 @@
         <h3 class="platform-card__title">iOS <span style="font-size: 0.7em; color: var(--color-secondary);">(TestFlight Beta)</span></h3>
         <ul class="platform-card__features">
           <li>Live Activity with Dynamic Island</li>
-          <li>Deepgram + Apple Speech transcription</li>
+          <li>Apple Speech, Deepgram, ElevenLabs, and OpenAI live transcription</li>
           <li>OpenClaw AI chat with voice input</li>
           <li>Audio recording & playback</li>
           <li>Home Screen widgets</li>
@@ -1220,7 +1463,7 @@
         </summary>
         <p class="faq-item__answer">
           Yes! When using on-device transcription with Apple Speech, your audio never leaves your device. 
-          When using cloud providers like OpenAI or Deepgram, audio is sent directly to their APIs using your own API keys—we never see or store your audio.
+          When using cloud providers like Deepgram, AssemblyAI, Soniox, ElevenLabs, OpenAI, or Modulate, audio is sent directly to their APIs using your own API keys—we never see or store your audio.
         </p>
       </details>
 
@@ -1231,7 +1474,7 @@
         </summary>
         <p class="faq-item__answer">
           The app is free to download. On-device transcription is completely free. 
-          Cloud transcription with your own API keys typically costs $0.006/minute (about $0.36/hour) with Deepgram or OpenAI Whisper. 
+          Cloud transcription with your own API keys typically costs around $0.006/minute (about $0.36/hour) with low-cost streaming providers such as Deepgram.
           You pay the provider directly—we don't add any markup.
         </p>
       </details>
@@ -1243,7 +1486,7 @@
         </summary>
         <p class="faq-item__answer">
           On-device (Apple Speech) is instant, free, and private—but may be less accurate for specialized vocabulary. 
-          Cloud providers like Deepgram and OpenAI Whisper offer higher accuracy, support for more languages, and features like speaker diarization.
+          Cloud providers like Deepgram, AssemblyAI, Soniox, ElevenLabs, OpenAI, and Modulate offer higher accuracy, lower-latency streaming, broader language support, and provider-specific features like diarisation or formatted turns.
         </p>
       </details>
 
@@ -1312,7 +1555,7 @@
       JustSpeakToIt
     </div>
     <p class="footer__text">
-      Voice-first transcription for Mac & iOS · Open Source
+      Live streaming transcription for Mac & iOS · Open Source
     </p>
     <div class="footer__links">
       <a href="#" class="footer__link">Privacy Policy</a>
@@ -1370,6 +1613,10 @@
     // Add staggered animation delay to feature cards and other elements
     document.querySelectorAll('.features-grid .feature-card').forEach((card, i) => {
       card.style.transitionDelay = `${i * 0.1}s`;
+    });
+
+    document.querySelectorAll('.live-models__grid .live-model-card').forEach((card, i) => {
+      card.style.transitionDelay = `${i * 0.08}s`;
     });
 
     document.querySelectorAll('.how-it-works .step').forEach((step, i) => {

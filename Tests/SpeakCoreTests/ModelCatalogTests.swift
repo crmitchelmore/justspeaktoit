@@ -56,6 +56,7 @@ final class ModelCatalogTests: XCTestCase {
         let allCount = ModelCatalog.allOptions.count
         let sum = ModelCatalog.liveTranscription.count
             + ModelCatalog.batchTranscription.count
+            + ModelCatalog.localTranscriptionOptions.count
             + ModelCatalog.postProcessing.count
         XCTAssertEqual(allCount, sum, "allOptions should be union of all category arrays")
     }
@@ -66,7 +67,8 @@ final class ModelCatalogTests: XCTestCase {
         for (name, options) in [
             ("liveTranscription", ModelCatalog.liveTranscription),
             ("batchTranscription", ModelCatalog.batchTranscription),
-            ("postProcessing", ModelCatalog.postProcessing),
+            ("localTranscription", ModelCatalog.localTranscriptionOptions),
+            ("postProcessing", ModelCatalog.postProcessing)
         ] {
             let ids = options.map(\.id)
             let uniqueIDs = Set(ids)
@@ -88,5 +90,18 @@ final class ModelCatalogTests: XCTestCase {
         for option in ModelCatalog.liveTranscription {
             XCTAssertNotNil(option.latencyTier, "\(option.id) should have a latency tier")
         }
+    }
+
+    func testLocalTranscription_isSeparateFromAppleSpeech() {
+        XCTAssertFalse(ModelCatalog.localTranscription.isEmpty)
+        for model in ModelCatalog.localTranscription {
+            XCTAssertTrue(model.id.hasPrefix("local/"), "\(model.id) should use the downloaded local namespace")
+            XCTAssertFalse(model.id.hasPrefix("apple/local/"), "\(model.id) should not be grouped with Apple Speech")
+        }
+    }
+
+    func testModelRouting_distinguishesAppleSpeechFromDownloadedLocal() {
+        XCTAssertEqual(ModelRouting.family(for: "apple/local/SFSpeechRecognizer"), .appleSpeech)
+        XCTAssertEqual(ModelRouting.family(for: "local/whisperkit/tiny"), .downloadedLocal(engine: "whisperkit"))
     }
 }

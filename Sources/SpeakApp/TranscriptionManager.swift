@@ -137,7 +137,15 @@ final class TranscriptionManager: ObservableObject {
   }
 
   func transcribeFile(at url: URL) async throws -> TranscriptionResult {
-    let model = appSettings.batchTranscriptionModel
+    let model = offlineTranscriptionModel
+    if ModelRouting.family(for: model).isDownloadedLocal {
+      return try await LocalModelManager.shared.transcribeFile(
+        at: url,
+        modelID: model,
+        language: appSettings.preferredLocaleIdentifier
+      )
+    }
+
     let registry = TranscriptionProviderRegistry.shared
 
     // Check if this model uses a dedicated transcription provider
@@ -160,7 +168,10 @@ final class TranscriptionManager: ObservableObject {
   }
 
   func batchTranscriptionUsesRemoteService() async -> Bool {
-    let model = appSettings.batchTranscriptionModel
+    let model = offlineTranscriptionModel
+    if ModelRouting.family(for: model).isDownloadedLocal {
+      return false
+    }
     let registry = TranscriptionProviderRegistry.shared
 
     // Check if provider requires API key
@@ -175,7 +186,7 @@ final class TranscriptionManager: ObservableObject {
   func hasValidBatchAPIKey() async -> Bool {
     guard await batchTranscriptionUsesRemoteService() else { return true }
 
-    let model = appSettings.batchTranscriptionModel
+    let model = offlineTranscriptionModel
     let registry = TranscriptionProviderRegistry.shared
 
     // Check if provider has API key
@@ -185,6 +196,13 @@ final class TranscriptionManager: ObservableObject {
 
     // Fallback to OpenRouter
     return await openRouter.hasStoredAPIKey()
+  }
+
+  private var offlineTranscriptionModel: String {
+    if appSettings.transcriptionMode == .localModel {
+      return appSettings.localTranscriptionModel
+    }
+    return appSettings.batchTranscriptionModel
   }
 
   /// Returns the metadata for the live-transcription provider whose API key is

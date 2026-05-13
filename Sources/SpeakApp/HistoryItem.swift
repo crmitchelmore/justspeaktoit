@@ -119,6 +119,7 @@ struct HistoryCost: Codable, Hashable {
 enum ModelUsagePhase: String, Codable, Hashable {
   case transcriptionLive = "live"
   case transcriptionBatch = "batch"
+  case transcriptionLocal = "local"
   case postProcessing = "post-processing"
 }
 

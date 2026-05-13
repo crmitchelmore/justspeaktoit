@@ -304,7 +304,39 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
         )
     ]
 
-    public static let allOptions: [Option] = liveTranscription + batchTranscription + postProcessing
+    public static let localTranscription: [LocalTranscriptionModel] = [
+        LocalTranscriptionModel(
+            id: "local/whisperkit/tiny",
+            displayName: "WhisperKit Tiny",
+            modelName: "tiny",
+            engine: "whisperkit",
+            approximateSizeMB: 75,
+            description: "Small downloadable Core ML Whisper model for fast offline transcription testing.",
+            tags: [.fast, .cheap]
+        ),
+        LocalTranscriptionModel(
+            id: "local/whisperkit/base",
+            displayName: "WhisperKit Base",
+            modelName: "base",
+            engine: "whisperkit",
+            approximateSizeMB: 145,
+            description: "Balanced downloaded Whisper model for private offline transcription.",
+            tags: [.fast]
+        ),
+        LocalTranscriptionModel(
+            id: "local/whisperkit/small",
+            displayName: "WhisperKit Small",
+            modelName: "small",
+            engine: "whisperkit",
+            approximateSizeMB: 465,
+            description: "Higher quality local Whisper model for longer recordings on Apple silicon.",
+            tags: [.quality]
+        )
+    ]
+
+    public static let localTranscriptionOptions: [Option] = localTranscription.map(\.option)
+
+    public static let allOptions: [Option] = liveTranscription + batchTranscription + localTranscriptionOptions + postProcessing
 
     // O(1) lookup cache keyed on lowercased model ID (first entry wins for cross-category duplicates).
     private static let optionsByID: [String: Option] = Dictionary(
@@ -321,6 +353,12 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
         }
 
         let lowercased = trimmed.lowercased()
+        if lowercased.hasPrefix("local/") {
+            if let name = localTranscription.first(where: { $0.id.lowercased() == lowercased })?.displayName {
+                return name
+            }
+            return "Downloaded Local Model"
+        }
         if lowercased.hasPrefix("apple/local") {
             return "Apple Speech"
         }

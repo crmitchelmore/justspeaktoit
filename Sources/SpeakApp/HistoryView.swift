@@ -1096,6 +1096,8 @@ private struct HistoryListRow: View {
       return "Live"
     case .transcriptionBatch:
       return "Batch"
+    case .transcriptionLocal:
+      return "Local"
     case .postProcessing:
       return "Post-processing"
     }
@@ -1106,6 +1108,8 @@ private struct HistoryListRow: View {
     case .transcriptionLive:
       return 0
     case .transcriptionBatch:
+      return 1
+    case .transcriptionLocal:
       return 1
     case .postProcessing:
       return 2

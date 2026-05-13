@@ -57,6 +57,7 @@ struct SettingsView: View {
   @EnvironmentObject private var settings: AppSettings
   @EnvironmentObject private var audioDevices: AudioInputDeviceManager
   @ObservedObject private var updaterManager = UpdaterManager.shared
+  @ObservedObject private var localModels = LocalModelManager.shared
   private static let localeOptions: [LocaleOption] = [
     LocaleOption(displayName: "English (United States)", identifier: "en_US"),
     LocaleOption(displayName: "English (United Kingdom)", identifier: "en_GB"),
@@ -966,9 +967,130 @@ struct SettingsView: View {
       }
       .speakTooltip("Tell Speak which cloud transcription model should polish the full recording.")
 
+      SettingsCard(
+        title: "Downloaded local models",
+        systemImage: "externaldrive.badge.checkmark",
+        tint: Color.green
+      ) {
+        VStack(alignment: .leading, spacing: 16) {
+          HStack(spacing: 8) {
+            Image(systemName: "lock.shield.fill")
+              .foregroundStyle(Color.green)
+              .imageScale(.small)
+            Text("Private offline transcription")
+              .font(.subheadline.weight(.semibold))
+              .foregroundStyle(Color.green)
+          }
+          .padding(.horizontal, 12)
+          .padding(.vertical, 6)
+          .background(
+            Capsule()
+              .fill(Color.green.opacity(0.12))
+          )
+
+          Text(
+            "Downloaded models are separate from Apple Speech. They run through WhisperKit after you download them and never require an API key."
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+
+          ModelPicker(
+            title: "Local Model",
+            help: "Used when Transcription Mode is set to Local Model.",
+            options: ModelCatalog.localTranscriptionOptions,
+            value: settingsBinding(\AppSettings.localTranscriptionModel)
+          )
+
+          if !localModels.isInstalled(settings.localTranscriptionModel) {
+            Label("Download the selected local model before recording in Local Model mode.", systemImage: "arrow.down.circle")
+              .font(.caption)
+              .foregroundStyle(.orange)
+          }
+
+          VStack(spacing: 10) {
+            ForEach(ModelCatalog.localTranscription) { model in
+              localModelRow(model)
+            }
+          }
+        }
+      }
+      .speakTooltip("Download and manage private local transcription models.")
+
       if settings.hasSelectedModulateModel {
         modulateFeatureSettings
       }
+    }
+  }
+
+  private func localModelRow(_ model: LocalTranscriptionModel) -> some View {
+    let state = localModels.installState(for: model.id)
+    return HStack(alignment: .top, spacing: 12) {
+      Image(systemName: localModelIcon(for: state))
+        .foregroundStyle(localModelTint(for: state))
+        .frame(width: 24)
+
+      VStack(alignment: .leading, spacing: 4) {
+        Text(model.displayName)
+          .font(.subheadline.weight(.semibold))
+        Text(model.description)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        Text("\(model.engine.capitalized) · ~\(model.approximateSizeMB) MB")
+          .font(.caption2.monospacedDigit())
+          .foregroundStyle(.tertiary)
+        if case .failed(let message) = state {
+          Text(message)
+            .font(.caption2)
+            .foregroundStyle(.red)
+        }
+      }
+
+      Spacer()
+
+      switch state {
+      case .installed:
+        Button("Delete") {
+          localModels.delete(model)
+        }
+      case .installing:
+        ProgressView()
+          .controlSize(.small)
+      case .notInstalled, .failed:
+        Button("Download") {
+          Task { await localModels.install(model) }
+        }
+      }
+    }
+    .padding(12)
+    .background(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .fill(Color(nsColor: .controlBackgroundColor))
+    )
+  }
+
+  private func localModelIcon(for state: LocalModelManager.InstallState) -> String {
+    switch state {
+    case .installed:
+      return "checkmark.circle.fill"
+    case .installing:
+      return "arrow.down.circle.fill"
+    case .notInstalled:
+      return "icloud.and.arrow.down"
+    case .failed:
+      return "exclamationmark.triangle.fill"
+    }
+  }
+
+  private func localModelTint(for state: LocalModelManager.InstallState) -> Color {
+    switch state {
+    case .installed:
+      return .green
+    case .installing:
+      return .brandLagoon
+    case .notInstalled:
+      return .secondary
+    case .failed:
+      return .red
     }
   }
 

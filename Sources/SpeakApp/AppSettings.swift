@@ -29,6 +29,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   enum TranscriptionMode: String, CaseIterable, Identifiable {
     case liveNative = "liveNative"
     case batchRemote = "batchRemote"
+    case localModel = "localModel"
 
     var id: String { rawValue }
 
@@ -38,6 +39,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
         return "Live (Streaming)"
       case .batchRemote:
         return "Batch (Remote)"
+      case .localModel:
+        return "Local Model"
       }
     }
   }
@@ -210,6 +213,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     case transcriptionMode
     case liveTranscriptionModel
     case batchTranscriptionModel
+    case localTranscriptionModel
     case postProcessingEnabled
     case postProcessingModel
     case postProcessingTemperature
@@ -276,6 +280,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   }
 
   private static let defaultBatchTranscriptionModel = "google/gemini-2.0-flash-001"
+  private static let defaultLocalTranscriptionModel = "local/whisperkit/tiny"
   private static let legacyWhisperModelIDs: Set<String> = [
     "openrouter/whisper-large-v3",
     "openrouter/whisper-medium",
@@ -314,6 +319,10 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       }
       store(batchTranscriptionModel, key: .batchTranscriptionModel)
     }
+  }
+
+  @Published var localTranscriptionModel: String {
+    didSet { store(localTranscriptionModel, key: .localTranscriptionModel) }
   }
 
   @Published var preferredLocaleIdentifier: String {
@@ -719,6 +728,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     batchTranscriptionModel =
       Self.normalizedBatchModel(
         defaults.string(forKey: DefaultsKey.batchTranscriptionModel.rawValue))
+    localTranscriptionModel =
+      defaults.string(forKey: DefaultsKey.localTranscriptionModel.rawValue) ?? Self.defaultLocalTranscriptionModel
     preferredLocaleIdentifier =
       defaults.string(forKey: DefaultsKey.preferredLocale.rawValue) ?? Locale.current.identifier
     preferredAudioInputUID = defaults.string(forKey: DefaultsKey.preferredAudioInputUID.rawValue)

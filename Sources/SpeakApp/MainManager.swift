@@ -353,6 +353,8 @@ final class MainManager: ObservableObject {
       activeModel = appSettings.liveTranscriptionModel
     case .batchRemote:
       activeModel = appSettings.batchTranscriptionModel
+    case .localModel:
+      activeModel = appSettings.localTranscriptionModel
     }
     let providerLabel = ModelCatalog.friendlyName(for: activeModel)
     let latencyTier = ModelCatalog.allOptions.first(where: { $0.id == activeModel })?.latencyTier ?? .medium
@@ -653,24 +655,49 @@ final class MainManager: ObservableObject {
       } else {
         hudManager.beginTranscribing()
         session.transcriptionStarted = Date()
-        guard
-          await ensureBatchAPIKeyAvailable(
-            for: session,
-            message:
-              "Batch transcription requires an OpenRouter API key. Add one in Settings › API Keys."
-          )
-        else {
-          return
+        if appSettings.transcriptionMode == .batchRemote {
+          guard
+            await ensureBatchAPIKeyAvailable(
+              for: session,
+              message:
+                "Batch transcription requires an OpenRouter API key. Add one in Settings › API Keys."
+            )
+          else {
+            return
+          }
         }
         let result = try await transcriptionManager.transcribeFile(at: summary.url)
         session.transcriptionEnded = Date()
         session.transcriptionResult = result
         session.modelsUsed.insert(result.modelIdentifier)
-        session.modelUsages.append(ModelUsage(modelIdentifier: result.modelIdentifier, phase: .transcriptionBatch))
+        let usagePhase: ModelUsagePhase = appSettings.transcriptionMode == .localModel
+          ? .transcriptionLocal
+          : .transcriptionBatch
+        session.modelUsages.append(ModelUsage(modelIdentifier: result.modelIdentifier, phase: usagePhase))
         session.events.append(
-          HistoryEvent(kind: .transcriptionReceived, description: "Batch transcription complete")
+          HistoryEvent(
+            kind: .transcriptionReceived,
+            description: appSettings.transcriptionMode == .localModel
+              ? "Local model transcription complete"
+              : "Batch transcription complete"
+          )
         )
-        if let payload = result.rawPayload {
+        if appSettings.transcriptionMode == .localModel {
+          session.networkExchanges.append(
+            HistoryNetworkExchange(
+              url: URL(string: "local://whisperkit")!,
+              method: "On-Device",
+              requestHeaders: [
+                "Model": result.modelIdentifier,
+                "Duration": String(format: "%.1fs", result.duration),
+              ],
+              requestBodyPreview: "Local audio file: \(summary.url.lastPathComponent)",
+              responseCode: 200,
+              responseHeaders: [:],
+              responseBodyPreview: "Transcript: \(String(result.text.prefix(500)))"
+            )
+          )
+        } else if let payload = result.rawPayload {
           session.networkExchanges.append(
             HistoryNetworkExchange(
               url: URL(string: "https://openrouter.ai/api/v1/chat/completions")!,

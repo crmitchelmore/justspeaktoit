@@ -97,6 +97,7 @@ final class ModelCatalogTests: XCTestCase {
         for model in ModelCatalog.localTranscription {
             XCTAssertTrue(model.id.hasPrefix("local/"), "\(model.id) should use the downloaded local namespace")
             XCTAssertFalse(model.id.hasPrefix("apple/local/"), "\(model.id) should not be grouped with Apple Speech")
+            XCTAssertFalse(model.supportsLiveStreaming, "\(model.id) should be explicit about offline-only support")
         }
     }
 

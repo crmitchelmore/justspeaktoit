@@ -22,6 +22,7 @@ enum TranscriptionManagerError: LocalizedError {
   case liveSessionNotRunning
   case recognizerUnavailable
   case permissionsMissing
+  case localLiveStreamingUnsupported
 
   var errorDescription: String? {
     switch self {
@@ -33,6 +34,8 @@ enum TranscriptionManagerError: LocalizedError {
       return "The speech recogniser could not be configured for the selected locale."
     case .permissionsMissing:
       return "Required microphone or speech recognition permissions are missing."
+    case .localLiveStreamingUnsupported:
+      return "Downloaded local models are offline-only in this prerelease. Use Local Model mode to transcribe after recording."
     }
   }
 }
@@ -572,6 +575,21 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
     let microphone = await permissionsManager.request(.microphone)
     let speech = await permissionsManager.request(.speechRecognition)
     return microphone.isGranted && speech.isGranted
+  }
+}
+
+final class UnsupportedLocalLiveTranscriber: LiveTranscriptionController {
+  weak var delegate: LiveTranscriptionSessionDelegate?
+  private(set) var isRunning: Bool = false
+
+  func configure(language: String?, model: String) {}
+
+  func start() async throws {
+    throw TranscriptionManagerError.localLiveStreamingUnsupported
+  }
+
+  func stop() async {
+    isRunning = false
   }
 }
 
@@ -2923,6 +2941,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   private var elevenlabsController: ElevenLabsLiveController
   private var sonioxController: SonioxLiveController
   private var openAIRealtimeController: OpenAIRealtimeLiveController
+  private var unsupportedLocalLiveController: UnsupportedLocalLiveTranscriber
   private var currentLanguage: String?
   private var currentModel: String?
   private var invalidateBeforeNextStart: Bool = false
@@ -2983,6 +3002,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       audioDeviceManager: audioDeviceManager,
       secureStorage: secureStorage
     )
+    unsupportedLocalLiveController = UnsupportedLocalLiveTranscriber()
     applyDelegateAndConfiguration()
     startObservingLifecycle()
   }
@@ -3038,6 +3058,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     if model.hasPrefix("elevenlabs/") { return elevenlabsController }
     if model.hasPrefix("soniox/") { return sonioxController }
     if model.hasPrefix("openai/gpt-realtime-whisper") { return openAIRealtimeController }
+    if ModelRouting.family(for: model).isDownloadedLocal { return unsupportedLocalLiveController }
     return nativeController
   }
 
@@ -3049,7 +3070,8 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       assemblyAIController,
       elevenlabsController,
       sonioxController,
-      openAIRealtimeController
+      openAIRealtimeController,
+      unsupportedLocalLiveController
     ]
     let model = currentModel ?? appSettings.liveTranscriptionModel
     for controller in controllers {
@@ -3109,6 +3131,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       audioDeviceManager: audioDeviceManager,
       secureStorage: secureStorage
     )
+    unsupportedLocalLiveController = UnsupportedLocalLiveTranscriber()
     invalidateBeforeNextStart = false
     lastStopDate = nil
     applyDelegateAndConfiguration()

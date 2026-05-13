@@ -92,6 +92,9 @@ struct SettingsView: View {
   @State private var systemPromptPreview = ""
   @State private var showingConfigTransfer = false
   @State private var soundPreviewPlayer: RecordingSoundPlayer?
+  @State private var huggingFaceRepoID: String = "argmaxinc/whisperkit-coreml"
+  @State private var huggingFaceModelName: String = "tiny"
+  @State private var huggingFaceImportError: String?
   private let openRouterKeyIdentifier = "openrouter.apiKey"
 
   enum ValidationViewState {
@@ -725,301 +728,317 @@ struct SettingsView: View {
         }
       }
       .speakTooltip("Choose which transcription flow Speak uses and the locale it should prefer.")
-      SettingsCard(title: "Processing Speed", systemImage: "gauge.with.dots.needle.67percent", tint: Color.brandLagoon) {
-        let capabilities = settings.liveModelCapabilities
-        let anyEnhancedModeAvailable = AppSettings.SpeedMode.allCases
-          .contains { $0 != .instant && capabilities.supportedSpeedModes.contains($0.coreID) }
 
-        VStack(alignment: .leading, spacing: 12) {
-          Text("Auto-clean modes require a streaming live transcription model and disable post-processing.")
-            .font(.callout)
-            .foregroundStyle(.secondary)
+      if settings.transcriptionMode == .liveNative {
+        SettingsCard(title: "Processing Speed", systemImage: "gauge.with.dots.needle.67percent", tint: Color.brandLagoon) {
+          let capabilities = settings.liveModelCapabilities
+          let anyEnhancedModeAvailable = AppSettings.SpeedMode.allCases
+            .contains { $0 != .instant && capabilities.supportedSpeedModes.contains($0.coreID) }
 
-          if !anyEnhancedModeAvailable {
-            Text("To enable these modes, select a streaming Live Model (e.g., Deepgram Nova-3 Streaming).")
-              .font(.caption)
+          VStack(alignment: .leading, spacing: 12) {
+            Text("Auto-clean modes require a streaming live transcription model and disable post-processing.")
+              .font(.callout)
               .foregroundStyle(.secondary)
-          }
 
-          if settings.isAssemblyAIModel && capabilities.postStopFinalizeBudget > 0 {
-            let budgetSeconds = String(format: "%.1f", capabilities.postStopFinalizeBudget)
-            Text("Note: AssemblyAI may take up to ~\(budgetSeconds)s to finalise after you stop, "
-                 + "because it formats the full turn server-side.")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          }
+            if !anyEnhancedModeAvailable {
+              Text("To enable these modes, select a streaming Live Model (e.g., Deepgram Nova-3 Streaming).")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
 
-          VStack(spacing: 8) {
-            ForEach(AppSettings.SpeedMode.allCases) { mode in
-              let isSupported = settings.supports(speedMode: mode)
-              Button {
-                settings.speedMode = mode
-              } label: {
-                HStack(spacing: 12) {
-                  Image(systemName: speedModeIcon(for: mode))
-                    .font(.title3)
-                    .foregroundStyle(settings.speedMode == mode ? .white : .brandLagoon)
-                    .frame(width: 24)
-                  VStack(alignment: .leading, spacing: 2) {
-                    Text(mode.displayName)
-                      .font(.headline)
-                      .foregroundStyle(settings.speedMode == mode ? .white : .primary)
-                    Text(mode.description)
-                      .font(.caption)
-                      .foregroundStyle(settings.speedMode == mode ? .white.opacity(0.8) : .secondary)
+            if settings.isAssemblyAIModel && capabilities.postStopFinalizeBudget > 0 {
+              let budgetSeconds = String(format: "%.1f", capabilities.postStopFinalizeBudget)
+              Text("Note: AssemblyAI may take up to ~\(budgetSeconds)s to finalise after you stop, "
+                   + "because it formats the full turn server-side.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            VStack(spacing: 8) {
+              ForEach(AppSettings.SpeedMode.allCases) { mode in
+                let isSupported = settings.supports(speedMode: mode)
+                Button {
+                  settings.speedMode = mode
+                } label: {
+                  HStack(spacing: 12) {
+                    Image(systemName: speedModeIcon(for: mode))
+                      .font(.title3)
+                      .foregroundStyle(settings.speedMode == mode ? .white : .brandLagoon)
+                      .frame(width: 24)
+                    VStack(alignment: .leading, spacing: 2) {
+                      Text(mode.displayName)
+                        .font(.headline)
+                        .foregroundStyle(settings.speedMode == mode ? .white : .primary)
+                      Text(mode.description)
+                        .font(.caption)
+                        .foregroundStyle(settings.speedMode == mode ? .white.opacity(0.8) : .secondary)
+                    }
+                    Spacer()
+                    if settings.speedMode == mode {
+                      Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.white)
+                    }
                   }
-                  Spacer()
-                  if settings.speedMode == mode {
-                    Image(systemName: "checkmark.circle.fill")
-                      .foregroundStyle(.white)
-                  }
+                  .padding(12)
+                  .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                      .fill(settings.speedMode == mode ? Color.brandLagoon : Color(nsColor: .controlBackgroundColor))
+                  )
                 }
-                .padding(12)
-                .background(
-                  RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(settings.speedMode == mode ? Color.brandLagoon : Color(nsColor: .controlBackgroundColor))
+                .buttonStyle(.plain)
+                .disabled(!isSupported)
+                .opacity(isSupported ? 1.0 : 0.6)
+              }
+            }
+          }
+        }
+        .speakTooltip("Control the trade-off between speed and AI-powered text cleanup.")
+      }
+
+      if settings.transcriptionMode != .liveNative {
+        SettingsCard(title: "Recording buffer", systemImage: "waveform.path.ecg", tint: Color.brandLagoon) {
+          VStack(alignment: .leading, spacing: 12) {
+            Text("Keep recording for a moment after you let go to capture trailing words.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+            HStack {
+              Slider(
+                value: settingsBinding(\AppSettings.postRecordingTailDuration),
+                in: 0...2,
+                step: 0.1
+              )
+              .speakTooltip("Control how long Speak keeps capturing after you finish talking.")
+              Text(
+                settings.postRecordingTailDuration,
+                format: .number.precision(.fractionLength(1))
+              )
+              .font(.caption.monospacedDigit())
+              .foregroundStyle(.secondary)
+              Text("sec")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+          }
+        }
+        .speakTooltip("Decide how much breathing room Speak gives you after releasing your shortcut.")
+      }
+
+      if settings.transcriptionMode == .liveNative {
+        SettingsCard(
+          title: "Live stop grace",
+          systemImage: "waveform.and.mic",
+          tint: Color.brandAccentDeep
+        ) {
+          VStack(alignment: .leading, spacing: 12) {
+            Text(
+              """
+              After stopping, keep the live transcription stream open briefly so providers \
+              can flush their final words. Applied to every live model (Deepgram, AssemblyAI, \
+              OpenAI Realtime, ElevenLabs, Soniox, Modulate).
+              """
+            )
+              .font(.caption)
+              .foregroundStyle(.secondary)
+            HStack {
+              Slider(
+                value: settingsBinding(\AppSettings.liveStopGracePeriod),
+                in: 0...2,
+                step: 0.1
+              )
+              .speakTooltip("Extra delay before closing the live transcription stream after you stop recording.")
+              Text(
+                settings.liveStopGracePeriod,
+                format: .number.precision(.fractionLength(1))
+              )
+              .font(.caption.monospacedDigit())
+              .foregroundStyle(.secondary)
+              Text("sec")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+          }
+        }
+        .speakTooltip("Helps reduce last-word cutoffs across all live transcription providers.")
+      }
+
+      if settings.transcriptionMode != .liveNative {
+        SettingsCard(title: "Silence detection", systemImage: "waveform.slash", tint: Color.brandAccentWarm) {
+          VStack(alignment: .leading, spacing: 12) {
+            Toggle(
+              "Auto-stop on silence",
+              isOn: settingsBinding(\AppSettings.silenceDetectionEnabled)
+            )
+            .speakTooltip("Automatically stop recording when you stop speaking.")
+
+            if settings.silenceDetectionEnabled {
+              Text("Stops recording after a period of silence, useful for hands-free operation.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+              VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                  Text("Silence threshold")
+                    .font(.caption)
+                  Spacer()
+                  Text("\(Int(settings.silenceThreshold * 100))%")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                }
+                Slider(
+                  value: settingsBinding(\AppSettings.silenceThreshold),
+                  in: 0.01...0.2,
+                  step: 0.01
                 )
+                .speakTooltip("Audio levels below this are considered silence. Lower = more sensitive.")
               }
-              .buttonStyle(.plain)
-              .disabled(!isSupported)
-              .opacity(isSupported ? 1.0 : 0.6)
+
+              VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                  Text("Silence duration")
+                    .font(.caption)
+                  Spacer()
+                  Text(settings.silenceDuration, format: .number.precision(.fractionLength(1)))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                  Text("sec")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                Slider(
+                  value: settingsBinding(\AppSettings.silenceDuration),
+                  in: 0.5...5.0,
+                  step: 0.5
+                )
+                .speakTooltip("How long to wait in silence before auto-stopping.")
+              }
             }
           }
         }
+        .speakTooltip("Configure automatic recording stop based on silence detection.")
       }
-      .speakTooltip("Control the trade-off between speed and AI-powered text cleanup.")
 
-      SettingsCard(title: "Recording buffer", systemImage: "waveform.path.ecg", tint: Color.brandLagoon) {
-        VStack(alignment: .leading, spacing: 12) {
-          Text("Keep recording for a moment after you let go to capture trailing words.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-          HStack {
-            Slider(
-              value: settingsBinding(\AppSettings.postRecordingTailDuration),
-              in: 0...2,
-              step: 0.1
+      if settings.transcriptionMode == .liveNative {
+        SettingsCard(title: "Live transcription", systemImage: "mic.fill", tint: Color.brandAccentDeep) {
+          VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+              Image(systemName: "bolt.fill")
+                .foregroundStyle(Color.brandAccentDeep)
+                .imageScale(.small)
+              Text("Fastest - Real-time Response")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.brandAccentDeep)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(
+              Capsule()
+                .fill(Color.brandAccentDeep.opacity(0.12))
             )
-            .speakTooltip("Control how long Speak keeps capturing after you finish talking.")
+
+            Text("Model used while recording. Provides instant feedback as you speak.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+            ModelPicker(
+              title: "Live Model",
+              help: "Choose between on-device transcription or supported streaming providers.",
+              options: ModelCatalog.liveTranscription,
+              value: settingsBinding(\AppSettings.liveTranscriptionModel)
+            )
+          }
+        }
+        .speakTooltip("Pick the model that transcribes as you speak during live recording.")
+      }
+
+      if settings.transcriptionMode == .batchRemote {
+        SettingsCard(
+          title: "Batch transcription", systemImage: "folder.badge.clock", tint: Color.brandLagoon
+        ) {
+          VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+              Image(systemName: "star.fill")
+                .foregroundStyle(Color.brandLagoon)
+                .imageScale(.small)
+              Text("Best Quality - Most Accurate")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.brandLagoon)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(
+              Capsule()
+                .fill(Color.brandLagoon.opacity(0.12))
+            )
+
+            Text("Model used when the recording is uploaded after it finishes. Delivers the highest accuracy.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+            ModelPicker(
+              title: "Batch Model",
+              help: "Remote transcription runs after recording stops for maximum accuracy and provider-specific metadata.",
+              options: ModelCatalog.batchTranscription,
+              value: settingsBinding(\AppSettings.batchTranscriptionModel)
+            )
+          }
+        }
+        .speakTooltip("Tell Speak which cloud transcription model should polish the full recording.")
+      }
+
+      if settings.transcriptionMode == .localModel {
+        SettingsCard(
+          title: "Downloaded local models",
+          systemImage: "externaldrive.badge.checkmark",
+          tint: Color.green
+        ) {
+          VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 8) {
+              Image(systemName: "lock.shield.fill")
+                .foregroundStyle(Color.green)
+                .imageScale(.small)
+              Text("Private offline transcription")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.green)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(
+              Capsule()
+                .fill(Color.green.opacity(0.12))
+            )
+
             Text(
-              settings.postRecordingTailDuration,
-              format: .number.precision(.fractionLength(1))
+              "Downloaded models are separate from Apple Speech. They run through WhisperKit after you download them and never require an API key."
             )
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(.secondary)
-            Text("sec")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          }
-        }
-      }
-      .speakTooltip("Decide how much breathing room Speak gives you after releasing your shortcut.")
-
-      SettingsCard(
-        title: "Live stop grace",
-        systemImage: "waveform.and.mic",
-        tint: Color.brandAccentDeep
-      ) {
-        VStack(alignment: .leading, spacing: 12) {
-          Text(
-            """
-            After stopping, keep the live transcription stream open briefly so providers \
-            can flush their final words. Applied to every live model (Deepgram, AssemblyAI, \
-            OpenAI Realtime, ElevenLabs, Soniox, Modulate).
-            """
-          )
             .font(.caption)
             .foregroundStyle(.secondary)
-          HStack {
-            Slider(
-              value: settingsBinding(\AppSettings.liveStopGracePeriod),
-              in: 0...2,
-              step: 0.1
+
+            localModelQuickStart
+            selectedLocalModelCallout
+            huggingFaceModelImport
+
+            ModelPicker(
+              title: "Local Model",
+              help: "Used when Transcription Mode is set to Local Model.",
+              options: localTranscriptionOptions,
+              value: settingsBinding(\AppSettings.localTranscriptionModel)
             )
-            .speakTooltip("Extra delay before closing the live transcription stream after you stop recording.")
-            Text(
-              settings.liveStopGracePeriod,
-              format: .number.precision(.fractionLength(1))
-            )
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(.secondary)
-            Text("sec")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          }
-        }
-      }
-      .speakTooltip("Helps reduce last-word cutoffs across all live transcription providers.")
 
-      SettingsCard(title: "Silence detection", systemImage: "waveform.slash", tint: Color.brandAccentWarm) {
-        VStack(alignment: .leading, spacing: 12) {
-          Toggle(
-            "Auto-stop on silence",
-            isOn: settingsBinding(\AppSettings.silenceDetectionEnabled)
-          )
-          .speakTooltip("Automatically stop recording when you stop speaking.")
+            if !localModels.isInstalled(settings.localTranscriptionModel) {
+              Label("Download the selected local model before recording in Local Model mode.", systemImage: "arrow.down.circle")
+                .font(.caption)
+                .foregroundStyle(.orange)
+            }
 
-          if settings.silenceDetectionEnabled {
-            Text("Stops recording after a period of silence, useful for hands-free operation.")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-
-            VStack(alignment: .leading, spacing: 8) {
-              HStack {
-                Text("Silence threshold")
-                  .font(.caption)
-                Spacer()
-                Text("\(Int(settings.silenceThreshold * 100))%")
-                  .font(.caption.monospacedDigit())
-                  .foregroundStyle(.secondary)
+            VStack(spacing: 10) {
+              ForEach(localTranscriptionModels) { model in
+                localModelRow(model)
               }
-              Slider(
-                value: settingsBinding(\AppSettings.silenceThreshold),
-                in: 0.01...0.2,
-                step: 0.01
-              )
-              .speakTooltip("Audio levels below this are considered silence. Lower = more sensitive.")
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-              HStack {
-                Text("Silence duration")
-                  .font(.caption)
-                Spacer()
-                Text(settings.silenceDuration, format: .number.precision(.fractionLength(1)))
-                  .font(.caption.monospacedDigit())
-                  .foregroundStyle(.secondary)
-                Text("sec")
-                  .font(.caption)
-                  .foregroundStyle(.secondary)
-              }
-              Slider(
-                value: settingsBinding(\AppSettings.silenceDuration),
-                in: 0.5...5.0,
-                step: 0.5
-              )
-              .speakTooltip("How long to wait in silence before auto-stopping.")
             }
           }
         }
+        .speakTooltip("Download and manage private local transcription models.")
       }
-      .speakTooltip("Configure automatic recording stop based on silence detection.")
 
-      SettingsCard(title: "Live transcription", systemImage: "mic.fill", tint: Color.brandAccentDeep) {
-        VStack(alignment: .leading, spacing: 12) {
-          HStack(spacing: 8) {
-            Image(systemName: "bolt.fill")
-              .foregroundStyle(Color.brandAccentDeep)
-              .imageScale(.small)
-            Text("Fastest - Real-time Response")
-              .font(.subheadline.weight(.semibold))
-              .foregroundStyle(Color.brandAccentDeep)
-          }
-          .padding(.horizontal, 12)
-          .padding(.vertical, 6)
-          .background(
-            Capsule()
-              .fill(Color.brandAccentDeep.opacity(0.12))
-          )
-
-          Text("Model used while recording. Provides instant feedback as you speak.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-          ModelPicker(
-            title: "Live Model",
-            help: "Choose between on-device transcription or supported streaming providers.",
-            options: ModelCatalog.liveTranscription,
-            value: settingsBinding(\AppSettings.liveTranscriptionModel)
-          )
-        }
-      }
-      .speakTooltip("Pick the model that transcribes as you speak during live recording.")
-
-      SettingsCard(
-        title: "Batch transcription", systemImage: "folder.badge.clock", tint: Color.brandLagoon
-      ) {
-        VStack(alignment: .leading, spacing: 12) {
-          HStack(spacing: 8) {
-            Image(systemName: "star.fill")
-              .foregroundStyle(Color.brandLagoon)
-              .imageScale(.small)
-            Text("Best Quality - Most Accurate")
-              .font(.subheadline.weight(.semibold))
-              .foregroundStyle(Color.brandLagoon)
-          }
-          .padding(.horizontal, 12)
-          .padding(.vertical, 6)
-          .background(
-            Capsule()
-              .fill(Color.brandLagoon.opacity(0.12))
-          )
-
-          Text("Model used when the recording is uploaded after it finishes. Delivers the highest accuracy.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-          ModelPicker(
-            title: "Batch Model",
-            help: "Remote transcription runs after recording stops for maximum accuracy and provider-specific metadata.", // swiftlint:disable:this line_length
-            options: ModelCatalog.batchTranscription,
-            value: settingsBinding(\AppSettings.batchTranscriptionModel)
-          )
-        }
-      }
-      .speakTooltip("Tell Speak which cloud transcription model should polish the full recording.")
-
-      SettingsCard(
-        title: "Downloaded local models",
-        systemImage: "externaldrive.badge.checkmark",
-        tint: Color.green
-      ) {
-        VStack(alignment: .leading, spacing: 16) {
-          HStack(spacing: 8) {
-            Image(systemName: "lock.shield.fill")
-              .foregroundStyle(Color.green)
-              .imageScale(.small)
-            Text("Private offline transcription")
-              .font(.subheadline.weight(.semibold))
-              .foregroundStyle(Color.green)
-          }
-          .padding(.horizontal, 12)
-          .padding(.vertical, 6)
-          .background(
-            Capsule()
-              .fill(Color.green.opacity(0.12))
-          )
-
-          Text(
-            "Downloaded models are separate from Apple Speech. They run through WhisperKit after you download them and never require an API key."
-          )
-          .font(.caption)
-          .foregroundStyle(.secondary)
-
-          localModelQuickStart
-          selectedLocalModelCallout
-
-          ModelPicker(
-            title: "Local Model",
-            help: "Used when Transcription Mode is set to Local Model.",
-            options: ModelCatalog.localTranscriptionOptions,
-            value: settingsBinding(\AppSettings.localTranscriptionModel)
-          )
-
-          if !localModels.isInstalled(settings.localTranscriptionModel) {
-            Label("Download the selected local model before recording in Local Model mode.", systemImage: "arrow.down.circle")
-              .font(.caption)
-              .foregroundStyle(.orange)
-          }
-
-          VStack(spacing: 10) {
-            ForEach(ModelCatalog.localTranscription) { model in
-              localModelRow(model)
-            }
-          }
-        }
-      }
-      .speakTooltip("Download and manage private local transcription models.")
-
-      if settings.hasSelectedModulateModel {
+      if settings.transcriptionMode == .liveNative && settings.hasSelectedModulateModel {
         modulateFeatureSettings
       }
     }
@@ -1147,6 +1166,67 @@ struct SettingsView: View {
     }
   }
 
+  private var huggingFaceModelImport: some View {
+      VStack(alignment: .leading, spacing: 12) {
+        HStack(alignment: .top, spacing: 10) {
+          Image(systemName: "globe")
+            .foregroundStyle(Color.green)
+            .frame(width: 24)
+          VStack(alignment: .leading, spacing: 3) {
+            Text("Find more models on Hugging Face")
+              .font(.subheadline.weight(.semibold))
+            Text(
+              """
+              Browse WhisperKit/Core ML model repos, then paste the Hugging Face repo ID and model variant here. \
+              WhisperKit models are offline batch models in this prerelease; live local streaming is not enabled yet.
+              """
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+          }
+        }
+
+        Button {
+          openHuggingFaceModelSearch()
+        } label: {
+          Label("Browse compatible Hugging Face models", systemImage: "magnifyingglass")
+        }
+
+        VStack(alignment: .leading, spacing: 8) {
+          TextField("Repo ID, e.g. argmaxinc/whisperkit-coreml", text: $huggingFaceRepoID)
+            .textFieldStyle(.roundedBorder)
+          TextField("Model variant, e.g. tiny, base, small", text: $huggingFaceModelName)
+            .textFieldStyle(.roundedBorder)
+        }
+
+        HStack {
+          Button {
+            installHuggingFaceModel()
+          } label: {
+            Label("Install from Hugging Face", systemImage: "arrow.down.circle")
+          }
+          .disabled(!canImportHuggingFaceModel)
+
+          Spacer()
+        }
+
+        if let huggingFaceImportError {
+          Text(huggingFaceImportError)
+            .font(.caption)
+            .foregroundStyle(.red)
+        }
+      }
+      .padding(12)
+      .background(
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+          .stroke(Color.green.opacity(0.25), lineWidth: 1)
+          .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+              .fill(Color(nsColor: .controlBackgroundColor).opacity(0.55))
+          )
+      )
+    }
+
   @ViewBuilder
   private var selectedLocalModelCallout: some View {
     if let model = selectedLocalModel {
@@ -1204,7 +1284,41 @@ struct SettingsView: View {
   }
 
   private var selectedLocalModel: LocalTranscriptionModel? {
-    ModelCatalog.localTranscription.first { $0.id == settings.localTranscriptionModel }
+    localTranscriptionModels.first { $0.id == settings.localTranscriptionModel }
+  }
+
+  private var localTranscriptionModels: [LocalTranscriptionModel] {
+    localModels.availableModels
+  }
+
+  private var localTranscriptionOptions: [ModelCatalog.Option] {
+    localModels.availableModelOptions
+  }
+
+  private var canImportHuggingFaceModel: Bool {
+    huggingFaceRepoID.split(separator: "/").count == 2
+      && !huggingFaceModelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+  }
+
+  private func openHuggingFaceModelSearch() {
+    guard let url = URL(
+      string: "https://huggingface.co/models?library=coreml&sort=downloads&search=whisperkit%20whisper"
+    ) else { return }
+    NSWorkspace.shared.open(url)
+  }
+
+  private func installHuggingFaceModel() {
+    do {
+      let model = try localModels.importHuggingFaceModel(
+        repoID: huggingFaceRepoID,
+        modelName: huggingFaceModelName
+      )
+      huggingFaceImportError = nil
+      settings.localTranscriptionModel = model.id
+      Task { await localModels.install(model) }
+    } catch {
+      huggingFaceImportError = error.localizedDescription
+    }
   }
 
   private func selectedLocalModelStatusIcon(for state: LocalModelManager.InstallState) -> String {

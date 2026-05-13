@@ -66,26 +66,32 @@ public struct LocalTranscriptionModel: Identifiable, Hashable, Sendable {
     public let displayName: String
     public let modelName: String
     public let engine: String
+    public let modelRepo: String?
     public let approximateSizeMB: Int
     public let description: String
     public let tags: [ModelCatalog.Tag]
+    public let supportsLiveStreaming: Bool
 
     public init(
         id: String,
         displayName: String,
         modelName: String,
         engine: String,
+        modelRepo: String? = nil,
         approximateSizeMB: Int,
         description: String,
-        tags: [ModelCatalog.Tag]
+        tags: [ModelCatalog.Tag],
+        supportsLiveStreaming: Bool = false
     ) {
         self.id = id
         self.displayName = displayName
         self.modelName = modelName
         self.engine = engine
+        self.modelRepo = modelRepo
         self.approximateSizeMB = approximateSizeMB
         self.description = description
         self.tags = tags
+        self.supportsLiveStreaming = supportsLiveStreaming
     }
 
     public var option: ModelCatalog.Option {

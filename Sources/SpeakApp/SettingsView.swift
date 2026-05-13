@@ -980,10 +980,29 @@ struct SettingsView: View {
               .foregroundStyle(.secondary)
             ModelPicker(
               title: "Batch Model",
-              help: "Remote transcription runs after recording stops for maximum accuracy and provider-specific metadata.",
+              help: "Remote transcription runs after recording stops. Built-in providers use their own keys; custom model identifiers are sent through OpenRouter.",
               options: ModelCatalog.batchTranscription,
               value: settingsBinding(\AppSettings.batchTranscriptionModel)
             )
+            if isCustomBatchTranscriptionModel {
+              SettingsInlineInfo(
+                title: "Custom batch models use OpenRouter",
+                message:
+                  "Speak will send this custom model identifier to OpenRouter. Save an OpenRouter API key before recording, or choose one of the built-in provider models above.",
+                systemImage: "key.fill"
+              )
+              if !isOpenRouterKeyStored {
+                HStack(spacing: 10) {
+                  Label("OpenRouter API key missing", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.orange)
+                  Button("Add OpenRouter Key") {
+                    sidebarSelection = .settings(.apiKeys)
+                  }
+                  .buttonStyle(.bordered)
+                }
+              }
+            }
           }
         }
         .speakTooltip("Tell Speak which cloud transcription model should polish the full recording.")
@@ -1519,6 +1538,14 @@ struct SettingsView: View {
   private var canAddStreamingModelSource: Bool {
     streamingHuggingFaceRepoID.split(separator: "/").count == 2
       && !streamingHuggingFaceModelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+  }
+
+  private var isCustomBatchTranscriptionModel: Bool {
+    let model = settings.batchTranscriptionModel.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !model.isEmpty else { return false }
+    return !ModelCatalog.batchTranscription.contains {
+      $0.id.caseInsensitiveCompare(model) == .orderedSame
+    }
   }
 
   private var selectedRecommendedStreamingSource: LocalStreamingModelSource? {

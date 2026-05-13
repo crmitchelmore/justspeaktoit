@@ -713,9 +713,10 @@ private struct HistoryListRow: View {
       Button {
         Task { await environment.main.reprocessHistoryItem(item) }
       } label: {
-        Label("Re-process with Current Settings", systemImage: "arrow.triangle.2.circlepath")
+        Label("Reprocess with Current Model", systemImage: "arrow.triangle.2.circlepath")
       }
       .disabled(environment.main.isBusy)
+      .speakTooltip(reprocessTooltip)
     }
 
     if let url = item.audioFileURL {
@@ -1306,6 +1307,27 @@ private struct HistoryListRow: View {
     .speakTooltip("Peek behind the scenes to review the API requests and responses that powered this session.")
   }
 
+  private var reprocessTooltip: String {
+    let postProcessing = environment.settings.postProcessingEnabled
+      ? "Post-processing will also use your current post-processing model: \(ModelCatalog.friendlyName(for: environment.settings.postProcessingModel))."
+      : "Post-processing is currently off, so only transcription will be rerun."
+    return """
+      Reprocess reruns this saved audio with your current settings, not the model originally used. It will use \(currentReprocessModelDescription). \(postProcessing)
+      """
+  }
+
+  private var currentReprocessModelDescription: String {
+    let settings = environment.settings
+    if settings.transcriptionMode == .localModel {
+      let modelName = ModelCatalog.friendlyName(for: settings.localTranscriptionModel)
+      if settings.localTranscriptionMode == .streaming {
+        return "\(modelName) from Local Batch; Local Streaming candidates are not used for saved-audio reprocessing yet"
+      }
+      return "\(modelName) from Local Batch"
+    }
+    return "\(ModelCatalog.friendlyName(for: settings.batchTranscriptionModel)) from Remote Batch"
+  }
+
   private var footerActions: some View {
     HStack(spacing: 12) {
       if let url = item.audioFileURL {
@@ -1330,7 +1352,7 @@ private struct HistoryListRow: View {
           }
         }
         .disabled(environment.main.isBusy)
-        .speakTooltip("Sometimes on-device audio misses words. Reprocess sends this clip to our larger cloud models, which usually pick up every detail.")
+        .speakTooltip(reprocessTooltip)
       }
       if environment.main.isBusy {
         ProgressView()

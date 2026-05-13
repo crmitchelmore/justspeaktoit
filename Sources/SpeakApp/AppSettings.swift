@@ -54,9 +54,9 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     var displayName: String {
       switch self {
       case .batch:
-        return "Offline"
+        return "Local Batch"
       case .streaming:
-        return "Streaming"
+        return "Local Streaming"
       }
     }
   }

@@ -51,4 +51,14 @@ final class LocalModelManagerTests: XCTestCase {
         XCTAssertEqual(resolved.displayName, "custom_model_123MB")
         XCTAssertEqual(resolved.approximateSizeMB, 123)
     }
+
+    func testStreamingRuntimeHint_identifiesParakeetModels() {
+        XCTAssertEqual(
+            LocalModelManager.streamingRuntimeHint(
+                for: "nvidia/parakeet-tdt-0.6b-v2",
+                modelName: "parakeet-tdt-0.6b-v2"
+            ),
+            "NeMo / Parakeet streaming runtime"
+        )
+    }
 }

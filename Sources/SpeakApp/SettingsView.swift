@@ -130,6 +130,21 @@ struct SettingsView: View {
       case .batch: return "Remote Batch"
       }
     }
+
+  }
+
+  private enum PostProcessingLocation: String, CaseIterable, Identifiable {
+    case remote
+    case local
+
+    var id: String { rawValue }
+
+    var displayName: String {
+      switch self {
+      case .remote: return "Remote"
+      case .local: return "Local"
+      }
+    }
   }
 
   enum ValidationViewState {
@@ -305,6 +320,24 @@ struct SettingsView: View {
       },
       set: { model in
         settings.postProcessingModel = model
+      }
+    )
+  }
+
+  private var postProcessingLocationBinding: Binding<PostProcessingLocation> {
+    Binding(
+      get: {
+        PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel) ? .local : .remote
+      },
+      set: { location in
+        switch location {
+        case .local:
+          settings.postProcessingModel = localPostProcessingOptions.first?.id ?? "local/post-processing/rules"
+        case .remote:
+          settings.postProcessingModel = cloudPostProcessingOptions.first {
+            $0.id == "openai/gpt-5-mini"
+          }?.id ?? cloudPostProcessingOptions.first?.id ?? settings.postProcessingModel
+        }
       }
     )
   }
@@ -2145,249 +2178,153 @@ struct SettingsView: View {
           }
 
           VStack(alignment: .leading, spacing: 8) {
-            Picker("Output Language", selection: settingsBinding(\AppSettings.postProcessingOutputLanguage)) {
-              Text("English").tag("English")
-              Text("Spanish").tag("Spanish")
-              Text("French").tag("French")
-              Text("German").tag("German")
-              Text("Italian").tag("Italian")
-              Text("Portuguese").tag("Portuguese")
-              Text("Chinese").tag("Chinese")
-              Text("Japanese").tag("Japanese")
-              Text("Korean").tag("Korean")
-              Text("Russian").tag("Russian")
-              Text("Arabic").tag("Arabic")
-              Text("Hindi").tag("Hindi")
-            }
-            .pickerStyle(.menu)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(
-              RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
-            )
-            .speakTooltip("Let Speak know which language you want your polished transcript delivered in.")
-            .onChange(of: settings.postProcessingOutputLanguage) { _, _ in
-              if showSystemPromptPreview {
-                generateSystemPromptPreview()
+            Picker("Post-processing location", selection: postProcessingLocationBinding) {
+              ForEach(PostProcessingLocation.allCases) { location in
+                Text(location.displayName).tag(location)
               }
             }
+            .pickerStyle(.segmented)
 
-            Text("The language that the transcription will be output in.")
+            Text("Choose whether cleanup runs locally on this Mac or remotely through OpenRouter.")
               .font(.caption)
               .foregroundStyle(.secondary)
           }
 
-          localPostProcessingSection
-
-          ModelPicker(
-            title: "Cloud Post-processing Model",
-            help: "Choose the OpenRouter model Speak will call for cloud LLM cleanup. Mini and Lite models are faster and cheaper.",
-            options: cloudPostProcessingOptions,
-            value: cloudPostProcessingModelBinding,
-            usesDetailedChooser: true
-          )
-
           if isCloudPostProcessingModelSelected {
-            SettingsInlineInfo(
-              title: "Cloud post-processing uses OpenRouter",
-              message:
-                "Speak sends transcript cleanup requests for this model to OpenRouter. Add an OpenRouter API key in Settings > API Keys before using cloud post-processing.",
-              systemImage: "network"
-            )
-
-            if !isOpenRouterKeyStored {
-              HStack(alignment: .center, spacing: 10) {
-                Label("OpenRouter API key missing", systemImage: "exclamationmark.triangle.fill")
-                  .font(.caption.weight(.semibold))
-                  .foregroundStyle(.orange)
-                Text(
-                  settings.postProcessingEnabled
-                    ? "Cloud post-processing will be skipped until a key is saved."
-                    : "Save a key before enabling cloud post-processing."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                Spacer()
-                Button("Add OpenRouter Key") {
-                  sidebarSelection = .settings(.apiKeys)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.orange)
-              }
-              .padding(12)
-              .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                  .fill(Color.orange.opacity(0.10))
-              )
-              .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                  .stroke(Color.orange.opacity(0.25), lineWidth: 1)
-              )
-            }
+            remotePostProcessingSection
           } else {
-            SettingsInlineInfo(
-              title: "Local cleanup stays on this Mac",
-              message:
-                "This mode applies safe offline transcript cleanup without OpenRouter or a cloud LLM. Custom prompts, translation, and creative formatting need a cloud post-processing model until a local text-generation runtime is available.",
-              systemImage: "lock.shield"
-            )
-          }
-
-          VStack(alignment: .leading) {
-            HStack {
-              Text("Temperature")
-              Spacer()
-              Text(
-                settings.postProcessingTemperature,
-                format: .number.precision(.fractionLength(2))
-              )
-              .font(.caption.monospacedDigit())
-              .foregroundStyle(.secondary)
-            }
-            Slider(
-              value: settingsBinding(\AppSettings.postProcessingTemperature), in: 0...1, step: 0.05)
-            .disabled(PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel))
-            .speakTooltip("Lower values stay close to your words; higher values let Speak be more creative.")
-            if PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel) {
-              Text("Temperature only affects cloud LLM cleanup.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
+            localPostProcessingSection
           }
         }
       }
       .speakTooltip("Choose how Speak cleans up transcripts—from languages to creativity and custom prompts.")
 
-      SettingsCard(title: "Transcription Prompt", systemImage: "quote.bubble", tint: Color.mint) {
-        VStack(alignment: .leading, spacing: 8) {
-          Text(
-            isCloudPostProcessingModelSelected
-              ? "This prompt is sent to the selected OpenRouter model after transcription. Requires an OpenRouter API key."
-              : "Local cleanup does not send prompts anywhere. Choose a cloud post-processing model to use custom OpenRouter LLM instructions."
-          )
-            .font(.caption)
-            .foregroundStyle(.secondary)
-          TextEditor(text: settingsBinding(\AppSettings.postProcessingSystemPrompt))
-            .font(.body.monospaced())
-            .frame(minHeight: 200)
-            .disabled(PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel))
-            .overlay(
-              RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.mint.opacity(0.2), lineWidth: 1)
-            )
-            .onChange(of: settings.postProcessingSystemPrompt) { _, _ in
-              if showSystemPromptPreview {
-                generateSystemPromptPreview()
-              }
-            }
-
-        }
-      }
-      .speakTooltip("Guide the cleanup model with your own instructions for tone and formatting.")
-
-      SettingsCard(title: "System-Generated Parts", systemImage: "gearshape.2", tint: Color.brandAccentDeep) {
-        VStack(alignment: .leading, spacing: 16) {
-          Text("Control which system-generated instructions are added to the prompt.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-
-          VStack(alignment: .leading, spacing: 12) {
-            settingsToggle(
-              "Include Personal Lexicon Directives",
-              isOn: settingsBinding(\AppSettings.postProcessingIncludeLexiconDirectives),
-              tint: .brandAccentDeep
-            )
-            .onChange(of: settings.postProcessingIncludeLexiconDirectives) { _, _ in
-              generateSystemPromptPreview()
-            }
-            Text("Automatically applies your personal corrections and name normalizations to the transcript.")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-              .padding(.leading, 28)
-
-            Divider()
-
-            settingsToggle(
-              "Include Context Tags",
-              isOn: settingsBinding(\AppSettings.postProcessingIncludeContextTags),
-              tint: .brandAccentDeep
-            )
-            .onChange(of: settings.postProcessingIncludeContextTags) { _, _ in
-              generateSystemPromptPreview()
-            }
-            Text("Adds context tags to help the model understand the setting and adjust output accordingly.")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-              .padding(.leading, 28)
-
-            Divider()
-
-            settingsToggle(
-              "Include Final Processing Instruction",
-              isOn: settingsBinding(\AppSettings.postProcessingIncludeFinalInstruction),
-              tint: .brandAccentDeep
-            )
-            .onChange(of: settings.postProcessingIncludeFinalInstruction) { _, _ in
-              generateSystemPromptPreview()
-            }
-            Text("Adds a hardcoded reminder: \"Return only the processed text and nothing else. The following message is a raw transcript:\"")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-              .padding(.leading, 28)
-          }
-
-          Divider()
-
+      if isCloudPostProcessingModelSelected {
+        SettingsCard(title: "Transcription Prompt", systemImage: "quote.bubble", tint: Color.mint) {
           VStack(alignment: .leading, spacing: 8) {
-            Button {
-              showSystemPromptPreview.toggle()
-              if showSystemPromptPreview {
-                DispatchQueue.main.async {
+            Text("This prompt is sent to the selected OpenRouter model after transcription. Requires an OpenRouter API key.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+            TextEditor(text: settingsBinding(\AppSettings.postProcessingSystemPrompt))
+              .font(.body.monospaced())
+              .frame(minHeight: 200)
+              .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                  .stroke(Color.mint.opacity(0.2), lineWidth: 1)
+              )
+              .onChange(of: settings.postProcessingSystemPrompt) { _, _ in
+                if showSystemPromptPreview {
                   generateSystemPromptPreview()
                 }
               }
-            } label: {
-              HStack {
-                Image(systemName: showSystemPromptPreview ? "eye.slash" : "eye")
-                Text(showSystemPromptPreview ? "Hide Current Prompt" : "Show Current Prompt")
+
+          }
+        }
+        .speakTooltip("Guide the cleanup model with your own instructions for tone and formatting.")
+
+        SettingsCard(title: "System-Generated Parts", systemImage: "gearshape.2", tint: Color.brandAccentDeep) {
+          VStack(alignment: .leading, spacing: 16) {
+            Text("Control which system-generated instructions are added to the prompt.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 12) {
+              settingsToggle(
+                "Include Personal Lexicon Directives",
+                isOn: settingsBinding(\AppSettings.postProcessingIncludeLexiconDirectives),
+                tint: .brandAccentDeep
+              )
+              .onChange(of: settings.postProcessingIncludeLexiconDirectives) { _, _ in
+                generateSystemPromptPreview()
               }
+              Text("Automatically applies your personal corrections and name normalizations to the transcript.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.leading, 28)
+
+              Divider()
+
+              settingsToggle(
+                "Include Context Tags",
+                isOn: settingsBinding(\AppSettings.postProcessingIncludeContextTags),
+                tint: .brandAccentDeep
+              )
+              .onChange(of: settings.postProcessingIncludeContextTags) { _, _ in
+                generateSystemPromptPreview()
+              }
+              Text("Adds context tags to help the model understand the setting and adjust output accordingly.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.leading, 28)
+
+              Divider()
+
+              settingsToggle(
+                "Include Final Processing Instruction",
+                isOn: settingsBinding(\AppSettings.postProcessingIncludeFinalInstruction),
+                tint: .brandAccentDeep
+              )
+              .onChange(of: settings.postProcessingIncludeFinalInstruction) { _, _ in
+                generateSystemPromptPreview()
+              }
+              Text("Adds a hardcoded reminder: \"Return only the processed text and nothing else. The following message is a raw transcript:\"")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.leading, 28)
             }
-            .buttonStyle(.bordered)
 
-            if showSystemPromptPreview {
-              VStack(alignment: .leading, spacing: 8) {
-                Text("Current System Prompt Preview:")
-                  .font(.caption.bold())
-                  .foregroundStyle(.secondary)
+            Divider()
 
-                ScrollView {
-                  Text(systemPromptPreview)
-                    .font(.caption.monospaced())
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12)
+            VStack(alignment: .leading, spacing: 8) {
+              Button {
+                showSystemPromptPreview.toggle()
+                if showSystemPromptPreview {
+                  DispatchQueue.main.async {
+                    generateSystemPromptPreview()
+                  }
                 }
-                .scrollIndicators(.visible)
-                .frame(minHeight: 200, maxHeight: 420)
-                .background(
-                  RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.brandAccentWarm.opacity(0.05))
-                )
+              } label: {
+                HStack {
+                  Image(systemName: showSystemPromptPreview ? "eye.slash" : "eye")
+                  Text(showSystemPromptPreview ? "Hide Current Prompt" : "Show Current Prompt")
+                }
+              }
+              .buttonStyle(.bordered)
 
-                Text("Scroll to view the full prompt.")
-                  .font(.caption)
-                  .foregroundStyle(.secondary)
-                .overlay(
-                  RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.brandAccentWarm.opacity(0.2), lineWidth: 1)
-                )
+              if showSystemPromptPreview {
+                VStack(alignment: .leading, spacing: 8) {
+                  Text("Current System Prompt Preview:")
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+
+                  ScrollView {
+                    Text(systemPromptPreview)
+                      .font(.caption.monospaced())
+                      .textSelection(.enabled)
+                      .frame(maxWidth: .infinity, alignment: .leading)
+                      .padding(12)
+                  }
+                  .scrollIndicators(.visible)
+                  .frame(minHeight: 200, maxHeight: 420)
+                  .background(
+                    RoundedRectangle(cornerRadius: 8)
+                      .fill(Color.brandAccentWarm.opacity(0.05))
+                  )
+
+                  Text("Scroll to view the full prompt.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                  .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                      .stroke(Color.brandAccentWarm.opacity(0.2), lineWidth: 1)
+                  )
+                }
               }
             }
           }
         }
+        .speakTooltip("Fine-tune what system-generated instructions are sent to the post-processing model.")
       }
-      .speakTooltip("Fine-tune what system-generated instructions are sent to the post-processing model.")
     }
   }
 
@@ -2584,23 +2521,148 @@ struct SettingsView: View {
       .environmentObject(environment.pronunciationManager)
   }
 
-  private var localPostProcessingSection: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      HStack(alignment: .top, spacing: 10) {
-        Image(systemName: "lock.shield.fill")
-          .foregroundStyle(Color.green)
-          .frame(width: 22)
-        VStack(alignment: .leading, spacing: 3) {
-          Text("Local post-processing")
-            .font(.caption.weight(.semibold))
-          Text("Built-in cleanup runs entirely on this Mac. No model download or OpenRouter key is required.")
-            .font(.caption2)
-            .foregroundStyle(.secondary)
+  private var remotePostProcessingSection: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      VStack(alignment: .leading, spacing: 8) {
+        Picker("Output Language", selection: settingsBinding(\AppSettings.postProcessingOutputLanguage)) {
+          Text("English").tag("English")
+          Text("Spanish").tag("Spanish")
+          Text("French").tag("French")
+          Text("German").tag("German")
+          Text("Italian").tag("Italian")
+          Text("Portuguese").tag("Portuguese")
+          Text("Chinese").tag("Chinese")
+          Text("Japanese").tag("Japanese")
+          Text("Korean").tag("Korean")
+          Text("Russian").tag("Russian")
+          Text("Arabic").tag("Arabic")
+          Text("Hindi").tag("Hindi")
         }
+        .pickerStyle(.menu)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+          RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .speakTooltip("Let Speak know which language you want your polished transcript delivered in.")
+        .onChange(of: settings.postProcessingOutputLanguage) { _, _ in
+          if showSystemPromptPreview {
+            generateSystemPromptPreview()
+          }
+        }
+
+        Text("The language that the transcription will be output in.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
       }
 
-      ForEach(localPostProcessingOptions) { option in
-        localPostProcessingRow(option)
+      ModelPicker(
+        title: "Remote Post-processing Model",
+        help: "Choose the OpenRouter model Speak will call for cloud LLM cleanup. Mini and Lite models are faster and cheaper.",
+        options: cloudPostProcessingOptions,
+        value: cloudPostProcessingModelBinding,
+        usesDetailedChooser: true
+      )
+
+      SettingsInlineInfo(
+        title: "Remote post-processing uses OpenRouter",
+        message:
+          "Speak sends transcript cleanup requests for this model to OpenRouter. Add an OpenRouter API key in Settings > API Keys before using remote post-processing.",
+        systemImage: "network"
+      )
+
+      if !isOpenRouterKeyStored {
+        HStack(alignment: .center, spacing: 10) {
+          Label("OpenRouter API key missing", systemImage: "exclamationmark.triangle.fill")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.orange)
+          Text(
+            settings.postProcessingEnabled
+              ? "Remote post-processing will be skipped until a key is saved."
+              : "Save a key before enabling remote post-processing."
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          Spacer()
+          Button("Add OpenRouter Key") {
+            sidebarSelection = .settings(.apiKeys)
+          }
+          .buttonStyle(.borderedProminent)
+          .tint(.orange)
+        }
+        .padding(12)
+        .background(
+          RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(Color.orange.opacity(0.10))
+        )
+        .overlay(
+          RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .stroke(Color.orange.opacity(0.25), lineWidth: 1)
+        )
+      }
+
+      VStack(alignment: .leading) {
+        HStack {
+          Text("Temperature")
+          Spacer()
+          Text(
+            settings.postProcessingTemperature,
+            format: .number.precision(.fractionLength(2))
+          )
+          .font(.caption.monospacedDigit())
+          .foregroundStyle(.secondary)
+        }
+        Slider(
+          value: settingsBinding(\AppSettings.postProcessingTemperature), in: 0...1, step: 0.05)
+        .speakTooltip("Lower values stay close to your words; higher values let Speak be more creative.")
+      }
+    }
+  }
+
+  private var localPostProcessingSection: some View {
+    VStack(alignment: .leading, spacing: 16) {
+      HStack(spacing: 8) {
+        Image(systemName: "lock.shield.fill")
+          .foregroundStyle(Color.green)
+          .imageScale(.small)
+        Text("Local Post-processing - private on this Mac")
+          .font(.subheadline.weight(.semibold))
+          .foregroundStyle(Color.green)
+      }
+      .padding(.horizontal, 12)
+      .padding(.vertical, 6)
+      .background(
+        Capsule()
+          .fill(Color.green.opacity(0.12))
+      )
+
+      Text(
+        "Local post-processing is separate from OpenRouter and cloud LLMs. The current local engine is a built-in rules model, so it is ready immediately and has no download step."
+      )
+      .font(.caption)
+      .foregroundStyle(.secondary)
+
+      localPostProcessingQuickStart
+
+      ModelPicker(
+        title: "Local Post-processing Model",
+        help: "Used for local-only cleanup after transcription. Downloadable local text-generation models will appear here when a local LLM runtime is available.",
+        options: localPostProcessingOptions,
+        value: settingsBinding(\AppSettings.postProcessingModel)
+      )
+
+      SettingsInlineInfo(
+        title: "No download required",
+        message:
+          "The built-in local cleanup model is installed with Speak, uses 0 MB of extra model storage, and does not require an API key.",
+        systemImage: "checkmark.circle"
+      )
+
+      VStack(spacing: 10) {
+        ForEach(localPostProcessingOptions) { option in
+          localPostProcessingRow(option)
+        }
       }
     }
     .padding(12)
@@ -2611,6 +2673,31 @@ struct SettingsView: View {
     .overlay(
       RoundedRectangle(cornerRadius: 12, style: .continuous)
         .stroke(Color.green.opacity(0.2), lineWidth: 1)
+    )
+  }
+
+  private var localPostProcessingQuickStart: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      localModelStep(
+        number: "1",
+        title: "Choose Local",
+        detail: "This switches transcript cleanup away from OpenRouter."
+      )
+      localModelStep(
+        number: "2",
+        title: "Confirm the local model",
+        detail: "Built-in cleanup is ready now. There is no model download for the current local engine."
+      )
+      localModelStep(
+        number: "3",
+        title: "Record normally",
+        detail: "Speak applies safe formatting cleanup on this Mac after transcription."
+      )
+    }
+    .padding(12)
+    .background(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .fill(Color.green.opacity(0.08))
     )
   }
 

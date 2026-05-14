@@ -767,7 +767,10 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
       else { continue }
       switch event.type {
       case "partial", "session_final":
-        guard let text = event.text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { continue }
+        guard let rawText = event.text?.trimmingCharacters(in: .whitespacesAndNewlines), !rawText.isEmpty else {
+          continue
+        }
+        let text = SherpaOnnxTranscriptNormalizer.normalize(rawText)
         latestText = text
         let update = LiveTranscriptionUpdate(text: text, isFinal: event.type == "session_final")
         delegate?.liveTranscriber(self, didUpdateWith: update)

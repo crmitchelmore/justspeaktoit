@@ -47,6 +47,11 @@ final class LocalModelManager: ObservableObject {
 
   static let recommendedStreamingModelSources: [LocalStreamingModelSource] = [
     LocalStreamingModelSource(
+      repoID: "csukuangfj/sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06",
+      modelName: "streaming-zipformer-en-kroko-2025-08-06",
+      runtime: "sherpa-onnx streaming runtime"
+    ),
+    LocalStreamingModelSource(
       repoID: "csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26",
       modelName: "streaming-zipformer-en-2023-06-26",
       runtime: "sherpa-onnx streaming runtime"

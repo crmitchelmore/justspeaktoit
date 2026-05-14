@@ -66,8 +66,8 @@ final class LocalModelManagerTests: XCTestCase {
     func testRecommendedStreamingSources_includeSelectableSherpaCandidate() {
         let sources = LocalModelManager.recommendedStreamingModelSources
         let hasSherpa = sources.contains {
-            $0.repoID == "csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26"
-                && $0.modelName == "streaming-zipformer-en-2023-06-26"
+            $0.repoID == "csukuangfj/sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"
+                && $0.modelName == "streaming-zipformer-en-kroko-2025-08-06"
                 && $0.runtime == "sherpa-onnx streaming runtime"
         }
         XCTAssertTrue(hasSherpa)

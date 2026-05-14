@@ -293,6 +293,14 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
         joiner: "joiner-epoch-99-avg-1.int8.onnx"
       )
     }
+    if repo.contains("en-kroko-2025-08-06") {
+      return ModelSpecification(
+        tokens: "tokens.txt",
+        encoder: "encoder.onnx",
+        decoder: "decoder.onnx",
+        joiner: "joiner.onnx"
+      )
+    }
     if repo.contains("en-2023-06-26") {
       return ModelSpecification(
         tokens: "tokens.txt",

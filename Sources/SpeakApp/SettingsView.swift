@@ -1300,7 +1300,7 @@ struct SettingsView: View {
         .speakTooltip("Download and manage private local transcription models.")
       }
 
-      if settings.transcriptionMode == .liveNative && settings.hasSelectedModulateModel {
+      if settings.hasSelectedModulateModel {
         modulateFeatureSettings
       }
     }

@@ -71,17 +71,21 @@ final class PostProcessingManagerTests: XCTestCase {
     XCTAssertEqual(client.sendChatCallCount, 0)
   }
 
-  func testLocalPostProcessingPromptMarksUserInstructionsAuthoritative() {
-    let prompt = LocalPostProcessingModelManager.localUserPrompt(
+  func testLocalPostProcessingSystemPromptMarksUserInstructionsAuthoritative() {
+    let systemPrompt = LocalPostProcessingModelManager.localSystemPrompt(
+      "Put a full stop after each word."
+    )
+    let userPrompt = LocalPostProcessingModelManager.localUserPrompt(
       systemPrompt: "Put a full stop after each word.",
       rawText: "hello world"
     )
 
-    XCTAssertTrue(prompt.contains("instructions below are authoritative"))
-    XCTAssertTrue(prompt.contains("formatting-only instructions"))
-    XCTAssertTrue(prompt.contains("Put a full stop after each word."))
-    XCTAssertTrue(prompt.contains("<raw_transcript>\nhello world\n</raw_transcript>"))
-    XCTAssertTrue(LocalPostProcessingModelManager.localSystemPrompt().contains("Follow the user's"))
+    XCTAssertTrue(systemPrompt.contains("instructions are authoritative"))
+    XCTAssertTrue(systemPrompt.contains("formatting-only instructions"))
+    XCTAssertTrue(systemPrompt.contains("Put a full stop after each word."))
+    XCTAssertTrue(systemPrompt.contains("<instructions>\nPut a full stop after each word.\n</instructions>"))
+    XCTAssertFalse(userPrompt.contains("Put a full stop after each word."))
+    XCTAssertTrue(userPrompt.contains("<raw_transcript>\nhello world\n</raw_transcript>"))
   }
 
   func testCloudPostProcessingStillUsesLLMClient() async throws {

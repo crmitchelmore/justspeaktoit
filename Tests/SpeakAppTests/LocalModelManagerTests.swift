@@ -140,6 +140,20 @@ final class LocalModelManagerTests: XCTestCase {
         XCTAssertTrue(sources.allSatisfy { ($0.approximateSizeMB ?? 0) > 0 })
     }
 
+    func testNormalizedStreamingModelSourceBackfillsKnownSize() {
+        let source = LocalStreamingModelSource(
+            repoID: "csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26",
+            modelName: "streaming-zipformer-en-2023-06-26",
+            runtime: "sherpa-onnx streaming runtime",
+            approximateSizeMB: nil
+        )
+
+        let normalized = LocalModelManager.normalizedStreamingModelSource(source)
+
+        XCTAssertEqual(normalized.approximateSizeMB, 73)
+        XCTAssertEqual(normalized.runtime, "sherpa-onnx streaming runtime")
+    }
+
     @MainActor
     func testRecommendedLocalPostProcessingModels_includeHuggingFaceGGUFModelsWithSizes() {
         let models = LocalPostProcessingModelManager.recommendedModels

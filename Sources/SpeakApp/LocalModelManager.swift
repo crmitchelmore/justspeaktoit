@@ -318,8 +318,11 @@ final class LocalModelManager: ObservableObject {
     do {
       let data = try Data(contentsOf: streamingModelSourcesURL)
       let decoded = try JSONDecoder().decode([LocalStreamingModelSource].self, from: data)
-      streamingModelSources = decoded.filter(Self.isSupportedStreamingSource)
-      if streamingModelSources.count != decoded.count {
+      let migratedSources = decoded
+        .filter(Self.isSupportedStreamingSource)
+        .map(Self.normalizedStreamingModelSource)
+      streamingModelSources = migratedSources
+      if streamingModelSources.count != decoded.count || streamingModelSources != decoded {
         try? saveStreamingModelSources()
       }
     } catch {
@@ -367,7 +370,6 @@ final class LocalModelManager: ObservableObject {
     else {
       return model
     }
-
     return LocalTranscriptionModel(
       id: expectedID,
       displayName: "\(resolved.displayName) from \(repoID)",
@@ -378,6 +380,16 @@ final class LocalModelManager: ObservableObject {
       description: model.description,
       tags: model.tags,
       supportsLiveStreaming: model.supportsLiveStreaming
+    )
+  }
+
+  nonisolated static func normalizedStreamingModelSource(_ source: LocalStreamingModelSource) -> LocalStreamingModelSource {
+    LocalStreamingModelSource(
+      repoID: source.repoID,
+      modelName: source.modelName,
+      runtime: streamingRuntimeHint(for: source.repoID, modelName: source.modelName),
+      approximateSizeMB: source.approximateSizeMB
+        ?? streamingApproximateSizeMB(repoID: source.repoID, modelName: source.modelName)
     )
   }
 

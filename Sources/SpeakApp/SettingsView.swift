@@ -1719,14 +1719,20 @@ struct SettingsView: View {
           }
           localModelBadge("Local Streaming", tint: .orange)
         }
-        Text(
-          "\(source.runtime) · \(localStreamingSizeLabel(for: source)) · \(localStreamingInstallLabel(for: source))"
-        )
+        Text(source.runtime)
           .font(.caption)
           .foregroundStyle(.secondary)
-        Text("Local only - no cloud transcription")
-          .font(.caption2)
+        Text("\(localStreamingSizeLabel(for: source)) - \(source.repoID) / \(source.modelName)")
+          .font(.caption2.monospacedDigit())
           .foregroundStyle(.tertiary)
+        Text(localStreamingInstallLabel(for: source))
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+        if case .failed(let message) = state {
+          Text(message)
+            .font(.caption2)
+            .foregroundStyle(.red)
+        }
       }
 
       Spacer()
@@ -1742,8 +1748,13 @@ struct SettingsView: View {
             }
           }
         case .installing:
-          ProgressView()
-            .controlSize(.small)
+          VStack(alignment: .trailing, spacing: 6) {
+            ProgressView()
+              .controlSize(.small)
+            Text("Downloading")
+              .font(.caption2)
+              .foregroundStyle(.secondary)
+          }
         case .notInstalled, .failed:
           Button("Download") {
             Task { await sherpaRuntime.installModel(source) }

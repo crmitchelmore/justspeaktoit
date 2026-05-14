@@ -90,6 +90,10 @@ final class PermissionsManager: ObservableObject {
     }
   }
 
+  func refresh(_ type: PermissionType) {
+    statuses[type] = computeStatus(for: type)
+  }
+
   func request(_ type: PermissionType) async -> PermissionStatus {
     let status: PermissionStatus
     switch type {

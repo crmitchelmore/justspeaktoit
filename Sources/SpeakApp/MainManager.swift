@@ -569,6 +569,7 @@ final class MainManager: ObservableObject {
     }
 
     if appSettings.showHUDDuringSessions {
+      permissionsManager.refresh(.microphone)
       hudManager.updateCaptureHealth(buildCaptureHealthSnapshot())
       hudManager.beginRecording()
     }

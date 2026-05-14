@@ -171,8 +171,8 @@ public struct HotKeyRecorder: View {
       from: event.modifierFlags.intersection([.command, .shift, .option, .control])
     )
 
-    // Require at least one modifier for non-function keys
-    guard !modifiers.isEmpty else { return true }
+    // Allow dedicated extended keys as single-key hotkeys, but keep ordinary typing keys modifier-gated.
+    guard !modifiers.isEmpty || KeyCodeMapping.singleKeyHotKeyCodes.contains(event.keyCode) else { return true }
 
     hotKey = .custom(keyCode: event.keyCode, modifiers: modifiers)
     stopRecording()

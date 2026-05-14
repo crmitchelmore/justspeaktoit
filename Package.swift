@@ -62,7 +62,7 @@ let package = Package(
         ),
         .testTarget(
             name: "SpeakAppTests",
-            dependencies: ["SpeakApp"]
+            dependencies: ["SpeakApp", "SpeakHotKeys"]
         ),
         .testTarget(
             name: "SpeakiOSTests",

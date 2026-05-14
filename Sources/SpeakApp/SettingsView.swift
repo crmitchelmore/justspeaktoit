@@ -368,6 +368,21 @@ struct SettingsView: View {
     )
   }
 
+  private var localPostProcessingModelBinding: Binding<String> {
+    Binding(
+      get: {
+        if PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel) {
+          return settings.postProcessingModel
+        }
+        return localPostProcessingOptions.first?.id ?? LocalPostProcessingModelManager.builtInRulesModelID
+      },
+      set: { model in
+        guard PostProcessingManager.isLocalPostProcessingModel(model) else { return }
+        settings.postProcessingModel = model
+      }
+    )
+  }
+
   private var postProcessingLocationBinding: Binding<PostProcessingLocation> {
     Binding(
       get: {
@@ -2785,7 +2800,7 @@ struct SettingsView: View {
         Hugging Face GGUF models need the local llama.cpp runtime and a model download.
         """,
         options: localPostProcessingOptions,
-        value: settingsBinding(\AppSettings.postProcessingModel),
+        value: localPostProcessingModelBinding,
         allowsCustom: false
       )
 

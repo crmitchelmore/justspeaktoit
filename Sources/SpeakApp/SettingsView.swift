@@ -183,6 +183,26 @@ struct SettingsView: View {
       : "Remote"
   }
 
+  private var postProcessingPromptHelpText: String {
+    if isCloudPostProcessingModelSelected {
+      return "This prompt is sent to the selected OpenRouter model after transcription. Requires an OpenRouter API key."
+    }
+    if PostProcessingManager.isBuiltInLocalPostProcessingModel(settings.postProcessingModel) {
+      return "Downloaded local LLM models use this prompt on your Mac. The built-in rules cleaner is local and ignores custom prompts."
+    }
+    return "This prompt is sent to the selected downloaded local model after transcription. It stays on this Mac and does not use OpenRouter."
+  }
+
+  private var systemGeneratedPartsHelpText: String {
+    if isCloudPostProcessingModelSelected {
+      return "Control which system-generated instructions are added to the OpenRouter prompt."
+    }
+    if PostProcessingManager.isBuiltInLocalPostProcessingModel(settings.postProcessingModel) {
+      return "These prompt parts apply when you choose a downloaded local LLM model. The built-in rules cleaner does not use prompts."
+    }
+    return "Control which system-generated instructions are added to the downloaded local model prompt."
+  }
+
   private var overviewHeader: some View {
     VStack(alignment: .leading, spacing: 16) {
       HStack(alignment: .center) {
@@ -2215,132 +2235,129 @@ struct SettingsView: View {
       }
       .speakTooltip("Choose how Speak cleans up transcripts—from languages to creativity and custom prompts.")
 
-      if isCloudPostProcessingModelSelected {
-        SettingsCard(title: "Transcription Prompt", systemImage: "quote.bubble", tint: Color.mint) {
-          VStack(alignment: .leading, spacing: 8) {
-            Text("This prompt is sent to the selected OpenRouter model after transcription. Requires an OpenRouter API key.")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-            TextEditor(text: settingsBinding(\AppSettings.postProcessingSystemPrompt))
-              .font(.body.monospaced())
-              .frame(minHeight: 200)
-              .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                  .stroke(Color.mint.opacity(0.2), lineWidth: 1)
-              )
-              .onChange(of: settings.postProcessingSystemPrompt) { _, _ in
-                if showSystemPromptPreview {
-                  generateSystemPromptPreview()
-                }
-              }
-
-          }
-        }
-        .speakTooltip("Guide the cleanup model with your own instructions for tone and formatting.")
-
-        SettingsCard(title: "System-Generated Parts", systemImage: "gearshape.2", tint: Color.brandAccentDeep) {
-          VStack(alignment: .leading, spacing: 16) {
-            Text("Control which system-generated instructions are added to the prompt.")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-
-            VStack(alignment: .leading, spacing: 12) {
-              settingsToggle(
-                "Include Personal Lexicon Directives",
-                isOn: settingsBinding(\AppSettings.postProcessingIncludeLexiconDirectives),
-                tint: .brandAccentDeep
-              )
-              .onChange(of: settings.postProcessingIncludeLexiconDirectives) { _, _ in
+      SettingsCard(title: "Transcription Prompt", systemImage: "quote.bubble", tint: Color.mint) {
+        VStack(alignment: .leading, spacing: 8) {
+          Text(postProcessingPromptHelpText)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+          TextEditor(text: settingsBinding(\AppSettings.postProcessingSystemPrompt))
+            .font(.body.monospaced())
+            .frame(minHeight: 200)
+            .overlay(
+              RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.mint.opacity(0.2), lineWidth: 1)
+            )
+            .onChange(of: settings.postProcessingSystemPrompt) { _, _ in
+              if showSystemPromptPreview {
                 generateSystemPromptPreview()
               }
-              Text("Automatically applies your personal corrections and name normalizations to the transcript.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.leading, 28)
-
-              Divider()
-
-              settingsToggle(
-                "Include Context Tags",
-                isOn: settingsBinding(\AppSettings.postProcessingIncludeContextTags),
-                tint: .brandAccentDeep
-              )
-              .onChange(of: settings.postProcessingIncludeContextTags) { _, _ in
-                generateSystemPromptPreview()
-              }
-              Text("Adds context tags to help the model understand the setting and adjust output accordingly.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.leading, 28)
-
-              Divider()
-
-              settingsToggle(
-                "Include Final Processing Instruction",
-                isOn: settingsBinding(\AppSettings.postProcessingIncludeFinalInstruction),
-                tint: .brandAccentDeep
-              )
-              .onChange(of: settings.postProcessingIncludeFinalInstruction) { _, _ in
-                generateSystemPromptPreview()
-              }
-              Text("Adds a hardcoded reminder: \"Return only the processed text and nothing else. The following message is a raw transcript:\"")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.leading, 28)
             }
+        }
+      }
+      .speakTooltip("Guide the cleanup model with your own instructions for tone and formatting.")
+
+      SettingsCard(title: "System-Generated Parts", systemImage: "gearshape.2", tint: Color.brandAccentDeep) {
+        VStack(alignment: .leading, spacing: 16) {
+          Text(systemGeneratedPartsHelpText)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+          VStack(alignment: .leading, spacing: 12) {
+            settingsToggle(
+              "Include Personal Lexicon Directives",
+              isOn: settingsBinding(\AppSettings.postProcessingIncludeLexiconDirectives),
+              tint: .brandAccentDeep
+            )
+            .onChange(of: settings.postProcessingIncludeLexiconDirectives) { _, _ in
+              generateSystemPromptPreview()
+            }
+            Text("Automatically applies your personal corrections and name normalizations to the transcript.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .padding(.leading, 28)
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 8) {
-              Button {
-                showSystemPromptPreview.toggle()
-                if showSystemPromptPreview {
-                  DispatchQueue.main.async {
-                    generateSystemPromptPreview()
-                  }
-                }
-              } label: {
-                HStack {
-                  Image(systemName: showSystemPromptPreview ? "eye.slash" : "eye")
-                  Text(showSystemPromptPreview ? "Hide Current Prompt" : "Show Current Prompt")
+            settingsToggle(
+              "Include Context Tags",
+              isOn: settingsBinding(\AppSettings.postProcessingIncludeContextTags),
+              tint: .brandAccentDeep
+            )
+            .onChange(of: settings.postProcessingIncludeContextTags) { _, _ in
+              generateSystemPromptPreview()
+            }
+            Text("Adds context tags to help the model understand the setting and adjust output accordingly.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .padding(.leading, 28)
+
+            Divider()
+
+            settingsToggle(
+              "Include Final Processing Instruction",
+              isOn: settingsBinding(\AppSettings.postProcessingIncludeFinalInstruction),
+              tint: .brandAccentDeep
+            )
+            .onChange(of: settings.postProcessingIncludeFinalInstruction) { _, _ in
+              generateSystemPromptPreview()
+            }
+            Text("Adds a hardcoded reminder: \"Return only the processed text and nothing else. The following message is a raw transcript:\"")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .padding(.leading, 28)
+          }
+
+          Divider()
+
+          VStack(alignment: .leading, spacing: 8) {
+            Button {
+              showSystemPromptPreview.toggle()
+              if showSystemPromptPreview {
+                DispatchQueue.main.async {
+                  generateSystemPromptPreview()
                 }
               }
-              .buttonStyle(.bordered)
+            } label: {
+              HStack {
+                Image(systemName: showSystemPromptPreview ? "eye.slash" : "eye")
+                Text(showSystemPromptPreview ? "Hide Current Prompt" : "Show Current Prompt")
+              }
+            }
+            .buttonStyle(.bordered)
 
-              if showSystemPromptPreview {
-                VStack(alignment: .leading, spacing: 8) {
-                  Text("Current System Prompt Preview:")
-                    .font(.caption.bold())
-                    .foregroundStyle(.secondary)
+            if showSystemPromptPreview {
+              VStack(alignment: .leading, spacing: 8) {
+                Text("Current System Prompt Preview:")
+                  .font(.caption.bold())
+                  .foregroundStyle(.secondary)
 
-                  ScrollView {
-                    Text(systemPromptPreview)
-                      .font(.caption.monospaced())
-                      .textSelection(.enabled)
-                      .frame(maxWidth: .infinity, alignment: .leading)
-                      .padding(12)
-                  }
-                  .scrollIndicators(.visible)
-                  .frame(minHeight: 200, maxHeight: 420)
-                  .background(
-                    RoundedRectangle(cornerRadius: 8)
-                      .fill(Color.brandAccentWarm.opacity(0.05))
-                  )
-
-                  Text("Scroll to view the full prompt.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                  .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                      .stroke(Color.brandAccentWarm.opacity(0.2), lineWidth: 1)
-                  )
+                ScrollView {
+                  Text(systemPromptPreview)
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
                 }
+                .scrollIndicators(.visible)
+                .frame(minHeight: 200, maxHeight: 420)
+                .background(
+                  RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.brandAccentWarm.opacity(0.05))
+                )
+
+                Text("Scroll to view the full prompt.")
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+                .overlay(
+                  RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.brandAccentWarm.opacity(0.2), lineWidth: 1)
+                )
               }
             }
           }
         }
-        .speakTooltip("Fine-tune what system-generated instructions are sent to the post-processing model.")
       }
+      .speakTooltip("Fine-tune what system-generated instructions are sent to the post-processing model.")
     }
   }
 

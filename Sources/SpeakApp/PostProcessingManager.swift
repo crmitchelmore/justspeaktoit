@@ -75,7 +75,7 @@ final class PostProcessingManager: ObservableObject {
       ? "inception/mercury"
       : settings.postProcessingModel
 
-    if Self.isLocalPostProcessingModel(model) {
+    if Self.isBuiltInLocalPostProcessingModel(model) {
       let cleaned = Self.processLocally(rawText)
       return .success(
         .init(
@@ -85,6 +85,28 @@ final class PostProcessingManager: ObservableObject {
           systemPrompt: "Local offline transcript cleanup"
         )
       )
+    }
+
+    if Self.isDownloadedLocalPostProcessingModel(model) {
+      do {
+        let cleaned = try await LocalPostProcessingModelManager.shared.process(
+          modelID: model,
+          rawText: rawText,
+          systemPrompt: systemPrompt,
+          temperature: settings.postProcessingTemperature
+        )
+        return .success(
+          .init(
+            original: rawText,
+            processed: cleaned,
+            response: nil,
+            systemPrompt: systemPrompt
+          )
+        )
+      } catch {
+        log.error("Local post-processing failed: \(error.localizedDescription, privacy: .public)")
+        return .failure(error)
+      }
     }
 
     let userMessage = """
@@ -175,8 +197,18 @@ final class PostProcessingManager: ObservableObject {
   }
 
   static func isLocalPostProcessingModel(_ model: String) -> Bool {
+    isBuiltInLocalPostProcessingModel(model) || isDownloadedLocalPostProcessingModel(model)
+  }
+
+  static func isBuiltInLocalPostProcessingModel(_ model: String) -> Bool {
     let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    return trimmed == "local/post-processing/rules"
+    return trimmed == LocalPostProcessingModelManager.builtInRulesModelID
+  }
+
+  static func isDownloadedLocalPostProcessingModel(_ model: String) -> Bool {
+    LocalPostProcessingModelManager.isDownloadedLocalModelID(
+      model.trimmingCharacters(in: .whitespacesAndNewlines)
+    )
   }
 
   static func processLocally(_ text: String) -> String {

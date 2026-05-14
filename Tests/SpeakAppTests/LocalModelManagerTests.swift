@@ -108,4 +108,26 @@ final class LocalModelManagerTests: XCTestCase {
         XCTAssertTrue(sources.allSatisfy(LocalModelManager.isSupportedStreamingSource))
         XCTAssertTrue(sources.allSatisfy { ($0.approximateSizeMB ?? 0) > 0 })
     }
+
+    @MainActor
+    func testRecommendedLocalPostProcessingModels_includeHuggingFaceGGUFModelsWithSizes() {
+        let models = LocalPostProcessingModelManager.recommendedModels
+
+        XCTAssertTrue(models.contains { $0.repoID == "bartowski/Qwen2.5-1.5B-Instruct-GGUF" })
+        XCTAssertTrue(models.allSatisfy { $0.filename.lowercased().hasSuffix(".gguf") })
+        XCTAssertTrue(models.allSatisfy { ($0.approximateSizeMB ?? 0) > 0 })
+    }
+
+    func testLocalPostProcessingModelID_identifiesDownloadedModels() {
+        XCTAssertTrue(
+            LocalPostProcessingModelManager.isDownloadedLocalModelID(
+                "local/post-processing/qwen2.5-0.5b-instruct-q4"
+            )
+        )
+        XCTAssertFalse(
+            LocalPostProcessingModelManager.isDownloadedLocalModelID(
+                LocalPostProcessingModelManager.builtInRulesModelID
+            )
+        )
+    }
 }

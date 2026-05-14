@@ -59,6 +59,7 @@ struct SettingsView: View {
   @ObservedObject private var updaterManager = UpdaterManager.shared
   @ObservedObject private var localModels = LocalModelManager.shared
   @ObservedObject private var sherpaRuntime = SherpaOnnxRuntimeManager.shared
+  @ObservedObject private var localPostProcessingModels = LocalPostProcessingModelManager.shared
   private static let localeOptions: [LocaleOption] = [
     LocaleOption(displayName: "English (United States)", identifier: "en_US"),
     LocaleOption(displayName: "English (United Kingdom)", identifier: "en_GB"),
@@ -102,6 +103,10 @@ struct SettingsView: View {
   @State private var selectedRecommendedStreamingSourceID: String =
     LocalModelManager.recommendedStreamingModelSources.first?.id ?? ""
   @State private var streamingHuggingFaceImportError: String?
+  @State private var localPostProcessingRepoID: String = "bartowski/Qwen2.5-0.5B-Instruct-GGUF"
+  @State private var localPostProcessingFilename: String = "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf"
+  @State private var localPostProcessingSizeMB: String = "397"
+  @State private var localPostProcessingImportError: String?
   private let openRouterKeyIdentifier = "openrouter.apiKey"
 
   private enum TranscriptionLocation: String, CaseIterable, Identifiable {
@@ -1840,9 +1845,10 @@ struct SettingsView: View {
   }
 
   private var localPostProcessingOptions: [ModelCatalog.Option] {
-    ModelCatalog.postProcessing.filter {
+    let builtIn = ModelCatalog.postProcessing.filter {
       PostProcessingManager.isLocalPostProcessingModel($0.id)
     }
+    return builtIn + localPostProcessingModels.availableModelOptions
   }
 
   private var cloudPostProcessingOptions: [ModelCatalog.Option] {
@@ -2638,30 +2644,29 @@ struct SettingsView: View {
       )
 
       Text(
-        "Local post-processing is separate from OpenRouter and cloud LLMs. The current local engine is a built-in rules model, so it is ready immediately and has no download step."
+        "Local post-processing is separate from OpenRouter and cloud LLMs. Use the built-in rules model for instant cleanup, or download GGUF instruction models from Hugging Face for local LLM cleanup."
       )
       .font(.caption)
       .foregroundStyle(.secondary)
 
       localPostProcessingQuickStart
+      localPostProcessingRuntimeStatus
 
       ModelPicker(
         title: "Local Post-processing Model",
-        help: "Used for local-only cleanup after transcription. Downloadable local text-generation models will appear here when a local LLM runtime is available.",
+        help: "Used for local-only cleanup after transcription. Built-in rules need no runtime; Hugging Face GGUF models need the local llama.cpp runtime and a model download.",
         options: localPostProcessingOptions,
         value: settingsBinding(\AppSettings.postProcessingModel)
       )
 
-      SettingsInlineInfo(
-        title: "No download required",
-        message:
-          "The built-in local cleanup model is installed with Speak, uses 0 MB of extra model storage, and does not require an API key.",
-        systemImage: "checkmark.circle"
-      )
+      localPostProcessingManualImport
 
       VStack(spacing: 10) {
-        ForEach(localPostProcessingOptions) { option in
-          localPostProcessingRow(option)
+        ForEach(ModelCatalog.postProcessing.filter { $0.id == LocalPostProcessingModelManager.builtInRulesModelID }) { option in
+          builtInLocalPostProcessingRow(option)
+        }
+        ForEach(localPostProcessingModels.availableModels) { model in
+          localPostProcessingModelRow(model)
         }
       }
     }
@@ -2685,13 +2690,13 @@ struct SettingsView: View {
       )
       localModelStep(
         number: "2",
-        title: "Confirm the local model",
-        detail: "Built-in cleanup is ready now. There is no model download for the current local engine."
+        title: "Download a local LLM model",
+        detail: "GGUF models come from Hugging Face and show their approximate size before download. The built-in rules model stays available with no download."
       )
       localModelStep(
         number: "3",
         title: "Record normally",
-        detail: "Speak applies safe formatting cleanup on this Mac after transcription."
+        detail: "Speak runs cleanup locally after transcription. Downloaded models use the app-owned llama.cpp runtime."
       )
     }
     .padding(12)
@@ -2701,7 +2706,85 @@ struct SettingsView: View {
     )
   }
 
-  private func localPostProcessingRow(_ option: ModelCatalog.Option) -> some View {
+  private var localPostProcessingRuntimeStatus: some View {
+    HStack(alignment: .top, spacing: 12) {
+      Image(systemName: localPostProcessingRuntimeIcon)
+        .foregroundStyle(localPostProcessingRuntimeTint)
+        .frame(width: 24)
+
+      VStack(alignment: .leading, spacing: 4) {
+        Text("Local LLM runtime")
+          .font(.subheadline.weight(.semibold))
+        Text("Required only for downloaded Hugging Face GGUF post-processing models. Built-in cleanup works without it.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        if case .failed(let message) = localPostProcessingModels.runtimeState {
+          Text(message)
+            .font(.caption2)
+            .foregroundStyle(.red)
+        }
+      }
+
+      Spacer()
+
+      switch localPostProcessingModels.runtimeState {
+      case .installed:
+        Text("Installed")
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.green)
+      case .installing:
+        ProgressView()
+          .controlSize(.small)
+      case .notInstalled, .failed:
+        Button("Install Runtime") {
+          Task { await localPostProcessingModels.installRuntime() }
+        }
+      }
+    }
+    .padding(12)
+    .background(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .fill(Color(nsColor: .controlBackgroundColor))
+    )
+  }
+
+  private var localPostProcessingManualImport: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      Text("Add a Hugging Face GGUF model")
+        .font(.caption.weight(.semibold))
+      Text("Use this for compatible llama.cpp/GGUF instruction models. Paste the Hugging Face repo and exact .gguf filename; Speak will download and run it locally.")
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      HStack(spacing: 10) {
+        TextField("Repo, e.g. bartowski/Qwen2.5-0.5B-Instruct-GGUF", text: $localPostProcessingRepoID)
+          .textFieldStyle(.roundedBorder)
+        TextField("File, e.g. Qwen2.5-0.5B-Instruct-Q4_K_M.gguf", text: $localPostProcessingFilename)
+          .textFieldStyle(.roundedBorder)
+      }
+      HStack(spacing: 10) {
+        TextField("Size MB (optional)", text: $localPostProcessingSizeMB)
+          .textFieldStyle(.roundedBorder)
+          .frame(width: 140)
+        Button("Add Manual Model") {
+          addLocalPostProcessingModel()
+        }
+        .buttonStyle(.bordered)
+        Spacer()
+      }
+      if let localPostProcessingImportError {
+        Text(localPostProcessingImportError)
+          .font(.caption)
+          .foregroundStyle(.red)
+      }
+    }
+    .padding(12)
+    .background(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .fill(Color(nsColor: .controlBackgroundColor))
+    )
+  }
+
+  private func builtInLocalPostProcessingRow(_ option: ModelCatalog.Option) -> some View {
     let isSelected = PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel)
       && settings.postProcessingModel.caseInsensitiveCompare(option.id) == .orderedSame
     return HStack(alignment: .top, spacing: 12) {
@@ -2743,7 +2826,7 @@ struct SettingsView: View {
           .font(.caption.weight(.semibold))
           .foregroundStyle(.green)
       } else {
-        Button("Use Local Cleanup") {
+        Button("Use") {
           settings.postProcessingModel = option.id
         }
       }
@@ -2753,6 +2836,143 @@ struct SettingsView: View {
       RoundedRectangle(cornerRadius: 12, style: .continuous)
         .fill(Color(nsColor: .controlBackgroundColor))
     )
+  }
+
+  private func localPostProcessingModelRow(_ model: LocalPostProcessingModel) -> some View {
+      let state = localPostProcessingModels.installState(for: model.id)
+      let isSelected = settings.postProcessingModel.caseInsensitiveCompare(model.id) == .orderedSame
+      return HStack(alignment: .top, spacing: 12) {
+        Image(systemName: localPostProcessingModelIcon(for: state))
+          .foregroundStyle(localPostProcessingModelTint(for: state))
+          .frame(width: 24)
+
+        VStack(alignment: .leading, spacing: 4) {
+          HStack(spacing: 8) {
+            Text(model.displayName)
+              .font(.subheadline.weight(.semibold))
+            if isSelected {
+              Text("Selected")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(Color.green)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Capsule().fill(Color.green.opacity(0.12)))
+            }
+            Text("Hugging Face")
+              .font(.caption2.weight(.semibold))
+              .foregroundStyle(Color.brandAccentDeep)
+              .padding(.horizontal, 8)
+              .padding(.vertical, 3)
+              .background(Capsule().fill(Color.brandAccentDeep.opacity(0.12)))
+          }
+          Text(model.description)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+          Text("\(model.sizeLabel) - \(model.repoID) / \(model.filename)")
+            .font(.caption2.monospacedDigit())
+            .foregroundStyle(.tertiary)
+          if case .failed(let message) = state {
+            Text(message)
+              .font(.caption2)
+              .foregroundStyle(.red)
+          }
+        }
+
+        Spacer()
+
+        switch state {
+        case .installed:
+          VStack(alignment: .trailing, spacing: 8) {
+            if !isSelected {
+              Button("Use") {
+                settings.postProcessingModel = model.id
+              }
+            }
+            Button("Delete") {
+              localPostProcessingModels.deleteModel(model)
+            }
+          }
+        case .installing:
+          VStack(alignment: .trailing, spacing: 6) {
+            ProgressView()
+              .controlSize(.small)
+            Text("Downloading")
+              .font(.caption2)
+              .foregroundStyle(.secondary)
+          }
+        case .notInstalled, .failed:
+          VStack(alignment: .trailing, spacing: 8) {
+            Button(isSelected ? "Download" : "Download & Use") {
+              settings.postProcessingModel = model.id
+              Task { await localPostProcessingModels.installModel(model) }
+            }
+            if !isSelected {
+              Button("Use") {
+                settings.postProcessingModel = model.id
+              }
+            }
+          }
+        }
+    }
+    .padding(12)
+    .background(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .fill(Color(nsColor: .controlBackgroundColor))
+    )
+  }
+
+  private var localPostProcessingRuntimeIcon: String {
+    switch localPostProcessingModels.runtimeState {
+    case .installed: return "checkmark.circle.fill"
+    case .installing: return "arrow.down.circle.fill"
+    case .failed: return "exclamationmark.triangle.fill"
+    case .notInstalled: return "shippingbox"
+    }
+  }
+
+  private var localPostProcessingRuntimeTint: Color {
+    switch localPostProcessingModels.runtimeState {
+    case .installed: return .green
+    case .installing: return .brandAccentDeep
+    case .failed: return .red
+    case .notInstalled: return .secondary
+    }
+  }
+
+  private func localPostProcessingModelIcon(for state: LocalPostProcessingModelManager.InstallState) -> String {
+    switch state {
+    case .installed: return "checkmark.circle.fill"
+    case .installing: return "arrow.down.circle.fill"
+    case .failed: return "exclamationmark.triangle.fill"
+    case .notInstalled: return "externaldrive.badge.plus"
+    }
+  }
+
+  private func localPostProcessingModelTint(for state: LocalPostProcessingModelManager.InstallState) -> Color {
+    switch state {
+    case .installed: return .green
+    case .installing: return .brandAccentDeep
+    case .failed: return .red
+    case .notInstalled: return .secondary
+    }
+  }
+
+  private func addLocalPostProcessingModel() {
+    localPostProcessingImportError = nil
+    let size = Int(localPostProcessingSizeMB.trimmingCharacters(in: .whitespacesAndNewlines))
+    do {
+      let model = try localPostProcessingModels.addHuggingFaceModel(
+        repoID: localPostProcessingRepoID,
+        filename: localPostProcessingFilename,
+        approximateSizeMB: size
+      )
+      settings.postProcessingModel = model.id
+      localPostProcessingRepoID = ""
+      localPostProcessingFilename = ""
+      localPostProcessingSizeMB = ""
+    } catch {
+      localPostProcessingImportError = error.localizedDescription
+    }
   }
 
   private var apiKeySettings: some View {

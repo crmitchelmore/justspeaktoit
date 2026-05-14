@@ -30,6 +30,22 @@ final class PostProcessingManagerTests: XCTestCase {
     XCTAssertTrue(hasRequiredAPIKey)
   }
 
+  func testDownloadedLocalPostProcessingDoesNotRequireOpenRouterKey() async throws {
+    let client = SpyChatClient()
+    let settings = makeSettings()
+    settings.postProcessingModel = "local/post-processing/qwen2.5-0.5b-instruct-q4"
+    let manager = PostProcessingManager(
+      client: client,
+      settings: settings,
+      personalLexicon: makePersonalLexiconService()
+    )
+
+    XCTAssertTrue(PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel))
+    XCTAssertTrue(PostProcessingManager.isDownloadedLocalPostProcessingModel(settings.postProcessingModel))
+    let hasRequiredAPIKey = await manager.hasRequiredAPIKey()
+    XCTAssertTrue(hasRequiredAPIKey)
+  }
+
   func testCloudPostProcessingStillUsesLLMClient() async throws {
     let client = SpyChatClient(responseText: "Cleaned by cloud")
     let settings = makeSettings()

@@ -402,6 +402,39 @@ struct SettingsView: View {
       Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
   }
 
+  private func localModelBadge(_ title: String, tint: Color) -> some View {
+    Text(title)
+      .font(.caption2.weight(.semibold))
+      .foregroundStyle(tint)
+      .padding(.horizontal, 8)
+      .padding(.vertical, 3)
+      .background(Capsule().fill(tint.opacity(0.12)))
+  }
+
+  private func selectedModelBadge(tint: Color = .green) -> some View {
+    Label("Selected", systemImage: "checkmark.circle.fill")
+      .font(.caption.weight(.semibold))
+      .foregroundStyle(tint)
+  }
+
+  private func localModelRowContainer<Content: View>(
+    isSelected: Bool,
+    tint: Color,
+    @ViewBuilder content: () -> Content
+  ) -> some View {
+    content()
+      .padding(12)
+      .background(
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+          .fill(isSelected ? tint.opacity(0.13) : Color(nsColor: .controlBackgroundColor))
+      )
+      .overlay(
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+          .stroke(isSelected ? tint.opacity(0.8) : Color.clear, lineWidth: isSelected ? 2 : 0)
+      )
+      .shadow(color: isSelected ? tint.opacity(0.16) : .clear, radius: 10, y: 3)
+  }
+
   private func previewRecordingSound(_ sound: RecordingSoundPlayer.RecordingSound) {
     let player = RecordingSoundPlayer()
     player.profile = settings.recordingSoundProfile
@@ -1273,20 +1306,21 @@ struct SettingsView: View {
             }
 
             if settings.localTranscriptionMode == .batch {
-              ModelPicker(
-                title: "Local Batch Model",
-                help: "Used for local-only transcription after recording stops.",
-                options: localTranscriptionOptions,
-                value: settingsBinding(\AppSettings.localTranscriptionModel)
-              )
-
-              if !localModels.isInstalled(settings.localTranscriptionModel) {
+              if localTranscriptionOptions.isEmpty {
                 Label(
-                  "Download the selected local batch model before recording in Local Batch mode.",
+                  "Download a local batch model before selecting it for recording.",
                   systemImage: "arrow.down.circle"
                 )
                   .font(.caption)
                   .foregroundStyle(.orange)
+              } else {
+                ModelPicker(
+                  title: "Local Batch Model",
+                  help: "Used for local-only transcription after recording stops.",
+                  options: localTranscriptionOptions,
+                  value: settingsBinding(\AppSettings.localTranscriptionModel),
+                  allowsCustom: false
+                )
               }
 
               VStack(spacing: 10) {
@@ -1308,8 +1342,9 @@ struct SettingsView: View {
 
   private func localModelRow(_ model: LocalTranscriptionModel) -> some View {
     let state = localModels.installState(for: model.id)
-    let isSelected = model.id == settings.localTranscriptionModel
-    return HStack(alignment: .top, spacing: 12) {
+    let isSelected = state == .installed && model.id == settings.localTranscriptionModel
+    return localModelRowContainer(isSelected: isSelected, tint: .green) {
+      HStack(alignment: .top, spacing: 12) {
       Image(systemName: localModelIcon(for: state))
         .foregroundStyle(localModelTint(for: state))
         .frame(width: 24)
@@ -1319,25 +1354,12 @@ struct SettingsView: View {
           Text(model.displayName)
             .font(.subheadline.weight(.semibold))
           if isSelected {
-            Text("Selected")
-              .font(.caption2.weight(.semibold))
-              .foregroundStyle(Color.green)
-              .padding(.horizontal, 8)
-              .padding(.vertical, 3)
-              .background(
-                Capsule()
-                  .fill(Color.green.opacity(0.12))
-              )
+            localModelBadge("Selected", tint: .green)
           }
-          Text(model.supportsLiveStreaming ? "Streaming" : "Offline")
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(model.supportsLiveStreaming ? Color.brandAccentDeep : Color.secondary)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(
-              Capsule()
-                .fill(model.supportsLiveStreaming ? Color.brandAccentDeep.opacity(0.12) : Color.secondary.opacity(0.12))
-            )
+          localModelBadge(
+            model.supportsLiveStreaming ? "Streaming" : "Offline",
+            tint: model.supportsLiveStreaming ? Color.brandAccentDeep : Color.secondary
+          )
         }
         Text(model.description)
           .font(.caption)
@@ -1357,14 +1379,18 @@ struct SettingsView: View {
       switch state {
       case .installed:
         VStack(alignment: .trailing, spacing: 8) {
-          if !isSelected {
+          if isSelected {
+            selectedModelBadge()
+          } else {
             Button("Use") {
               settings.localTranscriptionModel = model.id
-              Task { await localModels.install(model) }
             }
           }
           Button("Delete") {
             localModels.delete(model)
+            if settings.localTranscriptionModel == model.id {
+              settings.localTranscriptionModel = firstInstalledLocalTranscriptionModelID(excluding: model.id) ?? ""
+            }
           }
         }
       case .installing:
@@ -1377,24 +1403,13 @@ struct SettingsView: View {
         }
       case .notInstalled, .failed:
         VStack(alignment: .trailing, spacing: 8) {
-          Button(isSelected ? "Download" : "Download & Use") {
-            settings.localTranscriptionModel = model.id
+          Button("Download") {
             Task { await localModels.install(model) }
-          }
-          if !isSelected {
-            Button("Use") {
-              settings.localTranscriptionModel = model.id
-              Task { await localModels.install(model) }
-            }
           }
         }
       }
+      }
     }
-    .padding(12)
-    .background(
-      RoundedRectangle(cornerRadius: 12, style: .continuous)
-        .fill(Color(nsColor: .controlBackgroundColor))
-    )
   }
 
   private var localModelQuickStart: some View {
@@ -1641,7 +1656,10 @@ struct SettingsView: View {
 
   // swiftlint:disable:next function_body_length
   private func localStreamingSourceRow(_ source: LocalStreamingModelSource) -> some View {
-    HStack(alignment: .top, spacing: 12) {
+    let state = sherpaRuntime.modelStates[source.id] ?? .notInstalled
+    let isSelected = state == .installed && settings.localStreamingModelSource == source.id
+    return localModelRowContainer(isSelected: isSelected, tint: .orange) {
+      HStack(alignment: .top, spacing: 12) {
       Image(systemName: "antenna.radiowaves.left.and.right")
         .foregroundStyle(Color.orange)
         .frame(width: 24)
@@ -1650,12 +1668,10 @@ struct SettingsView: View {
         HStack(spacing: 8) {
           Text(source.displayName)
             .font(.subheadline.weight(.semibold))
-          Text("Local Streaming")
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(Color.orange)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(Capsule().fill(Color.orange.opacity(0.12)))
+          if isSelected {
+            localModelBadge("Selected", tint: .orange)
+          }
+          localModelBadge("Local Streaming", tint: .orange)
         }
         Text(
           "\(source.runtime) · \(localStreamingSizeLabel(for: source)) · \(localStreamingInstallLabel(for: source))"
@@ -1670,20 +1686,15 @@ struct SettingsView: View {
       Spacer()
 
       VStack(alignment: .trailing, spacing: 8) {
-        if settings.localStreamingModelSource == source.id {
-          Text("Selected")
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.orange)
-        } else {
-          Button("Use") {
-            settings.localStreamingModelSource = source.id
-          }
-        }
-        switch sherpaRuntime.modelStates[source.id] ?? .notInstalled {
+        switch state {
         case .installed:
-          Text("Downloaded")
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.green)
+          if isSelected {
+            selectedModelBadge(tint: .orange)
+          } else {
+            Button("Use") {
+              settings.localStreamingModelSource = source.id
+            }
+          }
         case .installing:
           ProgressView()
             .controlSize(.small)
@@ -1701,16 +1712,12 @@ struct SettingsView: View {
         Button("Remove") {
           localModels.deleteStreamingModelSource(source)
           if settings.localStreamingModelSource == source.id {
-            settings.localStreamingModelSource = localModels.streamingModelSources.first?.id ?? ""
+            settings.localStreamingModelSource = firstInstalledStreamingSourceID(excluding: source.id) ?? ""
           }
         }
       }
+      }
     }
-    .padding(12)
-    .background(
-      RoundedRectangle(cornerRadius: 12, style: .continuous)
-        .fill(Color(nsColor: .controlBackgroundColor))
-    )
   }
 
   private func localStreamingSetupSection<Content: View>(
@@ -1833,7 +1840,7 @@ struct SettingsView: View {
 
   @ViewBuilder
   private var selectedLocalModelCallout: some View {
-    if let model = selectedLocalModel {
+    if let model = selectedLocalModel, localModels.isInstalled(model.id) {
       let state = localModels.installState(for: model.id)
       HStack(alignment: .center, spacing: 12) {
         Image(systemName: selectedLocalModelStatusIcon(for: state))
@@ -1908,14 +1915,19 @@ struct SettingsView: View {
   }
 
   private var localTranscriptionOptions: [ModelCatalog.Option] {
-    localModels.availableModelOptions
+    localModels.availableModels
+      .filter { localModels.isInstalled($0.id) }
+      .map(\.option)
   }
 
   private var localPostProcessingOptions: [ModelCatalog.Option] {
     let builtIn = ModelCatalog.postProcessing.filter {
       PostProcessingManager.isLocalPostProcessingModel($0.id)
     }
-    return builtIn + localPostProcessingModels.availableModelOptions
+    let downloaded = localPostProcessingModels.availableModels
+      .filter { localPostProcessingModels.isInstalled($0.id) }
+      .map(\.option)
+    return builtIn + downloaded
   }
 
   private var cloudPostProcessingOptions: [ModelCatalog.Option] {
@@ -1974,7 +1986,6 @@ struct SettingsView: View {
         modelName: huggingFaceModelName
       )
       huggingFaceImportError = nil
-      settings.localTranscriptionModel = model.id
       Task { await localModels.install(model) }
     } catch {
       huggingFaceImportError = error.localizedDescription
@@ -1983,12 +1994,11 @@ struct SettingsView: View {
 
   private func addStreamingModelSource() {
     do {
-      let source = try localModels.addStreamingModelSource(
+      _ = try localModels.addStreamingModelSource(
         repoID: streamingHuggingFaceRepoID,
         modelName: streamingHuggingFaceModelName
       )
       streamingHuggingFaceImportError = nil
-      settings.localStreamingModelSource = source.id
     } catch {
       streamingHuggingFaceImportError = error.localizedDescription
     }
@@ -1999,10 +2009,21 @@ struct SettingsView: View {
     do {
       _ = try localModels.addStreamingModelSource(source)
       streamingHuggingFaceImportError = nil
-      settings.localStreamingModelSource = source.id
     } catch {
       streamingHuggingFaceImportError = error.localizedDescription
     }
+  }
+
+  private func firstInstalledStreamingSourceID(excluding excludedID: String? = nil) -> String? {
+    localModels.streamingModelSources.first {
+      $0.id != excludedID && (sherpaRuntime.modelStates[$0.id] ?? .notInstalled) == .installed
+    }?.id
+  }
+
+  private func firstInstalledLocalTranscriptionModelID(excluding excludedID: String? = nil) -> String? {
+    localModels.availableModels.first {
+      $0.id != excludedID && localModels.isInstalled($0.id)
+    }?.id
   }
 
   private func localModelSizeLabel(for model: LocalTranscriptionModel) -> String {
@@ -2735,7 +2756,8 @@ struct SettingsView: View {
         Hugging Face GGUF models need the local llama.cpp runtime and a model download.
         """,
         options: localPostProcessingOptions,
-        value: settingsBinding(\AppSettings.postProcessingModel)
+        value: settingsBinding(\AppSettings.postProcessingModel),
+        allowsCustom: false
       )
 
       localPostProcessingManualImport
@@ -2874,7 +2896,8 @@ struct SettingsView: View {
   private func builtInLocalPostProcessingRow(_ option: ModelCatalog.Option) -> some View {
     let isSelected = PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel)
       && settings.postProcessingModel.caseInsensitiveCompare(option.id) == .orderedSame
-    return HStack(alignment: .top, spacing: 12) {
+    return localModelRowContainer(isSelected: isSelected, tint: .green) {
+      HStack(alignment: .top, spacing: 12) {
       Image(systemName: "wand.and.stars")
         .foregroundStyle(Color.green)
         .frame(width: 24)
@@ -2883,18 +2906,11 @@ struct SettingsView: View {
         HStack(spacing: 8) {
           Text(option.displayName)
             .font(.subheadline.weight(.semibold))
-          Text("Local")
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(Color.green)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(Capsule().fill(Color.green.opacity(0.12)))
-          Text("Built in")
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(Capsule().fill(Color.secondary.opacity(0.12)))
+          if isSelected {
+            localModelBadge("Selected", tint: .green)
+          }
+          localModelBadge("Local", tint: .green)
+          localModelBadge("Built in", tint: .secondary)
         }
         if let description = option.description {
           Text(description)
@@ -2909,26 +2925,21 @@ struct SettingsView: View {
       Spacer()
 
       if isSelected {
-        Text("Selected")
-          .font(.caption.weight(.semibold))
-          .foregroundStyle(.green)
+        selectedModelBadge()
       } else {
         Button("Use") {
           settings.postProcessingModel = option.id
         }
       }
+      }
     }
-    .padding(12)
-    .background(
-      RoundedRectangle(cornerRadius: 12, style: .continuous)
-        .fill(Color(nsColor: .controlBackgroundColor))
-    )
   }
 
   private func localPostProcessingModelRow(_ model: LocalPostProcessingModel) -> some View {
       let state = localPostProcessingModels.installState(for: model.id)
-      let isSelected = settings.postProcessingModel.caseInsensitiveCompare(model.id) == .orderedSame
-      return HStack(alignment: .top, spacing: 12) {
+      let isSelected = state == .installed && settings.postProcessingModel.caseInsensitiveCompare(model.id) == .orderedSame
+      return localModelRowContainer(isSelected: isSelected, tint: .green) {
+        HStack(alignment: .top, spacing: 12) {
         Image(systemName: localPostProcessingModelIcon(for: state))
           .foregroundStyle(localPostProcessingModelTint(for: state))
           .frame(width: 24)
@@ -2938,19 +2949,9 @@ struct SettingsView: View {
             Text(model.displayName)
               .font(.subheadline.weight(.semibold))
             if isSelected {
-              Text("Selected")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(Color.green)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(Capsule().fill(Color.green.opacity(0.12)))
+              localModelBadge("Selected", tint: .green)
             }
-            Text("Hugging Face")
-              .font(.caption2.weight(.semibold))
-              .foregroundStyle(Color.brandAccentDeep)
-              .padding(.horizontal, 8)
-              .padding(.vertical, 3)
-              .background(Capsule().fill(Color.brandAccentDeep.opacity(0.12)))
+            localModelBadge("Hugging Face", tint: Color.brandAccentDeep)
           }
           Text(model.description)
             .font(.caption)
@@ -2970,7 +2971,9 @@ struct SettingsView: View {
         switch state {
         case .installed:
           VStack(alignment: .trailing, spacing: 8) {
-            if !isSelected {
+            if isSelected {
+              selectedModelBadge()
+            } else {
               Button("Use") {
                 settings.postProcessingModel = model.id
               }
@@ -2992,23 +2995,13 @@ struct SettingsView: View {
           }
         case .notInstalled, .failed:
           VStack(alignment: .trailing, spacing: 8) {
-            Button(isSelected ? "Download" : "Download & Use") {
-              settings.postProcessingModel = model.id
+            Button("Download") {
               Task { await localPostProcessingModels.installModel(model) }
-            }
-            if !isSelected {
-              Button("Use") {
-                settings.postProcessingModel = model.id
-              }
             }
           }
         }
+      }
     }
-    .padding(12)
-    .background(
-      RoundedRectangle(cornerRadius: 12, style: .continuous)
-        .fill(Color(nsColor: .controlBackgroundColor))
-    )
   }
 
   private var localPostProcessingRuntimeIcon: String {
@@ -3051,12 +3044,11 @@ struct SettingsView: View {
     localPostProcessingImportError = nil
     let size = Int(localPostProcessingSizeMB.trimmingCharacters(in: .whitespacesAndNewlines))
     do {
-      let model = try localPostProcessingModels.addHuggingFaceModel(
+      _ = try localPostProcessingModels.addHuggingFaceModel(
         repoID: localPostProcessingRepoID,
         filename: localPostProcessingFilename,
         approximateSizeMB: size
       )
-      settings.postProcessingModel = model.id
       localPostProcessingRepoID = ""
       localPostProcessingFilename = ""
       localPostProcessingSizeMB = ""
@@ -4365,6 +4357,7 @@ private struct ModelPicker: View {
   let help: String?
   let options: [ModelCatalog.Option]
   let usesDetailedChooser: Bool
+  let allowsCustom: Bool
   @Binding var value: String
 
   private struct ModelTagBadges: View {
@@ -4563,12 +4556,14 @@ private struct ModelPicker: View {
     help: String? = nil,
     options: [ModelCatalog.Option],
     value: Binding<String>,
-    usesDetailedChooser: Bool = false
+    usesDetailedChooser: Bool = false,
+    allowsCustom: Bool = true
   ) {
     self.title = title
     self.help = help
     self.options = options
     self.usesDetailedChooser = usesDetailedChooser
+    self.allowsCustom = allowsCustom
     _value = value
 
     let trimmed = value.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -4581,6 +4576,15 @@ private struct ModelPicker: View {
       DispatchQueue.main.async {
         value.wrappedValue = first.id
       }
+    } else if !allowsCustom, let first = options.first {
+      _selection = State(initialValue: first.id)
+      _customValue = State(initialValue: "")
+      DispatchQueue.main.async {
+        value.wrappedValue = first.id
+      }
+    } else if !allowsCustom {
+      _selection = State(initialValue: "")
+      _customValue = State(initialValue: "")
     } else {
       _selection = State(initialValue: ModelCatalog.customOptionID)
       _customValue = State(initialValue: trimmed)
@@ -4622,7 +4626,9 @@ private struct ModelPicker: View {
           ForEach(options) { option in
             Text(option.displayName).tag(option.id)
           }
-          Text("Custom…").tag(ModelCatalog.customOptionID)
+          if allowsCustom {
+            Text("Custom…").tag(ModelCatalog.customOptionID)
+          }
         }
         .pickerStyle(.menu)
         .padding(.horizontal, 12)

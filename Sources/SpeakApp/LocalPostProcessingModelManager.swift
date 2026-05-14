@@ -253,6 +253,7 @@ final class LocalPostProcessingModelManager: ObservableObject {
     let modelURL = modelFileURL(for: model)
     let request = LocalPostProcessingRequest(
       systemPrompt: systemPrompt,
+      userPrompt: Self.localUserPrompt(systemPrompt: systemPrompt, rawText: rawText),
       rawText: rawText,
       temperature: temperature
     )
@@ -391,6 +392,22 @@ final class LocalPostProcessingModelManager: ObservableObject {
     return Int((value * multiplier).rounded())
   }
 
+  nonisolated static func localUserPrompt(systemPrompt: String, rawText: String) -> String {
+    """
+    Follow these transcript cleanup instructions exactly:
+
+    <instructions>
+    \(systemPrompt)
+    </instructions>
+
+    Clean the following raw transcript. Return only the cleaned transcript text.
+
+    <raw_transcript>
+    \(rawText)
+    </raw_transcript>
+    """
+  }
+
   private nonisolated static func displayName(repoID: String, filename: String) -> String {
     let base = filename
       .replacingOccurrences(of: ".gguf", with: "", options: .caseInsensitive)
@@ -482,6 +499,16 @@ def main():
     request = json.loads(sys.stdin.read())
     system_prompt = request.get("systemPrompt") or ""
     raw_text = request.get("rawText") or ""
+    user_prompt = request.get("userPrompt") or (
+        "Follow these transcript cleanup instructions exactly:\n\n"
+        "<instructions>\n"
+        + system_prompt
+        + "\n</instructions>\n\n"
+        "Clean the following raw transcript. Return only the cleaned transcript text.\n\n"
+        "<raw_transcript>\n"
+        + raw_text
+        + "\n</raw_transcript>"
+    )
     temperature = float(request.get("temperature") or 0.2)
 
     llm = Llama(
@@ -493,15 +520,7 @@ def main():
     response = llm.create_chat_completion(
         messages=[
             {"role": "system", "content": system_prompt},
-            {
-                "role": "user",
-                "content": (
-                    "Clean the following raw transcript. Return only the cleaned transcript text.\n\n"
-                    "<raw_transcript>\n"
-                    + raw_text
-                    + "\n</raw_transcript>"
-                ),
-            },
+            {"role": "user", "content": user_prompt},
         ],
         temperature=temperature,
         max_tokens=1024,
@@ -564,6 +583,7 @@ struct LocalPostProcessingModel: Codable, Equatable, Identifiable, Sendable {
 
 private struct LocalPostProcessingRequest: Codable {
   let systemPrompt: String
+  let userPrompt: String
   let rawText: String
   let temperature: Double
 }

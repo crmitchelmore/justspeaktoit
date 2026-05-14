@@ -38,6 +38,25 @@ final class ModelCatalogTests: XCTestCase {
         XCTAssertFalse(name.isEmpty)
     }
 
+    func testFriendlyName_downloadedLocalModels_returnsSpecificName() {
+        XCTAssertEqual(
+            ModelCatalog.friendlyName(for: "local/post-processing/qwen2.5-0.5b-instruct-q4"),
+            "Qwen2.5 0.5B Instruct Q4"
+        )
+        XCTAssertEqual(
+            ModelCatalog.friendlyName(
+                for: "local/post-processing/huggingface/bartowski/qwen2.5-0.5b-instruct-gguf/qwen2.5-0.5b-instruct-q4-k-m.gguf"
+            ),
+            "Qwen2.5 0.5B Instruct Q4_K_M"
+        )
+        XCTAssertEqual(
+            ModelCatalog.friendlyName(
+                for: "local/whisperkit/huggingface/argmaxinc/whisperkit-coreml/openai-whisper-large-v3-turbo-954mb"
+            ),
+            "Openai Whisper Large V3 Turbo 954 MB"
+        )
+    }
+
     func testFriendlyName_emptyString_returnsNonEmpty() {
         let name = ModelCatalog.friendlyName(for: "")
         XCTAssertFalse(name.isEmpty, "Should return something even for empty identifier")

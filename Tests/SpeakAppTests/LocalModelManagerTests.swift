@@ -130,4 +130,16 @@ final class LocalModelManagerTests: XCTestCase {
             )
         )
     }
+
+    func testLocalPostProcessingPrompt_includesSystemPromptAsInstructions() {
+        let prompt = LocalPostProcessingModelManager.localUserPrompt(
+            systemPrompt: "Always output in bullet points.",
+            rawText: "hello world"
+        )
+
+        XCTAssertTrue(prompt.contains("<instructions>"))
+        XCTAssertTrue(prompt.contains("Always output in bullet points."))
+        XCTAssertTrue(prompt.contains("<raw_transcript>"))
+        XCTAssertTrue(prompt.contains("hello world"))
+    }
 }

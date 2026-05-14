@@ -425,6 +425,24 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
 
         let lowercased = trimmed.lowercased()
         if lowercased.hasPrefix("local/") {
+            if lowercased == "local/post-processing/rules" {
+                return "Local Cleanup (Offline)"
+            }
+            if lowercased.hasPrefix("local/post-processing/") {
+                return friendlyLocalModelName(
+                    from: trimmed,
+                    prefixes: [
+                        "local/post-processing/huggingface/",
+                        "local/post-processing/"
+                    ]
+                )
+            }
+            if lowercased.hasPrefix("local/whisperkit/huggingface/") {
+                return friendlyLocalModelName(from: trimmed, prefixes: ["local/whisperkit/huggingface/"])
+            }
+            if lowercased.hasPrefix("local/streaming/huggingface/") {
+                return friendlyLocalModelName(from: trimmed, prefixes: ["local/streaming/huggingface/"])
+            }
             if let name = localTranscription.first(where: { $0.id.lowercased() == lowercased })?.displayName {
                 return name
             }
@@ -440,5 +458,27 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             return String(lastComponent).replacingOccurrences(of: "-", with: " ").capitalized
         }
         return trimmed
+    }
+
+    private static func friendlyLocalModelName(from identifier: String, prefixes: [String]) -> String {
+        var working = identifier
+        let lowercased = identifier.lowercased()
+        if let prefix = prefixes.first(where: { lowercased.hasPrefix($0) }) {
+            working = String(identifier.dropFirst(prefix.count))
+        }
+        let components = working.split(separator: "/").map(String.init)
+        let candidate = components.last ?? working
+        return candidate
+            .replacingOccurrences(of: ".gguf", with: "", options: .caseInsensitive)
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .replacingOccurrences(of: #"(?i)\bq([0-9])\s+k\s+([a-z])\b"#, with: "Q$1_K_$2", options: .regularExpression)
+            .replacingOccurrences(of: #"(?i)\b([0-9]+)mb\b"#, with: "$1 MB", options: .regularExpression)
+            .replacingOccurrences(of: #"(?i)\b([0-9]+)gb\b"#, with: "$1 GB", options: .regularExpression)
+            .capitalized
+            .replacingOccurrences(of: "Gguf", with: "GGUF")
+            .replacingOccurrences(of: " Mb", with: " MB")
+            .replacingOccurrences(of: " Gb", with: " GB")
+            .replacingOccurrences(of: "Qwen", with: "Qwen")
     }
 }

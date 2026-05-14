@@ -46,6 +46,44 @@ final class PostProcessingManagerTests: XCTestCase {
     XCTAssertTrue(hasRequiredAPIKey)
   }
 
+  func testEmptyTranscriptSkipsPostProcessingAndReturnsEmptyText() async throws {
+    let client = SpyChatClient(responseText: "This is a raw transcript.")
+    let settings = makeSettings()
+    settings.postProcessingModel = "openai/gpt-4o-mini"
+    let manager = PostProcessingManager(
+      client: client,
+      settings: settings,
+      personalLexicon: makePersonalLexiconService()
+    )
+
+    for rawText in ["", "   \n\t  ", "[BLANK_AUDIO]", "  [blank_audio]  "] {
+      let result = await manager.process(
+        rawText: rawText,
+        context: .empty,
+        corrections: nil
+      )
+
+      let outcome = try result.get()
+      XCTAssertEqual(outcome.original, rawText)
+      XCTAssertEqual(outcome.processed, "")
+      XCTAssertNil(outcome.response)
+    }
+    XCTAssertEqual(client.sendChatCallCount, 0)
+  }
+
+  func testLocalPostProcessingPromptMarksUserInstructionsAuthoritative() {
+    let prompt = LocalPostProcessingModelManager.localUserPrompt(
+      systemPrompt: "Put a full stop after each word.",
+      rawText: "hello world"
+    )
+
+    XCTAssertTrue(prompt.contains("instructions below are authoritative"))
+    XCTAssertTrue(prompt.contains("formatting-only instructions"))
+    XCTAssertTrue(prompt.contains("Put a full stop after each word."))
+    XCTAssertTrue(prompt.contains("<raw_transcript>\nhello world\n</raw_transcript>"))
+    XCTAssertTrue(LocalPostProcessingModelManager.localSystemPrompt().contains("Follow the user's"))
+  }
+
   func testCloudPostProcessingStillUsesLLMClient() async throws {
     let client = SpyChatClient(responseText: "Cleaned by cloud")
     let settings = makeSettings()

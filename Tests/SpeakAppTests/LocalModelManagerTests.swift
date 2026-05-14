@@ -1,5 +1,6 @@
 import XCTest
 
+import SpeakCore
 @testable import SpeakApp
 
 final class LocalModelManagerTests: XCTestCase {
@@ -39,6 +40,36 @@ final class LocalModelManagerTests: XCTestCase {
             ),
             "local/whisperkit/huggingface/argmaxinc/whisperkit-coreml/openai-whisper-large-v3-turbo-954mb"
         )
+    }
+
+    func testNormalizedLocalModelID_mapsLegacyLargeTurboAliasToExactSizedVariant() {
+        let legacyID = "local/whisperkit/huggingface/argmaxinc/whisperkit-coreml/openai-whisper-large-v3-turbo"
+
+        XCTAssertEqual(
+            LocalModelManager.normalizedLocalModelID(legacyID),
+            "local/whisperkit/huggingface/argmaxinc/whisperkit-coreml/openai-whisper-large-v3-turbo-954mb"
+        )
+    }
+
+    func testNormalizedImportedModel_updatesLegacyInstallMarkerID() {
+        let legacy = LocalTranscriptionModel(
+            id: "local/whisperkit/huggingface/argmaxinc/whisperkit-coreml/openai-whisper-large-v3-turbo",
+            displayName: "Whisper Large v3 Turbo from argmaxinc/whisperkit-coreml",
+            modelName: "openai_whisper-large-v3_turbo_954MB",
+            engine: "whisperkit",
+            modelRepo: "argmaxinc/whisperkit-coreml",
+            approximateSizeMB: 954,
+            description: "Imported from Hugging Face.",
+            tags: [.quality]
+        )
+
+        let normalized = LocalModelManager.normalizedImportedModel(legacy)
+
+        XCTAssertEqual(
+            normalized.id,
+            "local/whisperkit/huggingface/argmaxinc/whisperkit-coreml/openai-whisper-large-v3-turbo-954mb"
+        )
+        XCTAssertEqual(normalized.modelName, "openai_whisper-large-v3_turbo_954MB")
     }
 
     func testResolveHuggingFaceModel_preservesUnknownRepoModelAndParsesSizeSuffix() {

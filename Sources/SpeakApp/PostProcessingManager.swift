@@ -59,6 +59,17 @@ final class PostProcessingManager: ObservableObject {
     corrections: PersonalLexiconHistorySummary?,
     onStreamingUpdate: ((String) -> Void)? = nil
   ) async -> Result<PostProcessingOutcome, Error> {
+    if Self.isEffectivelyEmptyTranscript(rawText) {
+      return .success(
+        .init(
+          original: rawText,
+          processed: "",
+          response: nil,
+          systemPrompt: basePrompt()
+        )
+      )
+    }
+
     guard settings.postProcessingEnabled else {
       return .success(
         .init(
@@ -216,7 +227,7 @@ final class PostProcessingManager: ObservableObject {
     guard !trimmed.isEmpty else { return text }
 
     var cleaned = trimmed.replacingOccurrences(
-      of: #"(?i)\s*\[blank_audio\]\s*"#,
+      of: blankAudioMarkerPattern,
       with: " ",
       options: .regularExpression
     )
@@ -244,6 +255,15 @@ final class PostProcessingManager: ObservableObject {
       cleaned.replaceSubrange(cleaned.startIndex...cleaned.startIndex, with: capitalizedFirst)
     }
     return cleaned
+  }
+
+  static func isEffectivelyEmptyTranscript(_ text: String) -> Bool {
+    let withoutBlankAudioMarkers = text.replacingOccurrences(
+      of: blankAudioMarkerPattern,
+      with: " ",
+      options: .regularExpression
+    )
+    return withoutBlankAudioMarkers.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 
   private func basePrompt() -> String {
@@ -365,6 +385,8 @@ final class PostProcessingManager: ObservableObject {
     }
     return existing
   }
+
+  private static let blankAudioMarkerPattern = #"(?i)\s*\[blank_audio\]\s*"#
 }
 // @Implement This manager depends on the chat LLM protocol as a dependency and alongside app settings for any configuration. It can read the system prompt that should come with it and orchestrate sending the request off, receiving it, and sending it back to the caller.
 // The default system message should be "The following message is a raw transcription. Improve the transcription by fixing grammar, punctuation, and formatting while preserving the original meaning. Only ever return the processed transcription, no additional text."

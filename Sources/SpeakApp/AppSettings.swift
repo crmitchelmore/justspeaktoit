@@ -1008,7 +1008,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
 
   private static func normalizedLocalTranscriptionModel(_ identifier: String?) -> String {
     let trimmed = identifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    return trimmed.isEmpty ? defaultLocalTranscriptionModel : trimmed
+    guard !trimmed.isEmpty else { return defaultLocalTranscriptionModel }
+    return LocalModelManager.normalizedLocalModelID(trimmed)
   }
 
   private static func normalizedPostProcessingModel(_ identifier: String?) -> String {

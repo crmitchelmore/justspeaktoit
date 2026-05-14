@@ -127,7 +127,8 @@ final class LocalModelManager: ObservableObject {
   }
 
   func model(for modelID: String) -> LocalTranscriptionModel? {
-    availableModels.first { $0.id == modelID }
+    let normalizedID = Self.normalizedLocalModelID(modelID)
+    return availableModels.first { $0.id == modelID || $0.id == normalizedID }
   }
 
   @discardableResult
@@ -295,25 +296,11 @@ final class LocalModelManager: ObservableObject {
       let records = try JSONDecoder().decode([ImportedModelRecord].self, from: data)
       var didMigrate = false
       let migratedModels = records.map { record in
-        let model = record.model
-        let resolved = Self.resolveHuggingFaceModel(
-          repoID: model.modelRepo ?? "",
-          modelName: model.modelName
-        )
-        guard resolved.modelName != model.modelName || model.approximateSizeMB <= 0 else { return model }
-        didMigrate = true
-        let repoID = model.modelRepo ?? "Hugging Face"
-        return LocalTranscriptionModel(
-          id: Self.huggingFaceModelID(repoID: repoID, modelName: resolved.modelName),
-          displayName: "\(resolved.displayName) from \(repoID)",
-          modelName: resolved.modelName,
-          engine: model.engine,
-          modelRepo: model.modelRepo,
-          approximateSizeMB: resolved.approximateSizeMB,
-          description: model.description,
-          tags: model.tags,
-          supportsLiveStreaming: model.supportsLiveStreaming
-        )
+        let migrated = Self.normalizedImportedModel(record.model)
+        if migrated != record.model {
+          didMigrate = true
+        }
+        return migrated
       }
       importedModels = Self.deduplicateModels(migratedModels)
       if didMigrate {
@@ -351,6 +338,45 @@ final class LocalModelManager: ObservableObject {
 
   nonisolated static func huggingFaceModelID(repoID: String, modelName: String) -> String {
     "local/whisperkit/huggingface/\(slug(repoID))/\(slug(modelName))"
+  }
+
+  nonisolated static func normalizedLocalModelID(_ identifier: String) -> String {
+    let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
+    let prefix = "local/whisperkit/huggingface/"
+    guard trimmed.lowercased().hasPrefix(prefix) else { return trimmed }
+
+    let remainder = String(trimmed.dropFirst(prefix.count))
+    let components = remainder.split(separator: "/").map(String.init)
+    guard components.count >= 3 else { return trimmed }
+
+    let repoID = "\(components[0])/\(components[1])"
+    let modelSlug = components.dropFirst(2).joined(separator: "/")
+    let resolved = resolveHuggingFaceModel(repoID: repoID, modelName: modelSlug)
+    return huggingFaceModelID(repoID: repoID, modelName: resolved.modelName)
+  }
+
+  nonisolated static func normalizedImportedModel(_ model: LocalTranscriptionModel) -> LocalTranscriptionModel {
+    guard let repoID = model.modelRepo else { return model }
+    let resolved = resolveHuggingFaceModel(repoID: repoID, modelName: model.modelName)
+    let expectedID = huggingFaceModelID(repoID: repoID, modelName: resolved.modelName)
+    guard expectedID != model.id
+      || resolved.modelName != model.modelName
+      || resolved.approximateSizeMB != model.approximateSizeMB
+    else {
+      return model
+    }
+
+    return LocalTranscriptionModel(
+      id: expectedID,
+      displayName: "\(resolved.displayName) from \(repoID)",
+      modelName: resolved.modelName,
+      engine: model.engine,
+      modelRepo: model.modelRepo,
+      approximateSizeMB: resolved.approximateSizeMB,
+      description: model.description,
+      tags: model.tags,
+      supportsLiveStreaming: model.supportsLiveStreaming
+    )
   }
 
   nonisolated static func slug(_ value: String) -> String {
@@ -495,7 +521,12 @@ final class LocalModelManager: ObservableObject {
         size: 632
       ),
       model(
-        ["openai_whisper-large-v3_turbo", "openai_whisper-large-v3_turbo_954mb"],
+        [
+          "openai_whisper-large-v3_turbo",
+          "openai_whisper-large-v3_turbo_954mb",
+          "openai-whisper-large-v3-turbo",
+          "openai-whisper-large-v3-turbo-954mb"
+        ],
         name: "openai_whisper-large-v3_turbo_954MB",
         displayName: "Whisper Large v3 Turbo",
         size: 954

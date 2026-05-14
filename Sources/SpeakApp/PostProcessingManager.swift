@@ -7,6 +7,7 @@ struct PostProcessingOutcome {
   let processed: String
   let response: ChatResponse?
   let systemPrompt: String
+  let promptPayload: PostProcessingPromptPayload?
 }
 
 @MainActor
@@ -67,7 +68,8 @@ final class PostProcessingManager: ObservableObject {
           original: rawText,
           processed: "",
           response: nil,
-          systemPrompt: basePrompt()
+          systemPrompt: basePrompt(),
+          promptPayload: nil
         )
       )
     }
@@ -78,7 +80,8 @@ final class PostProcessingManager: ObservableObject {
           original: rawText,
           processed: rawText,
           response: nil,
-          systemPrompt: basePrompt()
+          systemPrompt: basePrompt(),
+          promptPayload: nil
         )
       )
     }
@@ -95,7 +98,8 @@ final class PostProcessingManager: ObservableObject {
           original: rawText,
           processed: cleaned,
           response: nil,
-          systemPrompt: "Local offline transcript cleanup"
+          systemPrompt: "Local offline transcript cleanup",
+          promptPayload: nil
         )
       )
     }
@@ -108,12 +112,18 @@ final class PostProcessingManager: ObservableObject {
           systemPrompt: systemPrompt,
           temperature: settings.postProcessingTemperature
         )
+        let promptPayload = PostProcessingPromptPayload(
+          modelIdentifier: model,
+          systemPrompt: LocalPostProcessingModelManager.localSystemPrompt(systemPrompt),
+          userPrompt: LocalPostProcessingModelManager.localUserPrompt(systemPrompt: systemPrompt, rawText: rawText)
+        )
         return .success(
           .init(
             original: rawText,
             processed: cleaned,
             response: nil,
-            systemPrompt: systemPrompt
+            systemPrompt: systemPrompt,
+            promptPayload: promptPayload
           )
         )
       } catch {
@@ -129,6 +139,11 @@ final class PostProcessingManager: ObservableObject {
     \(rawText)
     </raw_transcript>
     """
+    let promptPayload = PostProcessingPromptPayload(
+      modelIdentifier: model,
+      systemPrompt: systemPrompt,
+      userPrompt: userMessage
+    )
 
     // Try streaming if enabled and client supports it
     if settings.postProcessingStreamingEnabled,
@@ -153,7 +168,8 @@ final class PostProcessingManager: ObservableObject {
             original: rawText,
             processed: cleaned,
             response: nil,
-            systemPrompt: systemPrompt
+            systemPrompt: systemPrompt,
+            promptPayload: promptPayload
           )
         )
       } catch {
@@ -179,7 +195,8 @@ final class PostProcessingManager: ObservableObject {
           original: rawText,
           processed: cleaned,
           response: response,
-          systemPrompt: systemPrompt
+          systemPrompt: systemPrompt,
+          promptPayload: promptPayload
         )
       )
     } catch {

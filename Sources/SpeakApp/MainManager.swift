@@ -1747,7 +1747,8 @@ private final class ActiveSession {
       trigger: trigger,
       personalCorrections: personalCorrections,
       errors: errors,
-      source: source
+      source: source,
+      postProcessingPrompt: postProcessingOutcome?.promptPayload
     )
   }
 }

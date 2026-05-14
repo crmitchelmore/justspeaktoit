@@ -89,6 +89,24 @@ final class PostProcessingManagerTests: XCTestCase {
     XCTAssertTrue(userPrompt.contains("<raw_transcript>\nhello world\n</raw_transcript>"))
   }
 
+  func testLocalPostProcessingSanitizesThinkingTags() {
+    let output = """
+    <think>
+    </think>
+
+    Is it able to do anything?
+    """
+
+    XCTAssertEqual(
+      LocalPostProcessingModelManager.sanitizedModelOutput(output),
+      "Is it able to do anything?"
+    )
+    XCTAssertEqual(
+      LocalPostProcessingModelManager.sanitizedModelOutput("<think>reasoning</think>\nHello."),
+      "Hello."
+    )
+  }
+
   func testCloudPostProcessingStillUsesLLMClient() async throws {
     let client = SpyChatClient(responseText: "Cleaned by cloud")
     let settings = makeSettings()
@@ -108,6 +126,10 @@ final class PostProcessingManagerTests: XCTestCase {
     let outcome = try result.get()
     XCTAssertEqual(outcome.processed, "Cleaned by cloud")
     XCTAssertNotNil(outcome.response)
+    let promptPayload = try XCTUnwrap(outcome.promptPayload)
+    XCTAssertEqual(promptPayload.modelIdentifier, "openai/gpt-4o-mini")
+    XCTAssertFalse(promptPayload.systemPrompt.isEmpty)
+    XCTAssertTrue(promptPayload.userPrompt.contains("<raw_transcript>\nhello world\n</raw_transcript>"))
     XCTAssertEqual(client.sendChatCallCount, 1)
   }
 

@@ -133,6 +133,12 @@ struct ModelUsage: Codable, Hashable {
   }
 }
 
+struct PostProcessingPromptPayload: Codable, Hashable {
+  let modelIdentifier: String
+  let systemPrompt: String
+  let userPrompt: String
+}
+
 struct PhaseTimestamps: Codable, Hashable {
   let recordingStarted: Date?
   let recordingEnded: Date?
@@ -175,6 +181,7 @@ struct HistoryItem: Codable, Identifiable, Hashable {
   let personalCorrections: PersonalLexiconHistorySummary?
   let errors: [HistoryError]
   let source: HistoryItemSource?
+  let postProcessingPrompt: PostProcessingPromptPayload?
 
   init(
     id: UUID = UUID(), createdAt: Date = .init(), updatedAt: Date = .init(), modelsUsed: [String],
@@ -183,7 +190,8 @@ struct HistoryItem: Codable, Identifiable, Hashable {
     cost: HistoryCost?, audioFileURL: URL?, networkExchanges: [HistoryNetworkExchange],
     events: [HistoryEvent], phaseTimestamps: PhaseTimestamps, trigger: HistoryTrigger,
     personalCorrections: PersonalLexiconHistorySummary?, errors: [HistoryError],
-    source: HistoryItemSource? = nil
+    source: HistoryItemSource? = nil,
+    postProcessingPrompt: PostProcessingPromptPayload? = nil
   ) {
     self.id = id
     self.createdAt = createdAt
@@ -202,6 +210,7 @@ struct HistoryItem: Codable, Identifiable, Hashable {
     self.personalCorrections = personalCorrections
     self.errors = errors
     self.source = source
+    self.postProcessingPrompt = postProcessingPrompt
   }
 
   static let placeholder: HistoryItem = .init(

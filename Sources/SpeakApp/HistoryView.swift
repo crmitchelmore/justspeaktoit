@@ -642,6 +642,8 @@ private struct HistoryListRow: View {
             }
           }
 
+          promptDisclosureSection
+
           metaSection
 
           if let url = item.audioFileURL {
@@ -670,6 +672,8 @@ private struct HistoryListRow: View {
             networkSection
           }
         }
+
+        promptDisclosureSection
 
         metaSection
 
@@ -1255,6 +1259,51 @@ private struct HistoryListRow: View {
             .stroke(Color.brandAccent.opacity(0.15), lineWidth: 1)
         )
       }
+    }
+  }
+
+  @ViewBuilder
+  private var promptDisclosureSection: some View {
+    if let prompt = item.postProcessingPrompt {
+      DisclosureGroup {
+        VStack(alignment: .leading, spacing: 10) {
+          Text(prompt.modelIdentifier)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+          promptTextBlock(title: "System Prompt", text: prompt.systemPrompt)
+          promptTextBlock(title: "User Prompt", text: prompt.userPrompt)
+        }
+        .padding(.top, 8)
+      } label: {
+        Label("Post-processing prompt", systemImage: "text.bubble")
+          .font(.subheadline.bold())
+      }
+      .padding(12)
+      .background(
+        RoundedRectangle(cornerRadius: 16, style: .continuous)
+          .fill(.thinMaterial)
+      )
+      .overlay(
+        RoundedRectangle(cornerRadius: 16, style: .continuous)
+          .stroke(Color.brandAccent.opacity(0.15), lineWidth: 1)
+      )
+    }
+  }
+
+  private func promptTextBlock(title: String, text: String) -> some View {
+    VStack(alignment: .leading, spacing: 4) {
+      Text(title)
+        .font(.caption.bold())
+        .foregroundStyle(.secondary)
+      ScrollView {
+        Text(text)
+          .font(.caption2.monospaced())
+          .textSelection(.enabled)
+          .frame(maxWidth: .infinity, alignment: .leading)
+      }
+      .frame(maxHeight: 180)
+      .padding(8)
+      .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
     }
   }
 

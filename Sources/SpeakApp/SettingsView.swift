@@ -374,16 +374,46 @@ struct SettingsView: View {
         PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel) ? .local : .remote
       },
       set: { location in
-        switch location {
-        case .local:
-          settings.postProcessingModel = localPostProcessingOptions.first?.id ?? "local/post-processing/rules"
-        case .remote:
-          settings.postProcessingModel = cloudPostProcessingOptions.first {
-            $0.id == "openai/gpt-5-mini"
-          }?.id ?? cloudPostProcessingOptions.first?.id ?? settings.postProcessingModel
-        }
+        selectPostProcessingLocation(location)
       }
     )
+  }
+
+  private var postProcessingLocationSelector: some View {
+    HStack(spacing: 8) {
+      ForEach(PostProcessingLocation.allCases) { location in
+        Button {
+          postProcessingLocationBinding.wrappedValue = location
+        } label: {
+          Text(location.displayName)
+            .font(.subheadline.weight(.semibold))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(postProcessingLocationBinding.wrappedValue == location ? .white : .primary)
+        .background(
+          RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .fill(postProcessingLocationBinding.wrappedValue == location ? Color.brandAccent : Color.clear)
+        )
+      }
+    }
+    .padding(4)
+    .background(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .fill(Color(nsColor: .controlBackgroundColor))
+    )
+  }
+
+  private func selectPostProcessingLocation(_ location: PostProcessingLocation) {
+    switch location {
+    case .local:
+      settings.postProcessingModel = localPostProcessingOptions.first?.id ?? "local/post-processing/rules"
+    case .remote:
+      settings.postProcessingModel = cloudPostProcessingOptions.first {
+        $0.id == "openai/gpt-5-mini"
+      }?.id ?? cloudPostProcessingOptions.first?.id ?? settings.postProcessingModel
+    }
   }
 
   private func overviewChip(title: String, value: String, systemImage: String) -> some View {
@@ -2274,12 +2304,10 @@ struct SettingsView: View {
           }
 
           VStack(alignment: .leading, spacing: 8) {
-            Picker("Post-processing location", selection: postProcessingLocationBinding) {
-              ForEach(PostProcessingLocation.allCases) { location in
-                Text(location.displayName).tag(location)
-              }
-            }
-            .pickerStyle(.segmented)
+            Text("Post-processing location")
+              .font(.caption.weight(.semibold))
+              .foregroundStyle(.secondary)
+            postProcessingLocationSelector
 
             Text("Choose whether cleanup runs locally on this Mac or remotely through OpenRouter.")
               .font(.caption)

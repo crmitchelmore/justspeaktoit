@@ -114,6 +114,7 @@ final class PostProcessingManager: ObservableObject {
         )
         let promptPayload = PostProcessingPromptPayload(
           modelIdentifier: model,
+          customPrompt: customPromptForDebug(),
           systemPrompt: LocalPostProcessingModelManager.localSystemPrompt(systemPrompt),
           userPrompt: LocalPostProcessingModelManager.localUserPrompt(systemPrompt: systemPrompt, rawText: rawText)
         )
@@ -141,6 +142,7 @@ final class PostProcessingManager: ObservableObject {
     """
     let promptPayload = PostProcessingPromptPayload(
       modelIdentifier: model,
+      customPrompt: customPromptForDebug(),
       systemPrompt: systemPrompt,
       userPrompt: userMessage
     )
@@ -305,6 +307,12 @@ final class PostProcessingManager: ObservableObject {
     }
 
     return basePrompt
+  }
+
+  private func customPromptForDebug() -> String? {
+    let trimmed = settings.postProcessingSystemPrompt
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
   }
 
   private func effectiveSystemPrompt(

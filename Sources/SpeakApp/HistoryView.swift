@@ -1270,8 +1270,11 @@ private struct HistoryListRow: View {
           Text(prompt.modelIdentifier)
             .font(.caption)
             .foregroundStyle(.secondary)
+          if let customPrompt = prompt.customPrompt, !customPrompt.isEmpty {
+            promptTextBlock(title: "Custom Cleanup Prompt", text: customPrompt)
+          }
           promptTextBlock(title: "System Prompt", text: prompt.systemPrompt)
-          promptTextBlock(title: "User Prompt", text: prompt.userPrompt)
+          promptTextBlock(title: "Transcript Payload", text: prompt.userPrompt)
         }
         .padding(.top, 8)
       } label: {

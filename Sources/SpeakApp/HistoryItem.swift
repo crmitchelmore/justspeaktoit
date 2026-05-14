@@ -135,6 +135,7 @@ struct ModelUsage: Codable, Hashable {
 
 struct PostProcessingPromptPayload: Codable, Hashable {
   let modelIdentifier: String
+  let customPrompt: String?
   let systemPrompt: String
   let userPrompt: String
 }

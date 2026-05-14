@@ -111,6 +111,7 @@ final class PostProcessingManagerTests: XCTestCase {
     let client = SpyChatClient(responseText: "Cleaned by cloud")
     let settings = makeSettings()
     settings.postProcessingModel = "openai/gpt-4o-mini"
+    settings.postProcessingSystemPrompt = "Put a full stop after each word."
     let manager = PostProcessingManager(
       client: client,
       settings: settings,
@@ -128,7 +129,9 @@ final class PostProcessingManagerTests: XCTestCase {
     XCTAssertNotNil(outcome.response)
     let promptPayload = try XCTUnwrap(outcome.promptPayload)
     XCTAssertEqual(promptPayload.modelIdentifier, "openai/gpt-4o-mini")
+    XCTAssertEqual(promptPayload.customPrompt, "Put a full stop after each word.")
     XCTAssertFalse(promptPayload.systemPrompt.isEmpty)
+    XCTAssertTrue(promptPayload.systemPrompt.contains("Put a full stop after each word."))
     XCTAssertTrue(promptPayload.userPrompt.contains("<raw_transcript>\nhello world\n</raw_transcript>"))
     XCTAssertEqual(client.sendChatCallCount, 1)
   }

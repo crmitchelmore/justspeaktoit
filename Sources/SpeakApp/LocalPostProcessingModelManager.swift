@@ -274,6 +274,9 @@ final class LocalPostProcessingModelManager: ObservableObject {
     guard !cleanedResponse.isEmpty else {
       throw LocalPostProcessingModelError.processFailed("The local model returned an empty response.")
     }
+    if response.truncated == true {
+      logger.warning("Local post-processing output reached the model output limit; returning partial generated text.")
+    }
     return cleanedResponse
   }
 
@@ -347,6 +350,7 @@ final class LocalPostProcessingModelManager: ObservableObject {
       throw LocalPostProcessingModelError.downloadFailed("Invalid Hugging Face URL for \(filename).")
     }
     let (downloadedURL, response) = try await URLSession.shared.download(from: url)
+    defer { try? fileManager.removeItem(at: downloadedURL) }
     if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
       throw LocalPostProcessingModelError.downloadFailed(
         "Hugging Face returned HTTP \(http.statusCode) for \(filename)."
@@ -547,7 +551,10 @@ final class LocalPostProcessingModelManager: ObservableObject {
       """
     }
     if message.contains("cmake") || message.contains("CMake") {
-      return "Building the llama.cpp runtime failed while preparing CMake. Install Xcode Command Line Tools, then try again."
+      return """
+      Building the llama.cpp runtime failed while preparing CMake. \
+      Install Xcode Command Line Tools, then try again.
+      """
     }
     if message.isEmpty {
       return "The llama.cpp runtime install failed. Check your Python installation and try again."
@@ -586,11 +593,11 @@ def main():
         + "\n</raw_transcript>"
     )
     temperature = float(request.get("temperature") or 0.2)
-    max_tokens = min(3072, max(1024, len(raw_text.split()) * 3 + 256))
+    max_tokens = min(8192, max(1024, len(raw_text.split()) * 4 + 512))
 
     llm = Llama(
         model_path=args.model,
-        n_ctx=4096,
+        n_ctx=8192,
         n_threads=None,
         verbose=False,
     )
@@ -603,10 +610,8 @@ def main():
         max_tokens=max_tokens,
     )
     choice = response["choices"][0]
-    if choice.get("finish_reason") == "length":
-        raise RuntimeError("The local post-processing model hit its output limit before finishing.")
     text = choice["message"]["content"]
-    print(json.dumps({"text": text}))
+    print(json.dumps({"text": text, "truncated": choice.get("finish_reason") == "length"}))
 
 
 if __name__ == "__main__":
@@ -670,34 +675,5 @@ private struct LocalPostProcessingRequest: Codable {
 
 private struct LocalPostProcessingResponse: Codable {
   let text: String
-}
-
-final class ProcessOutputAccumulator: @unchecked Sendable {
-  private let lock = NSLock()
-  private var stdoutData = Data()
-  private var stderrData = Data()
-
-  var stdout: String {
-    lock.lock()
-    defer { lock.unlock() }
-    return String(data: stdoutData, encoding: .utf8) ?? ""
-  }
-
-  var stderr: String {
-    lock.lock()
-    defer { lock.unlock() }
-    return String(data: stderrData, encoding: .utf8) ?? ""
-  }
-
-  func setStdout(_ data: Data) {
-    lock.lock()
-    stdoutData = data
-    lock.unlock()
-  }
-
-  func setStderr(_ data: Data) {
-    lock.lock()
-    stderrData = data
-    lock.unlock()
-  }
+  let truncated: Bool?
 }

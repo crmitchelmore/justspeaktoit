@@ -383,7 +383,7 @@ final class LocalModelManager: ObservableObject {
     )
   }
 
-  nonisolated static func normalizedStreamingModelSource(_ source: LocalStreamingModelSource) -> LocalStreamingModelSource {
+  nonisolated static func normalizedStreamingModelSource(_ source: LocalStreamingModelSource) -> LocalStreamingModelSource { // swiftlint:disable:this line_length
     LocalStreamingModelSource(
       repoID: source.repoID,
       modelName: source.modelName,

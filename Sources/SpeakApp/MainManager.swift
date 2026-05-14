@@ -1033,10 +1033,13 @@ final class MainManager: ObservableObject {
       session.postProcessingOutcome = outcome
       finalText = outcome.processed
 
+      session.events.append(
+        HistoryEvent(kind: .postProcessingReceived, description: "Retry post-processing complete")
+      )
+      session.modelsUsed.insert(resolvedPostProcessingModel)
+      session.modelUsages.append(ModelUsage(modelIdentifier: resolvedPostProcessingModel, phase: .postProcessing))
+
       if let response = outcome.response {
-        session.events.append(
-          HistoryEvent(kind: .postProcessingReceived, description: "Retry post-processing complete")
-        )
         if let payload = response.rawPayload {
           session.networkExchanges.append(
             HistoryNetworkExchange(
@@ -1053,8 +1056,6 @@ final class MainManager: ObservableObject {
             )
           )
         }
-        session.modelsUsed.insert(resolvedPostProcessingModel)
-        session.modelUsages.append(ModelUsage(modelIdentifier: resolvedPostProcessingModel, phase: .postProcessing))
         if let cost = response.cost {
           session.recordCostFragment(cost)
         }

@@ -450,7 +450,7 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
     // a final result at the same time stop() is called
     guard !hasFinished else { return }
     hasFinished = true
-    
+
     Task { await self.endActiveInputSession() }
 
     let segments = result.bestTranscription.segments.map { segment in
@@ -722,11 +722,11 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
   func stop() async {
     guard isRunning else { return }
     isStopping = true
-    hasFinished = true
     audioEngine.stop()
     audioEngine.inputNode.removeTap(onBus: 0)
     audioProcessor.setRunning(false)
 
+    await applyLiveStopGrace(appSettings.liveStopGracePeriod)
     try? stdinPipe?.fileHandleForWriting.close()
     await waitForProcessExit()
     processRemainingSidecarOutput()
@@ -747,6 +747,7 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
       rawPayload: nil,
       debugInfo: nil
     )
+    hasFinished = true
     delegate?.liveTranscriber(self, didFinishWith: result)
     await endActiveInputSession()
     resetProcessState()
@@ -768,6 +769,7 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
   }
 
   private func handleSidecarOutput(_ data: Data) {
+    guard !hasFinished else { return }
     guard let output = String(data: data, encoding: .utf8) else { return }
     sidecarOutputBuffer += output
     let lines = sidecarOutputBuffer.split(separator: "\n", omittingEmptySubsequences: false)
@@ -785,6 +787,7 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
   }
 
   private func decodeSidecarEvent(_ line: String) {
+    guard !hasFinished else { return }
     guard let lineData = line.data(using: .utf8),
       let event = try? JSONDecoder().decode(SidecarEvent.self, from: lineData)
     else { return }

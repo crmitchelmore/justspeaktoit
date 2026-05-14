@@ -489,7 +489,7 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
   }
 }
 
-private struct HistoryListRow: View {
+private struct HistoryListRow: View { // swiftlint:disable:this type_body_length
   @EnvironmentObject private var environment: AppEnvironment
   let item: HistoryItem
   @State private var isExpanded: Bool = false

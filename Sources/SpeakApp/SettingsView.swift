@@ -360,6 +360,9 @@ struct SettingsView: View {
             !PostProcessingManager.isLocalPostProcessingModel($0.id)
           }?.id ?? settings.postProcessingModel
         }
+        guard cloudPostProcessingOptions.contains(where: { $0.id == settings.postProcessingModel }) else {
+          return cloudPostProcessingOptions.first?.id ?? settings.postProcessingModel
+        }
         return settings.postProcessingModel
       },
       set: { model in
@@ -372,13 +375,33 @@ struct SettingsView: View {
     Binding(
       get: {
         if PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel) {
+          guard localPostProcessingOptions.contains(where: { $0.id == settings.postProcessingModel }) else {
+            return localPostProcessingOptions.first?.id ?? LocalPostProcessingModelManager.builtInRulesModelID
+          }
           return settings.postProcessingModel
         }
         return localPostProcessingOptions.first?.id ?? LocalPostProcessingModelManager.builtInRulesModelID
       },
       set: { model in
-        guard PostProcessingManager.isLocalPostProcessingModel(model) else { return }
+        guard PostProcessingManager.isLocalPostProcessingModel(model),
+          localPostProcessingOptions.contains(where: { $0.id == model })
+        else { return }
         settings.postProcessingModel = model
+      }
+    )
+  }
+
+  private var localTranscriptionModelBinding: Binding<String> {
+    Binding(
+      get: {
+        guard localTranscriptionOptions.contains(where: { $0.id == settings.localTranscriptionModel }) else {
+          return localTranscriptionOptions.first?.id ?? ""
+        }
+        return settings.localTranscriptionModel
+      },
+      set: { model in
+        guard localTranscriptionOptions.contains(where: { $0.id == model }) else { return }
+        settings.localTranscriptionModel = model
       }
     )
   }
@@ -389,6 +412,10 @@ struct SettingsView: View {
         PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel) ? .local : .remote
       },
       set: { location in
+        let currentLocation = PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel)
+          ? PostProcessingLocation.local
+          : .remote
+        guard location != currentLocation else { return }
         selectPostProcessingLocation(location)
       }
     )
@@ -1363,7 +1390,7 @@ struct SettingsView: View {
                   title: "Local Batch Model",
                   help: "Used for local-only transcription after recording stops.",
                   options: localTranscriptionOptions,
-                  value: settingsBinding(\AppSettings.localTranscriptionModel),
+                  value: localTranscriptionModelBinding,
                   allowsCustom: false
                 )
               }
@@ -1435,7 +1462,11 @@ struct SettingsView: View {
           Button("Delete") {
             localModels.delete(model)
             if settings.localTranscriptionModel == model.id {
-              settings.localTranscriptionModel = firstInstalledLocalTranscriptionModelID(excluding: model.id) ?? ""
+              if let fallback = firstInstalledLocalTranscriptionModelID(excluding: model.id) {
+                settings.localTranscriptionModel = fallback
+              } else {
+                settings.transcriptionMode = .liveNative
+              }
             }
           }
         }
@@ -1769,7 +1800,13 @@ struct SettingsView: View {
         Button("Remove") {
           localModels.deleteStreamingModelSource(source)
           if settings.localStreamingModelSource == source.id {
-            settings.localStreamingModelSource = firstInstalledStreamingSourceID(excluding: source.id) ?? ""
+            if let fallback = firstInstalledStreamingSourceID(excluding: source.id) {
+              settings.localStreamingModelSource = fallback
+            } else {
+              settings.localStreamingModelSource =
+                LocalModelManager.recommendedStreamingModelSources.first?.id ?? source.id
+              settings.localTranscriptionMode = .batch
+            }
           }
         }
       }

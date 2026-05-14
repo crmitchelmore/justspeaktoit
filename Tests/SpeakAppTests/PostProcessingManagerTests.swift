@@ -131,7 +131,9 @@ final class PostProcessingManagerTests: XCTestCase {
     XCTAssertEqual(promptPayload.modelIdentifier, "openai/gpt-4o-mini")
     XCTAssertEqual(promptPayload.customPrompt, "Put a full stop after each word.")
     XCTAssertFalse(promptPayload.systemPrompt.isEmpty)
-    XCTAssertTrue(promptPayload.systemPrompt.contains("Always output using English.\n\nPut a full stop after each word."))
+    XCTAssertTrue(
+      promptPayload.systemPrompt.contains("Always output using English.\n\nPut a full stop after each word.")
+    )
     XCTAssertTrue(promptPayload.systemPrompt.contains("Put a full stop after each word."))
     XCTAssertTrue(promptPayload.userPrompt.contains("<raw_transcript>\nhello world\n</raw_transcript>"))
     XCTAssertEqual(client.sendChatCallCount, 1)

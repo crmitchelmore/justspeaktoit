@@ -250,6 +250,7 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
       throw SherpaOnnxRuntimeError.downloadFailed("Invalid Hugging Face URL for \(filename).")
     }
     let (downloadedURL, response) = try await URLSession.shared.download(from: url)
+    defer { try? fileManager.removeItem(at: downloadedURL) }
     if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
       throw SherpaOnnxRuntimeError.downloadFailed("Hugging Face returned HTTP \(http.statusCode) for \(filename).")
     }
@@ -276,11 +277,7 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
         process.arguments = arguments
         process.standardOutput = outputPipe
         process.standardError = errorPipe
-        do {
-          drain(outputPipe.fileHandleForReading, output.setStdout)
-          drain(errorPipe.fileHandleForReading, output.setStderr)
-          try process.run()
-          process.waitUntilExit()
+        process.terminationHandler = { process in
           group.notify(queue: .global(qos: .utility)) {
             let outputText = output.stdout
             let errorText = output.stderr.isEmpty ? outputText : output.stderr
@@ -294,6 +291,11 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
             }
             continuation.resume(returning: outputText)
           }
+        }
+        do {
+          drain(outputPipe.fileHandleForReading, output.setStdout)
+          drain(errorPipe.fileHandleForReading, output.setStderr)
+          try process.run()
         } catch {
           outputPipe.fileHandleForReading.closeFile()
           errorPipe.fileHandleForReading.closeFile()

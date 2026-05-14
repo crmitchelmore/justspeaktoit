@@ -303,7 +303,7 @@ final class PostProcessingManager: ObservableObject {
     }
 
     if !language.isEmpty {
-      return "Always output using \(language). \(basePrompt)"
+      return "Always output using \(language).\n\n\(basePrompt)"
     }
 
     return basePrompt

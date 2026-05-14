@@ -11,6 +11,10 @@ enum SidebarItem: Hashable, Identifiable {
   var id: Self { self }
 
   var label: LocalizedStringKey {
+    LocalizedStringKey(title(isAssemblyAI: false))
+  }
+
+  func title(isAssemblyAI: Bool) -> String {
     switch self {
     case .dashboard:
       return "Dashboard"
@@ -23,7 +27,7 @@ enum SidebarItem: Hashable, Identifiable {
     case .troubleshooting:
       return "Troubleshooting"
     case .settings(let tab):
-      return LocalizedStringKey(tab.title)
+      return tab.title(isAssemblyAI: isAssemblyAI)
     }
   }
 
@@ -77,11 +81,29 @@ enum SidebarItem: Hashable, Identifiable {
       return "Adjust \(tab.title) preferences."
     }
   }
+
+  var shortcutAction: ShortcutAction {
+    switch self {
+    case .dashboard:
+      return .openDashboard
+    case .history:
+      return .showHistory
+    case .voiceOutput:
+      return .openVoiceOutput
+    case .corrections:
+      return .openCorrections
+    case .troubleshooting:
+      return .openTroubleshooting
+    case .settings(let tab):
+      return tab.shortcutAction
+    }
+  }
 }
 
 struct SideBarView: View {
   @Binding var selection: SidebarItem?
   @EnvironmentObject private var settings: AppSettings
+  @EnvironmentObject private var shortcutManager: ShortcutManager
 
   var body: some View {
     List {
@@ -95,14 +117,18 @@ struct SideBarView: View {
                 .foregroundStyle(item.color)
                 .imageScale(.medium)
                 .frame(width: 20)
-              Text(item.label)
+              Text(item.title(isAssemblyAI: settings.isAssemblyAIModel))
                 .fontWeight(selection == item ? .semibold : .regular)
                 .foregroundStyle(.primary)
+                .lineLimit(1)
+                .layoutPriority(1)
               Spacer()
+              shortcutHint(for: item)
             }
             .contentShape(Rectangle())
           }
           .buttonStyle(.plain)
+          .focusable(true)
           .padding(.horizontal, 12)
           .padding(.vertical, 8)
           .background(
@@ -114,6 +140,8 @@ struct SideBarView: View {
           .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
           .listRowBackground(Color.clear)
           .speakTooltip(item.helpMessage)
+          .accessibilityLabel(item.title(isAssemblyAI: settings.isAssemblyAIModel))
+          .accessibilityHint(accessibilityHint(for: item))
         }
       }
 
@@ -131,12 +159,16 @@ struct SideBarView: View {
               Text(LocalizedStringKey(tab.title(isAssemblyAI: settings.isAssemblyAIModel)))
                 .fontWeight(selection == item ? .semibold : .regular)
                 .foregroundStyle(.primary)
+                .lineLimit(1)
+                .layoutPriority(1)
               Spacer()
+              shortcutHint(for: item)
             }
             .contentShape(Rectangle())
             .padding(.leading, 10)
           }
           .buttonStyle(.plain)
+          .focusable(true)
           .padding(.horizontal, 12)
           .padding(.vertical, 8)
           .background(
@@ -148,11 +180,61 @@ struct SideBarView: View {
           .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
           .listRowBackground(Color.clear)
           .speakTooltip(item.helpMessage)
+          .accessibilityLabel(item.title(isAssemblyAI: settings.isAssemblyAIModel))
+          .accessibilityHint(accessibilityHint(for: item))
         }
       }
     }
     .listStyle(.sidebar)
     .scrollContentBackground(.hidden)
+  }
+
+  @ViewBuilder
+  private func shortcutHint(for item: SidebarItem) -> some View {
+    let binding = shortcutManager.binding(for: item.shortcutAction)
+    if settings.showSidebarShortcutHints && binding.isEnabled {
+      Text(binding.displayString)
+        .font(.caption2.monospaced())
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(Capsule().fill(Color.secondary.opacity(0.10)))
+        .fixedSize()
+        .accessibilityHidden(true)
+    }
+  }
+
+  private func accessibilityHint(for item: SidebarItem) -> String {
+    let binding = shortcutManager.binding(for: item.shortcutAction)
+    guard settings.showSidebarShortcutHints && binding.isEnabled else {
+      return item.helpMessage
+    }
+    return "\(item.helpMessage) Shortcut: \(binding.displayString)."
+  }
+}
+
+private extension SettingsTab {
+  var shortcutAction: ShortcutAction {
+    switch self {
+    case .general:
+      return .openSettings
+    case .transcription:
+      return .openTranscriptionSettings
+    case .postProcessing:
+      return .openPostProcessingSettings
+    case .voiceOutput:
+      return .openVoiceOutputSettings
+    case .pronunciation:
+      return .openPronunciationSettings
+    case .apiKeys:
+      return .openAPIKeysSettings
+    case .shortcuts:
+      return .openKeyboardSettings
+    case .permissions:
+      return .openPermissionsSettings
+    case .about:
+      return .openAboutSettings
+    }
   }
 }
 
@@ -161,4 +243,5 @@ struct SideBarView_Previews: PreviewProvider {
     SideBarView(selection: .constant(.dashboard))
   }
 }
-// @Implement: This shows the items available in the sidebar. There is a dashboard, history, corrections hub, and settings.
+// @Implement: This shows the items available in the sidebar. There is a dashboard, history,
+// corrections hub, and settings.

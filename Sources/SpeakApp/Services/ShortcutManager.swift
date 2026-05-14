@@ -1,9 +1,12 @@
 import AppKit
 import Carbon
 import Foundation
+import SpeakHotKeys
 
+// swiftlint:disable file_length
 /// Represents a keyboard shortcut action that can be triggered globally or locally.
 enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
+    case openDashboard
     case startStopRecording
     case speakSelectedText
     case speakClipboard
@@ -11,6 +14,17 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
     case stopTTS
     case openSettings
     case showHistory
+    case openVoiceOutput
+    case openCorrections
+    case openTroubleshooting
+    case openTranscriptionSettings
+    case openPostProcessingSettings
+    case openVoiceOutputSettings
+    case openPronunciationSettings
+    case openAPIKeysSettings
+    case openKeyboardSettings
+    case openPermissionsSettings
+    case openAboutSettings
     case quickVoice1
     case quickVoice2
     case quickVoice3
@@ -19,13 +33,25 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
 
     var displayName: String {
         switch self {
+        case .openDashboard: return "Open Dashboard"
         case .startStopRecording: return "Start/Stop Recording"
         case .speakSelectedText: return "Speak Selected Text"
         case .speakClipboard: return "Speak Clipboard Content"
         case .pauseResumeTTS: return "Pause/Resume TTS"
         case .stopTTS: return "Stop TTS"
-        case .openSettings: return "Open Settings"
+        case .openSettings: return "Open General Settings"
         case .showHistory: return "Show History"
+        case .openVoiceOutput: return "Open Voice Output"
+        case .openCorrections: return "Open Corrections"
+        case .openTroubleshooting: return "Open Troubleshooting"
+        case .openTranscriptionSettings: return "Open Transcription Settings"
+        case .openPostProcessingSettings: return "Open Post-processing Settings"
+        case .openVoiceOutputSettings: return "Open Voice Output Settings"
+        case .openPronunciationSettings: return "Open Pronunciation Settings"
+        case .openAPIKeysSettings: return "Open API Keys Settings"
+        case .openKeyboardSettings: return "Open Keyboard Settings"
+        case .openPermissionsSettings: return "Open Permissions Settings"
+        case .openAboutSettings: return "Open About Settings"
         case .quickVoice1: return "Quick Switch Voice 1"
         case .quickVoice2: return "Quick Switch Voice 2"
         case .quickVoice3: return "Quick Switch Voice 3"
@@ -34,6 +60,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
 
     var defaultKeyBinding: KeyBinding {
         switch self {
+        case .openDashboard:
+            return KeyBinding(keyCode: 18, modifiers: [.command, .option], isGlobal: false)  // ⌘⌥1
         case .startStopRecording:
             return KeyBinding(keyCode: 1, modifiers: [.command, .shift])  // ⌘+Shift+S
         case .speakSelectedText:
@@ -47,7 +75,29 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .openSettings:
             return KeyBinding(keyCode: 43, modifiers: [.command], isGlobal: false)  // ⌘+,
         case .showHistory:
-            return KeyBinding(keyCode: 4, modifiers: [.command], isGlobal: false)  // ⌘+H
+            return KeyBinding(keyCode: 19, modifiers: [.command, .option], isGlobal: false)  // ⌘⌥2
+        case .openVoiceOutput:
+            return KeyBinding(keyCode: 20, modifiers: [.command, .option], isGlobal: false)  // ⌘⌥3
+        case .openCorrections:
+            return KeyBinding(keyCode: 21, modifiers: [.command, .option], isGlobal: false)  // ⌘⌥4
+        case .openTroubleshooting:
+            return KeyBinding(keyCode: 23, modifiers: [.command, .option], isGlobal: false)  // ⌘⌥5
+        case .openTranscriptionSettings:
+            return KeyBinding(keyCode: 18, modifiers: [.command, .option, .shift], isGlobal: false)  // ⌘⌥⇧1
+        case .openPostProcessingSettings:
+            return KeyBinding(keyCode: 19, modifiers: [.command, .option, .shift], isGlobal: false)  // ⌘⌥⇧2
+        case .openVoiceOutputSettings:
+            return KeyBinding(keyCode: 20, modifiers: [.command, .option, .shift], isGlobal: false)  // ⌘⌥⇧3
+        case .openPronunciationSettings:
+            return KeyBinding(keyCode: 21, modifiers: [.command, .option, .shift], isGlobal: false)  // ⌘⌥⇧4
+        case .openAPIKeysSettings:
+            return KeyBinding(keyCode: 23, modifiers: [.command, .option, .shift], isGlobal: false)  // ⌘⌥⇧5
+        case .openKeyboardSettings:
+            return KeyBinding(keyCode: 22, modifiers: [.command, .option, .shift], isGlobal: false)  // ⌘⌥⇧6
+        case .openPermissionsSettings:
+            return KeyBinding(keyCode: 26, modifiers: [.command, .option, .shift], isGlobal: false)  // ⌘⌥⇧7
+        case .openAboutSettings:
+            return KeyBinding(keyCode: 28, modifiers: [.command, .option, .shift], isGlobal: false)  // ⌘⌥⇧8
         case .quickVoice1:
             return KeyBinding(keyCode: 18, modifiers: [.command], isGlobal: false)  // ⌘+1
         case .quickVoice2:
@@ -114,82 +164,7 @@ struct KeyBinding: Codable, Equatable {
     }
 
     private func keyCodeToString(_ code: UInt16) -> String {
-        switch code {
-        case 0: return "A"
-        case 1: return "S"
-        case 2: return "D"
-        case 3: return "F"
-        case 4: return "H"
-        case 5: return "G"
-        case 6: return "Z"
-        case 7: return "X"
-        case 8: return "C"
-        case 9: return "V"
-        case 11: return "B"
-        case 12: return "Q"
-        case 13: return "W"
-        case 14: return "E"
-        case 15: return "R"
-        case 16: return "Y"
-        case 17: return "T"
-        case 18: return "1"
-        case 19: return "2"
-        case 20: return "3"
-        case 21: return "4"
-        case 22: return "6"
-        case 23: return "5"
-        case 24: return "="
-        case 25: return "9"
-        case 26: return "7"
-        case 27: return "-"
-        case 28: return "8"
-        case 29: return "0"
-        case 30: return "]"
-        case 31: return "O"
-        case 32: return "U"
-        case 33: return "["
-        case 34: return "I"
-        case 35: return "P"
-        case 36: return "↩"
-        case 37: return "L"
-        case 38: return "J"
-        case 39: return "'"
-        case 40: return "K"
-        case 41: return ";"
-        case 42: return "\\"
-        case 43: return ","
-        case 44: return "/"
-        case 45: return "N"
-        case 46: return "M"
-        case 47: return "."
-        case 48: return "⇥"
-        case 49: return "␣"
-        case 50: return "`"
-        case 51: return "⌫"
-        case 53: return "⎋"
-        case 96: return "F5"
-        case 97: return "F6"
-        case 98: return "F7"
-        case 99: return "F3"
-        case 100: return "F8"
-        case 101: return "F9"
-        case 103: return "F11"
-        case 105: return "F13"
-        case 107: return "F14"
-        case 109: return "F10"
-        case 111: return "F12"
-        case 113: return "F15"
-        case 118: return "F4"
-        case 119: return "End"
-        case 120: return "F2"
-        case 121: return "PgDn"
-        case 122: return "F1"
-        case 123: return "←"
-        case 124: return "→"
-        case 125: return "↓"
-        case 126: return "↑"
-        default: return "?"
-        }
+        KeyCodeMapping.string(for: code)
     }
 }
 
@@ -197,6 +172,12 @@ struct KeyBinding: Codable, Equatable {
 struct ShortcutConflict {
     let action: ShortcutAction
     let conflictSource: String
+    let description: String
+}
+
+private struct SystemShortcut {
+    let keyCode: UInt16
+    let modifiers: NSEvent.ModifierFlags
     let description: String
 }
 
@@ -325,9 +306,7 @@ final class ShortcutManager: ObservableObject {
             guard let self else { return event }
 
             // Ignore modifier-only presses
-            if event.keyCode == 56 || event.keyCode == 54 || event.keyCode == 58 || event.keyCode == 55
-                || event.keyCode == 59 || event.keyCode == 62 || event.keyCode == 60 || event.keyCode == 61
-            {
+            if KeyCodeMapping.modifierKeyCodes.contains(event.keyCode) {
                 return nil
             }
 
@@ -398,7 +377,10 @@ final class ShortcutManager: ObservableObject {
 
             var hotKeyRef: EventHotKeyRef?
             let carbonModifiers = carbonModifierFlags(from: binding.modifiers)
-            let hotKeyID = EventHotKeyID(signature: 0x5350_4B00, id: UInt32(bitPattern: Int32(truncatingIfNeeded: action.hashValue)))  // "SPK" signature
+            let hotKeyID = EventHotKeyID(
+                signature: 0x5350_4B00,
+                id: UInt32(bitPattern: Int32(truncatingIfNeeded: action.hashValue))
+            )
 
             let status = RegisterEventHotKey(
                 UInt32(binding.keyCode),
@@ -433,9 +415,17 @@ final class ShortcutManager: ObservableObject {
 
     private func loadBindings() {
         if let data = UserDefaults.standard.data(forKey: defaultsKey),
-            let decoded = try? JSONDecoder().decode([ShortcutAction: KeyBinding].self, from: data)
-        {
+            let decoded = try? JSONDecoder().decode([ShortcutAction: KeyBinding].self, from: data) {
             bindings = decoded
+            var addedDefaults = false
+            for action in ShortcutAction.allCases where bindings[action] == nil {
+                bindings[action] = action.defaultKeyBinding
+                addedDefaults = true
+            }
+            if addedDefaults {
+                saveBindings()
+            }
+            detectConflicts()
         } else {
             resetToDefaults()
         }
@@ -451,16 +441,16 @@ final class ShortcutManager: ObservableObject {
         var newConflicts: [ShortcutConflict] = []
 
         // Check for common system shortcut conflicts
-        let systemShortcuts: [(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, description: String)] = [
-            (1, [.command], "Save (System)"),
-            (9, [.command], "Paste (System)"),
-            (8, [.command], "Copy (System)"),
-            (0, [.command], "Select All (System)"),
-            (6, [.command], "Undo (System)"),
-            (4, [.command], "Hide App (System)"),
-            (12, [.command], "Quit (System)"),
-            (13, [.command], "Close Window (System)"),
-            (45, [.command], "Minimize (System)"),
+        let systemShortcuts: [SystemShortcut] = [
+            SystemShortcut(keyCode: 1, modifiers: [.command], description: "Save (System)"),
+            SystemShortcut(keyCode: 9, modifiers: [.command], description: "Paste (System)"),
+            SystemShortcut(keyCode: 8, modifiers: [.command], description: "Copy (System)"),
+            SystemShortcut(keyCode: 0, modifiers: [.command], description: "Select All (System)"),
+            SystemShortcut(keyCode: 6, modifiers: [.command], description: "Undo (System)"),
+            SystemShortcut(keyCode: 4, modifiers: [.command], description: "Hide App (System)"),
+            SystemShortcut(keyCode: 12, modifiers: [.command], description: "Quit (System)"),
+            SystemShortcut(keyCode: 13, modifiers: [.command], description: "Close Window (System)"),
+            SystemShortcut(keyCode: 45, modifiers: [.command], description: "Minimize (System)")
         ]
 
         for (action, binding) in bindings where binding.isEnabled {

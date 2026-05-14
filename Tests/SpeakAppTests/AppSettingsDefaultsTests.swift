@@ -53,6 +53,12 @@ final class AppSettingsDefaultsTests: XCTestCase {
         XCTAssertTrue(settings.restoreClipboardAfterPaste)
     }
 
+    @MainActor
+    func testCoreDefaults_showSidebarShortcutHintsIsTrue() {
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertTrue(settings.showSidebarShortcutHints)
+    }
+
     // MARK: - Recording Settings
 
     @MainActor

@@ -32,6 +32,7 @@ final class AppEnvironment: ObservableObject {
   /// the API Keys settings tab and the apiKeySettings view scrolls to the
   /// matching `.id("transcription-<provider.id>")` section.
   @Published var apiKeysScrollTarget: String?
+  @Published var sidebarNavigationTarget: SidebarItem?
 
   private(set) var statusBarController: StatusBarController?
   private(set) var menuBarManager: MenuBarManager?
@@ -146,7 +147,7 @@ final class AppEnvironment: ObservableObject {
       // Get selected text via accessibility or pasteboard simulation
       Task {
         if let text = await self.getSelectedText(), !text.isEmpty {
-          try? await self.tts.synthesize(text: text)
+          _ = try? await self.tts.synthesize(text: text)
         }
       }
     }
@@ -161,6 +162,36 @@ final class AppEnvironment: ObservableObject {
     shortcuts.register(action: .stopTTS) { [weak self] in
       self?.tts.stop()
     }
+    registerNavigationShortcutHandlers()
+    registerQuickVoiceShortcutHandlers()
+    shortcuts.startMonitoring()
+  }
+
+  private func registerNavigationShortcutHandlers() {
+    let navigationActions: [ShortcutAction: SidebarItem] = [
+      .openDashboard: .dashboard,
+      .showHistory: .history,
+      .openVoiceOutput: .voiceOutput,
+      .openCorrections: .corrections,
+      .openTroubleshooting: .troubleshooting,
+      .openSettings: .settings(.general),
+      .openTranscriptionSettings: .settings(.transcription),
+      .openPostProcessingSettings: .settings(.postProcessing),
+      .openVoiceOutputSettings: .settings(.voiceOutput),
+      .openPronunciationSettings: .settings(.pronunciation),
+      .openAPIKeysSettings: .settings(.apiKeys),
+      .openKeyboardSettings: .settings(.shortcuts),
+      .openPermissionsSettings: .settings(.permissions),
+      .openAboutSettings: .settings(.about)
+    ]
+    for (action, item) in navigationActions {
+      shortcuts.register(action: action) { [weak self] in
+        self?.sidebarNavigationTarget = item
+      }
+    }
+  }
+
+  private func registerQuickVoiceShortcutHandlers() {
     shortcuts.register(action: .quickVoice1) { [weak self] in
       self?.switchToQuickVoice(1)
     }
@@ -170,7 +201,6 @@ final class AppEnvironment: ObservableObject {
     shortcuts.register(action: .quickVoice3) { [weak self] in
       self?.switchToQuickVoice(3)
     }
-    shortcuts.startMonitoring()
   }
 
   private func switchToQuickVoice(_ index: Int) {
@@ -374,7 +404,7 @@ enum WireUp {
       .openai: OpenAITTSClient(secureStorage: secureStorage),
       .azure: AzureSpeechClient(secureStorage: secureStorage, appSettings: settings),
       .deepgram: DeepgramTTSClient(secureStorage: secureStorage),
-      .system: SystemTTSClient(),
+      .system: SystemTTSClient()
     ]
     return TextToSpeechManager(
       appSettings: settings,
@@ -415,5 +445,5 @@ enum WireUp {
     }
   }
 }
-// @Implement: This file should wire up and configure all app dependencies based on the approach laid out in this talk https://www.infoq.com/presentations/8-lines-code-refactoring/
+// @Implement: This file wires up and configures app dependencies.
 // swiftlint:enable file_length

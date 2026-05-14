@@ -656,7 +656,9 @@ struct SettingsView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
               .fill(Color(nsColor: .controlBackgroundColor))
           )
-          .speakTooltip("Choose where Speak appears—in the Dock, menu bar, or both. Menu bar only keeps it out of the way while staying accessible.")
+          .speakTooltip(
+            "Choose where Speak appears - in the Dock, menu bar, or both. Menu bar only keeps it out of the way."
+          )
 
           VStack(alignment: .leading, spacing: 8) {
             settingsToggle(
@@ -669,6 +671,12 @@ struct SettingsView: View {
               .toggleStyle(.switch)
               .tint(.brandAccentWarm)
               .speakTooltip("Periodically check for new versions and notify you when updates are available.")
+            settingsToggle(
+              "Show sidebar shortcut hints",
+              isOn: settingsBinding(\AppSettings.showSidebarShortcutHints),
+              tint: .brandAccentWarm
+            )
+            .speakTooltip("Show discreet keyboard shortcut hints beside the left menu items.")
           }
         }
       }
@@ -792,7 +800,7 @@ struct SettingsView: View {
           Text("Allow iOS devices to send transcripts to this Mac over your local network.")
             .font(.callout)
             .foregroundStyle(.secondary)
-          
+
           settingsToggle(
             "Enable Send to Mac",
             isOn: Binding(
@@ -808,11 +816,13 @@ struct SettingsView: View {
             ),
             tint: .green
           )
-          .speakTooltip("When enabled, your Mac will advertise itself on the local network and accept connections from the Speak iOS app.")
-          
+          .speakTooltip(
+            "When enabled, your Mac will advertise itself on the local network and accept connections from Speak iOS."
+          )
+
           if settings.enableSendToMac {
             Divider()
-            
+
             VStack(alignment: .leading, spacing: 8) {
               HStack {
                 Text("Pairing Code:")
@@ -831,11 +841,11 @@ struct SettingsView: View {
                 .buttonStyle(.borderless)
                 .speakTooltip("Copy pairing code to clipboard")
               }
-              
+
               Text("Enter this code on your iPhone when pairing.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-              
+
               Button("Regenerate Code") {
                 _ = PairingManager.shared.regeneratePairingCode()
               }
@@ -847,7 +857,7 @@ struct SettingsView: View {
               RoundedRectangle(cornerRadius: 8)
                 .fill(Color.green.opacity(0.1))
             )
-            
+
             if environment.transportServer.isRunning {
               HStack(spacing: 6) {
                 Circle()
@@ -858,14 +868,14 @@ struct SettingsView: View {
                   .foregroundStyle(.secondary)
               }
             }
-            
+
             if !environment.transportServer.connectedDevices.isEmpty {
               Divider()
-              
+
               VStack(alignment: .leading, spacing: 8) {
                 Text("Connected Devices:")
                   .font(.headline)
-                
+
                 ForEach(environment.transportServer.connectedDevices) { device in
                   HStack {
                     Image(systemName: "iphone")
@@ -898,8 +908,7 @@ struct SettingsView: View {
           }
         }
       }
-      .speakTooltip("Use your iPhone as a wireless microphone for your Mac. Transcribe on iPhone, text appears on Mac.")
-
+      .speakTooltip("Use your iPhone as a wireless microphone. Transcribe on iPhone, text appears on Mac.")
 
       SettingsCard(title: "Housekeeping", systemImage: "tray.full", tint: Color.brandAccentWarm) {
         VStack(alignment: .leading, spacing: 12) {
@@ -2231,7 +2240,6 @@ struct SettingsView: View {
     return identifier
   }
 
-
   private var postProcessingSettings: some View {
     LazyVStack(spacing: 20) {
       if settings.isAssemblyAIModel {
@@ -2833,6 +2841,16 @@ struct SettingsView: View {
         Local post-processing is separate from OpenRouter and cloud LLMs. Use the built-in rules \
         model for instant cleanup, or download GGUF instruction models from Hugging Face for local LLM cleanup.
         """
+      )
+      .font(.caption)
+      .foregroundStyle(.secondary)
+
+      Label(
+        """
+        Small local models can ignore strict formatting or style instructions. For reliable prompt-following, \
+        use a larger local instruction model or a remote post-processing model.
+        """,
+        systemImage: "exclamationmark.triangle"
       )
       .font(.caption)
       .foregroundStyle(.secondary)
@@ -5026,7 +5044,7 @@ private struct PronunciationEntryView: View {
 // - General configuration: appearance, caches, audio files, text output, and status bar behaviour.
 // - Transcription configuration: live/batch mode, provider, selected model, and model configuration.
 // - Post-processing configuration. System prompt and temperature, model selection, enabled or disabled.
-// - Hotkey management and configuration: This should allow selection of a hotkey (default should be the fn key). Probably a https://github.com/sindresorhus/KeyboardShortcuts is a good choice
-// - Permission management: Call from permissions manager to see and ask for permissions and allow the user to validate easily for each one if it was correctly granted. Perhaps a test button that tries to use the permission and validates the outcome somehow.
+// - Hotkey management and configuration: Allow selection of a hotkey, defaulting to the fn key.
+// - Permission management: Let users inspect and validate required permissions.
 // And then any other sections you think are relevant. This should be presented in a concise but user-friendly format.
 // swiftlint:enable file_length type_body_length

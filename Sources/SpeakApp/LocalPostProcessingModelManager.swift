@@ -431,38 +431,22 @@ final class LocalPostProcessingModelManager: ObservableObject {
     environment: [String: String] = [:]
   ) async throws -> String {
     try await withCheckedThrowingContinuation { continuation in
-      DispatchQueue.global(qos: .userInitiated).async {
-        let process = Process()
-        process.executableURL = executableURL
-        process.arguments = arguments
-        if !environment.isEmpty {
-          process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
-        }
-        let outputPipe = Pipe()
-        let errorPipe = Pipe()
-        process.standardOutput = outputPipe
-        process.standardError = errorPipe
-        if let standardInput {
-          let inputPipe = Pipe()
-          process.standardInput = inputPipe
-          do {
-            try process.run()
-            inputPipe.fileHandleForWriting.write(standardInput)
-            try inputPipe.fileHandleForWriting.close()
-          } catch {
-            continuation.resume(throwing: error)
-            return
-          }
+      let process = Process()
+      process.executableURL = executableURL
+      process.arguments = arguments
+      if !environment.isEmpty {
+        process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
+      }
+      let outputPipe = Pipe()
+      let errorPipe = Pipe()
+      process.standardOutput = outputPipe
+      process.standardError = errorPipe
+      let inputPipe = standardInput == nil ? nil : Pipe()
+      if let inputPipe {
+        process.standardInput = inputPipe
+      }
 
-        } else {
-          do {
-            try process.run()
-          } catch {
-            continuation.resume(throwing: error)
-            return
-          }
-        }
-        process.waitUntilExit()
+      process.terminationHandler = { process in
         let output = String(data: outputPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         let errorOutput = String(data: errorPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         guard process.terminationStatus == 0 else {
@@ -474,6 +458,22 @@ final class LocalPostProcessingModelManager: ObservableObject {
           return
         }
         continuation.resume(returning: output)
+      }
+
+      do {
+        try process.run()
+      } catch {
+        continuation.resume(throwing: error)
+        return
+      }
+
+      do {
+        if let standardInput, let inputPipe {
+          inputPipe.fileHandleForWriting.write(standardInput)
+          try inputPipe.fileHandleForWriting.close()
+        }
+      } catch {
+        process.terminate()
       }
     }
   }

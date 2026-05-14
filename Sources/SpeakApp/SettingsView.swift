@@ -142,6 +142,10 @@ struct SettingsView: View {
     settings.trackedAPIKeyIdentifiers.contains(openRouterKeyIdentifier)
   }
 
+  private var isCloudPostProcessingModelSelected: Bool {
+    !PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel)
+  }
+
   private var isValidatingKey: Bool {
     if case .validating = apiKeyValidationState { return true }
     return false
@@ -2178,13 +2182,50 @@ struct SettingsView: View {
 
           ModelPicker(
             title: "Cloud Post-processing Model",
-            help: "Choose the OpenRouter model used for LLM cleanup. Mini and Lite models are faster and cheaper.",
+            help: "Choose the OpenRouter model Speak will call for cloud LLM cleanup. Mini and Lite models are faster and cheaper.",
             options: cloudPostProcessingOptions,
             value: cloudPostProcessingModelBinding,
             usesDetailedChooser: true
           )
 
-          if PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel) {
+          if isCloudPostProcessingModelSelected {
+            SettingsInlineInfo(
+              title: "Cloud post-processing uses OpenRouter",
+              message:
+                "Speak sends transcript cleanup requests for this model to OpenRouter. Add an OpenRouter API key in Settings > API Keys before using cloud post-processing.",
+              systemImage: "network"
+            )
+
+            if !isOpenRouterKeyStored {
+              HStack(alignment: .center, spacing: 10) {
+                Label("OpenRouter API key missing", systemImage: "exclamationmark.triangle.fill")
+                  .font(.caption.weight(.semibold))
+                  .foregroundStyle(.orange)
+                Text(
+                  settings.postProcessingEnabled
+                    ? "Cloud post-processing will be skipped until a key is saved."
+                    : "Save a key before enabling cloud post-processing."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                Spacer()
+                Button("Add OpenRouter Key") {
+                  sidebarSelection = .settings(.apiKeys)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.orange)
+              }
+              .padding(12)
+              .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                  .fill(Color.orange.opacity(0.10))
+              )
+              .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                  .stroke(Color.orange.opacity(0.25), lineWidth: 1)
+              )
+            }
+          } else {
             SettingsInlineInfo(
               title: "Local cleanup stays on this Mac",
               message:
@@ -2221,9 +2262,9 @@ struct SettingsView: View {
       SettingsCard(title: "Transcription Prompt", systemImage: "quote.bubble", tint: Color.mint) {
         VStack(alignment: .leading, spacing: 8) {
           Text(
-            PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel)
-              ? "Local cleanup does not send prompts anywhere. Choose a cloud post-processing model to use custom LLM instructions."
-              : "This prompt is sent to an LLM after transcription (post-processing). Requires an OpenRouter API key."
+            isCloudPostProcessingModelSelected
+              ? "This prompt is sent to the selected OpenRouter model after transcription. Requires an OpenRouter API key."
+              : "Local cleanup does not send prompts anywhere. Choose a cloud post-processing model to use custom OpenRouter LLM instructions."
           )
             .font(.caption)
             .foregroundStyle(.secondary)

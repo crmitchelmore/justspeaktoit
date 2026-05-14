@@ -63,7 +63,7 @@ final class LocalModelManager: ObservableObject {
       modelName: "streaming-zipformer-en-20M-2023-02-17",
       runtime: "sherpa-onnx streaming runtime",
       approximateSizeMB: 44
-    )
+    ),
   ]
 
   private var activePipelines: [String: WhisperKit] = [:]
@@ -149,11 +149,15 @@ final class LocalModelManager: ObservableObject {
       engine: "whisperkit",
       modelRepo: repoID,
       approximateSizeMB: resolvedModel.approximateSizeMB,
-      description: "Imported from Hugging Face. WhisperKit will download the matching Core ML files from \(repoID).",
+      description: """
+      Imported from Hugging Face. WhisperKit will download the matching Core ML files from \(repoID).
+      """,
       tags: [.quality]
     )
 
-    importedModels.removeAll { $0.id == model.id || ($0.modelRepo == model.modelRepo && $0.modelName == model.modelName) }
+    importedModels.removeAll {
+      $0.id == model.id || ($0.modelRepo == model.modelRepo && $0.modelName == model.modelName)
+    }
     importedModels.append(model)
     try saveImportedModels()
     installStates[model.id] = markerExists(for: model) ? .installed : .notInstalled
@@ -428,7 +432,12 @@ final class LocalModelManager: ObservableObject {
   }
 
   private nonisolated static let knownArgmaxWhisperKitModels: [String: ResolvedHuggingFaceModel] = {
-    func model(_ aliases: [String], name: String, displayName: String, size: Int) -> [(String, ResolvedHuggingFaceModel)] {
+    func model(
+      _ aliases: [String],
+      name: String,
+      displayName: String,
+      size: Int
+    ) -> [(String, ResolvedHuggingFaceModel)] {
       aliases.map {
         (
           $0,
@@ -467,7 +476,7 @@ final class LocalModelManager: ObservableObject {
           "distil-large-v3-turbo",
           "distil-large-v3_turbo",
           "distil-whisper_distil-large-v3_turbo",
-          "distil-whisper_distil-large-v3_turbo_600mb",
+          "distil-whisper_distil-large-v3_turbo_600mb"
         ],
         name: "distil-whisper_distil-large-v3_turbo_600MB",
         displayName: "Distil-Whisper Large v3 Turbo",
@@ -478,7 +487,7 @@ final class LocalModelManager: ObservableObject {
           "large-v3-turbo",
           "large-v3_turbo",
           "openai_whisper-large-v3-v20240930_turbo",
-          "openai_whisper-large-v3-v20240930_turbo_632mb",
+          "openai_whisper-large-v3-v20240930_turbo_632mb"
         ],
         name: "openai_whisper-large-v3-v20240930_turbo_632MB",
         displayName: "Whisper Large v3 Turbo",

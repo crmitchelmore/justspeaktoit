@@ -45,7 +45,8 @@ final class ModelCatalogTests: XCTestCase {
         )
         XCTAssertEqual(
             ModelCatalog.friendlyName(
-                for: "local/post-processing/huggingface/bartowski/qwen2.5-0.5b-instruct-gguf/qwen2.5-0.5b-instruct-q4-k-m.gguf"
+                for: "local/post-processing/huggingface/bartowski/qwen2.5-0.5b-instruct-gguf/"
+                    + "qwen2.5-0.5b-instruct-q4-k-m.gguf"
             ),
             "Qwen2.5 0.5B Instruct Q4_K_M"
         )

@@ -212,7 +212,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
         Option(
             id: "local/post-processing/rules",
             displayName: "Local Cleanup (Offline)",
-            description: "Runs entirely on this Mac. Applies safe transcript cleanup without sending text to a cloud LLM.",
+            description: "Runs entirely on this Mac. Applies safe transcript cleanup without cloud LLMs.",
             estimatedLatencyMs: 50,
             latencyTier: .instant,
             tags: [.fast, .cheap, .privacy]
@@ -407,7 +407,8 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
 
     public static let localTranscriptionOptions: [Option] = localTranscription.map(\.option)
 
-    public static let allOptions: [Option] = liveTranscription + batchTranscription + localTranscriptionOptions + postProcessing
+    public static let allOptions: [Option] =
+        liveTranscription + batchTranscription + localTranscriptionOptions + postProcessing
 
     // O(1) lookup cache keyed on lowercased model ID (first entry wins for cross-category duplicates).
     private static let optionsByID: [String: Option] = Dictionary(
@@ -472,7 +473,11 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             .replacingOccurrences(of: ".gguf", with: "", options: .caseInsensitive)
             .replacingOccurrences(of: "_", with: " ")
             .replacingOccurrences(of: "-", with: " ")
-            .replacingOccurrences(of: #"(?i)\bq([0-9])\s+k\s+([a-z])\b"#, with: "Q$1_K_$2", options: .regularExpression)
+            .replacingOccurrences(
+                of: #"(?i)\bq([0-9])\s+k\s+([a-z])\b"#,
+                with: "Q$1_K_$2",
+                options: .regularExpression
+            )
             .replacingOccurrences(of: #"(?i)\b([0-9]+)mb\b"#, with: "$1 MB", options: .regularExpression)
             .replacingOccurrences(of: #"(?i)\b([0-9]+)gb\b"#, with: "$1 GB", options: .regularExpression)
             .capitalized

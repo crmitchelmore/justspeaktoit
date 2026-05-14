@@ -1,8 +1,6 @@
 import Foundation
 import OSLog
 
-// swiftlint:disable type_body_length
-
 enum SherpaOnnxRuntimeError: LocalizedError {
   case pythonUnavailable
   case runtimeUnavailable(String)

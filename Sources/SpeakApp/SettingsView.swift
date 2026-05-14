@@ -188,9 +188,15 @@ struct SettingsView: View {
       return "This prompt is sent to the selected OpenRouter model after transcription. Requires an OpenRouter API key."
     }
     if PostProcessingManager.isBuiltInLocalPostProcessingModel(settings.postProcessingModel) {
-      return "Downloaded local LLM models use this prompt on your Mac. The built-in rules cleaner is local and ignores custom prompts."
+      return """
+      Downloaded local LLM models use this prompt on your Mac. \
+      The built-in rules cleaner is local and ignores custom prompts.
+      """
     }
-    return "This prompt is sent to the selected downloaded local model after transcription. It stays on this Mac and does not use OpenRouter."
+    return """
+    This prompt is sent to the selected downloaded local model after transcription. \
+    It stays on this Mac and does not use OpenRouter.
+    """
   }
 
   private var systemGeneratedPartsHelpText: String {
@@ -198,7 +204,10 @@ struct SettingsView: View {
       return "Control which system-generated instructions are added to the OpenRouter prompt."
     }
     if PostProcessingManager.isBuiltInLocalPostProcessingModel(settings.postProcessingModel) {
-      return "These prompt parts apply when you choose a downloaded local LLM model. The built-in rules cleaner does not use prompts."
+      return """
+      These prompt parts apply when you choose a downloaded local LLM model. \
+      The built-in rules cleaner does not use prompts.
+      """
     }
     return "Control which system-generated instructions are added to the downloaded local model prompt."
   }
@@ -891,7 +900,9 @@ struct SettingsView: View {
               RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color(nsColor: .controlBackgroundColor))
             )
-            .speakTooltip("Choose Local Batch for offline transcription after recording, or Local Streaming for on-device partial text while recording.")
+            .speakTooltip(
+              "Choose Local Batch for offline transcription after recording, or Local Streaming for live local text."
+            )
             .accessibilityLabel("Local transcription type picker")
           } else {
             Picker("Remote transcription type", selection: remoteTranscriptionModeBinding) {
@@ -906,7 +917,9 @@ struct SettingsView: View {
               RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color(nsColor: .controlBackgroundColor))
             )
-            .speakTooltip("Choose Remote Streaming for live provider updates, or Remote Batch for provider transcription after recording stops.")
+            .speakTooltip(
+              "Choose Remote Streaming for live provider updates, or Remote Batch for post-recording transcription."
+            )
             .accessibilityLabel("Remote transcription type picker")
           }
 
@@ -930,7 +943,11 @@ struct SettingsView: View {
       .speakTooltip("Choose which transcription flow Speak uses and the locale it should prefer.")
 
       if settings.transcriptionMode == .liveNative {
-        SettingsCard(title: "Processing Speed", systemImage: "gauge.with.dots.needle.67percent", tint: Color.brandLagoon) {
+        SettingsCard(
+          title: "Processing Speed",
+          systemImage: "gauge.with.dots.needle.67percent",
+          tint: Color.brandLagoon
+        ) {
           let capabilities = settings.liveModelCapabilities
           let anyEnhancedModeAvailable = AppSettings.SpeedMode.allCases
             .contains { $0 != .instant && capabilities.supportedSpeedModes.contains($0.coreID) }
@@ -1174,7 +1191,10 @@ struct SettingsView: View {
               .foregroundStyle(.secondary)
             ModelPicker(
               title: "Remote Batch Model",
-              help: "Remote transcription runs after recording stops. Built-in providers use their own keys; custom model identifiers are sent through OpenRouter.",
+              help: """
+              Remote transcription runs after recording stops. Built-in providers use their own keys; \
+              custom model identifiers are sent through OpenRouter.
+              """,
               options: ModelCatalog.batchTranscription,
               value: settingsBinding(\AppSettings.batchTranscriptionModel)
             )
@@ -1182,7 +1202,10 @@ struct SettingsView: View {
               SettingsInlineInfo(
                 title: "Custom batch models use OpenRouter",
                 message:
-                  "Speak will send this custom model identifier to OpenRouter. Save an OpenRouter API key before recording, or choose one of the built-in provider models above.",
+                  """
+                  Speak will send this custom model identifier to OpenRouter. Save an OpenRouter API key \
+                  before recording, or choose one of the built-in provider models above.
+                  """,
                 systemImage: "key.fill"
               )
               if !isOpenRouterKeyStored {
@@ -1213,7 +1236,11 @@ struct SettingsView: View {
               Image(systemName: "lock.shield.fill")
                 .foregroundStyle(Color.green)
                 .imageScale(.small)
-              Text(settings.localTranscriptionMode == .batch ? "Local Batch - private on this Mac" : "Local Streaming - private on this Mac")
+              Text(
+                settings.localTranscriptionMode == .batch
+                  ? "Local Batch - private on this Mac"
+                  : "Local Streaming - private on this Mac"
+              )
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Color.green)
             }
@@ -1225,7 +1252,11 @@ struct SettingsView: View {
             )
 
             Text(
-              "Local Batch and Local Streaming are separate from Apple Speech and cloud providers. Both stay local-only; Local Batch uses downloaded WhisperKit/Core ML models, while Local Streaming needs a dedicated streaming ASR runtime."
+              """
+              Local Batch and Local Streaming are separate from Apple Speech and cloud providers. \
+              Both stay local-only; Local Batch uses downloaded WhisperKit/Core ML models, while \
+              Local Streaming needs a dedicated streaming ASR runtime.
+              """
             )
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -1250,7 +1281,10 @@ struct SettingsView: View {
               )
 
               if !localModels.isInstalled(settings.localTranscriptionModel) {
-                Label("Download the selected local batch model before recording in Local Batch mode.", systemImage: "arrow.down.circle")
+                Label(
+                  "Download the selected local batch model before recording in Local Batch mode.",
+                  systemImage: "arrow.down.circle"
+                )
                   .font(.caption)
                   .foregroundStyle(.orange)
               }
@@ -1372,7 +1406,9 @@ struct SettingsView: View {
       )
       localModelStep(
         number: "2",
-        title: settings.localTranscriptionMode == .batch ? "Download a local batch model" : "Add local streaming model sources",
+        title: settings.localTranscriptionMode == .batch
+          ? "Download a local batch model"
+          : "Add local streaming model sources",
         detail: settings.localTranscriptionMode == .batch
           ? "WhisperKit/Core ML models run locally after recording stops."
           : "Streaming candidates are tracked separately because they need the sherpa-onnx local runtime."
@@ -1382,7 +1418,7 @@ struct SettingsView: View {
         title: "Record normally",
         detail: settings.localTranscriptionMode == .batch
           ? "Speak transcribes after recording stops, offline on this Mac."
-          : "Once a compatible streaming runtime is connected, Speak will stream partial text locally without cloud access."
+          : "Once a compatible streaming runtime is connected, Speak will stream partial text locally."
       )
     }
     .padding(12)
@@ -1533,7 +1569,10 @@ struct SettingsView: View {
 
       localStreamingSetupSection(
         title: "2. Browse for more local streaming models",
-        subtitle: "Open Hugging Face search for sherpa-onnx Zipformer models. Only compatible sources can be added here.",
+        subtitle: """
+        Open Hugging Face search for sherpa-onnx Zipformer models. \
+        Only compatible sources can be added here.
+        """,
         systemImage: "magnifyingglass",
         tint: .blue
       ) {
@@ -1924,7 +1963,8 @@ struct SettingsView: View {
 
   private func openLocalStreamingModelSearch() {
     guard let url = URL(
-      string: "https://huggingface.co/models?pipeline_tag=automatic-speech-recognition&sort=downloads&search=sherpa-onnx%20streaming%20zipformer"
+      string: "https://huggingface.co/models?pipeline_tag=automatic-speech-recognition&sort=downloads"
+        + "&search=sherpa-onnx%20streaming%20zipformer"
     ) else { return }
     NSWorkspace.shared.open(url)
   }
@@ -2592,7 +2632,10 @@ struct SettingsView: View {
 
       ModelPicker(
         title: "Remote Post-processing Model",
-        help: "Choose the OpenRouter model Speak will call for cloud LLM cleanup. Mini and Lite models are faster and cheaper.",
+        help: """
+        Choose the OpenRouter model Speak will call for cloud LLM cleanup. \
+        Mini and Lite models are faster and cheaper.
+        """,
         options: cloudPostProcessingOptions,
         value: cloudPostProcessingModelBinding,
         usesDetailedChooser: true
@@ -2601,7 +2644,10 @@ struct SettingsView: View {
       SettingsInlineInfo(
         title: "Remote post-processing uses OpenRouter",
         message:
-          "Speak sends transcript cleanup requests for this model to OpenRouter. Add an OpenRouter API key in Settings > API Keys before using remote post-processing.",
+          """
+          Speak sends transcript cleanup requests for this model to OpenRouter. \
+          Add an OpenRouter API key in Settings > API Keys before using remote post-processing.
+          """,
         systemImage: "network"
       )
 
@@ -2671,7 +2717,10 @@ struct SettingsView: View {
       )
 
       Text(
-        "Local post-processing is separate from OpenRouter and cloud LLMs. Use the built-in rules model for instant cleanup, or download GGUF instruction models from Hugging Face for local LLM cleanup."
+        """
+        Local post-processing is separate from OpenRouter and cloud LLMs. Use the built-in rules \
+        model for instant cleanup, or download GGUF instruction models from Hugging Face for local LLM cleanup.
+        """
       )
       .font(.caption)
       .foregroundStyle(.secondary)
@@ -2683,7 +2732,10 @@ struct SettingsView: View {
 
       ModelPicker(
         title: "Local Post-processing Model",
-        help: "Used for local-only cleanup after transcription. Built-in rules need no runtime; Hugging Face GGUF models need the local llama.cpp runtime and a model download.",
+        help: """
+        Used for local-only cleanup after transcription. Built-in rules need no runtime; \
+        Hugging Face GGUF models need the local llama.cpp runtime and a model download.
+        """,
         options: localPostProcessingOptions,
         value: settingsBinding(\AppSettings.postProcessingModel)
       )
@@ -2720,7 +2772,10 @@ struct SettingsView: View {
       localModelStep(
         number: "2",
         title: "Download a local LLM model",
-        detail: "GGUF models come from Hugging Face and show their approximate size before download. The built-in rules model stays available with no download."
+        detail: """
+        GGUF models come from Hugging Face and show their approximate size before download. \
+        The built-in rules model stays available with no download.
+        """
       )
       localModelStep(
         number: "3",
@@ -2744,7 +2799,7 @@ struct SettingsView: View {
       VStack(alignment: .leading, spacing: 4) {
         Text("Local LLM runtime")
           .font(.subheadline.weight(.semibold))
-        Text("Required only for downloaded Hugging Face GGUF post-processing models. Built-in cleanup works without it.")
+        Text("Required only for downloaded Hugging Face GGUF models. Built-in cleanup works without it.")
           .font(.caption)
           .foregroundStyle(.secondary)
         if case .failed(let message) = localPostProcessingModels.runtimeState {
@@ -2781,7 +2836,12 @@ struct SettingsView: View {
     VStack(alignment: .leading, spacing: 10) {
       Text("Add a Hugging Face GGUF model")
         .font(.caption.weight(.semibold))
-      Text("Use this for compatible llama.cpp/GGUF instruction models. Paste the Hugging Face repo and exact .gguf filename; Speak will download and run it locally.")
+      Text(
+        """
+        Use this for compatible llama.cpp/GGUF instruction models. Paste the Hugging Face repo and exact \
+        .gguf filename; Speak will download and run it locally.
+        """
+      )
         .font(.caption)
         .foregroundStyle(.secondary)
       HStack(spacing: 10) {
@@ -4816,10 +4876,10 @@ private struct PronunciationEntryView: View {
   }
 }
 
-// @Implement: This view allows management of all settings within the app settings class. Each logical grouping of settings should have it's own segment in a tab bar at the top of the view. All settings should be immediately persisted through the AppSettings class when they are changed. Break down the view in to smaller components for easier management.
-// - API key management: This should save to key vault. When a key is added it should validate using an api call. Each key should have red/green indicators to confirm it's saved or not.
-// - General configuration (including light/dark mode), delete any caches or audio files. Text Output configuration. Show status bar only/run in background mode but still can open the app from the status bar.
-// - Transcription configuration - if it's using a live transcribe with osx native (or select an api to stream to) or if it's batch and will send the file after. And which model to use for each of those and any model configuration
+// @Implement: This view manages the app settings class, grouped into logical setting sections.
+// - API key management: save keys to key vault and validate them with an API call.
+// - General configuration: appearance, caches, audio files, text output, and status bar behaviour.
+// - Transcription configuration: live/batch mode, provider, selected model, and model configuration.
 // - Post-processing configuration. System prompt and temperature, model selection, enabled or disabled.
 // - Hotkey management and configuration: This should allow selection of a hotkey (default should be the fn key). Probably a https://github.com/sindresorhus/KeyboardShortcuts is a good choice
 // - Permission management: Call from permissions manager to see and ask for permissions and allow the user to validate easily for each one if it was correctly granted. Perhaps a test button that tries to use the permission and validates the outcome somehow.

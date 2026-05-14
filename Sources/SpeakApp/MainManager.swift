@@ -742,7 +742,7 @@ final class MainManager: ObservableObject {
               method: "On-Device",
               requestHeaders: [
                 "Model": result.modelIdentifier,
-                "Duration": String(format: "%.1fs", result.duration),
+                "Duration": String(format: "%.1fs", result.duration)
               ],
               requestBodyPreview: "Local audio file: \(summary.url.lastPathComponent)",
               responseCode: 200,

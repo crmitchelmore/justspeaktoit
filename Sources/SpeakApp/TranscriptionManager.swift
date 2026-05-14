@@ -35,7 +35,7 @@ enum TranscriptionManagerError: LocalizedError {
     case .permissionsMissing:
       return "Required microphone or speech recognition permissions are missing."
     case .localLiveStreamingUnsupported:
-      return "Downloaded local models are offline-only in this prerelease. Use Local Batch to transcribe after recording."
+      return "Downloaded local models are offline-only in this prerelease. Use Local Batch after recording."
     }
   }
 }
@@ -210,8 +210,7 @@ final class TranscriptionManager: ObservableObject {
 
   private var liveTranscriptionModelForCurrentMode: String {
     if appSettings.transcriptionMode == .localModel,
-      appSettings.localTranscriptionMode == .streaming
-    {
+      appSettings.localTranscriptionMode == .streaming {
       return appSettings.localStreamingModelSource
     }
     return appSettings.liveTranscriptionModel

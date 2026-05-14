@@ -2,8 +2,6 @@ import Foundation
 import OSLog
 import SpeakCore
 
-// swiftlint:disable type_body_length
-
 enum LocalPostProcessingModelError: LocalizedError {
   case pythonUnavailable
   case runtimeUnavailable(String)
@@ -144,11 +142,17 @@ final class LocalPostProcessingModelManager: ObservableObject {
   }
 
   @discardableResult
-  func addHuggingFaceModel(repoID: String, filename: String, approximateSizeMB: Int?) throws -> LocalPostProcessingModel {
+  func addHuggingFaceModel(
+    repoID: String,
+    filename: String,
+    approximateSizeMB: Int?
+  ) throws -> LocalPostProcessingModel {
     let repoID = repoID.trimmingCharacters(in: .whitespacesAndNewlines)
     let filename = filename.trimmingCharacters(in: .whitespacesAndNewlines)
     guard repoID.split(separator: "/").count == 2 else {
-      throw LocalPostProcessingModelError.invalidHuggingFaceSource("Use owner/repo, for example bartowski/Qwen2.5-0.5B-Instruct-GGUF.")
+      throw LocalPostProcessingModelError.invalidHuggingFaceSource(
+        "Use owner/repo, for example bartowski/Qwen2.5-0.5B-Instruct-GGUF."
+      )
     }
     guard filename.lowercased().hasSuffix(".gguf") else {
       throw LocalPostProcessingModelError.invalidHuggingFaceSource("The file must be a .gguf model file.")
@@ -189,7 +193,7 @@ final class LocalPostProcessingModelManager: ObservableObject {
         executableURL: python,
         arguments: [
           "-m", "pip", "install",
-          "llama-cpp-python==0.3.23",
+          "llama-cpp-python==0.3.23"
         ],
         environment: [
           "CMAKE_ARGS": "-DGGML_METAL=on"
@@ -294,7 +298,7 @@ final class LocalPostProcessingModelManager: ObservableObject {
     let candidates = [
       "/opt/homebrew/bin/python3",
       "/usr/local/bin/python3",
-      "/usr/bin/python3",
+      "/usr/bin/python3"
     ]
     for candidate in candidates where fileManager.isExecutableFile(atPath: candidate) {
       let url = URL(fileURLWithPath: candidate)
@@ -341,7 +345,9 @@ final class LocalPostProcessingModelManager: ObservableObject {
     }
     let (downloadedURL, response) = try await URLSession.shared.download(from: url)
     if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-      throw LocalPostProcessingModelError.downloadFailed("Hugging Face returned HTTP \(http.statusCode) for \(filename).")
+      throw LocalPostProcessingModelError.downloadFailed(
+        "Hugging Face returned HTTP \(http.statusCode) for \(filename)."
+      )
     }
     try fileManager.moveItem(at: downloadedURL, to: destination)
   }
@@ -352,7 +358,9 @@ final class LocalPostProcessingModelManager: ObservableObject {
       let data = try Data(contentsOf: importedModelsURL)
       importedModels = try JSONDecoder().decode([LocalPostProcessingModel].self, from: data)
     } catch {
-      logger.error("Failed to load local post-processing model sources: \(error.localizedDescription, privacy: .public)")
+      logger.error(
+        "Failed to load local post-processing model sources: \(error.localizedDescription, privacy: .public)"
+      )
     }
   }
 
@@ -473,7 +481,10 @@ final class LocalPostProcessingModelManager: ObservableObject {
   private nonisolated static func readableRuntimeInstallError(from error: Error) -> String {
     let message = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
     if message.contains("No matching distribution found") || message.contains("Could not find a version") {
-      return "No compatible llama.cpp Python package was available for this Python version. Try installing Python 3.11 or 3.12, then install the runtime again."
+      return """
+      No compatible llama.cpp Python package was available for this Python version. \
+      Try installing Python 3.11 or 3.12, then install the runtime again.
+      """
     }
     if message.contains("cmake") || message.contains("CMake") {
       return "Building the llama.cpp runtime failed while preparing CMake. Install Xcode Command Line Tools, then try again."
@@ -574,8 +585,8 @@ struct LocalPostProcessingModel: Codable, Equatable, Identifiable, Sendable {
   var sizeLabel: String {
     guard let approximateSizeMB, approximateSizeMB > 0 else { return "Size unknown" }
     if approximateSizeMB >= 1024 {
-      let gb = Double(approximateSizeMB) / 1024
-      return "\(gb.formatted(.number.precision(.fractionLength(1)))) GB"
+      let gigabytes = Double(approximateSizeMB) / 1024
+      return "\(gigabytes.formatted(.number.precision(.fractionLength(1)))) GB"
     }
     return "\(approximateSizeMB) MB"
   }

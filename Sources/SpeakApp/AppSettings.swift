@@ -27,9 +27,9 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   }
 
   enum TranscriptionMode: String, CaseIterable, Identifiable {
-    case liveNative = "liveNative"
-    case batchRemote = "batchRemote"
-    case localModel = "localModel"
+    case liveNative
+    case batchRemote
+    case localModel
 
     var id: String { rawValue }
 
@@ -46,8 +46,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   }
 
   enum LocalTranscriptionMode: String, CaseIterable, Identifiable {
-    case batch = "batch"
-    case streaming = "streaming"
+    case batch
+    case streaming
 
     var id: String { rawValue }
 

@@ -1309,10 +1309,14 @@ private struct HistoryListRow: View {
 
   private var reprocessTooltip: String {
     let postProcessing = environment.settings.postProcessingEnabled
-      ? "Post-processing will also use your current post-processing model: \(ModelCatalog.friendlyName(for: environment.settings.postProcessingModel))."
+      ? """
+        Post-processing will also use your current post-processing model: \
+        \(ModelCatalog.friendlyName(for: environment.settings.postProcessingModel)).
+        """
       : "Post-processing is currently off, so only transcription will be rerun."
     return """
-      Reprocess reruns this saved audio with your current settings, not the model originally used. It will use \(currentReprocessModelDescription). \(postProcessing)
+      Reprocess reruns this saved audio with your current settings, not the model originally used. \
+      It will use \(currentReprocessModelDescription). \(postProcessing)
       """
   }
 

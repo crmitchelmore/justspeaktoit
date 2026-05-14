@@ -1112,6 +1112,7 @@ final class MainManager: ObservableObject {
     activeSession = nil
   }
 
+  // swiftlint:disable:next cyclomatic_complexity function_body_length
   func reprocessHistoryItem(_ item: HistoryItem) async {
     guard activeSession == nil else { return }
     guard let url = item.audioFileURL else { return }

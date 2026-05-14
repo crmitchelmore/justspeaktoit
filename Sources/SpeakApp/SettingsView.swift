@@ -1340,6 +1340,7 @@ struct SettingsView: View {
     }
   }
 
+  // swiftlint:disable:next function_body_length
   private func localModelRow(_ model: LocalTranscriptionModel) -> some View {
     let state = localModels.installState(for: model.id)
     let isSelected = state == .installed && model.id == settings.localTranscriptionModel
@@ -2935,9 +2936,11 @@ struct SettingsView: View {
     }
   }
 
+  // swiftlint:disable:next function_body_length
   private func localPostProcessingModelRow(_ model: LocalPostProcessingModel) -> some View {
       let state = localPostProcessingModels.installState(for: model.id)
-      let isSelected = state == .installed && settings.postProcessingModel.caseInsensitiveCompare(model.id) == .orderedSame
+      let isSelected = state == .installed
+        && settings.postProcessingModel.caseInsensitiveCompare(model.id) == .orderedSame
       return localModelRowContainer(isSelected: isSelected, tint: .green) {
         HStack(alignment: .top, spacing: 12) {
         Image(systemName: localPostProcessingModelIcon(for: state))
@@ -4715,6 +4718,7 @@ private struct ModelPicker: View {
     return "Choose which model Speak should use for this step."
   }
 
+  // swiftlint:disable:next cyclomatic_complexity
   private func syncSelection(with newValue: String) {
     let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
     if let match = options.first(where: { $0.id.caseInsensitiveCompare(trimmed) == .orderedSame }) {

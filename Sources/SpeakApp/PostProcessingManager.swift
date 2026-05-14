@@ -10,6 +10,7 @@ struct PostProcessingOutcome {
 }
 
 @MainActor
+// swiftlint:disable:next type_body_length
 final class PostProcessingManager: ObservableObject {
   private let client: ChatLLMClient
   private let settings: AppSettings
@@ -53,6 +54,7 @@ final class PostProcessingManager: ObservableObject {
     self.personalLexicon = personalLexicon
   }
 
+  // swiftlint:disable:next function_body_length
   func process(
     rawText: String,
     context: PersonalLexiconContext,

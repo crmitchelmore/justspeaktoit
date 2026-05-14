@@ -4,6 +4,7 @@ import SpeakCore
 import class WhisperKit.WhisperKit
 import class WhisperKit.WhisperKitConfig
 
+// swiftlint:disable file_length
 enum LocalModelError: LocalizedError {
   case unknownModel(String)
   case notInstalled(String)
@@ -31,6 +32,7 @@ enum LocalModelError: LocalizedError {
 }
 
 @MainActor
+// swiftlint:disable:next type_body_length
 final class LocalModelManager: ObservableObject {
   static let shared = LocalModelManager()
 

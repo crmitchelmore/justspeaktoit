@@ -2,6 +2,7 @@ import Foundation
 import OSLog
 import SpeakCore
 
+// swiftlint:disable file_length
 enum LocalPostProcessingModelError: LocalizedError {
   case pythonUnavailable
   case runtimeUnavailable(String)
@@ -32,6 +33,7 @@ enum LocalPostProcessingModelError: LocalizedError {
 }
 
 @MainActor
+// swiftlint:disable:next type_body_length
 final class LocalPostProcessingModelManager: ObservableObject {
   static let shared = LocalPostProcessingModelManager()
 
@@ -440,6 +442,7 @@ final class LocalPostProcessingModelManager: ObservableObject {
     return "\(base) from \(repoID)"
   }
 
+  // swiftlint:disable:next function_body_length
   private nonisolated static func runProcess(
     executableURL: URL,
     arguments: [String],

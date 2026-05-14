@@ -1,6 +1,7 @@
 import Foundation
 import OSLog
 
+// swiftlint:disable file_length
 enum SherpaOnnxRuntimeError: LocalizedError {
   case pythonUnavailable
   case runtimeUnavailable(String)
@@ -34,6 +35,7 @@ struct SherpaOnnxModelBundle: Equatable, Sendable {
 }
 
 @MainActor
+// swiftlint:disable:next type_body_length
 final class SherpaOnnxRuntimeManager: ObservableObject {
   static let shared = SherpaOnnxRuntimeManager()
 

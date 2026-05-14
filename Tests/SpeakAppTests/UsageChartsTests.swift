@@ -17,7 +17,7 @@ final class UsageChartsTests: XCTestCase {
       makeHistoryItem(
         modelIdentifier: "openai/gpt-5-mini",
         phase: .postProcessing
-      ),
+      )
     ]
 
     let usage = items.modelUsage(for: .transcription)

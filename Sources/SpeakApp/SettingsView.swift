@@ -2677,7 +2677,9 @@ struct SettingsView: View {
       .foregroundStyle(.secondary)
 
       localPostProcessingQuickStart
-      localPostProcessingRuntimeStatus
+      if !localPostProcessingModels.runtimeState.isInstalled {
+        localPostProcessingRuntimeStatus
+      }
 
       ModelPicker(
         title: "Local Post-processing Model",

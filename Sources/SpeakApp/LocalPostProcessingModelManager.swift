@@ -183,17 +183,22 @@ final class LocalPostProcessingModelManager: ObservableObject {
       pythonExecutableCache = python
       try await Self.runProcess(
         executableURL: python,
+        arguments: ["-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel", "cmake", "ninja"]
+      )
+      try await Self.runProcess(
+        executableURL: python,
         arguments: [
           "-m", "pip", "install",
-          "--prefer-binary",
-          "--only-binary=:all:",
-          "llama-cpp-python==0.3.9",
+          "llama-cpp-python==0.3.23",
+        ],
+        environment: [
+          "CMAKE_ARGS": "-DGGML_METAL=on"
         ]
       )
       try await ensureRuntimeAvailable()
       runtimeState = .installed
     } catch {
-      runtimeState = .failed(error.localizedDescription)
+      runtimeState = .failed(Self.readableRuntimeInstallError(from: error))
     }
   }
 
@@ -397,13 +402,17 @@ final class LocalPostProcessingModelManager: ObservableObject {
   private nonisolated static func runProcess(
     executableURL: URL,
     arguments: [String],
-    standardInput: Data? = nil
+    standardInput: Data? = nil,
+    environment: [String: String] = [:]
   ) async throws -> String {
     try await withCheckedThrowingContinuation { continuation in
       DispatchQueue.global(qos: .userInitiated).async {
         let process = Process()
         process.executableURL = executableURL
         process.arguments = arguments
+        if !environment.isEmpty {
+          process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
+        }
         let outputPipe = Pipe()
         let errorPipe = Pipe()
         process.standardOutput = outputPipe
@@ -419,6 +428,7 @@ final class LocalPostProcessingModelManager: ObservableObject {
             continuation.resume(throwing: error)
             return
           }
+
         } else {
           do {
             try process.run()
@@ -441,6 +451,20 @@ final class LocalPostProcessingModelManager: ObservableObject {
         continuation.resume(returning: output)
       }
     }
+  }
+
+  private nonisolated static func readableRuntimeInstallError(from error: Error) -> String {
+    let message = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+    if message.contains("No matching distribution found") || message.contains("Could not find a version") {
+      return "No compatible llama.cpp Python package was available for this Python version. Try installing Python 3.11 or 3.12, then install the runtime again."
+    }
+    if message.contains("cmake") || message.contains("CMake") {
+      return "Building the llama.cpp runtime failed while preparing CMake. Install Xcode Command Line Tools, then try again."
+    }
+    if message.isEmpty {
+      return "The llama.cpp runtime install failed. Check your Python installation and try again."
+    }
+    return String(message.prefix(500))
   }
 
   private nonisolated static let sidecarScript = #"""

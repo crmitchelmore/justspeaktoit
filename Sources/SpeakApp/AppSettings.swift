@@ -304,7 +304,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     "openrouter/whisper-medium",
     "openrouter/whisper-small",
   ]
-  private static let defaultPostProcessingModel = "openai/gpt-4o-mini"
+  private static let defaultPostProcessingModel = "openai/gpt-5-mini"
   private static let legacyPostProcessingModelMapping: [String: String] = [
     "openrouter/gpt-4o-mini": defaultPostProcessingModel,
     "openrouter/gpt-4o": "openai/gpt-4o",

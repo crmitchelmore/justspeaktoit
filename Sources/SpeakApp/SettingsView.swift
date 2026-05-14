@@ -289,6 +289,22 @@ struct SettingsView: View {
       || (settings.transcriptionMode == .localModel && settings.localTranscriptionMode == .streaming)
   }
 
+  private var cloudPostProcessingModelBinding: Binding<String> {
+    Binding(
+      get: {
+        if PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel) {
+          return ModelCatalog.postProcessing.first {
+            !PostProcessingManager.isLocalPostProcessingModel($0.id)
+          }?.id ?? settings.postProcessingModel
+        }
+        return settings.postProcessingModel
+      },
+      set: { model in
+        settings.postProcessingModel = model
+      }
+    )
+  }
+
   private func overviewChip(title: String, value: String, systemImage: String) -> some View {
     VStack(alignment: .leading, spacing: 6) {
       Label(title, systemImage: systemImage)
@@ -1786,6 +1802,18 @@ struct SettingsView: View {
     localModels.availableModelOptions
   }
 
+  private var localPostProcessingOptions: [ModelCatalog.Option] {
+    ModelCatalog.postProcessing.filter {
+      PostProcessingManager.isLocalPostProcessingModel($0.id)
+    }
+  }
+
+  private var cloudPostProcessingOptions: [ModelCatalog.Option] {
+    ModelCatalog.postProcessing.filter {
+      !PostProcessingManager.isLocalPostProcessingModel($0.id)
+    }
+  }
+
   private var localStreamingModels: [LocalTranscriptionModel] {
     localTranscriptionModels.filter(\.supportsLiveStreaming)
   }
@@ -2146,11 +2174,13 @@ struct SettingsView: View {
               .foregroundStyle(.secondary)
           }
 
+          localPostProcessingSection
+
           ModelPicker(
-            title: "Post-processing Model",
-            help: "Choose cloud LLM cleanup or local-only offline cleanup before delivery.",
-            options: ModelCatalog.postProcessing,
-            value: settingsBinding(\AppSettings.postProcessingModel),
+            title: "Cloud Post-processing Model",
+            help: "Choose the OpenRouter model used for LLM cleanup. Mini and Lite models are faster and cheaper.",
+            options: cloudPostProcessingOptions,
+            value: cloudPostProcessingModelBinding,
             usesDetailedChooser: true
           )
 
@@ -2210,6 +2240,7 @@ struct SettingsView: View {
                 generateSystemPromptPreview()
               }
             }
+
         }
       }
       .speakTooltip("Guide the cleanup model with your own instructions for tone and formatting.")
@@ -2510,6 +2541,90 @@ struct SettingsView: View {
   private var pronunciationSettings: some View {
     PronunciationDictionaryView()
       .environmentObject(environment.pronunciationManager)
+  }
+
+  private var localPostProcessingSection: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      HStack(alignment: .top, spacing: 10) {
+        Image(systemName: "lock.shield.fill")
+          .foregroundStyle(Color.green)
+          .frame(width: 22)
+        VStack(alignment: .leading, spacing: 3) {
+          Text("Local post-processing")
+            .font(.caption.weight(.semibold))
+          Text("Built-in cleanup runs entirely on this Mac. No model download or OpenRouter key is required.")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+      }
+
+      ForEach(localPostProcessingOptions) { option in
+        localPostProcessingRow(option)
+      }
+    }
+    .padding(12)
+    .background(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .fill(Color.green.opacity(0.08))
+    )
+    .overlay(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .stroke(Color.green.opacity(0.2), lineWidth: 1)
+    )
+  }
+
+  private func localPostProcessingRow(_ option: ModelCatalog.Option) -> some View {
+    let isSelected = PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel)
+      && settings.postProcessingModel.caseInsensitiveCompare(option.id) == .orderedSame
+    return HStack(alignment: .top, spacing: 12) {
+      Image(systemName: "wand.and.stars")
+        .foregroundStyle(Color.green)
+        .frame(width: 24)
+
+      VStack(alignment: .leading, spacing: 4) {
+        HStack(spacing: 8) {
+          Text(option.displayName)
+            .font(.subheadline.weight(.semibold))
+          Text("Local")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(Color.green)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(Color.green.opacity(0.12)))
+          Text("Built in")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(Color.secondary.opacity(0.12)))
+        }
+        if let description = option.description {
+          Text(description)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        Text("Ready now - 0 MB download - local only")
+          .font(.caption2.monospacedDigit())
+          .foregroundStyle(.tertiary)
+      }
+
+      Spacer()
+
+      if isSelected {
+        Text("Selected")
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.green)
+      } else {
+        Button("Use Local Cleanup") {
+          settings.postProcessingModel = option.id
+        }
+      }
+    }
+    .padding(12)
+    .background(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .fill(Color(nsColor: .controlBackgroundColor))
+    )
   }
 
   private var apiKeySettings: some View {

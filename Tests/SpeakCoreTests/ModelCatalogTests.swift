@@ -112,4 +112,23 @@ final class ModelCatalogTests: XCTestCase {
             .postProcessing(provider: "local")
         )
     }
+
+    func testPostProcessing_includesRecentFastCheapModels() {
+        let ids = Set(ModelCatalog.postProcessing.map(\.id))
+
+        XCTAssertTrue(ids.contains("openai/gpt-5-mini"))
+        XCTAssertTrue(ids.contains("openai/gpt-5.4-mini"))
+        XCTAssertTrue(ids.contains("openai/gpt-5.4-nano"))
+        XCTAssertTrue(ids.contains("google/gemini-3.1-flash-lite"))
+        XCTAssertTrue(ids.contains("qwen/qwen3.6-flash"))
+    }
+
+    func testPostProcessing_keepsLocalCleanupVisible() {
+        let localCleanup = ModelCatalog.postProcessing.first {
+            $0.id == "local/post-processing/rules"
+        }
+
+        XCTAssertNotNil(localCleanup)
+        XCTAssertTrue(localCleanup?.tags.contains(.privacy) == true)
+    }
 }

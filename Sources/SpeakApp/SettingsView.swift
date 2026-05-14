@@ -4691,6 +4691,12 @@ private struct ModelPicker: View {
         value = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
       }
     }
+    .onChange(of: value) { _, newValue in
+      syncSelection(with: newValue)
+    }
+    .onChange(of: options.map(\.id)) { _, _ in
+      syncSelection(with: value)
+    }
   }
 
   private var selectedOption: ModelCatalog.Option? {
@@ -4707,6 +4713,42 @@ private struct ModelPicker: View {
       return description
     }
     return "Choose which model Speak should use for this step."
+  }
+
+  private func syncSelection(with newValue: String) {
+    let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    if let match = options.first(where: { $0.id.caseInsensitiveCompare(trimmed) == .orderedSame }) {
+      if selection != match.id {
+        selection = match.id
+      }
+      if !customValue.isEmpty {
+        customValue = ""
+      }
+    } else if allowsCustom {
+      if selection != ModelCatalog.customOptionID {
+        selection = ModelCatalog.customOptionID
+      }
+      if customValue != trimmed {
+        customValue = trimmed
+      }
+    } else if let first = options.first {
+      if selection != first.id {
+        selection = first.id
+      }
+      if !customValue.isEmpty {
+        customValue = ""
+      }
+      if value != first.id {
+        value = first.id
+      }
+    } else {
+      if !selection.isEmpty {
+        selection = ""
+      }
+      if !customValue.isEmpty {
+        customValue = ""
+      }
+    }
   }
 }
 

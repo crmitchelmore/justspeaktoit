@@ -1140,19 +1140,46 @@ final class MainManager: ObservableObject {
 
     do {
       session.transcriptionStarted = Date()
+      let isLocalTranscription = appSettings.transcriptionMode == .localModel
       session.events.append(
-        HistoryEvent(kind: .transcriptionSubmitted, description: "Submitting to batch model")
+        HistoryEvent(
+          kind: .transcriptionSubmitted,
+          description: isLocalTranscription ? "Submitting to local model" : "Submitting to batch model"
+        )
       )
       let result = try await transcriptionManager.transcribeFile(at: url)
       session.transcriptionEnded = Date()
       session.transcriptionResult = result
       session.modelsUsed.insert(result.modelIdentifier)
-      session.modelUsages.append(ModelUsage(modelIdentifier: result.modelIdentifier, phase: .transcriptionBatch))
+      session.modelUsages.append(
+        ModelUsage(
+          modelIdentifier: result.modelIdentifier,
+          phase: isLocalTranscription ? .transcriptionLocal : .transcriptionBatch
+        )
+      )
       session.events.append(
-        HistoryEvent(kind: .transcriptionReceived, description: "Batch transcription complete")
+        HistoryEvent(
+          kind: .transcriptionReceived,
+          description: isLocalTranscription ? "Local model transcription complete" : "Batch transcription complete"
+        )
       )
 
-      if let payload = result.rawPayload {
+      if isLocalTranscription {
+        session.networkExchanges.append(
+          HistoryNetworkExchange(
+            url: URL(string: "local://whisperkit")!,
+            method: "On-Device",
+            requestHeaders: [
+              "Model": result.modelIdentifier,
+              "Duration": String(format: "%.1fs", result.duration)
+            ],
+            requestBodyPreview: "Local audio file: \(url.lastPathComponent)",
+            responseCode: 200,
+            responseHeaders: [:],
+            responseBodyPreview: "Transcript: \(String(result.text.prefix(500)))"
+          )
+        )
+      } else if let payload = result.rawPayload {
         session.networkExchanges.append(
           HistoryNetworkExchange(
             url: URL(string: "https://openrouter.ai/api/v1/chat/completions")!,

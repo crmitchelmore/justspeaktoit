@@ -58,7 +58,9 @@ extension Array where Element == HistoryItem {
         let relevantUsages: [ModelUsage]
         switch phase {
         case .transcription:
-          relevantUsages = item.modelUsages.filter { $0.phase == .transcriptionLive || $0.phase == .transcriptionBatch }
+          relevantUsages = item.modelUsages.filter {
+            $0.phase == .transcriptionLive || $0.phase == .transcriptionBatch || $0.phase == .transcriptionLocal
+          }
         case .postProcessing:
           relevantUsages = item.modelUsages.filter { $0.phase == .postProcessing }
         }

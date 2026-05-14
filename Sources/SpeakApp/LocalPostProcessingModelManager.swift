@@ -177,7 +177,7 @@ final class LocalPostProcessingModelManager: ObservableObject {
     do {
       let bootstrapPython = try bootstrapPythonExecutable()
       if !fileManager.fileExists(atPath: venvPythonURL.path) {
-        try await Self.runProcess(
+        _ = try await Self.runProcess(
           executableURL: bootstrapPython,
           arguments: ["-m", "venv", virtualEnvironmentURL.path]
         )
@@ -185,11 +185,11 @@ final class LocalPostProcessingModelManager: ObservableObject {
 
       let python = venvPythonURL
       pythonExecutableCache = python
-      try await Self.runProcess(
+      _ = try await Self.runProcess(
         executableURL: python,
         arguments: ["-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel", "cmake", "ninja"]
       )
-      try await Self.runProcess(
+      _ = try await Self.runProcess(
         executableURL: python,
         arguments: [
           "-m", "pip", "install",
@@ -461,24 +461,40 @@ final class LocalPostProcessingModelManager: ObservableObject {
       if let inputPipe {
         process.standardInput = inputPipe
       }
+      let group = DispatchGroup()
+      let output = ProcessOutputAccumulator()
+      let drain: (FileHandle, @escaping (Data) -> Void) -> Void = { handle, store in
+        group.enter()
+        DispatchQueue.global(qos: .utility).async {
+          let data = handle.readDataToEndOfFile()
+          store(data)
+          group.leave()
+        }
+      }
 
       process.terminationHandler = { process in
-        let output = String(data: outputPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let errorOutput = String(data: errorPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        guard process.terminationStatus == 0 else {
-          let details = errorOutput.trimmingCharacters(in: .whitespacesAndNewlines)
-          let error = standardInput == nil
-            ? LocalPostProcessingModelError.runtimeUnavailable(details)
-            : LocalPostProcessingModelError.processFailed(details)
-          continuation.resume(throwing: error)
-          return
+        group.notify(queue: .global(qos: .utility)) {
+          let outputText = output.stdout
+          let errorOutput = output.stderr
+          guard process.terminationStatus == 0 else {
+            let details = errorOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+            let error = standardInput == nil
+              ? LocalPostProcessingModelError.runtimeUnavailable(details)
+              : LocalPostProcessingModelError.processFailed(details)
+            continuation.resume(throwing: error)
+            return
+          }
+          continuation.resume(returning: outputText)
         }
-        continuation.resume(returning: output)
       }
 
       do {
+        drain(outputPipe.fileHandleForReading, output.setStdout)
+        drain(errorPipe.fileHandleForReading, output.setStderr)
         try process.run()
       } catch {
+        outputPipe.fileHandleForReading.closeFile()
+        errorPipe.fileHandleForReading.closeFile()
         continuation.resume(throwing: error)
         return
       }
@@ -542,6 +558,7 @@ def main():
         + "\n</raw_transcript>"
     )
     temperature = float(request.get("temperature") or 0.2)
+    max_tokens = min(3072, max(1024, len(raw_text.split()) * 3 + 256))
 
     llm = Llama(
         model_path=args.model,
@@ -555,9 +572,12 @@ def main():
             {"role": "user", "content": user_prompt},
         ],
         temperature=temperature,
-        max_tokens=1024,
+        max_tokens=max_tokens,
     )
-    text = response["choices"][0]["message"]["content"]
+    choice = response["choices"][0]
+    if choice.get("finish_reason") == "length":
+        raise RuntimeError("The local post-processing model hit its output limit before finishing.")
+    text = choice["message"]["content"]
     print(json.dumps({"text": text}))
 
 
@@ -622,4 +642,34 @@ private struct LocalPostProcessingRequest: Codable {
 
 private struct LocalPostProcessingResponse: Codable {
   let text: String
+}
+
+final class ProcessOutputAccumulator: @unchecked Sendable {
+  private let lock = NSLock()
+  private var stdoutData = Data()
+  private var stderrData = Data()
+
+  var stdout: String {
+    lock.lock()
+    defer { lock.unlock() }
+    return String(data: stdoutData, encoding: .utf8) ?? ""
+  }
+
+  var stderr: String {
+    lock.lock()
+    defer { lock.unlock() }
+    return String(data: stderrData, encoding: .utf8) ?? ""
+  }
+
+  func setStdout(_ data: Data) {
+    lock.lock()
+    stdoutData = data
+    lock.unlock()
+  }
+
+  func setStderr(_ data: Data) {
+    lock.lock()
+    stderrData = data
+    lock.unlock()
+  }
 }

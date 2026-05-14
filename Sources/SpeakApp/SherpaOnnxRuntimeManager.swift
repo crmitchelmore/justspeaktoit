@@ -95,34 +95,18 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
     do {
       let bootstrapPython = try bootstrapPythonExecutable()
       if !fileManager.fileExists(atPath: venvPythonURL.path) {
-        let venvProcess = Process()
-        venvProcess.executableURL = bootstrapPython
-        venvProcess.arguments = ["-m", "venv", virtualEnvironmentURL.path]
-        let venvErrorPipe = Pipe()
-        venvProcess.standardError = venvErrorPipe
-        venvProcess.standardOutput = Pipe()
-        try venvProcess.run()
-        venvProcess.waitUntilExit()
-        if venvProcess.terminationStatus != 0 {
-          let details = String(data: venvErrorPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-          throw SherpaOnnxRuntimeError.runtimeUnavailable(details.trimmingCharacters(in: .whitespacesAndNewlines))
-        }
+        _ = try await Self.runProcess(
+          executableURL: bootstrapPython,
+          arguments: ["-m", "venv", virtualEnvironmentURL.path]
+        )
       }
 
       let python = venvPythonURL
       pythonExecutableCache = python
-      let process = Process()
-      process.executableURL = python
-      process.arguments = ["-m", "pip", "install", "sherpa-onnx==1.13.2"]
-      let errorPipe = Pipe()
-      process.standardError = errorPipe
-      process.standardOutput = Pipe()
-      try process.run()
-      process.waitUntilExit()
-      if process.terminationStatus != 0 {
-        let details = String(data: errorPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        throw SherpaOnnxRuntimeError.runtimeUnavailable(details.trimmingCharacters(in: .whitespacesAndNewlines))
-      }
+      _ = try await Self.runProcess(
+        executableURL: python,
+        arguments: ["-m", "pip", "install", "sherpa-onnx==1.13.2"]
+      )
       try await ensureRuntimeAvailable()
       runtimeState = .installed
     } catch {
@@ -276,24 +260,41 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
         let process = Process()
         let outputPipe = Pipe()
         let errorPipe = Pipe()
+        let group = DispatchGroup()
+        let output = ProcessOutputAccumulator()
+        let drain: (FileHandle, @escaping (Data) -> Void) -> Void = { handle, store in
+          group.enter()
+          DispatchQueue.global(qos: .utility).async {
+            let data = handle.readDataToEndOfFile()
+            store(data)
+            group.leave()
+          }
+        }
         process.executableURL = executableURL
         process.arguments = arguments
         process.standardOutput = outputPipe
         process.standardError = errorPipe
         do {
+          drain(outputPipe.fileHandleForReading, output.setStdout)
+          drain(errorPipe.fileHandleForReading, output.setStderr)
           try process.run()
           process.waitUntilExit()
-          let output = outputPipe.fileHandleForReading.readDataToEndOfFile()
-          let error = errorPipe.fileHandleForReading.readDataToEndOfFile()
-          let outputText = String(data: output, encoding: .utf8) ?? ""
-          guard process.terminationStatus == 0 else {
-            let errorText = String(data: error, encoding: .utf8) ?? outputText
-            throw SherpaOnnxRuntimeError.runtimeUnavailable(
-              errorText.trimmingCharacters(in: .whitespacesAndNewlines)
-            )
+          group.notify(queue: .global(qos: .utility)) {
+            let outputText = output.stdout
+            let errorText = output.stderr.isEmpty ? outputText : output.stderr
+            guard process.terminationStatus == 0 else {
+              continuation.resume(
+                throwing: SherpaOnnxRuntimeError.runtimeUnavailable(
+                  errorText.trimmingCharacters(in: .whitespacesAndNewlines)
+                )
+              )
+              return
+            }
+            continuation.resume(returning: outputText)
           }
-          continuation.resume(returning: outputText)
         } catch {
+          outputPipe.fileHandleForReading.closeFile()
+          errorPipe.fileHandleForReading.closeFile()
           continuation.resume(throwing: error)
         }
       }

@@ -40,15 +40,15 @@ final class ModelCatalogTests: XCTestCase {
 
     func testFriendlyName_downloadedLocalModels_returnsSpecificName() {
         XCTAssertEqual(
-            ModelCatalog.friendlyName(for: "local/post-processing/qwen2.5-0.5b-instruct-q4"),
-            "Qwen2.5 0.5B Instruct Q4"
+            ModelCatalog.friendlyName(for: "local/post-processing/qwen3-0.6b-q4"),
+            "Qwen3 0.6B Q4"
         )
         XCTAssertEqual(
             ModelCatalog.friendlyName(
-                for: "local/post-processing/huggingface/bartowski/qwen2.5-0.5b-instruct-gguf/"
-                    + "qwen2.5-0.5b-instruct-q4-k-m.gguf"
+                for: "local/post-processing/huggingface/unsloth/qwen3-0.6b-gguf/"
+                    + "qwen3-0.6b-q4-k-m.gguf"
             ),
-            "Qwen2.5 0.5B Instruct Q4_K_M"
+            "Qwen3 0.6B Q4_K_M"
         )
         XCTAssertEqual(
             ModelCatalog.friendlyName(

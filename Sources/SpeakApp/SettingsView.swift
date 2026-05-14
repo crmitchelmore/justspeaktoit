@@ -103,9 +103,9 @@ struct SettingsView: View {
   @State private var selectedRecommendedStreamingSourceID: String =
     LocalModelManager.recommendedStreamingModelSources.first?.id ?? ""
   @State private var streamingHuggingFaceImportError: String?
-  @State private var localPostProcessingRepoID: String = "bartowski/Qwen2.5-0.5B-Instruct-GGUF"
-  @State private var localPostProcessingFilename: String = "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf"
-  @State private var localPostProcessingSizeMB: String = "397"
+  @State private var localPostProcessingRepoID: String = "unsloth/Qwen3-0.6B-GGUF"
+  @State private var localPostProcessingFilename: String = "Qwen3-0.6B-Q4_K_M.gguf"
+  @State private var localPostProcessingSizeMB: String = "450"
   @State private var localPostProcessingImportError: String?
   private let openRouterKeyIdentifier = "openrouter.apiKey"
 
@@ -2866,9 +2866,9 @@ struct SettingsView: View {
         .font(.caption)
         .foregroundStyle(.secondary)
       HStack(spacing: 10) {
-        TextField("Repo, e.g. bartowski/Qwen2.5-0.5B-Instruct-GGUF", text: $localPostProcessingRepoID)
+        TextField("Repo, e.g. unsloth/Qwen3-0.6B-GGUF", text: $localPostProcessingRepoID)
           .textFieldStyle(.roundedBorder)
-        TextField("File, e.g. Qwen2.5-0.5B-Instruct-Q4_K_M.gguf", text: $localPostProcessingFilename)
+        TextField("File, e.g. Qwen3-0.6B-Q4_K_M.gguf", text: $localPostProcessingFilename)
           .textFieldStyle(.roundedBorder)
       }
       HStack(spacing: 10) {

@@ -144,7 +144,8 @@ final class LocalModelManagerTests: XCTestCase {
     func testRecommendedLocalPostProcessingModels_includeHuggingFaceGGUFModelsWithSizes() {
         let models = LocalPostProcessingModelManager.recommendedModels
 
-        XCTAssertTrue(models.contains { $0.repoID == "bartowski/Qwen2.5-1.5B-Instruct-GGUF" })
+        XCTAssertTrue(models.contains { $0.repoID == "unsloth/Qwen3-1.7B-GGUF" })
+        XCTAssertTrue(models.contains { $0.repoID == "unsloth/Qwen3-0.6B-GGUF" })
         XCTAssertTrue(models.allSatisfy { $0.filename.lowercased().hasSuffix(".gguf") })
         XCTAssertTrue(models.allSatisfy { ($0.approximateSizeMB ?? 0) > 0 })
     }
@@ -152,7 +153,7 @@ final class LocalModelManagerTests: XCTestCase {
     func testLocalPostProcessingModelID_identifiesDownloadedModels() {
         XCTAssertTrue(
             LocalPostProcessingModelManager.isDownloadedLocalModelID(
-                "local/post-processing/qwen2.5-0.5b-instruct-q4"
+                "local/post-processing/qwen3-0.6b-q4"
             )
         )
         XCTAssertFalse(

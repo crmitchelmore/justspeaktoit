@@ -33,7 +33,7 @@ final class PostProcessingManagerTests: XCTestCase {
   func testDownloadedLocalPostProcessingDoesNotRequireOpenRouterKey() async throws {
     let client = SpyChatClient()
     let settings = makeSettings()
-    settings.postProcessingModel = "local/post-processing/qwen2.5-0.5b-instruct-q4"
+    settings.postProcessingModel = "local/post-processing/qwen3-0.6b-q4"
     let manager = PostProcessingManager(
       client: client,
       settings: settings,
@@ -82,6 +82,7 @@ final class PostProcessingManagerTests: XCTestCase {
 
     XCTAssertTrue(systemPrompt.contains("instructions are authoritative"))
     XCTAssertTrue(systemPrompt.contains("formatting-only instructions"))
+    XCTAssertTrue(systemPrompt.contains("do not emit <think> tags"))
     XCTAssertTrue(systemPrompt.contains("Put a full stop after each word."))
     XCTAssertTrue(systemPrompt.contains("<instructions>\nPut a full stop after each word.\n</instructions>"))
     XCTAssertFalse(userPrompt.contains("Put a full stop after each word."))

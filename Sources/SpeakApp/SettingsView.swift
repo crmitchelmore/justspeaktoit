@@ -104,6 +104,34 @@ struct SettingsView: View {
   @State private var streamingHuggingFaceImportError: String?
   private let openRouterKeyIdentifier = "openrouter.apiKey"
 
+  private enum TranscriptionLocation: String, CaseIterable, Identifiable {
+    case remote
+    case local
+
+    var id: String { rawValue }
+
+    var displayName: String {
+      switch self {
+      case .remote: return "Remote"
+      case .local: return "Local"
+      }
+    }
+  }
+
+  private enum RemoteTranscriptionMode: String, CaseIterable, Identifiable {
+    case streaming
+    case batch
+
+    var id: String { rawValue }
+
+    var displayName: String {
+      switch self {
+      case .streaming: return "Remote Streaming"
+      case .batch: return "Remote Batch"
+      }
+    }
+  }
+
   enum ValidationViewState {
     case idle
     case validating
@@ -219,12 +247,46 @@ struct SettingsView: View {
   private var overviewModeValue: String {
     switch settings.transcriptionMode {
     case .liveNative:
-      return "Remote Live"
+      return "Remote Streaming"
     case .batchRemote:
       return "Remote Batch"
     case .localModel:
       return settings.localTranscriptionMode.displayName
     }
+  }
+
+  private var transcriptionLocationBinding: Binding<TranscriptionLocation> {
+    Binding(
+      get: {
+        settings.transcriptionMode == .localModel ? .local : .remote
+      },
+      set: { location in
+        switch location {
+        case .remote:
+          if settings.transcriptionMode == .localModel {
+            settings.transcriptionMode = .liveNative
+          }
+        case .local:
+          settings.transcriptionMode = .localModel
+        }
+      }
+    )
+  }
+
+  private var remoteTranscriptionModeBinding: Binding<RemoteTranscriptionMode> {
+    Binding(
+      get: {
+        settings.transcriptionMode == .batchRemote ? .batch : .streaming
+      },
+      set: { mode in
+        settings.transcriptionMode = mode == .streaming ? .liveNative : .batchRemote
+      }
+    )
+  }
+
+  private var isStreamingTranscriptionSelected: Bool {
+    settings.transcriptionMode == .liveNative
+      || (settings.transcriptionMode == .localModel && settings.localTranscriptionMode == .streaming)
   }
 
   private func overviewChip(title: String, value: String, systemImage: String) -> some View {
@@ -713,9 +775,9 @@ struct SettingsView: View {
     LazyVStack(spacing: 20) {
       SettingsCard(title: "Transcription mode", systemImage: "waveform", tint: Color.teal) {
         VStack(alignment: .leading, spacing: 12) {
-          Picker("Transcription Mode", selection: settingsBinding(\AppSettings.transcriptionMode)) {
-            ForEach(AppSettings.TranscriptionMode.allCases) { mode in
-              Text(mode.displayName).tag(mode)
+          Picker("Where transcription runs", selection: transcriptionLocationBinding) {
+            ForEach(TranscriptionLocation.allCases) { location in
+              Text(location.displayName).tag(location)
             }
           }
           .pickerStyle(.segmented)
@@ -725,8 +787,40 @@ struct SettingsView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
               .fill(Color(nsColor: .controlBackgroundColor))
           )
-          .speakTooltip("Pick the recording flow that best matches how you speak—continuous live captions or hold-to-talk batches.")
-          .accessibilityLabel("Transcription mode picker")
+          .speakTooltip("Choose whether Speak transcribes locally on this Mac or remotely with a provider.")
+          .accessibilityLabel("Transcription location picker")
+
+          if settings.transcriptionMode == .localModel {
+            Picker("Local transcription type", selection: settingsBinding(\AppSettings.localTranscriptionMode)) {
+              ForEach(AppSettings.LocalTranscriptionMode.allCases) { mode in
+                Text(mode.displayName).tag(mode)
+              }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+              RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor))
+            )
+            .speakTooltip("Choose Local Batch for offline transcription after recording, or Local Streaming for on-device partial text while recording.")
+            .accessibilityLabel("Local transcription type picker")
+          } else {
+            Picker("Remote transcription type", selection: remoteTranscriptionModeBinding) {
+              ForEach(RemoteTranscriptionMode.allCases) { mode in
+                Text(mode.displayName).tag(mode)
+              }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+              RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor))
+            )
+            .speakTooltip("Choose Remote Streaming for live provider updates, or Remote Batch for provider transcription after recording stops.")
+            .accessibilityLabel("Remote transcription type picker")
+          }
 
           Picker("Preferred Locale", selection: settingsBinding(\AppSettings.preferredLocaleIdentifier)) {
             ForEach(resolvedLocaleOptions) { option in
@@ -754,12 +848,12 @@ struct SettingsView: View {
             .contains { $0 != .instant && capabilities.supportedSpeedModes.contains($0.coreID) }
 
           VStack(alignment: .leading, spacing: 12) {
-            Text("Auto-clean modes require a streaming live transcription model and disable post-processing.")
+            Text("Auto-clean modes require a Remote Streaming transcription model and disable post-processing.")
               .font(.callout)
               .foregroundStyle(.secondary)
 
             if !anyEnhancedModeAvailable {
-              Text("To enable these modes, select a streaming Live Model (e.g., Deepgram Nova-3 Streaming).")
+              Text("To enable these modes, select a Remote Streaming model such as Deepgram Nova-3 Streaming.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
@@ -813,7 +907,7 @@ struct SettingsView: View {
         .speakTooltip("Control the trade-off between speed and AI-powered text cleanup.")
       }
 
-      if settings.transcriptionMode != .liveNative {
+      if !isStreamingTranscriptionSelected {
         SettingsCard(title: "Recording buffer", systemImage: "waveform.path.ecg", tint: Color.brandLagoon) {
           VStack(alignment: .leading, spacing: 12) {
             Text("Keep recording for a moment after you let go to capture trailing words.")
@@ -841,18 +935,18 @@ struct SettingsView: View {
         .speakTooltip("Decide how much breathing room Speak gives you after releasing your shortcut.")
       }
 
-      if settings.transcriptionMode == .liveNative {
+      if isStreamingTranscriptionSelected {
         SettingsCard(
-          title: "Live stop grace",
+          title: "Streaming stop grace",
           systemImage: "waveform.and.mic",
           tint: Color.brandAccentDeep
         ) {
           VStack(alignment: .leading, spacing: 12) {
             Text(
               """
-              After stopping, keep the live transcription stream open briefly so providers \
-              can flush their final words. Applied to every live model (Deepgram, AssemblyAI, \
-              OpenAI Realtime, ElevenLabs, Soniox, Modulate).
+              After stopping, keep the streaming transcription connection open briefly so providers \
+              or local streaming runtimes can flush their final words. Applied to Remote \
+              Streaming providers and Local Streaming.
               """
             )
               .font(.caption)
@@ -863,7 +957,7 @@ struct SettingsView: View {
                 in: 0...2,
                 step: 0.1
               )
-              .speakTooltip("Extra delay before closing the live transcription stream after you stop recording.")
+              .speakTooltip("Extra delay before closing the streaming transcription connection after you stop recording.")
               Text(
                 settings.liveStopGracePeriod,
                 format: .number.precision(.fractionLength(1))
@@ -876,10 +970,10 @@ struct SettingsView: View {
             }
           }
         }
-        .speakTooltip("Helps reduce last-word cutoffs across all live transcription providers.")
+        .speakTooltip("Helps reduce last-word cutoffs across Remote Streaming providers and Local Streaming.")
       }
 
-      if settings.transcriptionMode != .liveNative {
+      if !isStreamingTranscriptionSelected {
         SettingsCard(title: "Silence detection", systemImage: "waveform.slash", tint: Color.brandAccentWarm) {
           VStack(alignment: .leading, spacing: 12) {
             Toggle(
@@ -936,7 +1030,7 @@ struct SettingsView: View {
       }
 
       if settings.transcriptionMode == .liveNative {
-        SettingsCard(title: "Live transcription", systemImage: "mic.fill", tint: Color.brandAccentDeep) {
+        SettingsCard(title: "Remote Streaming model", systemImage: "mic.fill", tint: Color.brandAccentDeep) {
           VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
               Image(systemName: "bolt.fill")
@@ -957,19 +1051,19 @@ struct SettingsView: View {
               .font(.caption)
               .foregroundStyle(.secondary)
             ModelPicker(
-              title: "Live Model",
-              help: "Choose between on-device transcription or supported streaming providers.",
+              title: "Remote Streaming Model",
+              help: "Choose the remote provider model used while recording.",
               options: ModelCatalog.liveTranscription,
               value: settingsBinding(\AppSettings.liveTranscriptionModel)
             )
           }
         }
-        .speakTooltip("Pick the model that transcribes as you speak during live recording.")
+        .speakTooltip("Pick the remote model that transcribes as you speak during streaming recording.")
       }
 
       if settings.transcriptionMode == .batchRemote {
         SettingsCard(
-          title: "Batch transcription", systemImage: "folder.badge.clock", tint: Color.brandLagoon
+          title: "Remote Batch model", systemImage: "folder.badge.clock", tint: Color.brandLagoon
         ) {
           VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
@@ -991,7 +1085,7 @@ struct SettingsView: View {
               .font(.caption)
               .foregroundStyle(.secondary)
             ModelPicker(
-              title: "Batch Model",
+              title: "Remote Batch Model",
               help: "Remote transcription runs after recording stops. Built-in providers use their own keys; custom model identifiers are sent through OpenRouter.",
               options: ModelCatalog.batchTranscription,
               value: settingsBinding(\AppSettings.batchTranscriptionModel)
@@ -1047,13 +1141,6 @@ struct SettingsView: View {
             )
             .font(.caption)
             .foregroundStyle(.secondary)
-
-            Picker("Local transcription type", selection: settingsBinding(\AppSettings.localTranscriptionMode)) {
-              ForEach(AppSettings.LocalTranscriptionMode.allCases) { mode in
-                Text(mode.displayName).tag(mode)
-              }
-            }
-            .pickerStyle(.segmented)
 
             localModelQuickStart
             if settings.localTranscriptionMode == .batch {

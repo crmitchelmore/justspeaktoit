@@ -36,7 +36,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     var displayName: String {
       switch self {
       case .liveNative:
-        return "Remote Live"
+        return "Remote Streaming"
       case .batchRemote:
         return "Remote Batch"
       case .localModel:

@@ -62,6 +62,23 @@ final class LocalModelManagerTests: XCTestCase {
         )
     }
 
+    func testStreamingApproximateSizeMB_identifiesKnownSherpaModels() {
+        XCTAssertEqual(
+            LocalModelManager.streamingApproximateSizeMB(
+                repoID: "csukuangfj/sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06",
+                modelName: "streaming-zipformer-en-kroko-2025-08-06"
+            ),
+            71
+        )
+        XCTAssertEqual(
+            LocalModelManager.streamingApproximateSizeMB(
+                repoID: "csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17",
+                modelName: "streaming-zipformer-en-20M-2023-02-17"
+            ),
+            44
+        )
+    }
+
     @MainActor
     func testRecommendedStreamingSources_includeSelectableSherpaCandidate() {
         let sources = LocalModelManager.recommendedStreamingModelSources
@@ -89,5 +106,6 @@ final class LocalModelManagerTests: XCTestCase {
 
         XCTAssertFalse(sources.contains { $0.repoID == "k2-fsa/sherpa-onnx" })
         XCTAssertTrue(sources.allSatisfy(LocalModelManager.isSupportedStreamingSource))
+        XCTAssertTrue(sources.allSatisfy { ($0.approximateSizeMB ?? 0) > 0 })
     }
 }

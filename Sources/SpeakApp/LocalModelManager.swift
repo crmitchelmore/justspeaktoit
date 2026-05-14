@@ -49,17 +49,20 @@ final class LocalModelManager: ObservableObject {
     LocalStreamingModelSource(
       repoID: "csukuangfj/sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06",
       modelName: "streaming-zipformer-en-kroko-2025-08-06",
-      runtime: "sherpa-onnx streaming runtime"
+      runtime: "sherpa-onnx streaming runtime",
+      approximateSizeMB: 71
     ),
     LocalStreamingModelSource(
       repoID: "csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26",
       modelName: "streaming-zipformer-en-2023-06-26",
-      runtime: "sherpa-onnx streaming runtime"
+      runtime: "sherpa-onnx streaming runtime",
+      approximateSizeMB: 73
     ),
     LocalStreamingModelSource(
       repoID: "csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17",
       modelName: "streaming-zipformer-en-20M-2023-02-17",
-      runtime: "sherpa-onnx streaming runtime"
+      runtime: "sherpa-onnx streaming runtime",
+      approximateSizeMB: 44
     )
   ]
 
@@ -374,6 +377,20 @@ final class LocalModelManager: ObservableObject {
     return "Streaming ASR runtime"
   }
 
+  nonisolated static func streamingApproximateSizeMB(repoID: String, modelName: String) -> Int? {
+    let searchText = "\(repoID) \(modelName)".lowercased()
+    if searchText.contains("en-kroko-2025-08-06") {
+      return 71
+    }
+    if searchText.contains("en-20m-2023-02-17") {
+      return 44
+    }
+    if searchText.contains("en-2023-06-26") {
+      return 73
+    }
+    return nil
+  }
+
   nonisolated static func isSupportedStreamingSource(_ source: LocalStreamingModelSource) -> Bool {
     let text = "\(source.id) \(source.repoID) \(source.modelName) \(source.runtime)".lowercased()
     guard !text.contains("parakeet"), !text.contains("nemo"), !text.contains("nvidia") else {
@@ -490,14 +507,17 @@ struct LocalStreamingModelSource: Codable, Equatable, Identifiable, Sendable {
   let repoID: String
   let modelName: String
   let runtime: String
+  let approximateSizeMB: Int?
 
-  init(repoID: String, modelName: String, runtime: String? = nil) {
+  init(repoID: String, modelName: String, runtime: String? = nil, approximateSizeMB: Int? = nil) {
     let repoID = repoID.trimmingCharacters(in: .whitespacesAndNewlines)
     let modelName = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
     self.id = "local/streaming/huggingface/\(LocalModelManager.slug(repoID))/\(LocalModelManager.slug(modelName))"
     self.repoID = repoID
     self.modelName = modelName
     self.runtime = runtime ?? LocalModelManager.streamingRuntimeHint(for: repoID, modelName: modelName)
+    self.approximateSizeMB = approximateSizeMB
+      ?? LocalModelManager.streamingApproximateSizeMB(repoID: repoID, modelName: modelName)
   }
 
   var displayName: String {

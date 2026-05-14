@@ -1314,12 +1314,15 @@ struct SettingsView: View {
 
       localStreamingRuntimeControls
 
-      VStack(alignment: .leading, spacing: 8) {
-        Text("Available local streaming candidates")
-          .font(.caption.weight(.semibold))
+      localStreamingSetupSection(
+        title: "1. Add a recommended streaming model",
+        subtitle: "Pick one of the compatible sherpa-onnx models we know how to download and run locally.",
+        systemImage: "checklist",
+        tint: .orange
+      ) {
         Picker("Available local streaming candidates", selection: $selectedRecommendedStreamingSourceID) {
           ForEach(LocalModelManager.recommendedStreamingModelSources) { source in
-            Text(source.displayName).tag(source.id)
+            Text("\(source.modelName) (\(localStreamingSizeLabel(for: source)))").tag(source.id)
           }
         }
         .labelsHidden()
@@ -1331,26 +1334,36 @@ struct SettingsView: View {
             .fill(Color(nsColor: .controlBackgroundColor))
         )
         if let source = selectedRecommendedStreamingSource {
-          Text("\(source.runtime) · local only · install the runtime and download the model to start streaming.")
+          Text("\(source.runtime) · \(localStreamingSizeLabel(for: source)) · local-only streaming.")
             .font(.caption)
             .foregroundStyle(.secondary)
         }
         Button {
           addSelectedStreamingModelSource()
         } label: {
-          Label("Add Selected Streaming Candidate", systemImage: "plus.circle")
+          Label("Add selected model to Local Streaming", systemImage: "plus.circle")
         }
       }
 
-      Button {
-        openLocalStreamingModelSearch()
-      } label: {
-        Label("Browse more local streaming ASR models on Hugging Face", systemImage: "magnifyingglass")
+      localStreamingSetupSection(
+        title: "2. Browse for more local streaming models",
+        subtitle: "Open Hugging Face search for sherpa-onnx Zipformer models. Only compatible sources can be added here.",
+        systemImage: "magnifyingglass",
+        tint: .blue
+      ) {
+        Button {
+          openLocalStreamingModelSearch()
+        } label: {
+          Label("Browse Hugging Face streaming ASR models", systemImage: "arrow.up.right.square")
+        }
       }
 
-      VStack(alignment: .leading, spacing: 8) {
-        Text("Advanced: add a Hugging Face source manually")
-          .font(.caption.weight(.semibold))
+      localStreamingSetupSection(
+        title: "3. Add a source manually",
+        subtitle: "Use this when you already know the Hugging Face repo and model name. The model still stays local-only.",
+        systemImage: "keyboard",
+        tint: .purple
+      ) {
         TextField(
           "Repo ID, e.g. csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26",
           text: $streamingHuggingFaceRepoID
@@ -1358,17 +1371,15 @@ struct SettingsView: View {
           .textFieldStyle(.roundedBorder)
         TextField("Model name, e.g. streaming-zipformer-en-2023-06-26", text: $streamingHuggingFaceModelName)
           .textFieldStyle(.roundedBorder)
-      }
-
-      HStack {
-        Button {
-          addStreamingModelSource()
-        } label: {
-          Label("Add Manual Streaming Source", systemImage: "plus.circle")
+        HStack {
+          Button {
+            addStreamingModelSource()
+          } label: {
+            Label("Add manual streaming source", systemImage: "plus.circle")
+          }
+          .disabled(!canAddStreamingModelSource)
+          Spacer()
         }
-        .disabled(!canAddStreamingModelSource)
-
-        Spacer()
       }
 
       if let streamingHuggingFaceImportError {
@@ -1377,14 +1388,21 @@ struct SettingsView: View {
           .foregroundStyle(.red)
       }
 
-      if localModels.streamingModelSources.isEmpty {
-        Label("No local streaming model sources have been added yet.", systemImage: "tray")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      } else {
-        VStack(spacing: 10) {
-          ForEach(localModels.streamingModelSources) { source in
-            localStreamingSourceRow(source)
+      VStack(alignment: .leading, spacing: 8) {
+        Text("Downloaded / added local streaming models")
+          .font(.caption.weight(.semibold))
+        if localModels.streamingModelSources.isEmpty {
+          Label(
+            "No local streaming models have been added yet. Start with a recommended model above.",
+            systemImage: "tray"
+          )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        } else {
+          VStack(spacing: 10) {
+            ForEach(localModels.streamingModelSources) { source in
+              localStreamingSourceRow(source)
+            }
           }
         }
       }
@@ -1414,7 +1432,9 @@ struct SettingsView: View {
             .padding(.vertical, 3)
             .background(Capsule().fill(Color.orange.opacity(0.12)))
         }
-        Text("\(source.runtime) · \(localStreamingInstallLabel(for: source))")
+        Text(
+          "\(source.runtime) · \(localStreamingSizeLabel(for: source)) · \(localStreamingInstallLabel(for: source))"
+        )
           .font(.caption)
           .foregroundStyle(.secondary)
         Text("Local only - no cloud transcription")
@@ -1467,6 +1487,39 @@ struct SettingsView: View {
     .background(
       RoundedRectangle(cornerRadius: 12, style: .continuous)
         .fill(Color(nsColor: .controlBackgroundColor))
+    )
+  }
+
+  private func localStreamingSetupSection<Content: View>(
+    title: String,
+    subtitle: String,
+    systemImage: String,
+    tint: Color,
+    @ViewBuilder content: () -> Content
+  ) -> some View {
+    VStack(alignment: .leading, spacing: 10) {
+      HStack(alignment: .top, spacing: 10) {
+        Image(systemName: systemImage)
+          .foregroundStyle(tint)
+          .frame(width: 20)
+        VStack(alignment: .leading, spacing: 3) {
+          Text(title)
+            .font(.caption.weight(.semibold))
+          Text(subtitle)
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+      }
+      content()
+    }
+    .padding(12)
+    .background(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .fill(Color(nsColor: .controlBackgroundColor).opacity(0.65))
+    )
+    .overlay(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .stroke(tint.opacity(0.2), lineWidth: 1)
     )
   }
 
@@ -1546,6 +1599,13 @@ struct SettingsView: View {
     case .notInstalled:
       return "not downloaded"
     }
+  }
+
+  private func localStreamingSizeLabel(for source: LocalStreamingModelSource) -> String {
+    guard let size = source.approximateSizeMB, size > 0 else {
+      return "size shown after model metadata is known"
+    }
+    return "~\(size) MB"
   }
 
   @ViewBuilder

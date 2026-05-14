@@ -200,7 +200,7 @@ final class HotKeyManager: ObservableObject {
 				Task { @MainActor in
 					self?.resumeAfterHotKeyRecording()
 				}
-			},
+			}
 		]
 	}
 }

@@ -146,7 +146,7 @@ struct SettingsView: View {
 
       HStack(spacing: 16) {
         overviewChip(
-          title: "Mode", value: settings.transcriptionMode.displayName, systemImage: "waveform")
+          title: "Mode", value: overviewModeValue, systemImage: "waveform")
         overviewChip(
           title: settings.isAssemblyAIModel ? "Pre-processing" : "Post-processing",
           value: settings.isAssemblyAIModel
@@ -214,6 +214,17 @@ struct SettingsView: View {
   init(tab: SettingsTab = .general, sidebarSelection: Binding<SidebarItem?>) {
     self.tab = tab
     _sidebarSelection = sidebarSelection
+  }
+
+  private var overviewModeValue: String {
+    switch settings.transcriptionMode {
+    case .liveNative:
+      return "Remote Live"
+    case .batchRemote:
+      return "Remote Batch"
+    case .localModel:
+      return settings.localTranscriptionMode.displayName
+    }
   }
 
   private func overviewChip(title: String, value: String, systemImage: String) -> some View {

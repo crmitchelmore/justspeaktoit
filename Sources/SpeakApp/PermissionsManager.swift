@@ -111,6 +111,14 @@ final class PermissionsManager: ObservableObject {
     return status
   }
 
+  func ensureGranted(_ type: PermissionType) async -> PermissionStatus {
+    refresh(type)
+    let current = status(for: type)
+    guard !current.isGranted else { return current }
+    guard current == .notDetermined else { return current }
+    return await request(type)
+  }
+
   func ensureKeychainAccess(forService service: String) async -> Bool {
     // Attempt a scoped, non-destructive lookup within our service namespace. This avoids prompting
     // for unrelated keychain items while still surfacing permission failures.

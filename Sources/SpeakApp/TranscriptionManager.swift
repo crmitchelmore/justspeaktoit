@@ -98,8 +98,8 @@ final class TranscriptionManager: ObservableObject {
     // and preferred input-device sessions are released before surfacing the failure.
     if let error = pendingError {
       pendingError = nil
-      await liveController.stop()
       isLiveTranscribing = false
+      Task { await liveController.stop() }
       throw error
     }
     guard isLiveTranscribing else { throw TranscriptionManagerError.liveSessionNotRunning }
@@ -122,7 +122,6 @@ final class TranscriptionManager: ObservableObject {
   }
 
   func cancelLiveTranscription() {
-    guard isLiveTranscribing else { return }
     continuation?.resume(throwing: TranscriptionManagerError.liveSessionNotRunning)
     continuation = nil
     Task {
@@ -580,8 +579,8 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
   }
 
   private func ensurePermissions() async -> Bool {
-    let microphone = await permissionsManager.request(.microphone)
-    let speech = await permissionsManager.request(.speechRecognition)
+    let microphone = await permissionsManager.ensureGranted(.microphone)
+    let speech = await permissionsManager.ensureGranted(.speechRecognition)
     return microphone.isGranted && speech.isGranted
   }
 }
@@ -648,7 +647,7 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
     guard !isRunning, !isStopping else {
       throw TranscriptionManagerError.liveSessionAlreadyRunning
     }
-    guard await permissionsManager.request(.microphone).isGranted else {
+    guard await permissionsManager.ensureGranted(.microphone).isGranted else {
       throw TranscriptionManagerError.permissionsMissing
     }
 
@@ -1261,8 +1260,8 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
 
 private extension DeepgramLiveController {
   func ensurePermissions() async -> Bool {
-    let microphone = await permissionsManager.request(.microphone)
-    let speech = await permissionsManager.request(.speechRecognition)
+    let microphone = await permissionsManager.ensureGranted(.microphone)
+    let speech = await permissionsManager.ensureGranted(.speechRecognition)
     return microphone.isGranted && speech.isGranted
   }
 
@@ -1914,8 +1913,8 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
   }
 
   private func ensurePermissions() async -> Bool {
-    let microphone = await permissionsManager.request(.microphone)
-    let speech = await permissionsManager.request(.speechRecognition)
+    let microphone = await permissionsManager.ensureGranted(.microphone)
+    let speech = await permissionsManager.ensureGranted(.speechRecognition)
     return microphone.isGranted && speech.isGranted
   }
 
@@ -2259,8 +2258,8 @@ final class ModulateLiveController: NSObject, LiveTranscriptionController {
   }
 
   private func ensurePermissions() async -> Bool {
-    let microphone = await permissionsManager.request(.microphone)
-    let speech = await permissionsManager.request(.speechRecognition)
+    let microphone = await permissionsManager.ensureGranted(.microphone)
+    let speech = await permissionsManager.ensureGranted(.speechRecognition)
     return microphone.isGranted && speech.isGranted
   }
 
@@ -2758,8 +2757,8 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
 
 private extension ElevenLabsLiveController {
   func ensurePermissions() async -> Bool {
-    let microphone = await permissionsManager.request(.microphone)
-    let speech = await permissionsManager.request(.speechRecognition)
+    let microphone = await permissionsManager.ensureGranted(.microphone)
+    let speech = await permissionsManager.ensureGranted(.speechRecognition)
     return microphone.isGranted && speech.isGranted
   }
 
@@ -3199,8 +3198,8 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
 
 private extension SonioxLiveController {
   func ensurePermissions() async -> Bool {
-    let microphone = await permissionsManager.request(.microphone)
-    let speech = await permissionsManager.request(.speechRecognition)
+    let microphone = await permissionsManager.ensureGranted(.microphone)
+    let speech = await permissionsManager.ensureGranted(.speechRecognition)
     return microphone.isGranted && speech.isGranted
   }
 

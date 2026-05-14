@@ -429,8 +429,8 @@ struct SettingsView: View {
         } label: {
           Text(location.displayName)
             .font(.subheadline.weight(.semibold))
-            .frame(maxWidth: .infinity)
             .padding(.vertical, 8)
+            .padding(.horizontal, 28)
         }
         .buttonStyle(.plain)
         .foregroundStyle(postProcessingLocationBinding.wrappedValue == location ? .white : .primary)
@@ -440,6 +440,7 @@ struct SettingsView: View {
         )
       }
     }
+    .fixedSize()
     .padding(4)
     .background(
       RoundedRectangle(cornerRadius: 12, style: .continuous)

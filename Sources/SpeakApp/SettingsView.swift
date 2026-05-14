@@ -171,6 +171,18 @@ struct SettingsView: View {
     return false
   }
 
+  private var overviewPostProcessingValue: String {
+    if settings.isAssemblyAIModel {
+      return "Keyterms only"
+    }
+    guard settings.postProcessingEnabled, settings.speedMode == .instant else {
+      return "Disabled"
+    }
+    return PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel)
+      ? "Local"
+      : "Remote"
+  }
+
   private var overviewHeader: some View {
     VStack(alignment: .leading, spacing: 16) {
       HStack(alignment: .center) {
@@ -201,9 +213,7 @@ struct SettingsView: View {
           title: "Mode", value: overviewModeValue, systemImage: "waveform")
         overviewChip(
           title: settings.isAssemblyAIModel ? "Pre-processing" : "Post-processing",
-          value: settings.isAssemblyAIModel
-            ? "Keyterms only"
-            : (settings.postProcessingEnabled ? "Enabled" : "Disabled"),
+          value: overviewPostProcessingValue,
           systemImage: "wand.and.stars")
         overviewChip(
           title: "Output", value: settings.textOutputMethod.displayName,

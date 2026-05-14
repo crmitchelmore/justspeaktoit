@@ -39,7 +39,8 @@ public enum ModelRouting {
         if provider == "apple" {
             return .appleSpeech
         }
-        if ModelCatalog.postProcessing.contains(where: { $0.id == trimmed }) {
+        if ModelCatalog.postProcessing.contains(where: { $0.id == trimmed })
+            || trimmed.lowercased().hasPrefix("local/post-processing/") {
             return .postProcessing(provider: provider)
         }
         if provider == "local" {

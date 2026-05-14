@@ -213,7 +213,7 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
   }
 
   func ensureReady(sourceID: String) async throws -> SherpaOnnxModelBundle {
-    let source = source(for: sourceID)
+    let source = try source(for: sourceID)
     try await ensureRuntimeAvailable()
     return try bundle(for: source)
   }
@@ -229,24 +229,22 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
 
   private func ensureRuntimeAvailable() async throws {
     let python = try pythonExecutable()
-    let process = Process()
-    process.executableURL = python
-    process.arguments = ["-c", "import sherpa_onnx; print(getattr(sherpa_onnx, '__version__', 'ok'))"]
-    let errorPipe = Pipe()
-    process.standardError = errorPipe
-    process.standardOutput = Pipe()
-    try process.run()
-    process.waitUntilExit()
-    guard process.terminationStatus == 0 else {
-      let details = String(data: errorPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-      throw SherpaOnnxRuntimeError.runtimeUnavailable(details.trimmingCharacters(in: .whitespacesAndNewlines))
+    do {
+      _ = try await Self.runProcess(
+        executableURL: python,
+        arguments: ["-c", "import sherpa_onnx; print(getattr(sherpa_onnx, '__version__', 'ok'))"]
+      )
+    } catch {
+      throw SherpaOnnxRuntimeError.runtimeUnavailable(error.localizedDescription)
     }
   }
 
-  private func source(for sourceID: String) -> LocalStreamingModelSource {
-    LocalModelManager.shared.streamingModelSources.first { $0.id == sourceID }
-      ?? LocalModelManager.recommendedStreamingModelSources.first { $0.id == sourceID }
-      ?? LocalModelManager.recommendedStreamingModelSources[0]
+  private func source(for sourceID: String) throws -> LocalStreamingModelSource {
+    if let source = LocalModelManager.shared.streamingModelSources.first(where: { $0.id == sourceID })
+      ?? LocalModelManager.recommendedStreamingModelSources.first(where: { $0.id == sourceID }) {
+      return source
+    }
+    throw SherpaOnnxRuntimeError.unsupportedModel(sourceID)
   }
 
   private func modelBundleExists(for source: LocalStreamingModelSource) -> Bool {
@@ -270,6 +268,36 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
       throw SherpaOnnxRuntimeError.downloadFailed("Hugging Face returned HTTP \(http.statusCode) for \(filename).")
     }
     try fileManager.moveItem(at: downloadedURL, to: destination)
+  }
+
+  private nonisolated static func runProcess(executableURL: URL, arguments: [String]) async throws -> String {
+    try await withCheckedThrowingContinuation { continuation in
+      DispatchQueue.global(qos: .utility).async {
+        let process = Process()
+        let outputPipe = Pipe()
+        let errorPipe = Pipe()
+        process.executableURL = executableURL
+        process.arguments = arguments
+        process.standardOutput = outputPipe
+        process.standardError = errorPipe
+        do {
+          try process.run()
+          process.waitUntilExit()
+          let output = outputPipe.fileHandleForReading.readDataToEndOfFile()
+          let error = errorPipe.fileHandleForReading.readDataToEndOfFile()
+          let outputText = String(data: output, encoding: .utf8) ?? ""
+          guard process.terminationStatus == 0 else {
+            let errorText = String(data: error, encoding: .utf8) ?? outputText
+            throw SherpaOnnxRuntimeError.runtimeUnavailable(
+              errorText.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+          }
+          continuation.resume(returning: outputText)
+        } catch {
+          continuation.resume(throwing: error)
+        }
+      }
+    }
   }
 
   private func writeSidecarIfNeeded() throws {

@@ -1701,9 +1701,7 @@ struct SettingsView: View {
         Button("Remove") {
           localModels.deleteStreamingModelSource(source)
           if settings.localStreamingModelSource == source.id {
-            settings.localStreamingModelSource = localModels.streamingModelSources.first?.id
-              ?? LocalModelManager.recommendedStreamingModelSources.first?.id
-              ?? ""
+            settings.localStreamingModelSource = localModels.streamingModelSources.first?.id ?? ""
           }
         }
       }
@@ -2979,6 +2977,9 @@ struct SettingsView: View {
             }
             Button("Delete") {
               localPostProcessingModels.deleteModel(model)
+              if settings.postProcessingModel.caseInsensitiveCompare(model.id) == .orderedSame {
+                settings.postProcessingModel = LocalPostProcessingModelManager.builtInRulesModelID
+              }
             }
           }
         case .installing:

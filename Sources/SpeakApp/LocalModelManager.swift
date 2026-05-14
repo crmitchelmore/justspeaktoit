@@ -63,7 +63,7 @@ final class LocalModelManager: ObservableObject {
       modelName: "streaming-zipformer-en-20M-2023-02-17",
       runtime: "sherpa-onnx streaming runtime",
       approximateSizeMB: 44
-    ),
+    )
   ]
 
   private var activePipelines: [String: WhisperKit] = [:]
@@ -268,6 +268,7 @@ final class LocalModelManager: ObservableObject {
       load: true
     )
     let pipe = try await WhisperKit(config)
+    activePipelines.removeAll(keepingCapacity: true)
     activePipelines[model.id] = pipe
     return pipe
   }

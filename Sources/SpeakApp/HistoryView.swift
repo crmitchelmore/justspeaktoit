@@ -1308,7 +1308,7 @@ private struct HistoryListRow: View {
   }
 
   private var reprocessTooltip: String {
-    let postProcessing = environment.settings.postProcessingEnabled
+    let postProcessing = environment.settings.postProcessingEnabled && environment.settings.speedMode == .instant
       ? """
         Post-processing will also use your current post-processing model: \
         \(ModelCatalog.friendlyName(for: environment.settings.postProcessingModel)).

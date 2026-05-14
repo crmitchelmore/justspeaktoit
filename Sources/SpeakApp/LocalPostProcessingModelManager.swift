@@ -466,11 +466,11 @@ final class LocalPostProcessingModelManager: ObservableObject {
         let output = String(data: outputPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         let errorOutput = String(data: errorPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         guard process.terminationStatus == 0 else {
-          continuation.resume(
-            throwing: LocalPostProcessingModelError.runtimeUnavailable(
-              errorOutput.trimmingCharacters(in: .whitespacesAndNewlines)
-            )
-          )
+          let details = errorOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+          let error = standardInput == nil
+            ? LocalPostProcessingModelError.runtimeUnavailable(details)
+            : LocalPostProcessingModelError.processFailed(details)
+          continuation.resume(throwing: error)
           return
         }
         continuation.resume(returning: output)

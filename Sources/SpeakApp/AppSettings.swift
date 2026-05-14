@@ -304,7 +304,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     "openrouter/whisper-medium",
     "openrouter/whisper-small",
   ]
-  private static let defaultPostProcessingModel = "openai/gpt-5-mini"
+  private static let defaultPostProcessingModel = "openai/gpt-4o-mini"
   private static let legacyPostProcessingModelMapping: [String: String] = [
     "openrouter/gpt-4o-mini": defaultPostProcessingModel,
     "openrouter/gpt-4o": "openai/gpt-4o",
@@ -340,7 +340,14 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   }
 
   @Published var localTranscriptionModel: String {
-    didSet { store(localTranscriptionModel, key: .localTranscriptionModel) }
+    didSet {
+      let normalized = Self.normalizedLocalTranscriptionModel(localTranscriptionModel)
+      if normalized != localTranscriptionModel {
+        localTranscriptionModel = normalized
+        return
+      }
+      store(localTranscriptionModel, key: .localTranscriptionModel)
+    }
   }
 
   @Published var localTranscriptionMode: LocalTranscriptionMode {
@@ -755,7 +762,9 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       Self.normalizedBatchModel(
         defaults.string(forKey: DefaultsKey.batchTranscriptionModel.rawValue))
     localTranscriptionModel =
-      defaults.string(forKey: DefaultsKey.localTranscriptionModel.rawValue) ?? Self.defaultLocalTranscriptionModel
+      Self.normalizedLocalTranscriptionModel(
+        defaults.string(forKey: DefaultsKey.localTranscriptionModel.rawValue)
+      )
     localTranscriptionMode =
       LocalTranscriptionMode(
         rawValue: defaults.string(forKey: DefaultsKey.localTranscriptionMode.rawValue)
@@ -995,6 +1004,11 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     guard !trimmed.isEmpty else { return defaultBatchTranscriptionModel }
     if legacyWhisperModelIDs.contains(trimmed) { return defaultBatchTranscriptionModel }
     return trimmed
+  }
+
+  private static func normalizedLocalTranscriptionModel(_ identifier: String?) -> String {
+    let trimmed = identifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    return trimmed.isEmpty ? defaultLocalTranscriptionModel : trimmed
   }
 
   private static func normalizedPostProcessingModel(_ identifier: String?) -> String {

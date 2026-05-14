@@ -625,6 +625,8 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
   private var streamingStartTime: Date?
   private var latestText: String = ""
   private var hasFinished: Bool = false
+  private var isStopping: Bool = false
+  private var sidecarOutputBuffer = ""
 
   init(
     appSettings: AppSettings,
@@ -643,6 +645,9 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
   }
 
   func start() async throws {
+    guard !isRunning, !isStopping else {
+      throw TranscriptionManagerError.liveSessionAlreadyRunning
+    }
     guard await permissionsManager.request(.microphone).isGranted else {
       throw TranscriptionManagerError.permissionsMissing
     }
@@ -660,6 +665,7 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
 
     latestText = ""
     hasFinished = false
+    sidecarOutputBuffer = ""
     self.process = process
     self.stdinPipe = stdinPipe
     self.stdoutPipe = stdoutPipe
@@ -715,16 +721,18 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
 
   func stop() async {
     guard isRunning else { return }
+    isStopping = true
     hasFinished = true
     audioEngine.stop()
     audioEngine.inputNode.removeTap(onBus: 0)
     audioProcessor.setRunning(false)
-    isRunning = false
 
     try? stdinPipe?.fileHandleForWriting.close()
     await waitForProcessExit()
+    processRemainingSidecarOutput()
     stdoutPipe?.fileHandleForReading.readabilityHandler = nil
     stderrPipe?.fileHandleForReading.readabilityHandler = nil
+    isRunning = false
 
     let duration = streamingStartTime.map { Date().timeIntervalSince($0) } ?? 0
     let result = TranscriptionResult(
@@ -742,6 +750,7 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
     delegate?.liveTranscriber(self, didFinishWith: result)
     await endActiveInputSession()
     resetProcessState()
+    isStopping = false
   }
 
   private func makeProcess(bundle: SherpaOnnxModelBundle) throws -> Process {
@@ -760,28 +769,42 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
 
   private func handleSidecarOutput(_ data: Data) {
     guard let output = String(data: data, encoding: .utf8) else { return }
-    for line in output.split(separator: "\n") {
-      guard let lineData = String(line).data(using: .utf8),
-        let event = try? JSONDecoder().decode(SidecarEvent.self, from: lineData)
-      else { continue }
-      switch event.type {
-      case "partial", "session_final":
-        guard let rawText = event.text?.trimmingCharacters(in: .whitespacesAndNewlines), !rawText.isEmpty else {
-          continue
-        }
-        let text = SherpaOnnxTranscriptNormalizer.normalize(rawText)
-        latestText = text
-        let update = LiveTranscriptionUpdate(text: text, isFinal: event.type == "session_final")
-        delegate?.liveTranscriber(self, didUpdateWith: update)
-        delegate?.liveTranscriber(self, didUpdatePartial: text)
-      case "error":
-        delegate?.liveTranscriber(
-          self,
-          didFail: SherpaOnnxRuntimeError.processFailed(event.message ?? "Unknown sherpa-onnx error.")
-        )
-      default:
-        break
+    sidecarOutputBuffer += output
+    let lines = sidecarOutputBuffer.split(separator: "\n", omittingEmptySubsequences: false)
+    sidecarOutputBuffer = lines.last.map(String.init) ?? ""
+    for line in lines.dropLast() {
+      decodeSidecarEvent(String(line))
+    }
+  }
+
+  private func processRemainingSidecarOutput() {
+    let remaining = sidecarOutputBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
+    sidecarOutputBuffer = ""
+    guard !remaining.isEmpty else { return }
+    decodeSidecarEvent(remaining)
+  }
+
+  private func decodeSidecarEvent(_ line: String) {
+    guard let lineData = line.data(using: .utf8),
+      let event = try? JSONDecoder().decode(SidecarEvent.self, from: lineData)
+    else { return }
+    switch event.type {
+    case "partial", "session_final":
+      guard let rawText = event.text?.trimmingCharacters(in: .whitespacesAndNewlines), !rawText.isEmpty else {
+        return
       }
+      let text = SherpaOnnxTranscriptNormalizer.normalize(rawText)
+      latestText = text
+      let update = LiveTranscriptionUpdate(text: text, isFinal: event.type == "session_final")
+      delegate?.liveTranscriber(self, didUpdateWith: update)
+      delegate?.liveTranscriber(self, didUpdatePartial: text)
+    case "error":
+      delegate?.liveTranscriber(
+        self,
+        didFail: SherpaOnnxRuntimeError.processFailed(event.message ?? "Unknown sherpa-onnx error.")
+      )
+    default:
+      break
     }
   }
 
@@ -802,6 +825,7 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
     try? stdinPipe?.fileHandleForWriting.close()
     process?.terminate()
     isRunning = false
+    isStopping = false
     await endActiveInputSession()
     resetProcessState()
   }
@@ -818,6 +842,7 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
     stdoutPipe = nil
     stderrPipe = nil
     streamingStartTime = nil
+    sidecarOutputBuffer = ""
   }
 
   private struct SidecarEvent: Decodable {

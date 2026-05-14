@@ -660,9 +660,11 @@ final class MainManager: ObservableObject {
         // Log network exchange for live transcription
         let durationStr = String(format: "%.1f", result.duration)
         if result.modelIdentifier.hasPrefix("local/streaming/") {
+          let localURL = URL(string: "local://sherpa-onnx")!
+            .appendingPathComponent(result.modelIdentifier)
           session.networkExchanges.append(
             HistoryNetworkExchange(
-              url: URL(string: "local://sherpa-onnx/\(result.modelIdentifier)")!,
+              url: localURL,
               method: "On-Device",
               requestHeaders: [
                 "Model": result.modelIdentifier,
@@ -1453,7 +1455,7 @@ final class MainManager: ObservableObject {
     livePolishManager.reset()
     liveTextInserter.reset()
 
-    if appSettings.transcriptionMode == .liveNative {
+    if isStreamingTranscriptionMode {
       transcriptionManager.cancelLiveTranscription()
     }
 

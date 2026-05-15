@@ -43,7 +43,8 @@ let project = Project(
     packages: [
         .package(path: .relativeToRoot(".")),
         .remote(url: "https://github.com/sparkle-project/Sparkle.git", requirement: .upToNextMajor(from: "2.6.0")),
-        .remote(url: "https://github.com/getsentry/sentry-cocoa.git", requirement: .upToNextMajor(from: "9.3.0"))
+        .remote(url: "https://github.com/getsentry/sentry-cocoa.git", requirement: .upToNextMajor(from: "9.3.0")),
+        .remote(url: "https://github.com/argmaxinc/argmax-oss-swift.git", requirement: .upToNextMajor(from: "0.9.0"))
     ],
     settings: .settings(
         base: [
@@ -70,6 +71,7 @@ let project = Project(
                 .package(product: "SpeakCore"),
                 .package(product: "SpeakSync"),
                 .package(product: "SpeakHotKeys"),
+                .package(product: "WhisperKit"),
                 .package(product: "Sparkle"),
                 .package(product: "Sentry")
             ],

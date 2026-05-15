@@ -69,6 +69,7 @@ final class LocalModelManager: ObservableObject {
   ]
 
   private var activePipelines: [String: WhisperKit] = [:]
+  private var loadingPipelines: [String: Task<WhisperKit, Error>] = [:]
   private let fileManager: FileManager
   private let logger = Logger(subsystem: "com.github.speakapp", category: "LocalModelManager")
   private let markerDirectory: URL
@@ -112,6 +113,9 @@ final class LocalModelManager: ObservableObject {
       return
     }
     for model in availableModels {
+      if installStates[model.id] == .installing {
+        continue
+      }
       installStates[model.id] = markerExists(for: model) ? .installed : .notInstalled
     }
   }
@@ -264,14 +268,24 @@ final class LocalModelManager: ObservableObject {
     if let existing = activePipelines[model.id] {
       return existing
     }
+    if let loading = loadingPipelines[model.id] {
+      return try await loading.value
+    }
+
     let config = WhisperKitConfig(
       model: model.modelName,
       modelRepo: model.modelRepo,
       verbose: false,
       load: true
     )
-    let pipe = try await WhisperKit(config)
-    activePipelines.removeAll(keepingCapacity: true)
+    let task = Task<WhisperKit, Error> {
+      try await WhisperKit(config)
+    }
+    loadingPipelines[model.id] = task
+    defer { loadingPipelines[model.id] = nil }
+
+    let pipe = try await task.value
+    activePipelines = [:]
     activePipelines[model.id] = pipe
     return pipe
   }
@@ -544,7 +558,7 @@ final class LocalModelManager: ObservableObject {
         name: "openai_whisper-large-v3_turbo_954MB",
         displayName: "Whisper Large v3 Turbo",
         size: 954
-      ),
+      )
     ].flatMap { $0 }
 
     return Dictionary(uniqueKeysWithValues: models)

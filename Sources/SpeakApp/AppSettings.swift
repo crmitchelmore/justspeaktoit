@@ -716,6 +716,10 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     liveTranscriptionModel.contains("assemblyai")
   }
 
+  var isActiveAssemblyAILiveModel: Bool {
+    transcriptionMode == .liveNative && isAssemblyAIModel
+  }
+
   var hasSelectedModulateModel: Bool {
     [liveTranscriptionModel, batchTranscriptionModel].contains { $0.split(separator: "/").first?.caseInsensitiveCompare("modulate") == .orderedSame } // swiftlint:disable:this line_length
   }

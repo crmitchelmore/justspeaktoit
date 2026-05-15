@@ -127,6 +127,9 @@ final class LocalPostProcessingModelManager: ObservableObject {
   func refresh() {
     Task { await refreshRuntimeState() }
     for model in availableModels {
+      if modelStates[model.id] == .installing {
+        continue
+      }
       modelStates[model.id] = modelFileExists(for: model) ? .installed : .notInstalled
     }
   }
@@ -175,6 +178,7 @@ final class LocalPostProcessingModelManager: ObservableObject {
   }
 
   func installRuntime() async {
+    guard runtimeState != .installing else { return }
     runtimeState = .installing
     do {
       let bootstrapPython = try bootstrapPythonExecutable()
@@ -209,11 +213,17 @@ final class LocalPostProcessingModelManager: ObservableObject {
   }
 
   func installModel(_ model: LocalPostProcessingModel) async {
+    guard modelStates[model.id] != .installing else { return }
     modelStates[model.id] = .installing
+    let finalURL = modelFileURL(for: model)
+    let tempURL = finalURL.deletingLastPathComponent()
+      .appendingPathComponent(finalURL.lastPathComponent + ".download")
+    defer {
+      if modelStates[model.id] != .installed, fileManager.fileExists(atPath: tempURL.path) {
+        try? fileManager.removeItem(at: tempURL)
+      }
+    }
     do {
-      let finalURL = modelFileURL(for: model)
-      let tempURL = finalURL.deletingLastPathComponent()
-        .appendingPathComponent(finalURL.lastPathComponent + ".download")
       if fileManager.fileExists(atPath: tempURL.path) {
         try fileManager.removeItem(at: tempURL)
       }
@@ -315,6 +325,7 @@ final class LocalPostProcessingModelManager: ObservableObject {
   }
 
   private func refreshRuntimeState() async {
+    guard runtimeState != .installing else { return }
     do {
       try await ensureRuntimeAvailable()
       runtimeState = .installed

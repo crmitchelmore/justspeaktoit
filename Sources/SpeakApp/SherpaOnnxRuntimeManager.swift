@@ -85,14 +85,21 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
   func refresh() {
     Task { await refreshRuntimeState() }
     for source in LocalModelManager.recommendedStreamingModelSources {
+      if modelStates[source.id] == .installing {
+        continue
+      }
       modelStates[source.id] = modelBundleExists(for: source) ? .installed : .notInstalled
     }
     for source in LocalModelManager.shared.streamingModelSources {
+      if modelStates[source.id] == .installing {
+        continue
+      }
       modelStates[source.id] = modelBundleExists(for: source) ? .installed : .notInstalled
     }
   }
 
   func installRuntime() async {
+    guard runtimeState != .installing else { return }
     runtimeState = .installing
     do {
       let bootstrapPython = try bootstrapPythonExecutable()
@@ -117,12 +124,18 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
   }
 
   func installModel(_ source: LocalStreamingModelSource) async {
+    guard modelStates[source.id] != .installing else { return }
     modelStates[source.id] = .installing
+    let finalDirectory = modelDirectory(for: source)
+    let tempDirectory = finalDirectory.deletingLastPathComponent()
+      .appendingPathComponent(finalDirectory.lastPathComponent + ".download", isDirectory: true)
+    defer {
+      if modelStates[source.id] != .installed, fileManager.fileExists(atPath: tempDirectory.path) {
+        try? fileManager.removeItem(at: tempDirectory)
+      }
+    }
     do {
       let spec = try Self.specification(for: source)
-      let finalDirectory = modelDirectory(for: source)
-      let tempDirectory = finalDirectory.deletingLastPathComponent()
-        .appendingPathComponent(finalDirectory.lastPathComponent + ".download", isDirectory: true)
       if fileManager.fileExists(atPath: tempDirectory.path) {
         try fileManager.removeItem(at: tempDirectory)
       }
@@ -205,6 +218,7 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
   }
 
   private func refreshRuntimeState() async {
+    guard runtimeState != .installing else { return }
     do {
       try await ensureRuntimeAvailable()
       runtimeState = .installed

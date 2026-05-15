@@ -117,15 +117,14 @@ struct SideBarView: View {
                 .foregroundStyle(item.color)
                 .imageScale(.medium)
                 .frame(width: 20)
-              Text(item.title(isAssemblyAI: settings.isAssemblyAIModel))
-                .fontWeight(selection == item ? .semibold : .regular)
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .layoutPriority(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-              shortcutHint(for: item)
-                .layoutPriority(0)
+              sidebarTitle(
+                item.title(isAssemblyAI: settings.isActiveAssemblyAILiveModel),
+                isSelected: selection == item
+              )
+              ViewThatFits(in: .horizontal) {
+                shortcutHint(for: item)
+                EmptyView()
+              }
             }
             .contentShape(Rectangle())
           }
@@ -142,7 +141,7 @@ struct SideBarView: View {
           .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
           .listRowBackground(Color.clear)
           .speakTooltip(item.helpMessage)
-          .accessibilityLabel(item.title(isAssemblyAI: settings.isAssemblyAIModel))
+          .accessibilityLabel(item.title(isAssemblyAI: settings.isActiveAssemblyAILiveModel))
           .accessibilityHint(accessibilityHint(for: item))
         }
       }
@@ -158,15 +157,11 @@ struct SideBarView: View {
                 .foregroundStyle(Color.brandAccentWarm)
                 .imageScale(.medium)
                 .frame(width: 20)
-              Text(LocalizedStringKey(tab.title(isAssemblyAI: settings.isAssemblyAIModel)))
-                .fontWeight(selection == item ? .semibold : .regular)
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .layoutPriority(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-              shortcutHint(for: item)
-                .layoutPriority(0)
+              sidebarTitle(tab.title(isAssemblyAI: settings.isActiveAssemblyAILiveModel), isSelected: selection == item)
+              ViewThatFits(in: .horizontal) {
+                shortcutHint(for: item)
+                EmptyView()
+              }
             }
             .contentShape(Rectangle())
             .padding(.leading, 10)
@@ -184,13 +179,24 @@ struct SideBarView: View {
           .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
           .listRowBackground(Color.clear)
           .speakTooltip(item.helpMessage)
-          .accessibilityLabel(item.title(isAssemblyAI: settings.isAssemblyAIModel))
+          .accessibilityLabel(item.title(isAssemblyAI: settings.isActiveAssemblyAILiveModel))
           .accessibilityHint(accessibilityHint(for: item))
         }
       }
     }
     .listStyle(.sidebar)
     .scrollContentBackground(.hidden)
+  }
+
+  private func sidebarTitle(_ title: String, isSelected: Bool) -> some View {
+    Text(title)
+      .fontWeight(isSelected ? .semibold : .regular)
+      .foregroundStyle(.primary)
+      .lineLimit(nil)
+      .multilineTextAlignment(.leading)
+      .fixedSize(horizontal: false, vertical: true)
+      .layoutPriority(3)
+      .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   @ViewBuilder
@@ -203,8 +209,8 @@ struct SideBarView: View {
         .padding(.horizontal, 6)
         .padding(.vertical, 2)
         .background(Capsule().fill(Color.secondary.opacity(0.10)))
-        .fixedSize()
-        .layoutPriority(0)
+        .minimumScaleFactor(0.8)
+        .layoutPriority(-1)
         .accessibilityHidden(true)
     }
   }

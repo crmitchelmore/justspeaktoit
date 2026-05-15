@@ -79,7 +79,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .openVoiceOutput:
             return KeyBinding(keyCode: 32, modifiers: [.command], isGlobal: false)  // ⌘U
         case .openCorrections:
-            return KeyBinding(keyCode: 15, modifiers: [.command], isGlobal: false)  // ⌘R
+            return KeyBinding(keyCode: 40, modifiers: [.command], isGlobal: false)  // ⌘K
         case .openTroubleshooting:
             return KeyBinding(keyCode: 17, modifiers: [.command], isGlobal: false)  // ⌘T
         case .openTranscriptionSettings:
@@ -224,15 +224,17 @@ private struct SystemShortcut {
 
 /// Manages global and local keyboard shortcuts for the application.
 @MainActor
+// swiftlint:disable:next type_body_length
 final class ShortcutManager: ObservableObject {
     @Published private(set) var bindings: [ShortcutAction: KeyBinding] = [:]
     @Published private(set) var conflicts: [ShortcutConflict] = []
     @Published private(set) var isRecordingShortcut: Bool = false
     @Published private(set) var recordingAction: ShortcutAction?
 
-    private var globalEventHandlers: [UInt32: EventHotKeyRef] = [:]
+    private var carbonHotKeys: [UInt32: EventHotKeyRef] = [:]
+    private var carbonHotKeyActions: [UInt32: ShortcutAction] = [:]
+    private var carbonEventHandler: EventHandlerRef?
     private var localMonitor: Any?
-    private var globalMonitor: Any?
     private var recordingMonitor: Any?
     private var handlers: [ShortcutAction: () -> Void] = [:]
     private let permissionsManager: PermissionsManager
@@ -257,12 +259,6 @@ final class ShortcutManager: ObservableObject {
             return event
         }
 
-        // Global monitor for system-wide shortcuts
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self else { return }
-            _ = self.handleKeyEvent(event, isGlobal: true)
-        }
-
         registerCarbonHotkeys()
     }
 
@@ -271,10 +267,6 @@ final class ShortcutManager: ObservableObject {
         if let monitor = localMonitor {
             NSEvent.removeMonitor(monitor)
             localMonitor = nil
-        }
-        if let monitor = globalMonitor {
-            NSEvent.removeMonitor(monitor)
-            globalMonitor = nil
         }
         unregisterCarbonHotkeys()
     }
@@ -296,7 +288,7 @@ final class ShortcutManager: ObservableObject {
         detectConflicts()
 
         // Re-register global shortcuts if monitoring is active
-        if globalMonitor != nil {
+        if isMonitoring {
             unregisterCarbonHotkeys()
             registerCarbonHotkeys()
         }
@@ -308,6 +300,11 @@ final class ShortcutManager: ObservableObject {
         binding.isEnabled = enabled
         bindings[action] = binding
         saveBindings()
+        detectConflicts()
+        if isMonitoring {
+            unregisterCarbonHotkeys()
+            registerCarbonHotkeys()
+        }
     }
 
     /// Toggles whether a shortcut is global.
@@ -317,7 +314,7 @@ final class ShortcutManager: ObservableObject {
         bindings[action] = binding
         saveBindings()
 
-        if globalMonitor != nil {
+        if isMonitoring {
             unregisterCarbonHotkeys()
             registerCarbonHotkeys()
         }
@@ -332,7 +329,7 @@ final class ShortcutManager: ObservableObject {
         saveBindings()
         detectConflicts()
 
-        if globalMonitor != nil {
+        if isMonitoring {
             unregisterCarbonHotkeys()
             registerCarbonHotkeys()
         }
@@ -340,6 +337,7 @@ final class ShortcutManager: ObservableObject {
 
     /// Starts recording a new shortcut for an action.
     func startRecording(for action: ShortcutAction) {
+        stopRecording()
         isRecordingShortcut = true
         recordingAction = action
 
@@ -381,6 +379,10 @@ final class ShortcutManager: ObservableObject {
 
     // MARK: - Private Methods
 
+    private var isMonitoring: Bool {
+        localMonitor != nil || carbonEventHandler != nil
+    }
+
     private func handleKeyEvent(_ event: NSEvent, isGlobal: Bool) -> Bool {
         guard !isRecordingShortcut else { return false }
 
@@ -413,14 +415,16 @@ final class ShortcutManager: ObservableObject {
     }
 
     private func registerCarbonHotkeys() {
+        installCarbonEventHandler()
         for (action, binding) in bindings {
             guard binding.isEnabled && binding.isGlobal else { continue }
 
             var hotKeyRef: EventHotKeyRef?
             let carbonModifiers = carbonModifierFlags(from: binding.modifiers)
+            let carbonID = Self.carbonHotKeyID(for: action)
             let hotKeyID = EventHotKeyID(
                 signature: 0x5350_4B00,
-                id: UInt32(bitPattern: Int32(truncatingIfNeeded: action.hashValue))
+                id: carbonID
             )
 
             let status = RegisterEventHotKey(
@@ -433,16 +437,78 @@ final class ShortcutManager: ObservableObject {
             )
 
             if status == noErr, let ref = hotKeyRef {
-                globalEventHandlers[UInt32(bitPattern: Int32(truncatingIfNeeded: action.hashValue))] = ref
+                carbonHotKeys[carbonID] = ref
+                carbonHotKeyActions[carbonID] = action
             }
         }
     }
 
     private func unregisterCarbonHotkeys() {
-        for (_, hotKeyRef) in globalEventHandlers {
+        for (_, hotKeyRef) in carbonHotKeys {
             UnregisterEventHotKey(hotKeyRef)
         }
-        globalEventHandlers.removeAll()
+        carbonHotKeys.removeAll()
+        carbonHotKeyActions.removeAll()
+        if let handler = carbonEventHandler {
+            RemoveEventHandler(handler)
+            carbonEventHandler = nil
+        }
+    }
+
+    private func installCarbonEventHandler() {
+        guard carbonEventHandler == nil else { return }
+
+        var eventType = EventTypeSpec(
+            eventClass: OSType(kEventClassKeyboard),
+            eventKind: UInt32(kEventHotKeyPressed)
+        )
+        let selfPtr = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
+        let status = InstallEventHandler(
+            GetEventDispatcherTarget(),
+            { _, event, userData -> OSStatus in
+                guard let userData, let event else { return OSStatus(eventNotHandledErr) }
+                let manager = Unmanaged<ShortcutManager>.fromOpaque(userData).takeUnretainedValue()
+                return manager.handleCarbonHotKeyEvent(event)
+            },
+            1,
+            &eventType,
+            selfPtr,
+            &carbonEventHandler
+        )
+
+        if status != noErr {
+            carbonEventHandler = nil
+        }
+    }
+
+    private nonisolated func handleCarbonHotKeyEvent(_ event: EventRef) -> OSStatus {
+        var hotKeyID = EventHotKeyID()
+        let status = GetEventParameter(
+            event,
+            UInt32(kEventParamDirectObject),
+            UInt32(typeEventHotKeyID),
+            nil,
+            MemoryLayout<EventHotKeyID>.size,
+            nil,
+            &hotKeyID
+        )
+
+        guard status == noErr else { return OSStatus(eventNotHandledErr) }
+        guard hotKeyID.signature == 0x5350_4B00 else { return OSStatus(eventNotHandledErr) }
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            guard !self.isRecordingShortcut else { return }
+            guard let action = self.carbonHotKeyActions[hotKeyID.id] else { return }
+            guard let binding = self.bindings[action], binding.isEnabled && binding.isGlobal else { return }
+            self.handlers[action]?()
+        }
+
+        return noErr
+    }
+
+    private static func carbonHotKeyID(for action: ShortcutAction) -> UInt32 {
+        UInt32(ShortcutAction.allCases.firstIndex(of: action) ?? 0) + 1
     }
 
     private func carbonModifierFlags(from modifiers: NSEvent.ModifierFlags) -> UInt32 {

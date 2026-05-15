@@ -42,7 +42,7 @@ final class ShortcutNavigationTests: XCTestCase {
         XCTAssertEqual(ShortcutAction.openDashboard.defaultKeyBinding.displayString, "⌘D")
         XCTAssertEqual(ShortcutAction.showHistory.defaultKeyBinding.displayString, "⌘Y")
         XCTAssertEqual(ShortcutAction.openVoiceOutput.defaultKeyBinding.displayString, "⌘U")
-        XCTAssertEqual(ShortcutAction.openCorrections.defaultKeyBinding.displayString, "⌘R")
+        XCTAssertEqual(ShortcutAction.openCorrections.defaultKeyBinding.displayString, "⌘K")
         XCTAssertEqual(ShortcutAction.openTroubleshooting.defaultKeyBinding.displayString, "⌘T")
 
         XCTAssertEqual(ShortcutAction.openSettings.defaultKeyBinding.displayString, "⌘1")

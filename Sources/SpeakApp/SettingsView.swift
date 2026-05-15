@@ -172,7 +172,7 @@ struct SettingsView: View {
   }
 
   private var overviewPostProcessingValue: String {
-    if settings.isAssemblyAIModel {
+    if settings.isActiveAssemblyAILiveModel {
       return "Keyterms only"
     }
     guard settings.postProcessingEnabled, settings.speedMode == .instant else {
@@ -241,7 +241,7 @@ struct SettingsView: View {
         overviewChip(
           title: "Mode", value: overviewModeValue, systemImage: "waveform")
         overviewChip(
-          title: settings.isAssemblyAIModel ? "Pre-processing" : "Post-processing",
+          title: settings.isActiveAssemblyAILiveModel ? "Pre-processing" : "Post-processing",
           value: overviewPostProcessingValue,
           systemImage: "wand.and.stars")
         overviewChip(
@@ -2242,7 +2242,7 @@ struct SettingsView: View {
 
   private var postProcessingSettings: some View {
     LazyVStack(spacing: 20) {
-      if settings.isAssemblyAIModel {
+      if settings.isActiveAssemblyAILiveModel {
         preprocessingSettings
       } else {
         fullPostProcessingSettings
@@ -2557,7 +2557,7 @@ struct SettingsView: View {
               }
             }
             .pickerStyle(.segmented)
-            
+
             Text(settings.ttsQuality.description)
               .font(.caption)
               .foregroundStyle(.secondary)
@@ -4055,7 +4055,7 @@ struct SettingsView: View {
           Text("Transfer your API keys and settings to the iOS app by scanning a QR code.")
             .font(.callout)
             .foregroundStyle(.secondary)
-          
+
           Button {
             showingConfigTransfer = true
           } label: {
@@ -4249,7 +4249,7 @@ struct SettingsView: View {
   }
 
   private func syncAssemblyAIKeytermsFromPronunciation() {
-    guard settings.isAssemblyAIModel else { return }
+    guard settings.isActiveAssemblyAILiveModel else { return }
 
     let seedTerms = pronunciationSeedKeyterms()
     let ignoredPronunciationTerms = Set(
@@ -4278,7 +4278,7 @@ struct SettingsView: View {
   }
 
   private func syncIgnoredPronunciationKeyterms(seedTerms: [String]? = nil) {
-    guard settings.isAssemblyAIModel else { return }
+    guard settings.isActiveAssemblyAILiveModel else { return }
 
     let pronunciationTerms = seedTerms ?? pronunciationSeedKeyterms()
     let selectedTermSet = Set(parseAssemblyAIKeyterms(settings.assemblyAIKeyterms).map(canonicalKeyterm))
@@ -4329,7 +4329,18 @@ struct SettingsView: View {
   }
 
   @MainActor
+  // swiftlint:disable:next function_body_length
   private func generateSystemPromptPreview() {
+    if PostProcessingManager.isBuiltInLocalPostProcessingModel(settings.postProcessingModel) {
+      self.systemPromptPreview = """
+      The built-in rules cleaner does not send a prompt.
+
+      It runs deterministic local cleanup rules on the raw transcript. Custom prompts, lexicon directives, \
+      context tags, and final processing instructions apply to remote models and downloaded local LLMs only.
+      """
+      return
+    }
+
     var sections: [String] = []
 
     // Base prompt
@@ -4346,7 +4357,7 @@ struct SettingsView: View {
 
     var finalBasePrompt = basePrompt
     if !language.isEmpty {
-      finalBasePrompt = "Always output using \(language). \(basePrompt)"
+      finalBasePrompt = "Always output using \(language).\n\n\(basePrompt)"
     }
 
     // Lexicon directives section
@@ -4370,6 +4381,25 @@ struct SettingsView: View {
     // Final instruction
     if self.settings.postProcessingIncludeFinalInstruction {
       sections.append("Return only the processed text and nothing else. The following message is a raw transcript:")
+    }
+
+    let effectiveSystemPrompt = sections.joined(separator: "\n\n")
+
+    if PostProcessingManager.isDownloadedLocalPostProcessingModel(settings.postProcessingModel) {
+      let localUserPrompt = LocalPostProcessingModelManager.localUserPrompt(
+        systemPrompt: effectiveSystemPrompt,
+        rawText: "{{RAW_TRANSCRIPT}}"
+      )
+      self.systemPromptPreview = """
+      System prompt sent to the local model:
+
+      \(LocalPostProcessingModelManager.localSystemPrompt(effectiveSystemPrompt))
+
+      User prompt sent to the local model:
+
+      \(localUserPrompt)
+      """
+      return
     }
 
     sections.append(
@@ -4777,7 +4807,9 @@ private struct ModelPicker: View {
         TextField("Custom model identifier", text: $customValue, prompt: Text("provider/model"))
           .textFieldStyle(.roundedBorder)
           .autocorrectionDisabled()
-          .speakTooltip("Type the exact provider/model identifier from your transcription service, such as openai/whisper-1.")
+          .speakTooltip(
+            "Type the exact provider/model identifier from your transcription service, such as openai/whisper-1."
+          )
       } else {
         HStack(spacing: 6) {
           Image(systemName: "info.circle")
@@ -4912,9 +4944,7 @@ private struct APIKeyValidationDebugDetailsView: View {
     }
   }
 
-  private func debugSection<Content: View>(title: String, @ViewBuilder content: () -> Content)
-    -> some View
-  {
+  private func debugSection<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
     VStack(alignment: .leading, spacing: 8) {
       Text(title.uppercased())
         .font(.caption2.weight(.semibold))

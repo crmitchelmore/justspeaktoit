@@ -17,12 +17,13 @@ func applyLiveStopGrace(_ period: TimeInterval) async {
   try? await Task.sleep(for: .seconds(grace))
 }
 
-enum TranscriptionManagerError: LocalizedError {
+enum TranscriptionManagerError: LocalizedError, Equatable {
   case liveSessionAlreadyRunning
   case liveSessionNotRunning
   case recognizerUnavailable
   case permissionsMissing
   case localLiveStreamingUnsupported
+  case invalidLocalStreamingSource(String)
 
   var errorDescription: String? {
     switch self {
@@ -36,6 +37,8 @@ enum TranscriptionManagerError: LocalizedError {
       return "Required microphone or speech recognition permissions are missing."
     case .localLiveStreamingUnsupported:
       return "Downloaded local models are offline-only in this prerelease. Use Local Batch after recording."
+    case .invalidLocalStreamingSource(let sourceID):
+      return "Local streaming source is not available: \(sourceID). Choose or download a local streaming model in Settings."
     }
   }
 }
@@ -80,7 +83,7 @@ final class TranscriptionManager: ObservableObject {
 
   func startLiveTranscription() async throws {
     guard !isLiveTranscribing else { throw TranscriptionManagerError.liveSessionAlreadyRunning }
-    let model = liveTranscriptionModelForCurrentMode
+    let model = try liveTranscriptionModelForCurrentMode()
     let language = appSettings.preferredLocaleIdentifier
     print("[TranscriptionManager] startLiveTranscription - model: \(model), language: \(language)")
     liveController.configure(
@@ -207,12 +210,37 @@ final class TranscriptionManager: ObservableObject {
     return appSettings.batchTranscriptionModel
   }
 
-  private var liveTranscriptionModelForCurrentMode: String {
-    if appSettings.transcriptionMode == .localModel,
-      appSettings.localTranscriptionMode == .streaming {
-      return appSettings.localStreamingModelSource
+  private func liveTranscriptionModelForCurrentMode() throws -> String {
+    try Self.resolvedLiveTranscriptionModel(
+      transcriptionMode: appSettings.transcriptionMode,
+      localTranscriptionMode: appSettings.localTranscriptionMode,
+      localStreamingModelSource: appSettings.localStreamingModelSource,
+      liveTranscriptionModel: appSettings.liveTranscriptionModel,
+      availableStreamingSourceIDs: Set(
+        LocalModelManager.recommendedStreamingModelSources.map(\.id)
+          + LocalModelManager.shared.streamingModelSources.map(\.id)
+      )
+    )
+  }
+
+  nonisolated static func resolvedLiveTranscriptionModel(
+    transcriptionMode: AppSettings.TranscriptionMode,
+    localTranscriptionMode: AppSettings.LocalTranscriptionMode,
+    localStreamingModelSource: String,
+    liveTranscriptionModel: String,
+    availableStreamingSourceIDs: Set<String>
+  ) throws -> String {
+    guard transcriptionMode == .localModel, localTranscriptionMode == .streaming else {
+      return liveTranscriptionModel
     }
-    return appSettings.liveTranscriptionModel
+
+    guard localStreamingModelSource.hasPrefix("local/streaming/"),
+      availableStreamingSourceIDs.contains(localStreamingModelSource)
+    else {
+      throw TranscriptionManagerError.invalidLocalStreamingSource(localStreamingModelSource)
+    }
+
+    return localStreamingModelSource
   }
 
   /// Returns the metadata for the live-transcription provider whose API key is

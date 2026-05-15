@@ -38,7 +38,8 @@ enum TranscriptionManagerError: LocalizedError, Equatable {
     case .localLiveStreamingUnsupported:
       return "Downloaded local models are offline-only in this prerelease. Use Local Batch after recording."
     case .invalidLocalStreamingSource(let sourceID):
-      return "Local streaming source is not available: \(sourceID). Choose or download a local streaming model in Settings."
+      return "Local streaming source is not available: \(sourceID). " +
+        "Choose or download a local streaming model in Settings."
     }
   }
 }

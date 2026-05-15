@@ -37,4 +37,26 @@ final class ShortcutNavigationTests: XCTestCase {
             XCTAssertTrue(binding.isEnabled, "\(action.displayName) should be enabled by default")
         }
     }
+
+    func testNavigationShortcutDefaults_useCompactMenuFriendlyBindings() {
+        XCTAssertEqual(ShortcutAction.openDashboard.defaultKeyBinding.displayString, "⌘D")
+        XCTAssertEqual(ShortcutAction.showHistory.defaultKeyBinding.displayString, "⌘Y")
+        XCTAssertEqual(ShortcutAction.openVoiceOutput.defaultKeyBinding.displayString, "⌘U")
+        XCTAssertEqual(ShortcutAction.openCorrections.defaultKeyBinding.displayString, "⌘R")
+        XCTAssertEqual(ShortcutAction.openTroubleshooting.defaultKeyBinding.displayString, "⌘T")
+
+        XCTAssertEqual(ShortcutAction.openSettings.defaultKeyBinding.displayString, "⌘1")
+        XCTAssertEqual(ShortcutAction.openTranscriptionSettings.defaultKeyBinding.displayString, "⌘2")
+        XCTAssertEqual(ShortcutAction.openPostProcessingSettings.defaultKeyBinding.displayString, "⌘3")
+        XCTAssertEqual(ShortcutAction.openVoiceOutputSettings.defaultKeyBinding.displayString, "⌘4")
+        XCTAssertEqual(ShortcutAction.openPronunciationSettings.defaultKeyBinding.displayString, "⌘5")
+        XCTAssertEqual(ShortcutAction.openAPIKeysSettings.defaultKeyBinding.displayString, "⌘6")
+        XCTAssertEqual(ShortcutAction.openKeyboardSettings.defaultKeyBinding.displayString, "⌘7")
+        XCTAssertEqual(ShortcutAction.openPermissionsSettings.defaultKeyBinding.displayString, "⌘8")
+        XCTAssertEqual(ShortcutAction.openAboutSettings.defaultKeyBinding.displayString, "⌘9")
+
+        XCTAssertEqual(ShortcutAction.quickVoice1.defaultKeyBinding.displayString, "⌥⌘1")
+        XCTAssertEqual(ShortcutAction.quickVoice2.defaultKeyBinding.displayString, "⌥⌘2")
+        XCTAssertEqual(ShortcutAction.quickVoice3.defaultKeyBinding.displayString, "⌥⌘3")
+    }
 }

@@ -61,7 +61,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
     var defaultKeyBinding: KeyBinding {
         switch self {
         case .openDashboard:
-            return KeyBinding(keyCode: 18, modifiers: [.command, .option], isGlobal: false)  // ⌘⌥1
+            return KeyBinding(keyCode: 2, modifiers: [.command], isGlobal: false)  // ⌘D
         case .startStopRecording:
             return KeyBinding(keyCode: 1, modifiers: [.command, .shift])  // ⌘+Shift+S
         case .speakSelectedText:
@@ -73,37 +73,78 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .stopTTS:
             return KeyBinding(keyCode: 53, modifiers: [], isGlobal: false)  // Escape
         case .openSettings:
-            return KeyBinding(keyCode: 43, modifiers: [.command], isGlobal: false)  // ⌘+,
+            return KeyBinding(keyCode: 18, modifiers: [.command], isGlobal: false)  // ⌘1
         case .showHistory:
-            return KeyBinding(keyCode: 19, modifiers: [.command, .option], isGlobal: false)  // ⌘⌥2
+            return KeyBinding(keyCode: 16, modifiers: [.command], isGlobal: false)  // ⌘Y
         case .openVoiceOutput:
-            return KeyBinding(keyCode: 20, modifiers: [.command, .option], isGlobal: false)  // ⌘⌥3
+            return KeyBinding(keyCode: 32, modifiers: [.command], isGlobal: false)  // ⌘U
         case .openCorrections:
-            return KeyBinding(keyCode: 21, modifiers: [.command, .option], isGlobal: false)  // ⌘⌥4
+            return KeyBinding(keyCode: 15, modifiers: [.command], isGlobal: false)  // ⌘R
         case .openTroubleshooting:
-            return KeyBinding(keyCode: 23, modifiers: [.command, .option], isGlobal: false)  // ⌘⌥5
+            return KeyBinding(keyCode: 17, modifiers: [.command], isGlobal: false)  // ⌘T
         case .openTranscriptionSettings:
-            return KeyBinding(keyCode: 18, modifiers: [.command, .option, .shift], isGlobal: false)  // ⌘⌥⇧1
+            return KeyBinding(keyCode: 19, modifiers: [.command], isGlobal: false)  // ⌘2
         case .openPostProcessingSettings:
-            return KeyBinding(keyCode: 19, modifiers: [.command, .option, .shift], isGlobal: false)  // ⌘⌥⇧2
+            return KeyBinding(keyCode: 20, modifiers: [.command], isGlobal: false)  // ⌘3
         case .openVoiceOutputSettings:
-            return KeyBinding(keyCode: 20, modifiers: [.command, .option, .shift], isGlobal: false)  // ⌘⌥⇧3
+            return KeyBinding(keyCode: 21, modifiers: [.command], isGlobal: false)  // ⌘4
         case .openPronunciationSettings:
-            return KeyBinding(keyCode: 21, modifiers: [.command, .option, .shift], isGlobal: false)  // ⌘⌥⇧4
+            return KeyBinding(keyCode: 23, modifiers: [.command], isGlobal: false)  // ⌘5
         case .openAPIKeysSettings:
-            return KeyBinding(keyCode: 23, modifiers: [.command, .option, .shift], isGlobal: false)  // ⌘⌥⇧5
+            return KeyBinding(keyCode: 22, modifiers: [.command], isGlobal: false)  // ⌘6
         case .openKeyboardSettings:
-            return KeyBinding(keyCode: 22, modifiers: [.command, .option, .shift], isGlobal: false)  // ⌘⌥⇧6
+            return KeyBinding(keyCode: 26, modifiers: [.command], isGlobal: false)  // ⌘7
         case .openPermissionsSettings:
-            return KeyBinding(keyCode: 26, modifiers: [.command, .option, .shift], isGlobal: false)  // ⌘⌥⇧7
+            return KeyBinding(keyCode: 28, modifiers: [.command], isGlobal: false)  // ⌘8
         case .openAboutSettings:
-            return KeyBinding(keyCode: 28, modifiers: [.command, .option, .shift], isGlobal: false)  // ⌘⌥⇧8
+            return KeyBinding(keyCode: 25, modifiers: [.command], isGlobal: false)  // ⌘9
         case .quickVoice1:
-            return KeyBinding(keyCode: 18, modifiers: [.command], isGlobal: false)  // ⌘+1
+            return KeyBinding(keyCode: 18, modifiers: [.command, .option], isGlobal: false)  // ⌘⌥1
         case .quickVoice2:
-            return KeyBinding(keyCode: 19, modifiers: [.command], isGlobal: false)  // ⌘+2
+            return KeyBinding(keyCode: 19, modifiers: [.command, .option], isGlobal: false)  // ⌘⌥2
         case .quickVoice3:
-            return KeyBinding(keyCode: 20, modifiers: [.command], isGlobal: false)  // ⌘+3
+            return KeyBinding(keyCode: 20, modifiers: [.command, .option], isGlobal: false)  // ⌘⌥3
+        }
+    }
+
+    var legacyDefaultKeyBindings: [KeyBinding] {
+        switch self {
+        case .openDashboard:
+            return [KeyBinding(keyCode: 18, modifiers: [.command, .option], isGlobal: false)]
+        case .showHistory:
+            return [KeyBinding(keyCode: 19, modifiers: [.command, .option], isGlobal: false)]
+        case .openVoiceOutput:
+            return [KeyBinding(keyCode: 20, modifiers: [.command, .option], isGlobal: false)]
+        case .openCorrections:
+            return [KeyBinding(keyCode: 21, modifiers: [.command, .option], isGlobal: false)]
+        case .openTroubleshooting:
+            return [KeyBinding(keyCode: 23, modifiers: [.command, .option], isGlobal: false)]
+        case .openSettings:
+            return [KeyBinding(keyCode: 43, modifiers: [.command], isGlobal: false)]
+        case .openTranscriptionSettings:
+            return [KeyBinding(keyCode: 18, modifiers: [.command, .option, .shift], isGlobal: false)]
+        case .openPostProcessingSettings:
+            return [KeyBinding(keyCode: 19, modifiers: [.command, .option, .shift], isGlobal: false)]
+        case .openVoiceOutputSettings:
+            return [KeyBinding(keyCode: 20, modifiers: [.command, .option, .shift], isGlobal: false)]
+        case .openPronunciationSettings:
+            return [KeyBinding(keyCode: 21, modifiers: [.command, .option, .shift], isGlobal: false)]
+        case .openAPIKeysSettings:
+            return [KeyBinding(keyCode: 23, modifiers: [.command, .option, .shift], isGlobal: false)]
+        case .openKeyboardSettings:
+            return [KeyBinding(keyCode: 22, modifiers: [.command, .option, .shift], isGlobal: false)]
+        case .openPermissionsSettings:
+            return [KeyBinding(keyCode: 26, modifiers: [.command, .option, .shift], isGlobal: false)]
+        case .openAboutSettings:
+            return [KeyBinding(keyCode: 28, modifiers: [.command, .option, .shift], isGlobal: false)]
+        case .quickVoice1:
+            return [KeyBinding(keyCode: 18, modifiers: [.command], isGlobal: false)]
+        case .quickVoice2:
+            return [KeyBinding(keyCode: 19, modifiers: [.command], isGlobal: false)]
+        case .quickVoice3:
+            return [KeyBinding(keyCode: 20, modifiers: [.command], isGlobal: false)]
+        default:
+            return []
         }
     }
 
@@ -417,12 +458,19 @@ final class ShortcutManager: ObservableObject {
         if let data = UserDefaults.standard.data(forKey: defaultsKey),
             let decoded = try? JSONDecoder().decode([ShortcutAction: KeyBinding].self, from: data) {
             bindings = decoded
-            var addedDefaults = false
-            for action in ShortcutAction.allCases where bindings[action] == nil {
-                bindings[action] = action.defaultKeyBinding
-                addedDefaults = true
+            var changedDefaults = false
+            for action in ShortcutAction.allCases {
+                if let binding = bindings[action] {
+                    if action.legacyDefaultKeyBindings.contains(binding) {
+                        bindings[action] = action.defaultKeyBinding
+                        changedDefaults = true
+                    }
+                } else {
+                    bindings[action] = action.defaultKeyBinding
+                    changedDefaults = true
+                }
             }
-            if addedDefaults {
+            if changedDefaults {
                 saveBindings()
             }
             detectConflicts()

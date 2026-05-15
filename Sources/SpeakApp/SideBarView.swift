@@ -121,9 +121,11 @@ struct SideBarView: View {
                 .fontWeight(selection == item ? .semibold : .regular)
                 .foregroundStyle(.primary)
                 .lineLimit(1)
-                .layoutPriority(1)
-              Spacer()
+                .truncationMode(.tail)
+                .layoutPriority(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
               shortcutHint(for: item)
+                .layoutPriority(0)
             }
             .contentShape(Rectangle())
           }
@@ -160,9 +162,11 @@ struct SideBarView: View {
                 .fontWeight(selection == item ? .semibold : .regular)
                 .foregroundStyle(.primary)
                 .lineLimit(1)
-                .layoutPriority(1)
-              Spacer()
+                .truncationMode(.tail)
+                .layoutPriority(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
               shortcutHint(for: item)
+                .layoutPriority(0)
             }
             .contentShape(Rectangle())
             .padding(.leading, 10)
@@ -200,6 +204,7 @@ struct SideBarView: View {
         .padding(.vertical, 2)
         .background(Capsule().fill(Color.secondary.opacity(0.10)))
         .fixedSize()
+        .layoutPriority(0)
         .accessibilityHidden(true)
     }
   }

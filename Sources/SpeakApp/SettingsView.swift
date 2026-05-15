@@ -57,6 +57,9 @@ struct SettingsView: View {
   @EnvironmentObject private var settings: AppSettings
   @EnvironmentObject private var audioDevices: AudioInputDeviceManager
   @ObservedObject private var updaterManager = UpdaterManager.shared
+  @ObservedObject private var localModels = LocalModelManager.shared
+  @ObservedObject private var sherpaRuntime = SherpaOnnxRuntimeManager.shared
+  @ObservedObject private var localPostProcessingModels = LocalPostProcessingModelManager.shared
   private static let localeOptions: [LocaleOption] = [
     LocaleOption(displayName: "English (United States)", identifier: "en_US"),
     LocaleOption(displayName: "English (United Kingdom)", identifier: "en_GB"),
@@ -91,7 +94,63 @@ struct SettingsView: View {
   @State private var systemPromptPreview = ""
   @State private var showingConfigTransfer = false
   @State private var soundPreviewPlayer: RecordingSoundPlayer?
+  @State private var huggingFaceRepoID: String = "argmaxinc/whisperkit-coreml"
+  @State private var huggingFaceModelName: String = "tiny"
+  @State private var huggingFaceImportError: String?
+  @State private var streamingHuggingFaceRepoID: String =
+    "csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26"
+  @State private var streamingHuggingFaceModelName: String = "streaming-zipformer-en-2023-06-26"
+  @State private var selectedRecommendedStreamingSourceID: String =
+    LocalModelManager.recommendedStreamingModelSources.first?.id ?? ""
+  @State private var streamingHuggingFaceImportError: String?
+  @State private var localPostProcessingRepoID: String = "unsloth/Qwen3-0.6B-GGUF"
+  @State private var localPostProcessingFilename: String = "Qwen3-0.6B-Q4_K_M.gguf"
+  @State private var localPostProcessingSizeMB: String = "450"
+  @State private var localPostProcessingImportError: String?
   private let openRouterKeyIdentifier = "openrouter.apiKey"
+
+  private enum TranscriptionLocation: String, CaseIterable, Identifiable {
+    case remote
+    case local
+
+    var id: String { rawValue }
+
+    var displayName: String {
+      switch self {
+      case .remote: return "Remote"
+      case .local: return "Local"
+      }
+    }
+  }
+
+  private enum RemoteTranscriptionMode: String, CaseIterable, Identifiable {
+    case streaming
+    case batch
+
+    var id: String { rawValue }
+
+    var displayName: String {
+      switch self {
+      case .streaming: return "Remote Streaming"
+      case .batch: return "Remote Batch"
+      }
+    }
+
+  }
+
+  private enum PostProcessingLocation: String, CaseIterable, Identifiable {
+    case remote
+    case local
+
+    var id: String { rawValue }
+
+    var displayName: String {
+      switch self {
+      case .remote: return "Remote"
+      case .local: return "Local"
+      }
+    }
+  }
 
   enum ValidationViewState {
     case idle
@@ -103,9 +162,54 @@ struct SettingsView: View {
     settings.trackedAPIKeyIdentifiers.contains(openRouterKeyIdentifier)
   }
 
+  private var isCloudPostProcessingModelSelected: Bool {
+    !PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel)
+  }
+
   private var isValidatingKey: Bool {
     if case .validating = apiKeyValidationState { return true }
     return false
+  }
+
+  private var overviewPostProcessingValue: String {
+    if settings.isActiveAssemblyAILiveModel {
+      return "Keyterms only"
+    }
+    guard settings.postProcessingEnabled, settings.speedMode == .instant else {
+      return "Disabled"
+    }
+    return PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel)
+      ? "Local"
+      : "Remote"
+  }
+
+  private var postProcessingPromptHelpText: String {
+    if isCloudPostProcessingModelSelected {
+      return "This prompt is sent to the selected OpenRouter model after transcription. Requires an OpenRouter API key."
+    }
+    if PostProcessingManager.isBuiltInLocalPostProcessingModel(settings.postProcessingModel) {
+      return """
+      Downloaded local LLM models use this prompt on your Mac. \
+      The built-in rules cleaner is local and ignores custom prompts.
+      """
+    }
+    return """
+    This prompt is sent to the selected downloaded local model after transcription. \
+    It stays on this Mac and does not use OpenRouter.
+    """
+  }
+
+  private var systemGeneratedPartsHelpText: String {
+    if isCloudPostProcessingModelSelected {
+      return "Control which system-generated instructions are added to the OpenRouter prompt."
+    }
+    if PostProcessingManager.isBuiltInLocalPostProcessingModel(settings.postProcessingModel) {
+      return """
+      These prompt parts apply when you choose a downloaded local LLM model. \
+      The built-in rules cleaner does not use prompts.
+      """
+    }
+    return "Control which system-generated instructions are added to the downloaded local model prompt."
   }
 
   private var overviewHeader: some View {
@@ -135,12 +239,10 @@ struct SettingsView: View {
 
       HStack(spacing: 16) {
         overviewChip(
-          title: "Mode", value: settings.transcriptionMode.displayName, systemImage: "waveform")
+          title: "Mode", value: overviewModeValue, systemImage: "waveform")
         overviewChip(
-          title: settings.isAssemblyAIModel ? "Pre-processing" : "Post-processing",
-          value: settings.isAssemblyAIModel
-            ? "Keyterms only"
-            : (settings.postProcessingEnabled ? "Enabled" : "Disabled"),
+          title: settings.isActiveAssemblyAILiveModel ? "Pre-processing" : "Post-processing",
+          value: overviewPostProcessingValue,
           systemImage: "wand.and.stars")
         overviewChip(
           title: "Output", value: settings.textOutputMethod.displayName,
@@ -205,6 +307,158 @@ struct SettingsView: View {
     _sidebarSelection = sidebarSelection
   }
 
+  private var overviewModeValue: String {
+    switch settings.transcriptionMode {
+    case .liveNative:
+      return "Remote Streaming"
+    case .batchRemote:
+      return "Remote Batch"
+    case .localModel:
+      return settings.localTranscriptionMode.displayName
+    }
+  }
+
+  private var transcriptionLocationBinding: Binding<TranscriptionLocation> {
+    Binding(
+      get: {
+        settings.transcriptionMode == .localModel ? .local : .remote
+      },
+      set: { location in
+        switch location {
+        case .remote:
+          if settings.transcriptionMode == .localModel {
+            settings.transcriptionMode = .liveNative
+          }
+        case .local:
+          settings.transcriptionMode = .localModel
+        }
+      }
+    )
+  }
+
+  private var remoteTranscriptionModeBinding: Binding<RemoteTranscriptionMode> {
+    Binding(
+      get: {
+        settings.transcriptionMode == .batchRemote ? .batch : .streaming
+      },
+      set: { mode in
+        settings.transcriptionMode = mode == .streaming ? .liveNative : .batchRemote
+      }
+    )
+  }
+
+  private var isStreamingTranscriptionSelected: Bool {
+    settings.transcriptionMode == .liveNative
+      || (settings.transcriptionMode == .localModel && settings.localTranscriptionMode == .streaming)
+  }
+
+  private var cloudPostProcessingModelBinding: Binding<String> {
+    Binding(
+      get: {
+        if PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel) {
+          return ModelCatalog.postProcessing.first {
+            !PostProcessingManager.isLocalPostProcessingModel($0.id)
+          }?.id ?? settings.postProcessingModel
+        }
+        guard cloudPostProcessingOptions.contains(where: { $0.id == settings.postProcessingModel }) else {
+          return cloudPostProcessingOptions.first?.id ?? settings.postProcessingModel
+        }
+        return settings.postProcessingModel
+      },
+      set: { model in
+        settings.postProcessingModel = model
+      }
+    )
+  }
+
+  private var localPostProcessingModelBinding: Binding<String> {
+    Binding(
+      get: {
+        if PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel) {
+          guard localPostProcessingOptions.contains(where: { $0.id == settings.postProcessingModel }) else {
+            return localPostProcessingOptions.first?.id ?? LocalPostProcessingModelManager.builtInRulesModelID
+          }
+          return settings.postProcessingModel
+        }
+        return localPostProcessingOptions.first?.id ?? LocalPostProcessingModelManager.builtInRulesModelID
+      },
+      set: { model in
+        guard PostProcessingManager.isLocalPostProcessingModel(model),
+          localPostProcessingOptions.contains(where: { $0.id == model })
+        else { return }
+        settings.postProcessingModel = model
+      }
+    )
+  }
+
+  private var localTranscriptionModelBinding: Binding<String> {
+    Binding(
+      get: {
+        guard localTranscriptionOptions.contains(where: { $0.id == settings.localTranscriptionModel }) else {
+          return localTranscriptionOptions.first?.id ?? ""
+        }
+        return settings.localTranscriptionModel
+      },
+      set: { model in
+        guard localTranscriptionOptions.contains(where: { $0.id == model }) else { return }
+        settings.localTranscriptionModel = model
+      }
+    )
+  }
+
+  private var postProcessingLocationBinding: Binding<PostProcessingLocation> {
+    Binding(
+      get: {
+        PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel) ? .local : .remote
+      },
+      set: { location in
+        let currentLocation = PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel)
+          ? PostProcessingLocation.local
+          : .remote
+        guard location != currentLocation else { return }
+        selectPostProcessingLocation(location)
+      }
+    )
+  }
+
+  private var postProcessingLocationSelector: some View {
+    HStack(spacing: 8) {
+      ForEach(PostProcessingLocation.allCases) { location in
+        Button {
+          postProcessingLocationBinding.wrappedValue = location
+        } label: {
+          Text(location.displayName)
+            .font(.subheadline.weight(.semibold))
+            .padding(.vertical, 8)
+            .padding(.horizontal, 28)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(postProcessingLocationBinding.wrappedValue == location ? .white : .primary)
+        .background(
+          RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .fill(postProcessingLocationBinding.wrappedValue == location ? Color.brandAccent : Color.clear)
+        )
+      }
+    }
+    .fixedSize()
+    .padding(4)
+    .background(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .fill(Color(nsColor: .controlBackgroundColor))
+    )
+  }
+
+  private func selectPostProcessingLocation(_ location: PostProcessingLocation) {
+    switch location {
+    case .local:
+      settings.postProcessingModel = localPostProcessingOptions.first?.id ?? "local/post-processing/rules"
+    case .remote:
+      settings.postProcessingModel = cloudPostProcessingOptions.first {
+        $0.id == "openai/gpt-5-mini"
+      }?.id ?? cloudPostProcessingOptions.first?.id ?? settings.postProcessingModel
+    }
+  }
+
   private func overviewChip(title: String, value: String, systemImage: String) -> some View {
     VStack(alignment: .leading, spacing: 6) {
       Label(title, systemImage: systemImage)
@@ -219,6 +473,39 @@ struct SettingsView: View {
     .frame(maxWidth: .infinity, alignment: .leading)
     .background(
       Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+  }
+
+  private func localModelBadge(_ title: String, tint: Color) -> some View {
+    Text(title)
+      .font(.caption2.weight(.semibold))
+      .foregroundStyle(tint)
+      .padding(.horizontal, 8)
+      .padding(.vertical, 3)
+      .background(Capsule().fill(tint.opacity(0.12)))
+  }
+
+  private func selectedModelBadge(tint: Color = .green) -> some View {
+    Label("Selected", systemImage: "checkmark.circle.fill")
+      .font(.caption.weight(.semibold))
+      .foregroundStyle(tint)
+  }
+
+  private func localModelRowContainer<Content: View>(
+    isSelected: Bool,
+    tint: Color,
+    @ViewBuilder content: () -> Content
+  ) -> some View {
+    content()
+      .padding(12)
+      .background(
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+          .fill(isSelected ? tint.opacity(0.13) : Color(nsColor: .controlBackgroundColor))
+      )
+      .overlay(
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+          .stroke(isSelected ? tint.opacity(0.8) : Color.clear, lineWidth: isSelected ? 2 : 0)
+      )
+      .shadow(color: isSelected ? tint.opacity(0.16) : .clear, radius: 10, y: 3)
   }
 
   private func previewRecordingSound(_ sound: RecordingSoundPlayer.RecordingSound) {
@@ -369,7 +656,9 @@ struct SettingsView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
               .fill(Color(nsColor: .controlBackgroundColor))
           )
-          .speakTooltip("Choose where Speak appears—in the Dock, menu bar, or both. Menu bar only keeps it out of the way while staying accessible.")
+          .speakTooltip(
+            "Choose where Speak appears - in the Dock, menu bar, or both. Menu bar only keeps it out of the way."
+          )
 
           VStack(alignment: .leading, spacing: 8) {
             settingsToggle(
@@ -382,6 +671,12 @@ struct SettingsView: View {
               .toggleStyle(.switch)
               .tint(.brandAccentWarm)
               .speakTooltip("Periodically check for new versions and notify you when updates are available.")
+            settingsToggle(
+              "Show sidebar shortcut hints",
+              isOn: settingsBinding(\AppSettings.showSidebarShortcutHints),
+              tint: .brandAccentWarm
+            )
+            .speakTooltip("Show discreet keyboard shortcut hints beside the left menu items.")
           }
         }
       }
@@ -505,7 +800,7 @@ struct SettingsView: View {
           Text("Allow iOS devices to send transcripts to this Mac over your local network.")
             .font(.callout)
             .foregroundStyle(.secondary)
-          
+
           settingsToggle(
             "Enable Send to Mac",
             isOn: Binding(
@@ -521,11 +816,13 @@ struct SettingsView: View {
             ),
             tint: .green
           )
-          .speakTooltip("When enabled, your Mac will advertise itself on the local network and accept connections from the Speak iOS app.")
-          
+          .speakTooltip(
+            "When enabled, your Mac will advertise itself on the local network and accept connections from Speak iOS."
+          )
+
           if settings.enableSendToMac {
             Divider()
-            
+
             VStack(alignment: .leading, spacing: 8) {
               HStack {
                 Text("Pairing Code:")
@@ -544,11 +841,11 @@ struct SettingsView: View {
                 .buttonStyle(.borderless)
                 .speakTooltip("Copy pairing code to clipboard")
               }
-              
+
               Text("Enter this code on your iPhone when pairing.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-              
+
               Button("Regenerate Code") {
                 _ = PairingManager.shared.regeneratePairingCode()
               }
@@ -560,7 +857,7 @@ struct SettingsView: View {
               RoundedRectangle(cornerRadius: 8)
                 .fill(Color.green.opacity(0.1))
             )
-            
+
             if environment.transportServer.isRunning {
               HStack(spacing: 6) {
                 Circle()
@@ -571,14 +868,14 @@ struct SettingsView: View {
                   .foregroundStyle(.secondary)
               }
             }
-            
+
             if !environment.transportServer.connectedDevices.isEmpty {
               Divider()
-              
+
               VStack(alignment: .leading, spacing: 8) {
                 Text("Connected Devices:")
                   .font(.headline)
-                
+
                 ForEach(environment.transportServer.connectedDevices) { device in
                   HStack {
                     Image(systemName: "iphone")
@@ -611,8 +908,7 @@ struct SettingsView: View {
           }
         }
       }
-      .speakTooltip("Use your iPhone as a wireless microphone for your Mac. Transcribe on iPhone, text appears on Mac.")
-
+      .speakTooltip("Use your iPhone as a wireless microphone. Transcribe on iPhone, text appears on Mac.")
 
       SettingsCard(title: "Housekeeping", systemImage: "tray.full", tint: Color.brandAccentWarm) {
         VStack(alignment: .leading, spacing: 12) {
@@ -691,9 +987,9 @@ struct SettingsView: View {
     LazyVStack(spacing: 20) {
       SettingsCard(title: "Transcription mode", systemImage: "waveform", tint: Color.teal) {
         VStack(alignment: .leading, spacing: 12) {
-          Picker("Transcription Mode", selection: settingsBinding(\AppSettings.transcriptionMode)) {
-            ForEach(AppSettings.TranscriptionMode.allCases) { mode in
-              Text(mode.displayName).tag(mode)
+          Picker("Where transcription runs", selection: transcriptionLocationBinding) {
+            ForEach(TranscriptionLocation.allCases) { location in
+              Text(location.displayName).tag(location)
             }
           }
           .pickerStyle(.segmented)
@@ -703,8 +999,44 @@ struct SettingsView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
               .fill(Color(nsColor: .controlBackgroundColor))
           )
-          .speakTooltip("Pick the recording flow that best matches how you speak—continuous live captions or hold-to-talk batches.")
-          .accessibilityLabel("Transcription mode picker")
+          .speakTooltip("Choose whether Speak transcribes locally on this Mac or remotely with a provider.")
+          .accessibilityLabel("Transcription location picker")
+
+          if settings.transcriptionMode == .localModel {
+            Picker("Local transcription type", selection: settingsBinding(\AppSettings.localTranscriptionMode)) {
+              ForEach(AppSettings.LocalTranscriptionMode.allCases) { mode in
+                Text(mode.displayName).tag(mode)
+              }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+              RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor))
+            )
+            .speakTooltip(
+              "Choose Local Batch for offline transcription after recording, or Local Streaming for live local text."
+            )
+            .accessibilityLabel("Local transcription type picker")
+          } else {
+            Picker("Remote transcription type", selection: remoteTranscriptionModeBinding) {
+              ForEach(RemoteTranscriptionMode.allCases) { mode in
+                Text(mode.displayName).tag(mode)
+              }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+              RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor))
+            )
+            .speakTooltip(
+              "Choose Remote Streaming for live provider updates, or Remote Batch for post-recording transcription."
+            )
+            .accessibilityLabel("Remote transcription type picker")
+          }
 
           Picker("Preferred Locale", selection: settingsBinding(\AppSettings.preferredLocaleIdentifier)) {
             ForEach(resolvedLocaleOptions) { option in
@@ -724,251 +1056,1165 @@ struct SettingsView: View {
         }
       }
       .speakTooltip("Choose which transcription flow Speak uses and the locale it should prefer.")
-      SettingsCard(title: "Processing Speed", systemImage: "gauge.with.dots.needle.67percent", tint: Color.brandLagoon) {
-        let capabilities = settings.liveModelCapabilities
-        let anyEnhancedModeAvailable = AppSettings.SpeedMode.allCases
-          .contains { $0 != .instant && capabilities.supportedSpeedModes.contains($0.coreID) }
 
-        VStack(alignment: .leading, spacing: 12) {
-          Text("Auto-clean modes require a streaming live transcription model and disable post-processing.")
-            .font(.callout)
+      if settings.transcriptionMode == .liveNative {
+        SettingsCard(
+          title: "Processing Speed",
+          systemImage: "gauge.with.dots.needle.67percent",
+          tint: Color.brandLagoon
+        ) {
+          let capabilities = settings.liveModelCapabilities
+          let anyEnhancedModeAvailable = AppSettings.SpeedMode.allCases
+            .contains { $0 != .instant && capabilities.supportedSpeedModes.contains($0.coreID) }
+
+          VStack(alignment: .leading, spacing: 12) {
+            Text("Auto-clean modes require a Remote Streaming transcription model and disable post-processing.")
+              .font(.callout)
+              .foregroundStyle(.secondary)
+
+            if !anyEnhancedModeAvailable {
+              Text("To enable these modes, select a Remote Streaming model such as Deepgram Nova-3 Streaming.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            if settings.isAssemblyAIModel && capabilities.postStopFinalizeBudget > 0 {
+              let budgetSeconds = String(format: "%.1f", capabilities.postStopFinalizeBudget)
+              Text("Note: AssemblyAI may take up to ~\(budgetSeconds)s to finalise after you stop, "
+                   + "because it formats the full turn server-side.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            VStack(spacing: 8) {
+              ForEach(AppSettings.SpeedMode.allCases) { mode in
+                let isSupported = settings.supports(speedMode: mode)
+                Button {
+                  settings.speedMode = mode
+                } label: {
+                  HStack(spacing: 12) {
+                    Image(systemName: speedModeIcon(for: mode))
+                      .font(.title3)
+                      .foregroundStyle(settings.speedMode == mode ? .white : .brandLagoon)
+                      .frame(width: 24)
+                    VStack(alignment: .leading, spacing: 2) {
+                      Text(mode.displayName)
+                        .font(.headline)
+                        .foregroundStyle(settings.speedMode == mode ? .white : .primary)
+                      Text(mode.description)
+                        .font(.caption)
+                        .foregroundStyle(settings.speedMode == mode ? .white.opacity(0.8) : .secondary)
+                    }
+                    Spacer()
+                    if settings.speedMode == mode {
+                      Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.white)
+                    }
+                  }
+                  .padding(12)
+                  .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                      .fill(settings.speedMode == mode ? Color.brandLagoon : Color(nsColor: .controlBackgroundColor))
+                  )
+                }
+                .buttonStyle(.plain)
+                .disabled(!isSupported)
+                .opacity(isSupported ? 1.0 : 0.6)
+              }
+            }
+          }
+        }
+        .speakTooltip("Control the trade-off between speed and AI-powered text cleanup.")
+      }
+
+      if !isStreamingTranscriptionSelected {
+        SettingsCard(title: "Recording buffer", systemImage: "waveform.path.ecg", tint: Color.brandLagoon) {
+          VStack(alignment: .leading, spacing: 12) {
+            Text("Keep recording for a moment after you let go to capture trailing words.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+            HStack {
+              Slider(
+                value: settingsBinding(\AppSettings.postRecordingTailDuration),
+                in: 0...2,
+                step: 0.1
+              )
+              .speakTooltip("Control how long Speak keeps capturing after you finish talking.")
+              Text(
+                settings.postRecordingTailDuration,
+                format: .number.precision(.fractionLength(1))
+              )
+              .font(.caption.monospacedDigit())
+              .foregroundStyle(.secondary)
+              Text("sec")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+          }
+        }
+        .speakTooltip("Decide how much breathing room Speak gives you after releasing your shortcut.")
+      }
+
+      if isStreamingTranscriptionSelected {
+        SettingsCard(
+          title: "Streaming stop grace",
+          systemImage: "waveform.and.mic",
+          tint: Color.brandAccentDeep
+        ) {
+          VStack(alignment: .leading, spacing: 12) {
+            Text(
+              """
+              After stopping, keep the streaming transcription connection open briefly so providers \
+              or local streaming runtimes can flush their final words. Applied to Remote \
+              Streaming providers and Local Streaming.
+              """
+            )
+              .font(.caption)
+              .foregroundStyle(.secondary)
+            HStack {
+              Slider(
+                value: settingsBinding(\AppSettings.liveStopGracePeriod),
+                in: 0...2,
+                step: 0.1
+              )
+              .speakTooltip("Extra delay before closing the streaming transcription connection after you stop recording.")
+              Text(
+                settings.liveStopGracePeriod,
+                format: .number.precision(.fractionLength(1))
+              )
+              .font(.caption.monospacedDigit())
+              .foregroundStyle(.secondary)
+              Text("sec")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+          }
+        }
+        .speakTooltip("Helps reduce last-word cutoffs across Remote Streaming providers and Local Streaming.")
+      }
+
+      if !isStreamingTranscriptionSelected {
+        SettingsCard(title: "Silence detection", systemImage: "waveform.slash", tint: Color.brandAccentWarm) {
+          VStack(alignment: .leading, spacing: 12) {
+            Toggle(
+              "Auto-stop on silence",
+              isOn: settingsBinding(\AppSettings.silenceDetectionEnabled)
+            )
+            .speakTooltip("Automatically stop recording when you stop speaking.")
+
+            if settings.silenceDetectionEnabled {
+              Text("Stops recording after a period of silence, useful for hands-free operation.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+              VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                  Text("Silence threshold")
+                    .font(.caption)
+                  Spacer()
+                  Text("\(Int(settings.silenceThreshold * 100))%")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                }
+                Slider(
+                  value: settingsBinding(\AppSettings.silenceThreshold),
+                  in: 0.01...0.2,
+                  step: 0.01
+                )
+                .speakTooltip("Audio levels below this are considered silence. Lower = more sensitive.")
+              }
+
+              VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                  Text("Silence duration")
+                    .font(.caption)
+                  Spacer()
+                  Text(settings.silenceDuration, format: .number.precision(.fractionLength(1)))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                  Text("sec")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                Slider(
+                  value: settingsBinding(\AppSettings.silenceDuration),
+                  in: 0.5...5.0,
+                  step: 0.5
+                )
+                .speakTooltip("How long to wait in silence before auto-stopping.")
+              }
+            }
+          }
+        }
+        .speakTooltip("Configure automatic recording stop based on silence detection.")
+      }
+
+      if settings.transcriptionMode == .liveNative {
+        SettingsCard(title: "Remote Streaming model", systemImage: "mic.fill", tint: Color.brandAccentDeep) {
+          VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+              Image(systemName: "bolt.fill")
+                .foregroundStyle(Color.brandAccentDeep)
+                .imageScale(.small)
+              Text("Fastest - Real-time Response")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.brandAccentDeep)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(
+              Capsule()
+                .fill(Color.brandAccentDeep.opacity(0.12))
+            )
+
+            Text("Model used while recording. Provides instant feedback as you speak.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+            ModelPicker(
+              title: "Remote Streaming Model",
+              help: "Choose the remote provider model used while recording.",
+              options: ModelCatalog.liveTranscription,
+              value: settingsBinding(\AppSettings.liveTranscriptionModel)
+            )
+          }
+        }
+        .speakTooltip("Pick the remote model that transcribes as you speak during streaming recording.")
+      }
+
+      if settings.transcriptionMode == .batchRemote {
+        SettingsCard(
+          title: "Remote Batch model", systemImage: "folder.badge.clock", tint: Color.brandLagoon
+        ) {
+          VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+              Image(systemName: "star.fill")
+                .foregroundStyle(Color.brandLagoon)
+                .imageScale(.small)
+              Text("Best Quality - Most Accurate")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.brandLagoon)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(
+              Capsule()
+                .fill(Color.brandLagoon.opacity(0.12))
+            )
+
+            Text("Model used when the recording is uploaded after it finishes. Delivers the highest accuracy.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+            ModelPicker(
+              title: "Remote Batch Model",
+              help: """
+              Remote transcription runs after recording stops. Built-in providers use their own keys; \
+              custom model identifiers are sent through OpenRouter.
+              """,
+              options: ModelCatalog.batchTranscription,
+              value: settingsBinding(\AppSettings.batchTranscriptionModel)
+            )
+            if isCustomBatchTranscriptionModel {
+              SettingsInlineInfo(
+                title: "Custom batch models use OpenRouter",
+                message:
+                  """
+                  Speak will send this custom model identifier to OpenRouter. Save an OpenRouter API key \
+                  before recording, or choose one of the built-in provider models above.
+                  """,
+                systemImage: "key.fill"
+              )
+              if !isOpenRouterKeyStored {
+                HStack(spacing: 10) {
+                  Label("OpenRouter API key missing", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.orange)
+                  Button("Add OpenRouter Key") {
+                    sidebarSelection = .settings(.apiKeys)
+                  }
+                  .buttonStyle(.bordered)
+                }
+              }
+            }
+          }
+        }
+        .speakTooltip("Tell Speak which cloud transcription model should polish the full recording.")
+      }
+
+      if settings.transcriptionMode == .localModel {
+        SettingsCard(
+          title: "Local transcription models",
+          systemImage: "externaldrive.badge.checkmark",
+          tint: Color.green
+        ) {
+          VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 8) {
+              Image(systemName: "lock.shield.fill")
+                .foregroundStyle(Color.green)
+                .imageScale(.small)
+              Text(
+                settings.localTranscriptionMode == .batch
+                  ? "Local Batch - private on this Mac"
+                  : "Local Streaming - private on this Mac"
+              )
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.green)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(
+              Capsule()
+                .fill(Color.green.opacity(0.12))
+            )
+
+            Text(
+              """
+              Local Batch and Local Streaming are separate from Apple Speech and cloud providers. \
+              Both stay local-only; Local Batch uses downloaded WhisperKit/Core ML models, while \
+              Local Streaming needs a dedicated streaming ASR runtime.
+              """
+            )
+            .font(.caption)
             .foregroundStyle(.secondary)
 
-          if !anyEnhancedModeAvailable {
-            Text("To enable these modes, select a streaming Live Model (e.g., Deepgram Nova-3 Streaming).")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          }
+            localModelQuickStart
+            if settings.localTranscriptionMode == .batch {
+              selectedLocalModelCallout
+            }
 
-          if settings.isAssemblyAIModel && capabilities.postStopFinalizeBudget > 0 {
-            let budgetSeconds = String(format: "%.1f", capabilities.postStopFinalizeBudget)
-            Text("Note: AssemblyAI may take up to ~\(budgetSeconds)s to finalise after you stop, "
-                 + "because it formats the full turn server-side.")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          }
+            if settings.localTranscriptionMode == .batch {
+              huggingFaceModelImport
+            } else {
+              localStreamingStatus
+            }
 
-          VStack(spacing: 8) {
-            ForEach(AppSettings.SpeedMode.allCases) { mode in
-              let isSupported = settings.supports(speedMode: mode)
-              Button {
-                settings.speedMode = mode
-              } label: {
-                HStack(spacing: 12) {
-                  Image(systemName: speedModeIcon(for: mode))
-                    .font(.title3)
-                    .foregroundStyle(settings.speedMode == mode ? .white : .brandLagoon)
-                    .frame(width: 24)
-                  VStack(alignment: .leading, spacing: 2) {
-                    Text(mode.displayName)
-                      .font(.headline)
-                      .foregroundStyle(settings.speedMode == mode ? .white : .primary)
-                    Text(mode.description)
-                      .font(.caption)
-                      .foregroundStyle(settings.speedMode == mode ? .white.opacity(0.8) : .secondary)
-                  }
-                  Spacer()
-                  if settings.speedMode == mode {
-                    Image(systemName: "checkmark.circle.fill")
-                      .foregroundStyle(.white)
-                  }
-                }
-                .padding(12)
-                .background(
-                  RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(settings.speedMode == mode ? Color.brandLagoon : Color(nsColor: .controlBackgroundColor))
+            if settings.localTranscriptionMode == .batch {
+              if localTranscriptionOptions.isEmpty {
+                Label(
+                  "Download a local batch model before selecting it for recording.",
+                  systemImage: "arrow.down.circle"
+                )
+                  .font(.caption)
+                  .foregroundStyle(.orange)
+              } else {
+                ModelPicker(
+                  title: "Local Batch Model",
+                  help: "Used for local-only transcription after recording stops.",
+                  options: localTranscriptionOptions,
+                  value: localTranscriptionModelBinding,
+                  allowsCustom: false
                 )
               }
-              .buttonStyle(.plain)
-              .disabled(!isSupported)
-              .opacity(isSupported ? 1.0 : 0.6)
-            }
-          }
-        }
-      }
-      .speakTooltip("Control the trade-off between speed and AI-powered text cleanup.")
 
-      SettingsCard(title: "Recording buffer", systemImage: "waveform.path.ecg", tint: Color.brandLagoon) {
-        VStack(alignment: .leading, spacing: 12) {
-          Text("Keep recording for a moment after you let go to capture trailing words.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-          HStack {
-            Slider(
-              value: settingsBinding(\AppSettings.postRecordingTailDuration),
-              in: 0...2,
-              step: 0.1
-            )
-            .speakTooltip("Control how long Speak keeps capturing after you finish talking.")
-            Text(
-              settings.postRecordingTailDuration,
-              format: .number.precision(.fractionLength(1))
-            )
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(.secondary)
-            Text("sec")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          }
-        }
-      }
-      .speakTooltip("Decide how much breathing room Speak gives you after releasing your shortcut.")
-
-      SettingsCard(
-        title: "Live stop grace",
-        systemImage: "waveform.and.mic",
-        tint: Color.brandAccentDeep
-      ) {
-        VStack(alignment: .leading, spacing: 12) {
-          Text(
-            """
-            After stopping, keep the live transcription stream open briefly so providers \
-            can flush their final words. Applied to every live model (Deepgram, AssemblyAI, \
-            OpenAI Realtime, ElevenLabs, Soniox, Modulate).
-            """
-          )
-            .font(.caption)
-            .foregroundStyle(.secondary)
-          HStack {
-            Slider(
-              value: settingsBinding(\AppSettings.liveStopGracePeriod),
-              in: 0...2,
-              step: 0.1
-            )
-            .speakTooltip("Extra delay before closing the live transcription stream after you stop recording.")
-            Text(
-              settings.liveStopGracePeriod,
-              format: .number.precision(.fractionLength(1))
-            )
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(.secondary)
-            Text("sec")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          }
-        }
-      }
-      .speakTooltip("Helps reduce last-word cutoffs across all live transcription providers.")
-
-      SettingsCard(title: "Silence detection", systemImage: "waveform.slash", tint: Color.brandAccentWarm) {
-        VStack(alignment: .leading, spacing: 12) {
-          Toggle(
-            "Auto-stop on silence",
-            isOn: settingsBinding(\AppSettings.silenceDetectionEnabled)
-          )
-          .speakTooltip("Automatically stop recording when you stop speaking.")
-
-          if settings.silenceDetectionEnabled {
-            Text("Stops recording after a period of silence, useful for hands-free operation.")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-
-            VStack(alignment: .leading, spacing: 8) {
-              HStack {
-                Text("Silence threshold")
-                  .font(.caption)
-                Spacer()
-                Text("\(Int(settings.silenceThreshold * 100))%")
-                  .font(.caption.monospacedDigit())
-                  .foregroundStyle(.secondary)
+              VStack(spacing: 10) {
+                ForEach(localTranscriptionModels) { model in
+                  localModelRow(model)
+                }
               }
-              Slider(
-                value: settingsBinding(\AppSettings.silenceThreshold),
-                in: 0.01...0.2,
-                step: 0.01
-              )
-              .speakTooltip("Audio levels below this are considered silence. Lower = more sensitive.")
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-              HStack {
-                Text("Silence duration")
-                  .font(.caption)
-                Spacer()
-                Text(settings.silenceDuration, format: .number.precision(.fractionLength(1)))
-                  .font(.caption.monospacedDigit())
-                  .foregroundStyle(.secondary)
-                Text("sec")
-                  .font(.caption)
-                  .foregroundStyle(.secondary)
-              }
-              Slider(
-                value: settingsBinding(\AppSettings.silenceDuration),
-                in: 0.5...5.0,
-                step: 0.5
-              )
-              .speakTooltip("How long to wait in silence before auto-stopping.")
             }
           }
         }
+        .speakTooltip("Download and manage private local transcription models.")
       }
-      .speakTooltip("Configure automatic recording stop based on silence detection.")
-
-      SettingsCard(title: "Live transcription", systemImage: "mic.fill", tint: Color.brandAccentDeep) {
-        VStack(alignment: .leading, spacing: 12) {
-          HStack(spacing: 8) {
-            Image(systemName: "bolt.fill")
-              .foregroundStyle(Color.brandAccentDeep)
-              .imageScale(.small)
-            Text("Fastest - Real-time Response")
-              .font(.subheadline.weight(.semibold))
-              .foregroundStyle(Color.brandAccentDeep)
-          }
-          .padding(.horizontal, 12)
-          .padding(.vertical, 6)
-          .background(
-            Capsule()
-              .fill(Color.brandAccentDeep.opacity(0.12))
-          )
-
-          Text("Model used while recording. Provides instant feedback as you speak.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-          ModelPicker(
-            title: "Live Model",
-            help: "Choose between on-device transcription or supported streaming providers.",
-            options: ModelCatalog.liveTranscription,
-            value: settingsBinding(\AppSettings.liveTranscriptionModel)
-          )
-        }
-      }
-      .speakTooltip("Pick the model that transcribes as you speak during live recording.")
-
-      SettingsCard(
-        title: "Batch transcription", systemImage: "folder.badge.clock", tint: Color.brandLagoon
-      ) {
-        VStack(alignment: .leading, spacing: 12) {
-          HStack(spacing: 8) {
-            Image(systemName: "star.fill")
-              .foregroundStyle(Color.brandLagoon)
-              .imageScale(.small)
-            Text("Best Quality - Most Accurate")
-              .font(.subheadline.weight(.semibold))
-              .foregroundStyle(Color.brandLagoon)
-          }
-          .padding(.horizontal, 12)
-          .padding(.vertical, 6)
-          .background(
-            Capsule()
-              .fill(Color.brandLagoon.opacity(0.12))
-          )
-
-          Text("Model used when the recording is uploaded after it finishes. Delivers the highest accuracy.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-          ModelPicker(
-            title: "Batch Model",
-            help: "Remote transcription runs after recording stops for maximum accuracy and provider-specific metadata.", // swiftlint:disable:this line_length
-            options: ModelCatalog.batchTranscription,
-            value: settingsBinding(\AppSettings.batchTranscriptionModel)
-          )
-        }
-      }
-      .speakTooltip("Tell Speak which cloud transcription model should polish the full recording.")
 
       if settings.hasSelectedModulateModel {
         modulateFeatureSettings
       }
+    }
+  }
+
+  // swiftlint:disable:next function_body_length
+  private func localModelRow(_ model: LocalTranscriptionModel) -> some View {
+    let state = localModels.installState(for: model.id)
+    let isSelected = state == .installed && model.id == settings.localTranscriptionModel
+    return localModelRowContainer(isSelected: isSelected, tint: .green) {
+      HStack(alignment: .top, spacing: 12) {
+      Image(systemName: localModelIcon(for: state))
+        .foregroundStyle(localModelTint(for: state))
+        .frame(width: 24)
+
+      VStack(alignment: .leading, spacing: 4) {
+        HStack(spacing: 8) {
+          Text(model.displayName)
+            .font(.subheadline.weight(.semibold))
+          if isSelected {
+            localModelBadge("Selected", tint: .green)
+          }
+          localModelBadge(
+            model.supportsLiveStreaming ? "Streaming" : "Offline",
+            tint: model.supportsLiveStreaming ? Color.brandAccentDeep : Color.secondary
+          )
+        }
+        Text(model.description)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        Text(localModelSizeLabel(for: model))
+          .font(.caption2.monospacedDigit())
+          .foregroundStyle(.tertiary)
+        if case .failed(let message) = state {
+          Text(message)
+            .font(.caption2)
+            .foregroundStyle(.red)
+        }
+      }
+
+      Spacer()
+
+      switch state {
+      case .installed:
+        VStack(alignment: .trailing, spacing: 8) {
+          if isSelected {
+            selectedModelBadge()
+          } else {
+            Button("Use") {
+              settings.localTranscriptionModel = model.id
+            }
+          }
+          Button("Delete") {
+            localModels.delete(model)
+            if settings.localTranscriptionModel == model.id {
+              if let fallback = firstInstalledLocalTranscriptionModelID(excluding: model.id) {
+                settings.localTranscriptionModel = fallback
+              } else {
+                settings.transcriptionMode = .liveNative
+              }
+            }
+          }
+        }
+      case .installing:
+        VStack(alignment: .trailing, spacing: 6) {
+          ProgressView()
+            .controlSize(.small)
+          Text("Preparing")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+      case .notInstalled, .failed:
+        VStack(alignment: .trailing, spacing: 8) {
+          Button("Download") {
+            Task { await localModels.install(model) }
+          }
+        }
+      }
+      }
+    }
+  }
+
+  private var localModelQuickStart: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      localModelStep(
+        number: "1",
+        title: "Choose Local mode",
+        detail: "This switches recordings away from cloud providers."
+      )
+      localModelStep(
+        number: "2",
+        title: settings.localTranscriptionMode == .batch
+          ? "Download a local batch model"
+          : "Add local streaming model sources",
+        detail: settings.localTranscriptionMode == .batch
+          ? "WhisperKit/Core ML models run locally after recording stops."
+          : "Streaming candidates are tracked separately because they need the sherpa-onnx local runtime."
+      )
+      localModelStep(
+        number: "3",
+        title: "Record normally",
+        detail: settings.localTranscriptionMode == .batch
+          ? "Speak transcribes after recording stops, offline on this Mac."
+          : "Once a compatible streaming runtime is connected, Speak will stream partial text locally."
+      )
+    }
+    .padding(12)
+    .background(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .fill(Color.green.opacity(0.08))
+    )
+  }
+
+  private func localModelStep(number: String, title: String, detail: String) -> some View {
+    HStack(alignment: .top, spacing: 10) {
+      Text(number)
+        .font(.caption.weight(.bold))
+        .foregroundStyle(.white)
+        .frame(width: 20, height: 20)
+        .background(Circle().fill(Color.green))
+      VStack(alignment: .leading, spacing: 2) {
+        Text(title)
+          .font(.caption.weight(.semibold))
+        Text(detail)
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+      }
+    }
+  }
+
+  private var huggingFaceModelImport: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      HStack(alignment: .top, spacing: 10) {
+        Image(systemName: "globe")
+          .foregroundStyle(Color.green)
+          .frame(width: 24)
+        VStack(alignment: .leading, spacing: 3) {
+          Text("Find more models on Hugging Face")
+            .font(.subheadline.weight(.semibold))
+          Text(
+            """
+            Browse WhisperKit/Core ML model repos, then paste the Hugging Face repo ID and model variant here. \
+            WhisperKit models are offline batch models in this prerelease; live local streaming is not enabled yet.
+            """
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        }
+      }
+
+      Button {
+        openHuggingFaceModelSearch()
+      } label: {
+        Label("Browse compatible Hugging Face models", systemImage: "magnifyingglass")
+      }
+
+      VStack(alignment: .leading, spacing: 8) {
+        TextField("Repo ID, e.g. argmaxinc/whisperkit-coreml", text: $huggingFaceRepoID)
+          .textFieldStyle(.roundedBorder)
+        TextField("Model variant, e.g. tiny, base, small", text: $huggingFaceModelName)
+          .textFieldStyle(.roundedBorder)
+      }
+
+      HStack {
+        Button {
+          installHuggingFaceModel()
+        } label: {
+          Label("Install from Hugging Face", systemImage: "arrow.down.circle")
+        }
+        .disabled(!canImportHuggingFaceModel)
+
+        Spacer()
+      }
+
+      if let huggingFaceImportError {
+        Text(huggingFaceImportError)
+          .font(.caption)
+          .foregroundStyle(.red)
+      }
+    }
+    .padding(12)
+    .background(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .stroke(Color.green.opacity(0.25), lineWidth: 1)
+        .background(
+          RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(Color(nsColor: .controlBackgroundColor).opacity(0.55))
+        )
+    )
+  }
+
+  private var localStreamingStatus: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      HStack(alignment: .top, spacing: 10) {
+        Image(systemName: "antenna.radiowaves.left.and.right")
+          .foregroundStyle(Color.orange)
+          .frame(width: 24)
+        VStack(alignment: .leading, spacing: 3) {
+          Text("Local Streaming model sources")
+            .font(.subheadline.weight(.semibold))
+          Text(
+            """
+            These are local-only streaming candidates, not cloud providers. \
+            They are separate from Local Batch/WhisperKit models and use sherpa-onnx for \
+            Apple Silicon-friendly on-device streaming.
+            """
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        }
+      }
+
+      Label(
+        "Local Streaming is local-only. sherpa-onnx runs on this Mac and never sends audio to the cloud.",
+        systemImage: "lock.shield"
+      )
+        .font(.caption)
+        .foregroundStyle(.orange)
+
+      localStreamingRuntimeControls
+
+      localStreamingSetupSection(
+        title: "1. Add a recommended streaming model",
+        subtitle: "Pick one of the compatible sherpa-onnx models we know how to download and run locally.",
+        systemImage: "checklist",
+        tint: .orange
+      ) {
+        Picker("Available local streaming candidates", selection: $selectedRecommendedStreamingSourceID) {
+          ForEach(LocalModelManager.recommendedStreamingModelSources) { source in
+            Text("\(source.modelName) (\(localStreamingSizeLabel(for: source)))").tag(source.id)
+          }
+        }
+        .labelsHidden()
+        .pickerStyle(.menu)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+          RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        if let source = selectedRecommendedStreamingSource {
+          Text("\(source.runtime) · \(localStreamingSizeLabel(for: source)) · local-only streaming.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        Button {
+          addSelectedStreamingModelSource()
+        } label: {
+          Label("Add selected model to Local Streaming", systemImage: "plus.circle")
+        }
+      }
+
+      localStreamingSetupSection(
+        title: "2. Browse for more local streaming models",
+        subtitle: """
+        Open Hugging Face search for sherpa-onnx Zipformer models. \
+        Only compatible sources can be added here.
+        """,
+        systemImage: "magnifyingglass",
+        tint: .blue
+      ) {
+        Button {
+          openLocalStreamingModelSearch()
+        } label: {
+          Label("Browse Hugging Face streaming ASR models", systemImage: "arrow.up.right.square")
+        }
+      }
+
+      localStreamingSetupSection(
+        title: "3. Add a source manually",
+        subtitle: "Use this when you already know the Hugging Face repo and model name. The model still stays local-only.",
+        systemImage: "keyboard",
+        tint: .purple
+      ) {
+        TextField(
+          "Repo ID, e.g. csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26",
+          text: $streamingHuggingFaceRepoID
+        )
+          .textFieldStyle(.roundedBorder)
+        TextField("Model name, e.g. streaming-zipformer-en-2023-06-26", text: $streamingHuggingFaceModelName)
+          .textFieldStyle(.roundedBorder)
+        HStack {
+          Button {
+            addStreamingModelSource()
+          } label: {
+            Label("Add manual streaming source", systemImage: "plus.circle")
+          }
+          .disabled(!canAddStreamingModelSource)
+          Spacer()
+        }
+      }
+
+      if let streamingHuggingFaceImportError {
+        Text(streamingHuggingFaceImportError)
+          .font(.caption)
+          .foregroundStyle(.red)
+      }
+
+      VStack(alignment: .leading, spacing: 8) {
+        Text("Downloaded / added local streaming models")
+          .font(.caption.weight(.semibold))
+        if localModels.streamingModelSources.isEmpty {
+          Label(
+            "No local streaming models have been added yet. Start with a recommended model above.",
+            systemImage: "tray"
+          )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        } else {
+          VStack(spacing: 10) {
+            ForEach(localModels.streamingModelSources) { source in
+              localStreamingSourceRow(source)
+            }
+          }
+        }
+      }
+    }
+    .padding(12)
+    .background(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .fill(Color.orange.opacity(0.08))
+    )
+  }
+
+  // swiftlint:disable:next function_body_length
+  private func localStreamingSourceRow(_ source: LocalStreamingModelSource) -> some View {
+    let state = sherpaRuntime.modelStates[source.id] ?? .notInstalled
+    let isSelected = state == .installed && settings.localStreamingModelSource == source.id
+    return localModelRowContainer(isSelected: isSelected, tint: .orange) {
+      HStack(alignment: .top, spacing: 12) {
+      Image(systemName: "antenna.radiowaves.left.and.right")
+        .foregroundStyle(Color.orange)
+        .frame(width: 24)
+
+      VStack(alignment: .leading, spacing: 4) {
+        HStack(spacing: 8) {
+          Text(source.displayName)
+            .font(.subheadline.weight(.semibold))
+          if isSelected {
+            localModelBadge("Selected", tint: .orange)
+          }
+          localModelBadge("Local Streaming", tint: .orange)
+        }
+        Text(source.runtime)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        Text("\(localStreamingSizeLabel(for: source)) - \(source.repoID) / \(source.modelName)")
+          .font(.caption2.monospacedDigit())
+          .foregroundStyle(.tertiary)
+        Text(localStreamingInstallLabel(for: source))
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+        if case .failed(let message) = state {
+          Text(message)
+            .font(.caption2)
+            .foregroundStyle(.red)
+        }
+      }
+
+      Spacer()
+
+      VStack(alignment: .trailing, spacing: 8) {
+        switch state {
+        case .installed:
+          if isSelected {
+            selectedModelBadge(tint: .orange)
+          } else {
+            Button("Use") {
+              settings.localStreamingModelSource = source.id
+            }
+          }
+        case .installing:
+          VStack(alignment: .trailing, spacing: 6) {
+            ProgressView()
+              .controlSize(.small)
+            Text("Downloading")
+              .font(.caption2)
+              .foregroundStyle(.secondary)
+          }
+        case .notInstalled, .failed:
+          Button("Download") {
+            Task { await sherpaRuntime.installModel(source) }
+          }
+          .disabled(!sherpaRuntime.runtimeState.isInstalled)
+          .speakTooltip(
+            sherpaRuntime.runtimeState.isInstalled
+              ? "Download this sherpa-onnx model for local-only streaming."
+              : "Install the sherpa-onnx runtime first."
+          )
+        }
+        Button("Remove") {
+          localModels.deleteStreamingModelSource(source)
+          if settings.localStreamingModelSource == source.id {
+            if let fallback = firstInstalledStreamingSourceID(excluding: source.id) {
+              settings.localStreamingModelSource = fallback
+            } else {
+              settings.localStreamingModelSource =
+                LocalModelManager.recommendedStreamingModelSources.first?.id ?? source.id
+              settings.localTranscriptionMode = .batch
+            }
+          }
+        }
+      }
+      }
+    }
+  }
+
+  private func localStreamingSetupSection<Content: View>(
+    title: String,
+    subtitle: String,
+    systemImage: String,
+    tint: Color,
+    @ViewBuilder content: () -> Content
+  ) -> some View {
+    VStack(alignment: .leading, spacing: 10) {
+      HStack(alignment: .top, spacing: 10) {
+        Image(systemName: systemImage)
+          .foregroundStyle(tint)
+          .frame(width: 20)
+        VStack(alignment: .leading, spacing: 3) {
+          Text(title)
+            .font(.caption.weight(.semibold))
+          Text(subtitle)
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+      }
+      content()
+    }
+    .padding(12)
+    .background(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .fill(Color(nsColor: .controlBackgroundColor).opacity(0.65))
+    )
+    .overlay(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .stroke(tint.opacity(0.2), lineWidth: 1)
+    )
+  }
+
+  private var localStreamingRuntimeControls: some View {
+    HStack(alignment: .center, spacing: 10) {
+      Image(systemName: sherpaRuntimeIcon)
+        .foregroundStyle(sherpaRuntimeTint)
+        .frame(width: 24)
+      VStack(alignment: .leading, spacing: 2) {
+        Text("sherpa-onnx local streaming runtime")
+          .font(.caption.weight(.semibold))
+        Text(sherpaRuntimeDetail)
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+      }
+      Spacer()
+      switch sherpaRuntime.runtimeState {
+      case .installed:
+        Text("Installed")
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.green)
+      case .installing:
+        ProgressView()
+          .controlSize(.small)
+      case .notInstalled, .failed:
+        Button("Install Runtime") {
+          Task { await sherpaRuntime.installRuntime() }
+        }
+      }
+    }
+    .padding(10)
+    .background(
+      RoundedRectangle(cornerRadius: 10, style: .continuous)
+        .fill(Color(nsColor: .controlBackgroundColor).opacity(0.7))
+    )
+  }
+
+  private var sherpaRuntimeIcon: String {
+    switch sherpaRuntime.runtimeState {
+    case .installed: return "checkmark.circle.fill"
+    case .installing: return "arrow.down.circle"
+    case .failed: return "exclamationmark.triangle.fill"
+    case .notInstalled: return "shippingbox"
+    }
+  }
+
+  private var sherpaRuntimeTint: Color {
+    switch sherpaRuntime.runtimeState {
+    case .installed: return .green
+    case .installing: return .orange
+    case .failed: return .red
+    case .notInstalled: return .secondary
+    }
+  }
+
+  private var sherpaRuntimeDetail: String {
+    switch sherpaRuntime.runtimeState {
+    case .installed:
+      return "Ready for local streaming on this Mac."
+    case .installing:
+      return "Installing the pinned Python sherpa-onnx package."
+    case .failed(let message):
+      return message
+    case .notInstalled:
+      return "Experimental prerelease runtime. Requires Python 3 and installs sherpa-onnx locally."
+    }
+  }
+
+  private func localStreamingInstallLabel(for source: LocalStreamingModelSource) -> String {
+    switch sherpaRuntime.modelStates[source.id] ?? .notInstalled {
+    case .installed:
+      return "downloaded and ready"
+    case .installing:
+      return "downloading model files"
+    case .failed(let message):
+      return "download failed: \(message)"
+    case .notInstalled:
+      return "not downloaded"
+    }
+  }
+
+  private func localStreamingSizeLabel(for source: LocalStreamingModelSource) -> String {
+    guard let size = source.approximateSizeMB, size > 0 else {
+      return "size shown after model metadata is known"
+    }
+    return "~\(size) MB"
+  }
+
+  @ViewBuilder
+  private var selectedLocalModelCallout: some View {
+    if let model = selectedLocalModel, localModels.isInstalled(model.id) {
+      let state = localModels.installState(for: model.id)
+      HStack(alignment: .center, spacing: 12) {
+        Image(systemName: selectedLocalModelStatusIcon(for: state))
+          .foregroundStyle(localModelTint(for: state))
+          .font(.title3)
+          .frame(width: 24)
+
+        VStack(alignment: .leading, spacing: 3) {
+          Text(selectedLocalModelStatusTitle(for: state, model: model))
+            .font(.subheadline.weight(.semibold))
+          Text(selectedLocalModelStatusDetail(for: state, model: model))
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+
+        Spacer()
+
+        selectedLocalModelAction(for: state, model: model)
+      }
+      .padding(12)
+      .background(
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+          .fill(Color(nsColor: .controlBackgroundColor))
+      )
+    }
+  }
+
+  @ViewBuilder
+  private func selectedLocalModelAction(
+    for state: LocalModelManager.InstallState,
+    model: LocalTranscriptionModel
+  ) -> some View {
+    switch state {
+    case .installed:
+      if settings.transcriptionMode == .localModel,
+        settings.localTranscriptionMode == .streaming,
+        !model.supportsLiveStreaming {
+        Button("Use Offline") {
+          settings.localTranscriptionMode = .batch
+        }
+      } else if settings.transcriptionMode == .localModel {
+        VStack(alignment: .trailing, spacing: 6) {
+          Label("Ready", systemImage: "checkmark.circle.fill")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.green)
+          Button("Prepare Model") {
+            Task { await localModels.install(model) }
+          }
+          .font(.caption)
+        }
+      } else {
+        Button("Use Local Mode") {
+          settings.transcriptionMode = .localModel
+        }
+      }
+    case .installing:
+      ProgressView()
+        .controlSize(.small)
+    case .notInstalled, .failed:
+      Button("Download Selected") {
+        Task { await localModels.install(model) }
+      }
+    }
+  }
+
+  private var selectedLocalModel: LocalTranscriptionModel? {
+    localTranscriptionModels.first { $0.id == settings.localTranscriptionModel }
+  }
+
+  private var localTranscriptionModels: [LocalTranscriptionModel] {
+    localModels.availableModels
+  }
+
+  private var localTranscriptionOptions: [ModelCatalog.Option] {
+    localModels.availableModels
+      .filter { localModels.isInstalled($0.id) }
+      .map(\.option)
+  }
+
+  private var localPostProcessingOptions: [ModelCatalog.Option] {
+    let builtIn = ModelCatalog.postProcessing.filter {
+      PostProcessingManager.isLocalPostProcessingModel($0.id)
+    }
+    let downloaded = localPostProcessingModels.availableModels
+      .filter { localPostProcessingModels.isInstalled($0.id) }
+      .map(\.option)
+    return builtIn + downloaded
+  }
+
+  private var cloudPostProcessingOptions: [ModelCatalog.Option] {
+    ModelCatalog.postProcessing.filter {
+      !PostProcessingManager.isLocalPostProcessingModel($0.id)
+    }
+  }
+
+  private var localStreamingModels: [LocalTranscriptionModel] {
+    localTranscriptionModels.filter(\.supportsLiveStreaming)
+  }
+
+  private var canImportHuggingFaceModel: Bool {
+    huggingFaceRepoID.split(separator: "/").count == 2
+      && !huggingFaceModelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+  }
+
+  private var canAddStreamingModelSource: Bool {
+    streamingHuggingFaceRepoID.split(separator: "/").count == 2
+      && !streamingHuggingFaceModelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+  }
+
+  private var isCustomBatchTranscriptionModel: Bool {
+    let model = settings.batchTranscriptionModel.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !model.isEmpty else { return false }
+    return !ModelCatalog.batchTranscription.contains {
+      $0.id.caseInsensitiveCompare(model) == .orderedSame
+    }
+  }
+
+  private var selectedRecommendedStreamingSource: LocalStreamingModelSource? {
+    LocalModelManager.recommendedStreamingModelSources.first {
+      $0.id == selectedRecommendedStreamingSourceID
+    } ?? LocalModelManager.recommendedStreamingModelSources.first
+  }
+
+  private func openHuggingFaceModelSearch() {
+    guard let url = URL(
+      string: "https://huggingface.co/models?library=coreml&sort=downloads&search=whisperkit%20whisper"
+    ) else { return }
+    NSWorkspace.shared.open(url)
+  }
+
+  private func openLocalStreamingModelSearch() {
+    guard let url = URL(
+      string: "https://huggingface.co/models?pipeline_tag=automatic-speech-recognition&sort=downloads"
+        + "&search=sherpa-onnx%20streaming%20zipformer"
+    ) else { return }
+    NSWorkspace.shared.open(url)
+  }
+
+  private func installHuggingFaceModel() {
+    do {
+      let model = try localModels.importHuggingFaceModel(
+        repoID: huggingFaceRepoID,
+        modelName: huggingFaceModelName
+      )
+      huggingFaceImportError = nil
+      Task { await localModels.install(model) }
+    } catch {
+      huggingFaceImportError = error.localizedDescription
+    }
+  }
+
+  private func addStreamingModelSource() {
+    do {
+      _ = try localModels.addStreamingModelSource(
+        repoID: streamingHuggingFaceRepoID,
+        modelName: streamingHuggingFaceModelName
+      )
+      streamingHuggingFaceImportError = nil
+    } catch {
+      streamingHuggingFaceImportError = error.localizedDescription
+    }
+  }
+
+  private func addSelectedStreamingModelSource() {
+    guard let source = selectedRecommendedStreamingSource else { return }
+    do {
+      _ = try localModels.addStreamingModelSource(source)
+      streamingHuggingFaceImportError = nil
+    } catch {
+      streamingHuggingFaceImportError = error.localizedDescription
+    }
+  }
+
+  private func firstInstalledStreamingSourceID(excluding excludedID: String? = nil) -> String? {
+    localModels.streamingModelSources.first {
+      $0.id != excludedID && (sherpaRuntime.modelStates[$0.id] ?? .notInstalled) == .installed
+    }?.id
+  }
+
+  private func firstInstalledLocalTranscriptionModelID(excluding excludedID: String? = nil) -> String? {
+    localModels.availableModels.first {
+      $0.id != excludedID && localModels.isInstalled($0.id)
+    }?.id
+  }
+
+  private func localModelSizeLabel(for model: LocalTranscriptionModel) -> String {
+    guard model.approximateSizeMB > 0 else {
+      return "\(model.engine.capitalized) · size confirmed during download"
+    }
+    return "\(model.engine.capitalized) · ~\(model.approximateSizeMB) MB"
+  }
+
+  private func selectedLocalModelStatusIcon(for state: LocalModelManager.InstallState) -> String {
+    switch state {
+    case .installed:
+      return settings.transcriptionMode == .localModel ? "checkmark.circle.fill" : "switch.2"
+    case .installing:
+      return "arrow.down.circle.fill"
+    case .notInstalled:
+      return "arrow.down.circle"
+    case .failed:
+      return "exclamationmark.triangle.fill"
+    }
+  }
+
+  private func selectedLocalModelStatusTitle(
+    for state: LocalModelManager.InstallState,
+    model: LocalTranscriptionModel
+  ) -> String {
+    switch state {
+    case .installed:
+      if settings.localTranscriptionMode == .streaming, !model.supportsLiveStreaming {
+        return "\(model.displayName) is offline-only"
+      }
+      return settings.transcriptionMode == .localModel
+        ? "\(model.displayName) is ready"
+        : "\(model.displayName) is downloaded"
+    case .installing:
+      return "Downloading \(model.displayName)"
+    case .notInstalled:
+      return "Download \(model.displayName)"
+    case .failed:
+      return "Download failed"
+    }
+  }
+
+  private func selectedLocalModelStatusDetail(
+    for state: LocalModelManager.InstallState,
+    model: LocalTranscriptionModel
+  ) -> String {
+    switch state {
+    case .installed:
+      if settings.localTranscriptionMode == .streaming, !model.supportsLiveStreaming {
+        return "This model can transcribe after recording stops, but it cannot stream live."
+      }
+      return settings.transcriptionMode == .localModel
+        ? "Hold your recording shortcut; transcription runs locally when you stop."
+        : "Switch to Local Model mode to run this model instead of a cloud provider."
+    case .installing:
+      return "Keep Settings open while the model download finishes."
+    case .notInstalled:
+      return "Download once, then this Mac can transcribe with it offline."
+    case .failed(let message):
+      return message
+    }
+  }
+
+  private func localModelIcon(for state: LocalModelManager.InstallState) -> String {
+    switch state {
+    case .installed:
+      return "checkmark.circle.fill"
+    case .installing:
+      return "arrow.down.circle.fill"
+    case .notInstalled:
+      return "icloud.and.arrow.down"
+    case .failed:
+      return "exclamationmark.triangle.fill"
+    }
+  }
+
+  private func localModelTint(for state: LocalModelManager.InstallState) -> Color {
+    switch state {
+    case .installed:
+      return .green
+    case .installing:
+      return .brandLagoon
+    case .notInstalled:
+      return .secondary
+    case .failed:
+      return .red
     }
   }
 
@@ -994,10 +2240,9 @@ struct SettingsView: View {
     return identifier
   }
 
-
   private var postProcessingSettings: some View {
     LazyVStack(spacing: 20) {
-      if settings.isAssemblyAIModel {
+      if settings.isActiveAssemblyAILiveModel {
         preprocessingSettings
       } else {
         fullPostProcessingSettings
@@ -1131,61 +2376,20 @@ struct SettingsView: View {
           }
 
           VStack(alignment: .leading, spacing: 8) {
-            Picker("Output Language", selection: settingsBinding(\AppSettings.postProcessingOutputLanguage)) {
-              Text("English").tag("English")
-              Text("Spanish").tag("Spanish")
-              Text("French").tag("French")
-              Text("German").tag("German")
-              Text("Italian").tag("Italian")
-              Text("Portuguese").tag("Portuguese")
-              Text("Chinese").tag("Chinese")
-              Text("Japanese").tag("Japanese")
-              Text("Korean").tag("Korean")
-              Text("Russian").tag("Russian")
-              Text("Arabic").tag("Arabic")
-              Text("Hindi").tag("Hindi")
-            }
-            .pickerStyle(.menu)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(
-              RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
-            )
-            .speakTooltip("Let Speak know which language you want your polished transcript delivered in.")
-            .onChange(of: settings.postProcessingOutputLanguage) { _, _ in
-              if showSystemPromptPreview {
-                generateSystemPromptPreview()
-              }
-            }
+            Text("Post-processing location")
+              .font(.caption.weight(.semibold))
+              .foregroundStyle(.secondary)
+            postProcessingLocationSelector
 
-            Text("The language that the transcription will be output in.")
+            Text("Choose whether cleanup runs locally on this Mac or remotely through OpenRouter.")
               .font(.caption)
               .foregroundStyle(.secondary)
           }
 
-          ModelPicker(
-            title: "Post-processing Model",
-            help: "We clean up the transcript before delivery using this model.",
-            options: ModelCatalog.postProcessing,
-            value: settingsBinding(\AppSettings.postProcessingModel),
-            usesDetailedChooser: true
-          )
-
-          VStack(alignment: .leading) {
-            HStack {
-              Text("Temperature")
-              Spacer()
-              Text(
-                settings.postProcessingTemperature,
-                format: .number.precision(.fractionLength(2))
-              )
-              .font(.caption.monospacedDigit())
-              .foregroundStyle(.secondary)
-            }
-            Slider(
-              value: settingsBinding(\AppSettings.postProcessingTemperature), in: 0...1, step: 0.05)
-            .speakTooltip("Lower values stay close to your words; higher values let Speak be more creative.")
+          if isCloudPostProcessingModelSelected {
+            remotePostProcessingSection
+          } else {
+            localPostProcessingSection
           }
         }
       }
@@ -1193,7 +2397,7 @@ struct SettingsView: View {
 
       SettingsCard(title: "Transcription Prompt", systemImage: "quote.bubble", tint: Color.mint) {
         VStack(alignment: .leading, spacing: 8) {
-          Text("This prompt is sent to an LLM after transcription (post-processing). Requires an OpenRouter API key.")
+          Text(postProcessingPromptHelpText)
             .font(.caption)
             .foregroundStyle(.secondary)
           TextEditor(text: settingsBinding(\AppSettings.postProcessingSystemPrompt))
@@ -1214,7 +2418,7 @@ struct SettingsView: View {
 
       SettingsCard(title: "System-Generated Parts", systemImage: "gearshape.2", tint: Color.brandAccentDeep) {
         VStack(alignment: .leading, spacing: 16) {
-          Text("Control which system-generated instructions are added to the prompt.")
+          Text(systemGeneratedPartsHelpText)
             .font(.caption)
             .foregroundStyle(.secondary)
 
@@ -1353,7 +2557,7 @@ struct SettingsView: View {
               }
             }
             .pickerStyle(.segmented)
-            
+
             Text(settings.ttsQuality.description)
               .font(.caption)
               .foregroundStyle(.secondary)
@@ -1508,6 +2712,462 @@ struct SettingsView: View {
   private var pronunciationSettings: some View {
     PronunciationDictionaryView()
       .environmentObject(environment.pronunciationManager)
+  }
+
+  private var remotePostProcessingSection: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      VStack(alignment: .leading, spacing: 8) {
+        Picker("Output Language", selection: settingsBinding(\AppSettings.postProcessingOutputLanguage)) {
+          Text("English").tag("English")
+          Text("Spanish").tag("Spanish")
+          Text("French").tag("French")
+          Text("German").tag("German")
+          Text("Italian").tag("Italian")
+          Text("Portuguese").tag("Portuguese")
+          Text("Chinese").tag("Chinese")
+          Text("Japanese").tag("Japanese")
+          Text("Korean").tag("Korean")
+          Text("Russian").tag("Russian")
+          Text("Arabic").tag("Arabic")
+          Text("Hindi").tag("Hindi")
+        }
+        .pickerStyle(.menu)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+          RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .speakTooltip("Let Speak know which language you want your polished transcript delivered in.")
+        .onChange(of: settings.postProcessingOutputLanguage) { _, _ in
+          if showSystemPromptPreview {
+            generateSystemPromptPreview()
+          }
+        }
+
+        Text("The language that the transcription will be output in.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+
+      ModelPicker(
+        title: "Remote Post-processing Model",
+        help: """
+        Choose the OpenRouter model Speak will call for cloud LLM cleanup. \
+        Mini and Lite models are faster and cheaper.
+        """,
+        options: cloudPostProcessingOptions,
+        value: cloudPostProcessingModelBinding,
+        usesDetailedChooser: true
+      )
+
+      SettingsInlineInfo(
+        title: "Remote post-processing uses OpenRouter",
+        message:
+          """
+          Speak sends transcript cleanup requests for this model to OpenRouter. \
+          Add an OpenRouter API key in Settings > API Keys before using remote post-processing.
+          """,
+        systemImage: "network"
+      )
+
+      if !isOpenRouterKeyStored {
+        HStack(alignment: .center, spacing: 10) {
+          Label("OpenRouter API key missing", systemImage: "exclamationmark.triangle.fill")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.orange)
+          Text(
+            settings.postProcessingEnabled
+              ? "Remote post-processing will be skipped until a key is saved."
+              : "Save a key before enabling remote post-processing."
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          Spacer()
+          Button("Add OpenRouter Key") {
+            sidebarSelection = .settings(.apiKeys)
+          }
+          .buttonStyle(.borderedProminent)
+          .tint(.orange)
+        }
+        .padding(12)
+        .background(
+          RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(Color.orange.opacity(0.10))
+        )
+        .overlay(
+          RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .stroke(Color.orange.opacity(0.25), lineWidth: 1)
+        )
+      }
+
+      VStack(alignment: .leading) {
+        HStack {
+          Text("Temperature")
+          Spacer()
+          Text(
+            settings.postProcessingTemperature,
+            format: .number.precision(.fractionLength(2))
+          )
+          .font(.caption.monospacedDigit())
+          .foregroundStyle(.secondary)
+        }
+        Slider(
+          value: settingsBinding(\AppSettings.postProcessingTemperature), in: 0...1, step: 0.05)
+        .speakTooltip("Lower values stay close to your words; higher values let Speak be more creative.")
+      }
+    }
+  }
+
+  private var localPostProcessingSection: some View {
+    VStack(alignment: .leading, spacing: 16) {
+      HStack(spacing: 8) {
+        Image(systemName: "lock.shield.fill")
+          .foregroundStyle(Color.green)
+          .imageScale(.small)
+        Text("Local Post-processing - private on this Mac")
+          .font(.subheadline.weight(.semibold))
+          .foregroundStyle(Color.green)
+      }
+      .padding(.horizontal, 12)
+      .padding(.vertical, 6)
+      .background(
+        Capsule()
+          .fill(Color.green.opacity(0.12))
+      )
+
+      Text(
+        """
+        Local post-processing is separate from OpenRouter and cloud LLMs. Use the built-in rules \
+        model for instant cleanup, or download GGUF instruction models from Hugging Face for local LLM cleanup.
+        """
+      )
+      .font(.caption)
+      .foregroundStyle(.secondary)
+
+      Label(
+        """
+        Small local models can ignore strict formatting or style instructions. For reliable prompt-following, \
+        use a larger local instruction model or a remote post-processing model.
+        """,
+        systemImage: "exclamationmark.triangle"
+      )
+      .font(.caption)
+      .foregroundStyle(.secondary)
+
+      localPostProcessingQuickStart
+      if !localPostProcessingModels.runtimeState.isInstalled {
+        localPostProcessingRuntimeStatus
+      }
+
+      ModelPicker(
+        title: "Local Post-processing Model",
+        help: """
+        Used for local-only cleanup after transcription. Built-in rules need no runtime; \
+        Hugging Face GGUF models need the local llama.cpp runtime and a model download.
+        """,
+        options: localPostProcessingOptions,
+        value: localPostProcessingModelBinding,
+        allowsCustom: false
+      )
+
+      localPostProcessingManualImport
+
+      VStack(spacing: 10) {
+        ForEach(ModelCatalog.postProcessing.filter { $0.id == LocalPostProcessingModelManager.builtInRulesModelID }) { option in
+          builtInLocalPostProcessingRow(option)
+        }
+        ForEach(localPostProcessingModels.availableModels) { model in
+          localPostProcessingModelRow(model)
+        }
+      }
+    }
+    .padding(12)
+    .background(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .fill(Color.green.opacity(0.08))
+    )
+    .overlay(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .stroke(Color.green.opacity(0.2), lineWidth: 1)
+    )
+  }
+
+  private var localPostProcessingQuickStart: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      localModelStep(
+        number: "1",
+        title: "Choose Local",
+        detail: "This switches transcript cleanup away from OpenRouter."
+      )
+      localModelStep(
+        number: "2",
+        title: "Download a local LLM model",
+        detail: """
+        GGUF models come from Hugging Face and show their approximate size before download. \
+        The built-in rules model stays available with no download.
+        """
+      )
+      localModelStep(
+        number: "3",
+        title: "Record normally",
+        detail: "Speak runs cleanup locally after transcription. Downloaded models use the app-owned llama.cpp runtime."
+      )
+    }
+    .padding(12)
+    .background(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .fill(Color.green.opacity(0.08))
+    )
+  }
+
+  private var localPostProcessingRuntimeStatus: some View {
+    HStack(alignment: .top, spacing: 12) {
+      Image(systemName: localPostProcessingRuntimeIcon)
+        .foregroundStyle(localPostProcessingRuntimeTint)
+        .frame(width: 24)
+
+      VStack(alignment: .leading, spacing: 4) {
+        Text("Local LLM runtime")
+          .font(.subheadline.weight(.semibold))
+        Text("Required only for downloaded Hugging Face GGUF models. Built-in cleanup works without it.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        if case .failed(let message) = localPostProcessingModels.runtimeState {
+          Text(message)
+            .font(.caption2)
+            .foregroundStyle(.red)
+        }
+      }
+
+      Spacer()
+
+      switch localPostProcessingModels.runtimeState {
+      case .installed:
+        Text("Installed")
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.green)
+      case .installing:
+        ProgressView()
+          .controlSize(.small)
+      case .notInstalled, .failed:
+        Button("Install Runtime") {
+          Task { await localPostProcessingModels.installRuntime() }
+        }
+      }
+    }
+    .padding(12)
+    .background(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .fill(Color(nsColor: .controlBackgroundColor))
+    )
+  }
+
+  private var localPostProcessingManualImport: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      Text("Add a Hugging Face GGUF model")
+        .font(.caption.weight(.semibold))
+      Text(
+        """
+        Use this for compatible llama.cpp/GGUF instruction models. Paste the Hugging Face repo and exact \
+        .gguf filename; Speak will download and run it locally.
+        """
+      )
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      HStack(spacing: 10) {
+        TextField("Repo, e.g. unsloth/Qwen3-0.6B-GGUF", text: $localPostProcessingRepoID)
+          .textFieldStyle(.roundedBorder)
+        TextField("File, e.g. Qwen3-0.6B-Q4_K_M.gguf", text: $localPostProcessingFilename)
+          .textFieldStyle(.roundedBorder)
+      }
+      HStack(spacing: 10) {
+        TextField("Size MB (optional)", text: $localPostProcessingSizeMB)
+          .textFieldStyle(.roundedBorder)
+          .frame(width: 140)
+        Button("Add Manual Model") {
+          addLocalPostProcessingModel()
+        }
+        .buttonStyle(.bordered)
+        Spacer()
+      }
+      if let localPostProcessingImportError {
+        Text(localPostProcessingImportError)
+          .font(.caption)
+          .foregroundStyle(.red)
+      }
+    }
+    .padding(12)
+    .background(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .fill(Color(nsColor: .controlBackgroundColor))
+    )
+  }
+
+  private func builtInLocalPostProcessingRow(_ option: ModelCatalog.Option) -> some View {
+    let isSelected = PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel)
+      && settings.postProcessingModel.caseInsensitiveCompare(option.id) == .orderedSame
+    return localModelRowContainer(isSelected: isSelected, tint: .green) {
+      HStack(alignment: .top, spacing: 12) {
+      Image(systemName: "wand.and.stars")
+        .foregroundStyle(Color.green)
+        .frame(width: 24)
+
+      VStack(alignment: .leading, spacing: 4) {
+        HStack(spacing: 8) {
+          Text(option.displayName)
+            .font(.subheadline.weight(.semibold))
+          if isSelected {
+            localModelBadge("Selected", tint: .green)
+          }
+          localModelBadge("Local", tint: .green)
+          localModelBadge("Built in", tint: .secondary)
+        }
+        if let description = option.description {
+          Text(description)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        Text("Ready now - 0 MB download - local only")
+          .font(.caption2.monospacedDigit())
+          .foregroundStyle(.tertiary)
+      }
+
+      Spacer()
+
+      if isSelected {
+        selectedModelBadge()
+      } else {
+        Button("Use") {
+          settings.postProcessingModel = option.id
+        }
+      }
+      }
+    }
+  }
+
+  // swiftlint:disable:next function_body_length
+  private func localPostProcessingModelRow(_ model: LocalPostProcessingModel) -> some View {
+      let state = localPostProcessingModels.installState(for: model.id)
+      let isSelected = state == .installed
+        && settings.postProcessingModel.caseInsensitiveCompare(model.id) == .orderedSame
+      return localModelRowContainer(isSelected: isSelected, tint: .green) {
+        HStack(alignment: .top, spacing: 12) {
+        Image(systemName: localPostProcessingModelIcon(for: state))
+          .foregroundStyle(localPostProcessingModelTint(for: state))
+          .frame(width: 24)
+
+        VStack(alignment: .leading, spacing: 4) {
+          HStack(spacing: 8) {
+            Text(model.displayName)
+              .font(.subheadline.weight(.semibold))
+            if isSelected {
+              localModelBadge("Selected", tint: .green)
+            }
+            localModelBadge("Hugging Face", tint: Color.brandAccentDeep)
+          }
+          Text(model.description)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+          Text("\(model.sizeLabel) - \(model.repoID) / \(model.filename)")
+            .font(.caption2.monospacedDigit())
+            .foregroundStyle(.tertiary)
+          if case .failed(let message) = state {
+            Text(message)
+              .font(.caption2)
+              .foregroundStyle(.red)
+          }
+        }
+
+        Spacer()
+
+        switch state {
+        case .installed:
+          VStack(alignment: .trailing, spacing: 8) {
+            if isSelected {
+              selectedModelBadge()
+            } else {
+              Button("Use") {
+                settings.postProcessingModel = model.id
+              }
+            }
+            Button("Delete") {
+              localPostProcessingModels.deleteModel(model)
+              if settings.postProcessingModel.caseInsensitiveCompare(model.id) == .orderedSame {
+                settings.postProcessingModel = LocalPostProcessingModelManager.builtInRulesModelID
+              }
+            }
+          }
+        case .installing:
+          VStack(alignment: .trailing, spacing: 6) {
+            ProgressView()
+              .controlSize(.small)
+            Text("Downloading")
+              .font(.caption2)
+              .foregroundStyle(.secondary)
+          }
+        case .notInstalled, .failed:
+          VStack(alignment: .trailing, spacing: 8) {
+            Button("Download") {
+              Task { await localPostProcessingModels.installModel(model) }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  private var localPostProcessingRuntimeIcon: String {
+    switch localPostProcessingModels.runtimeState {
+    case .installed: return "checkmark.circle.fill"
+    case .installing: return "arrow.down.circle.fill"
+    case .failed: return "exclamationmark.triangle.fill"
+    case .notInstalled: return "shippingbox"
+    }
+  }
+
+  private var localPostProcessingRuntimeTint: Color {
+    switch localPostProcessingModels.runtimeState {
+    case .installed: return .green
+    case .installing: return .brandAccentDeep
+    case .failed: return .red
+    case .notInstalled: return .secondary
+    }
+  }
+
+  private func localPostProcessingModelIcon(for state: LocalPostProcessingModelManager.InstallState) -> String {
+    switch state {
+    case .installed: return "checkmark.circle.fill"
+    case .installing: return "arrow.down.circle.fill"
+    case .failed: return "exclamationmark.triangle.fill"
+    case .notInstalled: return "externaldrive.badge.plus"
+    }
+  }
+
+  private func localPostProcessingModelTint(for state: LocalPostProcessingModelManager.InstallState) -> Color {
+    switch state {
+    case .installed: return .green
+    case .installing: return .brandAccentDeep
+    case .failed: return .red
+    case .notInstalled: return .secondary
+    }
+  }
+
+  private func addLocalPostProcessingModel() {
+    localPostProcessingImportError = nil
+    let size = Int(localPostProcessingSizeMB.trimmingCharacters(in: .whitespacesAndNewlines))
+    do {
+      _ = try localPostProcessingModels.addHuggingFaceModel(
+        repoID: localPostProcessingRepoID,
+        filename: localPostProcessingFilename,
+        approximateSizeMB: size
+      )
+      localPostProcessingRepoID = ""
+      localPostProcessingFilename = ""
+      localPostProcessingSizeMB = ""
+    } catch {
+      localPostProcessingImportError = error.localizedDescription
+    }
   }
 
   private var apiKeySettings: some View {
@@ -2395,7 +4055,7 @@ struct SettingsView: View {
           Text("Transfer your API keys and settings to the iOS app by scanning a QR code.")
             .font(.callout)
             .foregroundStyle(.secondary)
-          
+
           Button {
             showingConfigTransfer = true
           } label: {
@@ -2589,7 +4249,7 @@ struct SettingsView: View {
   }
 
   private func syncAssemblyAIKeytermsFromPronunciation() {
-    guard settings.isAssemblyAIModel else { return }
+    guard settings.isActiveAssemblyAILiveModel else { return }
 
     let seedTerms = pronunciationSeedKeyterms()
     let ignoredPronunciationTerms = Set(
@@ -2618,7 +4278,7 @@ struct SettingsView: View {
   }
 
   private func syncIgnoredPronunciationKeyterms(seedTerms: [String]? = nil) {
-    guard settings.isAssemblyAIModel else { return }
+    guard settings.isActiveAssemblyAILiveModel else { return }
 
     let pronunciationTerms = seedTerms ?? pronunciationSeedKeyterms()
     let selectedTermSet = Set(parseAssemblyAIKeyterms(settings.assemblyAIKeyterms).map(canonicalKeyterm))
@@ -2669,7 +4329,18 @@ struct SettingsView: View {
   }
 
   @MainActor
+  // swiftlint:disable:next function_body_length
   private func generateSystemPromptPreview() {
+    if PostProcessingManager.isBuiltInLocalPostProcessingModel(settings.postProcessingModel) {
+      self.systemPromptPreview = """
+      The built-in rules cleaner does not send a prompt.
+
+      It runs deterministic local cleanup rules on the raw transcript. Custom prompts, lexicon directives, \
+      context tags, and final processing instructions apply to remote models and downloaded local LLMs only.
+      """
+      return
+    }
+
     var sections: [String] = []
 
     // Base prompt
@@ -2686,7 +4357,7 @@ struct SettingsView: View {
 
     var finalBasePrompt = basePrompt
     if !language.isEmpty {
-      finalBasePrompt = "Always output using \(language). \(basePrompt)"
+      finalBasePrompt = "Always output using \(language).\n\n\(basePrompt)"
     }
 
     // Lexicon directives section
@@ -2712,6 +4383,25 @@ struct SettingsView: View {
       sections.append("Return only the processed text and nothing else. The following message is a raw transcript:")
     }
 
+    let effectiveSystemPrompt = sections.joined(separator: "\n\n")
+
+    if PostProcessingManager.isDownloadedLocalPostProcessingModel(settings.postProcessingModel) {
+      let localUserPrompt = LocalPostProcessingModelManager.localUserPrompt(
+        systemPrompt: effectiveSystemPrompt,
+        rawText: "{{RAW_TRANSCRIPT}}"
+      )
+      self.systemPromptPreview = """
+      System prompt sent to the local model:
+
+      \(LocalPostProcessingModelManager.localSystemPrompt(effectiveSystemPrompt))
+
+      User prompt sent to the local model:
+
+      \(localUserPrompt)
+      """
+      return
+    }
+
     sections.append(
       """
       User message preview:
@@ -2732,6 +4422,32 @@ private struct LocaleOption: Identifiable, Equatable {
   let displayName: String
   let identifier: String
   var id: String { identifier }
+}
+
+private struct SettingsInlineInfo: View {
+  let title: String
+  let message: String
+  let systemImage: String
+
+  var body: some View {
+    HStack(alignment: .top, spacing: 10) {
+      Image(systemName: systemImage)
+        .foregroundStyle(Color.brandLagoon)
+        .frame(width: 20)
+      VStack(alignment: .leading, spacing: 3) {
+        Text(title)
+          .font(.caption.weight(.semibold))
+        Text(message)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+    }
+    .padding(12)
+    .background(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .fill(Color.brandLagoon.opacity(0.08))
+    )
+  }
 }
 
 private struct SettingsCard<Content: View>: View {
@@ -2784,6 +4500,7 @@ private struct ModelPicker: View {
   let help: String?
   let options: [ModelCatalog.Option]
   let usesDetailedChooser: Bool
+  let allowsCustom: Bool
   @Binding var value: String
 
   private struct ModelTagBadges: View {
@@ -2816,6 +4533,7 @@ private struct ModelPicker: View {
       case .cheap: return Color.green.opacity(0.14)
       case .quality: return Color.brandAccent.opacity(0.12)
       case .leading: return Color.brandAccentWarm.opacity(0.14)
+      case .privacy: return Color.brandLagoon.opacity(0.14)
       }
     }
 
@@ -2825,6 +4543,7 @@ private struct ModelPicker: View {
       case .cheap: return .green
       case .quality: return .brandAccent
       case .leading: return .brandAccentWarm
+      case .privacy: return .brandLagoon
       }
     }
   }
@@ -2980,12 +4699,14 @@ private struct ModelPicker: View {
     help: String? = nil,
     options: [ModelCatalog.Option],
     value: Binding<String>,
-    usesDetailedChooser: Bool = false
+    usesDetailedChooser: Bool = false,
+    allowsCustom: Bool = true
   ) {
     self.title = title
     self.help = help
     self.options = options
     self.usesDetailedChooser = usesDetailedChooser
+    self.allowsCustom = allowsCustom
     _value = value
 
     let trimmed = value.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2998,6 +4719,15 @@ private struct ModelPicker: View {
       DispatchQueue.main.async {
         value.wrappedValue = first.id
       }
+    } else if !allowsCustom, let first = options.first {
+      _selection = State(initialValue: first.id)
+      _customValue = State(initialValue: "")
+      DispatchQueue.main.async {
+        value.wrappedValue = first.id
+      }
+    } else if !allowsCustom {
+      _selection = State(initialValue: "")
+      _customValue = State(initialValue: "")
     } else {
       _selection = State(initialValue: ModelCatalog.customOptionID)
       _customValue = State(initialValue: trimmed)
@@ -3039,7 +4769,9 @@ private struct ModelPicker: View {
           ForEach(options) { option in
             Text(option.displayName).tag(option.id)
           }
-          Text("Custom…").tag(ModelCatalog.customOptionID)
+          if allowsCustom {
+            Text("Custom…").tag(ModelCatalog.customOptionID)
+          }
         }
         .pickerStyle(.menu)
         .padding(.horizontal, 12)
@@ -3075,7 +4807,9 @@ private struct ModelPicker: View {
         TextField("Custom model identifier", text: $customValue, prompt: Text("provider/model"))
           .textFieldStyle(.roundedBorder)
           .autocorrectionDisabled()
-          .speakTooltip("Type the exact provider/model identifier from your transcription service, such as openai/whisper-1.")
+          .speakTooltip(
+            "Type the exact provider/model identifier from your transcription service, such as openai/whisper-1."
+          )
       } else {
         HStack(spacing: 6) {
           Image(systemName: "info.circle")
@@ -3102,6 +4836,12 @@ private struct ModelPicker: View {
         value = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
       }
     }
+    .onChange(of: value) { _, newValue in
+      syncSelection(with: newValue)
+    }
+    .onChange(of: options.map(\.id)) { _, _ in
+      syncSelection(with: value)
+    }
   }
 
   private var selectedOption: ModelCatalog.Option? {
@@ -3118,6 +4858,43 @@ private struct ModelPicker: View {
       return description
     }
     return "Choose which model Speak should use for this step."
+  }
+
+  // swiftlint:disable:next cyclomatic_complexity
+  private func syncSelection(with newValue: String) {
+    let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    if let match = options.first(where: { $0.id.caseInsensitiveCompare(trimmed) == .orderedSame }) {
+      if selection != match.id {
+        selection = match.id
+      }
+      if !customValue.isEmpty {
+        customValue = ""
+      }
+    } else if allowsCustom {
+      if selection != ModelCatalog.customOptionID {
+        selection = ModelCatalog.customOptionID
+      }
+      if customValue != trimmed {
+        customValue = trimmed
+      }
+    } else if let first = options.first {
+      if selection != first.id {
+        selection = first.id
+      }
+      if !customValue.isEmpty {
+        customValue = ""
+      }
+      if value != first.id {
+        value = first.id
+      }
+    } else {
+      if !selection.isEmpty {
+        selection = ""
+      }
+      if !customValue.isEmpty {
+        customValue = ""
+      }
+    }
   }
 }
 
@@ -3167,9 +4944,7 @@ private struct APIKeyValidationDebugDetailsView: View {
     }
   }
 
-  private func debugSection<Content: View>(title: String, @ViewBuilder content: () -> Content)
-    -> some View
-  {
+  private func debugSection<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
     VStack(alignment: .leading, spacing: 8) {
       Text(title.uppercased())
         .font(.caption2.weight(.semibold))
@@ -3294,12 +5069,12 @@ private struct PronunciationEntryView: View {
   }
 }
 
-// @Implement: This view allows management of all settings within the app settings class. Each logical grouping of settings should have it's own segment in a tab bar at the top of the view. All settings should be immediately persisted through the AppSettings class when they are changed. Break down the view in to smaller components for easier management.
-// - API key management: This should save to key vault. When a key is added it should validate using an api call. Each key should have red/green indicators to confirm it's saved or not.
-// - General configuration (including light/dark mode), delete any caches or audio files. Text Output configuration. Show status bar only/run in background mode but still can open the app from the status bar.
-// - Transcription configuration - if it's using a live transcribe with osx native (or select an api to stream to) or if it's batch and will send the file after. And which model to use for each of those and any model configuration
+// @Implement: This view manages the app settings class, grouped into logical setting sections.
+// - API key management: save keys to key vault and validate them with an API call.
+// - General configuration: appearance, caches, audio files, text output, and status bar behaviour.
+// - Transcription configuration: live/batch mode, provider, selected model, and model configuration.
 // - Post-processing configuration. System prompt and temperature, model selection, enabled or disabled.
-// - Hotkey management and configuration: This should allow selection of a hotkey (default should be the fn key). Probably a https://github.com/sindresorhus/KeyboardShortcuts is a good choice
-// - Permission management: Call from permissions manager to see and ask for permissions and allow the user to validate easily for each one if it was correctly granted. Perhaps a test button that tries to use the permission and validates the outcome somehow.
+// - Hotkey management and configuration: Allow selection of a hotkey, defaulting to the fn key.
+// - Permission management: Let users inspect and validate required permissions.
 // And then any other sections you think are relevant. This should be presented in a concise but user-friendly format.
 // swiftlint:enable file_length type_body_length

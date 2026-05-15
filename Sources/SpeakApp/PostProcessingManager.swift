@@ -7,9 +7,11 @@ struct PostProcessingOutcome {
   let processed: String
   let response: ChatResponse?
   let systemPrompt: String
+  let promptPayload: PostProcessingPromptPayload?
 }
 
 @MainActor
+// swiftlint:disable:next type_body_length
 final class PostProcessingManager: ObservableObject {
   private let client: ChatLLMClient
   private let settings: AppSettings
@@ -53,19 +55,33 @@ final class PostProcessingManager: ObservableObject {
     self.personalLexicon = personalLexicon
   }
 
+  // swiftlint:disable:next function_body_length
   func process(
     rawText: String,
     context: PersonalLexiconContext,
     corrections: PersonalLexiconHistorySummary?,
     onStreamingUpdate: ((String) -> Void)? = nil
   ) async -> Result<PostProcessingOutcome, Error> {
+    if Self.isEffectivelyEmptyTranscript(rawText) {
+      return .success(
+        .init(
+          original: rawText,
+          processed: "",
+          response: nil,
+          systemPrompt: basePrompt(),
+          promptPayload: nil
+        )
+      )
+    }
+
     guard settings.postProcessingEnabled else {
       return .success(
         .init(
           original: rawText,
           processed: rawText,
           response: nil,
-          systemPrompt: basePrompt()
+          systemPrompt: basePrompt(),
+          promptPayload: nil
         )
       )
     }
@@ -75,6 +91,48 @@ final class PostProcessingManager: ObservableObject {
       ? "inception/mercury"
       : settings.postProcessingModel
 
+    if Self.isBuiltInLocalPostProcessingModel(model) {
+      let cleaned = Self.processLocally(rawText)
+      return .success(
+        .init(
+          original: rawText,
+          processed: cleaned,
+          response: nil,
+          systemPrompt: "Local offline transcript cleanup",
+          promptPayload: nil
+        )
+      )
+    }
+
+    if Self.isDownloadedLocalPostProcessingModel(model) {
+      do {
+        let cleaned = try await LocalPostProcessingModelManager.shared.process(
+          modelID: model,
+          rawText: rawText,
+          systemPrompt: systemPrompt,
+          temperature: settings.postProcessingTemperature
+        )
+        let promptPayload = PostProcessingPromptPayload(
+          modelIdentifier: model,
+          customPrompt: customPromptForDebug(),
+          systemPrompt: LocalPostProcessingModelManager.localSystemPrompt(systemPrompt),
+          userPrompt: LocalPostProcessingModelManager.localUserPrompt(systemPrompt: systemPrompt, rawText: rawText)
+        )
+        return .success(
+          .init(
+            original: rawText,
+            processed: cleaned,
+            response: nil,
+            systemPrompt: systemPrompt,
+            promptPayload: promptPayload
+          )
+        )
+      } catch {
+        log.error("Local post-processing failed: \(error.localizedDescription, privacy: .public)")
+        return .failure(error)
+      }
+    }
+
     let userMessage = """
     Clean the following raw transcript (data only). Remember: output only the cleaned transcript text.
 
@@ -82,6 +140,12 @@ final class PostProcessingManager: ObservableObject {
     \(rawText)
     </raw_transcript>
     """
+    let promptPayload = PostProcessingPromptPayload(
+      modelIdentifier: model,
+      customPrompt: customPromptForDebug(),
+      systemPrompt: systemPrompt,
+      userPrompt: userMessage
+    )
 
     // Try streaming if enabled and client supports it
     if settings.postProcessingStreamingEnabled,
@@ -106,7 +170,8 @@ final class PostProcessingManager: ObservableObject {
             original: rawText,
             processed: cleaned,
             response: nil,
-            systemPrompt: systemPrompt
+            systemPrompt: systemPrompt,
+            promptPayload: promptPayload
           )
         )
       } catch {
@@ -132,7 +197,8 @@ final class PostProcessingManager: ObservableObject {
           original: rawText,
           processed: cleaned,
           response: response,
-          systemPrompt: systemPrompt
+          systemPrompt: systemPrompt,
+          promptPayload: promptPayload
         )
       )
     } catch {
@@ -146,6 +212,10 @@ final class PostProcessingManager: ObservableObject {
       .trimmingCharacters(in: .whitespacesAndNewlines)
     let resolvedModel = configuredModel.isEmpty ? "inception/mercury" : configuredModel
 
+    if Self.isLocalPostProcessingModel(resolvedModel) {
+      return true
+    }
+
     guard let openRouterClient = client as? OpenRouterAPIClient else {
       return true
     }
@@ -156,6 +226,65 @@ final class PostProcessingManager: ObservableObject {
     }
 
     return await openRouterClient.hasStoredAPIKey()
+  }
+
+  static func isLocalPostProcessingModel(_ model: String) -> Bool {
+    isBuiltInLocalPostProcessingModel(model) || isDownloadedLocalPostProcessingModel(model)
+  }
+
+  static func isBuiltInLocalPostProcessingModel(_ model: String) -> Bool {
+    let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    return trimmed == LocalPostProcessingModelManager.builtInRulesModelID
+  }
+
+  static func isDownloadedLocalPostProcessingModel(_ model: String) -> Bool {
+    LocalPostProcessingModelManager.isDownloadedLocalModelID(
+      model.trimmingCharacters(in: .whitespacesAndNewlines)
+    )
+  }
+
+  static func processLocally(_ text: String) -> String {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return text }
+
+    var cleaned = trimmed.replacingOccurrences(
+      of: blankAudioMarkerPattern,
+      with: " ",
+      options: .regularExpression
+    )
+    cleaned = cleaned.replacingOccurrences(
+      of: #"[ \t]+"#,
+      with: " ",
+      options: .regularExpression
+    )
+    cleaned = cleaned.replacingOccurrences(
+      of: #"\s+([,.;:!?])"#,
+      with: "$1",
+      options: .regularExpression
+    )
+    cleaned = cleaned.replacingOccurrences(
+      of: #"([,.;:!?])([^\s\]\)"'])"#,
+      with: "$1 $2",
+      options: .regularExpression
+    )
+    cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+
+    guard let first = cleaned.first else { return cleaned }
+    let firstString = String(first)
+    let capitalizedFirst = firstString.uppercased()
+    if firstString != capitalizedFirst {
+      cleaned.replaceSubrange(cleaned.startIndex...cleaned.startIndex, with: capitalizedFirst)
+    }
+    return cleaned
+  }
+
+  static func isEffectivelyEmptyTranscript(_ text: String) -> Bool {
+    let withoutBlankAudioMarkers = text.replacingOccurrences(
+      of: blankAudioMarkerPattern,
+      with: " ",
+      options: .regularExpression
+    )
+    return withoutBlankAudioMarkers.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 
   private func basePrompt() -> String {
@@ -174,10 +303,16 @@ final class PostProcessingManager: ObservableObject {
     }
 
     if !language.isEmpty {
-      return "Always output using \(language). \(basePrompt)"
+      return "Always output using \(language).\n\n\(basePrompt)"
     }
 
     return basePrompt
+  }
+
+  private func customPromptForDebug() -> String? {
+    let trimmed = settings.postProcessingSystemPrompt
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
   }
 
   private func effectiveSystemPrompt(
@@ -277,7 +412,7 @@ final class PostProcessingManager: ObservableObject {
     }
     return existing
   }
+
+  private static let blankAudioMarkerPattern = #"(?i)\s*\[blank_audio\]\s*"#
+  // swiftlint:disable:next file_length
 }
-// @Implement This manager depends on the chat LLM protocol as a dependency and alongside app settings for any configuration. It can read the system prompt that should come with it and orchestrate sending the request off, receiving it, and sending it back to the caller.
-// The default system message should be "The following message is a raw transcription. Improve the transcription by fixing grammar, punctuation, and formatting while preserving the original meaning. Only ever return the processed transcription, no additional text."
-// The default model should use openrouter and "inception/mercury"

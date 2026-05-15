@@ -52,6 +52,8 @@ final class HotKeyManager: ObservableObject {
 	private var shortcutListeners: [KeyboardShortcut: [UUID: () -> Void]] = [:]
 	private var globalMonitor: Any?
 	private var localMonitor: Any?
+	private var lifecycleObservers: [NSObjectProtocol] = []
+	private var wasMonitoringBeforeRecording = false
 
 	init(permissionsManager: PermissionsManager, appSettings: AppSettings) {
 		self.permissionsManager = permissionsManager
@@ -62,6 +64,13 @@ final class HotKeyManager: ObservableObject {
 				doubleTapWindow: appSettings.doubleTapWindow
 			)
 		)
+		registerLifecycleObservers()
+	}
+
+	deinit {
+		for observer in lifecycleObservers {
+			NotificationCenter.default.removeObserver(observer)
+		}
 	}
 
 	func startMonitoring() {
@@ -109,6 +118,17 @@ final class HotKeyManager: ObservableObject {
 			self.localMonitor = nil
 		}
 		engine.stop()
+	}
+
+	func pauseForHotKeyRecording() {
+		wasMonitoringBeforeRecording = engine.isMonitoring || globalMonitor != nil || localMonitor != nil
+		stopMonitoring()
+	}
+
+	func resumeAfterHotKeyRecording() {
+		guard wasMonitoringBeforeRecording else { return }
+		wasMonitoringBeforeRecording = false
+		startMonitoring()
 	}
 
 	/// Restart monitoring with the current hotkey from settings.
@@ -166,5 +186,21 @@ final class HotKeyManager: ObservableObject {
 				handlers.values.forEach { $0() }
 			}
 		}
+	}
+
+	private func registerLifecycleObservers() {
+		let center = NotificationCenter.default
+		lifecycleObservers = [
+			center.addObserver(forName: .speakHotKeyShouldPause, object: nil, queue: .main) { [weak self] _ in
+				Task { @MainActor in
+					self?.pauseForHotKeyRecording()
+				}
+			},
+			center.addObserver(forName: .speakHotKeyDidChange, object: nil, queue: .main) { [weak self] _ in
+				Task { @MainActor in
+					self?.resumeAfterHotKeyRecording()
+				}
+			}
+		]
 	}
 }

@@ -36,6 +36,11 @@ final class MainManager: ObservableObject {
     appSettings.speedMode.usesLivePolish && appSettings.textOutputMethod != .clipboardOnly
   }
 
+  private var isStreamingTranscriptionMode: Bool {
+    appSettings.transcriptionMode == .liveNative
+      || (appSettings.transcriptionMode == .localModel && appSettings.localTranscriptionMode == .streaming)
+  }
+
   private var cachedRetryData: RetryData?
 
   private let appSettings: AppSettings
@@ -353,8 +358,12 @@ final class MainManager: ObservableObject {
       activeModel = appSettings.liveTranscriptionModel
     case .batchRemote:
       activeModel = appSettings.batchTranscriptionModel
+    case .localModel:
+      activeModel = appSettings.localTranscriptionMode == .streaming
+        ? appSettings.localStreamingModelSource
+        : appSettings.localTranscriptionModel
     }
-    let providerLabel = ModelCatalog.friendlyName(for: activeModel)
+    let providerLabel = captureHealthProviderLabel(for: activeModel)
     let latencyTier = ModelCatalog.allOptions.first(where: { $0.id == activeModel })?.latencyTier ?? .medium
 
     return CaptureHealthSnapshot(
@@ -363,6 +372,27 @@ final class MainManager: ObservableObject {
       providerLabel: providerLabel,
       latencyTier: latencyTier
     )
+  }
+
+  private func captureHealthProviderLabel(for modelID: String) -> String {
+    guard appSettings.transcriptionMode == .localModel else {
+      return ModelCatalog.friendlyName(for: modelID)
+    }
+    if appSettings.localTranscriptionMode == .streaming {
+      let source = LocalModelManager.shared.streamingModelSources.first { $0.id == modelID }
+        ?? LocalModelManager.recommendedStreamingModelSources.first { $0.id == modelID }
+      return source?.modelName ?? "Local Streaming"
+    }
+    guard let localModel = LocalModelManager.shared.model(for: modelID) else {
+      return ModelCatalog.friendlyName(for: modelID)
+    }
+    return shortLocalModelDisplayName(localModel.displayName)
+  }
+
+  private func shortLocalModelDisplayName(_ displayName: String) -> String {
+    let suffixRange = displayName.range(of: " from ", options: [.caseInsensitive, .backwards])
+    guard let suffixRange else { return displayName }
+    return String(displayName[..<suffixRange.lowerBound])
   }
 
   func userRequestedStopDueToError() {
@@ -487,6 +517,16 @@ final class MainManager: ObservableObject {
     return true
   }
 
+  private func rawTranscriptionSubheadline() -> String {
+    guard appSettings.transcriptionMode == .localModel else {
+      return "Preparing raw transcript"
+    }
+    if LocalModelManager.shared.isModelLoaded(appSettings.localTranscriptionModel) {
+      return "Transcribing locally on this Mac"
+    }
+    return "Loading local model and transcribing. First run can take a minute."
+  }
+
   private func startSession(trigger: SessionTriggerSource) async {
     guard activeSession == nil else { return }
     if await presentMissingLiveAPIKeyAlertIfNeeded() { return }
@@ -529,6 +569,7 @@ final class MainManager: ObservableObject {
     }
 
     if appSettings.showHUDDuringSessions {
+      permissionsManager.refresh(.microphone)
       hudManager.updateCaptureHealth(buildCaptureHealthSnapshot())
       hudManager.beginRecording()
     }
@@ -536,7 +577,7 @@ final class MainManager: ObservableObject {
     do {
       _ = try await audioFileManager.startRecording()
       startAudioLevelMonitoring()
-      if appSettings.transcriptionMode == .liveNative {
+      if isStreamingTranscriptionMode {
         try await transcriptionManager.startLiveTranscription()
       }
     } catch {
@@ -575,7 +616,7 @@ final class MainManager: ObservableObject {
 
     state = .processing
     session.recordingEnded = Date()
-    if appSettings.transcriptionMode == .liveNative {
+    if isStreamingTranscriptionMode {
       // Move the HUD off the "Recording" timer immediately. Otherwise the
       // user sees the recording timer frozen at the release time while we
       // close the audio file and drain the live provider's finalisation
@@ -604,7 +645,7 @@ final class MainManager: ObservableObject {
       session.recordingSummary = summary
       session.recordingEnded = summary.startedAt.addingTimeInterval(summary.duration)
 
-      if appSettings.transcriptionMode == .liveNative {
+      if isStreamingTranscriptionMode {
         session.transcriptionStarted = Date()
         let result = try await transcriptionManager.stopLiveTranscription()
         session.transcriptionEnded = Date()
@@ -619,7 +660,24 @@ final class MainManager: ObservableObject {
         }
         // Log network exchange for live transcription
         let durationStr = String(format: "%.1f", result.duration)
-        if result.modelIdentifier.contains("deepgram") {
+        if result.modelIdentifier.hasPrefix("local/streaming/") {
+          let localURL = URL(string: "local://sherpa-onnx")!
+            .appendingPathComponent(result.modelIdentifier)
+          session.networkExchanges.append(
+            HistoryNetworkExchange(
+              url: localURL,
+              method: "On-Device",
+              requestHeaders: [
+                "Model": result.modelIdentifier,
+                "Duration": "\(durationStr)s"
+              ],
+              requestBodyPreview: "Local streaming audio (\(durationStr) seconds)",
+              responseCode: 200,
+              responseHeaders: [:],
+              responseBodyPreview: "Transcript: \(String(result.text.prefix(500)))"
+            )
+          )
+        } else if result.modelIdentifier.contains("deepgram") {
           session.networkExchanges.append(
             HistoryNetworkExchange(
               url: URL(string: "wss://api.deepgram.com/v1/listen")!,
@@ -651,26 +709,51 @@ final class MainManager: ObservableObject {
           )
         }
       } else {
-        hudManager.beginTranscribing()
+        hudManager.beginTranscribing(subheadline: rawTranscriptionSubheadline())
         session.transcriptionStarted = Date()
-        guard
-          await ensureBatchAPIKeyAvailable(
-            for: session,
-            message:
-              "Batch transcription requires an OpenRouter API key. Add one in Settings › API Keys."
-          )
-        else {
-          return
+        if appSettings.transcriptionMode == .batchRemote {
+          guard
+            await ensureBatchAPIKeyAvailable(
+              for: session,
+              message:
+                "Batch transcription requires an OpenRouter API key. Add one in Settings › API Keys."
+            )
+          else {
+            return
+          }
         }
         let result = try await transcriptionManager.transcribeFile(at: summary.url)
         session.transcriptionEnded = Date()
         session.transcriptionResult = result
         session.modelsUsed.insert(result.modelIdentifier)
-        session.modelUsages.append(ModelUsage(modelIdentifier: result.modelIdentifier, phase: .transcriptionBatch))
+        let usagePhase: ModelUsagePhase = appSettings.transcriptionMode == .localModel
+          ? .transcriptionLocal
+          : .transcriptionBatch
+        session.modelUsages.append(ModelUsage(modelIdentifier: result.modelIdentifier, phase: usagePhase))
         session.events.append(
-          HistoryEvent(kind: .transcriptionReceived, description: "Batch transcription complete")
+          HistoryEvent(
+            kind: .transcriptionReceived,
+            description: appSettings.transcriptionMode == .localModel
+              ? "Local model transcription complete"
+              : "Batch transcription complete"
+          )
         )
-        if let payload = result.rawPayload {
+        if appSettings.transcriptionMode == .localModel {
+          session.networkExchanges.append(
+            HistoryNetworkExchange(
+              url: URL(string: "local://whisperkit")!,
+              method: "On-Device",
+              requestHeaders: [
+                "Model": result.modelIdentifier,
+                "Duration": String(format: "%.1fs", result.duration)
+              ],
+              requestBodyPreview: "Local audio file: \(summary.url.lastPathComponent)",
+              responseCode: 200,
+              responseHeaders: [:],
+              responseBodyPreview: "Transcript: \(String(result.text.prefix(500)))"
+            )
+          )
+        } else if let payload = result.rawPayload {
           session.networkExchanges.append(
             HistoryNetworkExchange(
               url: URL(string: "https://openrouter.ai/api/v1/chat/completions")!,
@@ -950,10 +1033,13 @@ final class MainManager: ObservableObject {
       session.postProcessingOutcome = outcome
       finalText = outcome.processed
 
+      session.events.append(
+        HistoryEvent(kind: .postProcessingReceived, description: "Retry post-processing complete")
+      )
+      session.modelsUsed.insert(resolvedPostProcessingModel)
+      session.modelUsages.append(ModelUsage(modelIdentifier: resolvedPostProcessingModel, phase: .postProcessing))
+
       if let response = outcome.response {
-        session.events.append(
-          HistoryEvent(kind: .postProcessingReceived, description: "Retry post-processing complete")
-        )
         if let payload = response.rawPayload {
           session.networkExchanges.append(
             HistoryNetworkExchange(
@@ -970,8 +1056,6 @@ final class MainManager: ObservableObject {
             )
           )
         }
-        session.modelsUsed.insert(resolvedPostProcessingModel)
-        session.modelUsages.append(ModelUsage(modelIdentifier: resolvedPostProcessingModel, phase: .postProcessing))
         if let cost = response.cost {
           session.recordCostFragment(cost)
         }
@@ -1030,12 +1114,13 @@ final class MainManager: ObservableObject {
     activeSession = nil
   }
 
+  // swiftlint:disable:next cyclomatic_complexity function_body_length
   func reprocessHistoryItem(_ item: HistoryItem) async {
     guard activeSession == nil else { return }
     guard let url = item.audioFileURL else { return }
 
     state = .processing
-    hudManager.beginTranscribing()
+    hudManager.beginTranscribing(subheadline: rawTranscriptionSubheadline())
 
     let session = ActiveSession(
       gesture: .uiButton, hotKeyDescription: item.trigger.hotKeyDescription)
@@ -1058,19 +1143,46 @@ final class MainManager: ObservableObject {
 
     do {
       session.transcriptionStarted = Date()
+      let isLocalTranscription = appSettings.transcriptionMode == .localModel
       session.events.append(
-        HistoryEvent(kind: .transcriptionSubmitted, description: "Submitting to batch model")
+        HistoryEvent(
+          kind: .transcriptionSubmitted,
+          description: isLocalTranscription ? "Submitting to local model" : "Submitting to batch model"
+        )
       )
       let result = try await transcriptionManager.transcribeFile(at: url)
       session.transcriptionEnded = Date()
       session.transcriptionResult = result
       session.modelsUsed.insert(result.modelIdentifier)
-      session.modelUsages.append(ModelUsage(modelIdentifier: result.modelIdentifier, phase: .transcriptionBatch))
+      session.modelUsages.append(
+        ModelUsage(
+          modelIdentifier: result.modelIdentifier,
+          phase: isLocalTranscription ? .transcriptionLocal : .transcriptionBatch
+        )
+      )
       session.events.append(
-        HistoryEvent(kind: .transcriptionReceived, description: "Batch transcription complete")
+        HistoryEvent(
+          kind: .transcriptionReceived,
+          description: isLocalTranscription ? "Local model transcription complete" : "Batch transcription complete"
+        )
       )
 
-      if let payload = result.rawPayload {
+      if isLocalTranscription {
+        session.networkExchanges.append(
+          HistoryNetworkExchange(
+            url: URL(string: "local://whisperkit")!,
+            method: "On-Device",
+            requestHeaders: [
+              "Model": result.modelIdentifier,
+              "Duration": String(format: "%.1fs", result.duration)
+            ],
+            requestBodyPreview: "Local audio file: \(url.lastPathComponent)",
+            responseCode: 200,
+            responseHeaders: [:],
+            responseBodyPreview: "Transcript: \(String(result.text.prefix(500)))"
+          )
+        )
+      } else if let payload = result.rawPayload {
         session.networkExchanges.append(
           HistoryNetworkExchange(
             url: URL(string: "https://openrouter.ai/api/v1/chat/completions")!,
@@ -1373,7 +1485,7 @@ final class MainManager: ObservableObject {
     livePolishManager.reset()
     liveTextInserter.reset()
 
-    if appSettings.transcriptionMode == .liveNative {
+    if isStreamingTranscriptionMode {
       transcriptionManager.cancelLiveTranscription()
     }
 
@@ -1637,7 +1749,8 @@ private final class ActiveSession {
       trigger: trigger,
       personalCorrections: personalCorrections,
       errors: errors,
-      source: source
+      source: source,
+      postProcessingPrompt: postProcessingOutcome?.promptPayload
     )
   }
 }

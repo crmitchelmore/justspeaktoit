@@ -10,7 +10,7 @@ help: ## Show available targets
 
 .PHONY: run
 run: ## Build (if needed) and launch the app
-	swift run $(SWIFT_FLAGS)
+	swift run $(SWIFT_FLAGS) SpeakApp
 
 .PHONY: build
 build: ## Build the app in debug configuration

@@ -90,6 +90,10 @@ final class PermissionsManager: ObservableObject {
     }
   }
 
+  func refresh(_ type: PermissionType) {
+    statuses[type] = computeStatus(for: type)
+  }
+
   func request(_ type: PermissionType) async -> PermissionStatus {
     let status: PermissionStatus
     switch type {
@@ -105,6 +109,14 @@ final class PermissionsManager: ObservableObject {
 
     statuses[type] = status
     return status
+  }
+
+  func ensureGranted(_ type: PermissionType) async -> PermissionStatus {
+    refresh(type)
+    let current = status(for: type)
+    guard !current.isGranted else { return current }
+    guard current == .notDetermined else { return current }
+    return await request(type)
   }
 
   func ensureKeychainAccess(forService service: String) async -> Bool {

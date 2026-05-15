@@ -27,17 +27,36 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   }
 
   enum TranscriptionMode: String, CaseIterable, Identifiable {
-    case liveNative = "liveNative"
-    case batchRemote = "batchRemote"
+    case liveNative
+    case batchRemote
+    case localModel
 
     var id: String { rawValue }
 
     var displayName: String {
       switch self {
       case .liveNative:
-        return "Live (Streaming)"
+        return "Remote Streaming"
       case .batchRemote:
-        return "Batch (Remote)"
+        return "Remote Batch"
+      case .localModel:
+        return "Local"
+      }
+    }
+  }
+
+  enum LocalTranscriptionMode: String, CaseIterable, Identifiable {
+    case batch
+    case streaming
+
+    var id: String { rawValue }
+
+    var displayName: String {
+      switch self {
+      case .batch:
+        return "Local Batch"
+      case .streaming:
+        return "Local Streaming"
       }
     }
   }
@@ -210,6 +229,9 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     case transcriptionMode
     case liveTranscriptionModel
     case batchTranscriptionModel
+    case localTranscriptionModel
+    case localTranscriptionMode
+    case localStreamingModelSource
     case postProcessingEnabled
     case postProcessingModel
     case postProcessingTemperature
@@ -251,6 +273,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     case postProcessingStreamingEnabled
     case hudSizePreference
     case showLiveTranscriptInHUD
+    case showSidebarShortcutHints
     case speedMode
     case livePolishModel
     case livePolishDebounceMs
@@ -276,15 +299,16 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   }
 
   private static let defaultBatchTranscriptionModel = "google/gemini-2.0-flash-001"
+  private static let defaultLocalTranscriptionModel = "local/whisperkit/tiny"
   private static let legacyWhisperModelIDs: Set<String> = [
     "openrouter/whisper-large-v3",
     "openrouter/whisper-medium",
-    "openrouter/whisper-small",
+    "openrouter/whisper-small"
   ]
   private static let defaultPostProcessingModel = "openai/gpt-4o-mini"
   private static let legacyPostProcessingModelMapping: [String: String] = [
     "openrouter/gpt-4o-mini": defaultPostProcessingModel,
-    "openrouter/gpt-4o": "openai/gpt-4o",
+    "openrouter/gpt-4o": "openai/gpt-4o"
   ]
 
   @Published var appearance: Appearance {
@@ -314,6 +338,25 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       }
       store(batchTranscriptionModel, key: .batchTranscriptionModel)
     }
+  }
+
+  @Published var localTranscriptionModel: String {
+    didSet {
+      let normalized = Self.normalizedLocalTranscriptionModel(localTranscriptionModel)
+      if normalized != localTranscriptionModel {
+        localTranscriptionModel = normalized
+        return
+      }
+      store(localTranscriptionModel, key: .localTranscriptionModel)
+    }
+  }
+
+  @Published var localTranscriptionMode: LocalTranscriptionMode {
+    didSet { store(localTranscriptionMode.rawValue, key: .localTranscriptionMode) }
+  }
+
+  @Published var localStreamingModelSource: String {
+    didSet { store(localStreamingModelSource, key: .localStreamingModelSource) }
   }
 
   @Published var preferredLocaleIdentifier: String {
@@ -419,6 +462,10 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
 
   @Published var showLiveTranscriptInHUD: Bool {
     didSet { store(showLiveTranscriptInHUD, key: .showLiveTranscriptInHUD) }
+  }
+
+  @Published var showSidebarShortcutHints: Bool {
+    didSet { store(showSidebarShortcutHints, key: .showSidebarShortcutHints) }
   }
 
   @Published var appVisibility: AppVisibility {
@@ -621,9 +668,9 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   @Published var clipboardInsertionTriggers: String {
     didSet { store(clipboardInsertionTriggers, key: .clipboardInsertionTriggers) }
   }
-  
+
   // MARK: - Transport (Send to Mac)
-  
+
   /// Enable "Send to Mac" transport server
   @Published var enableSendToMac: Bool {
     didSet { store(enableSendToMac, key: .enableSendToMac) }
@@ -667,6 +714,10 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
 
   var isAssemblyAIModel: Bool {
     liveTranscriptionModel.contains("assemblyai")
+  }
+
+  var isActiveAssemblyAILiveModel: Bool {
+    transcriptionMode == .liveNative && isAssemblyAIModel
   }
 
   var hasSelectedModulateModel: Bool {
@@ -719,6 +770,23 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     batchTranscriptionModel =
       Self.normalizedBatchModel(
         defaults.string(forKey: DefaultsKey.batchTranscriptionModel.rawValue))
+    localTranscriptionModel =
+      Self.normalizedLocalTranscriptionModel(
+        defaults.string(forKey: DefaultsKey.localTranscriptionModel.rawValue)
+      )
+    localTranscriptionMode =
+      LocalTranscriptionMode(
+        rawValue: defaults.string(forKey: DefaultsKey.localTranscriptionMode.rawValue)
+          ?? LocalTranscriptionMode.batch.rawValue
+      ) ?? .batch
+    let storedLocalStreamingSource = defaults.string(forKey: DefaultsKey.localStreamingModelSource.rawValue)
+    let defaultLocalStreamingSource = LocalModelManager.recommendedStreamingModelSources.first?.id ?? ""
+    let supportedLocalStreamingIDs = Set(LocalModelManager.recommendedStreamingModelSources.map(\.id))
+      .union(LocalModelManager.shared.streamingModelSources.map(\.id))
+    localStreamingModelSource =
+      supportedLocalStreamingIDs.contains(storedLocalStreamingSource ?? "")
+      ? storedLocalStreamingSource ?? defaultLocalStreamingSource
+      : defaultLocalStreamingSource
     preferredLocaleIdentifier =
       defaults.string(forKey: DefaultsKey.preferredLocale.rawValue) ?? Locale.current.identifier
     preferredAudioInputUID = defaults.string(forKey: DefaultsKey.preferredAudioInputUID.rawValue)
@@ -765,6 +833,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     showHUDDuringSessions = defaults.object(forKey: DefaultsKey.showHUD.rawValue) as? Bool ?? true
     showLiveTranscriptInHUD =
       defaults.object(forKey: DefaultsKey.showLiveTranscriptInHUD.rawValue) as? Bool ?? true
+    showSidebarShortcutHints =
+      defaults.object(forKey: DefaultsKey.showSidebarShortcutHints.rawValue) as? Bool ?? true
     appVisibility =
       AppVisibility(
         rawValue: defaults.string(forKey: DefaultsKey.appVisibility.rawValue)
@@ -773,8 +843,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
 
     let defaultDirectory = Self.defaultRecordingsDirectory()
     if let storedPath = defaults.string(forKey: DefaultsKey.recordingsDirectory.rawValue),
-      !storedPath.isEmpty
-    {
+      !storedPath.isEmpty {
       recordingsDirectory = URL(fileURLWithPath: storedPath, isDirectory: true)
     } else {
       recordingsDirectory = defaultDirectory
@@ -788,8 +857,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     doubleTapWindow =
       defaults.object(forKey: DefaultsKey.doubleTapWindow.rawValue) as? Double ?? 0.4
     if let hotKeyData = defaults.data(forKey: DefaultsKey.selectedHotKey.rawValue),
-      let decoded = try? JSONDecoder().decode(HotKey.self, from: hotKeyData)
-    {
+      let decoded = try? JSONDecoder().decode(HotKey.self, from: hotKeyData) {
       selectedHotKey = decoded
     } else {
       selectedHotKey = .fnKey
@@ -832,8 +900,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     ttsFavoriteVoices =
       defaults.array(forKey: DefaultsKey.ttsFavoriteVoices.rawValue) as? [String] ?? []
     if let pronData = defaults.data(forKey: DefaultsKey.ttsPronunciationDictionary.rawValue),
-      let dict = try? JSONDecoder().decode([String: String].self, from: pronData)
-    {
+      let dict = try? JSONDecoder().decode([String: String].self, from: pronData) {
       ttsPronunciationDictionary = dict
     } else {
       ttsPronunciationDictionary = [:]
@@ -871,7 +938,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       defaults.object(forKey: DefaultsKey.voiceCommandsEnabled.rawValue) as? Bool ?? true
     clipboardInsertionTriggers =
       defaults.string(forKey: DefaultsKey.clipboardInsertionTriggers.rawValue) ?? ""
-    
+
     // Transport Settings
     enableSendToMac =
       defaults.object(forKey: DefaultsKey.enableSendToMac.rawValue) as? Bool ?? false
@@ -945,6 +1012,12 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     guard !trimmed.isEmpty else { return defaultBatchTranscriptionModel }
     if legacyWhisperModelIDs.contains(trimmed) { return defaultBatchTranscriptionModel }
     return trimmed
+  }
+
+  private static func normalizedLocalTranscriptionModel(_ identifier: String?) -> String {
+    let trimmed = identifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    guard !trimmed.isEmpty else { return defaultLocalTranscriptionModel }
+    return LocalModelManager.normalizedLocalModelID(trimmed)
   }
 
   private static func normalizedPostProcessingModel(_ identifier: String?) -> String {

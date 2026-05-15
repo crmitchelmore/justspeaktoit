@@ -38,6 +38,26 @@ final class ModelCatalogTests: XCTestCase {
         XCTAssertFalse(name.isEmpty)
     }
 
+    func testFriendlyName_downloadedLocalModels_returnsSpecificName() {
+        XCTAssertEqual(
+            ModelCatalog.friendlyName(for: "local/post-processing/qwen3-0.6b-q4"),
+            "Qwen3 0.6B Q4"
+        )
+        XCTAssertEqual(
+            ModelCatalog.friendlyName(
+                for: "local/post-processing/huggingface/unsloth/qwen3-0.6b-gguf/"
+                    + "qwen3-0.6b-q4-k-m.gguf"
+            ),
+            "Qwen3 0.6B Q4_K_M"
+        )
+        XCTAssertEqual(
+            ModelCatalog.friendlyName(
+                for: "local/whisperkit/huggingface/argmaxinc/whisperkit-coreml/openai-whisper-large-v3-turbo-954mb"
+            ),
+            "Openai Whisper Large V3 Turbo 954 MB"
+        )
+    }
+
     func testFriendlyName_emptyString_returnsNonEmpty() {
         let name = ModelCatalog.friendlyName(for: "")
         XCTAssertFalse(name.isEmpty, "Should return something even for empty identifier")
@@ -56,6 +76,7 @@ final class ModelCatalogTests: XCTestCase {
         let allCount = ModelCatalog.allOptions.count
         let sum = ModelCatalog.liveTranscription.count
             + ModelCatalog.batchTranscription.count
+            + ModelCatalog.localTranscriptionOptions.count
             + ModelCatalog.postProcessing.count
         XCTAssertEqual(allCount, sum, "allOptions should be union of all category arrays")
     }
@@ -66,7 +87,8 @@ final class ModelCatalogTests: XCTestCase {
         for (name, options) in [
             ("liveTranscription", ModelCatalog.liveTranscription),
             ("batchTranscription", ModelCatalog.batchTranscription),
-            ("postProcessing", ModelCatalog.postProcessing),
+            ("localTranscription", ModelCatalog.localTranscriptionOptions),
+            ("postProcessing", ModelCatalog.postProcessing)
         ] {
             let ids = options.map(\.id)
             let uniqueIDs = Set(ids)
@@ -88,5 +110,45 @@ final class ModelCatalogTests: XCTestCase {
         for option in ModelCatalog.liveTranscription {
             XCTAssertNotNil(option.latencyTier, "\(option.id) should have a latency tier")
         }
+    }
+
+    func testLocalTranscription_isSeparateFromAppleSpeech() {
+        XCTAssertFalse(ModelCatalog.localTranscription.isEmpty)
+        for model in ModelCatalog.localTranscription {
+            XCTAssertTrue(model.id.hasPrefix("local/"), "\(model.id) should use the downloaded local namespace")
+            XCTAssertFalse(model.id.hasPrefix("apple/local/"), "\(model.id) should not be grouped with Apple Speech")
+            XCTAssertFalse(model.supportsLiveStreaming, "\(model.id) should be explicit about offline-only support")
+        }
+    }
+
+    func testModelRouting_distinguishesAppleSpeechFromDownloadedLocal() {
+        XCTAssertEqual(ModelRouting.family(for: "apple/local/SFSpeechRecognizer"), .appleSpeech)
+        XCTAssertEqual(ModelRouting.family(for: "local/whisperkit/tiny"), .downloadedLocal(engine: "whisperkit"))
+    }
+
+    func testModelRouting_treatsLocalCleanupAsPostProcessing() {
+        XCTAssertEqual(
+            ModelRouting.family(for: "local/post-processing/rules"),
+            .postProcessing(provider: "local")
+        )
+    }
+
+    func testPostProcessing_includesRecentFastCheapModels() {
+        let ids = Set(ModelCatalog.postProcessing.map(\.id))
+
+        XCTAssertTrue(ids.contains("openai/gpt-5-mini"))
+        XCTAssertTrue(ids.contains("openai/gpt-5.4-mini"))
+        XCTAssertTrue(ids.contains("openai/gpt-5.4-nano"))
+        XCTAssertTrue(ids.contains("google/gemini-3.1-flash-lite"))
+        XCTAssertTrue(ids.contains("qwen/qwen3.6-flash"))
+    }
+
+    func testPostProcessing_keepsLocalCleanupVisible() {
+        let localCleanup = ModelCatalog.postProcessing.first {
+            $0.id == "local/post-processing/rules"
+        }
+
+        XCTAssertNotNil(localCleanup)
+        XCTAssertTrue(localCleanup?.tags.contains(.privacy) == true)
     }
 }

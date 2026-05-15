@@ -10,6 +10,7 @@ public struct HotKeyRecorder: View {
   @Binding var hotKey: HotKey
   @State private var isRecording = false
   @State private var pendingModifiers: HotKey.ModifierSet = []
+  @State private var eventMonitor: Any?
 
   private let label: String
 
@@ -35,6 +36,14 @@ public struct HotKeyRecorder: View {
         }
       }
     }
+    .onDisappear {
+      stopRecording()
+    }
+    .onChange(of: hotKey) { _, newValue in
+      if newValue.isFnKey {
+        stopRecording()
+      }
+    }
   }
 
   // MARK: - Display
@@ -42,9 +51,10 @@ public struct HotKeyRecorder: View {
   private var hotKeyDisplay: some View {
     Button {
       if hotKey.isFnKey { return }
-      isRecording.toggle()
       if isRecording {
-        pendingModifiers = []
+        stopRecording()
+      } else {
+        startRecording()
       }
     } label: {
       HStack(spacing: 4) {
@@ -69,10 +79,6 @@ public struct HotKeyRecorder: View {
     }
     .buttonStyle(.plain)
     .disabled(hotKey.isFnKey)
-    .onKeyDown { event in
-      guard isRecording else { return false }
-      return handleKeyEvent(event)
-    }
   }
 
   private var recordingView: some View {
@@ -94,7 +100,7 @@ public struct HotKeyRecorder: View {
       get: { hotKey.isFnKey },
       set: { useFn in
         if useFn {
-          isRecording = false
+          stopRecording()
           hotKey = .fnKey
         } else {
           hotKey = .custom(keyCode: 49, modifiers: .option)  // Default: ⌥Space
@@ -112,7 +118,7 @@ public struct HotKeyRecorder: View {
 
   private var clearButton: some View {
     Button {
-      isRecording = false
+      stopRecording()
       hotKey = .custom(keyCode: 49, modifiers: .option)
     } label: {
       Text("Reset")
@@ -124,6 +130,29 @@ public struct HotKeyRecorder: View {
 
   // MARK: - Key Recording
 
+  private func startRecording() {
+    stopRecording()
+    isRecording = true
+    pendingModifiers = []
+    NotificationCenter.default.post(name: .speakHotKeyShouldPause, object: nil)
+
+    eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
+      handleKeyEvent(event) ? nil : event
+    }
+  }
+
+  private func stopRecording() {
+    if let eventMonitor {
+      NSEvent.removeMonitor(eventMonitor)
+      self.eventMonitor = nil
+    }
+    if isRecording {
+      isRecording = false
+      pendingModifiers = []
+      NotificationCenter.default.post(name: .speakHotKeyDidChange, object: nil)
+    }
+  }
+
   private func handleKeyEvent(_ event: NSEvent) -> Bool {
     // Track modifier-only presses
     if KeyCodeMapping.modifierKeyCodes.contains(event.keyCode) {
@@ -133,7 +162,7 @@ public struct HotKeyRecorder: View {
 
     // Escape cancels recording
     if event.keyCode == 53 && pendingModifiers.isEmpty {
-      isRecording = false
+      stopRecording()
       return true
     }
 
@@ -142,11 +171,11 @@ public struct HotKeyRecorder: View {
       from: event.modifierFlags.intersection([.command, .shift, .option, .control])
     )
 
-    // Require at least one modifier for non-function keys
-    guard !modifiers.isEmpty else { return true }
+    // Allow dedicated extended keys as single-key hotkeys, but keep ordinary typing keys modifier-gated.
+    guard !modifiers.isEmpty || KeyCodeMapping.singleKeyHotKeyCodes.contains(event.keyCode) else { return true }
 
     hotKey = .custom(keyCode: event.keyCode, modifiers: modifiers)
-    isRecording = false
+    stopRecording()
     return true
   }
 }
@@ -164,31 +193,14 @@ extension HotKey.ModifierSet {
   }
 }
 
-// MARK: - Key Event Interception
+// MARK: - Hotkey Lifecycle Notifications
 
-/// View modifier that intercepts keyDown events via a local event monitor.
-private struct KeyDownMonitor: ViewModifier {
-    let handler: (NSEvent) -> Bool
-    @State private var monitor: Any?
+public extension Notification.Name {
+  /// Posted while recording a replacement hotkey so the active binding does not steal key events.
+  static let speakHotKeyShouldPause = Notification.Name("speak.hotKeyShouldPause")
 
-    func body(content: Content) -> some View {
-        content
-            .onAppear {
-                monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-                    handler(event) ? nil : event
-                }
-            }
-            .onDisappear {
-                if let monitor { NSEvent.removeMonitor(monitor) }
-                monitor = nil
-            }
-    }
-}
-
-extension View {
-    func onKeyDown(handler: @escaping (NSEvent) -> Bool) -> some View {
-        modifier(KeyDownMonitor(handler: handler))
-    }
+  /// Posted after recording finishes so the active hotkey can be re-registered.
+  static let speakHotKeyDidChange = Notification.Name("speak.hotKeyDidChange")
 }
 
 #endif

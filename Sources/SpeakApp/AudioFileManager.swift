@@ -79,7 +79,10 @@ actor AudioFileManager {
   func startRecording() async throws -> URL {
     guard recorder == nil else { throw AudioFileManagerError.alreadyRecording }
 
-    let permissionStatus = await MainActor.run { permissionsManager.status(for: .microphone) }
+    let permissionStatus = await MainActor.run {
+      permissionsManager.refresh(.microphone)
+      return permissionsManager.status(for: .microphone)
+    }
     if !permissionStatus.isGranted {
       let requested = await permissionsManager.request(.microphone)
       guard requested.isGranted else {

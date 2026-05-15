@@ -18,6 +18,10 @@ struct MainView: View {
     }
     .frame(minWidth: 960, minHeight: 640)
     .toolbar { toolbar }
+    .onReceive(environment.$sidebarNavigationTarget) { item in
+      guard let item else { return }
+      selection = item
+    }
     .task {
       environment.installStatusBarIfNeeded {
         NSApp.activate(ignoringOtherApps: true)
@@ -72,7 +76,7 @@ struct MainView: View {
     ToolbarItem(placement: .primaryAction) {
       Button(action: environment.main.toggleRecordingFromUI) {
         switch environment.main.state {
-        case .idle, .completed(_), .failed(_):
+        case .idle, .completed, .failed:
           Label("Record", systemImage: "mic")
         case .recording:
           Label("Stop", systemImage: "stop.fill")
@@ -112,10 +116,9 @@ struct MainView: View {
     }
   }
 
-  
   private var accessibilityLabelForRecordButton: String {
     switch environment.main.state {
-    case .idle, .completed(_), .failed(_):
+    case .idle, .completed, .failed:
       return "Start recording"
     case .recording:
       return "Stop recording"
@@ -127,4 +130,5 @@ struct MainView: View {
   }
 }
 
-// @Implement This is the main app container and handles all top-level system events. It has a sidebar on the left And then when items are selected, they're shown on the right in the main window. If it's the right place, this is where the status bar item and view should also be initialised.
+// @Implement This is the main app container and handles top-level system events.
+// It owns the sidebar selection and displays the selected content in the main window.

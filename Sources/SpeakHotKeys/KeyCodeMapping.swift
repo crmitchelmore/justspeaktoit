@@ -59,6 +59,10 @@ public enum KeyCodeMapping {
     case 51: return "⌫"
     case 53: return "⎋"
     case 63: return "Fn"
+    case 64: return "F17"
+    case 79: return "F18"
+    case 80: return "F19"
+    case 90: return "F20"
     case 96: return "F5"
     case 97: return "F6"
     case 98: return "F7"
@@ -67,10 +71,15 @@ public enum KeyCodeMapping {
     case 101: return "F9"
     case 103: return "F11"
     case 105: return "F13"
+    case 106: return "F16"
     case 107: return "F14"
     case 109: return "F10"
     case 111: return "F12"
     case 113: return "F15"
+    case 114: return "Insert"
+    case 115: return "Home"
+    case 116: return "PgUp"
+    case 117: return "⌦"
     case 118: return "F4"
     case 119: return "End"
     case 120: return "F2"
@@ -90,7 +99,14 @@ public enum KeyCodeMapping {
     56, 60,  // Shift (left/right)
     58, 61,  // Option (left/right)
     59, 62,  // Control (left/right)
-    63,  // Fn/Globe
+    63  // Fn/Globe
+  ]
+
+  /// Keys that are intentionally allowed as single-key custom hotkeys.
+  public static let singleKeyHotKeyCodes: Set<UInt16> = [
+    64, 79, 80, 90,  // F17-F20
+    105, 106, 107, 113,  // F13-F16
+    114  // Insert/Help
   ]
 }
 

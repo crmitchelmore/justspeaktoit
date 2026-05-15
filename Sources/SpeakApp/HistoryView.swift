@@ -489,7 +489,7 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
   }
 }
 
-private struct HistoryListRow: View {
+private struct HistoryListRow: View { // swiftlint:disable:this type_body_length
   @EnvironmentObject private var environment: AppEnvironment
   let item: HistoryItem
   @State private var isExpanded: Bool = false
@@ -642,6 +642,8 @@ private struct HistoryListRow: View {
             }
           }
 
+          promptDisclosureSection
+
           metaSection
 
           if let url = item.audioFileURL {
@@ -670,6 +672,8 @@ private struct HistoryListRow: View {
             networkSection
           }
         }
+
+        promptDisclosureSection
 
         metaSection
 
@@ -713,9 +717,10 @@ private struct HistoryListRow: View {
       Button {
         Task { await environment.main.reprocessHistoryItem(item) }
       } label: {
-        Label("Re-process with Current Settings", systemImage: "arrow.triangle.2.circlepath")
+        Label("Reprocess with Current Model", systemImage: "arrow.triangle.2.circlepath")
       }
       .disabled(environment.main.isBusy)
+      .speakTooltip(reprocessTooltip)
     }
 
     if let url = item.audioFileURL {
@@ -1096,6 +1101,8 @@ private struct HistoryListRow: View {
       return "Live"
     case .transcriptionBatch:
       return "Batch"
+    case .transcriptionLocal:
+      return "Local"
     case .postProcessing:
       return "Post-processing"
     }
@@ -1106,6 +1113,8 @@ private struct HistoryListRow: View {
     case .transcriptionLive:
       return 0
     case .transcriptionBatch:
+      return 1
+    case .transcriptionLocal:
       return 1
     case .postProcessing:
       return 2
@@ -1253,6 +1262,54 @@ private struct HistoryListRow: View {
     }
   }
 
+  @ViewBuilder
+  private var promptDisclosureSection: some View {
+    if let prompt = item.postProcessingPrompt {
+      DisclosureGroup {
+        VStack(alignment: .leading, spacing: 10) {
+          Text(prompt.modelIdentifier)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+          if let customPrompt = prompt.customPrompt, !customPrompt.isEmpty {
+            promptTextBlock(title: "Custom Cleanup Prompt", text: customPrompt)
+          }
+          promptTextBlock(title: "System Prompt", text: prompt.systemPrompt)
+          promptTextBlock(title: "Transcript Payload", text: prompt.userPrompt)
+        }
+        .padding(.top, 8)
+      } label: {
+        Label("Post-processing prompt", systemImage: "text.bubble")
+          .font(.subheadline.bold())
+      }
+      .padding(12)
+      .background(
+        RoundedRectangle(cornerRadius: 16, style: .continuous)
+          .fill(.thinMaterial)
+      )
+      .overlay(
+        RoundedRectangle(cornerRadius: 16, style: .continuous)
+          .stroke(Color.brandAccent.opacity(0.15), lineWidth: 1)
+      )
+    }
+  }
+
+  private func promptTextBlock(title: String, text: String) -> some View {
+    VStack(alignment: .leading, spacing: 4) {
+      Text(title)
+        .font(.caption.bold())
+        .foregroundStyle(.secondary)
+      ScrollView {
+        Text(text)
+          .font(.caption2.monospaced())
+          .textSelection(.enabled)
+          .frame(maxWidth: .infinity, alignment: .leading)
+      }
+      .frame(maxHeight: 180)
+      .padding(8)
+      .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
+    }
+  }
+
   private var networkSummaryButton: some View {
     let count = item.networkExchanges.count
     let responseSummary: String
@@ -1302,6 +1359,31 @@ private struct HistoryListRow: View {
     .speakTooltip("Peek behind the scenes to review the API requests and responses that powered this session.")
   }
 
+  private var reprocessTooltip: String {
+    let postProcessing = environment.settings.postProcessingEnabled && environment.settings.speedMode == .instant
+      ? """
+        Post-processing will also use your current post-processing model: \
+        \(ModelCatalog.friendlyName(for: environment.settings.postProcessingModel)).
+        """
+      : "Post-processing is currently off, so only transcription will be rerun."
+    return """
+      Reprocess reruns this saved audio with your current settings, not the model originally used. \
+      It will use \(currentReprocessModelDescription). \(postProcessing)
+      """
+  }
+
+  private var currentReprocessModelDescription: String {
+    let settings = environment.settings
+    if settings.transcriptionMode == .localModel {
+      let modelName = ModelCatalog.friendlyName(for: settings.localTranscriptionModel)
+      if settings.localTranscriptionMode == .streaming {
+        return "\(modelName) from Local Batch; Local Streaming candidates are not used for saved-audio reprocessing yet"
+      }
+      return "\(modelName) from Local Batch"
+    }
+    return "\(ModelCatalog.friendlyName(for: settings.batchTranscriptionModel)) from Remote Batch"
+  }
+
   private var footerActions: some View {
     HStack(spacing: 12) {
       if let url = item.audioFileURL {
@@ -1326,7 +1408,7 @@ private struct HistoryListRow: View {
           }
         }
         .disabled(environment.main.isBusy)
-        .speakTooltip("Sometimes on-device audio misses words. Reprocess sends this clip to our larger cloud models, which usually pick up every detail.")
+        .speakTooltip(reprocessTooltip)
       }
       if environment.main.isBusy {
         ProgressView()

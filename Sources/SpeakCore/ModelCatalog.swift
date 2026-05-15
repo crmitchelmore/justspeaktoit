@@ -35,6 +35,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
         case cheap
         case quality
         case leading
+        case privacy
 
         public var displayName: String {
             switch self {
@@ -42,6 +43,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             case .cheap: return "Cheap"
             case .quality: return "Quality"
             case .leading: return "Leading"
+            case .privacy: return "Private"
             }
         }
     }
@@ -207,7 +209,66 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
     // Curated, static set for transcript cleanup (OpenRouter) with pricing + tags.
     // Pricing is based on OpenRouter's /api/v1/models at time of writing.
     public static let postProcessing: [Option] = [
+        Option(
+            id: "local/post-processing/rules",
+            displayName: "Local Cleanup (Offline)",
+            description: "Runs entirely on this Mac. Applies safe transcript cleanup without cloud LLMs.",
+            estimatedLatencyMs: 50,
+            latencyTier: .instant,
+            tags: [.fast, .cheap, .privacy]
+        ),
+
         // Fast / cheap cleanup
+        Option(
+            id: "openai/gpt-5.4-nano",
+            displayName: "GPT-5.4 Nano",
+            description: "Newest ultra-low-cost OpenAI option for quick cleanup.",
+            estimatedLatencyMs: 350,
+            latencyTier: .fast,
+            tags: [.fast, .cheap],
+            pricing: Pricing(promptPerMTokens: 0.20, completionPerMTokens: 1.25),
+            contextLength: 400_000
+        ),
+        Option(
+            id: "openai/gpt-5-mini",
+            displayName: "GPT-5 Mini",
+            description: "Fast and cheap OpenAI reasoning model for reliable transcript cleanup.",
+            estimatedLatencyMs: 500,
+            latencyTier: .fast,
+            tags: [.fast, .cheap, .leading],
+            pricing: Pricing(promptPerMTokens: 0.25, completionPerMTokens: 2.0),
+            contextLength: 400_000
+        ),
+        Option(
+            id: "google/gemini-3.1-flash-lite",
+            displayName: "Gemini 3.1 Flash Lite",
+            description: "Latest Gemini Flash Lite generation with low cost and a long context window.",
+            estimatedLatencyMs: 400,
+            latencyTier: .fast,
+            tags: [.fast, .cheap],
+            pricing: Pricing(promptPerMTokens: 0.25, completionPerMTokens: 1.5),
+            contextLength: 1_048_576
+        ),
+        Option(
+            id: "qwen/qwen3.6-flash",
+            displayName: "Qwen3.6 Flash",
+            description: "Recent fast Qwen model with low-cost long-context cleanup.",
+            estimatedLatencyMs: 400,
+            latencyTier: .fast,
+            tags: [.fast, .cheap],
+            pricing: Pricing(promptPerMTokens: 0.25, completionPerMTokens: 1.5),
+            contextLength: 1_000_000
+        ),
+        Option(
+            id: "mistralai/mistral-small-2603",
+            displayName: "Mistral Small 4",
+            description: "Newest Mistral Small generation; very inexpensive for simple formatting.",
+            estimatedLatencyMs: 450,
+            latencyTier: .fast,
+            tags: [.fast, .cheap],
+            pricing: Pricing(promptPerMTokens: 0.15, completionPerMTokens: 0.6),
+            contextLength: 262_144
+        ),
         Option(
             id: "openai/gpt-4o-mini",
             displayName: "GPT-4o mini",
@@ -219,34 +280,34 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             contextLength: 128_000
         ),
         Option(
-            id: "google/gemini-2.0-flash-lite-001",
-            displayName: "Gemini 2.0 Flash Lite",
+            id: "google/gemini-2.5-flash-lite",
+            displayName: "Gemini 2.5 Flash Lite",
             description: "Very fast and inexpensive for everyday cleanup.",
             estimatedLatencyMs: 450,
             latencyTier: .fast,
             tags: [.fast, .cheap],
-            pricing: Pricing(promptPerMTokens: 0.075, completionPerMTokens: 0.3),
+            pricing: Pricing(promptPerMTokens: 0.1, completionPerMTokens: 0.4),
             contextLength: 1_048_576
         ),
         Option(
-            id: "bytedance-seed/seed-1.6-flash",
-            displayName: "Seed 1.6 Flash",
-            description: "Ultra-fast and very cheap.",
+            id: "qwen/qwen3.6-35b-a3b",
+            displayName: "Qwen3.6 35B A3B",
+            description: "Tiny-cost recent Qwen model for routine cleanup and formatting.",
             estimatedLatencyMs: 350,
             latencyTier: .fast,
             tags: [.fast, .cheap],
-            pricing: Pricing(promptPerMTokens: 0.075, completionPerMTokens: 0.3),
+            pricing: Pricing(promptPerMTokens: 0.15, completionPerMTokens: 1.0),
             contextLength: 262_144
         ),
         Option(
-            id: "mistralai/mistral-small-creative",
-            displayName: "Mistral Small Creative",
-            description: "Budget-friendly rewrites and formatting for shorter transcripts.",
-            estimatedLatencyMs: 500,
+            id: "meta-llama/llama-4-scout",
+            displayName: "Llama 4 Scout",
+            description: "Cheap long-context cleanup option with good speed.",
+            estimatedLatencyMs: 550,
             latencyTier: .fast,
-            tags: [.cheap],
-            pricing: Pricing(promptPerMTokens: 0.1, completionPerMTokens: 0.3),
-            contextLength: 32_768
+            tags: [.fast, .cheap],
+            pricing: Pricing(promptPerMTokens: 0.08, completionPerMTokens: 0.3),
+            contextLength: 327_680
         ),
 
         // Fast / quality cleanup
@@ -261,30 +322,40 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             contextLength: 200_000
         ),
         Option(
-            id: "google/gemini-2.0-flash-001",
-            displayName: "Gemini 2.0 Flash",
+            id: "openai/gpt-5.4-mini",
+            displayName: "GPT-5.4 Mini",
+            description: "Recent OpenAI mini model for higher-quality cleanup at moderate cost.",
+            estimatedLatencyMs: 650,
+            latencyTier: .fast,
+            tags: [.fast, .quality],
+            pricing: Pricing(promptPerMTokens: 0.75, completionPerMTokens: 4.5),
+            contextLength: 400_000
+        ),
+        Option(
+            id: "google/gemini-2.5-flash",
+            displayName: "Gemini 2.5 Flash",
             description: "Great speed and quality for large transcript cleanup.",
             estimatedLatencyMs: 650,
             latencyTier: .fast,
             tags: [.fast],
-            pricing: Pricing(promptPerMTokens: 0.1, completionPerMTokens: 0.4),
+            pricing: Pricing(promptPerMTokens: 0.3, completionPerMTokens: 2.5),
             contextLength: 1_048_576
         ),
 
         // Leading quality
         Option(
-            id: "openai/gpt-4o",
-            displayName: "GPT-4o",
-            description: "High-quality cleanup with excellent structure and tone preservation.",
+            id: "openai/gpt-5.5",
+            displayName: "GPT-5.5",
+            description: "Latest OpenAI generation for top-tier transcript cleanup quality.",
             estimatedLatencyMs: 1200,
             latencyTier: .medium,
             tags: [.quality, .leading],
-            pricing: Pricing(promptPerMTokens: 2.5, completionPerMTokens: 10.0),
-            contextLength: 128_000
+            pricing: Pricing(promptPerMTokens: 5.0, completionPerMTokens: 30.0),
+            contextLength: 1_050_000
         ),
         Option(
-            id: "anthropic/claude-sonnet-4.5",
-            displayName: "Claude Sonnet 4.5",
+            id: "anthropic/claude-sonnet-4.6",
+            displayName: "Claude Sonnet 4.6",
             description: "Excellent structure + tone preservation.",
             estimatedLatencyMs: 1400,
             latencyTier: .medium,
@@ -293,18 +364,51 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             contextLength: 1_000_000
         ),
         Option(
-            id: "openai/gpt-5.2-chat",
-            displayName: "GPT-5.2 Chat",
+            id: "openai/gpt-5.4",
+            displayName: "GPT-5.4",
             description: "Top-tier cleanup quality with low-latency responses.",
             estimatedLatencyMs: 900,
             latencyTier: .fast,
             tags: [.fast, .quality, .leading],
-            pricing: Pricing(promptPerMTokens: 1.75, completionPerMTokens: 14.0),
-            contextLength: 128_000
+            pricing: Pricing(promptPerMTokens: 2.5, completionPerMTokens: 15.0),
+            contextLength: 1_050_000
         )
     ]
 
-    public static let allOptions: [Option] = liveTranscription + batchTranscription + postProcessing
+    public static let localTranscription: [LocalTranscriptionModel] = [
+        LocalTranscriptionModel(
+            id: "local/whisperkit/tiny",
+            displayName: "WhisperKit Tiny",
+            modelName: "tiny",
+            engine: "whisperkit",
+            approximateSizeMB: 75,
+            description: "Small downloadable Core ML Whisper model for fast offline transcription testing.",
+            tags: [.fast, .cheap]
+        ),
+        LocalTranscriptionModel(
+            id: "local/whisperkit/base",
+            displayName: "WhisperKit Base",
+            modelName: "base",
+            engine: "whisperkit",
+            approximateSizeMB: 145,
+            description: "Balanced downloaded Whisper model for private offline transcription.",
+            tags: [.fast]
+        ),
+        LocalTranscriptionModel(
+            id: "local/whisperkit/small",
+            displayName: "WhisperKit Small",
+            modelName: "small",
+            engine: "whisperkit",
+            approximateSizeMB: 465,
+            description: "Higher quality local Whisper model for longer recordings on Apple silicon.",
+            tags: [.quality]
+        )
+    ]
+
+    public static let localTranscriptionOptions: [Option] = localTranscription.map(\.option)
+
+    public static let allOptions: [Option] =
+        liveTranscription + batchTranscription + localTranscriptionOptions + postProcessing
 
     // O(1) lookup cache keyed on lowercased model ID (first entry wins for cross-category duplicates).
     private static let optionsByID: [String: Option] = Dictionary(
@@ -321,6 +425,30 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
         }
 
         let lowercased = trimmed.lowercased()
+        if lowercased.hasPrefix("local/") {
+            if lowercased == "local/post-processing/rules" {
+                return "Local Cleanup (Offline)"
+            }
+            if lowercased.hasPrefix("local/post-processing/") {
+                return friendlyLocalModelName(
+                    from: trimmed,
+                    prefixes: [
+                        "local/post-processing/huggingface/",
+                        "local/post-processing/"
+                    ]
+                )
+            }
+            if lowercased.hasPrefix("local/whisperkit/huggingface/") {
+                return friendlyLocalModelName(from: trimmed, prefixes: ["local/whisperkit/huggingface/"])
+            }
+            if lowercased.hasPrefix("local/streaming/huggingface/") {
+                return friendlyLocalModelName(from: trimmed, prefixes: ["local/streaming/huggingface/"])
+            }
+            if let name = localTranscription.first(where: { $0.id.lowercased() == lowercased })?.displayName {
+                return name
+            }
+            return "Downloaded Local Model"
+        }
         if lowercased.hasPrefix("apple/local") {
             return "Apple Speech"
         }
@@ -331,5 +459,31 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             return String(lastComponent).replacingOccurrences(of: "-", with: " ").capitalized
         }
         return trimmed
+    }
+
+    private static func friendlyLocalModelName(from identifier: String, prefixes: [String]) -> String {
+        var working = identifier
+        let lowercased = identifier.lowercased()
+        if let prefix = prefixes.first(where: { lowercased.hasPrefix($0) }) {
+            working = String(identifier.dropFirst(prefix.count))
+        }
+        let components = working.split(separator: "/").map(String.init)
+        let candidate = components.last ?? working
+        return candidate
+            .replacingOccurrences(of: ".gguf", with: "", options: .caseInsensitive)
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .replacingOccurrences(
+                of: #"(?i)\bq([0-9])\s+k\s+([a-z])\b"#,
+                with: "Q$1_K_$2",
+                options: .regularExpression
+            )
+            .replacingOccurrences(of: #"(?i)\b([0-9]+)mb\b"#, with: "$1 MB", options: .regularExpression)
+            .replacingOccurrences(of: #"(?i)\b([0-9]+)gb\b"#, with: "$1 GB", options: .regularExpression)
+            .capitalized
+            .replacingOccurrences(of: "Gguf", with: "GGUF")
+            .replacingOccurrences(of: " Mb", with: " MB")
+            .replacingOccurrences(of: " Gb", with: " GB")
+            .replacingOccurrences(of: "Qwen", with: "Qwen")
     }
 }

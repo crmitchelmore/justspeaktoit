@@ -1,6 +1,6 @@
 import SpeakCore
 import AppKit
-import AVFoundation
+@preconcurrency import AVFoundation
 import Foundation
 import Speech
 
@@ -17,11 +17,13 @@ func applyLiveStopGrace(_ period: TimeInterval) async {
   try? await Task.sleep(for: .seconds(grace))
 }
 
-enum TranscriptionManagerError: LocalizedError {
+enum TranscriptionManagerError: LocalizedError, Equatable {
   case liveSessionAlreadyRunning
   case liveSessionNotRunning
   case recognizerUnavailable
   case permissionsMissing
+  case localLiveStreamingUnsupported
+  case invalidLocalStreamingSource(String)
 
   var errorDescription: String? {
     switch self {
@@ -33,6 +35,11 @@ enum TranscriptionManagerError: LocalizedError {
       return "The speech recogniser could not be configured for the selected locale."
     case .permissionsMissing:
       return "Required microphone or speech recognition permissions are missing."
+    case .localLiveStreamingUnsupported:
+      return "Downloaded local models are offline-only in this prerelease. Use Local Batch after recording."
+    case .invalidLocalStreamingSource(let sourceID):
+      return "Local streaming source is not available: \(sourceID). " +
+        "Choose or download a local streaming model in Settings."
     }
   }
 }
@@ -77,7 +84,7 @@ final class TranscriptionManager: ObservableObject {
 
   func startLiveTranscription() async throws {
     guard !isLiveTranscribing else { throw TranscriptionManagerError.liveSessionAlreadyRunning }
-    let model = appSettings.liveTranscriptionModel
+    let model = try liveTranscriptionModelForCurrentMode()
     let language = appSettings.preferredLocaleIdentifier
     print("[TranscriptionManager] startLiveTranscription - model: \(model), language: \(language)")
     liveController.configure(
@@ -95,8 +102,8 @@ final class TranscriptionManager: ObservableObject {
     // and preferred input-device sessions are released before surfacing the failure.
     if let error = pendingError {
       pendingError = nil
-      await liveController.stop()
       isLiveTranscribing = false
+      Task { await liveController.stop() }
       throw error
     }
     guard isLiveTranscribing else { throw TranscriptionManagerError.liveSessionNotRunning }
@@ -119,7 +126,6 @@ final class TranscriptionManager: ObservableObject {
   }
 
   func cancelLiveTranscription() {
-    guard isLiveTranscribing else { return }
     continuation?.resume(throwing: TranscriptionManagerError.liveSessionNotRunning)
     continuation = nil
     Task {
@@ -137,7 +143,15 @@ final class TranscriptionManager: ObservableObject {
   }
 
   func transcribeFile(at url: URL) async throws -> TranscriptionResult {
-    let model = appSettings.batchTranscriptionModel
+    let model = offlineTranscriptionModel
+    if ModelRouting.family(for: model).isDownloadedLocal {
+      return try await LocalModelManager.shared.transcribeFile(
+        at: url,
+        modelID: model,
+        language: appSettings.preferredLocaleIdentifier
+      )
+    }
+
     let registry = TranscriptionProviderRegistry.shared
 
     // Check if this model uses a dedicated transcription provider
@@ -160,7 +174,10 @@ final class TranscriptionManager: ObservableObject {
   }
 
   func batchTranscriptionUsesRemoteService() async -> Bool {
-    let model = appSettings.batchTranscriptionModel
+    let model = offlineTranscriptionModel
+    if ModelRouting.family(for: model).isDownloadedLocal {
+      return false
+    }
     let registry = TranscriptionProviderRegistry.shared
 
     // Check if provider requires API key
@@ -175,7 +192,7 @@ final class TranscriptionManager: ObservableObject {
   func hasValidBatchAPIKey() async -> Bool {
     guard await batchTranscriptionUsesRemoteService() else { return true }
 
-    let model = appSettings.batchTranscriptionModel
+    let model = offlineTranscriptionModel
     let registry = TranscriptionProviderRegistry.shared
 
     // Check if provider has API key
@@ -185,6 +202,46 @@ final class TranscriptionManager: ObservableObject {
 
     // Fallback to OpenRouter
     return await openRouter.hasStoredAPIKey()
+  }
+
+  private var offlineTranscriptionModel: String {
+    if appSettings.transcriptionMode == .localModel {
+      return appSettings.localTranscriptionModel
+    }
+    return appSettings.batchTranscriptionModel
+  }
+
+  private func liveTranscriptionModelForCurrentMode() throws -> String {
+    try Self.resolvedLiveTranscriptionModel(
+      transcriptionMode: appSettings.transcriptionMode,
+      localTranscriptionMode: appSettings.localTranscriptionMode,
+      localStreamingModelSource: appSettings.localStreamingModelSource,
+      liveTranscriptionModel: appSettings.liveTranscriptionModel,
+      availableStreamingSourceIDs: Set(
+        LocalModelManager.recommendedStreamingModelSources.map(\.id)
+          + LocalModelManager.shared.streamingModelSources.map(\.id)
+      )
+    )
+  }
+
+  nonisolated static func resolvedLiveTranscriptionModel(
+    transcriptionMode: AppSettings.TranscriptionMode,
+    localTranscriptionMode: AppSettings.LocalTranscriptionMode,
+    localStreamingModelSource: String,
+    liveTranscriptionModel: String,
+    availableStreamingSourceIDs: Set<String>
+  ) throws -> String {
+    guard transcriptionMode == .localModel, localTranscriptionMode == .streaming else {
+      return liveTranscriptionModel
+    }
+
+    guard localStreamingModelSource.hasPrefix("local/streaming/"),
+      availableStreamingSourceIDs.contains(localStreamingModelSource)
+    else {
+      throw TranscriptionManagerError.invalidLocalStreamingSource(localStreamingModelSource)
+    }
+
+    return localStreamingModelSource
   }
 
   /// Returns the metadata for the live-transcription provider whose API key is
@@ -421,7 +478,7 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
     // a final result at the same time stop() is called
     guard !hasFinished else { return }
     hasFinished = true
-    
+
     Task { await self.endActiveInputSession() }
 
     let segments = result.bestTranscription.segments.map { segment in
@@ -551,11 +608,387 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
   }
 
   private func ensurePermissions() async -> Bool {
-    let microphone = await permissionsManager.request(.microphone)
-    let speech = await permissionsManager.request(.speechRecognition)
+    let microphone = await permissionsManager.ensureGranted(.microphone)
+    let speech = await permissionsManager.ensureGranted(.speechRecognition)
     return microphone.isGranted && speech.isGranted
   }
 }
+
+final class UnsupportedLocalLiveTranscriber: LiveTranscriptionController {
+  weak var delegate: LiveTranscriptionSessionDelegate?
+  private(set) var isRunning: Bool = false
+
+  func configure(language: String?, model: String) {}
+
+  func start() async throws {
+    throw TranscriptionManagerError.localLiveStreamingUnsupported
+  }
+
+  func stop() async {
+    isRunning = false
+  }
+}
+
+@MainActor
+// swiftlint:disable type_body_length
+final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
+  weak var delegate: LiveTranscriptionSessionDelegate?
+  private(set) var isRunning: Bool = false
+
+  private let appSettings: AppSettings
+  private let permissionsManager: PermissionsManager
+  private let audioDeviceManager: AudioInputDeviceManager
+  private let runtimeManager: SherpaOnnxRuntimeManager
+  private let audioEngine = AVAudioEngine()
+  private let audioProcessor = SherpaOnnxAudioProcessor()
+  private let targetSampleRate: Double = 16000
+  private let logger = Logger(subsystem: "com.github.speakapp", category: "SherpaOnnxLiveController")
+
+  private var process: Process?
+  private var stdinPipe: Pipe?
+  private var stdoutPipe: Pipe?
+  private var stderrPipe: Pipe?
+  private var activeInputSession: AudioInputDeviceManager.SessionContext?
+  private var currentModel: String?
+  private var streamingStartTime: Date?
+  private var latestText: String = ""
+  private var hasFinished: Bool = false
+  private var isStopping: Bool = false
+  private var sidecarOutputBuffer = ""
+
+  init(
+    appSettings: AppSettings,
+    permissionsManager: PermissionsManager,
+    audioDeviceManager: AudioInputDeviceManager,
+    runtimeManager: SherpaOnnxRuntimeManager
+  ) {
+    self.appSettings = appSettings
+    self.permissionsManager = permissionsManager
+    self.audioDeviceManager = audioDeviceManager
+    self.runtimeManager = runtimeManager
+  }
+
+  func configure(language: String?, model: String) {
+    currentModel = model
+  }
+
+  func start() async throws {
+    guard !isRunning, !isStopping else {
+      throw TranscriptionManagerError.liveSessionAlreadyRunning
+    }
+    guard await permissionsManager.ensureGranted(.microphone).isGranted else {
+      throw TranscriptionManagerError.permissionsMissing
+    }
+
+    let modelID = currentModel ?? appSettings.localStreamingModelSource
+    let bundle = try await runtimeManager.ensureReady(sourceID: modelID)
+    let process = try makeProcess(bundle: bundle)
+    let stdinPipe = Pipe()
+    let stdoutPipe = Pipe()
+    let stderrPipe = Pipe()
+    process.standardInput = stdinPipe
+    process.standardOutput = stdoutPipe
+    process.standardError = stderrPipe
+    process.environment = ProcessInfo.processInfo.environment.merging(["PYTHONUNBUFFERED": "1"]) { _, new in new }
+
+    latestText = ""
+    hasFinished = false
+    sidecarOutputBuffer = ""
+    self.process = process
+    self.stdinPipe = stdinPipe
+    self.stdoutPipe = stdoutPipe
+    self.stderrPipe = stderrPipe
+
+    stdoutPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+      let data = handle.availableData
+      guard !data.isEmpty else { return }
+      Task { @MainActor [weak self] in
+        self?.handleSidecarOutput(data)
+      }
+    }
+
+    try process.run()
+
+    let sessionContext = await audioDeviceManager.beginUsingPreferredInput()
+    activeInputSession = sessionContext
+
+    do {
+      let inputNode = audioEngine.inputNode
+      inputNode.removeTap(onBus: 0)
+      let inputFormat = inputNode.outputFormat(forBus: 0)
+      guard let outputFormat = AVAudioFormat(
+        commonFormat: .pcmFormatFloat32,
+        sampleRate: targetSampleRate,
+        channels: 1,
+        interleaved: false
+      ) else {
+        throw SherpaOnnxRuntimeError.processFailed("Could not create 16 kHz Float32 audio format.")
+      }
+      let writer = stdinPipe.fileHandleForWriting
+      audioProcessor.setRunning(true)
+      let processor = audioProcessor
+      let log = logger
+      inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { buffer, _ in
+        processor.handleAudioTap(
+          buffer,
+          inputFormat: inputFormat,
+          outputFormat: outputFormat,
+          writer: writer,
+          logger: log
+        )
+      }
+      audioEngine.prepare()
+      try audioEngine.start()
+      streamingStartTime = Date()
+      isRunning = true
+    } catch {
+      await cleanupAfterFailedStart()
+      throw error
+    }
+  }
+
+  func stop() async {
+    guard isRunning else { return }
+    isStopping = true
+    audioEngine.stop()
+    audioEngine.inputNode.removeTap(onBus: 0)
+    audioProcessor.setRunning(false)
+
+    await applyLiveStopGrace(appSettings.liveStopGracePeriod)
+    try? stdinPipe?.fileHandleForWriting.close()
+    await waitForProcessExit()
+    processRemainingSidecarOutput()
+    stdoutPipe?.fileHandleForReading.readabilityHandler = nil
+    stderrPipe?.fileHandleForReading.readabilityHandler = nil
+    isRunning = false
+
+    let duration = streamingStartTime.map { Date().timeIntervalSince($0) } ?? 0
+    let result = TranscriptionResult(
+      text: latestText,
+      segments: latestText.isEmpty ? [] : [
+        TranscriptionSegment(startTime: 0, endTime: duration, text: latestText)
+      ],
+      confidence: nil,
+      duration: duration,
+      modelIdentifier: currentModel ?? appSettings.localStreamingModelSource,
+      cost: nil,
+      rawPayload: nil,
+      debugInfo: nil
+    )
+    hasFinished = true
+    delegate?.liveTranscriber(self, didFinishWith: result)
+    await endActiveInputSession()
+    resetProcessState()
+    isStopping = false
+  }
+
+  private func makeProcess(bundle: SherpaOnnxModelBundle) throws -> Process {
+    let process = Process()
+    process.executableURL = try runtimeManager.pythonExecutable()
+    process.arguments = [
+      "-u",
+      try runtimeManager.sidecarScriptURL().path,
+      "--tokens", bundle.tokens.path,
+      "--encoder", bundle.encoder.path,
+      "--decoder", bundle.decoder.path,
+      "--joiner", bundle.joiner.path
+    ]
+    return process
+  }
+
+  private func handleSidecarOutput(_ data: Data) {
+    guard !hasFinished else { return }
+    guard let output = String(data: data, encoding: .utf8) else { return }
+    sidecarOutputBuffer += output
+    let lines = sidecarOutputBuffer.split(separator: "\n", omittingEmptySubsequences: false)
+    sidecarOutputBuffer = lines.last.map(String.init) ?? ""
+    for line in lines.dropLast() {
+      decodeSidecarEvent(String(line))
+    }
+  }
+
+  private func processRemainingSidecarOutput() {
+    let remaining = sidecarOutputBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
+    sidecarOutputBuffer = ""
+    guard !remaining.isEmpty else { return }
+    decodeSidecarEvent(remaining)
+  }
+
+  private func decodeSidecarEvent(_ line: String) {
+    guard !hasFinished else { return }
+    guard let lineData = line.data(using: .utf8),
+      let event = try? JSONDecoder().decode(SidecarEvent.self, from: lineData)
+    else { return }
+    switch event.type {
+    case "partial", "session_final":
+      guard let rawText = event.text?.trimmingCharacters(in: .whitespacesAndNewlines), !rawText.isEmpty else {
+        return
+      }
+      let text = SherpaOnnxTranscriptNormalizer.normalize(rawText)
+      latestText = text
+      let update = LiveTranscriptionUpdate(text: text, isFinal: event.type == "session_final")
+      delegate?.liveTranscriber(self, didUpdateWith: update)
+      delegate?.liveTranscriber(self, didUpdatePartial: text)
+    case "error":
+      delegate?.liveTranscriber(
+        self,
+        didFail: SherpaOnnxRuntimeError.processFailed(event.message ?? "Unknown sherpa-onnx error.")
+      )
+    default:
+      break
+    }
+  }
+
+  private func waitForProcessExit() async {
+    guard let process else { return }
+    for _ in 0..<40 where process.isRunning {
+      try? await Task.sleep(for: .milliseconds(100))
+    }
+    if process.isRunning {
+      process.terminate()
+    }
+  }
+
+  private func cleanupAfterFailedStart() async {
+    audioEngine.stop()
+    audioEngine.inputNode.removeTap(onBus: 0)
+    audioProcessor.setRunning(false)
+    try? stdinPipe?.fileHandleForWriting.close()
+    process?.terminate()
+    isRunning = false
+    isStopping = false
+    await endActiveInputSession()
+    resetProcessState()
+  }
+
+  private func endActiveInputSession() async {
+    guard let session = activeInputSession else { return }
+    activeInputSession = nil
+    await audioDeviceManager.endUsingPreferredInput(session: session)
+  }
+
+  private func resetProcessState() {
+    process = nil
+    stdinPipe = nil
+    stdoutPipe = nil
+    stderrPipe = nil
+    streamingStartTime = nil
+    sidecarOutputBuffer = ""
+  }
+
+  private struct SidecarEvent: Decodable {
+    let type: String
+    let text: String?
+    let message: String?
+  }
+
+  private final class SherpaOnnxAudioProcessor: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "com.github.speakapp.sherpa-onnx.audioProcessing")
+    private var isRunning = false
+    private var cachedConverter: AVAudioConverter?
+    private var cachedInputFormat: AVAudioFormat?
+    private var reusableOutputBuffer: AVAudioPCMBuffer?
+
+    func setRunning(_ running: Bool) {
+      queue.sync {
+        isRunning = running
+        if !running {
+          cachedConverter = nil
+          cachedInputFormat = nil
+          reusableOutputBuffer = nil
+        }
+      }
+    }
+
+    func handleAudioTap(
+      _ buffer: AVAudioPCMBuffer,
+      inputFormat: AVAudioFormat,
+      outputFormat: AVAudioFormat,
+      writer: FileHandle,
+      logger: Logger
+    ) {
+      guard let copied = copyPCMBuffer(buffer) else { return }
+      queue.async { [weak self] in
+        guard let self, self.isRunning else { return }
+        self.processAndWriteAudio(copied, from: inputFormat, to: outputFormat, writer: writer, logger: logger)
+      }
+    }
+
+    private func copyPCMBuffer(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+      let frameLength = buffer.frameLength
+      guard let copy = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: frameLength) else {
+        return nil
+      }
+      copy.frameLength = frameLength
+      let src = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: buffer.audioBufferList))
+      let dst = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: copy.audioBufferList))
+      for idx in 0..<min(src.count, dst.count) {
+        guard let srcData = src[idx].mData, let dstData = dst[idx].mData else { continue }
+        dstData.copyMemory(from: srcData, byteCount: Int(src[idx].mDataByteSize))
+        dst[idx].mDataByteSize = src[idx].mDataByteSize
+      }
+      return copy
+    }
+
+    private func processAndWriteAudio(
+      _ buffer: AVAudioPCMBuffer,
+      from inputFormat: AVAudioFormat,
+      to outputFormat: AVAudioFormat,
+      writer: FileHandle,
+      logger: Logger
+    ) {
+      let converter: AVAudioConverter
+      if let cachedConverter, cachedInputFormat == inputFormat {
+        converter = cachedConverter
+      } else {
+        guard let newConverter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
+          logger.error("Failed to create sherpa-onnx audio converter")
+          return
+        }
+        cachedConverter = newConverter
+        cachedInputFormat = inputFormat
+        converter = newConverter
+      }
+
+      let ratio = outputFormat.sampleRate / inputFormat.sampleRate
+      let capacity = AVAudioFrameCount(max(1, Double(buffer.frameLength) * ratio + 32))
+      let outputBuffer: AVAudioPCMBuffer
+      if let reusableOutputBuffer, reusableOutputBuffer.frameCapacity >= capacity {
+        reusableOutputBuffer.frameLength = 0
+        outputBuffer = reusableOutputBuffer
+      } else {
+        guard let newBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: capacity) else { return }
+        reusableOutputBuffer = newBuffer
+        outputBuffer = newBuffer
+      }
+
+      var didProvideInput = false
+      var error: NSError?
+      let status = converter.convert(to: outputBuffer, error: &error) { _, outStatus in
+        if didProvideInput {
+          outStatus.pointee = .noDataNow
+          return nil
+        }
+        didProvideInput = true
+        outStatus.pointee = .haveData
+        return buffer
+      }
+      guard status != .error, error == nil, let channelData = outputBuffer.floatChannelData else {
+        let errorDescription = error?.localizedDescription ?? "unknown"
+        logger.error("sherpa-onnx audio conversion failed: \(errorDescription, privacy: .public)")
+        return
+      }
+      let byteCount = Int(outputBuffer.frameLength) * MemoryLayout<Float>.size
+      let data = Data(bytes: channelData[0], count: byteCount)
+      do {
+        try writer.write(contentsOf: data)
+      } catch {
+        logger.error("Failed to write audio to sherpa-onnx: \(error.localizedDescription, privacy: .public)")
+      }
+    }
+  }
+}
+// swiftlint:enable type_body_length
 
 struct RemoteAudioTranscriber: BatchTranscriptionClient {
   let client: OpenRouterAPIClient
@@ -856,8 +1289,8 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
 
 private extension DeepgramLiveController {
   func ensurePermissions() async -> Bool {
-    let microphone = await permissionsManager.request(.microphone)
-    let speech = await permissionsManager.request(.speechRecognition)
+    let microphone = await permissionsManager.ensureGranted(.microphone)
+    let speech = await permissionsManager.ensureGranted(.speechRecognition)
     return microphone.isGranted && speech.isGranted
   }
 
@@ -1509,8 +1942,8 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
   }
 
   private func ensurePermissions() async -> Bool {
-    let microphone = await permissionsManager.request(.microphone)
-    let speech = await permissionsManager.request(.speechRecognition)
+    let microphone = await permissionsManager.ensureGranted(.microphone)
+    let speech = await permissionsManager.ensureGranted(.speechRecognition)
     return microphone.isGranted && speech.isGranted
   }
 
@@ -1854,8 +2287,8 @@ final class ModulateLiveController: NSObject, LiveTranscriptionController {
   }
 
   private func ensurePermissions() async -> Bool {
-    let microphone = await permissionsManager.request(.microphone)
-    let speech = await permissionsManager.request(.speechRecognition)
+    let microphone = await permissionsManager.ensureGranted(.microphone)
+    let speech = await permissionsManager.ensureGranted(.speechRecognition)
     return microphone.isGranted && speech.isGranted
   }
 
@@ -2353,8 +2786,8 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
 
 private extension ElevenLabsLiveController {
   func ensurePermissions() async -> Bool {
-    let microphone = await permissionsManager.request(.microphone)
-    let speech = await permissionsManager.request(.speechRecognition)
+    let microphone = await permissionsManager.ensureGranted(.microphone)
+    let speech = await permissionsManager.ensureGranted(.speechRecognition)
     return microphone.isGranted && speech.isGranted
   }
 
@@ -2794,8 +3227,8 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
 
 private extension SonioxLiveController {
   func ensurePermissions() async -> Bool {
-    let microphone = await permissionsManager.request(.microphone)
-    let speech = await permissionsManager.request(.speechRecognition)
+    let microphone = await permissionsManager.ensureGranted(.microphone)
+    let speech = await permissionsManager.ensureGranted(.speechRecognition)
     return microphone.isGranted && speech.isGranted
   }
 
@@ -2905,6 +3338,8 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   private var elevenlabsController: ElevenLabsLiveController
   private var sonioxController: SonioxLiveController
   private var openAIRealtimeController: OpenAIRealtimeLiveController
+  private var sherpaOnnxController: SherpaOnnxLiveController
+  private var unsupportedLocalLiveController: UnsupportedLocalLiveTranscriber
   private var currentLanguage: String?
   private var currentModel: String?
   private var invalidateBeforeNextStart: Bool = false
@@ -2965,6 +3400,13 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       audioDeviceManager: audioDeviceManager,
       secureStorage: secureStorage
     )
+    sherpaOnnxController = SherpaOnnxLiveController(
+      appSettings: appSettings,
+      permissionsManager: permissionsManager,
+      audioDeviceManager: audioDeviceManager,
+      runtimeManager: SherpaOnnxRuntimeManager.shared
+    )
+    unsupportedLocalLiveController = UnsupportedLocalLiveTranscriber()
     applyDelegateAndConfiguration()
     startObservingLifecycle()
   }
@@ -3020,6 +3462,8 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     if model.hasPrefix("elevenlabs/") { return elevenlabsController }
     if model.hasPrefix("soniox/") { return sonioxController }
     if model.hasPrefix("openai/gpt-realtime-whisper") { return openAIRealtimeController }
+    if model.hasPrefix("local/streaming/") { return sherpaOnnxController }
+    if ModelRouting.family(for: model).isDownloadedLocal { return unsupportedLocalLiveController }
     return nativeController
   }
 
@@ -3031,7 +3475,9 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       assemblyAIController,
       elevenlabsController,
       sonioxController,
-      openAIRealtimeController
+      openAIRealtimeController,
+      sherpaOnnxController,
+      unsupportedLocalLiveController
     ]
     let model = currentModel ?? appSettings.liveTranscriptionModel
     for controller in controllers {
@@ -3091,6 +3537,13 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       audioDeviceManager: audioDeviceManager,
       secureStorage: secureStorage
     )
+    sherpaOnnxController = SherpaOnnxLiveController(
+      appSettings: appSettings,
+      permissionsManager: permissionsManager,
+      audioDeviceManager: audioDeviceManager,
+      runtimeManager: SherpaOnnxRuntimeManager.shared
+    )
+    unsupportedLocalLiveController = UnsupportedLocalLiveTranscriber()
     invalidateBeforeNextStart = false
     lastStopDate = nil
     applyDelegateAndConfiguration()

@@ -273,6 +273,18 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
 - `AssemblyAITranscriptionProvider.swift` — WebSocket client, response models
 - `TranscriptionManager.swift` (`AssemblyAILiveController`) — turn handling, audio processing
 
+## OpenAI Realtime Transcription
+
+### Endpoint and payload
+- Validate OpenAI Realtime transcription changes against the live WebSocket API before shipping; this API changed during rollout and stale docs/assumptions caused regressions.
+- All OpenAI transcription models use `wss://api.openai.com/v1/realtime?intent=transcription` with a GA `session.update` payload; do **not** use `?model=<name>` for transcription.
+- Do **not** send the legacy `OpenAI-Beta: realtime=v1` header for transcription sessions; it pins the old schema and rejects `session.type`.
+- Keep macOS and iOS OpenAI Realtime wiring in sync when changing endpoint shape, event names, payload fields, or stop/finalisation sequencing.
+
+### Prompt semantics
+- `gpt-4o-transcribe` and `gpt-4o-mini-transcribe` support the Realtime transcription `prompt`; `gpt-realtime-whisper` and `whisper-1` reject it.
+- Treat the OpenAI transcription `prompt` as vocabulary/keyterm biasing, not a custom formatting or tone prompt. Keep tone/style changes in post-processing.
+
 ## Accessibility Text Insertion
 
 ### API semantics
@@ -305,6 +317,16 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
 - Prefer native iOS controls (for example, `Toggle` with switch style) over custom checkbox-like controls in chat/input surfaces.
 - Keep interactive controls at least 44pt high/wide, and size message composer inputs to a comfortable HIG-aligned minimum (around 50pt).
 - If acknowledgement hints are shown, make the interaction target explicit (for example, “Tap the chat area…”).
+
+## Downloaded Local Models (macOS)
+
+- Treat downloaded local models as a distinct feature from Apple Speech: use `local/...` identifiers for downloaded models and keep Apple Speech under `apple/local/...`.
+- Keep settings structured as top-level **Local** vs **Remote**, then **Batch** vs **Streaming** within the selected side; mirror the same interaction pattern across transcription and post-processing.
+- Local model UI should show clear catalogue/source sections, Hugging Face discovery/import when supported, model size, selected/downloaded/prepared state, runtime install state, and local-only copy. Hide runtime install controls after the runtime is installed.
+- For local post-processing, the prompt editor must be visible for downloaded local LLMs as well as remote OpenRouter models; pass `postProcessingSystemPrompt` into the local model as an explicit system instruction. Built-in rules cleanup may ignore the prompt, but the UI must say so.
+- Local LLM post-processing must honour the user-defined prompt in the model context/system instruction, including formatting-only prompts such as one full stop after each word.
+- Empty or silent recordings must remain empty through post-processing; never emit placeholder text such as "This is a raw transcript." for no-input transcription.
+- In History and headers, always resolve model identifiers to friendly names, including imported/downloaded local models. Avoid generic labels such as “Downloaded Local Model” when a repo/model name can be derived.
 
 ## Commit Message Tagging
 - Prefix commit messages with a platform tag or scope: `[mac]`/`[ios]` or `(mac)`/`(ios)` (e.g., `fix: [mac] add recording sound picker` or `fix(mac): add recording sound picker`).
@@ -374,6 +396,7 @@ bd close <id>         # Complete work
 - Run `bd prime` for detailed command reference and session close protocol
 - Use `bd remember` for persistent knowledge -- do NOT use MEMORY.md files
 - Keep Beads automation on Copilot CLI surfaces (`AGENTS.md` and repo-local `.github/hooks/*.json`); do NOT add Claude-specific Beads files such as `CLAUDE.md` or `.claude/settings.json`
+- Beads hooks can generate a root `issues.jsonl` artefact during commits. Before committing or pushing, check for and exclude that file; if a hook already staged or committed it, rewrite the commit cleanly rather than shipping the artefact.
 
 ## Session Completion
 

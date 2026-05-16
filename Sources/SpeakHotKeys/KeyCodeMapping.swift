@@ -16,6 +16,7 @@ public enum KeyCodeMapping {
     case 7: return "X"
     case 8: return "C"
     case 9: return "V"
+    case 10: return "§/±"
     case 11: return "B"
     case 12: return "Q"
     case 13: return "W"
@@ -104,6 +105,7 @@ public enum KeyCodeMapping {
 
   /// Keys that are intentionally allowed as single-key custom hotkeys.
   public static let singleKeyHotKeyCodes: Set<UInt16> = [
+    10,  // ISO §/± key to the left of 1
     64, 79, 80, 90,  // F17-F20
     105, 106, 107, 113,  // F13-F16
     114  // Insert/Help

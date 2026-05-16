@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>JustSpeakToIt — Live Streaming Transcription for Mac & iOS</title>
-  <meta name="description" content="Live streaming speech-to-text for Mac & iOS using Deepgram, AssemblyAI, OpenAI, ElevenLabs, Soniox, Modulate, and Apple on-device models.">
-  <meta property="og:title" content="JustSpeakToIt — Live Streaming Transcription">
-  <meta property="og:description" content="Native Mac & iOS apps focused on low-latency live transcription with bring-your-own-keys pricing.">
+  <title>JustSpeakToIt — Local & Live Transcription for Mac & iOS</title>
+  <meta name="description" content="Local and live speech-to-text for Mac & iOS: downloaded WhisperKit batch models, sherpa-onnx local streaming, local LLM post-processing, and cloud providers when you want them.">
+  <meta property="og:title" content="JustSpeakToIt — Local & Live Transcription">
+  <meta property="og:description" content="Native Mac & iOS dictation with downloaded local models, live streaming providers, and bring-your-own-keys pricing.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://justspeaktoit.com">
   <meta name="twitter:card" content="summary_large_image">
@@ -565,6 +565,131 @@
     .live-model-card__pulse span:nth-child(3) { height: 48px; animation-delay: 0.24s; }
     .live-model-card__pulse span:nth-child(4) { height: 26px; animation-delay: 0.36s; }
 
+    /* Local model lab */
+    .local-lab {
+      max-width: 1240px;
+      position: relative;
+    }
+
+    .local-lab::before {
+      content: '';
+      position: absolute;
+      inset: 7rem 2rem 4rem;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 36px;
+      background:
+        linear-gradient(115deg, rgba(45, 212, 191, 0.10), transparent 38%),
+        radial-gradient(circle at 78% 18%, rgba(255, 155, 74, 0.16), transparent 30%),
+        repeating-linear-gradient(90deg, rgba(255,255,255,0.035) 0 1px, transparent 1px 64px);
+      opacity: 0.9;
+      z-index: -1;
+    }
+
+    .local-lab__panel {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(320px, 0.9fr);
+      gap: 1.5rem;
+      align-items: stretch;
+    }
+
+    .local-lab__terminal,
+    .local-lab__stack {
+      background: rgba(7, 10, 15, 0.82);
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      border-radius: 28px;
+      box-shadow: 0 30px 80px rgba(0, 0, 0, 0.38);
+      overflow: hidden;
+    }
+
+    .local-lab__terminal {
+      padding: 1.25rem;
+    }
+
+    .local-lab__chrome {
+      display: flex;
+      gap: 0.45rem;
+      margin-bottom: 1.25rem;
+    }
+
+    .local-lab__chrome span {
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      background: var(--color-accent);
+      box-shadow: 18px 0 0 var(--color-accent-warm), 36px 0 0 var(--color-secondary);
+    }
+
+    .local-lab__readout {
+      display: grid;
+      gap: 0.85rem;
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      font-size: clamp(0.78rem, 1.8vw, 0.95rem);
+      color: #d9f8f1;
+    }
+
+    .local-lab__line {
+      display: grid;
+      grid-template-columns: 8ch 1fr auto;
+      gap: 0.9rem;
+      align-items: center;
+      padding: 0.8rem 0.9rem;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.045);
+    }
+
+    .local-lab__line strong {
+      color: var(--color-secondary);
+      font-weight: 700;
+    }
+
+    .local-lab__meter {
+      height: 8px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08);
+      overflow: hidden;
+    }
+
+    .local-lab__meter span {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--color-secondary), var(--color-accent-warm));
+    }
+
+    .local-lab__stack {
+      padding: 1.25rem;
+      display: grid;
+      gap: 1rem;
+    }
+
+    .local-feature {
+      padding: 1.35rem;
+      border-radius: 20px;
+      background: linear-gradient(135deg, rgba(26, 37, 51, 0.92), rgba(11, 15, 20, 0.82));
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .local-feature__kicker {
+      color: var(--color-secondary);
+      font-size: 0.75rem;
+      font-weight: 800;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      margin-bottom: 0.55rem;
+    }
+
+    .local-feature__title {
+      font-family: var(--font-display);
+      font-size: 1.25rem;
+      margin-bottom: 0.45rem;
+    }
+
+    .local-feature__copy {
+      color: var(--color-text-muted);
+      font-size: 0.94rem;
+      line-height: 1.65;
+    }
+
     /* Section styling */
     section {
       padding: 6rem 2rem;
@@ -1029,6 +1154,14 @@
         min-height: 0;
       }
 
+      .local-lab__panel {
+        grid-template-columns: 1fr;
+      }
+
+      .local-lab__line {
+        grid-template-columns: 1fr;
+      }
+
       .byok-section {
         padding: 2.5rem 1.5rem;
         margin: 2rem 1rem;
@@ -1064,7 +1197,8 @@
       JustSpeakToIt
     </a>
     <ul class="nav__links">
-      <li><a href="#models" class="nav__link">Live Models</a></li>
+      <li><a href="#models" class="nav__link">Models</a></li>
+      <li><a href="#local" class="nav__link">Local</a></li>
       <li><a href="#features" class="nav__link">Features</a></li>
       <li><a href="#pricing" class="nav__link">Pricing</a></li>
       <li><a href="#platforms" class="nav__link">Platforms</a></li>
@@ -1080,7 +1214,8 @@
 
   <!-- Mobile navigation overlay (sibling of nav to avoid iOS Safari backdrop-filter containment) -->
   <div class="mobile-nav-overlay" id="mobile-nav-overlay" aria-hidden="true">
-    <a href="#models" class="nav__link">Live Models</a>
+    <a href="#models" class="nav__link">Models</a>
+    <a href="#local" class="nav__link">Local</a>
     <a href="#features" class="nav__link">Features</a>
     <a href="#pricing" class="nav__link">Pricing</a>
     <a href="#platforms" class="nav__link">Platforms</a>
@@ -1091,13 +1226,13 @@
   <section class="hero">
     <div class="hero__badge">
       <span class="hero__badge-dot"></span>
-      Live streaming models now front and centre
+      2.0 brings downloaded local models to the Mac
     </div>
     <h1 class="hero__title">
-      <span class="hero__title-accent">Speak live.</span> See the words arrive.
+      <span class="hero__title-accent">Speak anywhere.</span> Choose local, live, or both.
     </h1>
     <p class="hero__subtitle">
-      Low-latency speech-to-text for Mac and iOS, built around streaming providers like Deepgram Nova-3, AssemblyAI Universal-3 Pro, ElevenLabs Scribe v2, Soniox, OpenAI Realtime Whisper, Modulate Velma-2, and Apple on-device recognition.
+      Native dictation for Mac and iOS with downloaded WhisperKit batch models, sherpa-onnx local streaming, local LLM post-processing, and cloud engines like Deepgram, AssemblyAI, OpenAI, ElevenLabs, Soniox, and Modulate when you want maximum accuracy.
     </p>
     <div class="hero__actions">
       <a href="https://github.com/crmitchelmore/justspeaktoit/releases/latest" class="btn btn--primary" target="_blank" rel="noopener">
@@ -1138,8 +1273,8 @@
       </div>
       <div class="pricing-highlight__divider"></div>
       <div class="pricing-highlight__item">
-        <div class="pricing-highlight__value pricing-highlight__value--secondary">7</div>
-        <div class="pricing-highlight__label">Live model options</div>
+        <div class="pricing-highlight__value pricing-highlight__value--secondary">Local</div>
+        <div class="pricing-highlight__label">Batch, streaming & cleanup</div>
       </div>
       <div class="pricing-highlight__divider"></div>
       <div class="pricing-highlight__item">
@@ -1152,10 +1287,10 @@
   <!-- Live Models -->
   <section class="live-models" id="models">
     <div class="section-header reveal">
-      <div class="section-header__eyebrow">Live Streaming</div>
+      <div class="section-header__eyebrow">Local + Live</div>
       <h2 class="section-header__title">Choose the engine for the moment</h2>
       <p class="section-header__description">
-        JustSpeakToIt is tuned for streaming-first transcription: interim text while you speak, polished finals when the provider supports them, and instant insertion into the app you are already using.
+        Stay offline with local models, stream for instant feedback, or use a cloud model for specialised accuracy. JustSpeakToIt keeps each path explicit so you always know where audio and text are processed.
       </p>
     </div>
 
@@ -1246,6 +1381,69 @@
     </div>
   </section>
 
+  <!-- Local Models -->
+  <section class="local-lab" id="local">
+    <div class="section-header reveal">
+      <div class="section-header__eyebrow">Local Model Lab</div>
+      <h2 class="section-header__title">Downloaded models, no round trip required</h2>
+      <p class="section-header__description">
+        Version 2.0 separates local batch, local streaming, and local post-processing so you can pick the right offline tool without guessing which runtime is active.
+      </p>
+    </div>
+
+    <div class="local-lab__panel reveal">
+      <div class="local-lab__terminal" aria-label="Local model support overview">
+        <div class="local-lab__chrome" aria-hidden="true"><span></span></div>
+        <div class="local-lab__readout">
+          <div class="local-lab__line">
+            <strong>Batch</strong>
+            <span>WhisperKit/Core ML after recording stops</span>
+            <div class="local-lab__meter" aria-hidden="true"><span style="width: 92%;"></span></div>
+          </div>
+          <div class="local-lab__line">
+            <strong>Live</strong>
+            <span>sherpa-onnx streaming sources with model sizes shown</span>
+            <div class="local-lab__meter" aria-hidden="true"><span style="width: 76%;"></span></div>
+          </div>
+          <div class="local-lab__line">
+            <strong>Polish</strong>
+            <span>downloaded GGUF LLMs for private cleanup prompts</span>
+            <div class="local-lab__meter" aria-hidden="true"><span style="width: 68%;"></span></div>
+          </div>
+          <div class="local-lab__line">
+            <strong>Cloud</strong>
+            <span>optional BYOK providers when accuracy beats locality</span>
+            <div class="local-lab__meter" aria-hidden="true"><span style="width: 84%;"></span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="local-lab__stack">
+        <article class="local-feature">
+          <div class="local-feature__kicker">Offline transcription</div>
+          <h3 class="local-feature__title">Batch models for careful work</h3>
+          <p class="local-feature__copy">
+            Download WhisperKit/Core ML models, record normally, then transcribe locally after capture for private drafts, notes, and sensitive dictation.
+          </p>
+        </article>
+        <article class="local-feature">
+          <div class="local-feature__kicker">Local streaming</div>
+          <h3 class="local-feature__title">Live preview without cloud audio</h3>
+          <p class="local-feature__copy">
+            Use sherpa-onnx streaming models for local live text. The settings UI now shows catalogue/source sections, model sizes, and runtime state consistently.
+          </p>
+        </article>
+        <article class="local-feature">
+          <div class="local-feature__kicker">Private cleanup</div>
+          <h3 class="local-feature__title">Prompt-aware local post-processing</h3>
+          <p class="local-feature__copy">
+            Download local LLMs for cleanup and formatting. Small models can be less obedient, so the app makes the prompt path visible and keeps built-in rules honest.
+          </p>
+        </article>
+      </div>
+    </div>
+  </section>
+
   <!-- App Screenshots -->
   <section id="screenshots" style="padding: 4rem 2rem;">
     <div class="section-header reveal">
@@ -1293,9 +1491,9 @@
 
       <div class="feature-card reveal">
         <div class="feature-card__icon">🔒</div>
-        <h3 class="feature-card__title">Private On-Device Fallback</h3>
+        <h3 class="feature-card__title">Downloaded Local Models</h3>
         <p class="feature-card__description">
-          Use Apple's built-in speech recognition for completely private, offline transcription. Your audio never leaves your device.
+          Keep sensitive recordings offline with Apple Speech, WhisperKit batch models, sherpa-onnx streaming, and local LLM cleanup.
         </p>
       </div>
 
@@ -1311,7 +1509,7 @@
         <div class="feature-card__icon">🧠</div>
         <h3 class="feature-card__title">AI Post-Processing</h3>
         <p class="feature-card__description">
-          Optional Live Polish and post-processing using GPT-4o, Claude, Gemini, or Mistral--removes filler words, fixes punctuation, and polishes your prose.
+          Optional Live Polish and post-processing using downloaded local LLMs or GPT-4o, Claude, Gemini, and Mistral--removes filler words, fixes punctuation, and polishes your prose.
         </p>
       </div>
 
@@ -1390,13 +1588,15 @@
 
   <!-- BYOK Section -->
   <div class="byok-section reveal" id="byok">
-    <h2 class="byok-section__title">Bring Your Own Streaming Keys</h2>
+    <h2 class="byok-section__title">Local first. Bring keys only when you need them.</h2>
     <p class="byok-section__description">
-      Use your existing API keys from supported live transcription providers.
-      Pay only for what you use—typically <strong>$0.36 per hour</strong> or less. 
-      No subscriptions, no hidden fees, no data selling.
+      Download local models for offline work, then use your existing API keys from supported live transcription providers when cloud accuracy, diarisation, or specialist languages matter.
+      Pay only for what you use--typically <strong>$0.36 per hour</strong> or less with low-cost streaming providers. No subscriptions, no hidden fees, no data selling.
     </p>
     <div class="provider-logos">
+      <span class="provider-logo">WhisperKit Local Batch</span>
+      <span class="provider-logo">sherpa-onnx Local Streaming</span>
+      <span class="provider-logo">GGUF Local Cleanup</span>
       <span class="provider-logo">Deepgram Nova-3 Streaming</span>
       <span class="provider-logo">AssemblyAI Universal-3 Pro</span>
       <span class="provider-logo">OpenAI Realtime Whisper</span>
@@ -1425,6 +1625,8 @@
           <li>Menu bar app with global hotkeys</li>
           <li>Direct text insertion via Accessibility</li>
           <li>Live transcription preview HUD</li>
+          <li>Downloaded WhisperKit batch models and sherpa-onnx local streaming</li>
+          <li>Downloaded local LLM post-processing for private cleanup</li>
           <li>Deepgram, AssemblyAI, OpenAI, ElevenLabs, Soniox, Modulate, and Apple live models</li>
           <li>Live Polish + AI post-processing</li>
           <li>OpenClaw AI chat with hands-free mode</li>
@@ -1464,7 +1666,7 @@
         </summary>
         <p class="faq-item__answer">
           Yes! When using on-device transcription with Apple Speech, your audio never leaves your device. 
-          When using cloud providers like Deepgram, AssemblyAI, Soniox, ElevenLabs, OpenAI, or Modulate, audio is sent directly to their APIs using your own API keys—we never see or store your audio.
+          When using downloaded local models or Apple Speech, audio stays on your device. When using cloud providers like Deepgram, AssemblyAI, Soniox, ElevenLabs, OpenAI, or Modulate, audio is sent directly to their APIs using your own API keys—we never see or store your audio.
         </p>
       </details>
 
@@ -1474,7 +1676,7 @@
           <span class="faq-item__toggle">+</span>
         </summary>
         <p class="faq-item__answer">
-          The app is free to download. On-device transcription is completely free. 
+          The app is free to download. On-device transcription and downloaded local models are free to run after installation.
           Cloud transcription with your own API keys typically costs around $0.006/minute (about $0.36/hour) with low-cost streaming providers such as Deepgram.
           You pay the provider directly—we don't add any markup.
         </p>
@@ -1486,8 +1688,18 @@
           <span class="faq-item__toggle">+</span>
         </summary>
         <p class="faq-item__answer">
-          On-device (Apple Speech) is instant, free, and private—but may be less accurate for specialized vocabulary. 
+          Local modes include Apple Speech, downloaded WhisperKit batch models, sherpa-onnx local streaming, and downloaded local LLM cleanup. They prioritise privacy and offline use.
           Cloud providers like Deepgram, AssemblyAI, Soniox, ElevenLabs, OpenAI, and Modulate offer higher accuracy, lower-latency streaming, broader language support, and provider-specific features like diarisation or formatted turns.
+        </p>
+      </details>
+
+      <details class="faq-item reveal">
+        <summary class="faq-item__question">
+          Do small local models follow custom formatting prompts?
+          <span class="faq-item__toggle">+</span>
+        </summary>
+        <p class="faq-item__answer">
+          Larger local LLMs tend to follow cleanup instructions better. Very small downloaded models are useful for private, lightweight cleanup, but they may ignore strict formatting requests. The app shows the prompt path so you can tell whether the issue is model capability or configuration.
         </p>
       </details>
 
@@ -1532,7 +1744,7 @@
   <section class="cta-section" id="download">
     <h2 class="cta-section__title reveal">Ready to speak freely?</h2>
     <p class="cta-section__description reveal">
-      Download JustSpeakToIt and start turning your voice into text in seconds.
+      Download JustSpeakToIt 2.0 and pick the transcription path that fits the moment: offline local, instant live, or cloud accuracy.
     </p>
     <div class="hero__actions reveal">
       <a href="https://github.com/crmitchelmore/justspeaktoit/releases/latest" class="btn btn--primary" target="_blank" rel="noopener">
@@ -1556,7 +1768,7 @@
       JustSpeakToIt
     </div>
     <p class="footer__text">
-      Live streaming transcription for Mac & iOS · Open Source
+      Local and live transcription for Mac & iOS · Open Source
     </p>
     <div class="footer__links">
       <a href="#" class="footer__link">Privacy Policy</a>

@@ -2,13 +2,14 @@ import SpeakHotKeys
 import XCTest
 
 final class HotKeyMappingTests: XCTestCase {
-    func testSingleKeyHotKeyCodes_includeExtendedFunctionKeysAndInsert() {
-        for keyCode in [UInt16(64), 79, 80, 90, 105, 106, 107, 113, 114] {
+    func testSingleKeyHotKeyCodes_includeExtendedFunctionKeysInsertAndISOSectionKey() {
+        for keyCode in [UInt16(10), 64, 79, 80, 90, 105, 106, 107, 113, 114] {
             XCTAssertTrue(KeyCodeMapping.singleKeyHotKeyCodes.contains(keyCode))
         }
     }
 
-    func testDisplayStrings_includeExtendedFunctionKeysAndInsert() {
+    func testDisplayStrings_includeExtendedFunctionKeysInsertAndISOSectionKey() {
+        XCTAssertEqual(KeyCodeMapping.string(for: 10), "§/±")
         XCTAssertEqual(KeyCodeMapping.string(for: 105), "F13")
         XCTAssertEqual(KeyCodeMapping.string(for: 106), "F16")
         XCTAssertEqual(KeyCodeMapping.string(for: 64), "F17")

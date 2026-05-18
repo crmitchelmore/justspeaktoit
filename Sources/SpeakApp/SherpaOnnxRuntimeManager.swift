@@ -285,10 +285,16 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
         "Download returned HTTP \(http.statusCode) for \(url.lastPathComponent)."
       )
     }
-    _ = try await Self.runProcess(
-      executableURL: URL(fileURLWithPath: "/usr/bin/tar"),
-      arguments: ["-xjf", downloadedURL.path, "-C", destination.path]
-    )
+    do {
+      _ = try await Self.runProcess(
+        executableURL: URL(fileURLWithPath: "/usr/bin/tar"),
+        arguments: ["-xf", downloadedURL.path, "-C", destination.path]
+      )
+    } catch {
+      throw SherpaOnnxRuntimeError.downloadFailed(
+        "Failed to extract model archive: \(error.localizedDescription)"
+      )
+    }
   }
 
   private nonisolated static func runProcess(executableURL: URL, arguments: [String]) async throws -> String {

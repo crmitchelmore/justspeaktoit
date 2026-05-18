@@ -791,7 +791,8 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
       "--tokens", bundle.tokens.path,
       "--encoder", bundle.encoder.path,
       "--decoder", bundle.decoder.path,
-      "--joiner", bundle.joiner.path
+      "--joiner", bundle.joiner.path,
+      "--feature-dim", "\(bundle.featureDim)"
     ]
     return process
   }

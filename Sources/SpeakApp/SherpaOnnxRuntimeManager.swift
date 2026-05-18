@@ -32,6 +32,7 @@ struct SherpaOnnxModelBundle: Equatable, Sendable {
   let encoder: URL
   let decoder: URL
   let joiner: URL
+  let featureDim: Int
 }
 
 @MainActor
@@ -141,9 +142,13 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
       }
       try fileManager.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
 
-      for file in spec.files {
-        let destination = tempDirectory.appendingPathComponent(file)
-        try await downloadFile(repoID: source.repoID, filename: file, to: destination)
+      if let archiveURL = spec.archiveURL {
+        try await downloadArchive(from: archiveURL, to: tempDirectory)
+      } else {
+        for file in spec.files {
+          let destination = tempDirectory.appendingPathComponent(file)
+          try await downloadFile(repoID: source.repoID, filename: file, to: destination)
+        }
       }
 
       if fileManager.fileExists(atPath: finalDirectory.path) {
@@ -165,7 +170,8 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
       tokens: directory.appendingPathComponent(spec.tokens),
       encoder: directory.appendingPathComponent(spec.encoder),
       decoder: directory.appendingPathComponent(spec.decoder),
-      joiner: directory.appendingPathComponent(spec.joiner)
+      joiner: directory.appendingPathComponent(spec.joiner),
+      featureDim: spec.featureDim
     )
     guard fileManager.fileExists(atPath: bundle.tokens.path),
       fileManager.fileExists(atPath: bundle.encoder.path),
@@ -271,6 +277,20 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
     try fileManager.moveItem(at: downloadedURL, to: destination)
   }
 
+  private func downloadArchive(from url: URL, to destination: URL) async throws {
+    let (downloadedURL, response) = try await URLSession.shared.download(from: url)
+    defer { try? fileManager.removeItem(at: downloadedURL) }
+    if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+      throw SherpaOnnxRuntimeError.downloadFailed(
+        "Download returned HTTP \(http.statusCode) for \(url.lastPathComponent)."
+      )
+    }
+    _ = try await Self.runProcess(
+      executableURL: URL(fileURLWithPath: "/usr/bin/tar"),
+      arguments: ["-xjf", downloadedURL.path, "-C", destination.path]
+    )
+  }
+
   private nonisolated static func runProcess(executableURL: URL, arguments: [String]) async throws -> String {
     try await withCheckedThrowingContinuation { continuation in
       DispatchQueue.global(qos: .utility).async {
@@ -346,6 +366,26 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
         joiner: "joiner.onnx"
       )
     }
+    if repo.contains("nemotron-speech-streaming-en-0.6b")
+      || source.modelName.lowercased().contains("nemotron-speech-streaming-en-0.6b") {
+      let root = source.modelName
+      return ModelSpecification(
+        tokens: "\(root)/tokens.txt",
+        encoder: "\(root)/encoder.int8.onnx",
+        decoder: "\(root)/decoder.int8.onnx",
+        joiner: "\(root)/joiner.int8.onnx",
+        featureDim: 128,
+        archiveURL: source.archiveURL
+      )
+    }
+    if repo.contains("en-2023-06-21") {
+      return ModelSpecification(
+        tokens: "tokens.txt",
+        encoder: "encoder-epoch-99-avg-1.int8.onnx",
+        decoder: "decoder-epoch-99-avg-1.onnx",
+        joiner: "joiner-epoch-99-avg-1.int8.onnx"
+      )
+    }
     if repo.contains("en-2023-06-26") {
       return ModelSpecification(
         tokens: "tokens.txt",
@@ -362,6 +402,8 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
     let encoder: String
     let decoder: String
     let joiner: String
+    var featureDim: Int = 80
+    var archiveURL: URL?
 
     var files: [String] { [tokens, encoder, decoder, joiner] }
   }
@@ -386,6 +428,7 @@ def main():
     parser.add_argument("--encoder", required=True)
     parser.add_argument("--decoder", required=True)
     parser.add_argument("--joiner", required=True)
+    parser.add_argument("--feature-dim", type=int, default=80)
     args = parser.parse_args()
 
     recognizer = sherpa_onnx.OnlineRecognizer.from_transducer(
@@ -395,7 +438,7 @@ def main():
         joiner=args.joiner,
         num_threads=2,
         sample_rate=16000,
-        feature_dim=80,
+        feature_dim=args.feature_dim,
         decoding_method="greedy_search",
         provider="cpu",
     )

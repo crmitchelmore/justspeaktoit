@@ -103,6 +103,20 @@ final class LocalModelManagerTests: XCTestCase {
         )
         XCTAssertEqual(
             LocalModelManager.streamingApproximateSizeMB(
+                repoID: "k2-fsa/sherpa-onnx",
+                modelName: "sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25"
+            ),
+            632
+        )
+        XCTAssertEqual(
+            LocalModelManager.streamingApproximateSizeMB(
+                repoID: "csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-21",
+                modelName: "streaming-zipformer-en-2023-06-21"
+            ),
+            181
+        )
+        XCTAssertEqual(
+            LocalModelManager.streamingApproximateSizeMB(
                 repoID: "csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17",
                 modelName: "streaming-zipformer-en-20M-2023-02-17"
             ),
@@ -111,7 +125,19 @@ final class LocalModelManagerTests: XCTestCase {
     }
 
     @MainActor
-    func testRecommendedStreamingSources_includeSelectableSherpaCandidate() {
+    func testRecommendedStreamingSources_prioritizeLatestNemotronCandidates() {
+        let sources = LocalModelManager.recommendedStreamingModelSources
+        XCTAssertEqual(
+            sources.first?.modelName,
+            "sherpa-onnx-nemotron-speech-streaming-en-0.6b-1120ms-int8-2026-04-25"
+        )
+        XCTAssertEqual(sources.first?.approximateSizeMB, 632)
+        XCTAssertNotNil(sources.first?.archiveURL)
+        XCTAssertTrue(sources.prefix(2).allSatisfy { $0.modelName.contains("nemotron-speech-streaming-en-0.6b") })
+    }
+
+    @MainActor
+    func testRecommendedStreamingSources_keepLightweightSherpaCandidate() {
         let sources = LocalModelManager.recommendedStreamingModelSources
         let hasSherpa = sources.contains {
             $0.repoID == "csukuangfj/sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"
@@ -131,13 +157,27 @@ final class LocalModelManagerTests: XCTestCase {
         XCTAssertFalse(LocalModelManager.isSupportedStreamingSource(source))
     }
 
+    func testSupportedStreamingSource_acceptsSherpaNemotronSource() {
+        let source = LocalStreamingModelSource(
+            repoID: "k2-fsa/sherpa-onnx",
+            modelName: "sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25",
+            runtime: "sherpa-onnx streaming runtime"
+        )
+
+        XCTAssertTrue(LocalModelManager.isSupportedStreamingSource(source))
+    }
+
     @MainActor
-    func testRecommendedStreamingSources_onlyIncludeDownloadableZipformerModels() {
+    func testRecommendedStreamingSources_onlyIncludeDownloadableSherpaModels() {
         let sources = LocalModelManager.recommendedStreamingModelSources
 
-        XCTAssertFalse(sources.contains { $0.repoID == "k2-fsa/sherpa-onnx" })
         XCTAssertTrue(sources.allSatisfy(LocalModelManager.isSupportedStreamingSource))
         XCTAssertTrue(sources.allSatisfy { ($0.approximateSizeMB ?? 0) > 0 })
+        XCTAssertTrue(
+            sources.allSatisfy {
+                $0.repoID.split(separator: "/").count == 2 || $0.archiveURL != nil
+            }
+        )
     }
 
     func testNormalizedStreamingModelSourceBackfillsKnownSize() {

@@ -138,6 +138,9 @@ struct SettingsView: View {
 
   }
 
+  private let orderedLocalTranscriptionModes: [AppSettings.LocalTranscriptionMode] = [.streaming, .batch]
+  private let orderedRemoteTranscriptionModes: [RemoteTranscriptionMode] = [.streaming, .batch]
+
   private enum PostProcessingLocation: String, CaseIterable, Identifiable {
     case remote
     case local
@@ -345,6 +348,12 @@ struct SettingsView: View {
         settings.transcriptionMode = mode == .streaming ? .liveNative : .batchRemote
       }
     )
+  }
+
+  private func transcriptionModeSegmentLabel(from displayName: String) -> String {
+    displayName
+      .replacingOccurrences(of: "Local ", with: "")
+      .replacingOccurrences(of: "Remote ", with: "")
   }
 
   private var isStreamingTranscriptionSelected: Bool {
@@ -1004,34 +1013,22 @@ struct SettingsView: View {
 
           if settings.transcriptionMode == .localModel {
             Picker("Local transcription type", selection: settingsBinding(\AppSettings.localTranscriptionMode)) {
-              ForEach(AppSettings.LocalTranscriptionMode.allCases) { mode in
-                Text(mode.displayName).tag(mode)
+              ForEach(orderedLocalTranscriptionModes) { mode in
+                Text(transcriptionModeSegmentLabel(from: mode.displayName)).tag(mode)
               }
             }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(
-              RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
-            )
+            .modifier(TranscriptionModeSegmentedPickerStyle())
             .speakTooltip(
               "Choose Local Batch for offline transcription after recording, or Local Streaming for live local text."
             )
             .accessibilityLabel("Local transcription type picker")
           } else {
             Picker("Remote transcription type", selection: remoteTranscriptionModeBinding) {
-              ForEach(RemoteTranscriptionMode.allCases) { mode in
-                Text(mode.displayName).tag(mode)
+              ForEach(orderedRemoteTranscriptionModes) { mode in
+                Text(transcriptionModeSegmentLabel(from: mode.displayName)).tag(mode)
               }
             }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(
-              RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
-            )
+            .modifier(TranscriptionModeSegmentedPickerStyle())
             .speakTooltip(
               "Choose Remote Streaming for live provider updates, or Remote Batch for post-recording transcription."
             )
@@ -4495,6 +4492,20 @@ private struct SettingsCard<Content: View>: View {
         .allowsHitTesting(false)
     )
     .shadow(color: tint.opacity(0.08), radius: 18, x: 0, y: 12)
+  }
+}
+
+private struct TranscriptionModeSegmentedPickerStyle: ViewModifier {
+  func body(content: Content) -> some View {
+    content
+      .pickerStyle(.segmented)
+      .frame(minWidth: 260, idealWidth: 320, alignment: .leading)
+      .padding(.horizontal, 12)
+      .padding(.vertical, 8)
+      .background(
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+          .fill(Color(nsColor: .controlBackgroundColor))
+      )
   }
 }
 

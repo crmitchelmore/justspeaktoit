@@ -25,7 +25,7 @@ enum LocalModelError: LocalizedError {
     case .invalidHuggingFaceModel:
       return """
       Enter a supported local model name. Local Batch expects a WhisperKit variant; \
-      Local Streaming expects a sherpa-onnx Zipformer source.
+      Local Streaming expects a sherpa-onnx streaming ASR source.
       """
     }
   }
@@ -49,10 +49,36 @@ final class LocalModelManager: ObservableObject {
 
   static let recommendedStreamingModelSources: [LocalStreamingModelSource] = [
     LocalStreamingModelSource(
+      repoID: "k2-fsa/sherpa-onnx",
+      modelName: "sherpa-onnx-nemotron-speech-streaming-en-0.6b-1120ms-int8-2026-04-25",
+      runtime: "sherpa-onnx streaming runtime",
+      approximateSizeMB: 632,
+      archiveURL: URL(
+        string: "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/"
+          + "sherpa-onnx-nemotron-speech-streaming-en-0.6b-1120ms-int8-2026-04-25.tar.bz2"
+      )
+    ),
+    LocalStreamingModelSource(
+      repoID: "k2-fsa/sherpa-onnx",
+      modelName: "sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25",
+      runtime: "sherpa-onnx streaming runtime",
+      approximateSizeMB: 632,
+      archiveURL: URL(
+        string: "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/"
+          + "sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25.tar.bz2"
+      )
+    ),
+    LocalStreamingModelSource(
       repoID: "csukuangfj/sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06",
       modelName: "streaming-zipformer-en-kroko-2025-08-06",
       runtime: "sherpa-onnx streaming runtime",
       approximateSizeMB: 71
+    ),
+    LocalStreamingModelSource(
+      repoID: "csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-21",
+      modelName: "streaming-zipformer-en-2023-06-21",
+      runtime: "sherpa-onnx streaming runtime",
+      approximateSizeMB: 181
     ),
     LocalStreamingModelSource(
       repoID: "csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26",
@@ -403,7 +429,8 @@ final class LocalModelManager: ObservableObject {
       modelName: source.modelName,
       runtime: streamingRuntimeHint(for: source.repoID, modelName: source.modelName),
       approximateSizeMB: source.approximateSizeMB
-        ?? streamingApproximateSizeMB(repoID: source.repoID, modelName: source.modelName)
+        ?? streamingApproximateSizeMB(repoID: source.repoID, modelName: source.modelName),
+      archiveURL: source.archiveURL
     )
   }
 
@@ -441,6 +468,12 @@ final class LocalModelManager: ObservableObject {
     if searchText.contains("en-kroko-2025-08-06") {
       return 71
     }
+    if searchText.contains("nemotron-speech-streaming-en-0.6b") {
+      return 632
+    }
+    if searchText.contains("en-2023-06-21") {
+      return 181
+    }
     if searchText.contains("en-20m-2023-02-17") {
       return 44
     }
@@ -452,10 +485,11 @@ final class LocalModelManager: ObservableObject {
 
   nonisolated static func isSupportedStreamingSource(_ source: LocalStreamingModelSource) -> Bool {
     let text = "\(source.id) \(source.repoID) \(source.modelName) \(source.runtime)".lowercased()
-    guard !text.contains("parakeet"), !text.contains("nemo"), !text.contains("nvidia") else {
+    let isNemotron = text.contains("nemotron")
+    guard !text.contains("parakeet"), !text.contains("nvidia"), isNemotron || !text.contains("nemo") else {
       return false
     }
-    return text.contains("sherpa") && text.contains("zipformer")
+    return text.contains("sherpa") && (text.contains("zipformer") || text.contains("nemotron"))
   }
 
   nonisolated static func resolveHuggingFaceModel(repoID: String, modelName: String) -> ResolvedHuggingFaceModel {
@@ -577,8 +611,15 @@ struct LocalStreamingModelSource: Codable, Equatable, Identifiable, Sendable {
   let modelName: String
   let runtime: String
   let approximateSizeMB: Int?
+  let archiveURL: URL?
 
-  init(repoID: String, modelName: String, runtime: String? = nil, approximateSizeMB: Int? = nil) {
+  init(
+    repoID: String,
+    modelName: String,
+    runtime: String? = nil,
+    approximateSizeMB: Int? = nil,
+    archiveURL: URL? = nil
+  ) {
     let repoID = repoID.trimmingCharacters(in: .whitespacesAndNewlines)
     let modelName = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
     self.id = "local/streaming/huggingface/\(LocalModelManager.slug(repoID))/\(LocalModelManager.slug(modelName))"
@@ -587,6 +628,7 @@ struct LocalStreamingModelSource: Codable, Equatable, Identifiable, Sendable {
     self.runtime = runtime ?? LocalModelManager.streamingRuntimeHint(for: repoID, modelName: modelName)
     self.approximateSizeMB = approximateSizeMB
       ?? LocalModelManager.streamingApproximateSizeMB(repoID: repoID, modelName: modelName)
+    self.archiveURL = archiveURL
   }
 
   var displayName: String {

@@ -1672,7 +1672,7 @@ struct SettingsView: View {
       localStreamingSetupSection(
         title: "2. Browse for more local streaming models",
         subtitle: """
-        Open Hugging Face search for sherpa-onnx Zipformer models. \
+        Open Hugging Face search for sherpa-onnx streaming ASR models. \
         Only compatible sources can be added here.
         """,
         systemImage: "magnifyingglass",
@@ -1687,7 +1687,10 @@ struct SettingsView: View {
 
       localStreamingSetupSection(
         title: "3. Add a source manually",
-        subtitle: "Use this when you already know the Hugging Face repo and model name. The model still stays local-only.",
+        subtitle: """
+        Use this when you already know the Hugging Face repo and model name. \
+        The model still stays local-only.
+        """,
         systemImage: "keyboard",
         tint: .purple
       ) {
@@ -2078,7 +2081,7 @@ struct SettingsView: View {
   private func openLocalStreamingModelSearch() {
     guard let url = URL(
       string: "https://huggingface.co/models?pipeline_tag=automatic-speech-recognition&sort=downloads"
-        + "&search=sherpa-onnx%20streaming%20zipformer"
+        + "&search=sherpa-onnx%20streaming"
     ) else { return }
     NSWorkspace.shared.open(url)
   }

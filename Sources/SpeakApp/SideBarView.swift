@@ -130,6 +130,7 @@ struct SideBarView: View {
           }
           .buttonStyle(.plain)
           .focusable(true)
+          .focusEffectDisabled()
           .padding(.horizontal, 12)
           .padding(.vertical, 8)
           .background(
@@ -168,6 +169,7 @@ struct SideBarView: View {
           }
           .buttonStyle(.plain)
           .focusable(true)
+          .focusEffectDisabled()
           .padding(.horizontal, 12)
           .padding(.vertical, 8)
           .background(

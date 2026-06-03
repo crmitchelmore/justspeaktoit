@@ -1,0 +1,82 @@
+name: Conformance PR Review
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-conformance
+  cancel-in-progress: true
+
+jobs:
+  conformance-pr-review:
+    name: Advisory conformance review
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout conformance catalogue
+        uses: actions/checkout@v4
+        with:
+          repository: crmitchelmore/quality-software
+          path: .conformance-catalogue
+          token: ${{ secrets.CONFORMANCE_CATALOGUE_TOKEN || github.token }}
+
+      - name: Install conformance CLI
+        working-directory: .conformance-catalogue/integration
+        run: npm ci
+
+      - name: Fetch PR base
+        env:
+          BASE_REF: ${{ github.base_ref || 'main' }}
+        run: git fetch origin "$BASE_REF:refs/remotes/origin/$BASE_REF"
+
+      - name: Run advisory conformance review
+        env:
+          BASE_REF: ${{ github.base_ref || 'main' }}
+          CONFORMANCE_CATALOGUE_ROOT: ${{ github.workspace }}/.conformance-catalogue
+        run: |
+          set +e
+          node "$CONFORMANCE_CATALOGUE_ROOT/integration/bin/conformance.mjs" \
+            review --base "origin/$BASE_REF" --json > conformance-review.json 2> conformance-review.err
+          status=$?
+          {
+            echo "## Conformance PR review"
+            echo
+            echo "Advisory only. This job does not block merges while the profile is warn-only."
+            echo
+            if [ -s conformance-review.err ]; then
+              echo "### stderr"
+              echo '```text'
+              cat conformance-review.err
+              echo '```'
+              echo
+            fi
+            echo "### output"
+            echo '```json'
+            cat conformance-review.json
+            echo '```'
+            echo
+            echo "Exit status: $status"
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+
+      - name: Upload conformance review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-review
+          path: |
+            conformance-review.json
+            conformance-review.err
+          retention-days: 14

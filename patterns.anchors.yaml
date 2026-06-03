@@ -1,0 +1,34 @@
+# Candidate canonical anchors for justspeaktoit. Review before trusting.
+version: 1
+anchors:
+  - symbol: Transport contract
+    path: Sources/SpeakCore/TransportProtocol.swift
+    confidence: high
+    reasons:
+      - Core transport/message contract.
+      - Covered by Codable/message tests.
+  - symbol: Transport contract tests
+    path: Tests/SpeakCoreTests/TransportMessageCodableTests.swift
+    confidence: high
+    reasons:
+      - Behavioural contract examples for encoded transport messages.
+  - symbol: App onboarding flow
+    path: Sources/SpeakApp/OnboardingView.swift
+    confidence: medium
+    reasons:
+      - User-facing onboarding anchor.
+  - symbol: App bootstrap
+    path: Sources/SpeakApp/SpeakApp.swift
+    confidence: medium
+    reasons:
+      - Application composition and onboarding gate.
+  - symbol: Secure storage abstraction
+    path: Sources/SpeakCore/SecureStorage.swift
+    confidence: medium
+    reasons:
+      - Core secure-storage capability.
+  - symbol: Secure app storage adapter
+    path: Sources/SpeakApp/SecureAppStorage.swift
+    confidence: medium
+    reasons:
+      - App-facing adapter over secure storage.

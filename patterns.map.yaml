@@ -1,0 +1,67 @@
+# Candidate conformance evidence map for justspeaktoit.
+# Best-effort advisory evidence; not an adopted contract until ratified.
+version: 1
+meta:
+  detector: human-review-plus-codebase-onboarding
+  limitations:
+    - Based on repository inspection, not a full generated conformance onboard run.
+    - Swift/Tuist/Xcode structure needs native validation before any rule can block.
+patterns:
+  - id: modular-monolith
+    altitude: high
+    confidence: medium
+    evidence:
+      - "Swift package/Tuist modules split SpeakApp, SpeakiOS, SpeakCore, and SpeakSync responsibilities."
+    anchors:
+      - Package.swift
+      - Project.swift
+      - Sources/SpeakApp/SpeakApp.swift
+      - Sources/SpeakCore/TransportProtocol.swift
+  - id: contract-first-api
+    altitude: high
+    confidence: high
+    evidence:
+      - "TransportProtocol.swift defines the transport/message contract and tests assert Codable behaviour."
+    anchors:
+      - Sources/SpeakCore/TransportProtocol.swift
+      - Tests/SpeakCoreTests/TransportMessageCodableTests.swift
+  - id: adapter
+    altitude: medium
+    confidence: medium
+    evidence:
+      - "Platform-specific app/storage wrappers adapt core capabilities for macOS/iOS surfaces."
+    anchors:
+      - Sources/SpeakApp/SecureAppStorage.swift
+      - Sources/SpeakCore/SecureStorage.swift
+  - id: facade
+    altitude: medium
+    confidence: medium
+    evidence:
+      - "App bootstrap and onboarding expose simple flow-level surfaces over lower-level capabilities."
+    anchors:
+      - Sources/SpeakApp/SpeakApp.swift
+      - Sources/SpeakApp/OnboardingView.swift
+  - id: arrange-act-assert
+    altitude: low
+    confidence: medium
+    evidence:
+      - "TransportMessageCodableTests exercises contract examples through real encoding/decoding."
+    anchors:
+      - Tests/SpeakCoreTests/TransportMessageCodableTests.swift
+capabilities:
+  - id: transport-contract
+    title: Transport message contract
+    status: canonical-bypassed
+    canonical: Sources/SpeakCore/TransportProtocol.swift
+    usedIn: 2
+    sample:
+      - Sources/SpeakApp/SpeakApp.swift
+      - Tests/SpeakCoreTests/TransportMessageCodableTests.swift
+  - id: secure-storage
+    title: Secure storage abstraction
+    status: canonical-bypassed
+    canonical: Sources/SpeakCore/SecureStorage.swift
+    usedIn: 2
+    sample:
+      - Sources/SpeakApp/SecureAppStorage.swift
+      - Docs/PRIVACY.md

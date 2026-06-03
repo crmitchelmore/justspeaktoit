@@ -1,0 +1,77 @@
+# Candidate conformance profile for justspeaktoit.
+# Advisory pilot artefact only: review and ratify before treating as adopted.
+version: 1
+status: candidate
+projectSize: medium
+
+philosophies:
+  adopt:
+    - id: information-hiding
+      weight: primary
+      reason: "Keep app, core transport, secure storage, sync, and landing-page concerns behind clear module seams."
+    - id: design-for-production
+      weight: primary
+      reason: "Privacy, secure storage, transcript handling, and compatibility/fallback behaviour are production-critical."
+    - id: human-centered-design
+      weight: secondary
+      reason: "Onboarding and permission flows should make user trust and control explicit."
+    - id: mostly-integration-testing
+      weight: secondary
+      reason: "Transport contracts and app integration flows should be tested through real Codable/message boundaries."
+  reject: []
+
+patterns:
+  high:
+    adopt:
+      - id: modular-monolith
+        enforcement: advise
+        reason: "Swift package modules split app, iOS app, core transport, and sync responsibilities."
+      - id: client-server
+        enforcement: advise
+        reason: "The app has explicit transport messages and compatibility contracts across local/remote boundaries."
+      - id: contract-first-api
+        enforcement: warn
+        reason: "TransportMessage and Codable tests form the behavioural contract between components."
+  medium:
+    adopt:
+      - id: adapter
+        enforcement: advise
+        reason: "Platform-specific app and secure-storage implementations should adapt core capabilities rather than leak platform details."
+      - id: facade
+        enforcement: advise
+        reason: "App-level views and storage wrappers should expose simple interfaces over lower-level secure storage and transport primitives."
+      - id: fallback
+        enforcement: advise
+        reason: "Compatibility and fallback behaviours are part of the current app/product contract."
+      - id: data-transfer-object
+        enforcement: advise
+        reason: "Transport messages are explicit encoded data contracts."
+  low:
+    adopt:
+      - id: guard-clause
+        enforcement: advise
+        reason: "Privacy/security-sensitive paths should reject invalid state early and explicitly."
+      - id: arrange-act-assert
+        enforcement: advise
+        reason: "Tests should make transport/message contract behaviour easy to review."
+  ban: []
+
+practicePatterns:
+  adopt:
+    - id: privacy-by-default-ux
+      enforcement: advise
+      reason: "Speech/transcript flows should preserve user trust by default."
+    - id: permission-priming
+      enforcement: advise
+      reason: "Microphone, accessibility, or system permissions should explain value before prompting."
+    - id: progressive-onboarding
+      enforcement: advise
+      reason: "Onboarding should introduce capabilities without overwhelming the user."
+    - id: system-status-visibility
+      enforcement: advise
+      reason: "Users need clear feedback for listening, connection, sync, and failure states."
+
+phases:
+  write: { enabled: true, mode: advise, failMode: open, llm: false, block: false, maxFindings: 1 }
+  pr: { enabled: true, llm: true, failOn: block }
+  later: { enabled: true }

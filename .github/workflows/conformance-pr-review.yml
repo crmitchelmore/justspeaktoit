@@ -26,22 +26,37 @@ jobs:
           fetch-depth: 0
 
       - name: Checkout conformance catalogue
+        id: checkout-catalogue
+        continue-on-error: true
         uses: actions/checkout@v4
         with:
           repository: crmitchelmore/quality-software
           path: .conformance-catalogue
           token: ${{ secrets.CONFORMANCE_CATALOGUE_TOKEN || github.token }}
 
+      - name: Report catalogue checkout issue
+        if: steps.checkout-catalogue.outcome != 'success'
+        run: |
+          {
+            echo "## Conformance PR review"
+            echo
+            echo "Advisory review skipped because the conformance catalogue could not be checked out."
+            echo "Configure CONFORMANCE_CATALOGUE_TOKEN if this repository cannot read crmitchelmore/quality-software with github.token."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Install conformance CLI
+        if: steps.checkout-catalogue.outcome == 'success'
         working-directory: .conformance-catalogue/integration
         run: npm ci
 
       - name: Fetch PR base
+        if: steps.checkout-catalogue.outcome == 'success'
         env:
           BASE_REF: ${{ github.base_ref || 'main' }}
         run: git fetch origin "$BASE_REF:refs/remotes/origin/$BASE_REF"
 
       - name: Run advisory conformance review
+        if: steps.checkout-catalogue.outcome == 'success'
         env:
           BASE_REF: ${{ github.base_ref || 'main' }}
           CONFORMANCE_CATALOGUE_ROOT: ${{ github.workspace }}/.conformance-catalogue
@@ -72,7 +87,7 @@ jobs:
           exit 0
 
       - name: Upload conformance review
-        if: always()
+        if: always() && steps.checkout-catalogue.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: conformance-review

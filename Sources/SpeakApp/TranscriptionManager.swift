@@ -692,6 +692,7 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
     currentModel = model
   }
 
+  // swiftlint:disable:next function_body_length
   func start() async throws {
     guard !isRunning, !isStopping else {
       throw TranscriptionManagerError.liveSessionAlreadyRunning

@@ -1,0 +1,45 @@
+import AVFoundation
+import XCTest
+
+@testable import SpeakApp
+
+final class AudioInputFormatTests: XCTestCase {
+
+  func testUsableFormat_standardMic_isUsable() {
+    let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)
+    XCTAssertNotNil(format)
+    XCTAssertTrue(audioInputFormatIsUsable(format!))
+  }
+
+  func testUsableFormat_stereo_isUsable() {
+    let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 2)
+    XCTAssertNotNil(format)
+    XCTAssertTrue(audioInputFormatIsUsable(format!))
+  }
+
+  func testUsableFormat_zeroSampleRate_isNotUsable() {
+    // A stale HAL input node reports a 0 Hz format. AVAudioFormat does build
+    // such an instance, so the helper must reject it.
+    let format = AVAudioFormat(standardFormatWithSampleRate: 0, channels: 1)
+    XCTAssertNotNil(format)
+    XCTAssertFalse(audioInputFormatIsUsable(format!))
+  }
+
+  func testUsableFormat_zeroChannels_isNotUsable() {
+    // A stale input node can also report 0 channels; build one via an ASBD.
+    var asbd = AudioStreamBasicDescription(
+      mSampleRate: 48_000,
+      mFormatID: kAudioFormatLinearPCM,
+      mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked,
+      mBytesPerPacket: 4,
+      mFramesPerPacket: 1,
+      mBytesPerFrame: 4,
+      mChannelsPerFrame: 0,
+      mBitsPerChannel: 32,
+      mReserved: 0
+    )
+    let format = AVAudioFormat(streamDescription: &asbd)
+    XCTAssertNotNil(format)
+    XCTAssertFalse(audioInputFormatIsUsable(format!))
+  }
+}

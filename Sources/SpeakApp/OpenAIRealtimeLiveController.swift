@@ -26,7 +26,7 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
   private var currentModel: String?
   private var currentLanguage: String?
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
-  private let audioEngine = AVAudioEngine()
+  private var audioEngine = AVAudioEngine()
   private let logger = Logger(subsystem: "com.speak.app", category: "OpenAIRealtimeLiveController")
   private let audioProcessor = OpenAIRealtimeAudioProcessor(targetSampleRate: 24_000)
   private var hasFinished: Bool = false
@@ -76,6 +76,7 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
 
     let sessionContext = await audioDeviceManager.beginUsingPreferredInput()
     activeInputSession = sessionContext
+    audioEngine = AVAudioEngine()
 
     transcriber = nil
     targetFormat = nil
@@ -92,6 +93,9 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
       let inputNode = audioEngine.inputNode
       inputNode.removeTap(onBus: 0)
       let inputFormat = inputNode.outputFormat(forBus: 0)
+      guard audioInputFormatIsUsable(inputFormat) else {
+        throw TranscriptionManagerError.noUsableAudioInput
+      }
 
       guard let outputFormat = AVAudioFormat(
         commonFormat: .pcmFormatInt16,

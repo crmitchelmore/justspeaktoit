@@ -18,18 +18,28 @@ final class AudioInputFormatTests: XCTestCase {
   }
 
   func testUsableFormat_zeroSampleRate_isNotUsable() {
-    guard
-      let format = AVAudioFormat(
-        commonFormat: .pcmFormatFloat32,
-        sampleRate: 0,
-        channels: 1,
-        interleaved: false
-      )
-    else {
-      // A zero sample rate is itself rejected by AVAudioFormat, which already
-      // protects the engine start path, so there is nothing further to assert.
-      return
-    }
-    XCTAssertFalse(audioInputFormatIsUsable(format))
+    // A stale HAL input node reports a 0 Hz format. AVAudioFormat does build
+    // such an instance, so the helper must reject it.
+    let format = AVAudioFormat(standardFormatWithSampleRate: 0, channels: 1)
+    XCTAssertNotNil(format)
+    XCTAssertFalse(audioInputFormatIsUsable(format!))
+  }
+
+  func testUsableFormat_zeroChannels_isNotUsable() {
+    // A stale input node can also report 0 channels; build one via an ASBD.
+    var asbd = AudioStreamBasicDescription(
+      mSampleRate: 48_000,
+      mFormatID: kAudioFormatLinearPCM,
+      mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked,
+      mBytesPerPacket: 4,
+      mFramesPerPacket: 1,
+      mBytesPerFrame: 4,
+      mChannelsPerFrame: 0,
+      mBitsPerChannel: 32,
+      mReserved: 0
+    )
+    let format = AVAudioFormat(streamDescription: &asbd)
+    XCTAssertNotNil(format)
+    XCTAssertFalse(audioInputFormatIsUsable(format!))
   }
 }

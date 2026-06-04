@@ -8,7 +8,7 @@ philosophies:
   adopt:
     - id: information-hiding
       weight: primary
-      reason: "Keep app, core transport, secure storage, sync, and landing-page concerns behind clear module seams."
+      reason: "Keep app, core transport, secure storage, sync, and hotkey concerns behind clear module seams."
     - id: design-for-production
       weight: primary
       reason: "Privacy, secure storage, transcript handling, and compatibility/fallback behaviour are production-critical."

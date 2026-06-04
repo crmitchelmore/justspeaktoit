@@ -21,42 +21,67 @@ jobs:
     continue-on-error: true
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
 
       - name: Checkout conformance catalogue
         id: checkout-catalogue
         continue-on-error: true
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           repository: crmitchelmore/quality-software
+          ref: 8a4367ae26aadc0d5e5ed1c5f41885addec86fba
           path: .conformance-catalogue
           token: ${{ secrets.CONFORMANCE_CATALOGUE_TOKEN || github.token }}
+          persist-credentials: false
 
-      - name: Report catalogue checkout issue
-        if: steps.checkout-catalogue.outcome != 'success'
-        run: |
-          {
-            echo "## Conformance PR review"
-            echo
-            echo "Advisory review skipped because the conformance catalogue could not be checked out."
-            echo "Configure CONFORMANCE_CATALOGUE_TOKEN if this repository cannot read crmitchelmore/quality-software with github.token."
-          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Setup Node.js
+        id: setup-node
+        if: steps.checkout-catalogue.outcome == 'success'
+        continue-on-error: true
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: .conformance-catalogue/integration/package-lock.json
 
       - name: Install conformance CLI
-        if: steps.checkout-catalogue.outcome == 'success'
+        id: install-conformance
+        if: steps.checkout-catalogue.outcome == 'success' && steps.setup-node.outcome == 'success'
+        continue-on-error: true
         working-directory: .conformance-catalogue/integration
         run: npm ci
 
       - name: Fetch PR base
-        if: steps.checkout-catalogue.outcome == 'success'
+        id: fetch-base
+        if: steps.checkout-catalogue.outcome == 'success' && steps.setup-node.outcome == 'success' && steps.install-conformance.outcome == 'success'
+        continue-on-error: true
         env:
           BASE_REF: ${{ github.base_ref || 'main' }}
         run: git fetch origin "$BASE_REF:refs/remotes/origin/$BASE_REF"
 
+      - name: Report advisory review unavailable
+        if: steps.checkout-catalogue.outcome != 'success' || steps.setup-node.outcome != 'success' || steps.install-conformance.outcome != 'success' || steps.fetch-base.outcome != 'success'
+        run: |
+          cat > conformance-review.json <<'JSON'
+          {"decision":"allow","findings":[],"advisories":[],"summary":"Advisory conformance review skipped because the catalogue, Node setup, install, or base fetch was unavailable.","metadata":{"skipped":true}}
+          JSON
+          : > conformance-review.err
+          {
+            echo "## Conformance PR review"
+            echo
+            echo "Advisory review skipped because the catalogue, Node setup, install, or base fetch was unavailable."
+            echo "Configure CONFORMANCE_CATALOGUE_TOKEN if this repository cannot read crmitchelmore/quality-software with github.token."
+            echo
+            echo "### output"
+            echo '```json'
+            cat conformance-review.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Run advisory conformance review
-        if: steps.checkout-catalogue.outcome == 'success'
+        if: steps.checkout-catalogue.outcome == 'success' && steps.setup-node.outcome == 'success' && steps.install-conformance.outcome == 'success' && steps.fetch-base.outcome == 'success'
         env:
           BASE_REF: ${{ github.base_ref || 'main' }}
           CONFORMANCE_CATALOGUE_ROOT: ${{ github.workspace }}/.conformance-catalogue
@@ -65,6 +90,9 @@ jobs:
           node "$CONFORMANCE_CATALOGUE_ROOT/integration/bin/conformance.mjs" \
             review --base "origin/$BASE_REF" --json > conformance-review.json 2> conformance-review.err
           status=$?
+          if [ ! -s conformance-review.json ]; then
+            echo '{"decision":"allow","findings":[],"advisories":[],"summary":"Advisory conformance review produced no JSON output.","metadata":{"skipped":true}}' > conformance-review.json
+          fi
           {
             echo "## Conformance PR review"
             echo
@@ -87,11 +115,12 @@ jobs:
           exit 0
 
       - name: Upload conformance review
-        if: always() && steps.checkout-catalogue.outcome == 'success'
-        uses: actions/upload-artifact@v4
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: conformance-review
           path: |
             conformance-review.json
             conformance-review.err
+          if-no-files-found: warn
           retention-days: 14

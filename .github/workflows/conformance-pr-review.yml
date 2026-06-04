@@ -26,6 +26,6 @@ jobs:
           fetch-depth: 0
 
       - name: Run advisory conformance review
-        uses: crmitchelmore/quality-software/.github/actions/conformance-pr-review@e89e0e305b4d9877d49a52685665406db8855a4f
+        uses: crmitchelmore/quality-software/.github/actions/conformance-pr-review@v0.1.0
         with:
           base-ref: ${{ github.base_ref || 'main' }}

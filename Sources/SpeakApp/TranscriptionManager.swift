@@ -90,8 +90,7 @@ func normalisedAudioInputStartError(_ error: Error) -> Error {
 func audioInputStartErrorIsBadDevice(_ error: Error) -> Bool {
   let nsError = error as NSError
   if nsError.code == coreAudioBadDeviceErrorCode,
-    nsError.domain == avfaudioErrorDomain || nsError.domain == NSOSStatusErrorDomain
-  {
+    nsError.domain == avfaudioErrorDomain || nsError.domain == NSOSStatusErrorDomain {
     return true
   }
   if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? Error {
@@ -1062,9 +1061,7 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
 struct RemoteAudioTranscriber: BatchTranscriptionClient {
   let client: OpenRouterAPIClient
 
-  func transcribeFile(at url: URL, model: String, language: String?) async throws
-    -> TranscriptionResult
-  {
+  func transcribeFile(at url: URL, model: String, language: String?) async throws -> TranscriptionResult {
     try await client.transcribeFile(at: url, model: model, language: language)
   }
 }

@@ -4,6 +4,7 @@ enum HistoryIssueReporter {
   static let repositoryIssueURL = URL(string: "https://github.com/crmitchelmore/justspeaktoit/issues/new")!
   static let maximumBodyLength = 6_000
   static let maximumURLLength = 7_500
+  private static let iso8601Formatter = ISO8601DateFormatter()
 
   static func issueURL(for item: HistoryItem) -> URL? {
     var body = truncated(issueBody(for: item), limit: maximumBodyLength)
@@ -24,7 +25,7 @@ enum HistoryIssueReporter {
   static func issueTitle(for item: HistoryItem) -> String {
     let phase = item.errors.first?.phase.rawValue ?? "session"
     let message = item.errors.first?.message ?? "Session error"
-    return "[Bug] \(phase.capitalized) error: \(truncated(publicSafe(message), limit: 72))"
+    return "[Bug] \(phase.capitalized) error: \(truncated(publicSafe(message), limit: 72, suffix: "..."))"
   }
 
   static func issueBody(for item: HistoryItem) -> String {
@@ -118,16 +119,23 @@ enum HistoryIssueReporter {
     ]
   }
 
-  private static func truncated(_ value: String, limit: Int) -> String {
+  private static func truncated(
+    _ value: String,
+    limit: Int,
+    suffix: String = "\n\n[Report truncated to keep the GitHub issue URL within a safe length.]"
+  ) -> String {
     guard value.count > limit else { return value }
-    let suffix = "\n\n[Report truncated to keep the GitHub issue URL within a safe length.]"
     let prefixLimit = max(0, limit - suffix.count)
     return String(value.prefix(prefixLimit)) + suffix
   }
 
   private static func publicSafe(_ value: String) -> String {
     var result = replacing(pattern: #"/Users/[^/\s]+"#, in: value, with: "/Users/<redacted>")
-    result = replacing(pattern: #"(?i)(authorization|api[-_ ]?key|token|secret)\s*[:=]\s*\S+"#, in: result, with: "$1=<redacted>")
+    result = replacing(
+      pattern: #"(?i)(authorization|api[-_ ]?key|token|secret)\s*[:=]\s*(?:bearer\s+)?\S+"#,
+      in: result,
+      with: "$1=<redacted>"
+    )
     return result
   }
 
@@ -138,6 +146,6 @@ enum HistoryIssueReporter {
   }
 
   private static func iso8601(_ date: Date) -> String {
-    ISO8601DateFormatter().string(from: date)
+    iso8601Formatter.string(from: date)
   }
 }

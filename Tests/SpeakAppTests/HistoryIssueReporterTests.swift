@@ -36,7 +36,16 @@ final class HistoryIssueReporterTests: XCTestCase {
     XCTAssertFalse(body.contains("real-token-value"))
   }
 
-  private func makeErrorItem() -> HistoryItem {
+  func testIssueTitle_preservesErrorContextWhenLongMessageIsTruncated() {
+    let longMessage = String(repeating: "microphone unavailable ", count: 8)
+    let item = makeErrorItem(errorMessage: longMessage)
+    let title = HistoryIssueReporter.issueTitle(for: item)
+
+    XCTAssertTrue(title.contains("microphone unavailable"))
+    XCTAssertTrue(title.hasSuffix("..."))
+  }
+
+  private func makeErrorItem(errorMessage: String = "The selected microphone is unavailable") -> HistoryItem {
     let date = Date(timeIntervalSince1970: 1_717_171_717)
     let diagnostic = HistoryDiagnosticContext(
       capturedAt: date,
@@ -99,8 +108,8 @@ final class HistoryIssueReporterTests: XCTestCase {
       errors: [
         HistoryError(
           phase: .recording,
-          message: "The selected microphone is unavailable",
-          debugDescription: "com.apple.coreaudio.avfaudio error 560227702 at /Users/cm/private"
+          message: errorMessage,
+          debugDescription: "com.apple.coreaudio.avfaudio error 560227702 with Authorization: Bearer real-token-value at /Users/cm/private"
         )
       ],
       diagnosticContext: diagnostic

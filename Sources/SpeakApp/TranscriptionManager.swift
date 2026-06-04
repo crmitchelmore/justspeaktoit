@@ -55,6 +55,51 @@ func audioInputFormatIsUsable(_ format: AVAudioFormat) -> Bool {
   format.channelCount > 0 && format.sampleRate > 0
 }
 
+private let coreAudioBadDeviceErrorCode = 560_227_702
+private let avfaudioErrorDomain = "com.apple.coreaudio.avfaudio"
+private let staleInputDeviceRetryDelay: Duration = .milliseconds(200)
+
+@MainActor
+func startAudioEngineAfterInputDeviceSettles(_ audioEngine: AVAudioEngine) async throws {
+  do {
+    audioEngine.prepare()
+    try audioEngine.start()
+  } catch {
+    guard audioInputStartErrorIsBadDevice(error) else {
+      throw error
+    }
+
+    audioEngine.stop()
+    try? await Task.sleep(for: staleInputDeviceRetryDelay)
+
+    do {
+      audioEngine.prepare()
+      try audioEngine.start()
+    } catch {
+      throw normalisedAudioInputStartError(error)
+    }
+  }
+}
+
+func normalisedAudioInputStartError(_ error: Error) -> Error {
+  audioInputStartErrorIsBadDevice(error)
+    ? TranscriptionManagerError.noUsableAudioInput
+    : error
+}
+
+func audioInputStartErrorIsBadDevice(_ error: Error) -> Bool {
+  let nsError = error as NSError
+  if nsError.code == coreAudioBadDeviceErrorCode,
+    nsError.domain == avfaudioErrorDomain || nsError.domain == NSOSStatusErrorDomain
+  {
+    return true
+  }
+  if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? Error {
+    return audioInputStartErrorIsBadDevice(underlying)
+  }
+  return false
+}
+
 @MainActor
 final class TranscriptionManager: ObservableObject {
   @Published private(set) var livePartialText: String = ""
@@ -407,12 +452,11 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
       self?.request?.append(buffer)
     }
 
-    audioEngine.prepare()
     do {
-      try audioEngine.start()
+      try await startAudioEngineAfterInputDeviceSettles(audioEngine)
     } catch {
       await audioDeviceManager.endUsingPreferredInput(session: sessionContext)
-      throw error
+      throw normalisedAudioInputStartError(error)
     }
 
     latestResult = nil
@@ -762,8 +806,7 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
           logger: log
         )
       }
-      audioEngine.prepare()
-      try audioEngine.start()
+      try await startAudioEngineAfterInputDeviceSettles(audioEngine)
       streamingStartTime = Date()
       isRunning = true
     } catch {
@@ -1122,8 +1165,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
         transcriber: transcriber
       )
 
-      audioEngine.prepare()
-      try audioEngine.start()
+      try await startAudioEngineAfterInputDeviceSettles(audioEngine)
       isRunning = true
       streamingStartTime = Date()
       print("[DeepgramLiveController] Started successfully")
@@ -1643,8 +1685,7 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
         )
       }
 
-      audioEngine.prepare()
-      try audioEngine.start()
+      try await startAudioEngineAfterInputDeviceSettles(audioEngine)
       isRunning = true
       streamingStartTime = Date()
     } catch {
@@ -2075,8 +2116,7 @@ final class ModulateLiveController: NSObject, LiveTranscriptionController {
         transcriber: transcriber
       )
 
-      audioEngine.prepare()
-      try audioEngine.start()
+      try await startAudioEngineAfterInputDeviceSettles(audioEngine)
       isRunning = true
       streamingStartTime = Date()
     } catch {
@@ -2622,8 +2662,7 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
         )
       }
 
-      audioEngine.prepare()
-      try audioEngine.start()
+      try await startAudioEngineAfterInputDeviceSettles(audioEngine)
       isRunning = true
       streamingStartTime = Date()
     } catch {
@@ -3037,8 +3076,7 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
         )
       }
 
-      audioEngine.prepare()
-      try audioEngine.start()
+      try await startAudioEngineAfterInputDeviceSettles(audioEngine)
       isRunning = true
       streamingStartTime = Date()
     } catch {

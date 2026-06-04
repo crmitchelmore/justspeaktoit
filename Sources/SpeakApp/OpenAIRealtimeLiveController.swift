@@ -156,8 +156,7 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
         )
       }
 
-      audioEngine.prepare()
-      try audioEngine.start()
+      try await startAudioEngineAfterInputDeviceSettles(audioEngine)
       isRunning = true
       streamingStartTime = Date()
     } catch {

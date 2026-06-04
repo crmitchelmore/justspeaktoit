@@ -42,4 +42,27 @@ final class AudioInputFormatTests: XCTestCase {
     XCTAssertNotNil(format)
     XCTAssertFalse(audioInputFormatIsUsable(format!))
   }
+
+  func testAudioInputStartError_avfaudioBadDevice_mapsToNoUsableInput() {
+    let error = NSError(domain: "com.apple.coreaudio.avfaudio", code: 560_227_702)
+    let normalised = normalisedAudioInputStartError(error)
+
+    XCTAssertEqual(normalised as? TranscriptionManagerError, .noUsableAudioInput)
+  }
+
+  func testAudioInputStartError_underlyingBadDevice_mapsToNoUsableInput() {
+    let underlying = NSError(domain: NSOSStatusErrorDomain, code: 560_227_702)
+    let error = NSError(domain: "wrapper", code: 1, userInfo: [NSUnderlyingErrorKey: underlying])
+    let normalised = normalisedAudioInputStartError(error)
+
+    XCTAssertEqual(normalised as? TranscriptionManagerError, .noUsableAudioInput)
+  }
+
+  func testAudioInputStartError_unrelatedError_isPreserved() {
+    let error = NSError(domain: "com.apple.coreaudio.avfaudio", code: -1)
+    let normalised = normalisedAudioInputStartError(error) as NSError
+
+    XCTAssertEqual(normalised.domain, error.domain)
+    XCTAssertEqual(normalised.code, error.code)
+  }
 }

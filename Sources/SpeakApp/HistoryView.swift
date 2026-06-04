@@ -711,6 +711,22 @@ private struct HistoryListRow: View { // swiftlint:disable:this type_body_length
       }
     }
 
+    if !item.errors.isEmpty {
+      Divider()
+
+      Button {
+        openGitHubIssue()
+      } label: {
+        Label("Open GitHub Issue", systemImage: "ladybug")
+      }
+
+      Button {
+        copyIssueReport()
+      } label: {
+        Label("Copy Issue Report", systemImage: "doc.on.clipboard")
+      }
+    }
+
     Divider()
 
     if item.audioFileURL != nil {
@@ -1168,9 +1184,30 @@ private struct HistoryListRow: View { // swiftlint:disable:this type_body_length
   }
 
   private var errorSection: some View {
-    VStack(alignment: .leading, spacing: 6) {
-      Text("Errors")
-        .font(.subheadline.bold())
+    VStack(alignment: .leading, spacing: 10) {
+      HStack(alignment: .firstTextBaseline, spacing: 12) {
+        Text("Errors")
+          .font(.subheadline.bold())
+
+        Spacer()
+
+        Button {
+          openGitHubIssue()
+        } label: {
+          Label("Open GitHub Issue", systemImage: "ladybug")
+        }
+        .speakTooltip("Open a prefilled public GitHub issue with safe diagnostics for this failed session.")
+
+        Button {
+          copyIssueReport()
+        } label: {
+          Label("Copy Report", systemImage: "doc.on.clipboard")
+        }
+        .speakTooltip("Copy the same safe diagnostic report without opening GitHub.")
+      }
+      .buttonStyle(.bordered)
+      .controlSize(.small)
+
       ForEach(item.errors) { error in
         VStack(alignment: .leading, spacing: 2) {
           Text(error.phase.rawValue.capitalized)
@@ -1424,6 +1461,20 @@ private struct HistoryListRow: View { // swiftlint:disable:this type_body_length
     let board = NSPasteboard.general
     board.clearContents()
     board.setString(text, forType: .string)
+  }
+
+  private func copyIssueReport() {
+    copyToPasteboard(HistoryIssueReporter.issueBody(for: item))
+  }
+
+  private func openGitHubIssue() {
+    guard let url = HistoryIssueReporter.issueURL(for: item) else {
+      copyIssueReport()
+      return
+    }
+    if !NSWorkspace.shared.open(url) {
+      copyIssueReport()
+    }
   }
 
   private func formatDuration(_ duration: TimeInterval) -> String {

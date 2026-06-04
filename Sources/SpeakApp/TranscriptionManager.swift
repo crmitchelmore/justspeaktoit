@@ -456,7 +456,7 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
       audioEngine.stop()
       audioEngine.inputNode.removeTap(onBus: 0)
       await audioDeviceManager.endUsingPreferredInput(session: sessionContext)
-      throw normalisedAudioInputStartError(error)
+      throw error
     }
 
     latestResult = nil

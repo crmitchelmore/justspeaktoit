@@ -13,8 +13,7 @@ enum HistoryIssueReporter {
 
     while let url = components?.url,
       url.absoluteString.count > maximumURLLength,
-      body.count > 1_500
-    {
+      body.count > 1_500 {
       body = truncated(body, limit: body.count - 750)
       components?.queryItems = queryItems(for: item, body: body)
     }
@@ -30,67 +29,30 @@ enum HistoryIssueReporter {
 
   static func issueBody(for item: HistoryItem) -> String {
     let diagnostics = item.diagnosticContext.map(diagnosticLines) ?? ["- Not captured"]
-    let errorLines = item.errors.isEmpty
-      ? ["- No structured errors recorded"]
-      : item.errors.enumerated().map { index, error in
-        let debug = error.debugDescription.map { "\n  - Debug: `\(publicSafe($0))`" } ?? ""
-        return """
-        \(index + 1). **\(error.phase.rawValue)** at \(iso8601(error.occurredAt))
-          - Message: \(publicSafe(error.message))\(debug)
-        """
-      }
-    let eventLines = item.events.isEmpty
-      ? ["- No events recorded"]
-      : item.events.map { event in
-        "- \(iso8601(event.timestamp)) [\(event.kind.rawValue)] \(publicSafe(event.description))"
-      }
-    let networkLines = item.networkExchanges.isEmpty
-      ? ["- No network exchanges recorded"]
-      : item.networkExchanges.map { exchange in
-        let requestHeaderKeys = exchange.requestHeaders.keys.sorted().joined(separator: ", ")
-        let responseHeaderKeys = exchange.responseHeaders.keys.sorted().joined(separator: ", ")
-        return """
-        - \(exchange.method) \(publicSafe(exchange.url.host ?? exchange.url.absoluteString))\(exchange.url.path) -> HTTP \(exchange.responseCode)
-          - Request headers: \(requestHeaderKeys.isEmpty ? "none" : requestHeaderKeys)
-          - Response headers: \(responseHeaderKeys.isEmpty ? "none" : responseHeaderKeys)
-          - Payload previews omitted from public issue prefill for privacy.
-        """
-      }
-
-    let audioReference = item.audioFileURL?.lastPathComponent ?? "none"
-    let models = item.modelUsages.isEmpty
-      ? item.modelsUsed.sorted().joined(separator: ", ")
-      : item.modelUsages.map { "\($0.phase.rawValue): \($0.modelIdentifier)" }.joined(separator: ", ")
-    let recordingDuration = item.recordingDuration > 0
-      ? String(format: "%.2fs", item.recordingDuration)
-      : "unknown"
 
     return """
     ## Description
     An in-app error was recorded by JustSpeakToIt. Please describe what you were doing when this happened:
 
     ## History reference
-    - History ID: `\(item.id.uuidString)`
-    - Created: \(iso8601(item.createdAt))
-    - Updated: \(iso8601(item.updatedAt))
-    - Recording duration: \(recordingDuration)
-    - Audio file: \(publicSafe(audioReference))
-    - Models: \(models.isEmpty ? "none recorded" : publicSafe(models))
+    \(historyReferenceLines(for: item).joined(separator: "\n"))
 
     ## Errors
-    \(errorLines.joined(separator: "\n"))
+    \(errorLines(for: item).joined(separator: "\n"))
 
     ## Diagnostic context
     \(diagnostics.joined(separator: "\n"))
 
     ## Event timeline
-    \(eventLines.joined(separator: "\n"))
+    \(eventLines(for: item).joined(separator: "\n"))
 
     ## Network metadata
-    \(networkLines.joined(separator: "\n"))
+    \(networkLines(for: item).joined(separator: "\n"))
 
     ## Privacy note
-    This prefilled issue intentionally omits transcript text, API payload bodies, full local file paths, destination app names, and secrets because GitHub issues are public. Add any extra private context manually only if you are comfortable publishing it.
+    This prefilled issue intentionally omits transcript text, API payload bodies, full local file paths,
+    destination app names, and secrets because GitHub issues are public. Add any extra private context manually
+    only if you are comfortable publishing it.
     """
   }
 
@@ -100,6 +62,58 @@ enum HistoryIssueReporter {
       URLQueryItem(name: "body", value: body),
       URLQueryItem(name: "labels", value: "bug")
     ]
+  }
+
+  private static func historyReferenceLines(for item: HistoryItem) -> [String] {
+    let audioReference = item.audioFileURL?.lastPathComponent ?? "none"
+    let models = item.modelUsages.isEmpty
+      ? item.modelsUsed.sorted().joined(separator: ", ")
+      : item.modelUsages.map { "\($0.phase.rawValue): \($0.modelIdentifier)" }.joined(separator: ", ")
+    let recordingDuration = item.recordingDuration > 0
+      ? String(format: "%.2fs", item.recordingDuration)
+      : "unknown"
+
+    return [
+      "- History ID: `\(item.id.uuidString)`",
+      "- Created: \(iso8601(item.createdAt))",
+      "- Updated: \(iso8601(item.updatedAt))",
+      "- Recording duration: \(recordingDuration)",
+      "- Audio file: \(publicSafe(audioReference))",
+      "- Models: \(models.isEmpty ? "none recorded" : publicSafe(models))"
+    ]
+  }
+
+  private static func errorLines(for item: HistoryItem) -> [String] {
+    guard !item.errors.isEmpty else { return ["- No structured errors recorded"] }
+    return item.errors.enumerated().map { index, error in
+      let debug = error.debugDescription.map { "\n  - Debug: `\(publicSafe($0))`" } ?? ""
+      return """
+      \(index + 1). **\(error.phase.rawValue)** at \(iso8601(error.occurredAt))
+        - Message: \(publicSafe(error.message))\(debug)
+      """
+    }
+  }
+
+  private static func eventLines(for item: HistoryItem) -> [String] {
+    guard !item.events.isEmpty else { return ["- No events recorded"] }
+    return item.events.map { event in
+      "- \(iso8601(event.timestamp)) [\(event.kind.rawValue)] \(publicSafe(event.description))"
+    }
+  }
+
+  private static func networkLines(for item: HistoryItem) -> [String] {
+    guard !item.networkExchanges.isEmpty else { return ["- No network exchanges recorded"] }
+    return item.networkExchanges.map { exchange in
+      let requestHeaderKeys = exchange.requestHeaders.keys.sorted().joined(separator: ", ")
+      let responseHeaderKeys = exchange.responseHeaders.keys.sorted().joined(separator: ", ")
+      let target = "\(publicSafe(exchange.url.host ?? exchange.url.absoluteString))\(exchange.url.path)"
+      return """
+      - \(exchange.method) \(target) -> HTTP \(exchange.responseCode)
+        - Request headers: \(requestHeaderKeys.isEmpty ? "none" : requestHeaderKeys)
+        - Response headers: \(responseHeaderKeys.isEmpty ? "none" : responseHeaderKeys)
+        - Payload previews omitted from public issue prefill for privacy.
+      """
+    }
   }
 
   private static func diagnosticLines(_ context: HistoryDiagnosticContext) -> [String] {

@@ -45,6 +45,7 @@ final class HistoryIssueReporterTests: XCTestCase {
     XCTAssertTrue(title.hasSuffix("..."))
   }
 
+  // swiftlint:disable:next function_body_length
   private func makeErrorItem(errorMessage: String = "The selected microphone is unavailable") -> HistoryItem {
     let date = Date(timeIntervalSince1970: 1_717_171_717)
     let diagnostic = HistoryDiagnosticContext(
@@ -109,7 +110,9 @@ final class HistoryIssueReporterTests: XCTestCase {
         HistoryError(
           phase: .recording,
           message: errorMessage,
-          debugDescription: "com.apple.coreaudio.avfaudio error 560227702 with Authorization: Bearer real-token-value at /Users/cm/private"
+          debugDescription: """
+          com.apple.coreaudio.avfaudio error 560227702 with Authorization: Bearer real-token-value at /Users/cm/private
+          """
         )
       ],
       diagnosticContext: diagnostic

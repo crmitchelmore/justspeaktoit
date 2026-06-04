@@ -579,6 +579,7 @@ final class MainManager: ObservableObject {
     return "Loading local model and transcribing. First run can take a minute."
   }
 
+  // swiftlint:disable:next function_body_length
   private func startSession(trigger: SessionTriggerSource) async {
     guard activeSession == nil else { return }
     if await presentMissingLiveAPIKeyAlertIfNeeded() { return }
@@ -1044,6 +1045,7 @@ final class MainManager: ObservableObject {
   }
   // swiftlint:enable cyclomatic_complexity function_body_length
 
+  // swiftlint:disable:next function_body_length
   private func performRetryPostProcessing(with retryData: RetryData) async {
     state = .processing
     lastErrorMessage = nil

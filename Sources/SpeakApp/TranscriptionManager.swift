@@ -59,7 +59,6 @@ private let coreAudioBadDeviceErrorCode = 560_227_702
 private let avfaudioErrorDomain = "com.apple.coreaudio.avfaudio"
 private let staleInputDeviceRetryDelay: Duration = .milliseconds(200)
 
-@MainActor
 func startAudioEngineAfterInputDeviceSettles(_ audioEngine: AVAudioEngine) async throws {
   do {
     audioEngine.prepare()
@@ -70,7 +69,7 @@ func startAudioEngineAfterInputDeviceSettles(_ audioEngine: AVAudioEngine) async
     }
 
     audioEngine.stop()
-    try? await Task.sleep(for: staleInputDeviceRetryDelay)
+    try await Task.sleep(for: staleInputDeviceRetryDelay)
 
     do {
       audioEngine.prepare()
@@ -454,6 +453,8 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
     do {
       try await startAudioEngineAfterInputDeviceSettles(audioEngine)
     } catch {
+      audioEngine.stop()
+      audioEngine.inputNode.removeTap(onBus: 0)
       await audioDeviceManager.endUsingPreferredInput(session: sessionContext)
       throw normalisedAudioInputStartError(error)
     }

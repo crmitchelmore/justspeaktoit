@@ -8,7 +8,6 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-conformance
@@ -21,12 +20,15 @@ jobs:
     continue-on-error: true
     steps:
       - name: Checkout repository
+        id: checkout-repository
+        continue-on-error: true
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
 
       - name: Checkout conformance catalogue
         id: checkout-catalogue
+        if: steps.checkout-repository.outcome == 'success'
         continue-on-error: true
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
@@ -38,7 +40,7 @@ jobs:
 
       - name: Setup Node.js
         id: setup-node
-        if: steps.checkout-catalogue.outcome == 'success'
+        if: steps.checkout-repository.outcome == 'success' && steps.checkout-catalogue.outcome == 'success'
         continue-on-error: true
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -48,30 +50,30 @@ jobs:
 
       - name: Install conformance CLI
         id: install-conformance
-        if: steps.checkout-catalogue.outcome == 'success' && steps.setup-node.outcome == 'success'
+        if: steps.checkout-repository.outcome == 'success' && steps.checkout-catalogue.outcome == 'success' && steps.setup-node.outcome == 'success'
         continue-on-error: true
         working-directory: .conformance-catalogue/integration
         run: npm ci
 
       - name: Fetch PR base
         id: fetch-base
-        if: steps.checkout-catalogue.outcome == 'success' && steps.setup-node.outcome == 'success' && steps.install-conformance.outcome == 'success'
+        if: steps.checkout-repository.outcome == 'success' && steps.checkout-catalogue.outcome == 'success' && steps.setup-node.outcome == 'success' && steps.install-conformance.outcome == 'success'
         continue-on-error: true
         env:
           BASE_REF: ${{ github.base_ref || 'main' }}
         run: git fetch origin "$BASE_REF:refs/remotes/origin/$BASE_REF"
 
       - name: Report advisory review unavailable
-        if: steps.checkout-catalogue.outcome != 'success' || steps.setup-node.outcome != 'success' || steps.install-conformance.outcome != 'success' || steps.fetch-base.outcome != 'success'
+        if: steps.checkout-repository.outcome != 'success' || steps.checkout-catalogue.outcome != 'success' || steps.setup-node.outcome != 'success' || steps.install-conformance.outcome != 'success' || steps.fetch-base.outcome != 'success'
         run: |
           cat > conformance-review.json <<'JSON'
-          {"decision":"allow","findings":[],"advisories":[],"summary":"Advisory conformance review skipped because the catalogue, Node setup, install, or base fetch was unavailable.","metadata":{"skipped":true}}
+          {"decision":"allow","findings":[],"advisories":[],"summary":"Advisory conformance review skipped because repository checkout, catalogue checkout, Node setup, install, or base fetch was unavailable.","metadata":{"skipped":true}}
           JSON
           : > conformance-review.err
           {
             echo "## Conformance PR review"
             echo
-            echo "Advisory review skipped because the catalogue, Node setup, install, or base fetch was unavailable."
+            echo "Advisory review skipped because repository checkout, catalogue checkout, Node setup, install, or base fetch was unavailable."
             echo "Configure CONFORMANCE_CATALOGUE_TOKEN if this repository cannot read crmitchelmore/quality-software with github.token."
             echo
             echo "### output"
@@ -81,7 +83,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Run advisory conformance review
-        if: steps.checkout-catalogue.outcome == 'success' && steps.setup-node.outcome == 'success' && steps.install-conformance.outcome == 'success' && steps.fetch-base.outcome == 'success'
+        if: steps.checkout-repository.outcome == 'success' && steps.checkout-catalogue.outcome == 'success' && steps.setup-node.outcome == 'success' && steps.install-conformance.outcome == 'success' && steps.fetch-base.outcome == 'success'
         env:
           BASE_REF: ${{ github.base_ref || 'main' }}
           CONFORMANCE_CATALOGUE_ROOT: ${{ github.workspace }}/.conformance-catalogue

@@ -374,6 +374,58 @@ final class MainManager: ObservableObject {
     )
   }
 
+  private func currentTranscriptionModelIdentifier() -> String {
+    switch appSettings.transcriptionMode {
+    case .liveNative:
+      return appSettings.liveTranscriptionModel
+    case .batchRemote:
+      return appSettings.batchTranscriptionModel
+    case .localModel:
+      return appSettings.localTranscriptionMode == .streaming
+        ? appSettings.localStreamingModelSource
+        : appSettings.localTranscriptionModel
+    }
+  }
+
+  private func makeHistoryDiagnosticContext() -> HistoryDiagnosticContext {
+    let health = buildCaptureHealthSnapshot()
+    let info = Bundle.main.infoDictionary
+    let appVersion = info?["CFBundleShortVersionString"] as? String ?? "unknown"
+    let appBuild = info?["CFBundleVersion"] as? String ?? "unknown"
+    let microphonePermission: String
+    switch health.microphonePermission {
+    case .granted:
+      microphonePermission = "granted"
+    case .denied:
+      microphonePermission = "denied"
+    case .notDetermined:
+      microphonePermission = "notDetermined"
+    }
+
+    return HistoryDiagnosticContext(
+      appVersion: appVersion,
+      appBuild: appBuild,
+      operatingSystem: ProcessInfo.processInfo.operatingSystemVersionString,
+      processIdentifier: Int(ProcessInfo.processInfo.processIdentifier),
+      microphonePermission: microphonePermission,
+      inputDeviceName: health.inputDeviceName,
+      providerLabel: health.providerLabel,
+      latencyTier: health.latencyTier.displayName,
+      transcriptionMode: appSettings.transcriptionMode.displayName,
+      transcriptionModel: currentTranscriptionModelIdentifier(),
+      postProcessingModel: appSettings.postProcessingModel,
+      speedMode: appSettings.speedMode.displayName
+    )
+  }
+
+  private func attachFailureDiagnostics(to session: ActiveSession) {
+    session.diagnosticContext = makeHistoryDiagnosticContext()
+    let description = "Diagnostic snapshot captured for issue report"
+    if !session.events.contains(where: { $0.kind == .error && $0.description == description }) {
+      session.events.append(HistoryEvent(kind: .error, description: description))
+    }
+  }
+
   private func captureHealthProviderLabel(for modelID: String) -> String {
     guard appSettings.transcriptionMode == .localModel else {
       return ModelCatalog.friendlyName(for: modelID)
@@ -527,6 +579,7 @@ final class MainManager: ObservableObject {
     return "Loading local model and transcribing. First run can take a minute."
   }
 
+  // swiftlint:disable:next function_body_length
   private func startSession(trigger: SessionTriggerSource) async {
     guard activeSession == nil else { return }
     if await presentMissingLiveAPIKeyAlertIfNeeded() { return }
@@ -542,6 +595,7 @@ final class MainManager: ObservableObject {
 
     let gesture = trigger.historyGesture
     let session = ActiveSession(gesture: gesture, hotKeyDescription: appSettings.selectedHotKey.displayString)
+    session.diagnosticContext = makeHistoryDiagnosticContext()
     activeSession = session
     state = .recording
 
@@ -869,6 +923,7 @@ final class MainManager: ObservableObject {
             )
           )
           session.events.append(HistoryEvent(kind: .error, description: friendly))
+          attachFailureDiagnostics(to: session)
           postProcessingFailureNotice = (headline: "Post-processing failed", message: friendly)
 
           if let transcriptionResult = session.transcriptionResult {
@@ -918,6 +973,9 @@ final class MainManager: ObservableObject {
           hudManager.finishFailure(headline: "Delivery failed", message: error.localizedDescription)
           state = .failed(error.localizedDescription)
           lastErrorMessage = error.localizedDescription
+          attachFailureDiagnostics(to: session)
+          let historyItem = session.buildHistoryItem(finalText: finalText)
+          await historyManager.append(historyItem)
           livePolishManager.reset()
           liveTextInserter.reset()
           activeSession = nil
@@ -934,6 +992,9 @@ final class MainManager: ObservableObject {
         hudManager.finishFailure(headline: "Delivery failed", message: error.localizedDescription)
         state = .failed(error.localizedDescription)
         lastErrorMessage = error.localizedDescription
+        attachFailureDiagnostics(to: session)
+        let historyItem = session.buildHistoryItem(finalText: finalText)
+        await historyManager.append(historyItem)
         livePolishManager.reset()
         liveTextInserter.reset()
         activeSession = nil
@@ -984,12 +1045,14 @@ final class MainManager: ObservableObject {
   }
   // swiftlint:enable cyclomatic_complexity function_body_length
 
+  // swiftlint:disable:next function_body_length
   private func performRetryPostProcessing(with retryData: RetryData) async {
     state = .processing
     lastErrorMessage = nil
     hudManager.beginPostProcessing()
 
     let session = ActiveSession(gesture: .uiButton, hotKeyDescription: appSettings.selectedHotKey.displayString)
+    session.diagnosticContext = makeHistoryDiagnosticContext()
     activeSession = session
     session.transcriptionResult = retryData.transcriptionResult
     session.recordingSummary = retryData.recordingSummary
@@ -1079,6 +1142,9 @@ final class MainManager: ObservableObject {
         hudManager.finishFailure(headline: "Delivery failed", message: error.localizedDescription)
         state = .failed(error.localizedDescription)
         lastErrorMessage = error.localizedDescription
+        attachFailureDiagnostics(to: session)
+        let historyItem = session.buildHistoryItem(finalText: finalText)
+        await historyManager.append(historyItem)
       } else {
         session.events.append(
           HistoryEvent(kind: .outputDelivered, description: "Retry output delivered successfully")
@@ -1109,6 +1175,9 @@ final class MainManager: ObservableObject {
       hudManager.finishFailure(headline: "Retry post-processing failed", message: friendly, showRetryHint: true)
       state = .failed(friendly)
       lastErrorMessage = friendly
+      attachFailureDiagnostics(to: session)
+      let historyItem = session.buildHistoryItem(finalText: finalText)
+      await historyManager.append(historyItem)
     }
 
     activeSession = nil
@@ -1124,6 +1193,7 @@ final class MainManager: ObservableObject {
 
     let session = ActiveSession(
       gesture: .uiButton, hotKeyDescription: item.trigger.hotKeyDescription)
+    session.diagnosticContext = makeHistoryDiagnosticContext()
     activeSession = session
 
     let summary = makeRecordingSummary(from: url, fallbackDuration: item.recordingDuration)
@@ -1320,6 +1390,7 @@ final class MainManager: ObservableObject {
       )
       hudManager.finishFailure(message: error.localizedDescription)
       state = .failed(error.localizedDescription)
+      attachFailureDiagnostics(to: session)
       let historyItem = session.buildHistoryItem(
         finalText: session.transcriptionResult?.text,
         source: item.source
@@ -1363,6 +1434,7 @@ final class MainManager: ObservableObject {
     hudManager.finishFailure(message: message)
     state = .failed(message)
     lastErrorMessage = message
+    attachFailureDiagnostics(to: session)
     let historyItem = session.buildHistoryItem(finalText: session.transcriptionResult?.text)
     await historyManager.append(historyItem)
     activeSession = nil
@@ -1487,6 +1559,10 @@ final class MainManager: ObservableObject {
 
     if isStreamingTranscriptionMode {
       transcriptionManager.cancelLiveTranscription()
+    }
+
+    if let session = activeSession {
+      attachFailureDiagnostics(to: session)
     }
 
     Task { [failedSession = activeSession] in
@@ -1689,6 +1765,7 @@ private final class ActiveSession {
   var destination: String?
   var personalCorrections: PersonalLexiconHistorySummary?
   var lexiconContext: PersonalLexiconContext = .empty
+  var diagnosticContext: HistoryDiagnosticContext?
 
   init(gesture: HistoryTrigger.HotKeyGesture, hotKeyDescription: String) {
     self.gesture = gesture
@@ -1750,7 +1827,8 @@ private final class ActiveSession {
       personalCorrections: personalCorrections,
       errors: errors,
       source: source,
-      postProcessingPrompt: postProcessingOutcome?.promptPayload
+      postProcessingPrompt: postProcessingOutcome?.promptPayload,
+      diagnosticContext: diagnosticContext
     )
   }
 }

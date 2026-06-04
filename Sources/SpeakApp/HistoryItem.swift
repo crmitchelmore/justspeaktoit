@@ -183,6 +183,7 @@ struct HistoryItem: Codable, Identifiable, Hashable {
   let errors: [HistoryError]
   let source: HistoryItemSource?
   let postProcessingPrompt: PostProcessingPromptPayload?
+  let diagnosticContext: HistoryDiagnosticContext?
 
   init(
     id: UUID = UUID(), createdAt: Date = .init(), updatedAt: Date = .init(), modelsUsed: [String],
@@ -192,7 +193,8 @@ struct HistoryItem: Codable, Identifiable, Hashable {
     events: [HistoryEvent], phaseTimestamps: PhaseTimestamps, trigger: HistoryTrigger,
     personalCorrections: PersonalLexiconHistorySummary?, errors: [HistoryError],
     source: HistoryItemSource? = nil,
-    postProcessingPrompt: PostProcessingPromptPayload? = nil
+    postProcessingPrompt: PostProcessingPromptPayload? = nil,
+    diagnosticContext: HistoryDiagnosticContext? = nil
   ) {
     self.id = id
     self.createdAt = createdAt
@@ -212,6 +214,7 @@ struct HistoryItem: Codable, Identifiable, Hashable {
     self.errors = errors
     self.source = source
     self.postProcessingPrompt = postProcessingPrompt
+    self.diagnosticContext = diagnosticContext
   }
 
   static let placeholder: HistoryItem = .init(

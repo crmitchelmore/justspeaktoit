@@ -168,52 +168,32 @@ public final class TranscriptionRecordingService: ObservableObject {
         }
     }
 
-    /// Stops recording, copies transcript to clipboard, and returns the result.
+    /// Stops recording, applies the requested result destination, and returns the result.
+    ///
+    /// - Parameter destination: Where the transcript should go. When `nil`, defaults
+    ///   to `.clipboardAndPostProcess` if the user has post-processing turned on,
+    ///   else `.clipboard` — i.e., the original behaviour before destinations
+    ///   were configurable. Hardware-trigger callers (Action Button, Siri,
+    ///   Shortcuts) pass `AppSettings.shared.hardwareTriggerDestination`.
     @discardableResult
-    public func stopRecording() async -> TranscriptionResult {
+    public func stopRecording(destination: HardwareTriggerDestination? = nil) async -> TranscriptionResult {
         isRunning = false
         let duration = elapsedSeconds
 
-        let result: TranscriptionResult
-        if let deepgram = deepgramTranscriber {
-            result = await deepgram.stop()
-            deepgramTranscriber = nil
-        } else if let elevenlabs = elevenLabsTranscriber {
-            result = await elevenlabs.stop()
-            elevenLabsTranscriber = nil
-        } else if let openai = openAITranscriber {
-            result = await openai.stop()
-            openAITranscriber = nil
-        } else if let apple = appleTranscriber {
-            result = await apple.stop()
-            appleTranscriber = nil
-        } else {
-            result = TranscriptionResult(
-                text: partialText,
-                segments: [],
-                confidence: nil,
-                duration: TimeInterval(duration),
-                modelIdentifier: currentModel,
-                cost: nil,
-                rawPayload: nil,
-                debugInfo: nil
-            )
-        }
-
+        let result = await drainActiveTranscriber(duration: duration)
         startTime = nil
 
-        // Record to history
+        // Record to history (always, regardless of destination).
         iOSHistoryManager.shared.recordTranscription(
             text: result.text,
             model: currentModel,
             duration: result.duration
         )
 
-        // Copy to clipboard immediately
-        if !result.text.isEmpty {
-            UIPasteboard.general.string = result.text
-            sharedState.lastCompletedTranscript = result.text
-        }
+        // Resolve the destination. When nil (legacy callers), preserve the
+        // pre-destination behaviour: clipboard + post-process if user opted in.
+        let resolvedDestination: HardwareTriggerDestination = destination ?? .clipboard
+        applyDestinationSideEffects(result: result, destination: resolvedDestination)
 
         // Update shared state
         sharedState.clearRecordingState()
@@ -221,10 +201,12 @@ public final class TranscriptionRecordingService: ObservableObject {
         // Complete Live Activity with clipboard confirmation
         activityManager.completeActivity(finalWordCount: wordCount, duration: duration)
 
-        // Post-process in background if enabled
-        if AppSettings.shared.autoPostProcess && AppSettings.shared.hasOpenRouterKey && !result.text.isEmpty {
-            Task {
-                await postProcess(text: result.text)
+        // Kick off background post-processing if the chosen destination + user
+        // settings call for it.
+        if shouldPostProcess(destination: resolvedDestination, isLegacyCaller: destination == nil)
+            && !result.text.isEmpty {
+            Task { [resolvedDestination] in
+                await postProcess(text: result.text, replacingClipboard: resolvedDestination != .historyOnly)
             }
         }
 
@@ -268,7 +250,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         activityManager.reportError(error.localizedDescription)
     }
 
-    private func postProcess(text: String) async {
+    private func postProcess(text: String, replacingClipboard: Bool = true) async {
         let settings = AppSettings.shared
         let processor = iOSPostProcessingManager.shared
 
@@ -279,10 +261,95 @@ public final class TranscriptionRecordingService: ObservableObject {
             apiKey: settings.openRouterAPIKey
         )
 
-        // Replace clipboard with processed text
+        // Replace clipboard with processed text (unless caller asked us not to).
         if !processor.processedText.isEmpty {
-            UIPasteboard.general.string = processor.processedText
+            if replacingClipboard {
+                UIPasteboard.general.string = processor.processedText
+            }
             sharedState.lastCompletedTranscript = processor.processedText
+        }
+    }
+}
+
+// MARK: - Stop helpers
+
+@MainActor
+private extension TranscriptionRecordingService {
+    /// Stops whichever transcriber is currently active and returns its result.
+    /// Falls back to a synthetic `TranscriptionResult` built from `partialText`
+    /// if no transcriber is wired up (defensive — shouldn't happen in practice).
+    ///
+    /// We null out the transcriber property **before** awaiting `stop()` to be
+    /// safe under `@MainActor` reentrancy: a rapid double-press of the Action
+    /// Button can re-enter `stopRecording` while the first stop is suspended,
+    /// and otherwise both calls would see the same non-nil transcriber and try
+    /// to stop it twice.
+    func drainActiveTranscriber(duration: Int) async -> TranscriptionResult {
+        if let deepgram = deepgramTranscriber {
+            deepgramTranscriber = nil
+            return await deepgram.stop()
+        }
+        if let elevenlabs = elevenLabsTranscriber {
+            elevenLabsTranscriber = nil
+            return await elevenlabs.stop()
+        }
+        if let openai = openAITranscriber {
+            openAITranscriber = nil
+            return await openai.stop()
+        }
+        if let apple = appleTranscriber {
+            appleTranscriber = nil
+            return await apple.stop()
+        }
+        return TranscriptionResult(
+            text: partialText,
+            segments: [],
+            confidence: nil,
+            duration: TimeInterval(duration),
+            modelIdentifier: currentModel,
+            cost: nil,
+            rawPayload: nil,
+            debugInfo: nil
+        )
+    }
+
+    /// Applies the destination's side-effects (clipboard write, shared state
+    /// update). History recording is handled by the caller because it always
+    /// happens regardless of destination.
+    func applyDestinationSideEffects(
+        result: TranscriptionResult,
+        destination: HardwareTriggerDestination
+    ) {
+        guard !result.text.isEmpty else { return }
+        switch destination {
+        case .clipboard, .clipboardAndPostProcess:
+            UIPasteboard.general.string = result.text
+            sharedState.lastCompletedTranscript = result.text
+        case .historyOnly:
+            // Don't touch the pasteboard. We still record `lastCompletedTranscript`
+            // because the Live Activity / shared state UI shows it.
+            sharedState.lastCompletedTranscript = result.text
+        }
+    }
+
+    /// Decides whether to run the background post-processor.
+    ///
+    /// Two paths trigger it:
+    /// 1. Legacy callers (no explicit destination) honour the global
+    ///    `autoPostProcess` toggle for backwards compatibility.
+    /// 2. Hardware-trigger callers explicitly choose `.clipboardAndPostProcess`.
+    func shouldPostProcess(
+        destination: HardwareTriggerDestination,
+        isLegacyCaller: Bool
+    ) -> Bool {
+        let settings = AppSettings.shared
+        switch destination {
+        case .clipboardAndPostProcess:
+            return settings.hasOpenRouterKey
+        case .clipboard:
+            return isLegacyCaller && settings.autoPostProcess && settings.hasOpenRouterKey
+        case .historyOnly:
+            return false
         }
     }
 }

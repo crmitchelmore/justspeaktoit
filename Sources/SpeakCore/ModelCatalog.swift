@@ -1,3 +1,10 @@
+// swiftlint:disable file_length
+//
+// ModelCatalog is a static catalogue of provider/model metadata. It is
+// inherently long and grows whenever a new model is released. Splitting it
+// just to satisfy the 400-line file_length rule adds indirection without
+// improving clarity, so we suppress the rule for this file only.
+
 import Foundation
 
 public enum LatencyTier: String, Codable, CaseIterable, Comparable, Sendable {
@@ -145,7 +152,20 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             displayName: "OpenAI Whisper Realtime (Streaming)",
             description: "OpenAI's gpt-realtime-whisper — low-latency streaming transcription with "
                 + "built-in noise reduction. Reuses your OpenAI API key.",
-            estimatedLatencyMs: 250, latencyTier: .fast)
+            estimatedLatencyMs: 250, latencyTier: .fast),
+        Option(
+            id: "openai/gpt-4o-mini-transcribe-streaming",
+            displayName: "OpenAI GPT-4o mini Transcribe (Streaming)",
+            description: "OpenAI's gpt-4o-mini-transcribe over the Realtime API — fast, low-cost "
+                + "streaming transcription with keyterm prompt support. Reuses your OpenAI API key.",
+            estimatedLatencyMs: 220, latencyTier: .fast),
+        Option(
+            id: "openai/gpt-4o-transcribe-streaming",
+            displayName: "OpenAI GPT-4o Transcribe (Streaming)",
+            description: "OpenAI's flagship gpt-4o-transcribe over the Realtime API — higher "
+                + "accuracy on noisy or accented audio with keyterm prompt support. Reuses your "
+                + "OpenAI API key.",
+            estimatedLatencyMs: 280, latencyTier: .fast)
     ]
 
     public static let batchTranscription: [Option] = [
@@ -416,7 +436,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
         uniquingKeysWith: { first, _ in first }
     )
 
-    public static func friendlyName(for identifier: String) -> String {
+    public static func friendlyName(for identifier: String) -> String { // swiftlint:disable:this cyclomatic_complexity
         let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "—" }
 

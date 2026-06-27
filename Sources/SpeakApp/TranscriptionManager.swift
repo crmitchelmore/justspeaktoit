@@ -3544,6 +3544,8 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     if model.hasPrefix("elevenlabs/") { return elevenlabsController }
     if model.hasPrefix("soniox/") { return sonioxController }
     if model.hasPrefix("openai/gpt-realtime-whisper") { return openAIRealtimeController }
+    if model.hasPrefix("openai/gpt-4o-transcribe-streaming") { return openAIRealtimeController }
+    if model.hasPrefix("openai/gpt-4o-mini-transcribe-streaming") { return openAIRealtimeController }
     if model.hasPrefix("local/streaming/") { return sherpaOnnxController }
     if ModelRouting.family(for: model).isDownloadedLocal { return unsupportedLocalLiveController }
     return nativeController

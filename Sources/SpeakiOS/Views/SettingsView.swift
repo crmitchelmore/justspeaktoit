@@ -629,8 +629,8 @@ struct HardwareTriggerSettingsView: View {
                 StepRow(number: 1, text: "Open the Shortcuts app and tap the + button.")
                 StepRow(
                     number: 2,
-                    text: "Search for JustSpeakToIt and choose Toggle Recording "
-                        + "(or Start Recording if you prefer a one-shot start)."
+                    text: "Search for JustSpeakToIt and choose Toggle Recording for a single-button flow. "
+                        + "Use Start Recording only if you also create a separate Stop Recording shortcut."
                 )
                 StepRow(number: 3, text: "Name the shortcut and tap Done.")
                 StepRow(

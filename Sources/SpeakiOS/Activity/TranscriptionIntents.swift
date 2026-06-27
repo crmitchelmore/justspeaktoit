@@ -8,7 +8,8 @@ import UIKit
 @available(iOS 18, *)
 private func stopResultDialog(
     for result: TranscriptionResult,
-    destination: HardwareTriggerDestination
+    destination: HardwareTriggerDestination,
+    canPostProcess: Bool = true
 ) -> IntentDialog {
     let wordCount = result.text.split(separator: " ").count
     if result.text.isEmpty {
@@ -18,7 +19,10 @@ private func stopResultDialog(
     case .clipboard:
         return "Copied \(wordCount) words to clipboard."
     case .clipboardAndPostProcess:
-        return "Copied \(wordCount) words. Polishing in the background."
+        if canPostProcess {
+            return "Copied \(wordCount) words. Polishing in the background."
+        }
+        return "Copied \(wordCount) words. Add an OpenRouter API key to polish future recordings."
     case .historyOnly:
         return "Saved \(wordCount) words to history."
     }
@@ -31,7 +35,8 @@ private func stopResultDialog(
 public struct StartTranscriptionIntent: AudioRecordingIntent {
     public static var title: LocalizedStringResource = "Start Recording"
     public static var description = IntentDescription(
-        "Start a fresh transcription. If one is already in progress, this does nothing."
+        "Start a fresh transcription. If one is already in progress, this does nothing. "
+            + "Pair it with the Stop Recording shortcut to finish."
     )
 
     public static var openAppWhenRun: Bool = false
@@ -45,7 +50,7 @@ public struct StartTranscriptionIntent: AudioRecordingIntent {
             return .result(dialog: "Recording already in progress.")
         }
         try await service.startRecording()
-        return .result(dialog: "Recording started. Run \"Stop Recording\" or press your Action Button again to finish.")
+        return .result(dialog: "Recording started. Run \"Stop Recording\" to finish.")
     }
 }
 
@@ -68,10 +73,15 @@ public struct StartTranscriptionRecordingIntent: AudioRecordingIntent {
         let service = await TranscriptionRecordingService.shared
         let isRunning = await service.isRunning
         let destination = await AppSettings.shared.hardwareTriggerDestination
+        let canPostProcess = await AppSettings.shared.hasOpenRouterKey
 
         if isRunning {
             let result = await service.stopRecording(destination: destination)
-            return .result(dialog: stopResultDialog(for: result, destination: destination))
+            return .result(dialog: stopResultDialog(
+                for: result,
+                destination: destination,
+                canPostProcess: canPostProcess
+            ))
         } else {
             try await service.startRecording()
             return .result(dialog: "Recording started. Press again to stop.")
@@ -101,8 +111,13 @@ public struct StopTranscriptionRecordingIntent: AppIntent {
         }
 
         let destination = await AppSettings.shared.hardwareTriggerDestination
+        let canPostProcess = await AppSettings.shared.hasOpenRouterKey
         let result = await service.stopRecording(destination: destination)
-        return .result(dialog: stopResultDialog(for: result, destination: destination))
+        return .result(dialog: stopResultDialog(
+            for: result,
+            destination: destination,
+            canPostProcess: canPostProcess
+        ))
     }
 }
 

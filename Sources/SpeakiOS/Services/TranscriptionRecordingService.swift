@@ -278,26 +278,28 @@ private extension TranscriptionRecordingService {
     /// Stops whichever transcriber is currently active and returns its result.
     /// Falls back to a synthetic `TranscriptionResult` built from `partialText`
     /// if no transcriber is wired up (defensive — shouldn't happen in practice).
+    ///
+    /// We null out the transcriber property **before** awaiting `stop()` to be
+    /// safe under `@MainActor` reentrancy: a rapid double-press of the Action
+    /// Button can re-enter `stopRecording` while the first stop is suspended,
+    /// and otherwise both calls would see the same non-nil transcriber and try
+    /// to stop it twice.
     func drainActiveTranscriber(duration: Int) async -> TranscriptionResult {
         if let deepgram = deepgramTranscriber {
-            let result = await deepgram.stop()
             deepgramTranscriber = nil
-            return result
+            return await deepgram.stop()
         }
         if let elevenlabs = elevenLabsTranscriber {
-            let result = await elevenlabs.stop()
             elevenLabsTranscriber = nil
-            return result
+            return await elevenlabs.stop()
         }
         if let openai = openAITranscriber {
-            let result = await openai.stop()
             openAITranscriber = nil
-            return result
+            return await openai.stop()
         }
         if let apple = appleTranscriber {
-            let result = await apple.stop()
             appleTranscriber = nil
-            return result
+            return await apple.stop()
         }
         return TranscriptionResult(
             text: partialText,

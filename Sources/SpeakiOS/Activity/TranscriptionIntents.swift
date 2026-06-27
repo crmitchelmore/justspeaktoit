@@ -6,22 +6,32 @@ import UIKit
 // MARK: - Audio Recording Intent (Action Button / Shortcuts)
 
 @available(iOS 18, *)
-private func stopResultDialog(for result: TranscriptionResult) -> IntentDialog {
+private func stopResultDialog(
+    for result: TranscriptionResult,
+    destination: HardwareTriggerDestination
+) -> IntentDialog {
     let wordCount = result.text.split(separator: " ").count
     if result.text.isEmpty {
         return "Recording stopped. No speech detected."
     }
-    return "Copied \(wordCount) words to clipboard."
+    switch destination {
+    case .clipboard:
+        return "Copied \(wordCount) words to clipboard."
+    case .clipboardAndPostProcess:
+        return "Copied \(wordCount) words. Polishing in the background."
+    case .historyOnly:
+        return "Saved \(wordCount) words to history."
+    }
 }
 
-/// Toggle intent for starting/stopping transcription via Action Button, Siri, or Shortcuts.
-/// Conforms to AudioRecordingIntent so the system allows background audio recording
-/// and shows the recording indicator. Requires iOS 18+.
+/// Idempotent start intent for users who wire their Action Button / Shortcut
+/// to a one-shot start (and a separate one to stop). If a recording is already
+/// in progress this intent leaves it running and reports the state.
 @available(iOS 18, *)
-public struct StartTranscriptionRecordingIntent: AudioRecordingIntent {
-    public static var title: LocalizedStringResource = "Transcribe Voice"
+public struct StartTranscriptionIntent: AudioRecordingIntent {
+    public static var title: LocalizedStringResource = "Start Recording"
     public static var description = IntentDescription(
-        "Start or stop voice transcription. The transcript is copied to your clipboard automatically."
+        "Start a fresh transcription. If one is already in progress, this does nothing."
     )
 
     public static var openAppWhenRun: Bool = false
@@ -31,22 +41,52 @@ public struct StartTranscriptionRecordingIntent: AudioRecordingIntent {
     public func perform() async throws -> some IntentResult & ProvidesDialog {
         let service = await TranscriptionRecordingService.shared
         let isRunning = await service.isRunning
+        if isRunning {
+            return .result(dialog: "Recording already in progress.")
+        }
+        try await service.startRecording()
+        return .result(dialog: "Recording started. Run \"Stop Recording\" or press your Action Button again to finish.")
+    }
+}
+
+/// Toggle intent for starting/stopping transcription via Action Button, Siri, or Shortcuts.
+/// Conforms to AudioRecordingIntent so the system allows background audio recording
+/// and shows the recording indicator. Requires iOS 18+.
+@available(iOS 18, *)
+public struct StartTranscriptionRecordingIntent: AudioRecordingIntent {
+    public static var title: LocalizedStringResource = "Toggle Recording"
+    public static var description = IntentDescription(
+        "Start or stop voice transcription. Each invocation flips between the two states. "
+            + "The result lands in the destination you chose in Settings (clipboard by default)."
+    )
+
+    public static var openAppWhenRun: Bool = false
+
+    public init() {}
+
+    public func perform() async throws -> some IntentResult & ProvidesDialog {
+        let service = await TranscriptionRecordingService.shared
+        let isRunning = await service.isRunning
+        let destination = await AppSettings.shared.hardwareTriggerDestination
 
         if isRunning {
-            let result = await service.stopRecording()
-            return .result(dialog: stopResultDialog(for: result))
+            let result = await service.stopRecording(destination: destination)
+            return .result(dialog: stopResultDialog(for: result, destination: destination))
         } else {
             try await service.startRecording()
-            return .result(dialog: "Recording started. Press again to stop and copy.")
+            return .result(dialog: "Recording started. Press again to stop.")
         }
     }
 }
 
-/// Intent to stop an active recording from a Live Activity button.
+/// Intent to stop an active recording from a Live Activity button or a dedicated
+/// Shortcut paired with `StartTranscriptionIntent`.
 @available(iOS 18, *)
 public struct StopTranscriptionRecordingIntent: AppIntent {
-    public static var title: LocalizedStringResource = "Stop Transcription"
-    public static var description = IntentDescription("Stops the current transcription and copies it to clipboard")
+    public static var title: LocalizedStringResource = "Stop Recording"
+    public static var description = IntentDescription(
+        "Stops the current transcription and routes the result to the destination you chose in Settings."
+    )
 
     public static var openAppWhenRun: Bool = false
 
@@ -60,8 +100,9 @@ public struct StopTranscriptionRecordingIntent: AppIntent {
             return .result(dialog: "No active recording.")
         }
 
-        let result = await service.stopRecording()
-        return .result(dialog: stopResultDialog(for: result))
+        let destination = await AppSettings.shared.hardwareTriggerDestination
+        let result = await service.stopRecording(destination: destination)
+        return .result(dialog: stopResultDialog(for: result, destination: destination))
     }
 }
 
@@ -124,13 +165,32 @@ struct TranscriptionShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: StartTranscriptionRecordingIntent(),
             phrases: [
-                "Record with \(.applicationName)",
+                "Toggle recording with \(.applicationName)",
                 "Transcribe with \(.applicationName)",
+                "Record with \(.applicationName)"
+            ],
+            shortTitle: "Toggle Recording",
+            systemImageName: "mic.fill"
+        )
+
+        AppShortcut(
+            intent: StartTranscriptionIntent(),
+            phrases: [
                 "Start recording with \(.applicationName)",
                 "Start transcription with \(.applicationName)"
             ],
-            shortTitle: "Transcribe Voice",
-            systemImageName: "mic.fill"
+            shortTitle: "Start Recording",
+            systemImageName: "mic.badge.plus"
+        )
+
+        AppShortcut(
+            intent: StopTranscriptionRecordingIntent(),
+            phrases: [
+                "Stop recording with \(.applicationName)",
+                "Stop transcription with \(.applicationName)"
+            ],
+            shortTitle: "Stop Recording",
+            systemImageName: "stop.fill"
         )
 
         AppShortcut(
@@ -142,7 +202,7 @@ struct TranscriptionShortcuts: AppShortcutsProvider {
             shortTitle: "Copy Last Sentence",
             systemImageName: "doc.on.doc"
         )
-        
+
         AppShortcut(
             intent: CopyFullTranscriptIntent(),
             phrases: [

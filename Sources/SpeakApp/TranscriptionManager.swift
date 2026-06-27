@@ -3543,7 +3543,10 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     if model.hasPrefix("modulate/") { return modulateController }
     if model.hasPrefix("elevenlabs/") { return elevenlabsController }
     if model.hasPrefix("soniox/") { return sonioxController }
-    if model.hasPrefix("openai/gpt-realtime-whisper") { return openAIRealtimeController }
+    // SwitchingLiveTranscriber only routes live transcription models, and
+    // OpenAI's only live transcription transport is the Realtime WebSocket
+    // API. So any openai/* live model is handled by openAIRealtimeController.
+    if model.hasPrefix("openai/") { return openAIRealtimeController }
     if model.hasPrefix("local/streaming/") { return sherpaOnnxController }
     if ModelRouting.family(for: model).isDownloadedLocal { return unsupportedLocalLiveController }
     return nativeController

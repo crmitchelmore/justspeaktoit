@@ -99,6 +99,19 @@ extension ModelCatalog {
         "openai/gpt-realtime-whisper-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish],
             postStopFinalizeBudget: 0.5
+        ),
+
+        // OpenAI gpt-4o-mini-transcribe / gpt-4o-transcribe over the
+        // Realtime API: same WebSocket transport and event shape as
+        // gpt-realtime-whisper, with the added benefit of supporting the
+        // `input_audio_transcription.prompt` field for keyterm biasing.
+        "openai/gpt-4o-mini-transcribe-streaming": LiveModelCapabilities(
+            supportedSpeedModes: [.instant, .livePolish],
+            postStopFinalizeBudget: 0.5
+        ),
+        "openai/gpt-4o-transcribe-streaming": LiveModelCapabilities(
+            supportedSpeedModes: [.instant, .livePolish],
+            postStopFinalizeBudget: 0.5
         )
     ]
 }

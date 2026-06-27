@@ -38,8 +38,12 @@ struct OpenAITranscriptionProvider: TranscriptionProvider {
     // Extract model name without provider prefix
     let modelName = model.split(separator: "/").last.map(String.init) ?? model
 
+    // gpt-4o-transcribe / gpt-4o-mini-transcribe only support "json" or "text";
+    // verbose_json (with per-segment timestamps) is whisper-1 only.
+    let responseFormat = modelName.hasPrefix("gpt-4o") ? "json" : "verbose_json"
+
     body.appendFormField(named: "model", value: modelName, boundary: boundary)
-    body.appendFormField(named: "response_format", value: "verbose_json", boundary: boundary)
+    body.appendFormField(named: "response_format", value: responseFormat, boundary: boundary)
 
     if let language {
       // OpenAI expects ISO-639-1 (2-letter code), not full locale (e.g., "en" not "en_GB")
@@ -119,6 +123,16 @@ struct OpenAITranscriptionProvider: TranscriptionProvider {
         id: "openai/whisper-1",
         displayName: "Whisper",
         description: "OpenAI's speech recognition model. Fast and accurate."
+      ),
+      ModelCatalog.Option(
+        id: "openai/gpt-4o-mini-transcribe",
+        displayName: "GPT-4o mini Transcribe",
+        description: "Fast, low-cost transcription model with improved accuracy vs Whisper-1."
+      ),
+      ModelCatalog.Option(
+        id: "openai/gpt-4o-transcribe",
+        displayName: "GPT-4o Transcribe",
+        description: "Flagship transcription model with strong accuracy on noisy, accented audio."
       )
     ]
   }

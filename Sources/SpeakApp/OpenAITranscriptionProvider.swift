@@ -38,9 +38,11 @@ struct OpenAITranscriptionProvider: TranscriptionProvider {
     // Extract model name without provider prefix
     let modelName = model.split(separator: "/").last.map(String.init) ?? model
 
-    // gpt-4o-transcribe / gpt-4o-mini-transcribe only support "json" or "text";
-    // verbose_json (with per-segment timestamps) is whisper-1 only.
-    let responseFormat = modelName.hasPrefix("gpt-4o") ? "json" : "verbose_json"
+    // Only Whisper models support "verbose_json" (with per-segment timestamps).
+    // The gpt-* transcription models (and likely future OpenAI models) only
+    // support "json" or "text", so default everything that isn't a Whisper
+    // family model to "json".
+    let responseFormat = modelName.hasPrefix("whisper") ? "verbose_json" : "json"
 
     body.appendFormField(named: "model", value: modelName, boundary: boundary)
     body.appendFormField(named: "response_format", value: responseFormat, boundary: boundary)

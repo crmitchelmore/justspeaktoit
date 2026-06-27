@@ -438,7 +438,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             approximateSizeMB: 600,
             description: "Distilled, turbo-optimised Whisper Large v3 — fastest high-quality "
                 + "English-only offline option on Apple silicon.",
-            tags: [.fast]
+            tags: [.fast, .quality]
         )
     ]
 

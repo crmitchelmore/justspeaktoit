@@ -35,8 +35,7 @@ private func stopResultDialog(
 public struct StartTranscriptionIntent: AudioRecordingIntent {
     public static var title: LocalizedStringResource = "Start Recording"
     public static var description = IntentDescription(
-        "Start a fresh transcription. If one is already in progress, this does nothing. "
-            + "Pair it with the Stop Recording shortcut to finish."
+        "Start a fresh transcription. No-op if already recording. Pair with Stop Recording to finish."
     )
 
     public static var openAppWhenRun: Bool = false
@@ -61,8 +60,7 @@ public struct StartTranscriptionIntent: AudioRecordingIntent {
 public struct StartTranscriptionRecordingIntent: AudioRecordingIntent {
     public static var title: LocalizedStringResource = "Toggle Recording"
     public static var description = IntentDescription(
-        "Start or stop voice transcription. Each invocation flips between the two states. "
-            + "The result lands in the destination you chose in Settings (clipboard by default)."
+        "Start or stop voice transcription. Result lands in the destination you chose in Settings."
     )
 
     public static var openAppWhenRun: Bool = false

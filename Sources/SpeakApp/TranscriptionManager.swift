@@ -3023,13 +3023,13 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
       }
       targetFormat = outputFormat
 
-      // Catalog ID like "soniox/stt-rt-preview-streaming" → API model "stt-rt-preview".
+      // Catalog ID like "soniox/stt-rt-v5-streaming" → API model "stt-rt-v5".
       let modelID: String
       if let model = currentModel, model.hasPrefix("soniox/") {
         modelID = String(model.dropFirst("soniox/".count))
           .replacingOccurrences(of: "-streaming", with: "")
       } else {
-        modelID = "stt-rt-preview"
+        modelID = "stt-rt-v5"
       }
 
       let newTranscriber = SonioxLiveTranscriber(
@@ -3365,7 +3365,7 @@ private extension SonioxLiveController {
       segments: finalSegments,
       confidence: nil,
       duration: streamingDuration,
-      modelIdentifier: currentModel ?? "soniox/stt-rt-preview-streaming",
+      modelIdentifier: currentModel ?? "soniox/stt-rt-v5-streaming",
       cost: nil,
       rawPayload: nil,
       debugInfo: nil

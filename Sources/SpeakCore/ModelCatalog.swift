@@ -130,9 +130,9 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             description: "AssemblyAI's u3-rt-pro real-time model. Multilingual with high English accuracy.",
             estimatedLatencyMs: 250, latencyTier: .fast),
         Option(
-            id: "soniox/stt-rt-preview-streaming",
-            displayName: "Soniox Real-time (Preview)",
-            description: "Soniox real-time WebSocket STT (stt-rt-preview) with multilingual support and low latency.",
+            id: "soniox/stt-rt-v5-streaming",
+            displayName: "Soniox Real-time v5",
+            description: "Soniox v5 real-time WebSocket STT with reinvented speaker separation, faster semantic endpointing, and improved multilingual recognition across 60+ languages.",
             estimatedLatencyMs: 220, latencyTier: .fast),
         Option(
             id: "elevenlabs/scribe-v2-streaming",

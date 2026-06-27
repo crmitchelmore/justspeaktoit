@@ -75,7 +75,7 @@ extension ModelCatalog {
         "modulate/velma-2-stt-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish]
         ),
-        "soniox/stt-rt-preview-streaming": LiveModelCapabilities(
+        "soniox/stt-rt-v5-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish]
         ),
         "elevenlabs/scribe-v2-streaming": LiveModelCapabilities(

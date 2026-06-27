@@ -1,3 +1,10 @@
+// swiftlint:disable file_length
+//
+// ModelCatalog is a static catalogue of provider/model metadata. It is
+// inherently long and grows whenever a new model is released. Splitting it
+// just to satisfy the 400-line file_length rule adds indirection without
+// improving clarity, so we suppress the rule for this file only.
+
 import Foundation
 
 public enum LatencyTier: String, Codable, CaseIterable, Comparable, Sendable {
@@ -132,7 +139,8 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
         Option(
             id: "soniox/stt-rt-v5-streaming",
             displayName: "Soniox Real-time v5",
-            description: "Soniox v5 real-time WebSocket STT with reinvented speaker separation, faster semantic endpointing, and improved multilingual recognition across 60+ languages.",
+            description: "Soniox v5 real-time WebSocket STT with reinvented speaker separation, "
+                + "faster semantic endpointing, and improved multilingual recognition across 60+ languages.",
             estimatedLatencyMs: 220, latencyTier: .fast),
         Option(
             id: "elevenlabs/scribe-v2-streaming",
@@ -416,7 +424,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
         uniquingKeysWith: { first, _ in first }
     )
 
-    public static func friendlyName(for identifier: String) -> String {
+    public static func friendlyName(for identifier: String) -> String { // swiftlint:disable:this cyclomatic_complexity
         let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "—" }
 

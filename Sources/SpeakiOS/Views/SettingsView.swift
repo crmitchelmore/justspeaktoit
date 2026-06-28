@@ -14,6 +14,52 @@ public struct PostProcessingModelInfo: Identifiable {
     public let description: String
 }
 
+// MARK: - Hardware Trigger Destination
+
+/// What happens to the transcript after a hardware-triggered recording stops.
+///
+/// Used by every "headless" entry point: Action Button (iPhone 15 Pro+),
+/// Siri voice commands, the Shortcuts app, Lock Screen / Home Screen widget,
+/// Control Center, Back Tap. The main in-app record-and-stop flow is
+/// unaffected — it always shows the result on screen.
+public enum HardwareTriggerDestination: String, CaseIterable, Identifiable, Sendable {
+    /// Copy the transcript to the clipboard. Default — matches behaviour
+    /// prior to the destination setting being added.
+    case clipboard
+
+    /// Copy to clipboard and run the configured post-processor (OpenRouter)
+    /// in the background, replacing the clipboard with the polished version
+    /// when it lands. Falls back to plain `.clipboard` if no OpenRouter key.
+    case clipboardAndPostProcess
+
+    /// Save to history only — don't touch the clipboard, don't post-process.
+    /// Useful if the user wants to capture a thought without polluting the
+    /// pasteboard with something they didn't choose to paste.
+    case historyOnly
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .clipboard: return "Copy to Clipboard"
+        case .clipboardAndPostProcess: return "Copy & Polish"
+        case .historyOnly: return "Save to History Only"
+        }
+    }
+
+    public var summary: String {
+        switch self {
+        case .clipboard:
+            return "Transcript is copied to the clipboard immediately when recording stops."
+        case .clipboardAndPostProcess:
+            return "Transcript is copied to the clipboard, then re-cleaned with your post-processing model "
+                + "and the polished version is re-copied."
+        case .historyOnly:
+            return "Transcript is saved to history. Clipboard and post-processing are skipped."
+        }
+    }
+}
+
 // MARK: - Settings Storage
 
 /// Simple UserDefaults-based settings for iOS app.
@@ -63,6 +109,14 @@ public final class AppSettings: ObservableObject {
 
     @Published public var autoStartRecording: Bool {
         didSet { UserDefaults.standard.set(autoStartRecording, forKey: "autoStartRecording") }
+    }
+
+    /// What happens to the transcript when a hardware-triggered recording (Action Button,
+    /// Siri, Shortcuts, Lock Screen widget, Back Tap, Control Center) stops.
+    @Published public var hardwareTriggerDestination: HardwareTriggerDestination {
+        didSet {
+            UserDefaults.standard.set(hardwareTriggerDestination.rawValue, forKey: "hardwareTriggerDestination")
+        }
     }
 
     // MARK: - Post-Processing Settings
@@ -128,6 +182,11 @@ public final class AppSettings: ObservableObject {
         let liveActivities = UserDefaults.standard.object(forKey: "liveActivitiesEnabled") as? Bool ?? true
         let autoStart = UserDefaults.standard.bool(forKey: "autoStartRecording")
 
+        // Hardware trigger destination (Action Button, Siri, Shortcuts).
+        // Default to .clipboard for backwards compatibility with prior versions.
+        let hardwareDestRaw = UserDefaults.standard.string(forKey: "hardwareTriggerDestination")
+        let hardwareDest = HardwareTriggerDestination(rawValue: hardwareDestRaw ?? "") ?? .clipboard
+
         // Post-processing settings
         let postEnabled = UserDefaults.standard.bool(forKey: "postProcessingEnabled")
         let postModel = UserDefaults.standard.string(forKey: "postProcessingModel") ?? "openai/gpt-4o-mini"
@@ -141,6 +200,7 @@ public final class AppSettings: ObservableObject {
         self.elevenLabsAPIKey = ""
         self.liveActivitiesEnabled = liveActivities
         self.autoStartRecording = autoStart
+        self.hardwareTriggerDestination = hardwareDest
         self.postProcessingEnabled = postEnabled
         self.postProcessingModel = postModel
         self.postProcessingPrompt = postPrompt
@@ -307,6 +367,24 @@ public struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+            }
+
+            Section("Hardware Trigger") {
+                NavigationLink {
+                    HardwareTriggerSettingsView(settings: settings)
+                } label: {
+                    HStack {
+                        Label("Action Button & Shortcuts", systemImage: "button.programmable")
+                        Spacer()
+                        Text(settings.hardwareTriggerDestination.displayName)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+
+                Text("Trigger transcription from the Action Button, Siri, Lock Screen, Control Center, or Back Tap.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Post-Processing") {
@@ -502,6 +580,145 @@ public struct SettingsView: View {
 
     private var postProcessingModelName: String {
         AppSettings.postProcessingModels.first { $0.id == settings.postProcessingModel }?.name ?? "GPT-4o Mini"
+    }
+}
+
+// MARK: - Hardware Trigger Settings View
+
+/// Configuration screen for the Action Button / Shortcuts / Siri / widget
+/// recording entry points. Lets the user pick what happens to the transcript
+/// when recording stops and explains how to wire each entry point.
+struct HardwareTriggerSettingsView: View {
+    @ObservedObject var settings: AppSettings
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        Form {
+            Section("When Recording Stops") {
+                Picker("Destination", selection: $settings.hardwareTriggerDestination) {
+                    ForEach(HardwareTriggerDestination.allCases) { destination in
+                        Text(destination.displayName).tag(destination)
+                    }
+                }
+                .pickerStyle(.inline)
+                .labelsHidden()
+
+                Text(settings.hardwareTriggerDestination.summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if settings.hardwareTriggerDestination == .clipboardAndPostProcess
+                    && !settings.hasOpenRouterKey {
+                    Label(
+                        "Add an OpenRouter API key under API Keys to enable polishing. "
+                            + "Without it, polishing falls back to plain clipboard.",
+                        systemImage: "exclamationmark.triangle"
+                    )
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            }
+
+            Section("Set Up the Action Button") {
+                Text(
+                    "On iPhone 15 Pro and later you can map the Action Button to start recording in one press — "
+                        + "even from the Lock Screen."
+                )
+                    .font(.callout)
+
+                StepRow(number: 1, text: "Open the Shortcuts app and tap the + button.")
+                StepRow(
+                    number: 2,
+                    text: "Search for JustSpeakToIt and choose Toggle Recording for a single-button flow. "
+                        + "Use Start Recording only if you also create a separate Stop Recording shortcut."
+                )
+                StepRow(number: 3, text: "Name the shortcut and tap Done.")
+                StepRow(
+                    number: 4,
+                    text: "Open Settings → Action Button, swipe to Shortcut, and pick the shortcut you just made."
+                )
+
+                Button {
+                    if let url = URL(string: "shortcuts://") {
+                        openURL(url)
+                    }
+                } label: {
+                    Label("Open Shortcuts App", systemImage: "arrow.up.right.square")
+                }
+            }
+
+            Section("Other Trigger Options") {
+                BulletRow(
+                    icon: "mic.fill",
+                    title: "Siri",
+                    detail: "Say \"Toggle Recording with JustSpeakToIt\" or \"Start Recording with JustSpeakToIt\"."
+                )
+                BulletRow(
+                    icon: "square.grid.2x2.fill",
+                    title: "Control Center",
+                    detail: "On iOS 18 and later add the Shortcut control via Customise Controls → Add a Control."
+                )
+                BulletRow(
+                    icon: "lock.iphone",
+                    title: "Lock Screen / Home Screen widget",
+                    detail: "Add a Shortcuts widget and pick your Toggle Recording shortcut."
+                )
+                BulletRow(
+                    icon: "hand.tap.fill",
+                    title: "Back Tap",
+                    detail: "Settings → Accessibility → Touch → Back Tap. "
+                        + "Assign your shortcut to a double or triple tap."
+                )
+            }
+
+            Section("What Runs") {
+                Label("Live model: \(settings.selectedModel)", systemImage: "waveform")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(
+                    "Recording uses the live model from the Transcription section above. "
+                        + "If the chosen model needs an API key that isn't set, JustSpeakToIt "
+                        + "falls back to Apple Speech (on-device) so the trigger still works."
+                )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle("Action Button & Shortcuts")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct StepRow: View {
+    let number: Int
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text("\(number)")
+                .font(.headline)
+                .frame(width: 24, height: 24)
+                .background(Color.accentColor.opacity(0.15), in: Circle())
+                .foregroundStyle(Color.accentColor)
+            Text(text)
+                .font(.callout)
+        }
+    }
+}
+
+private struct BulletRow: View {
+    let icon: String
+    let title: String
+    let detail: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label(title, systemImage: icon)
+                .font(.callout.weight(.medium))
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 }
 

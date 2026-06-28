@@ -1,3 +1,10 @@
+// swiftlint:disable file_length
+//
+// ModelCatalog is a static catalogue of provider/model metadata. It is
+// inherently long and grows whenever a new model is released. Splitting it
+// just to satisfy the 400-line file_length rule adds indirection without
+// improving clarity, so we suppress the rule for this file only.
+
 import Foundation
 
 public enum LatencyTier: String, Codable, CaseIterable, Comparable, Sendable {
@@ -130,9 +137,10 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             description: "AssemblyAI's u3-rt-pro real-time model. Multilingual with high English accuracy.",
             estimatedLatencyMs: 250, latencyTier: .fast),
         Option(
-            id: "soniox/stt-rt-preview-streaming",
-            displayName: "Soniox Real-time (Preview)",
-            description: "Soniox real-time WebSocket STT (stt-rt-preview) with multilingual support and low latency.",
+            id: "soniox/stt-rt-v5-streaming",
+            displayName: "Soniox Real-time v5",
+            description: "Soniox v5 real-time WebSocket STT with reinvented speaker separation, "
+                + "faster semantic endpointing, and improved multilingual recognition across 60+ languages.",
             estimatedLatencyMs: 220, latencyTier: .fast),
         Option(
             id: "elevenlabs/scribe-v2-streaming",
@@ -145,7 +153,20 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             displayName: "OpenAI Whisper Realtime (Streaming)",
             description: "OpenAI's gpt-realtime-whisper — low-latency streaming transcription with "
                 + "built-in noise reduction. Reuses your OpenAI API key.",
-            estimatedLatencyMs: 250, latencyTier: .fast)
+            estimatedLatencyMs: 250, latencyTier: .fast),
+        Option(
+            id: "openai/gpt-4o-mini-transcribe-streaming",
+            displayName: "OpenAI GPT-4o mini Transcribe (Streaming)",
+            description: "OpenAI's gpt-4o-mini-transcribe over the Realtime API — fast, low-cost "
+                + "streaming transcription with keyterm prompt support. Reuses your OpenAI API key.",
+            estimatedLatencyMs: 220, latencyTier: .fast),
+        Option(
+            id: "openai/gpt-4o-transcribe-streaming",
+            displayName: "OpenAI GPT-4o Transcribe (Streaming)",
+            description: "OpenAI's flagship gpt-4o-transcribe over the Realtime API — higher "
+                + "accuracy on noisy or accented audio with keyterm prompt support. Reuses your "
+                + "OpenAI API key.",
+            estimatedLatencyMs: 280, latencyTier: .fast)
     ]
 
     public static let batchTranscription: [Option] = [
@@ -154,6 +175,14 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             id: "openai/whisper-1", displayName: "Whisper (OpenAI)",
             description: "OpenAI's speech recognition model. Fast and accurate.",
             estimatedLatencyMs: 800, latencyTier: .fast),
+        Option(
+            id: "openai/gpt-4o-mini-transcribe", displayName: "GPT-4o mini Transcribe (OpenAI)",
+            description: "OpenAI's fast, low-cost transcription model. Improved accuracy vs Whisper-1.",
+            estimatedLatencyMs: 700, latencyTier: .fast),
+        Option(
+            id: "openai/gpt-4o-transcribe", displayName: "GPT-4o Transcribe (OpenAI)",
+            description: "OpenAI's flagship transcription model with strong accuracy on noisy, accented audio.",
+            estimatedLatencyMs: 900, latencyTier: .fast),
         Option(
             id: "revai/default", displayName: "Rev.ai",
             description: "Rev.ai's speech recognition. High accuracy with speaker identification.",
@@ -402,6 +431,36 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             approximateSizeMB: 465,
             description: "Higher quality local Whisper model for longer recordings on Apple silicon.",
             tags: [.quality]
+        ),
+        LocalTranscriptionModel(
+            id: "local/whisperkit/large-v3-turbo",
+            displayName: "WhisperKit Large v3 Turbo",
+            modelName: "openai_whisper-large-v3-v20240930_turbo_632MB",
+            engine: "whisperkit",
+            approximateSizeMB: 632,
+            description: "Whisper Large v3 Turbo — near-Large quality with ≈4× real-time speed on "
+                + "Apple silicon. Recommended for high-accuracy offline transcription.",
+            tags: [.quality, .fast]
+        ),
+        LocalTranscriptionModel(
+            id: "local/whisperkit/distil-large-v3",
+            displayName: "WhisperKit Distil-Large v3",
+            modelName: "distil-whisper_distil-large-v3_594MB",
+            engine: "whisperkit",
+            approximateSizeMB: 594,
+            description: "Distilled Whisper Large v3 — English-optimised, faster and lighter than "
+                + "the full Large model with minimal accuracy loss.",
+            tags: [.fast, .quality]
+        ),
+        LocalTranscriptionModel(
+            id: "local/whisperkit/distil-large-v3-turbo",
+            displayName: "WhisperKit Distil-Large v3 Turbo",
+            modelName: "distil-whisper_distil-large-v3_turbo_600MB",
+            engine: "whisperkit",
+            approximateSizeMB: 600,
+            description: "Distilled, turbo-optimised Whisper Large v3 — fastest high-quality "
+                + "English-only offline option on Apple silicon.",
+            tags: [.fast, .quality]
         )
     ]
 
@@ -416,7 +475,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
         uniquingKeysWith: { first, _ in first }
     )
 
-    public static func friendlyName(for identifier: String) -> String {
+    public static func friendlyName(for identifier: String) -> String { // swiftlint:disable:this cyclomatic_complexity
         let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "—" }
 

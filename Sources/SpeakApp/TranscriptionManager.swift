@@ -3023,13 +3023,13 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
       }
       targetFormat = outputFormat
 
-      // Catalog ID like "soniox/stt-rt-preview-streaming" → API model "stt-rt-preview".
+      // Catalog ID like "soniox/stt-rt-v5-streaming" → API model "stt-rt-v5".
       let modelID: String
       if let model = currentModel, model.hasPrefix("soniox/") {
         modelID = String(model.dropFirst("soniox/".count))
           .replacingOccurrences(of: "-streaming", with: "")
       } else {
-        modelID = "stt-rt-preview"
+        modelID = "stt-rt-v5"
       }
 
       let newTranscriber = SonioxLiveTranscriber(
@@ -3365,7 +3365,7 @@ private extension SonioxLiveController {
       segments: finalSegments,
       confidence: nil,
       duration: streamingDuration,
-      modelIdentifier: currentModel ?? "soniox/stt-rt-preview-streaming",
+      modelIdentifier: currentModel ?? "soniox/stt-rt-v5-streaming",
       cost: nil,
       rawPayload: nil,
       debugInfo: nil
@@ -3543,7 +3543,10 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     if model.hasPrefix("modulate/") { return modulateController }
     if model.hasPrefix("elevenlabs/") { return elevenlabsController }
     if model.hasPrefix("soniox/") { return sonioxController }
-    if model.hasPrefix("openai/gpt-realtime-whisper") { return openAIRealtimeController }
+    // SwitchingLiveTranscriber only routes live transcription models, and
+    // OpenAI's only live transcription transport is the Realtime WebSocket
+    // API. So any openai/* live model is handled by openAIRealtimeController.
+    if model.hasPrefix("openai/") { return openAIRealtimeController }
     if model.hasPrefix("local/streaming/") { return sherpaOnnxController }
     if ModelRouting.family(for: model).isDownloadedLocal { return unsupportedLocalLiveController }
     return nativeController

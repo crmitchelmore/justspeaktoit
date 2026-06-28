@@ -75,7 +75,7 @@ extension ModelCatalog {
         "modulate/velma-2-stt-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish]
         ),
-        "soniox/stt-rt-preview-streaming": LiveModelCapabilities(
+        "soniox/stt-rt-v5-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish]
         ),
         "elevenlabs/scribe-v2-streaming": LiveModelCapabilities(
@@ -97,6 +97,19 @@ extension ModelCatalog {
         // event. We use a small post-stop budget to wait for the in-flight
         // commit to round-trip, then close the socket.
         "openai/gpt-realtime-whisper-streaming": LiveModelCapabilities(
+            supportedSpeedModes: [.instant, .livePolish],
+            postStopFinalizeBudget: 0.5
+        ),
+
+        // OpenAI gpt-4o-mini-transcribe / gpt-4o-transcribe over the
+        // Realtime API: same WebSocket transport and event shape as
+        // gpt-realtime-whisper, with the added benefit of supporting the
+        // `input_audio_transcription.prompt` field for keyterm biasing.
+        "openai/gpt-4o-mini-transcribe-streaming": LiveModelCapabilities(
+            supportedSpeedModes: [.instant, .livePolish],
+            postStopFinalizeBudget: 0.5
+        ),
+        "openai/gpt-4o-transcribe-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish],
             postStopFinalizeBudget: 0.5
         )

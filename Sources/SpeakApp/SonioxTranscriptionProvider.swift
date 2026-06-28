@@ -159,7 +159,7 @@ final class SonioxLiveTranscriber: @unchecked Sendable {
 
     init(
         apiKey: String,
-        model: String = "stt-rt-preview",
+        model: String = "stt-rt-v5",
         sampleRate: Int = 16000,
         session: URLSession = .shared
     ) {

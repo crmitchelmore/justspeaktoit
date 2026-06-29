@@ -126,6 +126,7 @@ public final class OpenClawChatCoordinator: ObservableObject {
     var settingsCancellables = Set<AnyCancellable>()
     var headsetToggleTarget: Any?
     var headsetPauseTarget: Any?
+    var cachedKeywordRegex: (keyword: String, regex: NSRegularExpression)?
 
     let logger = Logger(subsystem: "com.justspeaktoit.ios", category: "OpenClawChat")
 

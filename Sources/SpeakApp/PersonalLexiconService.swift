@@ -3,10 +3,13 @@ import os.log
 
 @MainActor
 final class PersonalLexiconService: ObservableObject {
-  @Published private(set) var rules: [PersonalLexiconRule] = []
+  @Published private(set) var rules: [PersonalLexiconRule] = [] {
+    didSet { regexCache.removeAll() }
+  }
 
   private let store: PersonalLexiconStore
   private let log = Logger(subsystem: "com.github.speakapp", category: "PersonalLexicon")
+  private var regexCache: [String: NSRegularExpression] = [:]
 
   init(store: PersonalLexiconStore) {
     self.store = store
@@ -193,10 +196,17 @@ final class PersonalLexiconService: ObservableObject {
   }
 
   private func apply(alias: String, with canonical: String, to text: String) -> (Int, String) {
-    let escapedAlias = NSRegularExpression.escapedPattern(for: alias)
-    let pattern = "(?i)\\b\(escapedAlias)\\b"
-    guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
-      return (0, text)
+    let regex: NSRegularExpression
+    if let cached = regexCache[alias] {
+      regex = cached
+    } else {
+      let escapedAlias = NSRegularExpression.escapedPattern(for: alias)
+      let pattern = "(?i)\\b\(escapedAlias)\\b"
+      guard let compiled = try? NSRegularExpression(pattern: pattern, options: []) else {
+        return (0, text)
+      }
+      regexCache[alias] = compiled
+      regex = compiled
     }
     let fullRange = NSRange(location: 0, length: text.utf16.count)
     let matches = regex.numberOfMatches(in: text, options: [], range: fullRange)

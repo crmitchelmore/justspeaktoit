@@ -15,6 +15,7 @@ logs/
 .dolt/
 *.db
 .beads-credential-key
+issues.jsonl
 
 # Quality Software conformance derived evidence
 .conformance/

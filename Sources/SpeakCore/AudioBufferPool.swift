@@ -11,9 +11,27 @@ public final class AudioBufferPool: @unchecked Sendable {
     private let logger = Logger(subsystem: "com.speak.app", category: "AudioBufferPool")
 
     // Metrics
-    public private(set) var poolHits: Int = 0
-    public private(set) var poolMisses: Int = 0
-    public private(set) var growthCount: Int = 0
+    private var _poolHits: Int = 0
+    private var _poolMisses: Int = 0
+    private var _growthCount: Int = 0
+
+    public var poolHits: Int {
+        os_unfair_lock_lock(&unfairLock)
+        defer { os_unfair_lock_unlock(&unfairLock) }
+        return _poolHits
+    }
+
+    public var poolMisses: Int {
+        os_unfair_lock_lock(&unfairLock)
+        defer { os_unfair_lock_unlock(&unfairLock) }
+        return _poolMisses
+    }
+
+    public var growthCount: Int {
+        os_unfair_lock_lock(&unfairLock)
+        defer { os_unfair_lock_unlock(&unfairLock) }
+        return _growthCount
+    }
 
     /// Creates a new buffer pool.
     /// - Parameters:
@@ -41,15 +59,15 @@ public final class AudioBufferPool: @unchecked Sendable {
         defer { os_unfair_lock_unlock(&unfairLock) }
 
         if let buffer = availableBuffers.popLast() {
-            poolHits += 1
+            _poolHits += 1
             return buffer
         }
 
         // Pool exhausted - grow by creating a new buffer
-        poolMisses += 1
-        growthCount += 1
+        _poolMisses += 1
+        _growthCount += 1
         logger.warning(
-            "AudioBufferPool exhausted, growing pool. Hits: \(self.poolHits), Misses: \(self.poolMisses), Growth: \(self.growthCount)"
+            "Pool exhausted. Hits: \(self._poolHits), Misses: \(self._poolMisses), Growth: \(self._growthCount)"
         )
 
         var newBuffer = Data()
@@ -77,9 +95,9 @@ public final class AudioBufferPool: @unchecked Sendable {
         defer { os_unfair_lock_unlock(&unfairLock) }
 
         return [
-            "poolHits": poolHits,
-            "poolMisses": poolMisses,
-            "growthCount": growthCount,
+            "poolHits": _poolHits,
+            "poolMisses": _poolMisses,
+            "growthCount": _growthCount,
             "availableBuffers": availableBuffers.count,
             "initialPoolSize": initialPoolSize
         ]
@@ -90,16 +108,21 @@ public final class AudioBufferPool: @unchecked Sendable {
         os_unfair_lock_lock(&unfairLock)
         defer { os_unfair_lock_unlock(&unfairLock) }
 
-        poolHits = 0
-        poolMisses = 0
-        growthCount = 0
+        _poolHits = 0
+        _poolMisses = 0
+        _growthCount = 0
     }
 
     /// Logs current pool metrics.
     public func logMetrics() {
         let metrics = metricsSnapshot()
+        let hits = metrics["poolHits"] ?? 0
+        let misses = metrics["poolMisses"] ?? 0
+        let growth = metrics["growthCount"] ?? 0
+        let available = metrics["availableBuffers"] ?? 0
+
         logger.info(
-            "AudioBufferPool metrics - Hits: \(metrics["poolHits"] ?? 0), Misses: \(metrics["poolMisses"] ?? 0), Growth: \(metrics["growthCount"] ?? 0), Available: \(metrics["availableBuffers"] ?? 0)"
+            "Pool metrics. Hits: \(hits), Misses: \(misses), Growth: \(growth), Available: \(available)"
         )
     }
 }

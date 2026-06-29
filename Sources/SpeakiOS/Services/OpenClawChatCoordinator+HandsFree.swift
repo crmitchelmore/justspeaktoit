@@ -190,9 +190,16 @@ extension OpenClawChatCoordinator {
         let keyword = settings.keywordAcknowledgePhrase.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !keyword.isEmpty else { return trimmed }
 
-        let pattern = "(?i)[\\s\\p{P}]*\(NSRegularExpression.escapedPattern(for: keyword))[\\s\\p{P}]*$"
-        guard let regex = try? NSRegularExpression(pattern: pattern) else {
-            return trimmed
+        let regex: NSRegularExpression
+        if let cached = cachedKeywordRegex, cached.keyword == keyword {
+            regex = cached.regex
+        } else {
+            let pattern = "(?i)[\\s\\p{P}]*\(NSRegularExpression.escapedPattern(for: keyword))[\\s\\p{P}]*$"
+            guard let compiled = try? NSRegularExpression(pattern: pattern) else {
+                return trimmed
+            }
+            cachedKeywordRegex = (keyword: keyword, regex: compiled)
+            regex = compiled
         }
 
         let range = NSRange(trimmed.startIndex..<trimmed.endIndex, in: trimmed)

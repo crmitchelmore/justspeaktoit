@@ -303,13 +303,16 @@ public final class AppSettings: ObservableObject {
 
 public struct SettingsView: View {
     @StateObject private var settings = AppSettings.shared
+    @Environment(\.openURL) private var openURL
+    @State private var showingAPIKeys = false
+    @State private var missingTranscriptionAPIKeyAlert: IOSMissingTranscriptionAPIKeyAlert?
 
     public init() {}
 
     public var body: some View {
         Form {
             Section("Transcription") {
-                Picker("Live Model", selection: $settings.selectedModel) {
+                Picker("Live Model", selection: selectedModelBinding) {
                     // Apple Speech (free, on-device)
                     Text("Apple Speech (On-Device)").tag("apple/local/SFSpeechRecognizer")
 
@@ -576,10 +579,104 @@ public struct SettingsView: View {
             }
         }
         .navigationTitle("Settings")
+        .navigationDestination(isPresented: $showingAPIKeys) {
+            APIKeysView(settings: settings)
+        }
+        .alert(
+            missingTranscriptionAPIKeyAlert?.title ?? "API key required",
+            isPresented: Binding(
+                get: { missingTranscriptionAPIKeyAlert != nil },
+                set: { if !$0 { missingTranscriptionAPIKeyAlert = nil } }
+            ),
+            presenting: missingTranscriptionAPIKeyAlert
+        ) { alert in
+            Button("Add API Key") {
+                missingTranscriptionAPIKeyAlert = nil
+                showingAPIKeys = true
+            }
+            if let url = alert.apiKeyURL {
+                Button("Get API Key") {
+                    missingTranscriptionAPIKeyAlert = nil
+                    openURL(url)
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                missingTranscriptionAPIKeyAlert = nil
+            }
+        } message: { alert in
+            Text(alert.message)
+        }
     }
 
     private var postProcessingModelName: String {
         AppSettings.postProcessingModels.first { $0.id == settings.postProcessingModel }?.name ?? "GPT-4o Mini"
+    }
+
+    private var selectedModelBinding: Binding<String> {
+        Binding(
+            get: { settings.selectedModel },
+            set: { newValue in
+                settings.selectedModel = newValue
+                presentMissingTranscriptionAPIKeyAlertIfNeeded(for: newValue)
+            }
+        )
+    }
+
+    private func presentMissingTranscriptionAPIKeyAlertIfNeeded(for model: String) {
+        guard let alert = IOSMissingTranscriptionAPIKeyAlert(modelID: model, settings: settings) else {
+            return
+        }
+        missingTranscriptionAPIKeyAlert = alert
+    }
+}
+
+private struct IOSMissingTranscriptionAPIKeyAlert: Identifiable {
+    let id = UUID()
+    let providerName: String
+    let modelName: String
+    let apiKeyURL: URL?
+
+    var title: String { "API key required" }
+
+    var message: String {
+        "\(providerName) needs an API key for transcription with \(modelName). Add it now and try again."
+    }
+
+    @MainActor
+    init?(modelID: String, settings: AppSettings) {
+        let metadata: (providerName: String, modelName: String, apiKeyURL: URL?, hasKey: Bool)?
+        if modelID.hasPrefix("deepgram") {
+            metadata = (
+                "Deepgram",
+                "Deepgram Nova-3",
+                URL(string: "https://deepgram.com"),
+                settings.hasDeepgramKey
+            )
+        } else if modelID.hasPrefix("elevenlabs") {
+            metadata = (
+                "ElevenLabs",
+                "ElevenLabs Scribe",
+                URL(string: "https://elevenlabs.io"),
+                settings.hasElevenLabsKey
+            )
+        } else if modelID.hasPrefix("openai") {
+            metadata = (
+                "OpenAI",
+                "OpenAI gpt-realtime-whisper",
+                URL(string: "https://platform.openai.com"),
+                settings.hasOpenAIKey
+            )
+        } else {
+            metadata = nil
+        }
+
+        guard let metadata, !metadata.hasKey else {
+            return nil
+        }
+
+        providerName = metadata.providerName
+        modelName = metadata.modelName
+        apiKeyURL = metadata.apiKeyURL
     }
 }
 

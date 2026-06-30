@@ -196,7 +196,7 @@ struct OpenAITranscriptionProvider: TranscriptionProvider {
     if let duration = response.duration, duration > 0 {
       return duration
     }
-    if let lastSegmentEnd = response.segments?.map(\.end).max(), lastSegmentEnd > 0 {
+    if let lastSegmentEnd = response.segments?.last?.end, lastSegmentEnd > 0 {
       return lastSegmentEnd
     }
     let asset = AVURLAsset(url: audioURL)

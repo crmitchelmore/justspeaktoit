@@ -8,12 +8,15 @@ final class OpenAIRealtimeProviderTests: XCTestCase {
 
     // MARK: - Catalogue + capabilities
 
-    func testModelCatalog_includesGPTRealtimeWhisperStreaming() {
-        let option = ModelCatalog.liveTranscription.first {
-            $0.id == "openai/gpt-realtime-whisper-streaming"
-        }
+    func testModelCatalog_includesGPTRealtimeWhisperStreaming() throws {
+        let option = try XCTUnwrap(
+            ModelCatalog.liveTranscription.first {
+                $0.id == "openai/gpt-realtime-whisper-streaming"
+            },
+            "Expected to find openai/gpt-realtime-whisper-streaming in liveTranscription"
+        )
 
-        XCTAssertEqual(option?.displayName, "OpenAI GPT Realtime Whisper (Streaming)")
+        XCTAssertEqual(option.displayName, "OpenAI GPT Realtime Whisper (Streaming)")
     }
 
     func testCapabilities_supportsInstantAndLivePolish() {

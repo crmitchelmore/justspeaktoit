@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import SpeakCore
 import AVFoundation
 import Foundation

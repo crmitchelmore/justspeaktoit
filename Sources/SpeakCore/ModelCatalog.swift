@@ -165,7 +165,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             estimatedLatencyMs: 200, latencyTier: .fast),
         Option(
             id: "openai/gpt-realtime-whisper-streaming",
-            displayName: "OpenAI Whisper Realtime (Streaming)",
+            displayName: "OpenAI GPT Realtime Whisper (Streaming)",
             description: "OpenAI's gpt-realtime-whisper — low-latency streaming transcription with "
                 + "built-in noise reduction. Reuses your OpenAI API key.",
             estimatedLatencyMs: 250, latencyTier: .fast),

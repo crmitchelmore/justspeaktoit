@@ -184,6 +184,11 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             description: "OpenAI's flagship transcription model with strong accuracy on noisy, accented audio.",
             estimatedLatencyMs: 900, latencyTier: .fast),
         Option(
+            id: "openai/gpt-4o-transcribe-diarize",
+            displayName: "GPT-4o Transcribe Diarize (OpenAI)",
+            description: "OpenAI's speaker-aware GPT-4o transcription model with diarized JSON segments.",
+            estimatedLatencyMs: 1100, latencyTier: .medium),
+        Option(
             id: "revai/default", displayName: "Rev.ai",
             description: "Rev.ai's speech recognition. High accuracy with speaker identification.",
             estimatedLatencyMs: 1500, latencyTier: .medium),

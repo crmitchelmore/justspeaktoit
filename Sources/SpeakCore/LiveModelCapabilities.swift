@@ -72,6 +72,12 @@ extension ModelCatalog {
         "deepgram/nova-3-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish]
         ),
+        "deepgram/flux-general-en-streaming": LiveModelCapabilities(
+            supportedSpeedModes: [.instant, .livePolish]
+        ),
+        "deepgram/flux-general-multi-streaming": LiveModelCapabilities(
+            supportedSpeedModes: [.instant, .livePolish]
+        ),
         "modulate/velma-2-stt-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish]
         ),

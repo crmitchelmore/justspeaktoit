@@ -129,6 +129,16 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             description: "Real-time WebSocket streaming transcription with interim results.",
             estimatedLatencyMs: 200, latencyTier: .fast),
         Option(
+            id: "deepgram/flux-general-en-streaming",
+            displayName: "Deepgram Flux (English Streaming)",
+            description: "Conversational streaming model with integrated end-of-turn detection.",
+            estimatedLatencyMs: 180, latencyTier: .fast),
+        Option(
+            id: "deepgram/flux-general-multi-streaming",
+            displayName: "Deepgram Flux (Multilingual Streaming)",
+            description: "Flux conversational streaming with multilingual detection and language hints.",
+            estimatedLatencyMs: 220, latencyTier: .fast),
+        Option(
             id: "modulate/velma-2-stt-streaming", displayName: "Modulate Velma-2 (Streaming)",
             description: "Real-time multilingual WebSocket transcription with diarization and signal detection.",
             estimatedLatencyMs: 220, latencyTier: .fast),

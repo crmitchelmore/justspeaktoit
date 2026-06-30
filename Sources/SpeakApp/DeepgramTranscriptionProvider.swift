@@ -49,27 +49,7 @@ final class DeepgramLiveTranscriber: @unchecked Sendable {
         self.onTranscript = onTranscript
         self.onError = onError
 
-        var urlComponents = URLComponents(string: "wss://api.deepgram.com/v1/listen")!
-        var queryItems = [
-            URLQueryItem(name: "model", value: model),
-            URLQueryItem(name: "punctuate", value: "true"),
-            URLQueryItem(name: "smart_format", value: "true"),
-            URLQueryItem(name: "numerals", value: "true"),
-            URLQueryItem(name: "interim_results", value: "true"),
-            URLQueryItem(name: "encoding", value: "linear16"),
-            URLQueryItem(name: "sample_rate", value: String(sampleRate)),
-            URLQueryItem(name: "channels", value: "1"),
-            URLQueryItem(name: "endpointing", value: "300"),
-            URLQueryItem(name: "vad_events", value: "true")
-        ]
-        if let language {
-            let languageCode = extractLanguageCode(from: language)
-            queryItems.append(URLQueryItem(name: "language", value: languageCode))
-        }
-
-        urlComponents.queryItems = queryItems
-
-        guard let url = urlComponents.url else {
+        guard let url = Self.webSocketURL(model: model, language: language, sampleRate: sampleRate) else {
             onError(DeepgramError.invalidURL)
             return
         }
@@ -219,26 +199,82 @@ final class DeepgramLiveTranscriber: @unchecked Sendable {
 
     private func parseTranscriptResponse(_ json: String) {
         logger.debug("Received Deepgram response (length: \(json.count))")
-        guard let data = json.data(using: .utf8) else { return }
-
-        do {
-            let response = try JSONDecoder().decode(DeepgramStreamResponse.self, from: data)
-
-            guard let channel = response.channel,
-                  let alternative = channel.alternatives.first,
-                  !alternative.transcript.isEmpty else {
-                return
-            }
-
-            let isFinal = response.is_final ?? false
-            onTranscript?(alternative.transcript, isFinal)
-
-        } catch {
-            logger.debug("Failed to parse transcript response: \(error.localizedDescription)")
+        guard let event = Self.transcriptEvent(from: json, model: model) else {
+            logger.debug("Failed to parse transcript response")
+            return
         }
+        onTranscript?(event.text, event.isFinal)
+    }
+
+    nonisolated static func transcriptEvent(from json: String, model: String) -> (text: String, isFinal: Bool)? {
+        guard let data = json.data(using: .utf8) else { return nil }
+
+        if model.hasPrefix("flux-") {
+            guard
+                let response = try? JSONDecoder().decode(DeepgramFluxResponse.self, from: data),
+                !response.transcript.isEmpty
+            else {
+                return nil
+            }
+            return (response.transcript, response.event == .endOfTurn)
+        }
+
+        guard
+            let response = try? JSONDecoder().decode(DeepgramStreamResponse.self, from: data),
+            let channel = response.channel,
+            let alternative = channel.alternatives.first,
+            !alternative.transcript.isEmpty
+        else {
+            return nil
+        }
+        return (alternative.transcript, response.is_final ?? false)
+    }
+
+    nonisolated static func webSocketURL(model: String, language: String?, sampleRate: Int) -> URL? {
+        let isFlux = model.hasPrefix("flux-")
+        var urlComponents = URLComponents(
+            string: isFlux
+                ? "wss://api.deepgram.com/v2/listen"
+                : "wss://api.deepgram.com/v1/listen"
+        )!
+        var queryItems = [
+            URLQueryItem(name: "model", value: model),
+            URLQueryItem(name: "encoding", value: "linear16"),
+            URLQueryItem(name: "sample_rate", value: String(sampleRate))
+        ]
+
+        if isFlux {
+            if model == "flux-general-multi", let language {
+                queryItems.append(URLQueryItem(name: "language_hint", value: extractLanguageCode(from: language)))
+            }
+        } else {
+            queryItems.append(contentsOf: [
+                URLQueryItem(name: "punctuate", value: "true"),
+                URLQueryItem(name: "smart_format", value: "true"),
+                URLQueryItem(name: "numerals", value: "true"),
+                URLQueryItem(name: "interim_results", value: "true"),
+                URLQueryItem(name: "channels", value: "1"),
+                URLQueryItem(name: "endpointing", value: "300"),
+                URLQueryItem(name: "vad_events", value: "true")
+            ])
+            if let language {
+                queryItems.append(URLQueryItem(name: "language", value: extractLanguageCode(from: language)))
+            }
+        }
+
+        urlComponents.queryItems = queryItems
+        return urlComponents.url
+    }
+
+    private var isFluxModel: Bool {
+        model.hasPrefix("flux-")
     }
 
     private func extractLanguageCode(from locale: String) -> String {
+        Self.extractLanguageCode(from: locale)
+    }
+
+    private nonisolated static func extractLanguageCode(from locale: String) -> String {
         let components = locale.split(whereSeparator: { $0 == "_" || $0 == "-" })
         return components.first.map(String.init)?.lowercased() ?? locale.lowercased()
     }
@@ -503,6 +539,24 @@ private struct DeepgramStreamResponse: Decodable {
 
     let channel: Channel?
     let is_final: Bool?
+}
+
+private struct DeepgramFluxResponse: Decodable {
+    enum Event: String, Decodable {
+        case update = "Update"
+        case startOfTurn = "StartOfTurn"
+        case eagerEndOfTurn = "EagerEndOfTurn"
+        case turnResumed = "TurnResumed"
+        case endOfTurn = "EndOfTurn"
+    }
+
+    let event: Event
+    let transcript: String
+
+    private enum CodingKeys: String, CodingKey {
+        case event
+        case transcript
+    }
 }
 
 private struct DeepgramBatchResponse: Decodable {

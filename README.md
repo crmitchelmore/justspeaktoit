@@ -112,7 +112,7 @@ Just Speak to It supports multiple live and batch transcription backends on macO
 
 ### macOS
 
-- **Live**: Apple Speech (`apple/local/SFSpeechRecognizer`), Apple Dictation (`apple/local/Dictation`), Deepgram (`deepgram/nova-3-streaming`), Modulate (`modulate/velma-2-stt-streaming`), AssemblyAI (`assemblyai/universal-streaming`, `assemblyai/universal-streaming-english`, `assemblyai/universal-streaming-multilingual`, `assemblyai/u3-rt-pro-streaming`), and ElevenLabs Scribe (`elevenlabs/scribe-v2-streaming`).
+- **Live**: Apple Speech (`apple/local/SFSpeechRecognizer`), Apple Dictation (`apple/local/Dictation`), Deepgram (`deepgram/nova-3-streaming`, `deepgram/flux-general-en-streaming`, `deepgram/flux-general-multi-streaming`), Modulate (`modulate/velma-2-stt-streaming`), AssemblyAI (`assemblyai/universal-streaming`, `assemblyai/universal-streaming-english`, `assemblyai/universal-streaming-multilingual`, `assemblyai/u3-rt-pro-streaming`), and ElevenLabs Scribe (`elevenlabs/scribe-v2-streaming`).
 - **Batch**: OpenAI Whisper / GPT-4o Transcribe (`openai/whisper-1`, `openai/gpt-4o-mini-transcribe`, `openai/gpt-4o-transcribe`, `openai/gpt-4o-transcribe-diarize`), Groq Whisper (`groq/whisper-large-v3-turbo`), Rev.ai (`revai/default`), Deepgram (`deepgram/nova-3`), Modulate (`modulate/velma-2-stt-batch`, `modulate/velma-2-stt-batch-english-vfast`), AssemblyAI (`assemblyai/universal-3-pro`, `assemblyai/universal-2`), ElevenLabs Scribe (`elevenlabs/scribe_v1`, `elevenlabs/scribe_v1_experimental`), and OpenRouter audio models such as `google/gemini-2.0-flash-001`, `google/gemini-2.0-flash-lite-001`, and `openai/gpt-4o-audio-preview-2024-12-17`.
 - API keys are stored in the Keychain. The same ElevenLabs key is reused for both TTS and Scribe STT.
 

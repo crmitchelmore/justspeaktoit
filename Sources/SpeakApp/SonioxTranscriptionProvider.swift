@@ -12,6 +12,8 @@ enum SonioxLiveError: LocalizedError {
     case connectionFailed
     case invalidAPIKey
     case batchNotSupported
+    case transcriptionFailed(String)
+    case transcriptionTimedOut
 
     var errorDescription: String? {
         switch self {
@@ -25,6 +27,10 @@ enum SonioxLiveError: LocalizedError {
             return "Soniox API key is invalid. Check your key in Settings → Soniox."
         case .batchNotSupported:
             return "Soniox is currently only available for live streaming in Speak."
+        case .transcriptionFailed(let message):
+            return "Soniox transcription failed: \(message)"
+        case .transcriptionTimedOut:
+            return "Soniox transcription did not complete in time."
         }
     }
 }
@@ -72,9 +78,18 @@ struct SonioxTranscriptionProvider: TranscriptionProvider {
     )
 
     private let session: URLSession
+    private let baseURL = URL(string: "https://api.soniox.com/v1")!
+    private let pollingDelay: Duration
+    private let maximumPollingAttempts: Int
 
-    init(session: URLSession = .shared) {
+    init(
+        session: URLSession = .shared,
+        pollingDelay: Duration = .seconds(2),
+        maximumPollingAttempts: Int = 90
+    ) {
         self.session = session
+        self.pollingDelay = pollingDelay
+        self.maximumPollingAttempts = maximumPollingAttempts
     }
 
     func transcribeFile(
@@ -83,8 +98,23 @@ struct SonioxTranscriptionProvider: TranscriptionProvider {
         model: String,
         language: String?
     ) async throws -> TranscriptionResult {
-        _ = (url, apiKey, model, language)
-        throw SonioxLiveError.batchNotSupported
+        guard model == "soniox/stt-async-v5" else {
+            throw SonioxLiveError.batchNotSupported
+        }
+
+        let file = try await uploadFile(at: url, apiKey: apiKey)
+        let transcription = try await createTranscription(
+            fileID: file.id,
+            apiKey: apiKey,
+            language: language
+        )
+        let completed = try await waitForCompletion(id: transcription.id, apiKey: apiKey)
+        let transcript = try await fetchTranscript(id: completed.id, apiKey: apiKey)
+        return buildTranscriptionResult(
+            transcript: transcript,
+            transcription: completed,
+            model: model
+        )
     }
 
     func validateAPIKey(_ key: String) async -> APIKeyValidationResult {
@@ -122,9 +152,301 @@ struct SonioxTranscriptionProvider: TranscriptionProvider {
     func requiresAPIKey(for model: String) -> Bool { true }
 
     func supportedModels() -> [ModelCatalog.Option] {
-        // Live-only provider; batch model list is empty intentionally.
-        []
+        [
+            ModelCatalog.Option(
+                id: "soniox/stt-rt-v5-streaming",
+                displayName: "Soniox Real-time v5",
+                description: "Soniox v5 real-time streaming transcription."
+            ),
+            ModelCatalog.Option(
+                id: "soniox/stt-async-v5",
+                displayName: "Soniox Async v5",
+                description: "Soniox v5 asynchronous batch transcription with speaker and language metadata."
+            )
+        ]
     }
+
+    private func uploadFile(at url: URL, apiKey: String) async throws -> SonioxFile {
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var request = URLRequest(url: baseURL.appendingPathComponent("files"))
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+        var body = Data()
+        body.appendFileField(
+            named: "file",
+            filename: url.lastPathComponent,
+            mimeType: mimeType(for: url),
+            fileData: try Data(contentsOf: url),
+            boundary: boundary
+        )
+        body.appendString("--\(boundary)--\r\n")
+        request.httpBody = body
+
+        let data = try await send(request)
+        return try JSONDecoder().decode(SonioxFile.self, from: data)
+    }
+
+    private func createTranscription(
+        fileID: String,
+        apiKey: String,
+        language: String?
+    ) async throws -> SonioxTranscription {
+        var request = URLRequest(url: baseURL.appendingPathComponent("transcriptions"))
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let payload = SonioxCreateTranscriptionPayload(
+            model: "stt-async-v5",
+            fileID: fileID,
+            languageHints: language.map { [extractLanguageCode(from: $0)] },
+            enableSpeakerDiarization: true,
+            enableLanguageIdentification: true
+        )
+        request.httpBody = try JSONEncoder().encode(payload)
+
+        let data = try await send(request, expectedStatusCodes: 200..<300)
+        return try JSONDecoder().decode(SonioxTranscription.self, from: data)
+    }
+
+    private func waitForCompletion(id: String, apiKey: String) async throws -> SonioxTranscription {
+        for _ in 0..<maximumPollingAttempts {
+            let transcription = try await fetchTranscription(id: id, apiKey: apiKey)
+            switch transcription.status {
+            case "completed":
+                return transcription
+            case "error":
+                throw SonioxLiveError.transcriptionFailed(
+                    transcription.errorMessage ?? transcription.errorType ?? "Unknown error"
+                )
+            default:
+                try await Task.sleep(for: pollingDelay)
+            }
+        }
+        throw SonioxLiveError.transcriptionTimedOut
+    }
+
+    private func fetchTranscription(id: String, apiKey: String) async throws -> SonioxTranscription {
+        var request = URLRequest(url: baseURL.appendingPathComponent("transcriptions/\(id)"))
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        let data = try await send(request)
+        return try JSONDecoder().decode(SonioxTranscription.self, from: data)
+    }
+
+    private func fetchTranscript(id: String, apiKey: String) async throws -> SonioxTranscript {
+        var request = URLRequest(url: baseURL.appendingPathComponent("transcriptions/\(id)/transcript"))
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        let data = try await send(request)
+        return try JSONDecoder().decode(SonioxTranscript.self, from: data)
+    }
+
+    private func send(
+        _ request: URLRequest,
+        expectedStatusCodes: Range<Int> = 200..<300
+    ) async throws -> Data {
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw TranscriptionProviderError.invalidResponse
+        }
+        guard expectedStatusCodes.contains(http.statusCode) else {
+            let body = String(data: data, encoding: .utf8) ?? "<no-body>"
+            throw TranscriptionProviderError.httpError(http.statusCode, body)
+        }
+        return data
+    }
+
+    private func buildTranscriptionResult(
+        transcript: SonioxTranscript,
+        transcription: SonioxTranscription,
+        model: String
+    ) -> TranscriptionResult {
+        let segments = groupedSegments(from: transcript.tokens)
+        let duration = transcription.audioDurationMs.map { TimeInterval($0) / 1000 }
+            ?? segments.map(\.endTime).max()
+            ?? 0
+        return TranscriptionResult(
+            text: formattedTranscript(from: transcript),
+            segments: segments.isEmpty
+                ? [TranscriptionSegment(startTime: 0, endTime: duration, text: transcript.text)]
+                : segments,
+            confidence: nil,
+            duration: duration,
+            modelIdentifier: model,
+            cost: nil,
+            rawPayload: nil,
+            debugInfo: nil
+        )
+    }
+
+    private func groupedSegments(from tokens: [SonioxTranscript.Token]) -> [TranscriptionSegment] {
+        guard !tokens.isEmpty else { return [] }
+        guard shouldLabelSpeakers(in: tokens) else {
+            return tokens.map { token in
+                TranscriptionSegment(
+                    startTime: TimeInterval(token.startMs) / 1000,
+                    endTime: TimeInterval(token.endMs) / 1000,
+                    text: token.text,
+                    confidence: token.confidence
+                )
+            }
+        }
+
+        var grouped: [TranscriptionSegment] = []
+        var currentSpeaker = tokens[0].speaker ?? ""
+        var currentText = tokens[0].text
+        var startMs = tokens[0].startMs
+        var endMs = tokens[0].endMs
+        var confidences = [tokens[0].confidence]
+
+        for token in tokens.dropFirst() {
+            let speaker = token.speaker ?? ""
+            if speaker == currentSpeaker {
+                currentText += token.text
+                endMs = token.endMs
+                confidences.append(token.confidence)
+            } else {
+                grouped.append(
+                    labelledSegment(
+                        speaker: currentSpeaker,
+                        text: currentText,
+                        startMs: startMs,
+                        endMs: endMs,
+                        confidences: confidences
+                    )
+                )
+                currentSpeaker = speaker
+                currentText = token.text
+                startMs = token.startMs
+                endMs = token.endMs
+                confidences = [token.confidence]
+            }
+        }
+        grouped.append(
+            labelledSegment(
+                speaker: currentSpeaker,
+                text: currentText,
+                startMs: startMs,
+                endMs: endMs,
+                confidences: confidences
+            )
+        )
+        return grouped
+    }
+
+    private func labelledSegment(
+        speaker: String,
+        text: String,
+        startMs: Int,
+        endMs: Int,
+        confidences: [Double]
+    ) -> TranscriptionSegment {
+        let prefix = speaker.isEmpty ? "" : "Speaker \(speaker): "
+        return TranscriptionSegment(
+            startTime: TimeInterval(startMs) / 1000,
+            endTime: TimeInterval(endMs) / 1000,
+            text: prefix + text,
+            confidence: confidences.reduce(0, +) / Double(confidences.count)
+        )
+    }
+
+    private func formattedTranscript(from transcript: SonioxTranscript) -> String {
+        let segments = groupedSegments(from: transcript.tokens)
+        guard shouldLabelSpeakers(in: transcript.tokens), !segments.isEmpty else {
+            return transcript.text
+        }
+        return segments.map(\.text).joined(separator: "\n")
+    }
+
+    private func shouldLabelSpeakers(in tokens: [SonioxTranscript.Token]) -> Bool {
+        Set(tokens.compactMap(\.speaker)).count > 1
+    }
+
+    private func mimeType(for url: URL) -> String {
+        let mimeTypes = [
+            "aac": "audio/aac",
+            "aiff": "audio/aiff",
+            "aif": "audio/aiff",
+            "flac": "audio/flac",
+            "mov": "video/quicktime",
+            "mp3": "audio/mpeg",
+            "mp4": "audio/mp4",
+            "m4a": "audio/mp4",
+            "ogg": "audio/ogg",
+            "opus": "audio/opus",
+            "wav": "audio/wav",
+            "webm": "audio/webm"
+        ]
+        return mimeTypes[url.pathExtension.lowercased()] ?? "application/octet-stream"
+    }
+
+    private func extractLanguageCode(from locale: String) -> String {
+        let components = locale.split(whereSeparator: { $0 == "_" || $0 == "-" })
+        return components.first.map(String.init)?.lowercased() ?? locale.lowercased()
+    }
+}
+
+private struct SonioxFile: Decodable {
+    let id: String
+}
+
+private struct SonioxCreateTranscriptionPayload: Encodable {
+    let model: String
+    let fileID: String
+    let languageHints: [String]?
+    let enableSpeakerDiarization: Bool
+    let enableLanguageIdentification: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case model
+        case fileID = "file_id"
+        case languageHints = "language_hints"
+        case enableSpeakerDiarization = "enable_speaker_diarization"
+        case enableLanguageIdentification = "enable_language_identification"
+    }
+}
+
+private struct SonioxTranscription: Decodable {
+    let id: String
+    let status: String
+    let audioDurationMs: Int?
+    let errorType: String?
+    let errorMessage: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case status
+        case audioDurationMs = "audio_duration_ms"
+        case errorType = "error_type"
+        case errorMessage = "error_message"
+    }
+}
+
+private struct SonioxTranscript: Decodable {
+    struct Token: Decodable {
+        let text: String
+        let startMs: Int
+        let endMs: Int
+        let confidence: Double
+        let speaker: String?
+        let language: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case text
+            case startMs = "start_ms"
+            case endMs = "end_ms"
+            case confidence
+            case speaker
+            case language
+        }
+    }
+
+    let id: String
+    let text: String
+    let tokens: [Token]
 }
 
 // MARK: - Live Transcriber (WebSocket client)

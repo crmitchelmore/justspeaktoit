@@ -189,6 +189,11 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             description: "OpenAI's speaker-aware GPT-4o transcription model with diarized JSON segments.",
             estimatedLatencyMs: 1100, latencyTier: .medium),
         Option(
+            id: "groq/whisper-large-v3-turbo",
+            displayName: "Whisper Large v3 Turbo (Groq)",
+            description: "Groq-hosted Whisper Large v3 Turbo. Fast, low-cost OpenAI-compatible batch transcription.",
+            estimatedLatencyMs: 500, latencyTier: .fast),
+        Option(
             id: "revai/default", displayName: "Rev.ai",
             description: "Rev.ai's speech recognition. High accuracy with speaker identification.",
             estimatedLatencyMs: 1500, latencyTier: .medium),

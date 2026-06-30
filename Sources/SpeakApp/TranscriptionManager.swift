@@ -3770,7 +3770,7 @@ struct LiveTranscriptionControllerReusePolicy {
   }
 }
 
-/// Routes to appropriate live transcription controller based on selected model.
+// Routes to appropriate live transcription controller based on selected model.
 // swiftlint:disable:next type_body_length
 final class SwitchingLiveTranscriber: LiveTranscriptionController {
   weak var delegate: LiveTranscriptionSessionDelegate? {

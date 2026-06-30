@@ -95,6 +95,49 @@ final class OpenAITranscriptionProviderTests: XCTestCase {
     XCTAssertEqual(result.segments.map(\.text), ["Speaker 1: Hello there.", "Speaker 2: Hi back."])
   }
 
+  func testTranscribeFileWithDiarize_preservesSingleSpeakerLabels() async throws {
+    let responseBody = """
+    {
+      "text": "Only me.",
+      "segments": [
+        {"speaker": "SPEAKER_00", "start": 0.0, "end": 1.0, "text": "Only me."}
+      ]
+    }
+    """
+    OpenAIMockURLProtocol.requestHandler = { request in
+      try Self.makeResponse(for: request, body: responseBody)
+    }
+    defer { OpenAIMockURLProtocol.requestHandler = nil }
+
+    let result = try await makeProvider().transcribeFile(
+      at: try makeAudioFile(),
+      apiKey: "test-openai-key",
+      model: "openai/gpt-4o-transcribe-diarize",
+      language: nil
+    )
+
+    XCTAssertEqual(result.text, "Speaker 1: Only me.")
+    XCTAssertEqual(result.segments.map(\.text), ["Speaker 1: Only me."])
+  }
+
+  func testTranscribeFileWithEmptySegments_fallsBackToTranscriptText() async throws {
+    OpenAIMockURLProtocol.requestHandler = { request in
+      try Self.makeResponse(for: request, body: #"{"text":"fallback transcript","segments":[]}"#)
+    }
+    defer { OpenAIMockURLProtocol.requestHandler = nil }
+
+    let result = try await makeProvider().transcribeFile(
+      at: try makeAudioFile(),
+      apiKey: "test-openai-key",
+      model: "openai/gpt-4o-transcribe",
+      language: nil
+    )
+
+    XCTAssertEqual(result.text, "fallback transcript")
+    XCTAssertEqual(result.segments.count, 1)
+    XCTAssertEqual(result.segments.first?.text, "fallback transcript")
+  }
+
   private func makeProvider() -> OpenAITranscriptionProvider {
     OpenAITranscriptionProvider(session: makeMockSession())
   }

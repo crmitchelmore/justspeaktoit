@@ -171,14 +171,18 @@ struct OpenAITranscriptionProvider: TranscriptionProvider {
     let duration = await resolvedDuration(for: audioURL, response: response)
     let transcriptText = response.transcriptText
 
-    let segments =
+    let mappedSegments =
       response.segments?.map { segment in
         TranscriptionSegment(
           startTime: segment.start,
           endTime: segment.end,
           text: response.segmentText(for: segment)
         )
-      } ?? [TranscriptionSegment(startTime: 0, endTime: duration, text: transcriptText)]
+      } ?? []
+    let segments =
+      mappedSegments.isEmpty
+      ? [TranscriptionSegment(startTime: 0, endTime: duration, text: transcriptText)]
+      : mappedSegments
 
     return TranscriptionResult(
       text: transcriptText,
@@ -261,7 +265,7 @@ private struct OpenAITranscriptionResponse: Decodable {
 
   private var shouldLabelSpeakers: Bool {
     let speakers = Set((segments ?? []).compactMap { speakerLabel(from: $0.speaker) })
-    return speakers.count > 1
+    return !speakers.isEmpty
   }
 
   private func speakerLabel(from value: String?) -> String? {

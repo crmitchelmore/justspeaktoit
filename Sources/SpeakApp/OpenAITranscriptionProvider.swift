@@ -38,14 +38,11 @@ struct OpenAITranscriptionProvider: TranscriptionProvider {
     // Extract model name without provider prefix
     let modelName = model.split(separator: "/").last.map(String.init) ?? model
 
-    // Only Whisper models support "verbose_json" (with per-segment timestamps).
-    // The gpt-* transcription models (and likely future OpenAI models) only
-    // support "json" or "text", so default everything that isn't a Whisper
-    // family model to "json".
-    let responseFormat = modelName.hasPrefix("whisper") ? "verbose_json" : "json"
-
     body.appendFormField(named: "model", value: modelName, boundary: boundary)
-    body.appendFormField(named: "response_format", value: responseFormat, boundary: boundary)
+    body.appendFormField(named: "response_format", value: responseFormat(for: modelName), boundary: boundary)
+    if requiresChunkingStrategy(modelName) {
+      body.appendFormField(named: "chunking_strategy", value: "auto", boundary: boundary)
+    }
 
     if let language {
       // OpenAI expects ISO-639-1 (2-letter code), not full locale (e.g., "en" not "en_GB")
@@ -135,8 +132,27 @@ struct OpenAITranscriptionProvider: TranscriptionProvider {
         id: "openai/gpt-4o-transcribe",
         displayName: "GPT-4o Transcribe",
         description: "Flagship transcription model with strong accuracy on noisy, accented audio."
+      ),
+      ModelCatalog.Option(
+        id: "openai/gpt-4o-transcribe-diarize",
+        displayName: "GPT-4o Transcribe Diarize",
+        description: "Speaker-aware GPT-4o transcription model with diarized JSON segments."
       )
     ]
+  }
+
+  private func responseFormat(for modelName: String) -> String {
+    if modelName == "gpt-4o-transcribe-diarize" {
+      return "diarized_json"
+    }
+    if modelName.hasPrefix("whisper") {
+      return "verbose_json"
+    }
+    return "json"
+  }
+
+  private func requiresChunkingStrategy(_ modelName: String) -> Bool {
+    modelName == "gpt-4o-transcribe-diarize"
   }
 
   private func extractLanguageCode(from locale: String) -> String {
@@ -152,21 +168,24 @@ struct OpenAITranscriptionProvider: TranscriptionProvider {
     model: String,
     payload: Data
   ) async throws -> TranscriptionResult {
-    let asset = AVURLAsset(url: audioURL)
-    let durationTime = try await asset.load(.duration)
-    let duration = durationTime.seconds
+    let duration = await resolvedDuration(for: audioURL, response: response)
+    let transcriptText = response.transcriptText
 
-    let segments =
+    let mappedSegments =
       response.segments?.map { segment in
         TranscriptionSegment(
           startTime: segment.start,
           endTime: segment.end,
-          text: segment.text
+          text: response.segmentText(for: segment)
         )
-      } ?? [TranscriptionSegment(startTime: 0, endTime: duration, text: response.text)]
+      } ?? []
+    let segments =
+      mappedSegments.isEmpty
+      ? [TranscriptionSegment(startTime: 0, endTime: duration, text: transcriptText)]
+      : mappedSegments
 
     return TranscriptionResult(
-      text: response.text,
+      text: transcriptText,
       segments: segments,
       confidence: nil,
       duration: duration,
@@ -175,6 +194,20 @@ struct OpenAITranscriptionProvider: TranscriptionProvider {
       rawPayload: String(data: payload, encoding: .utf8),
       debugInfo: nil
     )
+  }
+
+  private func resolvedDuration(for audioURL: URL, response: OpenAITranscriptionResponse) async -> TimeInterval {
+    if let duration = response.duration, duration > 0 {
+      return duration
+    }
+    if let lastSegmentEnd = response.segments?.last?.end, lastSegmentEnd > 0 {
+      return lastSegmentEnd
+    }
+    let asset = AVURLAsset(url: audioURL)
+    guard let durationTime = try? await asset.load(.duration), durationTime.seconds.isFinite else {
+      return 0
+    }
+    return durationTime.seconds
   }
 
   private func debugSnapshot(
@@ -208,12 +241,47 @@ private struct OpenAITranscriptionResponse: Decodable {
     let start: TimeInterval
     let end: TimeInterval
     let text: String
+    let speaker: String?
   }
 
-  let text: String
+  let text: String?
   let language: String?
   let duration: TimeInterval?
   let segments: [Segment]?
+
+  var transcriptText: String {
+    if shouldLabelSpeakers {
+      return segments?.map(segmentText(for:)).joined(separator: "\n") ?? (text ?? "")
+    }
+    return text ?? segments?.map(\.text).joined(separator: " ") ?? ""
+  }
+
+  func segmentText(for segment: Segment) -> String {
+    guard shouldLabelSpeakers, let label = speakerLabel(from: segment.speaker) else {
+      return segment.text
+    }
+    return "\(label): \(segment.text)"
+  }
+
+  private var shouldLabelSpeakers: Bool {
+    let speakers = Set((segments ?? []).compactMap { speakerLabel(from: $0.speaker) })
+    return !speakers.isEmpty
+  }
+
+  private func speakerLabel(from value: String?) -> String? {
+    guard let raw = value?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+      return nil
+    }
+    let uppercased = raw.uppercased()
+    if uppercased.hasPrefix("SPEAKER_") || uppercased.hasPrefix("SPEAKER ") {
+      let digits = raw.filter(\.isNumber)
+      if let index = Int(digits) {
+        return "Speaker \(index + 1)"
+      }
+      return raw.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+    return raw
+  }
 }
 
 // MARK: - Error Types

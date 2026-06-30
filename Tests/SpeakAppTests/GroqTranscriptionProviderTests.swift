@@ -130,7 +130,11 @@ private actor GroqRequestObserver {
 }
 
 private final class GroqMockURLProtocol: URLProtocol {
+#if compiler(>=5.10)
   nonisolated(unsafe) static var requestHandler: (@Sendable (URLRequest) async throws -> (HTTPURLResponse, Data))?
+#else
+  static var requestHandler: (@Sendable (URLRequest) async throws -> (HTTPURLResponse, Data))?
+#endif
 
   override static func canInit(with request: URLRequest) -> Bool {
     true

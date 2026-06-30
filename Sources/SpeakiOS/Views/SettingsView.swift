@@ -662,23 +662,23 @@ private struct IOSMissingTranscriptionAPIKeyAlert: Identifiable {
 
     @MainActor
     init?(modelID: String, settings: AppSettings) {
-        let requirement: IOSMissingTranscriptionProviderRequirement?
+        let requirement: IOSProviderRequirement?
         if modelID.hasPrefix("deepgram") {
-            requirement = IOSMissingTranscriptionProviderRequirement(
+            requirement = IOSProviderRequirement(
                 providerName: "Deepgram",
                 modelName: "Deepgram Nova-3",
                 apiKeyURL: URL(string: "https://deepgram.com"),
                 hasKey: settings.hasDeepgramKey
             )
         } else if modelID.hasPrefix("elevenlabs") {
-            requirement = IOSMissingTranscriptionProviderRequirement(
+            requirement = IOSProviderRequirement(
                 providerName: "ElevenLabs",
                 modelName: "ElevenLabs Scribe",
                 apiKeyURL: URL(string: "https://elevenlabs.io"),
                 hasKey: settings.hasElevenLabsKey
             )
         } else if modelID.hasPrefix("openai") {
-            requirement = IOSMissingTranscriptionProviderRequirement(
+            requirement = IOSProviderRequirement(
                 providerName: "OpenAI",
                 modelName: "OpenAI gpt-realtime-whisper",
                 apiKeyURL: URL(string: "https://platform.openai.com"),
@@ -698,7 +698,7 @@ private struct IOSMissingTranscriptionAPIKeyAlert: Identifiable {
     }
 }
 
-private struct IOSMissingTranscriptionProviderRequirement {
+private struct IOSProviderRequirement {
     let providerName: String
     let modelName: String
     let apiKeyURL: URL?

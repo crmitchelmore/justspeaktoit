@@ -11,11 +11,18 @@ struct OpenAITranscriptionProvider: TranscriptionProvider {
     website: "https://platform.openai.com"
   )
 
-  private let baseURL = URL(string: "https://api.openai.com/v1")!
+  private let baseURL: URL
   private let session: URLSession
+  private let validationServiceName: String
 
-  init(session: URLSession = .shared) {
+  init(
+    session: URLSession = .shared,
+    baseURL: URL = URL(string: "https://api.openai.com/v1")!,
+    validationServiceName: String = "OpenAI"
+  ) {
     self.session = session
+    self.baseURL = baseURL
+    self.validationServiceName = validationServiceName
   }
 
   func transcribeFile(
@@ -99,7 +106,7 @@ struct OpenAITranscriptionProvider: TranscriptionProvider {
       let debug = debugSnapshot(request: request, response: http, data: data)
 
       if (200..<300).contains(http.statusCode) {
-        return .success(message: "OpenAI API key validated", debug: debug)
+        return .success(message: "\(validationServiceName) API key validated", debug: debug)
       }
 
       let message = "HTTP \(http.statusCode) while validating key"

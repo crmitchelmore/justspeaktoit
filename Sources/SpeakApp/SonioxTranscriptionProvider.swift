@@ -67,7 +67,7 @@ protocol SonioxFinalizationDelegate: AnyObject {
 
 // MARK: - Provider
 
-/// Soniox Real-time STT v2 streaming. Live-only — batch is not implemented in this build.
+// Soniox v5 supports real-time streaming and asynchronous batch transcription.
 // swiftlint:disable type_body_length
 struct SonioxTranscriptionProvider: TranscriptionProvider {
     let metadata = TranscriptionProviderMetadata(
@@ -406,48 +406,46 @@ struct SonioxTranscriptionProvider: TranscriptionProvider {
             }
             let gapMs = token.startMs - endMs
             if !currentText.isEmpty, gapMs > 1_500 {
-                grouped.append(
-                    self.unlabelledSegment(
-                        text: currentText,
-                        startMs: startMs,
-                        endMs: endMs,
-                        confidences: confidences
-                    )
-                )
-                currentText = ""
+                grouped.append(self.unlabelledSegment(
+                    text: currentText,
+                    startMs: startMs,
+                    endMs: endMs,
+                    confidences: confidences
+                ))
+                currentText.removeAll(keepingCapacity: true)
                 startMs = token.startMs
-                confidences = []
+                confidences.removeAll(keepingCapacity: true)
             }
             currentText += token.text
             endMs = token.endMs
             confidences.append(token.confidence)
 
-            let trimmed = token.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.hasSuffix(".") || trimmed.hasSuffix("?") || trimmed.hasSuffix("!") {
-                grouped.append(
-                    self.unlabelledSegment(
-                        text: currentText,
-                        startMs: startMs,
-                        endMs: endMs,
-                        confidences: confidences
-                    )
-                )
-                currentText = ""
-                confidences = []
-            }
-        }
-
-        if !currentText.isEmpty {
-            grouped.append(
-                self.unlabelledSegment(
+            if self.endsSingleSpeakerSegment(token.text) {
+                grouped.append(self.unlabelledSegment(
                     text: currentText,
                     startMs: startMs,
                     endMs: endMs,
                     confidences: confidences
-                )
-            )
+                ))
+                currentText.removeAll(keepingCapacity: true)
+                confidences.removeAll(keepingCapacity: true)
+            }
+        }
+
+        if !currentText.isEmpty {
+            grouped.append(self.unlabelledSegment(
+                text: currentText,
+                startMs: startMs,
+                endMs: endMs,
+                confidences: confidences
+            ))
         }
         return grouped
+    }
+
+    private func endsSingleSpeakerSegment(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.hasSuffix(".") || trimmed.hasSuffix("?") || trimmed.hasSuffix("!")
     }
 
     private func unlabelledSegment(

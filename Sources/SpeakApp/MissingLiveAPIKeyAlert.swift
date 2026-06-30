@@ -1,10 +1,8 @@
 import Foundation
 import SpeakCore
 
-/// State for the pre-flight "API key required" alert shown when the user
-/// triggers a live recording but the chosen live transcription provider has
-/// no API key stored. The alert exposes an "Add API Key" CTA which navigates
-/// to Settings → API Keys, scrolled to the relevant provider section.
+/// State for the "API key required" alert shown when the user selects or starts
+/// a transcription model whose provider has no API key stored.
 struct MissingLiveAPIKeyAlert: Identifiable, Equatable {
   let id = UUID()
   let provider: TranscriptionProviderMetadata
@@ -13,7 +11,7 @@ struct MissingLiveAPIKeyAlert: Identifiable, Equatable {
   var title: String { "API key required" }
 
   var message: String {
-    "\(provider.displayName) needs an API key for live transcription "
+    "\(provider.displayName) needs an API key for transcription "
       + "with \(modelDisplayName). Add it now and try again."
   }
 

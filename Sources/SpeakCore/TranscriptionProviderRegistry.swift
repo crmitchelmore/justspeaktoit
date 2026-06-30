@@ -43,6 +43,11 @@ public struct TranscriptionProviderMetadata: Sendable, Identifiable {
         self.tintColor = tintColor
         self.website = website
     }
+
+    public var apiKeyURL: URL? {
+        guard !website.isEmpty else { return nil }
+        return URL(string: website)
+    }
 }
 
 // MARK: - Provider Error

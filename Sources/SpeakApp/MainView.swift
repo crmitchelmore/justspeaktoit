@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct MainView: View {
@@ -41,6 +42,12 @@ struct MainView: View {
         environment.apiKeysScrollTarget = target
         selection = .settings(.apiKeys)
         environment.main.missingLiveAPIKeyAlert = nil
+      }
+      if let url = alert.provider.apiKeyURL {
+        Button("Get API Key") {
+          NSWorkspace.shared.open(url)
+          environment.main.missingLiveAPIKeyAlert = nil
+        }
       }
       Button("Cancel", role: .cancel) {
         environment.main.missingLiveAPIKeyAlert = nil

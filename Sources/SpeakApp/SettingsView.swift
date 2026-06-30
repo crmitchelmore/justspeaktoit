@@ -90,6 +90,7 @@ struct SettingsView: View {
   @State private var providerValidationStates: [String: ValidationViewState] = [:]
   @State private var ttsProviderAPIKeys: [String: String] = [:]
   @State private var ttsProviderValidationStates: [String: ValidationViewState] = [:]
+  @State private var missingTranscriptionAPIKeyAlert: MissingLiveAPIKeyAlert?
   @State private var showSystemPromptPreview = false
   @State private var systemPromptPreview = ""
   @State private var showingConfigTransfer = false
@@ -263,6 +264,59 @@ struct SettingsView: View {
       )
       .cornerRadius(24)
       .shadow(color: Color.orange.opacity(0.3), radius: 18, x: 0, y: 12)
+    )
+  }
+
+  @MainActor
+  private func remoteTranscriptionModelBinding(
+    _ keyPath: ReferenceWritableKeyPath<AppSettings, String>,
+    options: [ModelCatalog.Option]
+  ) -> Binding<String> {
+    Binding(
+      get: { settings[keyPath: keyPath] },
+      set: { newValue in
+        settings[keyPath: keyPath] = newValue
+        Task {
+          await presentMissingTranscriptionAPIKeyAlertIfNeeded(
+            for: newValue,
+            keyPath: keyPath,
+            options: options
+          )
+        }
+      }
+    )
+  }
+
+  @MainActor
+  private func presentMissingTranscriptionAPIKeyAlertIfNeeded(
+    for model: String,
+    keyPath: ReferenceWritableKeyPath<AppSettings, String>,
+    options: [ModelCatalog.Option]
+  ) async {
+    let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty, trimmed != ModelCatalog.customOptionID else { return }
+    let registry = TranscriptionProviderRegistry.shared
+    guard await registry.requiresAPIKey(for: trimmed),
+          let provider = await registry.provider(forModel: trimmed) else {
+      return
+    }
+    let hasAPIKey = await environment.secureStorage.hasSecret(
+      identifier: provider.metadata.apiKeyIdentifier
+    )
+    guard !hasAPIKey else {
+      return
+    }
+
+    let modelName = options.first {
+      $0.id.caseInsensitiveCompare(trimmed) == .orderedSame
+    }?.displayName ?? ModelCatalog.friendlyName(for: trimmed)
+
+    let current = settings[keyPath: keyPath].trimmingCharacters(in: .whitespacesAndNewlines)
+    guard current.caseInsensitiveCompare(trimmed) == .orderedSame else { return }
+
+    missingTranscriptionAPIKeyAlert = MissingLiveAPIKeyAlert(
+      provider: provider.metadata,
+      modelDisplayName: modelName
     )
   }
 
@@ -552,6 +606,33 @@ struct SettingsView: View {
     }
     .onChange(of: settings.ttsPronunciationDictionary) { _, _ in
       syncAssemblyAIKeytermsFromPronunciation()
+    }
+    .alert(
+      missingTranscriptionAPIKeyAlert?.title ?? "API key required",
+      isPresented: Binding(
+        get: { missingTranscriptionAPIKeyAlert != nil },
+        set: { if !$0 { missingTranscriptionAPIKeyAlert = nil } }
+      ),
+      presenting: missingTranscriptionAPIKeyAlert
+    ) { alert in
+      Button("Add API Key") {
+        environment.apiKeysScrollTarget = alert.provider.id == "elevenlabs"
+          ? "tts-elevenlabs"
+          : "transcription-\(alert.provider.id)"
+        sidebarSelection = .settings(.apiKeys)
+        missingTranscriptionAPIKeyAlert = nil
+      }
+      if let url = alert.provider.apiKeyURL {
+        Button("Get API Key") {
+          NSWorkspace.shared.open(url)
+          missingTranscriptionAPIKeyAlert = nil
+        }
+      }
+      Button("Cancel", role: .cancel) {
+        missingTranscriptionAPIKeyAlert = nil
+      }
+    } message: { alert in
+      Text(alert.message)
     }
     .onReceive(environment.pronunciationManager.$entries) { _ in
       syncAssemblyAIKeytermsFromPronunciation()
@@ -1271,7 +1352,10 @@ struct SettingsView: View {
               title: "Remote Streaming Model",
               help: "Choose the remote provider model used while recording.",
               options: ModelCatalog.liveTranscription,
-              value: settingsBinding(\AppSettings.liveTranscriptionModel)
+              value: remoteTranscriptionModelBinding(
+                \AppSettings.liveTranscriptionModel,
+                options: ModelCatalog.liveTranscription
+              )
             )
           }
         }
@@ -1308,7 +1392,10 @@ struct SettingsView: View {
               custom model identifiers are sent through OpenRouter.
               """,
               options: ModelCatalog.batchTranscription,
-              value: settingsBinding(\AppSettings.batchTranscriptionModel)
+              value: remoteTranscriptionModelBinding(
+                \AppSettings.batchTranscriptionModel,
+                options: ModelCatalog.batchTranscription
+              )
             )
             if isCustomBatchTranscriptionModel {
               SettingsInlineInfo(

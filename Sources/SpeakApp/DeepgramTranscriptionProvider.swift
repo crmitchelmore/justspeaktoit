@@ -199,10 +199,7 @@ final class DeepgramLiveTranscriber: @unchecked Sendable {
 
     private func parseTranscriptResponse(_ json: String) {
         logger.debug("Received Deepgram response (length: \(json.count))")
-        guard let event = Self.transcriptEvent(from: json, model: model) else {
-            logger.debug("Failed to parse transcript response")
-            return
-        }
+        guard let event = Self.transcriptEvent(from: json, model: model) else { return }
         onTranscript?(event.text, event.isFinal)
     }
 
@@ -216,7 +213,7 @@ final class DeepgramLiveTranscriber: @unchecked Sendable {
             else {
                 return nil
             }
-            return (response.transcript, response.event == .endOfTurn)
+            return (response.transcript, response.event == "EndOfTurn")
         }
 
         guard
@@ -264,14 +261,6 @@ final class DeepgramLiveTranscriber: @unchecked Sendable {
 
         urlComponents.queryItems = queryItems
         return urlComponents.url
-    }
-
-    private var isFluxModel: Bool {
-        model.hasPrefix("flux-")
-    }
-
-    private func extractLanguageCode(from locale: String) -> String {
-        Self.extractLanguageCode(from: locale)
     }
 
     private nonisolated static func extractLanguageCode(from locale: String) -> String {
@@ -542,21 +531,8 @@ private struct DeepgramStreamResponse: Decodable {
 }
 
 private struct DeepgramFluxResponse: Decodable {
-    enum Event: String, Decodable {
-        case update = "Update"
-        case startOfTurn = "StartOfTurn"
-        case eagerEndOfTurn = "EagerEndOfTurn"
-        case turnResumed = "TurnResumed"
-        case endOfTurn = "EndOfTurn"
-    }
-
-    let event: Event
+    let event: String
     let transcript: String
-
-    private enum CodingKeys: String, CodingKey {
-        case event
-        case transcript
-    }
 }
 
 private struct DeepgramBatchResponse: Decodable {

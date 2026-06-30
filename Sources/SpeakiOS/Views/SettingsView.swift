@@ -595,6 +595,7 @@ public struct SettingsView: View {
 }
 
 private extension SettingsView {
+    @MainActor
     private var selectedModelBinding: Binding<String> {
         Binding(
             get: { settings.selectedModel },
@@ -605,6 +606,7 @@ private extension SettingsView {
         )
     }
 
+    @MainActor
     private func presentMissingTranscriptionAPIKeyAlertIfNeeded(for model: String) {
         guard let alert = IOSMissingTranscriptionAPIKeyAlert(modelID: model, settings: settings) else {
             return

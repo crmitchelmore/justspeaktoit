@@ -267,6 +267,7 @@ struct SettingsView: View {
     )
   }
 
+  @MainActor
   private func remoteTranscriptionModelBinding(
     _ keyPath: ReferenceWritableKeyPath<AppSettings, String>,
     options: [ModelCatalog.Option]
@@ -285,6 +286,7 @@ struct SettingsView: View {
     )
   }
 
+  @MainActor
   private func presentMissingTranscriptionAPIKeyAlertIfNeeded(
     for model: String,
     options: [ModelCatalog.Option]

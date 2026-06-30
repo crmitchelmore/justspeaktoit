@@ -48,7 +48,9 @@ final class SonioxAsyncTranscriptionProviderTests: XCTestCase {
       "/v1/files",
       "/v1/transcriptions",
       "/v1/transcriptions/transcription-1",
-      "/v1/transcriptions/transcription-1/transcript"
+      "/v1/transcriptions/transcription-1/transcript",
+      "/v1/transcriptions/transcription-1",
+      "/v1/files/file-1"
     ])
     let capturedBody = await requestObserver.bodyString(forPath: "/v1/transcriptions")
     let createBody = try XCTUnwrap(capturedBody)

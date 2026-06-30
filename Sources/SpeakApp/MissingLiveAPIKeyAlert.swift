@@ -19,10 +19,3 @@ struct MissingLiveAPIKeyAlert: Identifiable, Equatable {
     lhs.id == rhs.id
   }
 }
-
-extension TranscriptionProviderMetadata {
-  var apiKeyURL: URL? {
-    guard !website.isEmpty else { return nil }
-    return URL(string: website)
-  }
-}

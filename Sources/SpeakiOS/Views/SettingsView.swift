@@ -1319,23 +1319,32 @@ private struct IOSMissingTranscriptionAPIKeyAlert: Identifiable {
         let requirement: IOSProviderRequirement?
         if modelID.hasPrefix("deepgram") {
             requirement = IOSProviderRequirement(
-                providerName: "Deepgram",
+                provider: TranscriptionProviderMetadata(
+                    id: "deepgram",
+                    displayName: "Deepgram",
+                    website: "https://deepgram.com"
+                ),
                 modelName: "Deepgram Nova-3",
-                apiKeyURL: URL(string: "https://deepgram.com"),
                 hasKey: settings.hasDeepgramKey
             )
         } else if modelID.hasPrefix("elevenlabs") {
             requirement = IOSProviderRequirement(
-                providerName: "ElevenLabs",
+                provider: TranscriptionProviderMetadata(
+                    id: "elevenlabs",
+                    displayName: "ElevenLabs",
+                    website: "https://elevenlabs.io"
+                ),
                 modelName: "ElevenLabs Scribe",
-                apiKeyURL: URL(string: "https://elevenlabs.io"),
                 hasKey: settings.hasElevenLabsKey
             )
         } else if modelID.hasPrefix("openai") {
             requirement = IOSProviderRequirement(
-                providerName: "OpenAI",
+                provider: TranscriptionProviderMetadata(
+                    id: "openai",
+                    displayName: "OpenAI",
+                    website: "https://platform.openai.com"
+                ),
                 modelName: "OpenAI gpt-realtime-whisper",
-                apiKeyURL: URL(string: "https://platform.openai.com"),
                 hasKey: settings.hasOpenAIKey
             )
         } else {
@@ -1346,16 +1355,15 @@ private struct IOSMissingTranscriptionAPIKeyAlert: Identifiable {
             return nil
         }
 
-        providerName = requirement.providerName
+        providerName = requirement.provider.displayName
         modelName = requirement.modelName
-        apiKeyURL = requirement.apiKeyURL
+        apiKeyURL = requirement.provider.apiKeyURL
     }
 }
 
 private struct IOSProviderRequirement {
-    let providerName: String
+    let provider: TranscriptionProviderMetadata
     let modelName: String
-    let apiKeyURL: URL?
     let hasKey: Bool
 }
 #endif

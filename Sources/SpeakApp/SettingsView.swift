@@ -279,6 +279,7 @@ struct SettingsView: View {
         Task {
           await presentMissingTranscriptionAPIKeyAlertIfNeeded(
             for: newValue,
+            keyPath: keyPath,
             options: options
           )
         }
@@ -289,6 +290,7 @@ struct SettingsView: View {
   @MainActor
   private func presentMissingTranscriptionAPIKeyAlertIfNeeded(
     for model: String,
+    keyPath: ReferenceWritableKeyPath<AppSettings, String>,
     options: [ModelCatalog.Option]
   ) async {
     let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -308,6 +310,9 @@ struct SettingsView: View {
     let modelName = options.first {
       $0.id.caseInsensitiveCompare(trimmed) == .orderedSame
     }?.displayName ?? ModelCatalog.friendlyName(for: trimmed)
+
+    let current = settings[keyPath: keyPath].trimmingCharacters(in: .whitespacesAndNewlines)
+    guard current.caseInsensitiveCompare(trimmed) == .orderedSame else { return }
 
     missingTranscriptionAPIKeyAlert = MissingLiveAPIKeyAlert(
       provider: provider.metadata,
@@ -611,7 +616,9 @@ struct SettingsView: View {
       presenting: missingTranscriptionAPIKeyAlert
     ) { alert in
       Button("Add API Key") {
-        environment.apiKeysScrollTarget = "transcription-\(alert.provider.id)"
+        environment.apiKeysScrollTarget = alert.provider.id == "elevenlabs"
+          ? "tts-elevenlabs"
+          : "transcription-\(alert.provider.id)"
         sidebarSelection = .settings(.apiKeys)
         missingTranscriptionAPIKeyAlert = nil
       }

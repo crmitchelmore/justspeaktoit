@@ -3381,7 +3381,7 @@ private extension SonioxLiveController {
 
 // MARK: - Cartesia Live Controller
 
-// swiftlint:disable type_body_length
+// swiftlint:disable type_body_length function_body_length
 @MainActor
 final class CartesiaLiveController: NSObject, LiveTranscriptionController {
   weak var delegate: LiveTranscriptionSessionDelegate?
@@ -3682,7 +3682,7 @@ final class CartesiaLiveController: NSObject, LiveTranscriptionController {
     }
   }
 }
-// swiftlint:enable type_body_length
+// swiftlint:enable type_body_length function_body_length
 
 private extension CartesiaLiveController {
   func ensurePermissions() async -> Bool {

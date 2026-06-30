@@ -78,6 +78,9 @@ extension ModelCatalog {
         "deepgram/flux-general-multi-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish]
         ),
+        "cartesia/ink-2-streaming": LiveModelCapabilities(
+            supportedSpeedModes: [.instant, .livePolish]
+        ),
         "modulate/velma-2-stt-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish]
         ),

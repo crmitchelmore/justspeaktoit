@@ -139,6 +139,11 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             description: "Flux conversational streaming with multilingual detection and language hints.",
             estimatedLatencyMs: 220, latencyTier: .fast),
         Option(
+            id: "cartesia/ink-2-streaming",
+            displayName: "Cartesia Ink-2 (Streaming)",
+            description: "English real-time STT with built-in turn detection and structured-data accuracy.",
+            estimatedLatencyMs: 180, latencyTier: .fast),
+        Option(
             id: "modulate/velma-2-stt-streaming", displayName: "Modulate Velma-2 (Streaming)",
             description: "Real-time multilingual WebSocket transcription with diarization and signal detection.",
             estimatedLatencyMs: 220, latencyTier: .fast),

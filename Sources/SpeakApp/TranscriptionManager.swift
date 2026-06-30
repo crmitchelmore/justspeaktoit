@@ -3379,6 +3379,355 @@ private extension SonioxLiveController {
   }
 }
 
+// MARK: - Cartesia Live Controller
+
+// swiftlint:disable type_body_length
+final class CartesiaLiveController: NSObject, LiveTranscriptionController {
+  weak var delegate: LiveTranscriptionSessionDelegate?
+  private(set) var isRunning: Bool = false
+
+  private let appSettings: AppSettings
+  private let permissionsManager: PermissionsManager
+  private let audioDeviceManager: AudioInputDeviceManager
+  private let secureStorage: SecureAppStorage
+  private var transcriber: CartesiaLiveTranscriber?
+  private var currentLanguage: String?
+  private var currentModel: String?
+  private var activeInputSession: AudioInputDeviceManager.SessionContext?
+  private var audioEngine = AVAudioEngine()
+  private let logger = Logger(subsystem: "com.speak.app", category: "CartesiaLiveController")
+  private let audioProcessor = CartesiaAudioProcessor()
+  private var hasFinished: Bool = false
+
+  private let targetSampleRate: Double = 16_000
+  private var targetFormat: AVAudioFormat?
+  private var streamingStartTime: Date?
+  private var finalSegments: [TranscriptionSegment] = []
+  private var currentInterim: String = ""
+  private var fullTranscript: String = ""
+
+  init(
+    appSettings: AppSettings,
+    permissionsManager: PermissionsManager,
+    audioDeviceManager: AudioInputDeviceManager,
+    secureStorage: SecureAppStorage
+  ) {
+    self.appSettings = appSettings
+    self.permissionsManager = permissionsManager
+    self.audioDeviceManager = audioDeviceManager
+    self.secureStorage = secureStorage
+  }
+
+  func configure(language: String?, model: String) {
+    currentLanguage = language
+    currentModel = model
+    logger.info("Configured Cartesia with model: \(model)")
+  }
+
+  // swiftlint:disable:next function_body_length
+  func start() async throws {
+    guard await ensurePermissions() else {
+      throw TranscriptionManagerError.permissionsMissing
+    }
+
+    let apiKey = try await cartesiaAPIKey()
+    activeInputSession = await audioDeviceManager.beginUsingPreferredInput()
+    audioEngine = AVAudioEngine()
+    resetStartState()
+
+    do {
+      let inputNode = audioEngine.inputNode
+      inputNode.removeTap(onBus: 0)
+      let inputFormat = inputNode.outputFormat(forBus: 0)
+      guard audioInputFormatIsUsable(inputFormat) else {
+        throw TranscriptionManagerError.noUsableAudioInput
+      }
+
+      guard let outputFormat = AVAudioFormat(
+        commonFormat: .pcmFormatInt16,
+        sampleRate: targetSampleRate,
+        channels: 1,
+        interleaved: true
+      ) else {
+        throw CartesiaLiveError.connectionFailed
+      }
+      targetFormat = outputFormat
+
+      let newTranscriber = CartesiaTranscriptionProvider().createLiveTranscriber(
+        apiKey: apiKey,
+        model: "ink-2",
+        sampleRate: 16_000
+      )
+      transcriber = newTranscriber
+
+      newTranscriber.start(
+        onTranscript: { [weak self] text, isFinal in
+          Task { @MainActor [weak self] in
+            self?.handleTranscript(text: text, isFinal: isFinal)
+          }
+        },
+        onError: { [weak self] error in
+          Task { @MainActor [weak self] in
+            guard let self, self.isRunning else { return }
+            self.delegate?.liveTranscriber(self, didFail: error)
+          }
+        }
+      )
+
+      audioProcessor.setRunning(true)
+      let processor = audioProcessor
+      let log = logger
+      inputNode.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { buffer, _ in
+        processor.handleAudioTap(
+          buffer,
+          inputFormat: inputFormat,
+          outputFormat: outputFormat,
+          transcriber: newTranscriber,
+          logger: log
+        )
+      }
+
+      try await startAudioEngineAfterInputDeviceSettles(audioEngine)
+      isRunning = true
+      streamingStartTime = Date()
+    } catch {
+      await cleanupAfterFailedStart()
+      throw error
+    }
+  }
+
+  private func handleTranscript(text: String, isFinal: Bool) {
+    if isFinal {
+      let segment = TranscriptionSegment(startTime: 0, endTime: 0, text: text)
+      finalSegments.append(segment)
+      fullTranscript = finalSegments.map(\.text).joined(separator: " ")
+      currentInterim = ""
+      delegate?.liveTranscriber(self, didUpdatePartial: fullTranscript)
+    } else {
+      currentInterim = text
+      let displayText = fullTranscript.isEmpty
+        ? currentInterim
+        : fullTranscript + " " + currentInterim
+      delegate?.liveTranscriber(self, didUpdatePartial: displayText)
+    }
+  }
+
+  func stop() async {
+    guard isRunning else { return }
+    guard !hasFinished else { return }
+    hasFinished = true
+
+    audioEngine.stop()
+    audioEngine.inputNode.removeTap(onBus: 0)
+    isRunning = false
+
+    if let transcriber {
+      audioProcessor.flushPendingAudio(to: transcriber)
+      await transcriber.waitForPendingSends()
+      audioProcessor.setRunning(false)
+      await applyLiveStopGrace(appSettings.liveStopGracePeriod)
+      transcriber.stop()
+    } else {
+      audioProcessor.setRunning(false)
+    }
+
+    let result = buildFinalResult()
+    await MainActor.run {
+      delegate?.liveTranscriber(self, didFinishWith: result)
+    }
+
+    await endActiveInputSession()
+    transcriber = nil
+  }
+
+  private final class CartesiaAudioProcessor: @unchecked Sendable {
+    private static let preferredChunkBytes = CartesiaLiveTranscriber.preferredChunkBytes
+    private static let minimumChunkBytes = CartesiaLiveTranscriber.minimumChunkBytes
+
+    private let queue = DispatchQueue(label: "com.speak.app.cartesia.audioProcessing")
+    private var isRunning: Bool = false
+    private var cachedConverter: AVAudioConverter?
+    private var cachedInputFormat: AVAudioFormat?
+    private var reusableOutputBuffer: AVAudioPCMBuffer?
+    private var pendingPCMData = Data()
+
+    func setRunning(_ running: Bool) {
+      queue.sync {
+        isRunning = running
+        if !running {
+          cachedConverter = nil
+          cachedInputFormat = nil
+          reusableOutputBuffer = nil
+          pendingPCMData.removeAll(keepingCapacity: false)
+        }
+      }
+    }
+
+    func flushPendingAudio(to transcriber: CartesiaLiveTranscriber) {
+      queue.sync {
+        guard !pendingPCMData.isEmpty else { return }
+        if pendingPCMData.count < Self.minimumChunkBytes {
+          pendingPCMData.append(
+            contentsOf: repeatElement(0, count: Self.minimumChunkBytes - pendingPCMData.count))
+        }
+        transcriber.sendAudio(pendingPCMData)
+        pendingPCMData.removeAll(keepingCapacity: false)
+      }
+    }
+
+    func handleAudioTap(
+      _ buffer: AVAudioPCMBuffer,
+      inputFormat: AVAudioFormat,
+      outputFormat: AVAudioFormat,
+      transcriber: CartesiaLiveTranscriber,
+      logger: Logger
+    ) {
+      guard let copied = copyPCMBuffer(buffer) else { return }
+      queue.async { [weak self] in
+        guard let self, self.isRunning else { return }
+        self.processAndSendAudio(copied, from: inputFormat, to: outputFormat, transcriber: transcriber, logger: logger)
+      }
+    }
+
+    private func copyPCMBuffer(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+      let frameLength = buffer.frameLength
+      guard let copy = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: frameLength) else {
+        return nil
+      }
+      copy.frameLength = frameLength
+      let src = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: buffer.audioBufferList))
+      let dst = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: copy.audioBufferList))
+      for idx in 0..<min(src.count, dst.count) {
+        let srcBuf = src[idx]
+        guard let srcData = srcBuf.mData, let dstData = dst[idx].mData else { continue }
+        dstData.copyMemory(from: srcData, byteCount: Int(srcBuf.mDataByteSize))
+        dst[idx].mDataByteSize = srcBuf.mDataByteSize
+      }
+      return copy
+    }
+
+    private func processAndSendAudio(
+      _ buffer: AVAudioPCMBuffer,
+      from inputFormat: AVAudioFormat,
+      to outputFormat: AVAudioFormat,
+      transcriber: CartesiaLiveTranscriber,
+      logger: Logger
+    ) {
+      let converter: AVAudioConverter
+      if let cached = cachedConverter, cachedInputFormat == inputFormat {
+        converter = cached
+      } else {
+        guard let newConverter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
+          logger.error("Failed to create audio converter")
+          return
+        }
+        cachedConverter = newConverter
+        cachedInputFormat = inputFormat
+        converter = newConverter
+      }
+
+      let ratio = outputFormat.sampleRate / inputFormat.sampleRate
+      let outputFrameCapacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio)
+      guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: outputFrameCapacity) else {
+        return
+      }
+
+      converter.reset()
+      var error: NSError?
+      let status = converter.convert(to: outputBuffer, error: &error) { _, outStatus in
+        outStatus.pointee = .haveData
+        return buffer
+      }
+      guard status != .error, error == nil else { return }
+      guard let int16Data = outputBuffer.int16ChannelData else { return }
+      let frameLength = Int(outputBuffer.frameLength)
+      pendingPCMData.append(Data(bytes: int16Data[0], count: frameLength * 2))
+
+      var offset = 0
+      while pendingPCMData.count - offset >= Self.preferredChunkBytes {
+        let chunk = pendingPCMData.subdata(in: offset..<(offset + Self.preferredChunkBytes))
+        transcriber.sendAudio(chunk)
+        offset += Self.preferredChunkBytes
+      }
+      if offset > 0 {
+        pendingPCMData = Data(pendingPCMData.dropFirst(offset))
+      }
+    }
+  }
+}
+// swiftlint:enable type_body_length
+
+private extension CartesiaLiveController {
+  func ensurePermissions() async -> Bool {
+    let microphone = await permissionsManager.ensureGranted(.microphone)
+    let speech = await permissionsManager.ensureGranted(.speechRecognition)
+    return microphone.isGranted && speech.isGranted
+  }
+
+  func cartesiaAPIKey() async throws -> String {
+    do {
+      let apiKey = try await secureStorage.secret(identifier: "cartesia.apiKey")
+      guard !apiKey.isEmpty else { throw CartesiaLiveError.missingAPIKey }
+      return apiKey
+    } catch let error as SecureAppStorageError {
+      if case .valueNotFound = error { throw CartesiaLiveError.missingAPIKey }
+      throw error
+    }
+  }
+
+  func resetStartState() {
+    transcriber = nil
+    targetFormat = nil
+    finalSegments = []
+    currentInterim = ""
+    fullTranscript = ""
+    streamingStartTime = nil
+    hasFinished = false
+    isRunning = false
+  }
+
+  func cleanupAfterFailedStart() async {
+    audioEngine.stop()
+    audioEngine.inputNode.removeTap(onBus: 0)
+    isRunning = false
+    audioProcessor.setRunning(false)
+    transcriber?.stop()
+    transcriber = nil
+    targetFormat = nil
+    streamingStartTime = nil
+    currentInterim = ""
+    finalSegments = []
+    fullTranscript = ""
+    await endActiveInputSession()
+  }
+
+  func buildFinalResult() -> TranscriptionResult {
+    var text = finalSegments.map(\.text).joined(separator: " ")
+    let trimmedInterim = currentInterim.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !trimmedInterim.isEmpty {
+      if !text.isEmpty { text += " " }
+      text += trimmedInterim
+    }
+    let streamingDuration = streamingStartTime.map { Date().timeIntervalSince($0) } ?? 0
+    return TranscriptionResult(
+      text: text,
+      segments: finalSegments,
+      confidence: nil,
+      duration: streamingDuration,
+      modelIdentifier: currentModel ?? "cartesia/ink-2-streaming",
+      cost: nil,
+      rawPayload: nil,
+      debugInfo: nil
+    )
+  }
+
+  func endActiveInputSession() async {
+    guard let session = activeInputSession else { return }
+    activeInputSession = nil
+    await audioDeviceManager.endUsingPreferredInput(session: session)
+  }
+}
+
 // MARK: - Switching Live Transcriber
 
 struct LiveTranscriptionControllerReusePolicy {
@@ -3419,6 +3768,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   private var assemblyAIController: AssemblyAILiveController
   private var elevenlabsController: ElevenLabsLiveController
   private var sonioxController: SonioxLiveController
+  private var cartesiaController: CartesiaLiveController
   private var openAIRealtimeController: OpenAIRealtimeLiveController
   private var sherpaOnnxController: SherpaOnnxLiveController
   private var unsupportedLocalLiveController: UnsupportedLocalLiveTranscriber
@@ -3471,6 +3821,12 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       secureStorage: secureStorage
     )
     sonioxController = SonioxLiveController(
+      appSettings: appSettings,
+      permissionsManager: permissionsManager,
+      audioDeviceManager: audioDeviceManager,
+      secureStorage: secureStorage
+    )
+    cartesiaController = CartesiaLiveController(
       appSettings: appSettings,
       permissionsManager: permissionsManager,
       audioDeviceManager: audioDeviceManager,
@@ -3543,6 +3899,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     if model.hasPrefix("modulate/") { return modulateController }
     if model.hasPrefix("elevenlabs/") { return elevenlabsController }
     if model.hasPrefix("soniox/") { return sonioxController }
+    if model.hasPrefix("cartesia/") { return cartesiaController }
     // SwitchingLiveTranscriber only routes live transcription models, and
     // OpenAI's only live transcription transport is the Realtime WebSocket
     // API. So any openai/* live model is handled by openAIRealtimeController.
@@ -3560,6 +3917,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       assemblyAIController,
       elevenlabsController,
       sonioxController,
+      cartesiaController,
       openAIRealtimeController,
       sherpaOnnxController,
       unsupportedLocalLiveController
@@ -3611,6 +3969,12 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       secureStorage: secureStorage
     )
     sonioxController = SonioxLiveController(
+      appSettings: appSettings,
+      permissionsManager: permissionsManager,
+      audioDeviceManager: audioDeviceManager,
+      secureStorage: secureStorage
+    )
+    cartesiaController = CartesiaLiveController(
       appSettings: appSettings,
       permissionsManager: permissionsManager,
       audioDeviceManager: audioDeviceManager,

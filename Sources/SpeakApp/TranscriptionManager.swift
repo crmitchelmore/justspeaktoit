@@ -3382,6 +3382,7 @@ private extension SonioxLiveController {
 // MARK: - Cartesia Live Controller
 
 // swiftlint:disable type_body_length
+@MainActor
 final class CartesiaLiveController: NSObject, LiveTranscriptionController {
   weak var delegate: LiveTranscriptionSessionDelegate?
   private(set) var isRunning: Bool = false
@@ -3453,9 +3454,17 @@ final class CartesiaLiveController: NSObject, LiveTranscriptionController {
       }
       targetFormat = outputFormat
 
+      let modelID: String
+      if let model = currentModel, model.hasPrefix("cartesia/") {
+        modelID = String(model.dropFirst("cartesia/".count))
+          .replacingOccurrences(of: "-streaming", with: "")
+      } else {
+        modelID = "ink-2"
+      }
+
       let newTranscriber = CartesiaTranscriptionProvider().createLiveTranscriber(
         apiKey: apiKey,
-        model: "ink-2",
+        model: modelID,
         sampleRate: 16_000
       )
       transcriber = newTranscriber
@@ -3468,7 +3477,7 @@ final class CartesiaLiveController: NSObject, LiveTranscriptionController {
         },
         onError: { [weak self] error in
           Task { @MainActor [weak self] in
-            guard let self, self.isRunning else { return }
+            guard let self else { return }
             self.delegate?.liveTranscriber(self, didFail: error)
           }
         }
@@ -3532,9 +3541,7 @@ final class CartesiaLiveController: NSObject, LiveTranscriptionController {
     }
 
     let result = buildFinalResult()
-    await MainActor.run {
-      delegate?.liveTranscriber(self, didFinishWith: result)
-    }
+    delegate?.liveTranscriber(self, didFinishWith: result)
 
     await endActiveInputSession()
     transcriber = nil
@@ -3585,7 +3592,13 @@ final class CartesiaLiveController: NSObject, LiveTranscriptionController {
       guard let copied = copyPCMBuffer(buffer) else { return }
       queue.async { [weak self] in
         guard let self, self.isRunning else { return }
-        self.processAndSendAudio(copied, from: inputFormat, to: outputFormat, transcriber: transcriber, logger: logger)
+        self.processAndSendAudio(
+          copied,
+          from: inputFormat,
+          to: outputFormat,
+          transcriber: transcriber,
+          logger: logger
+        )
       }
     }
 
@@ -3627,14 +3640,28 @@ final class CartesiaLiveController: NSObject, LiveTranscriptionController {
       }
 
       let ratio = outputFormat.sampleRate / inputFormat.sampleRate
-      let outputFrameCapacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio)
-      guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: outputFrameCapacity) else {
-        return
+      let outputFrameCapacity = AVAudioFrameCount(ceil(Double(buffer.frameLength) * ratio))
+      let outputBuffer: AVAudioPCMBuffer
+      if let reusable = reusableOutputBuffer, reusable.frameCapacity >= outputFrameCapacity {
+        reusable.frameLength = 0
+        outputBuffer = reusable
+      } else {
+        guard let newBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: outputFrameCapacity) else {
+          return
+        }
+        reusableOutputBuffer = newBuffer
+        outputBuffer = newBuffer
       }
 
       converter.reset()
       var error: NSError?
+      var didProvideInput = false
       let status = converter.convert(to: outputBuffer, error: &error) { _, outStatus in
+        guard !didProvideInput else {
+          outStatus.pointee = .noDataNow
+          return nil
+        }
+        didProvideInput = true
         outStatus.pointee = .haveData
         return buffer
       }
@@ -3660,8 +3687,7 @@ final class CartesiaLiveController: NSObject, LiveTranscriptionController {
 private extension CartesiaLiveController {
   func ensurePermissions() async -> Bool {
     let microphone = await permissionsManager.ensureGranted(.microphone)
-    let speech = await permissionsManager.ensureGranted(.speechRecognition)
-    return microphone.isGranted && speech.isGranted
+    return microphone.isGranted
   }
 
   func cartesiaAPIKey() async throws -> String {

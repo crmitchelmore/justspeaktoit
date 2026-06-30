@@ -110,10 +110,15 @@ struct CartesiaTranscriptionProvider: TranscriptionProvider {
     response: HTTPURLResponse,
     data: Data
   ) -> APIKeyValidationDebugSnapshot {
-    APIKeyValidationDebugSnapshot(
+    var requestHeaders = request.allHTTPHeaderFields ?? [:]
+    if requestHeaders["Authorization"] != nil {
+      requestHeaders["Authorization"] = "Bearer [REDACTED]"
+    }
+
+    return APIKeyValidationDebugSnapshot(
       url: request.url?.absoluteString ?? "",
       method: request.httpMethod ?? "GET",
-      requestHeaders: request.allHTTPHeaderFields ?? [:],
+      requestHeaders: requestHeaders,
       requestBody: request.httpBody.flatMap { String(data: $0, encoding: .utf8) },
       statusCode: response.statusCode,
       responseHeaders: response.allHeaderFields.reduce(into: [String: String]()) { partialResult, entry in
@@ -143,6 +148,7 @@ final class CartesiaLiveTranscriber: @unchecked Sendable {
   private let pendingSendGroup = DispatchGroup()
 
   private var webSocketTask: URLSessionWebSocketTask?
+  private var pendingAudio = Data()
   private var onTranscript: ((String, Bool) -> Void)?
   private var onError: ((Error) -> Void)?
   private var isStopping = false
@@ -172,7 +178,15 @@ final class CartesiaLiveTranscriber: @unchecked Sendable {
   }
 
   func sendAudio(_ audioData: Data) {
-    guard let task = currentWebSocketTask(), task.state == .running else { return }
+    guard let task = currentWebSocketTask(), task.state == .running else {
+      bufferPendingAudio(audioData)
+      return
+    }
+    flushPendingAudio(to: task)
+    send(audioData, to: task)
+  }
+
+  private func send(_ audioData: Data, to task: URLSessionWebSocketTask) {
     let sendGroup = pendingSendGroup
     sendGroup.enter()
     task.send(.data(audioData)) { [weak self] error in
@@ -188,9 +202,21 @@ final class CartesiaLiveTranscriber: @unchecked Sendable {
   func waitForPendingSends(timeout: TimeInterval = 1.5) async {
     let sendGroup = pendingSendGroup
     await withCheckedContinuation { continuation in
-      DispatchQueue.global().async {
-        _ = sendGroup.wait(timeout: .now() + timeout)
+      let lock = NSLock()
+      var didResume = false
+      let resumeOnce = {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !didResume else { return }
+        didResume = true
         continuation.resume()
+      }
+
+      sendGroup.notify(queue: .global()) {
+        resumeOnce()
+      }
+      DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+        resumeOnce()
       }
     }
   }
@@ -259,6 +285,7 @@ final class CartesiaLiveTranscriber: @unchecked Sendable {
       return
     }
     logger.info("Cartesia WebSocket connecting (model=\(self.model, privacy: .public))")
+    flushPendingAudio(to: task)
     receiveMessages()
   }
 
@@ -335,6 +362,26 @@ final class CartesiaLiveTranscriber: @unchecked Sendable {
 
   private func currentOnError() -> ((Error) -> Void)? {
     withStateLock { onError }
+  }
+
+  private func bufferPendingAudio(_ audioData: Data) {
+    withStateLock {
+      pendingAudio.append(audioData)
+      let maxBufferedBytes = Self.preferredChunkBytes * 20
+      if pendingAudio.count > maxBufferedBytes {
+        pendingAudio = Data(pendingAudio.suffix(maxBufferedBytes))
+      }
+    }
+  }
+
+  private func flushPendingAudio(to task: URLSessionWebSocketTask) {
+    let buffered = withStateLock { () -> Data in
+      let snapshot = pendingAudio
+      pendingAudio.removeAll(keepingCapacity: true)
+      return snapshot
+    }
+    guard !buffered.isEmpty else { return }
+    send(buffered, to: task)
   }
 }
 

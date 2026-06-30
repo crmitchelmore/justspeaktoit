@@ -582,36 +582,19 @@ public struct SettingsView: View {
         .navigationDestination(isPresented: $showingAPIKeys) {
             APIKeysView(settings: settings)
         }
-        .alert(
-            missingTranscriptionAPIKeyAlert?.title ?? "API key required",
-            isPresented: Binding(
-                get: { missingTranscriptionAPIKeyAlert != nil },
-                set: { if !$0 { missingTranscriptionAPIKeyAlert = nil } }
-            ),
-            presenting: missingTranscriptionAPIKeyAlert
-        ) { alert in
-            Button("Add API Key") {
-                missingTranscriptionAPIKeyAlert = nil
-                showingAPIKeys = true
-            }
-            if let url = alert.apiKeyURL {
-                Button("Get API Key") {
-                    missingTranscriptionAPIKeyAlert = nil
-                    openURL(url)
-                }
-            }
-            Button("Cancel", role: .cancel) {
-                missingTranscriptionAPIKeyAlert = nil
-            }
-        } message: { alert in
-            Text(alert.message)
-        }
+        .iosMissingTranscriptionAPIKeyAlert(
+            alert: $missingTranscriptionAPIKeyAlert,
+            showingAPIKeys: $showingAPIKeys,
+            openURL: openURL
+        )
     }
 
     private var postProcessingModelName: String {
         AppSettings.postProcessingModels.first { $0.id == settings.postProcessingModel }?.name ?? "GPT-4o Mini"
     }
+}
 
+private extension SettingsView {
     private var selectedModelBinding: Binding<String> {
         Binding(
             get: { settings.selectedModel },
@@ -630,6 +613,39 @@ public struct SettingsView: View {
     }
 }
 
+private extension View {
+    func iosMissingTranscriptionAPIKeyAlert(
+        alert: Binding<IOSMissingTranscriptionAPIKeyAlert?>,
+        showingAPIKeys: Binding<Bool>,
+        openURL: OpenURLAction
+    ) -> some View {
+        self.alert(
+            alert.wrappedValue?.title ?? "API key required",
+            isPresented: Binding(
+                get: { alert.wrappedValue != nil },
+                set: { if !$0 { alert.wrappedValue = nil } }
+            ),
+            presenting: alert.wrappedValue
+        ) { presentedAlert in
+            Button("Add API Key") {
+                alert.wrappedValue = nil
+                showingAPIKeys.wrappedValue = true
+            }
+            if let url = presentedAlert.apiKeyURL {
+                Button("Get API Key") {
+                    alert.wrappedValue = nil
+                    openURL(url)
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                alert.wrappedValue = nil
+            }
+        } message: { presentedAlert in
+            Text(presentedAlert.message)
+        }
+    }
+}
+
 private struct IOSMissingTranscriptionAPIKeyAlert: Identifiable {
     let id = UUID()
     let providerName: String
@@ -644,40 +660,47 @@ private struct IOSMissingTranscriptionAPIKeyAlert: Identifiable {
 
     @MainActor
     init?(modelID: String, settings: AppSettings) {
-        let metadata: (providerName: String, modelName: String, apiKeyURL: URL?, hasKey: Bool)?
+        let requirement: IOSMissingTranscriptionProviderRequirement?
         if modelID.hasPrefix("deepgram") {
-            metadata = (
-                "Deepgram",
-                "Deepgram Nova-3",
-                URL(string: "https://deepgram.com"),
-                settings.hasDeepgramKey
+            requirement = IOSMissingTranscriptionProviderRequirement(
+                providerName: "Deepgram",
+                modelName: "Deepgram Nova-3",
+                apiKeyURL: URL(string: "https://deepgram.com"),
+                hasKey: settings.hasDeepgramKey
             )
         } else if modelID.hasPrefix("elevenlabs") {
-            metadata = (
-                "ElevenLabs",
-                "ElevenLabs Scribe",
-                URL(string: "https://elevenlabs.io"),
-                settings.hasElevenLabsKey
+            requirement = IOSMissingTranscriptionProviderRequirement(
+                providerName: "ElevenLabs",
+                modelName: "ElevenLabs Scribe",
+                apiKeyURL: URL(string: "https://elevenlabs.io"),
+                hasKey: settings.hasElevenLabsKey
             )
         } else if modelID.hasPrefix("openai") {
-            metadata = (
-                "OpenAI",
-                "OpenAI gpt-realtime-whisper",
-                URL(string: "https://platform.openai.com"),
-                settings.hasOpenAIKey
+            requirement = IOSMissingTranscriptionProviderRequirement(
+                providerName: "OpenAI",
+                modelName: "OpenAI gpt-realtime-whisper",
+                apiKeyURL: URL(string: "https://platform.openai.com"),
+                hasKey: settings.hasOpenAIKey
             )
         } else {
-            metadata = nil
+            requirement = nil
         }
 
-        guard let metadata, !metadata.hasKey else {
+        guard let requirement, !requirement.hasKey else {
             return nil
         }
 
-        providerName = metadata.providerName
-        modelName = metadata.modelName
-        apiKeyURL = metadata.apiKeyURL
+        providerName = requirement.providerName
+        modelName = requirement.modelName
+        apiKeyURL = requirement.apiKeyURL
     }
+}
+
+private struct IOSMissingTranscriptionProviderRequirement {
+    let providerName: String
+    let modelName: String
+    let apiKeyURL: URL?
+    let hasKey: Bool
 }
 
 // MARK: - Hardware Trigger Settings View

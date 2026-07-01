@@ -153,7 +153,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             estimatedLatencyMs: 250, latencyTier: .fast),
         Option(
             id: "soniox/stt-rt-v5-streaming",
-            displayName: "Soniox Real-time v5",
+            displayName: "Soniox Real-time v5 (Streaming)",
             description: "Soniox v5 real-time WebSocket STT with reinvented speaker separation, "
                 + "faster semantic endpointing, and improved multilingual recognition across 60+ languages.",
             estimatedLatencyMs: 220, latencyTier: .fast),

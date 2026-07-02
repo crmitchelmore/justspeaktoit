@@ -4,6 +4,7 @@ import Foundation
 import os.log
 import SpeakCore
 
+@MainActor
 // swiftlint:disable:next type_body_length
 final class GladiaLiveController: NSObject, LiveTranscriptionController {
   weak var delegate: LiveTranscriptionSessionDelegate?
@@ -160,9 +161,7 @@ final class GladiaLiveController: NSObject, LiveTranscriptionController {
     }
 
     let result = buildFinalResult()
-    await MainActor.run {
-      delegate?.liveTranscriber(self, didFinishWith: result)
-    }
+    delegate?.liveTranscriber(self, didFinishWith: result)
 
     await endActiveInputSession()
     transcriber = nil
@@ -290,6 +289,7 @@ final class GladiaLiveController: NSObject, LiveTranscriptionController {
       return copy
     }
 
+    // swiftlint:disable:next function_body_length
     private func processAndSendAudio(
       _ buffer: AVAudioPCMBuffer,
       from inputFormat: AVAudioFormat,
@@ -328,7 +328,13 @@ final class GladiaLiveController: NSObject, LiveTranscriptionController {
 
       converter.reset()
       var error: NSError?
+      var didProvideInput = false
       let status = converter.convert(to: outputBuffer, error: &error) { _, outStatus in
+        guard !didProvideInput else {
+          outStatus.pointee = .noDataNow
+          return nil
+        }
+        didProvideInput = true
         outStatus.pointee = .haveData
         return buffer
       }

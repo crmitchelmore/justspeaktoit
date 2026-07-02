@@ -56,8 +56,8 @@ final class GladiaTranscriptionProviderTests: XCTestCase {
     XCTAssertEqual(payload["bit_depth"] as? Int, 16)
     XCTAssertEqual(payload["sample_rate"] as? Int, 16_000)
     XCTAssertEqual(payload["channels"] as? Int, 1)
-    XCTAssertEqual(languageConfig["languages"] as? [String], [])
-    XCTAssertEqual(languageConfig["code_switching"] as? Bool, true)
+    XCTAssertEqual(languageConfig["languages"] as? [String], ["en"])
+    XCTAssertEqual(languageConfig["code_switching"] as? Bool, false)
     XCTAssertEqual(messagesConfig["receive_partial_transcripts"] as? Bool, true)
     XCTAssertEqual(messagesConfig["receive_final_transcripts"] as? Bool, true)
   }

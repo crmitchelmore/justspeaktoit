@@ -190,15 +190,23 @@ final class GladiaLiveTranscriber: @unchecked Sendable {
     onTranscript: @escaping (GladiaTranscriptEvent) -> Void,
     onError: @escaping (Error) -> Void
   ) {
-    withStateLock {
+    let oldInitTask = withStateLock { () -> Task<Void, Never>? in
       isStopping = false
       pendingAudio.removeAll(keepingCapacity: true)
       self.onTranscript = onTranscript
       self.onError = onError
+      let old = initTask
+      initTask = nil
+      return old
     }
+    oldInitTask?.cancel()
 
-    initTask = Task { [weak self] in
-      await self?.initiateAndConnect()
+    let task = Task { [weak self] in
+      guard let self else { return }
+      await self.initiateAndConnect()
+    }
+    withStateLock {
+      self.initTask = task
     }
   }
 
@@ -283,7 +291,7 @@ final class GladiaLiveTranscriber: @unchecked Sendable {
     let payload = GladiaLiveInitRequest(
       model: liveModelName(from: model),
       sampleRate: sampleRate,
-      languageConfig: GladiaLanguageConfig.automaticCodeSwitching,
+      languageConfig: GladiaLanguageConfig.from(language: language),
       messagesConfig: GladiaMessagesConfig.transcriptsOnly
     )
     var request = URLRequest(url: baseURL.appendingPathComponent("v2/live"))
@@ -291,7 +299,6 @@ final class GladiaLiveTranscriber: @unchecked Sendable {
     request.setValue(apiKey.trimmingCharacters(in: .whitespacesAndNewlines), forHTTPHeaderField: "x-gladia-key")
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     request.httpBody = try JSONEncoder().encode(payload)
-    _ = language
     return request
   }
 
@@ -505,6 +512,17 @@ private struct GladiaLiveInitRequest: Encodable {
 
 private struct GladiaLanguageConfig: Encodable {
   static let automaticCodeSwitching = GladiaLanguageConfig(languages: [], codeSwitching: true)
+
+  static func from(language: String?) -> GladiaLanguageConfig {
+    guard let language else { return automaticCodeSwitching }
+    let normalized = language
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+      .replacingOccurrences(of: "_", with: "-")
+    guard let code = normalized.split(separator: "-").first, !code.isEmpty else {
+      return automaticCodeSwitching
+    }
+    return GladiaLanguageConfig(languages: [String(code).lowercased()], codeSwitching: false)
+  }
 
   let languages: [String]
   let codeSwitching: Bool

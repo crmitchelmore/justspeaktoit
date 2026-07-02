@@ -214,11 +214,6 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             description: "Mistral Voxtral Mini batch transcription for long-form multilingual audio.",
             estimatedLatencyMs: 900, latencyTier: .fast),
         Option(
-            id: "mistral/voxtral-small-latest",
-            displayName: "Voxtral Small Latest (Mistral)",
-            description: "Larger Mistral Voxtral batch transcription model for higher quality on difficult audio.",
-            estimatedLatencyMs: 1200, latencyTier: .medium),
-        Option(
             id: "soniox/stt-async-v5",
             displayName: "Soniox Async v5",
             description: "Soniox v5 asynchronous batch STT with speaker diarization and language identification.",

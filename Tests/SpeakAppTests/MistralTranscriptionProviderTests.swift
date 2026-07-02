@@ -9,22 +9,19 @@ final class MistralTranscriptionProviderTests: XCTestCase {
     let ids = ModelCatalog.batchTranscription.map(\.id)
 
     XCTAssertTrue(ids.contains("mistral/voxtral-mini-latest"))
-    XCTAssertTrue(ids.contains("mistral/voxtral-small-latest"))
   }
 
   func testSupportedModels_returnsVoxtralModels() {
     let ids = MistralTranscriptionProvider().supportedModels().map(\.id)
 
     XCTAssertEqual(ids, [
-      "mistral/voxtral-mini-latest",
-      "mistral/voxtral-small-latest"
+      "mistral/voxtral-mini-latest"
     ])
   }
 
   func testProviderRegistry_routesVoxtralModelsToMistralProvider() async {
     for model in [
-      "mistral/voxtral-mini-latest",
-      "mistral/voxtral-small-latest"
+      "mistral/voxtral-mini-latest"
     ] {
       let provider = await TranscriptionProviderRegistry.shared.provider(forModel: model)
 
@@ -97,7 +94,7 @@ final class MistralTranscriptionProviderTests: XCTestCase {
     let result = try await makeProvider().transcribeFile(
       at: try makeAudioFile(),
       apiKey: "test-mistral-key",
-      model: "mistral/voxtral-small-latest",
+      model: "mistral/voxtral-mini-latest",
       language: nil
     )
 
@@ -126,12 +123,36 @@ final class MistralTranscriptionProviderTests: XCTestCase {
     let result = try await makeProvider().transcribeFile(
       at: try makeAudioFile(),
       apiKey: "test-mistral-key",
-      model: "mistral/voxtral-small-latest",
+      model: "mistral/voxtral-mini-latest",
       language: nil
     )
 
     XCTAssertEqual(result.text, "Speaker 1: Hello there.\nSpeaker 2: Hi back.")
     XCTAssertEqual(result.segments.map(\.text), ["Speaker 1: Hello there.", "Speaker 2: Hi back."])
+  }
+
+  func testTranscribeFile_preservesOneIndexedSpeakerLabels() async throws {
+    let responseBody = """
+    {
+      "duration": 1.0,
+      "segments": [
+        {"start": 0.0, "end": 1.0, "text": "Hello there.", "speaker": "Speaker 1"}
+      ]
+    }
+    """
+    MistralMockURLProtocol.requestHandler = { request in
+      try Self.makeResponse(for: request, body: responseBody)
+    }
+    defer { MistralMockURLProtocol.requestHandler = nil }
+
+    let result = try await makeProvider().transcribeFile(
+      at: try makeAudioFile(),
+      apiKey: "test-mistral-key",
+      model: "mistral/voxtral-mini-latest",
+      language: nil
+    )
+
+    XCTAssertEqual(result.text, "Speaker 1: Hello there.")
   }
 
   func testValidateAPIKey_usesMistralModelsEndpoint() async throws {

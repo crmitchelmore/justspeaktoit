@@ -116,13 +116,6 @@ struct MistralTranscriptionProvider: TranscriptionProvider {
         description: "Mistral Voxtral Mini batch transcription for long-form multilingual audio.",
         estimatedLatencyMs: 900,
         latencyTier: .fast
-      ),
-      ModelCatalog.Option(
-        id: "mistral/voxtral-small-latest",
-        displayName: "Voxtral Small Latest",
-        description: "Larger Mistral Voxtral batch transcription model for higher quality on difficult audio.",
-        estimatedLatencyMs: 1200,
-        latencyTier: .medium
       )
     ]
   }
@@ -297,12 +290,14 @@ private enum MistralSpeaker: Decodable {
       let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
       guard !trimmed.isEmpty else { return nil }
       let uppercased = trimmed.uppercased()
-      if uppercased.hasPrefix("SPEAKER_") || uppercased.hasPrefix("SPEAKER ") {
+      if uppercased.hasPrefix("SPEAKER_") {
         let digits = trimmed.filter(\.isNumber)
         if let index = Int(digits) {
           return "Speaker \(index + 1)"
         }
         return trimmed.replacingOccurrences(of: "_", with: " ").capitalized
+      } else if uppercased.hasPrefix("SPEAKER ") {
+        return trimmed.capitalized
       }
       return trimmed
     }

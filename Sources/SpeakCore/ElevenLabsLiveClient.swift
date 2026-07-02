@@ -365,7 +365,7 @@ public struct ElevenLabsSTTAPIKeyValidator {
     }
 
     private func isAcceptedScribeProbeStatus(_ statusCode: Int) -> Bool {
-        (200..<300).contains(statusCode) || statusCode == 400 || statusCode == 422
+        (200..<300).contains(statusCode) || statusCode == 400 || statusCode == 415 || statusCode == 422
     }
 
     private func debugSnapshot(

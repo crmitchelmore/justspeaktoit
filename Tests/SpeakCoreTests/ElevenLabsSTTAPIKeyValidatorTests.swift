@@ -63,6 +63,27 @@ final class ElevenLabsSTTAPIKeyValidatorTests: XCTestCase {
         XCTAssertEqual(result.debug?.statusCode, 403)
     }
 
+    func testValidate_acceptsUnsupportedMediaTypeAfterUserCheck() async {
+        ElevenLabsSTTValidationMockURLProtocol.handler = { request in
+            let statusCode = request.url?.path == "/v1/speech-to-text" ? 415 : 200
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: statusCode,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, Data())
+        }
+
+        let validator = ElevenLabsSTTAPIKeyValidator(session: makeMockSession())
+        let result = await validator.validate("full-access-key")
+
+        guard case .success = result.outcome else {
+            return XCTFail("Expected validation success for a post-auth Scribe probe response, got \(result)")
+        }
+        XCTAssertEqual(result.debug?.statusCode, 415)
+    }
+
     func testValidate_doesNotProbeScribeWhenUserCheckRejectsKey() async throws {
         let recorder = ElevenLabsSTTValidationRequestRecorder()
         ElevenLabsSTTValidationMockURLProtocol.handler = { request in

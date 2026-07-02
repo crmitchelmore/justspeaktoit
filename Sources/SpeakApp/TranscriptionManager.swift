@@ -3796,6 +3796,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   private var elevenlabsController: ElevenLabsLiveController
   private var sonioxController: SonioxLiveController
   private var cartesiaController: CartesiaLiveController
+  private var gladiaController: GladiaLiveController
   private var openAIRealtimeController: OpenAIRealtimeLiveController
   private var sherpaOnnxController: SherpaOnnxLiveController
   private var unsupportedLocalLiveController: UnsupportedLocalLiveTranscriber
@@ -3855,6 +3856,12 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       secureStorage: secureStorage
     )
     cartesiaController = CartesiaLiveController(
+      appSettings: appSettings,
+      permissionsManager: permissionsManager,
+      audioDeviceManager: audioDeviceManager,
+      secureStorage: secureStorage
+    )
+    gladiaController = GladiaLiveController(
       appSettings: appSettings,
       permissionsManager: permissionsManager,
       audioDeviceManager: audioDeviceManager,
@@ -3928,6 +3935,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     if model.hasPrefix("elevenlabs/") { return elevenlabsController }
     if model.hasPrefix("soniox/") { return sonioxController }
     if model.hasPrefix("cartesia/") { return cartesiaController }
+    if model.hasPrefix("gladia/") { return gladiaController }
     // SwitchingLiveTranscriber only routes live transcription models, and
     // OpenAI's only live transcription transport is the Realtime WebSocket
     // API. So any openai/* live model is handled by openAIRealtimeController.
@@ -3946,6 +3954,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       elevenlabsController,
       sonioxController,
       cartesiaController,
+      gladiaController,
       openAIRealtimeController,
       sherpaOnnxController,
       unsupportedLocalLiveController
@@ -4004,6 +4013,12 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       secureStorage: secureStorage
     )
     cartesiaController = CartesiaLiveController(
+      appSettings: appSettings,
+      permissionsManager: permissionsManager,
+      audioDeviceManager: audioDeviceManager,
+      secureStorage: secureStorage
+    )
+    gladiaController = GladiaLiveController(
       appSettings: appSettings,
       permissionsManager: permissionsManager,
       audioDeviceManager: audioDeviceManager,

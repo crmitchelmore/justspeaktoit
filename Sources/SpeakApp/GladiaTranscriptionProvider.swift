@@ -74,13 +74,15 @@ struct GladiaTranscriptionProvider: TranscriptionProvider {
       guard let http = response as? HTTPURLResponse else {
         return .failure(message: "Non-HTTP response")
       }
-      let debug = debugSnapshot(request: request, response: http, data: data)
       switch http.statusCode {
       case 200..<300:
+        let debug = debugSnapshot(request: request, response: http, data: nil)
         return .success(message: "Gladia API key validated", debug: debug)
       case 401, 403:
+        let debug = debugSnapshot(request: request, response: http, data: data)
         return .failure(message: "Gladia rejected the key (HTTP \(http.statusCode))", debug: debug)
       default:
+        let debug = debugSnapshot(request: request, response: http, data: data)
         return .failure(message: "HTTP \(http.statusCode) while validating key", debug: debug)
       }
     } catch {
@@ -121,7 +123,7 @@ struct GladiaTranscriptionProvider: TranscriptionProvider {
   private func debugSnapshot(
     request: URLRequest,
     response: HTTPURLResponse,
-    data: Data
+    data: Data?
   ) -> APIKeyValidationDebugSnapshot {
     APIKeyValidationDebugSnapshot(
       url: request.url?.absoluteString ?? "",
@@ -133,7 +135,7 @@ struct GladiaTranscriptionProvider: TranscriptionProvider {
         guard let key = entry.key as? String else { return }
         partialResult[key] = String(describing: entry.value)
       },
-      responseBody: String(data: data, encoding: .utf8),
+      responseBody: data.flatMap { String(data: $0, encoding: .utf8) },
       errorDescription: nil
     )
   }

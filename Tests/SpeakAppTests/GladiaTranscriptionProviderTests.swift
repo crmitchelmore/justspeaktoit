@@ -127,7 +127,8 @@ final class GladiaTranscriptionProviderTests: XCTestCase {
         httpVersion: nil,
         headerFields: ["Content-Type": "application/json"]
       )!
-      return (response, Data(#"{"items":[]}"#.utf8))
+      let body = #"{"items":[{"status":"done","result":{"transcription":"private prior transcript"}}]}"#
+      return (response, Data(body.utf8))
     }
     defer { GladiaMockURLProtocol.requestHandler = nil }
 
@@ -145,6 +146,7 @@ final class GladiaTranscriptionProviderTests: XCTestCase {
       XCTFail("Expected validation success")
     }
     XCTAssertEqual(result.debug?.requestHeaders["x-gladia-key"], "gla...-key")
+    XCTAssertNil(result.debug?.responseBody)
   }
 
   func testValidateAPIKey_returnsFailureOnUnauthorized() async {
@@ -167,6 +169,7 @@ final class GladiaTranscriptionProviderTests: XCTestCase {
     } else {
       XCTFail("Expected validation failure")
     }
+    XCTAssertEqual(result.debug?.responseBody, #"{"message":"invalid key"}"#)
   }
 
   private func makeMockSession() -> URLSession {

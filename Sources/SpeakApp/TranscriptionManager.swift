@@ -3961,14 +3961,9 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
 
   // swiftlint:disable:next cyclomatic_complexity
   private func controller(for model: String) -> any LiveTranscriptionController {
-    if model.hasPrefix("assemblyai/") { return assemblyAIController }
-    if model.hasPrefix("deepgram/") { return deepgramController }
-    if model.hasPrefix("modulate/") { return modulateController }
-    if model.hasPrefix("elevenlabs/") { return elevenlabsController }
-    if model.hasPrefix("soniox/") { return sonioxController }
-    if model.hasPrefix("speechmatics/") { return speechmaticsController }
-    if model.hasPrefix("cartesia/") { return cartesiaController }
-    if model.hasPrefix("gladia/") { return gladiaController }
+    if let route = controllerRoutes.first(where: { model.hasPrefix($0.prefix) }) {
+      return route.controller
+    }
     // SwitchingLiveTranscriber only routes live transcription models, and
     // OpenAI's only live transcription transport is the Realtime WebSocket
     // API. So any openai/* live model is handled by openAIRealtimeController.
@@ -3980,6 +3975,19 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     #endif
     if ModelRouting.family(for: model).isDownloadedLocal { return unsupportedLocalLiveController }
     return nativeController
+  }
+
+  private var controllerRoutes: [(prefix: String, controller: any LiveTranscriptionController)] {
+    [
+      ("assemblyai/", assemblyAIController),
+      ("deepgram/", deepgramController),
+      ("modulate/", modulateController),
+      ("elevenlabs/", elevenlabsController),
+      ("soniox/", sonioxController),
+      ("speechmatics/", speechmaticsController),
+      ("cartesia/", cartesiaController),
+      ("gladia/", gladiaController)
+    ]
   }
 
   private func applyDelegateAndConfiguration() {

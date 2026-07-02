@@ -69,6 +69,8 @@ final class MistralTranscriptionProviderTests: XCTestCase {
     XCTAssertTrue(body.contains(#"name="model""#))
     XCTAssertTrue(body.contains("\r\nvoxtral-mini-latest\r\n"))
     XCTAssertFalse(body.contains("\r\nmistral/voxtral-mini-latest\r\n"))
+    XCTAssertTrue(body.contains(#"name="language""#))
+    XCTAssertTrue(body.contains("\r\nen\r\n"))
     XCTAssertTrue(body.contains(#"name="file"; filename=""#))
     XCTAssertFalse(body.contains("response_format"))
     XCTAssertEqual(result.text, "hello world")

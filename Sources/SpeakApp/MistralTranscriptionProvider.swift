@@ -28,7 +28,6 @@ struct MistralTranscriptionProvider: TranscriptionProvider {
     model: String,
     language: String?
   ) async throws -> TranscriptionResult {
-    _ = language
     let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmedKey.isEmpty else {
       throw TranscriptionProviderError.apiKeyMissing
@@ -47,6 +46,9 @@ struct MistralTranscriptionProvider: TranscriptionProvider {
 
     let modelName = modelID(from: model)
     body.appendFormField(named: "model", value: modelName, boundary: boundary)
+    if let languageCode = languageCode(from: language) {
+      body.appendFormField(named: "language", value: languageCode, boundary: boundary)
+    }
     body.appendFileField(
       named: "file",
       filename: url.lastPathComponent,
@@ -127,6 +129,15 @@ struct MistralTranscriptionProvider: TranscriptionProvider {
 
   private func modelID(from model: String) -> String {
     model.split(separator: "/").last.map(String.init) ?? model
+  }
+
+  private func languageCode(from language: String?) -> String? {
+    guard let language else { return nil }
+    let normalized = language
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+      .replacingOccurrences(of: "_", with: "-")
+    guard let code = normalized.split(separator: "-").first, !code.isEmpty else { return nil }
+    return String(code).lowercased()
   }
 
   private func buildTranscriptionResult(

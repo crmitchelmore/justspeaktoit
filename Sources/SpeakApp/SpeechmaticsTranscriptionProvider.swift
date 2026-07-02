@@ -251,6 +251,7 @@ final class SpeechmaticsLiveTranscriber: @unchecked Sendable {
   private var lastAcknowledgedSeqNo = -1
   private var endOfTranscriptReceived = false
   private var endOfTranscriptContinuation: CheckedContinuation<Void, Never>?
+  private var recognitionStartedContinuation: CheckedContinuation<Bool, Never>?
 
   init(
     apiKey: String,
@@ -280,6 +281,7 @@ final class SpeechmaticsLiveTranscriber: @unchecked Sendable {
       self.lastAcknowledgedSeqNo = -1
       self.endOfTranscriptReceived = false
       self.endOfTranscriptContinuation = nil
+      self.recognitionStartedContinuation = nil
       self.onTranscript = onTranscript
       self.onError = onError
     }
@@ -313,6 +315,30 @@ final class SpeechmaticsLiveTranscriber: @unchecked Sendable {
       "last_seq_no": lastSeqNo
     ]
     sendJSONPayload(payload, on: task)
+  }
+
+  func waitForRecognitionStarted(timeout: TimeInterval = 1.5) async -> Bool {
+    await withCheckedContinuation { continuation in
+      let shouldWait = withStateLock { () -> Bool in
+        guard !self.recognitionStarted else { return false }
+        self.recognitionStartedContinuation = continuation
+        return true
+      }
+      if !shouldWait {
+        continuation.resume(returning: true)
+        return
+      }
+      Task { [weak self] in
+        try? await Task.sleep(for: .seconds(timeout))
+        guard let self else { return }
+        let pending = self.withStateLock { () -> CheckedContinuation<Bool, Never>? in
+          let saved = self.recognitionStartedContinuation
+          self.recognitionStartedContinuation = nil
+          return saved
+        }
+        pending?.resume(returning: false)
+      }
+    }
   }
 
   func awaitEndOfTranscript(timeout: TimeInterval = 2.0) async {
@@ -363,6 +389,13 @@ final class SpeechmaticsLiveTranscriber: @unchecked Sendable {
       return saved
     }
     pending?.resume()
+
+    let recognitionPending = withStateLock { () -> CheckedContinuation<Bool, Never>? in
+      let saved = self.recognitionStartedContinuation
+      self.recognitionStartedContinuation = nil
+      return saved
+    }
+    recognitionPending?.resume(returning: false)
 
     guard let task else { return }
     if task.state == .running {
@@ -561,8 +594,14 @@ final class SpeechmaticsLiveTranscriber: @unchecked Sendable {
 
     switch envelope.message {
     case "RecognitionStarted":
-      withStateLock { self.recognitionStarted = true }
+      let pending = withStateLock { () -> CheckedContinuation<Bool, Never>? in
+        self.recognitionStarted = true
+        let saved = self.recognitionStartedContinuation
+        self.recognitionStartedContinuation = nil
+        return saved
+      }
       flushPreStartAudio()
+      pending?.resume(returning: true)
     case "AudioAdded":
       if let message = try? JSONDecoder().decode(SpeechmaticsAudioAddedMessage.self, from: data) {
         withStateLock { self.lastAcknowledgedSeqNo = max(self.lastAcknowledgedSeqNo, message.seqNo) }

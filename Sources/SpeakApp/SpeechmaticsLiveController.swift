@@ -133,12 +133,17 @@ final class SpeechmaticsLiveController: NSObject, LiveTranscriptionController {
 
     if let transcriber {
       audioProcessor.flushPendingAudio(to: transcriber)
+      let recognitionStarted = await transcriber.waitForRecognitionStarted(
+        timeout: appSettings.liveModelCapabilities.postStopFinalizeBudget
+      )
       await transcriber.waitForPendingSends()
       audioProcessor.setRunning(false)
-      await applyLiveStopGrace(appSettings.liveStopGracePeriod)
-      transcriber.sendEndOfStream()
-      await transcriber.waitForPendingSends()
-      await transcriber.awaitEndOfTranscript(timeout: appSettings.liveModelCapabilities.postStopFinalizeBudget)
+      if recognitionStarted {
+        await applyLiveStopGrace(appSettings.liveStopGracePeriod)
+        transcriber.sendEndOfStream()
+        await transcriber.waitForPendingSends()
+        await transcriber.awaitEndOfTranscript(timeout: appSettings.liveModelCapabilities.postStopFinalizeBudget)
+      }
       transcriber.stop()
     } else {
       audioProcessor.setRunning(false)

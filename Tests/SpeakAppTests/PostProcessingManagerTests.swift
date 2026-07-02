@@ -139,6 +139,33 @@ final class PostProcessingManagerTests: XCTestCase {
     XCTAssertEqual(client.sendChatCallCount, 1)
   }
 
+  func testHistoryPromptPayloadSeparatesGeneratedLanguageInstructionFromCustomPrompt() async throws {
+    let client = SpyChatClient(responseText: "Cleaned by cloud")
+    let settings = makeSettings()
+    settings.postProcessingModel = "openai/gpt-4o-mini"
+    settings.postProcessingOutputLanguage = "ENGB"
+    settings.postProcessingSystemPrompt = "Keep every sentence short."
+    let manager = PostProcessingManager(
+      client: client,
+      settings: settings,
+      personalLexicon: makePersonalLexiconService()
+    )
+
+    let result = await manager.process(
+      rawText: "hello world",
+      context: .empty,
+      corrections: nil
+    )
+
+    let outcome = try result.get()
+    let promptPayload = try XCTUnwrap(outcome.promptPayload)
+    XCTAssertEqual(promptPayload.customPrompt, "Keep every sentence short.")
+    XCTAssertTrue(
+      promptPayload.systemPrompt.contains("Always output using British English.\n\nKeep every sentence short.")
+    )
+    XCTAssertFalse(promptPayload.systemPrompt.contains("British English. Keep every sentence short."))
+  }
+
   private func makeSettings() -> AppSettings {
     let suiteName = "PostProcessingManagerTests-\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suiteName)!

@@ -1,3 +1,7 @@
-/.well-known/*
+/.well-known/apple-app-site-association
   Content-Type: application/json
+  Access-Control-Allow-Origin: *
+
+/.well-known/appspecific/com.tesla.3p.public-key.pem
+  Content-Type: application/x-pem-file
   Access-Control-Allow-Origin: *

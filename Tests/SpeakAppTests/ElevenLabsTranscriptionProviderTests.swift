@@ -251,6 +251,7 @@ final class ElevenLabsTranscriptionProviderTests: XCTestCase {
             )!
             return (response, Data("{}".utf8))
         }
+
         defer { MockURLProtocol.requestHandler = nil }
 
         let session = makeMockSession()

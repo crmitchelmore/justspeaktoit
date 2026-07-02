@@ -35,7 +35,10 @@ final class ElevenLabsSTTAPIKeyValidatorTests: XCTestCase {
         XCTAssertEqual(requests.map(\.path), ["/v1/user", "/v1/speech-to-text"])
         XCTAssertEqual(requests.last?.method, "POST")
         XCTAssertEqual(requests.last?.apiKeyHeader, "full-access-key")
-        XCTAssertEqual(requests.last?.body, "{}")
+        XCTAssertTrue(requests.last?.contentType?.hasPrefix("multipart/form-data; boundary=") == true)
+        XCTAssertTrue(requests.last?.body?.contains(#"name="model_id""#) == true)
+        XCTAssertTrue(requests.last?.body?.contains("\r\nscribe_v1\r\n") == true)
+        XCTAssertFalse(requests.last?.body == "{}")
     }
 
     func testValidate_rejectsTTSOnlyKeyWhenScribeAccessIsForbidden() async {
@@ -100,6 +103,7 @@ private actor ElevenLabsSTTValidationRequestRecorder {
                 path: request.url?.path,
                 method: request.httpMethod,
                 apiKeyHeader: request.value(forHTTPHeaderField: "xi-api-key"),
+                contentType: request.value(forHTTPHeaderField: "Content-Type"),
                 body: requestBody(for: request).flatMap { String(data: $0, encoding: .utf8) }
             )
         )
@@ -144,6 +148,7 @@ private struct RecordedRequest: Equatable {
     let path: String?
     let method: String?
     let apiKeyHeader: String?
+    let contentType: String?
     let body: String?
 }
 

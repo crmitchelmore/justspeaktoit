@@ -308,11 +308,20 @@ public struct ElevenLabsSTTAPIKeyValidator {
 
     private func makeScribeProbeRequest(apiKey: String) -> URLRequest {
         let url = baseURL.appendingPathComponent("speech-to-text")
+        let boundary = "Boundary-\(UUID().uuidString)"
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue(apiKey, forHTTPHeaderField: "xi-api-key")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = Data("{}".utf8)
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Data(
+            """
+            --\(boundary)\r
+            Content-Disposition: form-data; name="model_id"\r
+            \r
+            scribe_v1\r
+            --\(boundary)--\r
+            """.utf8
+        )
         return request
     }
 
@@ -376,6 +385,7 @@ public struct ElevenLabsSTTAPIKeyValidator {
                     guard let key = entry.key as? String else { return }
                     partialResult[key] = String(describing: entry.value)
                 }
+
             } ?? [:],
             responseBody: data.flatMap { String(data: $0, encoding: .utf8) },
             errorDescription: error?.localizedDescription

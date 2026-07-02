@@ -209,6 +209,11 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             description: "Groq-hosted Whisper Large v3 Turbo. Fast, low-cost OpenAI-compatible batch transcription.",
             estimatedLatencyMs: 500, latencyTier: .fast),
         Option(
+            id: "mistral/voxtral-mini-latest",
+            displayName: "Voxtral Mini Latest (Mistral)",
+            description: "Mistral Voxtral Mini batch transcription for long-form multilingual audio.",
+            estimatedLatencyMs: 900, latencyTier: .fast),
+        Option(
             id: "soniox/stt-async-v5",
             displayName: "Soniox Async v5",
             description: "Soniox v5 asynchronous batch STT with speaker diarization and language identification.",

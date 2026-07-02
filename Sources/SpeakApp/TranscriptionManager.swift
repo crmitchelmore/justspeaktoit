@@ -3815,6 +3815,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   private var assemblyAIController: AssemblyAILiveController
   private var elevenlabsController: ElevenLabsLiveController
   private var sonioxController: SonioxLiveController
+  private var speechmaticsController: SpeechmaticsLiveController
   private var cartesiaController: CartesiaLiveController
   private var gladiaController: GladiaLiveController
   private var openAIRealtimeController: OpenAIRealtimeLiveController
@@ -3872,6 +3873,12 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       secureStorage: secureStorage
     )
     sonioxController = SonioxLiveController(
+      appSettings: appSettings,
+      permissionsManager: permissionsManager,
+      audioDeviceManager: audioDeviceManager,
+      secureStorage: secureStorage
+    )
+    speechmaticsController = SpeechmaticsLiveController(
       appSettings: appSettings,
       permissionsManager: permissionsManager,
       audioDeviceManager: audioDeviceManager,
@@ -3959,6 +3966,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     if model.hasPrefix("modulate/") { return modulateController }
     if model.hasPrefix("elevenlabs/") { return elevenlabsController }
     if model.hasPrefix("soniox/") { return sonioxController }
+    if model.hasPrefix("speechmatics/") { return speechmaticsController }
     if model.hasPrefix("cartesia/") { return cartesiaController }
     if model.hasPrefix("gladia/") { return gladiaController }
     // SwitchingLiveTranscriber only routes live transcription models, and
@@ -3982,6 +3990,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       assemblyAIController,
       elevenlabsController,
       sonioxController,
+      speechmaticsController,
       cartesiaController,
       gladiaController,
       openAIRealtimeController,
@@ -4038,6 +4047,12 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       secureStorage: secureStorage
     )
     sonioxController = SonioxLiveController(
+      appSettings: appSettings,
+      permissionsManager: permissionsManager,
+      audioDeviceManager: audioDeviceManager,
+      secureStorage: secureStorage
+    )
+    speechmaticsController = SpeechmaticsLiveController(
       appSettings: appSettings,
       permissionsManager: permissionsManager,
       audioDeviceManager: audioDeviceManager,

@@ -163,6 +163,11 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
                 + "faster semantic endpointing, and improved multilingual recognition across 60+ languages.",
             estimatedLatencyMs: 220, latencyTier: .fast),
         Option(
+            id: "speechmatics/enhanced-streaming",
+            displayName: "Speechmatics Enhanced (Streaming)",
+            description: "Speechmatics realtime WebSocket transcription with partial and final results.",
+            estimatedLatencyMs: 220, latencyTier: .fast),
+        Option(
             id: "elevenlabs/scribe-v2-streaming",
             displayName: "ElevenLabs Scribe v2 (Streaming)",
             description: "ElevenLabs Scribe v2 real-time WebSocket transcription. Reuses your "

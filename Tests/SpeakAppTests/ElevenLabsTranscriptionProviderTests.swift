@@ -216,11 +216,12 @@ final class ElevenLabsTranscriptionProviderTests: XCTestCase {
 
     // MARK: - API Key Validation
 
-    func testValidateAPIKey_returnsSuccess_on200() async {
+    func testValidateAPIKey_returnsSuccess_whenUserKeyHasScribeAccess() async {
         MockURLProtocol.requestHandler = { request in
+            let statusCode = request.url?.path == "/v1/speech-to-text" ? 422 : 200
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
-                statusCode: 200,
+                statusCode: statusCode,
                 httpVersion: nil,
                 headerFields: nil
             )!
@@ -236,6 +237,30 @@ final class ElevenLabsTranscriptionProviderTests: XCTestCase {
             // pass
         } else {
             XCTFail("Expected validation success for 200 response")
+        }
+    }
+
+    func testValidateAPIKey_returnsFailure_whenScribeAccessForbidden() async {
+        MockURLProtocol.requestHandler = { request in
+            let statusCode = request.url?.path == "/v1/speech-to-text" ? 403 : 200
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: statusCode,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, Data("{}".utf8))
+        }
+        defer { MockURLProtocol.requestHandler = nil }
+
+        let session = makeMockSession()
+        let provider = ElevenLabsTranscriptionProvider(session: session)
+        let result = await provider.validateAPIKey("tts-only-key")
+
+        if case .failure(let message) = result.outcome {
+            XCTAssertTrue(message.contains("Scribe"), "Expected missing Scribe access message")
+        } else {
+            XCTFail("Expected validation failure for a key without Scribe access")
         }
     }
 

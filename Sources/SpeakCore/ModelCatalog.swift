@@ -144,6 +144,11 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             description: "English real-time STT with built-in turn detection and structured-data accuracy.",
             estimatedLatencyMs: 180, latencyTier: .fast),
         Option(
+            id: "gladia/solaria-1-streaming",
+            displayName: "Gladia Solaria-1 (Streaming)",
+            description: "Real-time multilingual STT with automatic language detection and partial transcripts.",
+            estimatedLatencyMs: 220, latencyTier: .fast),
+        Option(
             id: "modulate/velma-2-stt-streaming", displayName: "Modulate Velma-2 (Streaming)",
             description: "Real-time multilingual WebSocket transcription with diarization and signal detection.",
             estimatedLatencyMs: 220, latencyTier: .fast),

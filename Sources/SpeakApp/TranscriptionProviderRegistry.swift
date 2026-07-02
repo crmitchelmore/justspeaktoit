@@ -20,6 +20,7 @@ actor TranscriptionProviderRegistry {
         providers["groq"] = GroqTranscriptionProvider()
         providers["cartesia"] = CartesiaTranscriptionProvider()
         providers["mistral"] = MistralTranscriptionProvider()
+        providers["gladia"] = GladiaTranscriptionProvider()
     }
 
     func allProviders() -> [TranscriptionProviderMetadata] {

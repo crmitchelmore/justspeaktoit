@@ -6,15 +6,50 @@ import os.log
 
 // swiftlint:disable file_length
 
+private let openAIRealtimeOutputBufferPool = OpenAIRealtimePCMBufferPool(maximumBuffers: 2)
+
+private final class OpenAIRealtimePCMBufferPool: @unchecked Sendable {
+    private let lock = NSLock()
+    private let maximumBuffers: Int
+    private var buffers: [AVAudioPCMBuffer] = []
+
+    init(maximumBuffers: Int) {
+        self.maximumBuffers = maximumBuffers
+    }
+
+    func buffer(format: AVAudioFormat, frameCapacity: AVAudioFrameCount) -> AVAudioPCMBuffer? {
+        lock.lock()
+        defer { lock.unlock() }
+
+        if let index = buffers.firstIndex(where: { $0.format == format && $0.frameCapacity >= frameCapacity }) {
+            let buffer = buffers.remove(at: index)
+            buffer.frameLength = 0
+            return buffer
+        }
+
+        return AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCapacity)
+    }
+
+    func recycle(_ buffer: AVAudioPCMBuffer) {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard buffers.count < maximumBuffers else { return }
+        buffer.frameLength = 0
+        buffers.append(buffer)
+    }
+}
+
 /// iOS live transcriber backed by OpenAI's Realtime API in transcription mode.
 ///
 /// Mirrors the macOS `OpenAIRealtimeLiveTranscriber` / `OpenAIRealtimeLiveController`
 /// pair, collapsed into a single `ObservableObject` to match the existing
 /// iOS provider shape (`DeepgramLiveTranscriber`, `ElevenLabsLiveTranscriber`).
 ///
-/// Endpoint:
-/// - Beta (default): `wss://api.openai.com/v1/realtime?intent=transcription`
-/// - GA (gpt-realtime-whisper): `wss://api.openai.com/v1/realtime?model=<name>`
+/// Endpoint: `wss://api.openai.com/v1/realtime?intent=transcription`.
+/// All Realtime transcription models use this GA transcription session shape;
+/// `?model=<name>` creates a conversation session and rejects transcription
+/// updates.
 /// Audio: PCM16 mono @ 24 kHz, base64 in `input_audio_buffer.append`.
 /// On stop we wait for the session config ack, flush, send
 /// `input_audio_buffer.commit`, then wait for the final `.completed` event
@@ -335,9 +370,13 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
     ) {
         let ratio = Self.targetSampleRate / nativeFormat.sampleRate
         let outputFrameCapacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio)
-        guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: outputFrameCapacity) else {
+        guard let outputBuffer = openAIRealtimeOutputBufferPool.buffer(
+            format: targetFormat,
+            frameCapacity: outputFrameCapacity
+        ) else {
             return
         }
+        defer { openAIRealtimeOutputBufferPool.recycle(outputBuffer) }
         var error: NSError?
         let status = converter.convert(to: outputBuffer, error: &error) { _, outStatus in
             outStatus.pointee = .haveData

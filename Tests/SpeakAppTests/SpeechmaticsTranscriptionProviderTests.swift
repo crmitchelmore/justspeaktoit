@@ -139,7 +139,7 @@ final class SpeechmaticsTranscriptionProviderTests: XCTestCase {
     let request = try XCTUnwrap(capturedRequest)
     XCTAssertEqual(request.url?.host, "eu1.asr.api.speechmatics.com")
     XCTAssertEqual(request.url?.path, "/v2/jobs")
-    XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "test-speechmatics-key")
+    XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-speechmatics-key")
   }
 
   private func makeMockSession() -> URLSession {

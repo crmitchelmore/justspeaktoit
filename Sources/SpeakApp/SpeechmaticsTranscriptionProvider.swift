@@ -66,7 +66,7 @@ struct SpeechmaticsTranscriptionProvider: TranscriptionProvider {
 
     var request = URLRequest(url: validationURL)
     request.httpMethod = "GET"
-    request.setValue(trimmed, forHTTPHeaderField: "Authorization")
+    request.setValue("Bearer \(trimmed)", forHTTPHeaderField: "Authorization")
 
     do {
       let (data, response) = try await session.data(for: request)
@@ -215,6 +215,12 @@ private struct SpeechmaticsAudioAddedMessage: Decodable {
   }
 }
 
+private struct SpeechmaticsPreStartAudioFlush {
+  let task: URLSessionWebSocketTask?
+  let frames: [Data]
+  let continuation: CheckedContinuation<Bool, Never>?
+}
+
 private struct SpeechmaticsErrorMessage: Decodable {
   let type: String?
   let reason: String?
@@ -289,20 +295,32 @@ final class SpeechmaticsLiveTranscriber: @unchecked Sendable {
   }
 
   func sendAudio(_ audioData: Data) {
-    let snapshot = withStateLock { () -> (URLSessionWebSocketTask?, Bool) in
-      (self.webSocketTask, self.recognitionStarted)
+    enum SendAction {
+      case sendDirectly(URLSessionWebSocketTask)
+      case buffered
     }
-    guard let task = snapshot.0, task.state == .running, snapshot.1 else {
-      withStateLock {
+
+    let action = withStateLock { () -> SendAction in
+      if self.recognitionStarted,
+         let task = self.webSocketTask,
+         task.state == .running {
+        return .sendDirectly(task)
+      } else {
         self.preStartAudioBuffer.append(audioData)
         var totalBytes = self.preStartAudioBuffer.reduce(0) { $0 + $1.count }
         while totalBytes > Self.preStartByteLimit, !self.preStartAudioBuffer.isEmpty {
           totalBytes -= self.preStartAudioBuffer.removeFirst().count
         }
+        return .buffered
       }
+    }
+
+    switch action {
+    case .sendDirectly(let task):
+      sendAudioFrame(audioData, on: task)
+    case .buffered:
       return
     }
-    sendAudioFrame(audioData, on: task)
   }
 
   func sendEndOfStream() {
@@ -471,7 +489,7 @@ final class SpeechmaticsLiveTranscriber: @unchecked Sendable {
     }
 
     var request = URLRequest(url: url)
-    request.setValue(apiKey, forHTTPHeaderField: "Authorization")
+    request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
 
     let task = session.webSocketTask(with: request)
     let shouldReceive = withStateLock { () -> Bool in
@@ -545,19 +563,6 @@ final class SpeechmaticsLiveTranscriber: @unchecked Sendable {
     }
   }
 
-  private func flushPreStartAudio() {
-    let (task, frames) = withStateLock { () -> (URLSessionWebSocketTask?, [Data]) in
-      let pending = self.preStartAudioBuffer
-      self.preStartAudioBuffer = []
-      return (self.webSocketTask, pending)
-    }
-    guard let task, task.state == .running, !frames.isEmpty else { return }
-    logger.info("Flushing \(frames.count) pre-start audio frames to Speechmatics")
-    for frame in frames {
-      sendAudioFrame(frame, on: task)
-    }
-  }
-
   private func receiveMessages() {
     guard let task = currentWebSocketTask() else { return }
     task.receive { [weak self] result in
@@ -594,14 +599,7 @@ final class SpeechmaticsLiveTranscriber: @unchecked Sendable {
 
     switch envelope.message {
     case "RecognitionStarted":
-      let pending = withStateLock { () -> CheckedContinuation<Bool, Never>? in
-        self.recognitionStarted = true
-        let saved = self.recognitionStartedContinuation
-        self.recognitionStartedContinuation = nil
-        return saved
-      }
-      flushPreStartAudio()
-      pending?.resume(returning: true)
+      handleRecognitionStarted()
     case "AudioAdded":
       if let message = try? JSONDecoder().decode(SpeechmaticsAudioAddedMessage.self, from: data) {
         withStateLock { self.lastAcknowledgedSeqNo = max(self.lastAcknowledgedSeqNo, message.seqNo) }
@@ -624,6 +622,28 @@ final class SpeechmaticsLiveTranscriber: @unchecked Sendable {
     default:
       break
     }
+  }
+
+  private func handleRecognitionStarted() {
+    let flush = withStateLock { () -> SpeechmaticsPreStartAudioFlush in
+      self.recognitionStarted = true
+      let frames = self.preStartAudioBuffer
+      self.preStartAudioBuffer = []
+      let continuation = self.recognitionStartedContinuation
+      self.recognitionStartedContinuation = nil
+      return SpeechmaticsPreStartAudioFlush(
+        task: self.webSocketTask,
+        frames: frames,
+        continuation: continuation
+      )
+    }
+    if let task = flush.task, task.state == .running, !flush.frames.isEmpty {
+      logger.info("Flushing \(flush.frames.count) pre-start audio frames to Speechmatics")
+      for frame in flush.frames {
+        sendAudioFrame(frame, on: task)
+      }
+    }
+    flush.continuation?.resume(returning: true)
   }
 
   private static func segments(from results: [SpeechmaticsResult]) -> [TranscriptionSegment] {

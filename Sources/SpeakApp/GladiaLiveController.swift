@@ -52,7 +52,7 @@ final class GladiaLiveController: NSObject, LiveTranscriptionController {
   // swiftlint:disable:next function_body_length
   func start() async throws {
     guard await ensurePermissions() else {
-      throw TranscriptionManagerError.permissionsMissing
+      throw TranscriptionManagerError.microphonePermissionMissing
     }
 
     let apiKey = try await gladiaAPIKey()

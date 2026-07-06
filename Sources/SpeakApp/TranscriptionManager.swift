@@ -22,6 +22,7 @@ enum TranscriptionManagerError: LocalizedError, Equatable {
   case liveSessionNotRunning
   case recognizerUnavailable
   case permissionsMissing
+  case microphonePermissionMissing
   case localLiveStreamingUnsupported
   case invalidLocalStreamingSource(String)
   case noUsableAudioInput
@@ -36,6 +37,8 @@ enum TranscriptionManagerError: LocalizedError, Equatable {
       return "The speech recogniser could not be configured for the selected locale."
     case .permissionsMissing:
       return "Required microphone or speech recognition permissions are missing."
+    case .microphonePermissionMissing:
+      return "Microphone permission is missing. Grant microphone access in System Settings and try again."
     case .localLiveStreamingUnsupported:
       return "Downloaded local models are offline-only in this prerelease. Use Local Batch after recording."
     case .invalidLocalStreamingSource(let sourceID):
@@ -742,7 +745,7 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
       throw TranscriptionManagerError.liveSessionAlreadyRunning
     }
     guard await permissionsManager.ensureGranted(.microphone).isGranted else {
-      throw TranscriptionManagerError.permissionsMissing
+      throw TranscriptionManagerError.microphonePermissionMissing
     }
 
     let modelID = currentModel ?? appSettings.localStreamingModelSource
@@ -1137,7 +1140,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
 
     guard await ensurePermissions() else {
       print("[DeepgramLiveController] ERROR: Permissions missing")
-      throw TranscriptionManagerError.permissionsMissing
+      throw TranscriptionManagerError.microphonePermissionMissing
     }
 
     let apiKey = try await deepgramAPIKey()
@@ -1598,7 +1601,7 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
   // swiftlint:disable:next function_body_length
   func start() async throws {
     guard await ensurePermissions() else {
-      throw TranscriptionManagerError.permissionsMissing
+      throw TranscriptionManagerError.microphonePermissionMissing
     }
 
     let apiKey = try await assemblyAIAPIKey()
@@ -2092,7 +2095,7 @@ final class ModulateLiveController: NSObject, LiveTranscriptionController {
 
   func start() async throws {
     guard await ensurePermissions() else {
-      throw TranscriptionManagerError.permissionsMissing
+      throw TranscriptionManagerError.microphonePermissionMissing
     }
 
     let apiKey = try await modulateAPIKey()
@@ -2598,7 +2601,7 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
   // swiftlint:disable:next function_body_length
   func start() async throws {
     guard await ensurePermissions() else {
-      throw TranscriptionManagerError.permissionsMissing
+      throw TranscriptionManagerError.microphonePermissionMissing
     }
 
     let apiKey = try await elevenLabsAPIKey()
@@ -3001,7 +3004,7 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
   // swiftlint:disable:next function_body_length
   func start() async throws {
     guard await ensurePermissions() else {
-      throw TranscriptionManagerError.permissionsMissing
+      throw TranscriptionManagerError.microphonePermissionMissing
     }
 
     let apiKey = try await sonioxAPIKey()
@@ -3433,7 +3436,7 @@ final class CartesiaLiveController: NSObject, LiveTranscriptionController {
   // swiftlint:disable:next function_body_length
   func start() async throws {
     guard await ensurePermissions() else {
-      throw TranscriptionManagerError.permissionsMissing
+      throw TranscriptionManagerError.microphonePermissionMissing
     }
 
     let apiKey = try await cartesiaAPIKey()

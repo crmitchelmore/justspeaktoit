@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import AppKit
 import AVFoundation
 import SpeakHotKeys
@@ -7,6 +8,7 @@ import SwiftUI
 
 enum OnboardingProvider: String, CaseIterable, Identifiable {
     case deepgram
+    case soniox
     case openai
     case openrouter
     case revai
@@ -16,6 +18,7 @@ enum OnboardingProvider: String, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .deepgram: return "Deepgram"
+        case .soniox: return "Soniox"
         case .openai: return "OpenAI Whisper"
         case .openrouter: return "OpenRouter"
         case .revai: return "Rev.ai"
@@ -25,6 +28,7 @@ enum OnboardingProvider: String, CaseIterable, Identifiable {
     var signupURL: URL {
         switch self {
         case .deepgram: return URL(string: "https://console.deepgram.com/signup")!
+        case .soniox: return URL(string: "https://console.soniox.com")!
         case .openai: return URL(string: "https://platform.openai.com/signup")!
         case .openrouter: return URL(string: "https://openrouter.ai/keys")!
         case .revai: return URL(string: "https://www.rev.ai/auth/signup")!
@@ -34,6 +38,7 @@ enum OnboardingProvider: String, CaseIterable, Identifiable {
     var apiKeyInstructions: String {
         switch self {
         case .deepgram: return "Go to Settings → API Keys → Create Key"
+        case .soniox: return "Go to Dashboard → API Keys → New API Key"
         case .openai: return "Go to API Keys → Create new secret key"
         case .openrouter: return "Go to Keys → Create Key"
         case .revai: return "Go to Access Token → Generate Token"
@@ -43,6 +48,7 @@ enum OnboardingProvider: String, CaseIterable, Identifiable {
     var freeCredits: String? {
         switch self {
         case .deepgram: return "Free tier includes $200 credit"
+        case .soniox: return "Free tier includes $200 credit, real-time streaming STT"
         case .openai: return nil
         case .openrouter: return "Pay-as-you-go with many model options"
         case .revai: return "Free tier includes 5 hours"
@@ -50,6 +56,29 @@ enum OnboardingProvider: String, CaseIterable, Identifiable {
     }
     
     var keychainIdentifier: String { "\(rawValue).apiKey" }
+
+    /// The live streaming transcription model this provider maps to, if any.
+    /// Selecting such a provider during onboarding switches the app to remote
+    /// streaming so the freshly-added key is used immediately.
+    var defaultLiveTranscriptionModel: String? {
+        switch self {
+        case .deepgram: return "deepgram/nova-3-streaming"
+        case .soniox: return "soniox/stt-rt-v5-streaming"
+        case .openai, .openrouter, .revai: return nil
+        }
+    }
+
+    /// Short label used in the segmented onboarding picker where horizontal
+    /// space is tight; `displayName` is used everywhere else.
+    var pickerLabel: String {
+        switch self {
+        case .deepgram: return "Deepgram"
+        case .soniox: return "Soniox"
+        case .openai: return "OpenAI"
+        case .openrouter: return "OpenRouter"
+        case .revai: return "Rev.ai"
+        }
+    }
 }
 
 // MARK: - Onboarding State
@@ -97,6 +126,9 @@ final class OnboardingState: ObservableObject {
     func refreshPermissions() {
         permissionsGranted = []
         for perm in [PermissionType.microphone, .accessibility, .inputMonitoring] {
+            // Force a fresh computation; cached statuses go stale when the user
+            // toggles a permission in System Settings (the OS never notifies us).
+            permissionsManager.refresh(perm)
             if permissionsManager.status(for: perm).isGranted {
                 permissionsGranted.insert(perm)
             }
@@ -108,6 +140,7 @@ final class OnboardingState: ObservableObject {
         permissionsGranted.contains(.accessibility)
     }
     
+    // swiftlint:disable:next cyclomatic_complexity function_body_length
     func validateAPIKey() async -> Bool {
         guard !apiKey.isEmpty else {
             validationError = "Please enter an API key"
@@ -135,6 +168,25 @@ final class OnboardingState: ObservableObject {
                     }
                 }
                 
+            case .soniox:
+                let url = URL(string: "https://api.soniox.com/v1/auth/temporary-api-key")!
+                var request = URLRequest(url: url)
+                request.httpMethod = "POST"
+                request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.httpBody = Data("{\"usage_type\":\"transcribe_websocket\",\"expires_in_seconds\":60}".utf8)
+                let (_, response) = try await URLSession.shared.data(for: request)
+                if let httpResponse = response as? HTTPURLResponse {
+                    if (200...299).contains(httpResponse.statusCode) {
+                        isValidating = false
+                        return true
+                    } else if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
+                        validationError = "Invalid API key"
+                    } else {
+                        validationError = "Unexpected response (\(httpResponse.statusCode))"
+                    }
+                }
+
             case .openai:
                 let url = URL(string: "https://api.openai.com/v1/models")!
                 var request = URLRequest(url: url)
@@ -195,6 +247,21 @@ final class OnboardingState: ObservableObject {
         try await secureStorage.storeSecret(apiKey, identifier: selectedProvider.keychainIdentifier)
         // Register the key identifier so it shows up in settings
         settings.registerAPIKeyIdentifier(selectedProvider.keychainIdentifier)
+
+        // If the chosen provider offers live streaming, make it the active
+        // transcription engine straight away so the key the user just added is
+        // actually used. Deepgram (and other streaming providers) default to
+        // no post-processing for the fastest, cleanest live experience.
+        //
+        // Only switch when the user is still on the untouched default (Apple
+        // on-device speech) so re-running onboarding never clobbers a returning
+        // user's deliberately configured model / batch / post-processing setup.
+        if let liveModel = selectedProvider.defaultLiveTranscriptionModel,
+           settings.liveTranscriptionModel == "apple/local/SFSpeechRecognizer" {
+            settings.transcriptionMode = .liveNative
+            settings.liveTranscriptionModel = liveModel
+            settings.postProcessingEnabled = false
+        }
     }
 }
 
@@ -448,6 +515,10 @@ struct PermissionsStepView: View {
     @ObservedObject var state: OnboardingState
     @State private var showAccessibilityHelper = false
     @State private var accessibilityAttempted = false
+    // Accessibility and Input Monitoring are granted in System Settings and the
+    // OS never notifies us, so poll while this step is on screen to reflect the
+    // grants live instead of forcing an app restart.
+    private let permissionPollTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     
     var body: some View {
         VStack(spacing: 20) {
@@ -537,6 +608,9 @@ struct PermissionsStepView: View {
                 .buttonStyle(.plain)
                 .foregroundColor(.accentColor)
             }
+        }
+        .onReceive(permissionPollTimer) { _ in
+            state.refreshPermissions()
         }
     }
 }
@@ -681,7 +755,7 @@ struct APIKeyStepView: View {
                     
                     Picker("Provider", selection: $state.selectedProvider) {
                         ForEach(OnboardingProvider.allCases) { provider in
-                            Text(provider.displayName).tag(provider)
+                            Text(provider.pickerLabel).tag(provider)
                         }
                     }
                     .pickerStyle(.segmented)

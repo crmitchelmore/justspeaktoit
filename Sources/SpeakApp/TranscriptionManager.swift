@@ -1359,9 +1359,10 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
 
 private extension DeepgramLiveController {
   func ensurePermissions() async -> Bool {
+    // Remote streaming providers only need microphone access; speech recognition
+    // permission is exclusive to the on-device Apple transcriber.
     let microphone = await permissionsManager.ensureGranted(.microphone)
-    let speech = await permissionsManager.ensureGranted(.speechRecognition)
-    return microphone.isGranted && speech.isGranted
+    return microphone.isGranted
   }
 
   func deepgramAPIKey() async throws -> String {
@@ -2015,9 +2016,10 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
   }
 
   private func ensurePermissions() async -> Bool {
+    // Remote streaming providers only need microphone access; speech recognition
+    // permission is exclusive to the on-device Apple transcriber.
     let microphone = await permissionsManager.ensureGranted(.microphone)
-    let speech = await permissionsManager.ensureGranted(.speechRecognition)
-    return microphone.isGranted && speech.isGranted
+    return microphone.isGranted
   }
 
   private func assemblyAIAPIKey() async throws -> String {
@@ -2363,9 +2365,10 @@ final class ModulateLiveController: NSObject, LiveTranscriptionController {
   }
 
   private func ensurePermissions() async -> Bool {
+    // Remote streaming providers only need microphone access; speech recognition
+    // permission is exclusive to the on-device Apple transcriber.
     let microphone = await permissionsManager.ensureGranted(.microphone)
-    let speech = await permissionsManager.ensureGranted(.speechRecognition)
-    return microphone.isGranted && speech.isGranted
+    return microphone.isGranted
   }
 
   private func modulateAPIKey() async throws -> String {
@@ -2865,9 +2868,10 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
 
 private extension ElevenLabsLiveController {
   func ensurePermissions() async -> Bool {
+    // Remote streaming providers only need microphone access; speech recognition
+    // permission is exclusive to the on-device Apple transcriber.
     let microphone = await permissionsManager.ensureGranted(.microphone)
-    let speech = await permissionsManager.ensureGranted(.speechRecognition)
-    return microphone.isGranted && speech.isGranted
+    return microphone.isGranted
   }
 
   func elevenLabsAPIKey() async throws -> String {
@@ -3309,9 +3313,10 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
 
 private extension SonioxLiveController {
   func ensurePermissions() async -> Bool {
+    // Remote streaming providers only need microphone access; speech recognition
+    // permission is exclusive to the on-device Apple transcriber.
     let microphone = await permissionsManager.ensureGranted(.microphone)
-    let speech = await permissionsManager.ensureGranted(.speechRecognition)
-    return microphone.isGranted && speech.isGranted
+    return microphone.isGranted
   }
 
   func sonioxAPIKey() async throws -> String {

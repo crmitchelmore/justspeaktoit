@@ -515,10 +515,6 @@ struct PermissionsStepView: View {
     @ObservedObject var state: OnboardingState
     @State private var showAccessibilityHelper = false
     @State private var accessibilityAttempted = false
-    // Accessibility and Input Monitoring are granted in System Settings and the
-    // OS never notifies us, so poll while this step is on screen to reflect the
-    // grants live instead of forcing an app restart.
-    private let permissionPollTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     
     var body: some View {
         VStack(spacing: 20) {
@@ -609,8 +605,15 @@ struct PermissionsStepView: View {
                 .foregroundColor(.accentColor)
             }
         }
-        .onReceive(permissionPollTimer) { _ in
-            state.refreshPermissions()
+        .task {
+            // Accessibility and Input Monitoring are granted in System Settings
+            // and the OS never notifies us, so poll while this step is on screen
+            // to reflect the grants live instead of forcing an app restart. The
+            // loop is automatically cancelled when the view disappears.
+            while !Task.isCancelled {
+                state.refreshPermissions()
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
         }
     }
 }

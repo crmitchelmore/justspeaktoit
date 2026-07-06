@@ -69,7 +69,7 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
   // swiftlint:disable:next function_body_length
   func start() async throws {
     guard await ensurePermissions() else {
-      throw TranscriptionManagerError.permissionsMissing
+      throw TranscriptionManagerError.microphonePermissionMissing
     }
 
     let apiKey = try await openAIAPIKey()
@@ -330,9 +330,10 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
   }
 
   private func ensurePermissions() async -> Bool {
+    // Remote streaming providers only need microphone access; speech recognition
+    // permission is exclusive to the on-device Apple transcriber.
     let microphone = await permissionsManager.request(.microphone)
-    let speech = await permissionsManager.request(.speechRecognition)
-    return microphone.isGranted && speech.isGranted
+    return microphone.isGranted
   }
 
   private func trimmedKeytermsPrompt() -> String? {

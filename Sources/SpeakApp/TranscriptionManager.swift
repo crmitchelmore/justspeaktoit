@@ -22,6 +22,7 @@ enum TranscriptionManagerError: LocalizedError, Equatable {
   case liveSessionNotRunning
   case recognizerUnavailable
   case permissionsMissing
+  case microphonePermissionMissing
   case localLiveStreamingUnsupported
   case invalidLocalStreamingSource(String)
   case noUsableAudioInput
@@ -36,6 +37,8 @@ enum TranscriptionManagerError: LocalizedError, Equatable {
       return "The speech recogniser could not be configured for the selected locale."
     case .permissionsMissing:
       return "Required microphone or speech recognition permissions are missing."
+    case .microphonePermissionMissing:
+      return "Microphone permission is missing. Grant microphone access in System Settings and try again."
     case .localLiveStreamingUnsupported:
       return "Downloaded local models are offline-only in this prerelease. Use Local Batch after recording."
     case .invalidLocalStreamingSource(let sourceID):
@@ -742,7 +745,7 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
       throw TranscriptionManagerError.liveSessionAlreadyRunning
     }
     guard await permissionsManager.ensureGranted(.microphone).isGranted else {
-      throw TranscriptionManagerError.permissionsMissing
+      throw TranscriptionManagerError.microphonePermissionMissing
     }
 
     let modelID = currentModel ?? appSettings.localStreamingModelSource
@@ -1137,7 +1140,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
 
     guard await ensurePermissions() else {
       print("[DeepgramLiveController] ERROR: Permissions missing")
-      throw TranscriptionManagerError.permissionsMissing
+      throw TranscriptionManagerError.microphonePermissionMissing
     }
 
     let apiKey = try await deepgramAPIKey()
@@ -1359,9 +1362,10 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
 
 private extension DeepgramLiveController {
   func ensurePermissions() async -> Bool {
+    // Remote streaming providers only need microphone access; speech recognition
+    // permission is exclusive to the on-device Apple transcriber.
     let microphone = await permissionsManager.ensureGranted(.microphone)
-    let speech = await permissionsManager.ensureGranted(.speechRecognition)
-    return microphone.isGranted && speech.isGranted
+    return microphone.isGranted
   }
 
   func deepgramAPIKey() async throws -> String {
@@ -1597,7 +1601,7 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
   // swiftlint:disable:next function_body_length
   func start() async throws {
     guard await ensurePermissions() else {
-      throw TranscriptionManagerError.permissionsMissing
+      throw TranscriptionManagerError.microphonePermissionMissing
     }
 
     let apiKey = try await assemblyAIAPIKey()
@@ -2015,9 +2019,10 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
   }
 
   private func ensurePermissions() async -> Bool {
+    // Remote streaming providers only need microphone access; speech recognition
+    // permission is exclusive to the on-device Apple transcriber.
     let microphone = await permissionsManager.ensureGranted(.microphone)
-    let speech = await permissionsManager.ensureGranted(.speechRecognition)
-    return microphone.isGranted && speech.isGranted
+    return microphone.isGranted
   }
 
   private func assemblyAIAPIKey() async throws -> String {
@@ -2090,7 +2095,7 @@ final class ModulateLiveController: NSObject, LiveTranscriptionController {
 
   func start() async throws {
     guard await ensurePermissions() else {
-      throw TranscriptionManagerError.permissionsMissing
+      throw TranscriptionManagerError.microphonePermissionMissing
     }
 
     let apiKey = try await modulateAPIKey()
@@ -2363,9 +2368,10 @@ final class ModulateLiveController: NSObject, LiveTranscriptionController {
   }
 
   private func ensurePermissions() async -> Bool {
+    // Remote streaming providers only need microphone access; speech recognition
+    // permission is exclusive to the on-device Apple transcriber.
     let microphone = await permissionsManager.ensureGranted(.microphone)
-    let speech = await permissionsManager.ensureGranted(.speechRecognition)
-    return microphone.isGranted && speech.isGranted
+    return microphone.isGranted
   }
 
   private func modulateAPIKey() async throws -> String {
@@ -2595,7 +2601,7 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
   // swiftlint:disable:next function_body_length
   func start() async throws {
     guard await ensurePermissions() else {
-      throw TranscriptionManagerError.permissionsMissing
+      throw TranscriptionManagerError.microphonePermissionMissing
     }
 
     let apiKey = try await elevenLabsAPIKey()
@@ -2865,9 +2871,10 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
 
 private extension ElevenLabsLiveController {
   func ensurePermissions() async -> Bool {
+    // Remote streaming providers only need microphone access; speech recognition
+    // permission is exclusive to the on-device Apple transcriber.
     let microphone = await permissionsManager.ensureGranted(.microphone)
-    let speech = await permissionsManager.ensureGranted(.speechRecognition)
-    return microphone.isGranted && speech.isGranted
+    return microphone.isGranted
   }
 
   func elevenLabsAPIKey() async throws -> String {
@@ -2997,7 +3004,7 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
   // swiftlint:disable:next function_body_length
   func start() async throws {
     guard await ensurePermissions() else {
-      throw TranscriptionManagerError.permissionsMissing
+      throw TranscriptionManagerError.microphonePermissionMissing
     }
 
     let apiKey = try await sonioxAPIKey()
@@ -3309,9 +3316,10 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
 
 private extension SonioxLiveController {
   func ensurePermissions() async -> Bool {
+    // Remote streaming providers only need microphone access; speech recognition
+    // permission is exclusive to the on-device Apple transcriber.
     let microphone = await permissionsManager.ensureGranted(.microphone)
-    let speech = await permissionsManager.ensureGranted(.speechRecognition)
-    return microphone.isGranted && speech.isGranted
+    return microphone.isGranted
   }
 
   func sonioxAPIKey() async throws -> String {
@@ -3428,7 +3436,7 @@ final class CartesiaLiveController: NSObject, LiveTranscriptionController {
   // swiftlint:disable:next function_body_length
   func start() async throws {
     guard await ensurePermissions() else {
-      throw TranscriptionManagerError.permissionsMissing
+      throw TranscriptionManagerError.microphonePermissionMissing
     }
 
     let apiKey = try await cartesiaAPIKey()

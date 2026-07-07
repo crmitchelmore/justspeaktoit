@@ -105,6 +105,11 @@ let project = Project(
                 "NSMicrophoneUsageDescription": "Just Speak to It needs microphone access for voice transcription.",
                 "NSSpeechRecognitionUsageDescription": "Just Speak to It uses speech recognition to transcribe your voice.",
                 "NSCameraUsageDescription": "Just Speak to It does not use the camera, but a linked library requires this declaration.",
+                // Export compliance: the app uses only standard, published encryption
+                // (AES-GCM and PBKDF2 via CryptoKit) to protect the user's own API keys
+                // for end-to-end encrypted iCloud/CloudKit key sync, alongside OS-provided
+                // HTTPS and Keychain. This qualifies for the U.S. EAR Category 5 Part 2
+                // export exemption, so the app uses no *non-exempt* encryption.
                 "ITSAppUsesNonExemptEncryption": false,
                 "NSSupportsLiveActivities": true,
                 "UIBackgroundModes": ["audio"],

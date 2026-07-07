@@ -107,6 +107,10 @@ public final class AppSettings: ObservableObject {
         didSet { persistSecret(assemblyAIAPIKey, identifier: Self.assemblyAIKeyID) }
     }
 
+    @Published public var gladiaAPIKey: String {
+        didSet { persistSecret(gladiaAPIKey, identifier: Self.gladiaKeyID) }
+    }
+
     // MARK: - Canonical secure storage for API keys (SpeakCore)
     //
     // Every API key is stored through SpeakCore's SecureStorage using the same
@@ -126,6 +130,7 @@ public final class AppSettings: ObservableObject {
     static let sonioxKeyID = "soniox.apiKey"
     static let modulateKeyID = "modulate.apiKey"
     static let assemblyAIKeyID = "assemblyai.apiKey"
+    static let gladiaKeyID = "gladia.apiKey"
 
     /// Shared keychain access group declared in `SpeakiOS.entitlements`
     /// (`$(AppIdentifierPrefix)com.justspeaktoit.shared`). Only used when the
@@ -257,6 +262,7 @@ public final class AppSettings: ObservableObject {
         self.sonioxAPIKey = ""
         self.modulateAPIKey = ""
         self.assemblyAIAPIKey = ""
+        self.gladiaAPIKey = ""
         self.liveActivitiesEnabled = liveActivities
         self.autoStartRecording = autoStart
         self.hardwareTriggerDestination = hardwareDest
@@ -281,6 +287,7 @@ public final class AppSettings: ObservableObject {
             self.modulateAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.modulateKeyID)) ?? ""
             self.assemblyAIAPIKey =
                 (try? await Self.credentialStorage.secret(identifier: Self.assemblyAIKeyID)) ?? ""
+            self.gladiaAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.gladiaKeyID)) ?? ""
             self.configureDefaultProviderIfNeeded()
         }
     }
@@ -319,6 +326,7 @@ public final class AppSettings: ObservableObject {
     public var hasSonioxKey: Bool { !sonioxAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasModulateKey: Bool { !modulateAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasAssemblyAIKey: Bool { !assemblyAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    public var hasGladiaKey: Bool { !gladiaAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     /// Returns the stored API key for a resolved live-transcription route, used
     /// by the generic shared-client recording path.
@@ -331,6 +339,7 @@ public final class AppSettings: ObservableObject {
         case Self.sonioxKeyID: return sonioxAPIKey
         case Self.modulateKeyID: return modulateAPIKey
         case Self.assemblyAIKeyID: return assemblyAIAPIKey
+        case Self.gladiaKeyID: return gladiaAPIKey
         default: return ""
         }
     }
@@ -920,6 +929,7 @@ struct APIKeysView: View {
     @State private var sonioxKey = ""
     @State private var modulateKey = ""
     @State private var assemblyAIKey = ""
+    @State private var gladiaKey = ""
     @State private var isValidating = false
     @State private var validationMessage: String?
     @State private var showingValidation = false
@@ -1109,6 +1119,29 @@ struct APIKeysView: View {
                 }
                 .font(.caption)
             }
+
+            Section {
+                SecureField("API Key", text: $gladiaKey)
+                    .textContentType(.password)
+                    .autocorrectionDisabled()
+
+                if settings.hasGladiaKey && gladiaKey.isEmpty {
+                    Button("Clear Stored Key", role: .destructive) {
+                        settings.gladiaAPIKey = ""
+                    }
+                }
+            } header: {
+                Label("Gladia", systemImage: "waveform.badge.exclamationmark")
+            } footer: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Get your API key from gladia.io. Used by Solaria streaming.")
+                    if settings.hasGladiaKey {
+                        Text("✓ API key is stored")
+                            .foregroundStyle(.green)
+                    }
+                }
+                .font(.caption)
+            }
         }
         .navigationTitle("API Keys")
         .toolbar {
@@ -1128,6 +1161,7 @@ struct APIKeysView: View {
                             && sonioxKey.isEmpty
                             && modulateKey.isEmpty
                             && assemblyAIKey.isEmpty
+                            && gladiaKey.isEmpty
                     )
                 }
             }
@@ -1216,6 +1250,13 @@ struct APIKeysView: View {
                 settings.assemblyAIAPIKey = assemblyAIKey
                 assemblyAIKey = ""
                 messages.append("✓ AssemblyAI key saved")
+            }
+
+            // Save Gladia key (no cheap validation endpoint)
+            if !gladiaKey.isEmpty {
+                settings.gladiaAPIKey = gladiaKey
+                gladiaKey = ""
+                messages.append("✓ Gladia key saved")
             }
 
             isValidating = false

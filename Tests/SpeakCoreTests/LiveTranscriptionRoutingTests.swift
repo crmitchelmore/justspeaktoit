@@ -76,46 +76,44 @@ final class LiveTranscriptionRoutingTests: XCTestCase {
 
     // MARK: - iOS availability
 
-    func testIsSupportedOnIOS_reflectsWiredProviders() {
-        // Assert
-        XCTAssertTrue(LiveTranscriptionProviderID.deepgram.isSupportedOnIOS)
-        XCTAssertTrue(LiveTranscriptionProviderID.elevenlabs.isSupportedOnIOS)
-        XCTAssertTrue(LiveTranscriptionProviderID.openai.isSupportedOnIOS)
-        XCTAssertTrue(LiveTranscriptionProviderID.apple.isSupportedOnIOS)
-        XCTAssertTrue(LiveTranscriptionProviderID.cartesia.isSupportedOnIOS)
-        XCTAssertTrue(LiveTranscriptionProviderID.soniox.isSupportedOnIOS)
-        XCTAssertTrue(LiveTranscriptionProviderID.modulate.isSupportedOnIOS)
-        XCTAssertTrue(LiveTranscriptionProviderID.assemblyai.isSupportedOnIOS)
-        XCTAssertFalse(LiveTranscriptionProviderID.gladia.isSupportedOnIOS)
+    func testIsSupportedOnIOS_allCatalogueProvidersWired() {
+        // Assert: every provider the catalogue exposes now runs on iOS.
+        for provider in LiveTranscriptionProviderID.allCases {
+            XCTAssertTrue(provider.isSupportedOnIOS, "\(provider) should be iOS-supported")
+        }
     }
 
     // MARK: - Factory
 
-    func testFactory_buildsSharedClientForPortedProviders() {
+    func testFactory_buildsSharedClientForShippedProviders() {
         // Arrange
-        let deepgram = LiveTranscriptionRouting.route(for: "deepgram/nova-3-streaming")!
-        let elevenlabs = LiveTranscriptionRouting.route(for: "elevenlabs/scribe-v2-streaming")!
-        let cartesia = LiveTranscriptionRouting.route(for: "cartesia/ink-2-streaming")!
+        let shared = [
+            "deepgram/nova-3-streaming",
+            "elevenlabs/scribe-v2-streaming",
+            "cartesia/ink-2-streaming",
+            "soniox/stt-rt-v5-streaming",
+            "modulate/velma-2-stt-streaming",
+            "assemblyai/u3-rt-pro-streaming",
+            "gladia/solaria-1-streaming"
+        ]
 
         // Act / Assert
-        XCTAssertNotNil(
-            LiveTranscriptionClientFactory.makeClient(for: deepgram, apiKey: "k", language: nil)
-        )
-        XCTAssertNotNil(
-            LiveTranscriptionClientFactory.makeClient(for: elevenlabs, apiKey: "k", language: nil)
-        )
-        XCTAssertNotNil(
-            LiveTranscriptionClientFactory.makeClient(for: cartesia, apiKey: "k", language: nil)
-        )
+        for id in shared {
+            let route = LiveTranscriptionRouting.route(for: id)!
+            XCTAssertNotNil(
+                LiveTranscriptionClientFactory.makeClient(for: route, apiKey: "k", language: nil),
+                "expected a shared client for \(id)"
+            )
+        }
     }
 
-    func testFactory_returnsNilForUnportedProvider() {
-        // Arrange
-        let gladia = LiveTranscriptionRouting.route(for: "gladia/solaria-1-streaming")!
+    func testFactory_returnsNilForNativeProviders() {
+        // Apple (on-device) and OpenAI (platform-native transcriber) have no
+        // shared factory client.
+        let apple = LiveTranscriptionRouting.route(for: "apple/local/SFSpeechRecognizer")!
+        let openai = LiveTranscriptionRouting.route(for: "openai/gpt-realtime-whisper-streaming")!
 
-        // Act / Assert
-        XCTAssertNil(
-            LiveTranscriptionClientFactory.makeClient(for: gladia, apiKey: "k", language: nil)
-        )
+        XCTAssertNil(LiveTranscriptionClientFactory.makeClient(for: apple, apiKey: "k", language: nil))
+        XCTAssertNil(LiveTranscriptionClientFactory.makeClient(for: openai, apiKey: "k", language: nil))
     }
 }

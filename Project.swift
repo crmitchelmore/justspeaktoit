@@ -126,7 +126,8 @@ let project = Project(
             sources: ["SpeakiOSApp/**"],
             resources: [
                 "SpeakiOSApp/Assets.xcassets",
-                "SpeakiOSApp/Resources/LaunchScreen.storyboard"
+                "SpeakiOSApp/Resources/LaunchScreen.storyboard",
+                "SpeakiOSApp/PrivacyInfo.xcprivacy"
             ],
             entitlements: .file(path: "SpeakiOS.entitlements"),
             dependencies: [

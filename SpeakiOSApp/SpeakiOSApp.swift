@@ -78,11 +78,13 @@ struct MainTabView: View {
             }
             .tag(0)
 
-            OpenClawTabView()
-                .tabItem {
-                    Label("OpenClaw", systemImage: "bolt.horizontal.icloud.fill")
-                }
-                .tag(1)
+            if FeatureFlags.openClawTabEnabled {
+                OpenClawTabView()
+                    .tabItem {
+                        Label("OpenClaw", systemImage: "bolt.horizontal.icloud.fill")
+                    }
+                    .tag(1)
+            }
         }
     }
 }

@@ -24,10 +24,7 @@ struct MainView: View {
       selection = item
     }
     .task {
-      environment.installStatusBarIfNeeded {
-        NSApp.activate(ignoringOtherApps: true)
-        NSApp.windows.first?.makeKeyAndOrderFront(nil)
-      }
+      environment.installStatusBarIfNeeded()
     }
     .alert(
       environment.main.missingLiveAPIKeyAlert?.title ?? "API key required",

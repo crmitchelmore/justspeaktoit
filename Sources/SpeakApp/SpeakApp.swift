@@ -18,7 +18,7 @@ struct SpeakApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("Just Speak to It") {
+        WindowGroup("Just Speak to It", id: "main") {
             Group {
                 if let environment = environmentHolder.environment {
                     if hasCompletedOnboarding {
@@ -76,6 +76,11 @@ struct SpeakApp: App {
             }
             .tint(.brandAccent)
             .preferredColorScheme(environmentHolder.environment?.settings.appearance.colorScheme)
+            .background {
+                if let environment = environmentHolder.environment {
+                    MainWindowReopenBinder(environment: environment)
+                }
+            }
         }
         .defaultSize(width: 1080, height: 720)
         .commands {
@@ -93,7 +98,12 @@ final class EnvironmentHolder: ObservableObject {
 
     func bootstrap() {
         guard environment == nil else { return }
-        environment = WireUp.bootstrap()
+        let env = WireUp.bootstrap()
+        environment = env
+        // Install the status bar access point immediately, independent of any
+        // window, so the app is always reachable — even when launched straight
+        // into menu-bar-only mode with no window on screen.
+        env.installStatusBarIfNeeded()
     }
 }
 

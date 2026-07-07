@@ -95,11 +95,16 @@ final class AppEnvironment: ObservableObject {
   /// Alias for permissions manager (for API consistency)
   var permissionsManager: PermissionsManager { permissions }
 
+  /// Installs the status bar controller if needed and wires it to react to
+  /// visibility settings. The `openMainWindow` closure is stored for later use,
+  /// so ensure it captures any strongly-held objects weakly to avoid a retain
+  /// cycle.
   func installStatusBarIfNeeded(openMainWindow: @escaping () -> Void) {
     self.openMainWindow = openMainWindow
     if statusBarVisibilityObserver == nil {
       statusBarVisibilityObserver = settings.$appVisibility
-        .combineLatest(settings.$showStatusBarIconInDockOnly)
+        .removeDuplicates()
+        .combineLatest(settings.$showStatusBarIconInDockOnly.removeDuplicates())
         .receive(on: RunLoop.main)
         .sink { [weak self] _, _ in
           self?.updateStatusBarVisibility()

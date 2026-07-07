@@ -30,6 +30,13 @@ final class StatusBarController {
     observeChanges()
   }
 
+  deinit {
+    let statusItem = self.statusItem
+    Task { @MainActor in
+      NSStatusBar.system.removeStatusItem(statusItem)
+    }
+  }
+
   /// Removes the status bar icon from the system menu bar and stops observing.
   func tearDown() {
     NSStatusBar.system.removeStatusItem(statusItem)
@@ -64,7 +71,7 @@ final class StatusBarController {
       .receive(on: RunLoop.main)
       .sink { [weak self] _ in
         guard let self else { return }
-        updateButton(for: mainManager.state)
+        self.updateButton(for: self.mainManager.state)
       }
       .store(in: &cancellables)
   }

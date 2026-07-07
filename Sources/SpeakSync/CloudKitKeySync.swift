@@ -313,12 +313,15 @@ public final class CloudKitKeySync: ObservableObject {
     private static let localDerivedKeyIdentifier = "cloudkitKeySync.derivedKey"
     private static let localUpdatedPrefix = "speak.keysync.localUpdatedAt."
     private static let subscriptionID = "encrypted-secret-changes"
+    private static let localUploadDebounceNanoseconds: UInt64 = 750_000_000
 
     private let log = Logger(subsystem: "com.justspeaktoit", category: "CloudKitKeySync")
     private var secureStorage: SecureStorage
     private var symmetricKey: SymmetricKey?
     private var observer: NSObjectProtocol?
     private var applyingRemoteIdentifiers = Set<String>()
+    private var pendingLocalUploadDates: [String: Date] = [:]
+    private var localUploadTasks: [String: Task<Void, Never>] = [:]
 
     private init(secureStorage: SecureStorage = SecureStorage()) {
         self.secureStorage = secureStorage
@@ -372,6 +375,9 @@ public final class CloudKitKeySync: ObservableObject {
     public func disable() async {
         UserDefaults.standard.set(false, forKey: Self.enabledKey)
         try? await secureStorage.removeSecret(identifier: Self.localDerivedKeyIdentifier)
+        localUploadTasks.values.forEach { $0.cancel() }
+        localUploadTasks.removeAll()
+        pendingLocalUploadDates.removeAll()
         symmetricKey = nil
         status.isEnabled = false
         status.lastErrorDescription = nil
@@ -419,15 +425,61 @@ public final class CloudKitKeySync: ObservableObject {
 
             Task { @MainActor in
                 guard !self.applyingRemoteIdentifiers.contains(identifier),
+                      self.status.isEnabled else {
+                    return
+                }
+                let updatedAt = notification
+                    .userInfo?[SecureStorage.NotificationUserInfoKey.updatedAt] as? Date ?? Date()
+                self.scheduleLocalUpload(identifier: identifier, updatedAt: updatedAt)
+            }
+        }
+    }
+
+    private func scheduleLocalUpload(identifier: String, updatedAt: Date) {
+        pendingLocalUploadDates[identifier] = updatedAt
+
+        guard localUploadTasks[identifier] == nil else { return }
+
+        localUploadTasks[identifier] = Task { @MainActor [weak self] in
+            defer {
+                self?.localUploadTasks[identifier] = nil
+            }
+
+            while !Task.isCancelled {
+                let observedUpdatedAt = self?.pendingLocalUploadDates[identifier]
+                do {
+                    try await Task.sleep(nanoseconds: Self.localUploadDebounceNanoseconds)
+                } catch {
+                    return
+                }
+
+                guard let self else { return }
+                guard self.pendingLocalUploadDates[identifier] == observedUpdatedAt else {
+                    continue
+                }
+                guard let updatedAt = self.pendingLocalUploadDates.removeValue(forKey: identifier),
                       self.status.isEnabled,
                       let key = self.symmetricKey,
                       let database = SyncConfiguration.privateDatabase else {
                     return
                 }
-                let updatedAt = notification
-                    .userInfo?[SecureStorage.NotificationUserInfoKey.updatedAt] as? Date ?? Date()
+
                 await self.saveLocalUpdatedAt(updatedAt, identifier: identifier)
-                try? await self.uploadSecret(identifier: identifier, updatedAt: updatedAt, database: database, key: key)
+
+                do {
+                    try await self.uploadSecret(
+                        identifier: identifier,
+                        updatedAt: updatedAt,
+                        database: database,
+                        key: key
+                    )
+                } catch {
+                    self.log.error("Debounced key upload failed for \(identifier): \(error.localizedDescription)")
+                }
+
+                if self.pendingLocalUploadDates[identifier] == nil {
+                    return
+                }
             }
         }
     }
@@ -500,13 +552,26 @@ public final class CloudKitKeySync: ObservableObject {
         let result = try await executeFetchOperation(database: database, changeToken: loadChangeToken())
 
         for record in result.records {
-            guard let secret = EncryptedSecretRecordMapper.secret(from: record) else { continue }
-            try await applyRemoteSecret(secret, key: key)
+            guard let secret = EncryptedSecretRecordMapper.secret(from: record) else {
+                log.warning("Skipping malformed encrypted secret record: \(record.recordID.recordName)")
+                continue
+            }
+
+            do {
+                try await applyRemoteSecret(secret, key: key)
+            } catch {
+                log.error("Skipping encrypted secret \(secret.identifier): \(error.localizedDescription)")
+            }
         }
 
         for recordID in result.deletedIDs {
             guard let identifier = identifierFromRecordName(recordID.recordName) else { continue }
-            try await applyRemoteDeletion(identifier: identifier, updatedAt: Date())
+
+            do {
+                try await applyRemoteDeletion(identifier: identifier, updatedAt: Date())
+            } catch {
+                log.error("Skipping encrypted secret deletion \(identifier): \(error.localizedDescription)")
+            }
         }
 
         if let token = result.serverChangeToken {

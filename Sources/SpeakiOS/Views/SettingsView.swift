@@ -67,6 +67,7 @@ public enum HardwareTriggerDestination: String, CaseIterable, Identifiable, Send
 /// Simple UserDefaults-based settings for iOS app.
 @MainActor
 public final class AppSettings: ObservableObject {
+    // swiftlint:disable:previous type_body_length
     public static let shared = AppSettings()
 
     @Published public var selectedModel: String {
@@ -228,7 +229,6 @@ public final class AppSettings: ObservableObject {
         PostProcessingModelInfo(id: "anthropic/claude-sonnet-4", name: "Claude Sonnet", description: "Best structure preservation"),
     ]
 
-    // swiftlint:disable:next function_body_length
     private init() {
         let selectedRaw = UserDefaults.standard.string(forKey: "selectedModel") ?? "apple/local/SFSpeechRecognizer"
         // Normalise to canonical catalogue ids. Keep any id already in the
@@ -1572,7 +1572,6 @@ struct CloudKitSyncSettingsSection: View {
         }
     }
 }
-
 
 struct CloudKitKeySyncSettingsSection: View {
     @ObservedObject private var keySync = CloudKitKeySync.shared

@@ -38,36 +38,60 @@ public final class AudioSessionManager: ObservableObject {
         let session = AVAudioSession.sharedInstance()
 
         do {
-            // Category: playAndRecord allows simultaneous input/output
-            // Mode: measurement for high-quality audio capture
-            // Options: allowBluetooth for headsets, defaultToSpeaker for better UX
-            try session.setCategory(
-                .playAndRecord,
-                mode: .measurement,
-                options: [.allowBluetooth, .defaultToSpeaker, .allowBluetoothA2DP]
-            )
+            // Preferred: an isolated (non-mixable) measurement session for the
+            // cleanest capture.
+            try configureCategory(on: session, mixWithOthers: false)
+            try await activate(session)
+        } catch let error as AudioSessionConfigurationError
+            where error.operation == .setActive
+            && AudioSessionActivation.isCannotInterruptOthers(error.underlying) {
+            // A `cannotInterruptOthers` rejection is how the system refuses a
+            // *non-mixable* session that tries to go active from the background
+            // (Action Button / Shortcuts / Siri). Retrying the identical
+            // activation cannot clear it, so re-configure as a *mixable* session
+            // and try once more — mixable sessions are allowed to activate from
+            // the background because they don't interrupt other audio.
+            try configureCategory(on: session, mixWithOthers: true)
+            try await activate(session)
+        }
+
+        lastError = nil
+        isConfigured = true
+        updateCurrentRoute()
+
+        let inputRoute = Self.routeDescription(ports: session.currentRoute.inputs)
+        print("[AudioSessionManager] Configured for recording: \(inputRoute)")
+    }
+
+    /// Recording options common to both the isolated and mixable configurations.
+    /// `allowBluetooth` enables headsets, `defaultToSpeaker` improves UX, and the
+    /// A2DP variant keeps high-quality Bluetooth output available.
+    private static let baseRecordingOptions: AVAudioSession.CategoryOptions =
+        [.allowBluetooth, .defaultToSpeaker, .allowBluetoothA2DP]
+
+    /// Applies the `playAndRecord`/`measurement` category, optionally adding
+    /// `mixWithOthers` so the session can activate from the background without
+    /// interrupting other audio.
+    private func configureCategory(on session: AVAudioSession, mixWithOthers: Bool) throws {
+        var options = Self.baseRecordingOptions
+        if mixWithOthers { options.insert(.mixWithOthers) }
+        do {
+            try session.setCategory(.playAndRecord, mode: .measurement, options: options)
         } catch {
             throw configurationFailure(.setCategory, error, session)
         }
+    }
 
+    /// Activates the session, retrying transient `cannotInterruptOthers` failures
+    /// with a short back-off before surfacing a diagnostic error.
+    private func activate(_ session: AVAudioSession) async throws {
         do {
-            // Activation intermittently fails with `cannotInterruptOthers` when a
-            // recording is triggered from the background (Action Button /
-            // Shortcuts / Siri) while another app is still releasing its audio
-            // session. Retry with a short back-off before surfacing the
-            // diagnostic error — the second attempt almost always succeeds.
             try await AudioSessionActivation.activate {
                 try session.setActive(true, options: .notifyOthersOnDeactivation)
             }
         } catch {
             throw configurationFailure(.setActive, error, session)
         }
-
-        isConfigured = true
-        updateCurrentRoute()
-
-        let inputRoute = Self.routeDescription(ports: session.currentRoute.inputs)
-        print("[AudioSessionManager] Configured for recording: \(inputRoute)")
     }
 
     /// Builds a diagnostic error for a failed configuration step, snapshotting

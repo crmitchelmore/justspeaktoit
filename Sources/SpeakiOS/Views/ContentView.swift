@@ -292,6 +292,9 @@ public struct ContentView: View {
     @ObservedObject private var backgroundService = TranscriptionRecordingService.shared
     @Environment(\.scenePhase) private var scenePhase
     @State private var showHistoryBadge = false
+    /// Completion time of the background transcript we last surfaced, so we only
+    /// surface a given session once and never clobber the user's in-app edits.
+    @State private var lastSurfacedAt: Date?
 
     public init() {}
 
@@ -425,6 +428,11 @@ public struct ContentView: View {
             .onAppear { refreshBackgroundState() }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { refreshBackgroundState() }
+            }
+            .onChange(of: backgroundService.isRunning) { wasRunning, isRunning in
+                // A live background session just finished — surface its result
+                // instead of leaving the screen blank.
+                if wasRunning && !isRunning { refreshBackgroundState() }
             }
             .sheet(isPresented: $showingPostProcessing) {
                 PostProcessingView(initialText: currentText) { processedResult in
@@ -591,7 +599,16 @@ public struct ContentView: View {
               !text.isEmpty else {
             return
         }
+
+        // Surface a given background transcript only once. Comparing completion
+        // timestamps stops repeated foreground cycles from overwriting the
+        // user's in-app edits with the same background result.
+        let completedAt = shared.lastCompletedAt
+        if let surfaced = lastSurfacedAt, let completedAt, completedAt <= surfaced {
+            return
+        }
         displayText = text
+        lastSurfacedAt = completedAt ?? Date()
     }
 
     /// Clears the History badge once the user opens History.

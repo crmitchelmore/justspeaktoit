@@ -19,12 +19,13 @@ var iosAppSettings: [String: SettingValue] = [
     "MARKETING_VERSION": "\(version)"
 ]
 
-// Build-time feature flag: hide the OpenClaw tab from the iOS app by generating
-// the project with `HIDE_OPENCLAW_TAB=1 tuist generate`. When unset (default),
-// the tab is shown. Gated in code via the `HIDE_OPENCLAW_TAB` Swift active
-// compilation condition (see SpeakiOSApp/FeatureFlags.swift).
-if ProcessInfo.processInfo.environment["HIDE_OPENCLAW_TAB"] != nil {
-    iosAppSettings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] = "$(inherited) HIDE_OPENCLAW_TAB"
+// Build-time feature flag: the OpenClaw tab is hidden by default (App Store
+// builds ship without it). Generate the project with `SHOW_OPENCLAW_TAB=1
+// tuist generate` to bring the tab back for internal testing. Gated in code via
+// the `SHOW_OPENCLAW_TAB` Swift active compilation condition (see
+// SpeakiOSApp/FeatureFlags.swift).
+if ProcessInfo.processInfo.environment["SHOW_OPENCLAW_TAB"] != nil {
+    iosAppSettings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] = "$(inherited) SHOW_OPENCLAW_TAB"
 }
 var iosWidgetSettings: [String: SettingValue] = [
     "CURRENT_PROJECT_VERSION": "1",

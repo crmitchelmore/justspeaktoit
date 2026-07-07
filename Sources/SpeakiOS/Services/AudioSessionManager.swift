@@ -39,18 +39,23 @@ public final class AudioSessionManager: ObservableObject {
 
         do {
             // Preferred: an isolated (non-mixable) measurement session for the
-            // cleanest capture.
+            // cleanest capture. Fail fast (no retry back-off): in the foreground
+            // this succeeds on the first attempt, and when it can't (a background
+            // trigger is *guaranteed* to be refused with cannotInterruptOthers)
+            // there is no point burning the retry budget before falling back to a
+            // mixable session below.
             try configureCategory(on: session, mixWithOthers: false)
-            try await activate(session)
+            try await activate(session, maxAttempts: 1)
         } catch let error as AudioSessionConfigurationError
             where error.operation == .setActive
             && AudioSessionActivation.isCannotInterruptOthers(error.underlying) {
             // A `cannotInterruptOthers` rejection is how the system refuses a
             // *non-mixable* session that tries to go active from the background
-            // (Action Button / Shortcuts / Siri). Retrying the identical
-            // activation cannot clear it, so re-configure as a *mixable* session
-            // and try once more — mixable sessions are allowed to activate from
-            // the background because they don't interrupt other audio.
+            // (Action Button / Shortcuts / Siri). Re-configure as a *mixable*
+            // session and try again — mixable sessions are allowed to activate
+            // from the background because they don't interrupt other audio. Keep
+            // the retry back-off here to ride out a transient owner still tearing
+            // its own session down.
             try configureCategory(on: session, mixWithOthers: true)
             try await activate(session)
         }
@@ -83,10 +88,15 @@ public final class AudioSessionManager: ObservableObject {
     }
 
     /// Activates the session, retrying transient `cannotInterruptOthers` failures
-    /// with a short back-off before surfacing a diagnostic error.
-    private func activate(_ session: AVAudioSession) async throws {
+    /// with a short back-off before surfacing a diagnostic error. `maxAttempts`
+    /// caps the retries: pass `1` to fail fast when a fallback path will handle
+    /// the failure.
+    private func activate(
+        _ session: AVAudioSession,
+        maxAttempts: Int = AudioSessionActivation.defaultMaxAttempts
+    ) async throws {
         do {
-            try await AudioSessionActivation.activate {
+            try await AudioSessionActivation.activate(maxAttempts: maxAttempts) {
                 try session.setActive(true, options: .notifyOthersOnDeactivation)
             }
         } catch {

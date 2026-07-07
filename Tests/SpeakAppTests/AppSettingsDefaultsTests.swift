@@ -177,6 +177,42 @@ final class AppSettingsDefaultsTests: XCTestCase {
         XCTAssertFalse(settings.runAtLogin)
     }
 
+    @MainActor
+    func testVisibilityDefaults_showStatusBarIconInDockOnlyIsTrue() {
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertTrue(settings.showStatusBarIconInDockOnly)
+    }
+
+    @MainActor
+    func testVisibilityDefaults_compactStatusBarIconIsFalse() {
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertFalse(settings.compactStatusBarIcon)
+    }
+
+    @MainActor
+    func testShouldShowStatusBarIcon_dockOnlyFollowsToggle() {
+        let settings = AppSettings(defaults: defaults)
+        settings.appVisibility = .dockOnly
+
+        XCTAssertTrue(settings.shouldShowStatusBarIcon)
+
+        settings.showStatusBarIconInDockOnly = false
+
+        XCTAssertFalse(settings.shouldShowStatusBarIcon)
+    }
+
+    @MainActor
+    func testShouldShowStatusBarIcon_menuBarModesAlwaysShow() {
+        let settings = AppSettings(defaults: defaults)
+        settings.showStatusBarIconInDockOnly = false
+
+        settings.appVisibility = .menuBarOnly
+        XCTAssertTrue(settings.shouldShowStatusBarIcon)
+
+        settings.appVisibility = .dockAndMenuBar
+        XCTAssertTrue(settings.shouldShowStatusBarIcon)
+    }
+
     // MARK: - HUD Settings
 
     @MainActor

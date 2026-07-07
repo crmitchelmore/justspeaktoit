@@ -750,6 +750,28 @@ struct SettingsView: View {
             "Choose where Speak appears - in the Dock, menu bar, or both. Menu bar only keeps it out of the way."
           )
 
+          if settings.appVisibility == .dockOnly {
+            settingsToggle(
+              "Show status bar icon",
+              isOn: settingsBinding(\AppSettings.showStatusBarIconInDockOnly),
+              tint: .brandAccentWarm
+            )
+            .speakTooltip(
+              "Keep the Speak icon in the menu bar for quick access while the app lives in the Dock. "
+                + "Turn off for a Dock-only experience."
+            )
+          }
+
+          settingsToggle(
+            "Compact status bar icon",
+            isOn: settingsBinding(\AppSettings.compactStatusBarIcon),
+            tint: .brandAccentWarm
+          )
+          .speakTooltip(
+            "Compact hides the “Speak” label and colour-codes the icon by state, "
+              + "keeping the menu bar tidy. Turn off for the Labelled style with status text."
+          )
+
           VStack(alignment: .leading, spacing: 8) {
             settingsToggle(
               "Launch at login",

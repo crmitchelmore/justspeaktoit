@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Foundation
 import SpeakSync
 
@@ -35,6 +36,8 @@ final class AppEnvironment: ObservableObject {
   @Published var sidebarNavigationTarget: SidebarItem?
 
   private(set) var statusBarController: StatusBarController?
+  private var openMainWindow: (() -> Void)?
+  private var statusBarVisibilityObserver: AnyCancellable?
   private(set) var menuBarManager: MenuBarManager?
   private(set) var dockMenuManager: DockMenuManager?
   private(set) var servicesProvider: ServicesProvider?
@@ -92,8 +95,33 @@ final class AppEnvironment: ObservableObject {
   /// Alias for permissions manager (for API consistency)
   var permissionsManager: PermissionsManager { permissions }
 
+  /// Installs the status bar controller if needed and wires it to react to
+  /// visibility settings. The `openMainWindow` closure is stored for later use,
+  /// so ensure it captures any strongly-held objects weakly to avoid a retain
+  /// cycle.
   func installStatusBarIfNeeded(openMainWindow: @escaping () -> Void) {
-    guard statusBarController == nil else { return }
+    self.openMainWindow = openMainWindow
+    if statusBarVisibilityObserver == nil {
+      statusBarVisibilityObserver = settings.$appVisibility
+        .removeDuplicates()
+        .combineLatest(settings.$showStatusBarIconInDockOnly.removeDuplicates())
+        .receive(on: RunLoop.main)
+        .sink { [weak self] _, _ in
+          self?.updateStatusBarVisibility()
+        }
+    }
+    updateStatusBarVisibility()
+  }
+
+  /// Installs or removes the status bar icon to match the current visibility
+  /// settings. In Dock Only mode the icon follows `showStatusBarIconInDockOnly`.
+  private func updateStatusBarVisibility() {
+    guard settings.shouldShowStatusBarIcon else {
+      statusBarController?.tearDown()
+      statusBarController = nil
+      return
+    }
+    guard statusBarController == nil, let openMainWindow else { return }
     statusBarController = StatusBarController(
       appSettings: settings,
       historyManager: history,

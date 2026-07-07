@@ -12,6 +12,9 @@ public final class iOSHistoryManager: ObservableObject {
     @Published public private(set) var items: [iOSHistoryItem] = []
     @Published public private(set) var isLoading = false
 
+    /// IDs currently being reprocessed (drives per-row progress in the UI).
+    @Published public private(set) var reprocessingIDs: Set<UUID> = []
+
     private let fileURL: URL
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
@@ -159,6 +162,75 @@ public final class iOSHistoryManager: ObservableObject {
     /// Trigger a manual sync.
     public func triggerSync() async {
         await HistorySyncEngine.shared.sync()
+    }
+
+    // MARK: - Reprocess
+
+    /// Re-runs post-processing on an entry with the current model/prompt and
+    /// stores the polished result alongside the raw transcript (mirrors the Mac
+    /// "Reprocess with current model" action). Surfaces failures on the entry.
+    public func reprocess(_ item: iOSHistoryItem) async {
+        let settings = AppSettings.shared
+        guard settings.hasOpenRouterKey else {
+            setError("Add an OpenRouter API key in Settings to reprocess.", for: item.id)
+            return
+        }
+        guard !reprocessingIDs.contains(item.id) else { return }
+
+        reprocessingIDs.insert(item.id)
+        defer { reprocessingIDs.remove(item.id) }
+
+        do {
+            let polished = try await iOSPostProcessingManager.shared.polish(
+                text: item.transcription,
+                model: settings.postProcessingModel,
+                prompt: settings.postProcessingPrompt,
+                apiKey: settings.openRouterAPIKey
+            )
+            setPostProcessed(polished, for: item.id)
+        } catch is CancellationError {
+            // Reprocess was cancelled (e.g. the user navigated away) — leave the
+            // entry untouched rather than persisting a confusing error.
+        } catch {
+            setError(error.localizedDescription, for: item.id)
+        }
+    }
+
+    /// Stores a polished transcript on an entry and re-syncs it.
+    public func setPostProcessed(_ processed: String, for id: UUID) {
+        loadHistoryFromDiskIfNeeded()
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+        items[index] = items[index].withPostProcessed(processed)
+        saveHistory()
+
+        guard syncEnabled else { return }
+        let entry = items[index].toSyncable()
+        // Mark the entry unsynced until the updated version uploads, so a failed
+        // upload is retried by the next full sync instead of silently desyncing.
+        syncedIDs.remove(id)
+        saveSyncedIDs()
+        Task {
+            do {
+                try await HistorySyncEngine.shared.upload(entry: entry)
+                syncedIDs.insert(id)
+                saveSyncedIDs()
+            } catch {
+                print("[iOSHistoryManager] Failed to upload reprocessed item: \(error)")
+            }
+        }
+    }
+
+    /// Records an error against an entry (surfaced in the history UI).
+    public func setError(_ message: String, for id: UUID) {
+        loadHistoryFromDiskIfNeeded()
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+        items[index] = items[index].withError(message)
+        saveHistory()
+    }
+
+    /// Whether an entry is currently being reprocessed.
+    public func isReprocessing(_ item: iOSHistoryItem) -> Bool {
+        reprocessingIDs.contains(item.id)
     }
 
     // MARK: - Persistence

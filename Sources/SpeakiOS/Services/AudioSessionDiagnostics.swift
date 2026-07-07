@@ -129,3 +129,57 @@ public struct AudioSessionConfigurationError: LocalizedError {
         "what": "unspecified"
     ]
 }
+
+/// Activation helpers for the audio session, factored out of
+/// `AudioSessionManager` so the retry policy is unit-testable without
+/// AVFoundation (which is unavailable off-device).
+///
+/// `AVAudioSession.setActive(true)` intermittently fails with
+/// `cannotInterruptOthers` (`'!int'`) when another process briefly owns a
+/// non-mixable session — most commonly when a recording is triggered from the
+/// background via an `AudioRecordingIntent` (Action Button / Shortcuts / Siri)
+/// while the previous audio owner is still tearing down. Apple's guidance for
+/// this specific error is to retry activation; a short bounded back-off almost
+/// always succeeds on the second attempt. This is the Fallback pattern applied
+/// to a flaky boundary.
+public enum AudioSessionActivation {
+    /// Number of activation attempts before giving up.
+    public static let defaultMaxAttempts = 4
+
+    /// Whether `error` is the transient `cannotInterruptOthers` (`'!int'`)
+    /// activation failure that resolves on retry. Decoded from the underlying
+    /// `NSError`'s FourCC so it works regardless of platform SDK constants.
+    public static func isCannotInterruptOthers(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        guard let fourCC = AudioSessionConfigurationError.fourCharCode(from: nsError.code) else {
+            return false
+        }
+        return AudioSessionConfigurationError.knownErrorName(forFourCC: fourCC) == "cannotInterruptOthers"
+    }
+
+    /// Runs `perform`, retrying while `isTransient` classifies the thrown error
+    /// as retryable and attempts remain. Sleeps via the injected `sleep`
+    /// closure between attempts (defaults to `Task.sleep`); tests inject a
+    /// no-op sleep to exercise the loop deterministically. The final error is
+    /// rethrown once retries are exhausted or the error is non-transient.
+    public static func activate(
+        maxAttempts: Int = defaultMaxAttempts,
+        backoffNanoseconds: (Int) -> UInt64 = { attempt in UInt64(attempt) * 150_000_000 },
+        isTransient: (Error) -> Bool = isCannotInterruptOthers,
+        sleep: (UInt64) async -> Void = { try? await Task.sleep(nanoseconds: $0) },
+        perform: () throws -> Void
+    ) async throws {
+        var attempt = 1
+        let limit = max(1, maxAttempts)
+        while true {
+            do {
+                try perform()
+                return
+            } catch {
+                guard attempt < limit, isTransient(error) else { throw error }
+                await sleep(backoffNanoseconds(attempt))
+                attempt += 1
+            }
+        }
+    }
+}

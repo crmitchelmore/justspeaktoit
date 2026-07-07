@@ -133,7 +133,7 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
         }
 
         try await ensureMicrophonePermission()
-        try configureAudioSession()
+        try await configureAudioSession()
         connectClient(apiKey: apiKey)
         do {
             try startAudioEngine()
@@ -274,9 +274,9 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
         }
     }
 
-    private func configureAudioSession() throws {
+    private func configureAudioSession() async throws {
         do {
-            try audioSessionManager.configureForRecording()
+            try await audioSessionManager.configureForRecording()
             SpeakLogger.audio.info("Audio session configured for OpenAI Realtime")
         } catch {
             let wrapped = iOSTranscriptionError.audioSessionFailed(error)

@@ -72,7 +72,7 @@ public final class ElevenLabsLiveTranscriber: ObservableObject {
         }
 
         try await ensureMicrophonePermission()
-        try configureAudioSession()
+        try await configureAudioSession()
         connectElevenLabsClient(apiKey: apiKey)
         try startAudioEngine()
         resetState()
@@ -92,9 +92,9 @@ public final class ElevenLabsLiveTranscriber: ObservableObject {
         }
     }
 
-    private func configureAudioSession() throws {
+    private func configureAudioSession() async throws {
         do {
-            try audioSessionManager.configureForRecording()
+            try await audioSessionManager.configureForRecording()
             SpeakLogger.audio.info("Audio session configured for ElevenLabs")
         } catch {
             let wrappedError = iOSTranscriptionError.audioSessionFailed(error)

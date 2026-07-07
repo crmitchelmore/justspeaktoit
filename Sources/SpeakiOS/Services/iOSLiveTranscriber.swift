@@ -105,7 +105,7 @@ public final class iOSLiveTranscriber: ObservableObject {
 
         // Configure audio session
         do {
-            try audioSessionManager.configureForRecording()
+            try await audioSessionManager.configureForRecording()
             SpeakLogger.audio.info("Audio session configured for recording")
         } catch {
             SpeakLogger.logError(error, context: "Audio session setup", logger: SpeakLogger.audio)

@@ -99,6 +99,10 @@ public final class AppSettings: ObservableObject {
         didSet { persistSecret(sonioxAPIKey, identifier: Self.sonioxKeyID) }
     }
 
+    @Published public var modulateAPIKey: String {
+        didSet { persistSecret(modulateAPIKey, identifier: Self.modulateKeyID) }
+    }
+
     // MARK: - Canonical secure storage for API keys (SpeakCore)
     //
     // Every API key is stored through SpeakCore's SecureStorage using the same
@@ -116,6 +120,7 @@ public final class AppSettings: ObservableObject {
     static let elevenLabsKeyID = "elevenlabs.apiKey"
     static let cartesiaKeyID = "cartesia.apiKey"
     static let sonioxKeyID = "soniox.apiKey"
+    static let modulateKeyID = "modulate.apiKey"
 
     /// Shared keychain access group declared in `SpeakiOS.entitlements`
     /// (`$(AppIdentifierPrefix)com.justspeaktoit.shared`). Only used when the
@@ -245,6 +250,7 @@ public final class AppSettings: ObservableObject {
         self.elevenLabsAPIKey = ""
         self.cartesiaAPIKey = ""
         self.sonioxAPIKey = ""
+        self.modulateAPIKey = ""
         self.liveActivitiesEnabled = liveActivities
         self.autoStartRecording = autoStart
         self.hardwareTriggerDestination = hardwareDest
@@ -266,6 +272,7 @@ public final class AppSettings: ObservableObject {
             self.elevenLabsAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.elevenLabsKeyID)) ?? ""
             self.cartesiaAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.cartesiaKeyID)) ?? ""
             self.sonioxAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.sonioxKeyID)) ?? ""
+            self.modulateAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.modulateKeyID)) ?? ""
             self.configureDefaultProviderIfNeeded()
         }
     }
@@ -302,6 +309,7 @@ public final class AppSettings: ObservableObject {
     public var hasElevenLabsKey: Bool { !elevenLabsAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasCartesiaKey: Bool { !cartesiaAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasSonioxKey: Bool { !sonioxAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    public var hasModulateKey: Bool { !modulateAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     /// Returns the stored API key for a resolved live-transcription route, used
     /// by the generic shared-client recording path.
@@ -312,6 +320,7 @@ public final class AppSettings: ObservableObject {
         case Self.elevenLabsKeyID: return elevenLabsAPIKey
         case Self.cartesiaKeyID: return cartesiaAPIKey
         case Self.sonioxKeyID: return sonioxAPIKey
+        case Self.modulateKeyID: return modulateAPIKey
         default: return ""
         }
     }
@@ -899,6 +908,7 @@ struct APIKeysView: View {
     @State private var elevenLabsKey = ""
     @State private var cartesiaKey = ""
     @State private var sonioxKey = ""
+    @State private var modulateKey = ""
     @State private var isValidating = false
     @State private var validationMessage: String?
     @State private var showingValidation = false
@@ -1042,6 +1052,29 @@ struct APIKeysView: View {
                 }
                 .font(.caption)
             }
+
+            Section {
+                SecureField("API Key", text: $modulateKey)
+                    .textContentType(.password)
+                    .autocorrectionDisabled()
+
+                if settings.hasModulateKey && modulateKey.isEmpty {
+                    Button("Clear Stored Key", role: .destructive) {
+                        settings.modulateAPIKey = ""
+                    }
+                }
+            } header: {
+                Label("Modulate", systemImage: "waveform.badge.magnifyingglass")
+            } footer: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Get your API key from modulate.ai. Used by Velma streaming.")
+                    if settings.hasModulateKey {
+                        Text("✓ API key is stored")
+                            .foregroundStyle(.green)
+                    }
+                }
+                .font(.caption)
+            }
         }
         .navigationTitle("API Keys")
         .toolbar {
@@ -1059,6 +1092,7 @@ struct APIKeysView: View {
                             && elevenLabsKey.isEmpty
                             && cartesiaKey.isEmpty
                             && sonioxKey.isEmpty
+                            && modulateKey.isEmpty
                     )
                 }
             }
@@ -1133,6 +1167,13 @@ struct APIKeysView: View {
                 settings.sonioxAPIKey = sonioxKey
                 sonioxKey = ""
                 messages.append("✓ Soniox key saved")
+            }
+
+            // Save Modulate key (no cheap validation endpoint)
+            if !modulateKey.isEmpty {
+                settings.modulateAPIKey = modulateKey
+                modulateKey = ""
+                messages.append("✓ Modulate key saved")
             }
 
             isValidating = false

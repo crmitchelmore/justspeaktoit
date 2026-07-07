@@ -84,8 +84,9 @@ final class LiveTranscriptionRoutingTests: XCTestCase {
         XCTAssertTrue(LiveTranscriptionProviderID.apple.isSupportedOnIOS)
         XCTAssertTrue(LiveTranscriptionProviderID.cartesia.isSupportedOnIOS)
         XCTAssertTrue(LiveTranscriptionProviderID.soniox.isSupportedOnIOS)
+        XCTAssertTrue(LiveTranscriptionProviderID.modulate.isSupportedOnIOS)
         XCTAssertFalse(LiveTranscriptionProviderID.gladia.isSupportedOnIOS)
-        XCTAssertFalse(LiveTranscriptionProviderID.modulate.isSupportedOnIOS)
+        XCTAssertFalse(LiveTranscriptionProviderID.assemblyai.isSupportedOnIOS)
     }
 
     // MARK: - Factory

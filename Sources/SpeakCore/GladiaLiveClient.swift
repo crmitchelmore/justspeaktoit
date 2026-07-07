@@ -188,6 +188,11 @@ public final class GladiaLiveClient: StreamingTranscriptionClient, @unchecked Se
            let utterance = transcript.utterance?.text?.trimmingCharacters(in: .whitespacesAndNewlines),
            !utterance.isEmpty {
             currentOnTranscript()?(utterance, transcript.isFinal)
+        } else if envelope.type == "error" || envelope.error != nil {
+            let message = envelope.error?.message ?? "Gladia streaming error"
+            currentOnError()?(NSError(
+                domain: "Gladia", code: -1, userInfo: [NSLocalizedDescriptionKey: message]
+            ))
         }
     }
 
@@ -275,6 +280,11 @@ private struct GladiaInitResponse: Decodable {
 private struct GladiaMessage: Decodable {
     let type: String?
     let data: GladiaTranscriptData?
+    let error: GladiaError?
+}
+
+private struct GladiaError: Decodable {
+    let message: String?
 }
 
 private struct GladiaTranscriptData: Decodable {

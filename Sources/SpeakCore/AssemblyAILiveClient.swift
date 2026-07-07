@@ -72,7 +72,7 @@ public final class AssemblyAILiveClient: StreamingTranscriptionClient, @unchecke
             isStopping = false
             sessionDidBegin = false
             hasAttemptedHostFallback = false
-            currentHost = .global
+            currentHost = .europe
             preBeginAudio = []
             finalTexts = []
             finalIndexByTurnOrder = [:]
@@ -81,7 +81,9 @@ public final class AssemblyAILiveClient: StreamingTranscriptionClient, @unchecke
             self.onTranscript = onTranscript
             self.onError = onError
         }
-        connect(using: .global)
+        // Connect to the EU host first and fall back to global on a pre-Begin
+        // failure — this ordering is the more reliable one in practice.
+        connect(using: .europe)
     }
 
     public func sendAudio(_ audioData: Data) {

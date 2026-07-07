@@ -23,10 +23,8 @@ final class StatusBarController {
     self.openMainWindow = openMainWindow
 
     statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-    statusItem.button?.image = NSImage(
-      systemSymbolName: "waveform", accessibilityDescription: "Speak")
-    statusItem.button?.imagePosition = .imageLeading
     statusItem.button?.appearsDisabled = false
+    updateButton(for: mainManager.state)
     statusItem.menu = buildMenu()
 
     observeChanges()
@@ -59,6 +57,14 @@ final class StatusBarController {
       .sink { [weak self] state in
         self?.updateButton(for: state)
         self?.refresh()
+      }
+      .store(in: &cancellables)
+
+    appSettings.$compactStatusBarIcon
+      .receive(on: RunLoop.main)
+      .sink { [weak self] _ in
+        guard let self else { return }
+        updateButton(for: mainManager.state)
       }
       .store(in: &cancellables)
   }
@@ -159,19 +165,47 @@ final class StatusBarController {
   }
 
   private func updateButton(for state: MainManager.State) {
+    guard let button = statusItem.button else { return }
+    let appearance = Self.appearance(for: state)
+
+    if appSettings.compactStatusBarIcon {
+      button.image = NSImage(
+        systemSymbolName: appearance.compactSymbol, accessibilityDescription: appearance.label)
+      button.image?.isTemplate = true
+      button.imagePosition = .imageOnly
+      button.title = ""
+      button.contentTintColor = appearance.tint
+    } else {
+      button.image = NSImage(
+        systemSymbolName: "waveform", accessibilityDescription: "Speak")
+      button.image?.isTemplate = true
+      button.imagePosition = .imageLeading
+      button.title = appearance.label
+      button.contentTintColor = nil
+    }
+  }
+
+  /// Visual descriptor for a recording state: the Labelled-mode text plus the
+  /// compact-mode SF Symbol and tint used to convey the same state without text.
+  private struct StatusAppearance {
+    let label: String
+    let compactSymbol: String
+    let tint: NSColor?
+  }
+
+  private static func appearance(for state: MainManager.State) -> StatusAppearance {
     switch state {
-    case .idle:
-      statusItem.button?.title = "Speak"
-    case .completed(_):
-      statusItem.button?.title = "Speak"
+    case .idle, .completed:
+      return StatusAppearance(label: "Speak", compactSymbol: "waveform", tint: nil)
     case .recording:
-      statusItem.button?.title = "Recording…"
+      return StatusAppearance(label: "Recording…", compactSymbol: "mic.fill", tint: .systemRed)
     case .processing:
-      statusItem.button?.title = "Transcribing…"
+      return StatusAppearance(label: "Transcribing…", compactSymbol: "hourglass", tint: .systemOrange)
     case .delivering:
-      statusItem.button?.title = "Delivering…"
-    case .failed(_):
-      statusItem.button?.title = "Needs Attention"
+      return StatusAppearance(label: "Delivering…", compactSymbol: "paperplane.fill", tint: .systemBlue)
+    case .failed:
+      return StatusAppearance(
+        label: "Needs Attention", compactSymbol: "exclamationmark.triangle.fill", tint: .systemRed)
     }
   }
 

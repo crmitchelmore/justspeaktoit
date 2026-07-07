@@ -184,6 +184,12 @@ final class AppSettingsDefaultsTests: XCTestCase {
     }
 
     @MainActor
+    func testVisibilityDefaults_compactStatusBarIconIsFalse() {
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertFalse(settings.compactStatusBarIcon)
+    }
+
+    @MainActor
     func testShouldShowStatusBarIcon_dockOnlyFollowsToggle() {
         let settings = AppSettings(defaults: defaults)
         settings.appVisibility = .dockOnly

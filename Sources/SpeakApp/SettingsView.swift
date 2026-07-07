@@ -756,8 +756,21 @@ struct SettingsView: View {
               isOn: settingsBinding(\AppSettings.showStatusBarIconInDockOnly),
               tint: .brandAccentWarm
             )
-            .speakTooltip("Keep the Speak icon in the menu bar for quick access while the app lives in the Dock. Turn off for a Dock-only experience.")
+            .speakTooltip(
+              "Keep the Speak icon in the menu bar for quick access while the app lives in the Dock. "
+                + "Turn off for a Dock-only experience."
+            )
           }
+
+          settingsToggle(
+            "Compact status bar icon",
+            isOn: settingsBinding(\AppSettings.compactStatusBarIcon),
+            tint: .brandAccentWarm
+          )
+          .speakTooltip(
+            "Compact hides the “Speak” label and colour-codes the icon by state, "
+              + "keeping the menu bar tidy. Turn off for the Labelled style with status text."
+          )
 
           VStack(alignment: .leading, spacing: 8) {
             settingsToggle(

@@ -245,6 +245,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     case showHUD
     case appVisibility
     case showStatusBarIconInDockOnly
+    case compactStatusBarIcon
     case runAtLogin
     case recordingsDirectory
     case hotKeyActivation
@@ -493,6 +494,14 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     case .dockOnly:
       return showStatusBarIconInDockOnly
     }
+  }
+
+  /// Whether the status bar icon uses the compact, icon-only style. When on,
+  /// the "Speak"/status label is hidden and recording state is conveyed purely
+  /// through iconography and colour, keeping the menu bar footprint minimal.
+  /// When off (default) the icon shows the Labelled style with status text.
+  @Published var compactStatusBarIcon: Bool {
+    didSet { store(compactStatusBarIcon, key: .compactStatusBarIcon) }
   }
 
   @Published var runAtLogin: Bool {
@@ -861,6 +870,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
           ?? AppVisibility.dockAndMenuBar.rawValue) ?? .dockAndMenuBar
     showStatusBarIconInDockOnly =
       defaults.object(forKey: DefaultsKey.showStatusBarIconInDockOnly.rawValue) as? Bool ?? true
+    compactStatusBarIcon =
+      defaults.object(forKey: DefaultsKey.compactStatusBarIcon.rawValue) as? Bool ?? false
     runAtLogin = defaults.object(forKey: DefaultsKey.runAtLogin.rawValue) as? Bool ?? false
 
     let defaultDirectory = Self.defaultRecordingsDirectory()

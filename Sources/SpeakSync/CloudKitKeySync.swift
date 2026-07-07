@@ -75,6 +75,8 @@ public enum CloudKitKeySyncError: LocalizedError, Equatable {
     case incorrectPassphrase
     case encryptionFailed
     case malformedRecord
+    case passphraseTooShort(minimumLength: Int)
+    case randomGenerationFailed
 
     public var errorDescription: String? {
         switch self {
@@ -88,6 +90,10 @@ public enum CloudKitKeySyncError: LocalizedError, Equatable {
             return "Failed to encrypt or decrypt the API key."
         case .malformedRecord:
             return "CloudKit returned an invalid encrypted key record."
+        case .passphraseTooShort(let minimumLength):
+            return "Use an API-key sync passphrase with at least \(minimumLength) characters."
+        case .randomGenerationFailed:
+            return "Failed to generate secure random bytes for API-key sync."
         }
     }
 }
@@ -95,20 +101,62 @@ public enum CloudKitKeySyncError: LocalizedError, Equatable {
 public enum EncryptedSecretCrypto {
     private static let info = Data("justspeaktoit.api-key-sync.v1".utf8)
     private static let verifierPlaintext = Data("justspeaktoit.api-key-sync.verifier.v1".utf8)
+    private static let keyByteCount = 32
+    private static let pbkdf2Iterations = 210_000
+    public static let minimumPassphraseLength = 12
 
     /// Derives the local encryption key from a user-owned passphrase and a CloudKit-stored salt.
     /// The passphrase is never sent to CloudKit. CloudKit stores only the random salt and an
     /// AES-GCM verification token, so iCloud private-database access alone cannot read API keys.
     /// A device joins sync by entering the passphrase once; the derived key is then kept only in
     /// that device's Keychain via SecureStorage, not in CloudKit.
+    public static func validatePassphrase(_ passphrase: String) throws {
+        guard passphrase.count >= minimumPassphraseLength else {
+            throw CloudKitKeySyncError.passphraseTooShort(minimumLength: minimumPassphraseLength)
+        }
+    }
+
     public static func deriveKey(passphrase: String, salt: Data) -> SymmetricKey {
-        let inputKeyMaterial = SymmetricKey(data: Data(passphrase.utf8))
-        return HKDF<SHA256>.deriveKey(
-            inputKeyMaterial: inputKeyMaterial,
-            salt: salt,
-            info: info,
-            outputByteCount: 32
+        let derived = pbkdf2SHA256(
+            password: Data(passphrase.utf8),
+            salt: salt + info,
+            iterations: pbkdf2Iterations,
+            keyByteCount: keyByteCount
         )
+        return SymmetricKey(data: derived)
+    }
+
+    private static func pbkdf2SHA256(
+        password: Data,
+        salt: Data,
+        iterations: Int,
+        keyByteCount: Int
+    ) -> Data {
+        let hmacKey = SymmetricKey(data: password)
+        let blockCount = Int(ceil(Double(keyByteCount) / Double(SHA256.byteCount)))
+        var derived = Data()
+
+        for blockIndex in 1...blockCount {
+            var blockSalt = salt
+            var bigEndianIndex = UInt32(blockIndex).bigEndian
+            withUnsafeBytes(of: &bigEndianIndex) { blockSalt.append(contentsOf: $0) }
+
+            var iterationOutput = Data(HMAC<SHA256>.authenticationCode(for: blockSalt, using: hmacKey))
+            var block = iterationOutput
+
+            if iterations > 1 {
+                for _ in 2...iterations {
+                    iterationOutput = Data(HMAC<SHA256>.authenticationCode(for: iterationOutput, using: hmacKey))
+                    for index in block.indices {
+                        block[index] ^= iterationOutput[index]
+                    }
+                }
+            }
+
+            derived.append(block)
+        }
+
+        return Data(derived.prefix(keyByteCount))
     }
 
     public static func encryptSecret(
@@ -287,6 +335,36 @@ private struct KeySyncFetchResult {
     var serverChangeToken: CKServerChangeToken?
 }
 
+private final class KeySyncFetchAccumulator: @unchecked Sendable {
+    private let lock = NSLock()
+    private var records: [CKRecord] = []
+    private var deletedIDs: [CKRecord.ID] = []
+    private var serverChangeToken: CKServerChangeToken?
+
+    func append(record: CKRecord) {
+        lock.withLock { records.append(record) }
+    }
+
+    func appendDeletedID(_ recordID: CKRecord.ID) {
+        lock.withLock { deletedIDs.append(recordID) }
+    }
+
+    func updateToken(_ token: CKServerChangeToken?) {
+        guard let token else { return }
+        lock.withLock { serverChangeToken = token }
+    }
+
+    func result() -> KeySyncFetchResult {
+        lock.withLock {
+            KeySyncFetchResult(
+                records: records,
+                deletedIDs: deletedIDs,
+                serverChangeToken: serverChangeToken
+            )
+        }
+    }
+}
+
 @MainActor
 // swiftlint:disable:next type_body_length
 public final class CloudKitKeySync: ObservableObject {
@@ -321,6 +399,7 @@ public final class CloudKitKeySync: ObservableObject {
     private var observer: NSObjectProtocol?
     private var applyingRemoteIdentifiers = Set<String>()
     private var pendingLocalUploadDates: [String: Date] = [:]
+    private var pendingLocalDeletions: [String: Bool] = [:]
     private var localUploadTasks: [String: Task<Void, Never>] = [:]
 
     private init(secureStorage: SecureStorage = SecureStorage()) {
@@ -355,6 +434,7 @@ public final class CloudKitKeySync: ObservableObject {
     public func enable(passphrase: String) async throws {
         let trimmed = passphrase.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw CloudKitKeySyncError.missingPassphrase }
+        try EncryptedSecretCrypto.validatePassphrase(trimmed)
         guard await isAvailable(), let database = SyncConfiguration.privateDatabase else {
             throw CloudKitKeySyncError.cloudUnavailable
         }
@@ -378,6 +458,7 @@ public final class CloudKitKeySync: ObservableObject {
         localUploadTasks.values.forEach { $0.cancel() }
         localUploadTasks.removeAll()
         pendingLocalUploadDates.removeAll()
+        pendingLocalDeletions.removeAll()
         symmetricKey = nil
         status.isEnabled = false
         status.lastErrorDescription = nil
@@ -430,13 +511,20 @@ public final class CloudKitKeySync: ObservableObject {
                 }
                 let updatedAt = notification
                     .userInfo?[SecureStorage.NotificationUserInfoKey.updatedAt] as? Date ?? Date()
-                self.scheduleLocalUpload(identifier: identifier, updatedAt: updatedAt)
+                let operation = notification
+                    .userInfo?[SecureStorage.NotificationUserInfoKey.operation] as? String
+                self.scheduleLocalUpload(
+                    identifier: identifier,
+                    updatedAt: updatedAt,
+                    isDeletion: operation == "remove"
+                )
             }
         }
     }
 
-    private func scheduleLocalUpload(identifier: String, updatedAt: Date) {
+    private func scheduleLocalUpload(identifier: String, updatedAt: Date, isDeletion: Bool) {
         pendingLocalUploadDates[identifier] = updatedAt
+        pendingLocalDeletions[identifier] = isDeletion
 
         guard localUploadTasks[identifier] == nil else { return }
 
@@ -461,18 +549,20 @@ public final class CloudKitKeySync: ObservableObject {
                       self.status.isEnabled,
                       let key = self.symmetricKey,
                       let database = SyncConfiguration.privateDatabase else {
+                    self.pendingLocalDeletions.removeValue(forKey: identifier)
                     return
                 }
-
-                await self.saveLocalUpdatedAt(updatedAt, identifier: identifier)
+                let isDeletion = self.pendingLocalDeletions.removeValue(forKey: identifier) ?? false
 
                 do {
                     try await self.uploadSecret(
                         identifier: identifier,
                         updatedAt: updatedAt,
                         database: database,
-                        key: key
+                        key: key,
+                        isDeletion: isDeletion
                     )
+                    await self.saveLocalUpdatedAt(updatedAt, identifier: identifier)
                 } catch {
                     self.log.error("Debounced key upload failed for \(identifier): \(error.localizedDescription)")
                 }
@@ -535,7 +625,7 @@ public final class CloudKitKeySync: ObservableObject {
             return key
         }
 
-        let salt = randomData(byteCount: 32)
+        let salt = try randomData(byteCount: 32)
         let key = EncryptedSecretCrypto.deriveKey(passphrase: passphrase, salt: salt)
         let token = try EncryptedSecretCrypto.makeVerificationToken(key: key)
         let metadata = KeySyncMetadata(
@@ -610,8 +700,18 @@ public final class CloudKitKeySync: ObservableObject {
             .prefix(SyncConfiguration.batchSize)
         for identifier in identifiers {
             let updatedAt = await loadLocalUpdatedAt(identifier: identifier) ?? Date()
-            try await uploadSecret(identifier: identifier, updatedAt: updatedAt, database: database, key: key)
-            await saveLocalUpdatedAt(updatedAt, identifier: identifier)
+            do {
+                try await uploadSecret(
+                    identifier: identifier,
+                    updatedAt: updatedAt,
+                    database: database,
+                    key: key,
+                    isDeletion: false
+                )
+                await saveLocalUpdatedAt(updatedAt, identifier: identifier)
+            } catch {
+                log.error("Skipping local encrypted secret upload \(identifier): \(error.localizedDescription)")
+            }
         }
     }
 
@@ -619,10 +719,21 @@ public final class CloudKitKeySync: ObservableObject {
         identifier: String,
         updatedAt: Date,
         database: CKDatabase,
-        key: SymmetricKey
+        key: SymmetricKey,
+        isDeletion: Bool
     ) async throws {
-        let value = (try? await secureStorage.secret(identifier: identifier)) ?? ""
-        let isDeleted = value.isEmpty
+        let value: String
+        if isDeletion {
+            value = ""
+        } else {
+            do {
+                value = try await secureStorage.secret(identifier: identifier)
+            } catch SecureStorageError.valueNotFound {
+                log.warning("Skipping missing local encrypted secret \(identifier)")
+                return
+            }
+        }
+        let isDeleted = isDeletion
         let secret = try EncryptedSecretCrypto.encryptSecret(
             identifier: identifier,
             value: value,
@@ -650,24 +761,22 @@ public final class CloudKitKeySync: ObservableObject {
             configurationsByRecordZoneID: [SyncConfiguration.zoneID: config]
         )
 
-        var records: [CKRecord] = []
-        var deletedIDs: [CKRecord.ID] = []
-        var newToken: CKServerChangeToken?
+        let accumulator = KeySyncFetchAccumulator()
 
         operation.recordWasChangedBlock = { _, result in
             if case .success(let record) = result {
-                records.append(record)
+                accumulator.append(record: record)
             }
         }
         operation.recordWithIDWasDeletedBlock = { recordID, _ in
-            deletedIDs.append(recordID)
+            accumulator.appendDeletedID(recordID)
         }
         operation.recordZoneChangeTokensUpdatedBlock = { _, token, _ in
-            newToken = token
+            accumulator.updateToken(token)
         }
         operation.recordZoneFetchResultBlock = { _, result in
             if case .success(let (token, _, _)) = result {
-                newToken = token
+                accumulator.updateToken(token)
             }
         }
 
@@ -683,7 +792,7 @@ public final class CloudKitKeySync: ObservableObject {
             database.add(operation)
         }
 
-        return KeySyncFetchResult(records: records, deletedIDs: deletedIDs, serverChangeToken: newToken)
+        return accumulator.result()
     }
 
     private func fetchRecord(id: CKRecord.ID, database: CKDatabase) async throws -> CKRecord? {
@@ -720,9 +829,12 @@ public final class CloudKitKeySync: ObservableObject {
         return Date(timeIntervalSince1970: timestamp)
     }
 
-    private func randomData(byteCount: Int) -> Data {
+    private func randomData(byteCount: Int) throws -> Data {
         var bytes = [UInt8](repeating: 0, count: byteCount)
-        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        guard status == errSecSuccess else {
+            throw CloudKitKeySyncError.randomGenerationFailed
+        }
         return Data(bytes)
     }
 

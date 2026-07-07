@@ -3591,6 +3591,7 @@ struct SettingsView: View {
     let secureStorage: SecureAppStorage
     @ObservedObject private var keySync = CloudKitKeySync.shared
     @State private var passphrase = ""
+    @State private var syncError: String?
 
     var body: some View {
       SettingsCard(title: "Encrypted API-Key Sync", systemImage: "lock.icloud", tint: .brandLagoon) {
@@ -3610,8 +3611,13 @@ struct SettingsView: View {
 
             Button {
               Task {
-                try? await keySync.enable(passphrase: passphrase)
-                passphrase = ""
+                do {
+                  try await keySync.enable(passphrase: passphrase)
+                  passphrase = ""
+                  syncError = nil
+                } catch {
+                  syncError = error.localizedDescription
+                }
               }
             } label: {
               Label("Enable API-Key Sync", systemImage: "lock.open")
@@ -3621,7 +3627,14 @@ struct SettingsView: View {
           } else {
             HStack {
               Button {
-                Task { try? await keySync.syncNow() }
+                Task {
+                  do {
+                    try await keySync.syncNow()
+                    syncError = nil
+                  } catch {
+                    syncError = error.localizedDescription
+                  }
+                }
               } label: {
                 Label("Sync Keys Now", systemImage: "arrow.triangle.2.circlepath")
               }
@@ -3631,6 +3644,12 @@ struct SettingsView: View {
                 Task { await keySync.disable() }
               }
             }
+          }
+
+          if let syncError {
+            Text(syncError)
+              .font(.caption)
+              .foregroundStyle(.red)
           }
 
           Text(

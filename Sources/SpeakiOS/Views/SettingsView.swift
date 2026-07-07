@@ -342,28 +342,54 @@ public final class AppSettings: ObservableObject {
     public var hasGladiaKey: Bool { !gladiaAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     public func reloadSyncedAPIKeys() async {
-        let values = await Self.syncedAPIKeyValues()
         isApplyingSyncedKeys = true
         defer { isApplyingSyncedKeys = false }
-        deepgramAPIKey = values[Self.deepgramKeyID] ?? deepgramAPIKey
-        openRouterAPIKey = values[Self.openRouterKeyID] ?? openRouterAPIKey
-        openAIAPIKey = values[Self.openAIKeyID] ?? openAIAPIKey
-        elevenLabsAPIKey = values[Self.elevenLabsKeyID] ?? elevenLabsAPIKey
-        cartesiaAPIKey = values[Self.cartesiaKeyID] ?? cartesiaAPIKey
-        sonioxAPIKey = values[Self.sonioxKeyID] ?? sonioxAPIKey
-        modulateAPIKey = values[Self.modulateKeyID] ?? modulateAPIKey
-        assemblyAIAPIKey = values[Self.assemblyAIKeyID] ?? assemblyAIAPIKey
-        gladiaAPIKey = values[Self.gladiaKeyID] ?? gladiaAPIKey
+        deepgramAPIKey = await Self.syncedAPIKeyValue(
+            identifier: Self.deepgramKeyID,
+            currentValue: deepgramAPIKey
+        )
+        openRouterAPIKey = await Self.syncedAPIKeyValue(
+            identifier: Self.openRouterKeyID,
+            currentValue: openRouterAPIKey
+        )
+        openAIAPIKey = await Self.syncedAPIKeyValue(
+            identifier: Self.openAIKeyID,
+            currentValue: openAIAPIKey
+        )
+        elevenLabsAPIKey = await Self.syncedAPIKeyValue(
+            identifier: Self.elevenLabsKeyID,
+            currentValue: elevenLabsAPIKey
+        )
+        cartesiaAPIKey = await Self.syncedAPIKeyValue(
+            identifier: Self.cartesiaKeyID,
+            currentValue: cartesiaAPIKey
+        )
+        sonioxAPIKey = await Self.syncedAPIKeyValue(
+            identifier: Self.sonioxKeyID,
+            currentValue: sonioxAPIKey
+        )
+        modulateAPIKey = await Self.syncedAPIKeyValue(
+            identifier: Self.modulateKeyID,
+            currentValue: modulateAPIKey
+        )
+        assemblyAIAPIKey = await Self.syncedAPIKeyValue(
+            identifier: Self.assemblyAIKeyID,
+            currentValue: assemblyAIAPIKey
+        )
+        gladiaAPIKey = await Self.syncedAPIKeyValue(
+            identifier: Self.gladiaKeyID,
+            currentValue: gladiaAPIKey
+        )
     }
 
-    private static func syncedAPIKeyValues() async -> [String: String] {
-        var values: [String: String] = [:]
-        for identifier in CloudKitKeySync.syncableIdentifiers {
-            if let value = try? await credentialStorage.secret(identifier: identifier) {
-                values[identifier] = value
-            }
+    private static func syncedAPIKeyValue(identifier: String, currentValue: String) async -> String {
+        do {
+            return try await credentialStorage.secret(identifier: identifier)
+        } catch SecureStorageError.valueNotFound {
+            return ""
+        } catch {
+            return currentValue
         }
-        return values
     }
 
     private func observeSecureStorageChanges() {
@@ -1577,6 +1603,7 @@ struct CloudKitKeySyncSettingsSection: View {
     @ObservedObject private var keySync = CloudKitKeySync.shared
     @ObservedObject var settings: AppSettings
     @State private var passphrase = ""
+    @State private var syncError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1592,12 +1619,18 @@ struct CloudKitKeySyncSettingsSection: View {
                 SecureField("Sync passphrase", text: $passphrase)
                     .textContentType(.password)
                     .autocorrectionDisabled()
+                    .privacySensitive()
 
                 Button {
                     Task {
-                        try? await keySync.enable(passphrase: passphrase)
-                        await settings.reloadSyncedAPIKeys()
-                        passphrase = ""
+                        do {
+                            try await keySync.enable(passphrase: passphrase)
+                            await settings.reloadSyncedAPIKeys()
+                            passphrase = ""
+                            syncError = nil
+                        } catch {
+                            syncError = error.localizedDescription
+                        }
                     }
                 } label: {
                     Label("Enable API-Key Sync", systemImage: "lock.open")
@@ -1607,8 +1640,13 @@ struct CloudKitKeySyncSettingsSection: View {
                 HStack {
                     Button {
                         Task {
-                            try? await keySync.syncNow()
-                            await settings.reloadSyncedAPIKeys()
+                            do {
+                                try await keySync.syncNow()
+                                await settings.reloadSyncedAPIKeys()
+                                syncError = nil
+                            } catch {
+                                syncError = error.localizedDescription
+                            }
                         }
                     } label: {
                         Label("Sync Keys Now", systemImage: "arrow.triangle.2.circlepath")
@@ -1619,6 +1657,12 @@ struct CloudKitKeySyncSettingsSection: View {
                         Task { await keySync.disable() }
                     }
                 }
+            }
+
+            if let syncError {
+                Text(syncError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
             }
 
             Text("Keys are encrypted on this device before they are written to your private CloudKit database.")

@@ -95,11 +95,15 @@ public final class iOSHistoryManager: ObservableObject {
 
         guard syncEnabled else { return }
         Task {
-            try? await HistorySyncEngine.shared.upload(
-                entry: item.toSyncable()
-            )
-            syncedIDs.insert(item.id)
-            saveSyncedIDs()
+            do {
+                try await HistorySyncEngine.shared.upload(entry: item.toSyncable())
+                syncedIDs.insert(item.id)
+                saveSyncedIDs()
+            } catch {
+                // Leave the item unsynced so a later full sync retries it,
+                // rather than marking it synced after a failed upload.
+                print("[iOSHistoryManager] Failed to upload item: \(error)")
+            }
         }
     }
 
@@ -165,15 +169,21 @@ public final class iOSHistoryManager: ObservableObject {
     /// from `add`/`remove`/`clearAll`.
     private func loadHistoryFromDiskIfNeeded() {
         guard !hasLoadedFromDisk else { return }
-        hasLoadedFromDisk = true
 
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            // Nothing to load — safe to start from an empty list.
+            hasLoadedFromDisk = true
             return
         }
 
         do {
             let data = try Data(contentsOf: fileURL)
             items = try decoder.decode([iOSHistoryItem].self, from: data)
+            // Only mark loaded once we've actually read the file. A transient
+            // failure (e.g. file protection while the device is locked during a
+            // background recording) must be retried, never treated as "loaded"
+            // and then clobbered by the next save.
+            hasLoadedFromDisk = true
         } catch {
             print("[iOSHistoryManager] Failed to load history: \(error)")
         }
@@ -182,7 +192,13 @@ public final class iOSHistoryManager: ObservableObject {
     private func saveHistory() {
         do {
             let data = try encoder.encode(items)
-            try data.write(to: fileURL, options: .atomic)
+            // `completeUntilFirstUserAuthentication` keeps the file readable and
+            // writable from a background (Action Button) recording after the
+            // first unlock, so headless sessions can persist without data loss.
+            try data.write(
+                to: fileURL,
+                options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+            )
         } catch {
             print("[iOSHistoryManager] Failed to save history: \(error)")
         }

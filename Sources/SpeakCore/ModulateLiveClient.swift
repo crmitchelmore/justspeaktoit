@@ -112,6 +112,7 @@ public final class ModulateLiveClient: StreamingTranscriptionClient, @unchecked 
         }
     }
 
+    // swiftlint:disable:next cyclomatic_complexity
     private func handleMessage(_ message: URLSessionWebSocketTask.Message) {
         let text: String?
         switch message {

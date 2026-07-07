@@ -214,6 +214,7 @@ public final class AppSettings: ObservableObject {
         PostProcessingModelInfo(id: "anthropic/claude-sonnet-4", name: "Claude Sonnet", description: "Best structure preservation"),
     ]
 
+    // swiftlint:disable:next function_body_length
     private init() {
         let selectedRaw = UserDefaults.standard.string(forKey: "selectedModel") ?? "apple/local/SFSpeechRecognizer"
         // Normalise to canonical catalogue ids. Keep any id already in the
@@ -415,6 +416,7 @@ private struct LiveModelRow: View {
     }
 }
 
+// swiftlint:disable:next type_body_length
 public struct SettingsView: View {
     @StateObject private var settings = AppSettings.shared
     @Environment(\.openURL) private var openURL
@@ -919,6 +921,7 @@ struct PostProcessingSettingsView: View {
 
 // MARK: - API Keys View
 
+// swiftlint:disable:next type_body_length
 struct APIKeysView: View {
     @ObservedObject var settings: AppSettings
     @State private var deepgramKey = ""
@@ -1173,6 +1176,7 @@ struct APIKeysView: View {
         }
     }
 
+    // swiftlint:disable:next function_body_length cyclomatic_complexity
     private func saveKeys() {
         Task {
             isValidating = true

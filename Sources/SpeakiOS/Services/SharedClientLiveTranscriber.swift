@@ -149,16 +149,26 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         let sampleRate = Double(route.sampleRate)
         let client = self.client
 
+        let conversion = Conversion(
+            targetFormat: targetFormat, converter: converter, targetSampleRate: sampleRate
+        )
+        let nativeSampleRate = nativeFormat.sampleRate
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) { [weak self] buffer, _ in
             self?.convertAndSend(
-                buffer: buffer, nativeFormat: nativeFormat,
-                targetFormat: targetFormat, converter: converter,
-                sampleRate: sampleRate, client: client
+                buffer: buffer, nativeSampleRate: nativeSampleRate,
+                conversion: conversion, client: client
             )
         }
 
         audioEngine.prepare()
         try audioEngine.start()
+    }
+
+    /// Bundles the audio-conversion context handed to the capture tap.
+    private struct Conversion {
+        let targetFormat: AVAudioFormat
+        let converter: AVAudioConverter
+        let targetSampleRate: Double
     }
 
     private func makeConverter(
@@ -182,19 +192,17 @@ public final class SharedClientLiveTranscriber: ObservableObject {
 
     private nonisolated func convertAndSend(
         buffer: AVAudioPCMBuffer,
-        nativeFormat: AVAudioFormat,
-        targetFormat: AVAudioFormat,
-        converter: AVAudioConverter,
-        sampleRate: Double,
+        nativeSampleRate: Double,
+        conversion: Conversion,
         client: StreamingTranscriptionClient?
     ) {
-        let ratio = sampleRate / nativeFormat.sampleRate
+        let ratio = conversion.targetSampleRate / nativeSampleRate
         let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 1
-        guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: capacity) else {
+        guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: conversion.targetFormat, frameCapacity: capacity) else {
             return
         }
         var conversionError: NSError?
-        let status = converter.convert(to: outputBuffer, error: &conversionError) { _, outStatus in
+        let status = conversion.converter.convert(to: outputBuffer, error: &conversionError) { _, outStatus in
             outStatus.pointee = .haveData
             return buffer
         }

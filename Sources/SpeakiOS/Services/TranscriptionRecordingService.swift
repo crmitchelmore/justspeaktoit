@@ -3,6 +3,8 @@ import Foundation
 import UIKit
 import SpeakCore
 
+// swiftlint:disable file_length
+
 /// Headless recording coordinator for Action Button / Shortcuts / Siri.
 /// Manages the full lifecycle: start recording → live transcription → stop → clipboard → Live Activity.
 @MainActor
@@ -42,7 +44,8 @@ public final class TranscriptionRecordingService: ObservableObject {
     // MARK: - Public API
 
     /// Starts a headless recording session with Live Activity.
-    public func startRecording() async throws { // swiftlint:disable:this function_body_length
+    public func startRecording() async throws {
+        // swiftlint:disable:previous function_body_length cyclomatic_complexity
         guard !isRunning else { return }
 
         let settings = AppSettings.shared

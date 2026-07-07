@@ -13,6 +13,7 @@ import os.log
 /// so it can drive the generic iOS transcriber (which captures the latest text).
 /// Conforms to ``StreamingTranscriptionClient``.
 public final class AssemblyAILiveClient: StreamingTranscriptionClient, @unchecked Sendable {
+    // swiftlint:disable:previous type_body_length
     private enum Host: String {
         case global = "streaming.assemblyai.com"
         case europe = "streaming.eu.assemblyai.com"

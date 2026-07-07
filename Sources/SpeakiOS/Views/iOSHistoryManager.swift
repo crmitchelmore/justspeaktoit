@@ -16,6 +16,15 @@ public final class iOSHistoryManager: ObservableObject {
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
+    /// Whether CloudKit sync is wired up. Disabled in unit tests so persistence
+    /// can be exercised in isolation.
+    private let syncEnabled: Bool
+
+    /// Guards against loading twice and, crucially, against saving from an
+    /// unloaded (empty) state — the root cause of background-recording history
+    /// loss (see `loadHistoryFromDiskIfNeeded`).
+    private var hasLoadedFromDisk = false
+
     /// IDs of entries that have been synced to CloudKit.
     private(set) var syncedIDs: Set<UUID> = []
     private let syncedIDsKey = "speak.sync.syncedHistoryIDs"
@@ -33,22 +42,38 @@ public final class iOSHistoryManager: ObservableObject {
         syncedIDs.contains(item.id)
     }
 
-    private init() {
+    private convenience init() {
         let documentsURL = FileManager.default.urls(
             for: .documentDirectory,
             in: .userDomainMask
         )[0]
-        self.fileURL = documentsURL.appendingPathComponent(
-            "transcription-history.json"
+        self.init(
+            fileURL: documentsURL.appendingPathComponent("transcription-history.json"),
+            syncEnabled: true
         )
+    }
+
+    /// Designated initializer. `fileURL` and `syncEnabled` are injectable so
+    /// tests can exercise persistence against a temporary file without touching
+    /// CloudKit.
+    init(fileURL: URL, syncEnabled: Bool) {
+        self.fileURL = fileURL
+        self.syncEnabled = syncEnabled
 
         encoder.dateEncodingStrategy = .iso8601
         decoder.dateDecodingStrategy = .iso8601
 
         loadSyncedIDs()
 
+        // Load history *synchronously* before this initializer returns. A
+        // headless Action Button recording touches `.shared` cold and then
+        // immediately calls `recordTranscription`; the previous async load left
+        // a window where the save ran against an empty in-memory list and wiped
+        // all prior history on disk.
+        loadHistoryFromDiskIfNeeded()
+
+        guard syncEnabled else { return }
         Task {
-            await loadHistory()
             await initializeSync()
         }
     }
@@ -64,9 +89,11 @@ public final class iOSHistoryManager: ObservableObject {
 
     /// Adds a new transcription to history.
     public func add(_ item: iOSHistoryItem) {
+        loadHistoryFromDiskIfNeeded()
         items.insert(item, at: 0)
         saveHistory()
 
+        guard syncEnabled else { return }
         Task {
             try? await HistorySyncEngine.shared.upload(
                 entry: item.toSyncable()
@@ -96,9 +123,11 @@ public final class iOSHistoryManager: ObservableObject {
 
     /// Removes an item from history.
     public func remove(_ item: iOSHistoryItem) {
+        loadHistoryFromDiskIfNeeded()
         items.removeAll { $0.id == item.id }
         saveHistory()
 
+        guard syncEnabled else { return }
         Task {
             try? await HistorySyncEngine.shared.delete(entryID: item.id)
             syncedIDs.remove(item.id)
@@ -108,10 +137,12 @@ public final class iOSHistoryManager: ObservableObject {
 
     /// Clears all history.
     public func clearAll() {
+        loadHistoryFromDiskIfNeeded()
         let allIDs = items.map(\.id)
         items.removeAll()
         saveHistory()
 
+        guard syncEnabled else { return }
         Task {
             for entryID in allIDs {
                 try? await HistorySyncEngine.shared.delete(entryID: entryID)
@@ -128,9 +159,13 @@ public final class iOSHistoryManager: ObservableObject {
 
     // MARK: - Persistence
 
-    private func loadHistory() async {
-        isLoading = true
-        defer { isLoading = false }
+    /// Loads history from disk exactly once, synchronously. Every mutation
+    /// funnels through this first so we never write from an unloaded (empty)
+    /// list and clobber the file. Called eagerly from `init` and defensively
+    /// from `add`/`remove`/`clearAll`.
+    private func loadHistoryFromDiskIfNeeded() {
+        guard !hasLoadedFromDisk else { return }
+        hasLoadedFromDisk = true
 
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             return

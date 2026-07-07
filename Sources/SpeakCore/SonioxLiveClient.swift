@@ -3,20 +3,6 @@ import os.log
 
 // MARK: - Soniox Live Client (Cross-platform WebSocket)
 
-public enum SonioxLiveError: LocalizedError {
-    case invalidURLComponents
-    case invalidAPIKey
-
-    public var errorDescription: String? {
-        switch self {
-        case .invalidURLComponents:
-            return "Failed to construct the Soniox streaming URL."
-        case .invalidAPIKey:
-            return "Soniox rejected the API key. Check it in Settings."
-        }
-    }
-}
-
 /// Cross-platform Soniox real-time speech-to-text client.
 ///
 /// Shared by macOS and iOS. Soniox streams token batches; final tokens are
@@ -107,7 +93,7 @@ public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Se
         components.host = Self.websocketHost
         components.path = Self.websocketPath
         guard let url = components.url else {
-            currentOnError()?(SonioxLiveError.invalidURLComponents)
+            currentOnError()?(StreamingClientError.invalidURL)
             return
         }
 
@@ -234,7 +220,7 @@ public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Se
         if nsError.code == 401 || nsError.code == 403
             || description.contains("401") || description.contains("403")
             || description.contains("unauthorized") || description.contains("forbidden") {
-            return SonioxLiveError.invalidAPIKey
+            return StreamingClientError.invalidAPIKey(provider: "Soniox")
         }
         return error
     }

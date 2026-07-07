@@ -3,20 +3,6 @@ import os.log
 
 // MARK: - Cartesia Live Client (Cross-platform WebSocket)
 
-public enum CartesiaLiveError: LocalizedError {
-    case invalidURLComponents
-    case invalidAPIKey
-
-    public var errorDescription: String? {
-        switch self {
-        case .invalidURLComponents:
-            return "Could not build the Cartesia streaming URL."
-        case .invalidAPIKey:
-            return "Cartesia rejected the API key. Check it in Settings."
-        }
-    }
-}
-
 /// Cross-platform Cartesia Ink streaming speech-to-text client.
 ///
 /// Shared by macOS and iOS: both feed it linear16 mono PCM captured by their own
@@ -107,7 +93,7 @@ public final class CartesiaLiveClient: StreamingTranscriptionClient, @unchecked 
 
     private func connectWebSocket() {
         guard let url = Self.webSocketURL(model: model, sampleRate: sampleRate) else {
-            currentOnError()?(CartesiaLiveError.invalidURLComponents)
+            currentOnError()?(StreamingClientError.invalidURL)
             return
         }
 
@@ -218,7 +204,7 @@ public final class CartesiaLiveClient: StreamingTranscriptionClient, @unchecked 
         if nsError.code == 401 || nsError.code == 403
             || description.contains("401") || description.contains("403")
             || description.contains("unauthorized") || description.contains("forbidden") {
-            return CartesiaLiveError.invalidAPIKey
+            return StreamingClientError.invalidAPIKey(provider: "Cartesia")
         }
         return error
     }

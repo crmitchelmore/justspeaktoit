@@ -191,6 +191,23 @@ public enum LiveTranscriptionClientError: LocalizedError {
     }
 }
 
+/// Connection/transport errors shared by every `StreamingTranscriptionClient`.
+/// A single shared type avoids per-provider error enums colliding with the
+/// macOS app's own provider error types.
+public enum StreamingClientError: LocalizedError {
+    case invalidURL
+    case invalidAPIKey(provider: String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .invalidURL:
+            return "Could not build the streaming transcription URL."
+        case .invalidAPIKey(let provider):
+            return "\(provider) rejected the API key. Check it in Settings."
+        }
+    }
+}
+
 /// Constructs the shared streaming client for a resolved route.
 ///
 /// Providers whose client already lives in `SpeakCore` are built here so both

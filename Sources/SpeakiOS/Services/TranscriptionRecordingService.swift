@@ -254,10 +254,10 @@ public final class TranscriptionRecordingService: ObservableObject {
             && !text.isEmpty {
             Task { [resolvedDestination, assertion] in
                 await postProcess(text: text, replacingClipboard: resolvedDestination != .historyOnly)
-                endBackgroundAssertion(assertion)
+                assertion.end()
             }
         } else {
-            endBackgroundAssertion(assertion)
+            assertion.end()
         }
 
         return result
@@ -390,29 +390,22 @@ private extension TranscriptionRecordingService {
 
     /// The most complete transcript we can produce at stop time. The transcriber
     /// result is preferred, but for very short recordings the provider may return
-    /// empty while interim text is still held in `partialText` / shared state —
-    /// falling back there keeps the clipboard and dialog honest.
+    /// empty while interim text is still held in `partialText` — falling back
+    /// there keeps the clipboard and dialog honest. We deliberately do NOT fall
+    /// back to the last completed transcript: a silent new session must stay
+    /// empty rather than re-emitting the previous recording's text.
     func bestAvailableText(from result: TranscriptionResult) -> String {
         TranscriptionRecordingService.bestTranscript(
-            candidates: [result.text, partialText, sharedState.lastCompletedTranscript ?? ""],
+            candidates: [result.text, partialText],
             fallback: result.text
         )
     }
 
     /// Begins a finite-length background assertion so a headless / backgrounded
     /// process isn't suspended before the clipboard (and any post-processing)
-    /// write commits. The expiration handler ends the task to avoid termination.
-    func beginBackgroundAssertion(_ name: String) -> UIBackgroundTaskIdentifier {
-        var identifier: UIBackgroundTaskIdentifier = .invalid
-        identifier = UIApplication.shared.beginBackgroundTask(withName: name) {
-            UIApplication.shared.endBackgroundTask(identifier)
-        }
-        return identifier
-    }
-
-    func endBackgroundAssertion(_ identifier: UIBackgroundTaskIdentifier) {
-        guard identifier != .invalid else { return }
-        UIApplication.shared.endBackgroundTask(identifier)
+    /// write commits. The returned object ends the task exactly once.
+    func beginBackgroundAssertion(_ name: String) -> BackgroundTaskAssertion {
+        BackgroundTaskAssertion(name: name)
     }
 
     /// Decides whether to run the background post-processor.
@@ -452,6 +445,27 @@ private extension TranscriptionResult {
             rawPayload: rawPayload,
             debugInfo: debugInfo
         )
+    }
+}
+
+/// Reference-type wrapper around a UIKit background-task assertion that
+/// guarantees `endBackgroundTask` is called exactly once — whether via the
+/// normal completion path or the system expiration handler — avoiding the
+/// double-end API violation.
+@MainActor
+final class BackgroundTaskAssertion {
+    private var identifier: UIBackgroundTaskIdentifier = .invalid
+
+    init(name: String) {
+        identifier = UIApplication.shared.beginBackgroundTask(withName: name) { [weak self] in
+            self?.end()
+        }
+    }
+
+    func end() {
+        guard identifier != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(identifier)
+        identifier = .invalid
     }
 }
 #endif

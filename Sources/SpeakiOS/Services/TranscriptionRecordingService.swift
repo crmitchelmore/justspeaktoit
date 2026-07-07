@@ -21,6 +21,7 @@ public final class TranscriptionRecordingService: ObservableObject {
     private var deepgramTranscriber: DeepgramLiveTranscriber?
     private var elevenLabsTranscriber: ElevenLabsLiveTranscriber?
     private var openAITranscriber: OpenAIRealtimeLiveTranscriber?
+    private var sharedTranscriber: SharedClientLiveTranscriber?
     private var startTime: Date?
     private var currentModel: String = ""
 
@@ -65,6 +66,11 @@ public final class TranscriptionRecordingService: ObservableObject {
 
         // Fallback to Apple Speech if OpenAI selected but no API key
         if currentModel.hasPrefix("openai") && !settings.hasOpenAIKey {
+            currentModel = "apple/local/SFSpeechRecognizer"
+        }
+
+        // Fallback to Apple Speech if Cartesia selected but no API key
+        if currentModel.hasPrefix("cartesia") && !settings.hasCartesiaKey {
             currentModel = "apple/local/SFSpeechRecognizer"
         }
 
@@ -136,6 +142,27 @@ public final class TranscriptionRecordingService: ObservableObject {
                 elevenLabsTranscriber = nil
                 deepgramTranscriber = nil
                 appleTranscriber = nil
+                sharedTranscriber = nil
+                try await transcriber.start()
+            } else if let route = LiveTranscriptionRouting.route(for: currentModel),
+                      route.provider.isSupportedOnIOS {
+                // Generic shared-client path (Cartesia, and future ported providers).
+                let transcriber = SharedClientLiveTranscriber(
+                    route: route,
+                    apiKey: settings.liveAPIKey(for: route),
+                    audioSessionManager: audioSessionManager
+                )
+                transcriber.onPartialResult = { [weak self] text, _ in
+                    Task { @MainActor in self?.handlePartialResult(text: text) }
+                }
+                transcriber.onError = { [weak self] error in
+                    Task { @MainActor in self?.handleError(error) }
+                }
+                sharedTranscriber = transcriber
+                deepgramTranscriber = nil
+                elevenLabsTranscriber = nil
+                openAITranscriber = nil
+                appleTranscriber = nil
                 try await transcriber.start()
             } else {
                 let transcriber = iOSLiveTranscriber(audioSessionManager: audioSessionManager)
@@ -155,6 +182,7 @@ public final class TranscriptionRecordingService: ObservableObject {
                 deepgramTranscriber = nil
                 elevenLabsTranscriber = nil
                 openAITranscriber = nil
+                sharedTranscriber = nil
                 try await transcriber.start()
             }
 
@@ -165,6 +193,7 @@ public final class TranscriptionRecordingService: ObservableObject {
             elevenLabsTranscriber = nil
             openAITranscriber = nil
             appleTranscriber = nil
+            sharedTranscriber = nil
             sharedState.clearRecordingState()
             activityManager.endActivity()
             throw error
@@ -222,10 +251,12 @@ public final class TranscriptionRecordingService: ObservableObject {
         elevenLabsTranscriber?.cancel()
         openAITranscriber?.cancel()
         appleTranscriber?.cancel()
+        sharedTranscriber?.cancel()
         deepgramTranscriber = nil
         elevenLabsTranscriber = nil
         openAITranscriber = nil
         appleTranscriber = nil
+        sharedTranscriber = nil
         isRunning = false
         startTime = nil
         partialText = ""
@@ -299,6 +330,10 @@ private extension TranscriptionRecordingService {
         if let openai = openAITranscriber {
             openAITranscriber = nil
             return await openai.stop()
+        }
+        if let shared = sharedTranscriber {
+            sharedTranscriber = nil
+            return await shared.stop()
         }
         if let apple = appleTranscriber {
             appleTranscriber = nil

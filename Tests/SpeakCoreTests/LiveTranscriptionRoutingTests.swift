@@ -82,8 +82,9 @@ final class LiveTranscriptionRoutingTests: XCTestCase {
         XCTAssertTrue(LiveTranscriptionProviderID.elevenlabs.isSupportedOnIOS)
         XCTAssertTrue(LiveTranscriptionProviderID.openai.isSupportedOnIOS)
         XCTAssertTrue(LiveTranscriptionProviderID.apple.isSupportedOnIOS)
-        XCTAssertFalse(LiveTranscriptionProviderID.cartesia.isSupportedOnIOS)
+        XCTAssertTrue(LiveTranscriptionProviderID.cartesia.isSupportedOnIOS)
         XCTAssertFalse(LiveTranscriptionProviderID.gladia.isSupportedOnIOS)
+        XCTAssertFalse(LiveTranscriptionProviderID.soniox.isSupportedOnIOS)
     }
 
     // MARK: - Factory
@@ -92,6 +93,7 @@ final class LiveTranscriptionRoutingTests: XCTestCase {
         // Arrange
         let deepgram = LiveTranscriptionRouting.route(for: "deepgram/nova-3-streaming")!
         let elevenlabs = LiveTranscriptionRouting.route(for: "elevenlabs/scribe-v2-streaming")!
+        let cartesia = LiveTranscriptionRouting.route(for: "cartesia/ink-2-streaming")!
 
         // Act / Assert
         XCTAssertNotNil(
@@ -100,15 +102,18 @@ final class LiveTranscriptionRoutingTests: XCTestCase {
         XCTAssertNotNil(
             LiveTranscriptionClientFactory.makeClient(for: elevenlabs, apiKey: "k", language: nil)
         )
+        XCTAssertNotNil(
+            LiveTranscriptionClientFactory.makeClient(for: cartesia, apiKey: "k", language: nil)
+        )
     }
 
     func testFactory_returnsNilForUnportedProvider() {
         // Arrange
-        let cartesia = LiveTranscriptionRouting.route(for: "cartesia/ink-2-streaming")!
+        let gladia = LiveTranscriptionRouting.route(for: "gladia/solaria-1-streaming")!
 
         // Act / Assert
         XCTAssertNil(
-            LiveTranscriptionClientFactory.makeClient(for: cartesia, apiKey: "k", language: nil)
+            LiveTranscriptionClientFactory.makeClient(for: gladia, apiKey: "k", language: nil)
         )
     }
 }

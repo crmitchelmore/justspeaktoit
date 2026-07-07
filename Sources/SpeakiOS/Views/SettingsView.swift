@@ -88,6 +88,13 @@ public final class AppSettings: ObservableObject {
         didSet { persistSecret(elevenLabsAPIKey, identifier: Self.elevenLabsKeyID) }
     }
 
+    /// API keys for providers that use the shared `StreamingTranscriptionClient`
+    /// path (Cartesia today; Gladia/Modulate/AssemblyAI/Soniox as they are
+    /// ported). Keyed by the provider's `apiKeyIdentifier`.
+    @Published public var cartesiaAPIKey: String {
+        didSet { persistSecret(cartesiaAPIKey, identifier: Self.cartesiaKeyID) }
+    }
+
     // MARK: - Canonical secure storage for API keys (SpeakCore)
     //
     // Every API key is stored through SpeakCore's SecureStorage using the same
@@ -103,6 +110,7 @@ public final class AppSettings: ObservableObject {
     static let openRouterKeyID = "openrouter.apiKey"
     static let openAIKeyID = "openai.apiKey"
     static let elevenLabsKeyID = "elevenlabs.apiKey"
+    static let cartesiaKeyID = "cartesia.apiKey"
 
     /// Shared keychain access group declared in `SpeakiOS.entitlements`
     /// (`$(AppIdentifierPrefix)com.justspeaktoit.shared`). Only used when the
@@ -230,6 +238,7 @@ public final class AppSettings: ObservableObject {
         self.openRouterAPIKey = ""
         self.openAIAPIKey = ""
         self.elevenLabsAPIKey = ""
+        self.cartesiaAPIKey = ""
         self.liveActivitiesEnabled = liveActivities
         self.autoStartRecording = autoStart
         self.hardwareTriggerDestination = hardwareDest
@@ -249,6 +258,7 @@ public final class AppSettings: ObservableObject {
             self.openRouterAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.openRouterKeyID)) ?? ""
             self.openAIAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.openAIKeyID)) ?? ""
             self.elevenLabsAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.elevenLabsKeyID)) ?? ""
+            self.cartesiaAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.cartesiaKeyID)) ?? ""
             self.configureDefaultProviderIfNeeded()
         }
     }
@@ -283,6 +293,19 @@ public final class AppSettings: ObservableObject {
     public var hasOpenRouterKey: Bool { !openRouterAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasOpenAIKey: Bool { !openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasElevenLabsKey: Bool { !elevenLabsAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    public var hasCartesiaKey: Bool { !cartesiaAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    /// Returns the stored API key for a resolved live-transcription route, used
+    /// by the generic shared-client recording path.
+    public func liveAPIKey(for route: LiveTranscriptionRoute) -> String {
+        switch route.apiKeyIdentifier {
+        case Self.deepgramKeyID: return deepgramAPIKey
+        case Self.openAIKeyID: return openAIAPIKey
+        case Self.elevenLabsKeyID: return elevenLabsAPIKey
+        case Self.cartesiaKeyID: return cartesiaAPIKey
+        default: return ""
+        }
+    }
 
     // MARK: - Legacy migration
 
@@ -859,6 +882,7 @@ struct APIKeysView: View {
     @State private var openRouterKey = ""
     @State private var openAIKey = ""
     @State private var elevenLabsKey = ""
+    @State private var cartesiaKey = ""
     @State private var isValidating = false
     @State private var validationMessage: String?
     @State private var showingValidation = false
@@ -956,6 +980,29 @@ struct APIKeysView: View {
                 }
                 .font(.caption)
             }
+
+            Section {
+                SecureField("API Key", text: $cartesiaKey)
+                    .textContentType(.password)
+                    .autocorrectionDisabled()
+
+                if settings.hasCartesiaKey && cartesiaKey.isEmpty {
+                    Button("Clear Stored Key", role: .destructive) {
+                        settings.cartesiaAPIKey = ""
+                    }
+                }
+            } header: {
+                Label("Cartesia", systemImage: "waveform.circle")
+            } footer: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Get your API key from cartesia.ai. Used by Ink streaming.")
+                    if settings.hasCartesiaKey {
+                        Text("✓ API key is stored")
+                            .foregroundStyle(.green)
+                    }
+                }
+                .font(.caption)
+            }
         }
         .navigationTitle("API Keys")
         .toolbar {
@@ -971,6 +1018,7 @@ struct APIKeysView: View {
                             && openRouterKey.isEmpty
                             && openAIKey.isEmpty
                             && elevenLabsKey.isEmpty
+                            && cartesiaKey.isEmpty
                     )
                 }
             }
@@ -1031,6 +1079,13 @@ struct APIKeysView: View {
                 settings.openAIAPIKey = openAIKey
                 openAIKey = ""
                 messages.append("✓ OpenAI key saved")
+            }
+
+            // Save Cartesia key (no cheap validation endpoint)
+            if !cartesiaKey.isEmpty {
+                settings.cartesiaAPIKey = cartesiaKey
+                cartesiaKey = ""
+                messages.append("✓ Cartesia key saved")
             }
 
             isValidating = false

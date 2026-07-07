@@ -82,9 +82,9 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
     /// iOS path so the two never drift.
     public var isSupportedOnIOS: Bool {
         switch self {
-        case .apple, .deepgram, .elevenlabs, .openai:
+        case .apple, .deepgram, .elevenlabs, .openai, .cartesia:
             return true
-        case .cartesia, .gladia, .modulate, .assemblyai, .soniox:
+        case .gladia, .modulate, .assemblyai, .soniox:
             return false
         }
     }
@@ -218,7 +218,13 @@ public enum LiveTranscriptionClientFactory {
                 modelID: route.apiModelName,
                 language: language
             )
-        case .apple, .openai, .cartesia, .gladia, .modulate, .assemblyai, .soniox:
+        case .cartesia:
+            return CartesiaLiveClient(
+                apiKey: apiKey,
+                model: route.apiModelName,
+                sampleRate: route.sampleRate
+            )
+        case .apple, .openai, .gladia, .modulate, .assemblyai, .soniox:
             return nil
         }
     }

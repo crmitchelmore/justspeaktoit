@@ -103,6 +103,10 @@ public final class AppSettings: ObservableObject {
         didSet { persistSecret(modulateAPIKey, identifier: Self.modulateKeyID) }
     }
 
+    @Published public var assemblyAIAPIKey: String {
+        didSet { persistSecret(assemblyAIAPIKey, identifier: Self.assemblyAIKeyID) }
+    }
+
     // MARK: - Canonical secure storage for API keys (SpeakCore)
     //
     // Every API key is stored through SpeakCore's SecureStorage using the same
@@ -121,6 +125,7 @@ public final class AppSettings: ObservableObject {
     static let cartesiaKeyID = "cartesia.apiKey"
     static let sonioxKeyID = "soniox.apiKey"
     static let modulateKeyID = "modulate.apiKey"
+    static let assemblyAIKeyID = "assemblyai.apiKey"
 
     /// Shared keychain access group declared in `SpeakiOS.entitlements`
     /// (`$(AppIdentifierPrefix)com.justspeaktoit.shared`). Only used when the
@@ -251,6 +256,7 @@ public final class AppSettings: ObservableObject {
         self.cartesiaAPIKey = ""
         self.sonioxAPIKey = ""
         self.modulateAPIKey = ""
+        self.assemblyAIAPIKey = ""
         self.liveActivitiesEnabled = liveActivities
         self.autoStartRecording = autoStart
         self.hardwareTriggerDestination = hardwareDest
@@ -273,6 +279,8 @@ public final class AppSettings: ObservableObject {
             self.cartesiaAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.cartesiaKeyID)) ?? ""
             self.sonioxAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.sonioxKeyID)) ?? ""
             self.modulateAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.modulateKeyID)) ?? ""
+            self.assemblyAIAPIKey =
+                (try? await Self.credentialStorage.secret(identifier: Self.assemblyAIKeyID)) ?? ""
             self.configureDefaultProviderIfNeeded()
         }
     }
@@ -310,6 +318,7 @@ public final class AppSettings: ObservableObject {
     public var hasCartesiaKey: Bool { !cartesiaAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasSonioxKey: Bool { !sonioxAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasModulateKey: Bool { !modulateAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    public var hasAssemblyAIKey: Bool { !assemblyAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     /// Returns the stored API key for a resolved live-transcription route, used
     /// by the generic shared-client recording path.
@@ -321,6 +330,7 @@ public final class AppSettings: ObservableObject {
         case Self.cartesiaKeyID: return cartesiaAPIKey
         case Self.sonioxKeyID: return sonioxAPIKey
         case Self.modulateKeyID: return modulateAPIKey
+        case Self.assemblyAIKeyID: return assemblyAIAPIKey
         default: return ""
         }
     }
@@ -909,6 +919,7 @@ struct APIKeysView: View {
     @State private var cartesiaKey = ""
     @State private var sonioxKey = ""
     @State private var modulateKey = ""
+    @State private var assemblyAIKey = ""
     @State private var isValidating = false
     @State private var validationMessage: String?
     @State private var showingValidation = false
@@ -1075,6 +1086,29 @@ struct APIKeysView: View {
                 }
                 .font(.caption)
             }
+
+            Section {
+                SecureField("API Key", text: $assemblyAIKey)
+                    .textContentType(.password)
+                    .autocorrectionDisabled()
+
+                if settings.hasAssemblyAIKey && assemblyAIKey.isEmpty {
+                    Button("Clear Stored Key", role: .destructive) {
+                        settings.assemblyAIAPIKey = ""
+                    }
+                }
+            } header: {
+                Label("AssemblyAI", systemImage: "waveform.badge.plus")
+            } footer: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Get your API key from assemblyai.com. Used by Universal-Streaming.")
+                    if settings.hasAssemblyAIKey {
+                        Text("✓ API key is stored")
+                            .foregroundStyle(.green)
+                    }
+                }
+                .font(.caption)
+            }
         }
         .navigationTitle("API Keys")
         .toolbar {
@@ -1093,6 +1127,7 @@ struct APIKeysView: View {
                             && cartesiaKey.isEmpty
                             && sonioxKey.isEmpty
                             && modulateKey.isEmpty
+                            && assemblyAIKey.isEmpty
                     )
                 }
             }
@@ -1174,6 +1209,13 @@ struct APIKeysView: View {
                 settings.modulateAPIKey = modulateKey
                 modulateKey = ""
                 messages.append("✓ Modulate key saved")
+            }
+
+            // Save AssemblyAI key (no cheap validation endpoint)
+            if !assemblyAIKey.isEmpty {
+                settings.assemblyAIAPIKey = assemblyAIKey
+                assemblyAIKey = ""
+                messages.append("✓ AssemblyAI key saved")
             }
 
             isValidating = false

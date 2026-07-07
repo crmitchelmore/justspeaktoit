@@ -84,6 +84,11 @@ public final class TranscriptionRecordingService: ObservableObject {
             currentModel = "apple/local/SFSpeechRecognizer"
         }
 
+        // Fallback to Apple Speech if AssemblyAI selected but no API key
+        if currentModel.hasPrefix("assemblyai") && !settings.hasAssemblyAIKey {
+            currentModel = "apple/local/SFSpeechRecognizer"
+        }
+
         // Live Activity is mandatory for AudioRecordingIntent
         activityManager.startActivity(provider: modelDisplayName)
 

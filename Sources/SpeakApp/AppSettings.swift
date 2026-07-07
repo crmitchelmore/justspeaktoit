@@ -244,6 +244,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     case restoreClipboard
     case showHUD
     case appVisibility
+    case showStatusBarIconInDockOnly
     case runAtLogin
     case recordingsDirectory
     case hotKeyActivation
@@ -472,6 +473,25 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     didSet {
       store(appVisibility.rawValue, key: .appVisibility)
       applyAppVisibility()
+    }
+  }
+
+  /// Whether the menu bar (status bar) icon is shown while running in
+  /// Dock Only mode. Only user-configurable in that mode; the menu bar modes
+  /// always require the icon as their primary access point.
+  @Published var showStatusBarIconInDockOnly: Bool {
+    didSet { store(showStatusBarIconInDockOnly, key: .showStatusBarIconInDockOnly) }
+  }
+
+  /// Whether the status bar icon should currently be visible given the active
+  /// visibility mode. In menu bar modes the icon is essential; in Dock Only
+  /// mode it is governed by `showStatusBarIconInDockOnly` (on by default).
+  var shouldShowStatusBarIcon: Bool {
+    switch appVisibility {
+    case .dockAndMenuBar, .menuBarOnly:
+      return true
+    case .dockOnly:
+      return showStatusBarIconInDockOnly
     }
   }
 
@@ -839,6 +859,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       AppVisibility(
         rawValue: defaults.string(forKey: DefaultsKey.appVisibility.rawValue)
           ?? AppVisibility.dockAndMenuBar.rawValue) ?? .dockAndMenuBar
+    showStatusBarIconInDockOnly =
+      defaults.object(forKey: DefaultsKey.showStatusBarIconInDockOnly.rawValue) as? Bool ?? true
     runAtLogin = defaults.object(forKey: DefaultsKey.runAtLogin.rawValue) as? Bool ?? false
 
     let defaultDirectory = Self.defaultRecordingsDirectory()

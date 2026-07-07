@@ -32,6 +32,12 @@ final class StatusBarController {
     observeChanges()
   }
 
+  /// Removes the status bar icon from the system menu bar and stops observing.
+  func tearDown() {
+    NSStatusBar.system.removeStatusItem(statusItem)
+    cancellables.removeAll()
+  }
+
   private func observeChanges() {
     appSettings.$transcriptionMode
       .combineLatest(appSettings.$postProcessingEnabled, appSettings.$textOutputMethod)

@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Foundation
 import SpeakSync
 
@@ -35,6 +36,8 @@ final class AppEnvironment: ObservableObject {
   @Published var sidebarNavigationTarget: SidebarItem?
 
   private(set) var statusBarController: StatusBarController?
+  private var openMainWindow: (() -> Void)?
+  private var statusBarVisibilityObserver: AnyCancellable?
   private(set) var menuBarManager: MenuBarManager?
   private(set) var dockMenuManager: DockMenuManager?
   private(set) var servicesProvider: ServicesProvider?
@@ -93,7 +96,27 @@ final class AppEnvironment: ObservableObject {
   var permissionsManager: PermissionsManager { permissions }
 
   func installStatusBarIfNeeded(openMainWindow: @escaping () -> Void) {
-    guard statusBarController == nil else { return }
+    self.openMainWindow = openMainWindow
+    if statusBarVisibilityObserver == nil {
+      statusBarVisibilityObserver = settings.$appVisibility
+        .combineLatest(settings.$showStatusBarIconInDockOnly)
+        .receive(on: RunLoop.main)
+        .sink { [weak self] _, _ in
+          self?.updateStatusBarVisibility()
+        }
+    }
+    updateStatusBarVisibility()
+  }
+
+  /// Installs or removes the status bar icon to match the current visibility
+  /// settings. In Dock Only mode the icon follows `showStatusBarIconInDockOnly`.
+  private func updateStatusBarVisibility() {
+    guard settings.shouldShowStatusBarIcon else {
+      statusBarController?.tearDown()
+      statusBarController = nil
+      return
+    }
+    guard statusBarController == nil, let openMainWindow else { return }
     statusBarController = StatusBarController(
       appSettings: settings,
       historyManager: history,

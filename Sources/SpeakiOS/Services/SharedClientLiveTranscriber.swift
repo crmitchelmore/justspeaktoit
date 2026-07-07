@@ -70,12 +70,23 @@ public final class SharedClientLiveTranscriber: ObservableObject {
             }
         )
 
-        try startAudioEngine()
+        do {
+            try startAudioEngine()
+        } catch {
+            // Capture startup failed after the client connected — tear the
+            // client and audio session back down so nothing is left running.
+            client.stop()
+            self.client = nil
+            audioSessionManager.deactivate()
+            throw error
+        }
         resetState()
     }
 
     public func stop() async -> TranscriptionResult {
-        let text = accumulatedText.isEmpty ? partialText : accumulatedText
+        // `partialText` is the fullest view (finalised text plus any trailing
+        // non-final words); fall back to the accumulated finals if empty.
+        let text = partialText.isEmpty ? accumulatedText : partialText
         guard isRunning else {
             return makeResult(text: text, duration: 0)
         }

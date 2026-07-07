@@ -3,6 +3,7 @@ import SwiftUI
 import SpeakCore
 import SpeakSync
 import Security
+import OSLog
 
 // swiftlint:disable file_length
 
@@ -145,13 +146,23 @@ public final class AppSettings: ObservableObject {
         )
     )
 
+    private static let logger = Logger(subsystem: "com.justspeaktoit.ios", category: "AppSettings")
+
     /// Persists (or clears when empty) an API key on the canonical secure store.
+    /// Keychain failures are logged rather than silently dropped so a key that
+    /// appears saved but didn't persist is diagnosable from logs.
     private func persistSecret(_ value: String, identifier: String) {
         Task {
-            if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                try? await Self.credentialStorage.removeSecret(identifier: identifier)
-            } else {
-                try? await Self.credentialStorage.storeSecret(value, identifier: identifier)
+            do {
+                if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    try await Self.credentialStorage.removeSecret(identifier: identifier)
+                } else {
+                    try await Self.credentialStorage.storeSecret(value, identifier: identifier)
+                }
+            } catch {
+                Self.logger.error(
+                    "Failed to persist secret \(identifier, privacy: .public): \(error.localizedDescription)"
+                )
             }
         }
     }
@@ -445,22 +456,16 @@ public struct SettingsView: View {
                     .font(.caption)
                 }
 
-                if settings.selectedModel.hasPrefix("openai/") && !settings.hasOpenAIKey {
-                    Label("Add OpenAI API key below to use this model", systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.orange)
-                        .font(.caption)
-                }
-
-                if settings.selectedModel.hasPrefix("deepgram") && !settings.hasDeepgramKey {
-                    Label("Add Deepgram API key below to use this model", systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.orange)
-                        .font(.caption)
-                }
-
-                if settings.selectedModel.hasPrefix("elevenlabs") && !settings.hasElevenLabsKey {
-                    Label("Add ElevenLabs API key below to use this model", systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.orange)
-                        .font(.caption)
+                if let route = LiveTranscriptionRouting.route(for: settings.selectedModel),
+                   route.isSupportedOnIOS,
+                   route.apiKeyIdentifier != nil,
+                   settings.liveAPIKey(for: route).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Label(
+                        "Add this provider's API key below to use this model.",
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .foregroundStyle(.orange)
+                    .font(.caption)
                 }
 
                 LabeledContent("Language") {

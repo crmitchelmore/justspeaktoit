@@ -3,8 +3,6 @@ import Foundation
 import UIKit
 import SpeakCore
 
-// swiftlint:disable file_length
-
 /// Headless recording coordinator for Action Button / Shortcuts / Siri.
 /// Manages the full lifecycle: start recording → live transcription → stop → clipboard → Live Activity.
 @MainActor
@@ -45,7 +43,7 @@ public final class TranscriptionRecordingService: ObservableObject {
 
     /// Starts a headless recording session with Live Activity.
     public func startRecording() async throws {
-        // swiftlint:disable:previous function_body_length cyclomatic_complexity
+        // swiftlint:disable:previous function_body_length
         guard !isRunning else { return }
 
         let settings = AppSettings.shared
@@ -57,43 +55,11 @@ public final class TranscriptionRecordingService: ObservableObject {
         sharedState.isRecording = true
         sharedState.recordingStartTime = startTime
 
-        // Fallback to Apple Speech if Deepgram selected but no API key
-        if currentModel.hasPrefix("deepgram") && !settings.hasDeepgramKey {
-            currentModel = "apple/local/SFSpeechRecognizer"
-        }
-
-        // Fallback to Apple Speech if ElevenLabs selected but no API key
-        if currentModel.hasPrefix("elevenlabs") && !settings.hasElevenLabsKey {
-            currentModel = "apple/local/SFSpeechRecognizer"
-        }
-
-        // Fallback to Apple Speech if OpenAI selected but no API key
-        if currentModel.hasPrefix("openai") && !settings.hasOpenAIKey {
-            currentModel = "apple/local/SFSpeechRecognizer"
-        }
-
-        // Fallback to Apple Speech if Cartesia selected but no API key
-        if currentModel.hasPrefix("cartesia") && !settings.hasCartesiaKey {
-            currentModel = "apple/local/SFSpeechRecognizer"
-        }
-
-        // Fallback to Apple Speech if Soniox selected but no API key
-        if currentModel.hasPrefix("soniox") && !settings.hasSonioxKey {
-            currentModel = "apple/local/SFSpeechRecognizer"
-        }
-
-        // Fallback to Apple Speech if Modulate selected but no API key
-        if currentModel.hasPrefix("modulate") && !settings.hasModulateKey {
-            currentModel = "apple/local/SFSpeechRecognizer"
-        }
-
-        // Fallback to Apple Speech if AssemblyAI selected but no API key
-        if currentModel.hasPrefix("assemblyai") && !settings.hasAssemblyAIKey {
-            currentModel = "apple/local/SFSpeechRecognizer"
-        }
-
-        // Fallback to Apple Speech if Gladia selected but no API key
-        if currentModel.hasPrefix("gladia") && !settings.hasGladiaKey {
+        // Fall back to Apple Speech if the selected provider needs an API key we
+        // don't have (covers every cloud provider via the shared routing).
+        if let route = LiveTranscriptionRouting.route(for: currentModel),
+           route.apiKeyIdentifier != nil,
+           settings.liveAPIKey(for: route).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             currentModel = "apple/local/SFSpeechRecognizer"
         }
 

@@ -56,18 +56,11 @@ final class TranscriberCoordinator: ObservableObject {
         startTime = Date()
         sharedState.clear()
 
-        // Fallback to Apple Speech if Deepgram selected but no API key
-        if currentModel.hasPrefix("deepgram") && !settings.hasDeepgramKey {
-            currentModel = "apple/local/SFSpeechRecognizer"
-        }
-
-        // Fallback to Apple Speech if ElevenLabs selected but no API key
-        if currentModel.hasPrefix("elevenlabs") && !settings.hasElevenLabsKey {
-            currentModel = "apple/local/SFSpeechRecognizer"
-        }
-
-        // Fallback to Apple Speech if OpenAI selected but no API key
-        if currentModel.hasPrefix("openai") && !settings.hasOpenAIKey {
+        // Fall back to Apple Speech if the selected provider needs an API key we
+        // don't have (covers every cloud provider via the shared routing).
+        if let route = LiveTranscriptionRouting.route(for: currentModel),
+           route.apiKeyIdentifier != nil,
+           settings.liveAPIKey(for: route).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             currentModel = "apple/local/SFSpeechRecognizer"
         }
 

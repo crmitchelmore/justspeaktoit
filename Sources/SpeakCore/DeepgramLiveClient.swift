@@ -5,7 +5,7 @@ import os.log
 
 /// Cross-platform Deepgram WebSocket client for live transcription.
 /// Works on both macOS and iOS.
-public final class DeepgramLiveClient: @unchecked Sendable {
+public final class DeepgramLiveClient: StreamingTranscriptionClient, @unchecked Sendable {
     private let apiKey: String
     private let model: String
     private let language: String?

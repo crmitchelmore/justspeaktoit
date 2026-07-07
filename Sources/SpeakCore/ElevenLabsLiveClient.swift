@@ -5,7 +5,7 @@ import os.log
 
 /// Cross-platform ElevenLabs WebSocket client for live speech-to-text.
 /// Works on both macOS and iOS.
-public final class ElevenLabsLiveClient: @unchecked Sendable {
+public final class ElevenLabsLiveClient: StreamingTranscriptionClient, @unchecked Sendable {
     private let apiKey: String
     private let modelID: String
     private let language: String?

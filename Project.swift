@@ -18,6 +18,15 @@ var iosAppSettings: [String: SettingValue] = [
     "CURRENT_PROJECT_VERSION": "1",
     "MARKETING_VERSION": "\(version)"
 ]
+
+// Build-time feature flag: the OpenClaw tab is hidden by default (App Store
+// builds ship without it). Generate the project with `SHOW_OPENCLAW_TAB=1
+// tuist generate` to bring the tab back for internal testing. Gated in code via
+// the `SHOW_OPENCLAW_TAB` Swift active compilation condition (see
+// SpeakiOSApp/FeatureFlags.swift).
+if ProcessInfo.processInfo.environment["SHOW_OPENCLAW_TAB"] != nil {
+    iosAppSettings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] = "$(inherited) SHOW_OPENCLAW_TAB"
+}
 var iosWidgetSettings: [String: SettingValue] = [
     "CURRENT_PROJECT_VERSION": "1",
     "MARKETING_VERSION": "\(version)"
@@ -117,7 +126,8 @@ let project = Project(
             sources: ["SpeakiOSApp/**"],
             resources: [
                 "SpeakiOSApp/Assets.xcassets",
-                "SpeakiOSApp/Resources/LaunchScreen.storyboard"
+                "SpeakiOSApp/Resources/LaunchScreen.storyboard",
+                "SpeakiOSApp/PrivacyInfo.xcprivacy"
             ],
             entitlements: .file(path: "SpeakiOS.entitlements"),
             dependencies: [

@@ -22,6 +22,7 @@ final class TranscriberCoordinator: ObservableObject {
     private var deepgramTranscriber: DeepgramLiveTranscriber?
     private var elevenLabsTranscriber: ElevenLabsLiveTranscriber?
     private var openAITranscriber: OpenAIRealtimeLiveTranscriber?
+    private var sharedTranscriber: SharedClientLiveTranscriber?
     private var startTime: Date?
 
     init() {
@@ -55,18 +56,11 @@ final class TranscriberCoordinator: ObservableObject {
         startTime = Date()
         sharedState.clear()
 
-        // Fallback to Apple Speech if Deepgram selected but no API key
-        if currentModel.hasPrefix("deepgram") && !settings.hasDeepgramKey {
-            currentModel = "apple/local/SFSpeechRecognizer"
-        }
-
-        // Fallback to Apple Speech if ElevenLabs selected but no API key
-        if currentModel.hasPrefix("elevenlabs") && !settings.hasElevenLabsKey {
-            currentModel = "apple/local/SFSpeechRecognizer"
-        }
-
-        // Fallback to Apple Speech if OpenAI selected but no API key
-        if currentModel.hasPrefix("openai") && !settings.hasOpenAIKey {
+        // Fall back to Apple Speech if the selected provider needs an API key we
+        // don't have (covers every cloud provider via the shared routing).
+        if let route = LiveTranscriptionRouting.route(for: currentModel),
+           route.apiKeyIdentifier != nil,
+           settings.liveAPIKey(for: route).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             currentModel = "apple/local/SFSpeechRecognizer"
         }
 
@@ -79,7 +73,8 @@ final class TranscriberCoordinator: ObservableObject {
             // Use Deepgram
             let transcriber = DeepgramLiveTranscriber(audioSessionManager: audioSessionManager)
             transcriber.configure(apiKey: settings.deepgramAPIKey)
-            transcriber.model = currentModel.replacingOccurrences(of: "deepgram/", with: "")
+            transcriber.model = LiveTranscriptionRouting.route(for: currentModel)?.apiModelName
+                ?? currentModel.replacingOccurrences(of: "deepgram/", with: "")
 
             transcriber.onPartialResult = { [weak self] text, isFinal in
                 self?.handlePartialResult(text: self?.deepgramTranscriber?.partialText ?? text, isFinal: isFinal)
@@ -98,7 +93,8 @@ final class TranscriberCoordinator: ObservableObject {
             // Use ElevenLabs
             let transcriber = ElevenLabsLiveTranscriber(audioSessionManager: audioSessionManager)
             transcriber.configure(apiKey: settings.elevenLabsAPIKey)
-            transcriber.modelID = currentModel.replacingOccurrences(of: "elevenlabs/", with: "")
+            transcriber.modelID = LiveTranscriptionRouting.route(for: currentModel)?.apiModelName
+                ?? currentModel.replacingOccurrences(of: "elevenlabs/", with: "")
 
             transcriber.onPartialResult = { [weak self] text, isFinal in
                 self?.handlePartialResult(text: self?.elevenLabsTranscriber?.partialText ?? text, isFinal: isFinal)
@@ -117,7 +113,8 @@ final class TranscriberCoordinator: ObservableObject {
             // Use OpenAI Realtime
             let transcriber = OpenAIRealtimeLiveTranscriber(audioSessionManager: audioSessionManager)
             transcriber.configure(apiKey: settings.openAIAPIKey)
-            transcriber.modelID = currentModel.replacingOccurrences(of: "openai/", with: "")
+            transcriber.modelID = LiveTranscriptionRouting.route(for: currentModel)?.apiModelName
+                ?? currentModel.replacingOccurrences(of: "openai/", with: "")
 
             transcriber.onPartialResult = { [weak self] text, isFinal in
                 self?.handlePartialResult(text: self?.openAITranscriber?.partialText ?? text, isFinal: isFinal)
@@ -129,6 +126,29 @@ final class TranscriberCoordinator: ObservableObject {
             openAITranscriber = transcriber
             elevenLabsTranscriber = nil
             deepgramTranscriber = nil
+            appleTranscriber = nil
+
+            try await transcriber.start()
+            isRunning = true
+        } else if let route = LiveTranscriptionRouting.route(for: currentModel),
+                  route.provider.isSupportedOnIOS {
+            // Generic shared-client path (Cartesia, and future ported providers).
+            let transcriber = SharedClientLiveTranscriber(
+                route: route,
+                apiKey: settings.liveAPIKey(for: route),
+                audioSessionManager: audioSessionManager
+            )
+            transcriber.onPartialResult = { [weak self] text, isFinal in
+                self?.handlePartialResult(text: self?.sharedTranscriber?.partialText ?? text, isFinal: isFinal)
+            }
+            transcriber.onError = { [weak self] error in
+                self?.handleError(error)
+            }
+
+            sharedTranscriber = transcriber
+            deepgramTranscriber = nil
+            elevenLabsTranscriber = nil
+            openAITranscriber = nil
             appleTranscriber = nil
 
             try await transcriber.start()
@@ -149,6 +169,7 @@ final class TranscriberCoordinator: ObservableObject {
             deepgramTranscriber = nil
             elevenLabsTranscriber = nil
             openAITranscriber = nil
+            sharedTranscriber = nil
 
             try await transcriber.start()
             isRunning = true
@@ -201,6 +222,10 @@ final class TranscriberCoordinator: ObservableObject {
             let result = await openai.stop()
             openAITranscriber = nil
             return finishStop(with: result)
+        } else if let shared = sharedTranscriber {
+            let result = await shared.stop()
+            sharedTranscriber = nil
+            return finishStop(with: result)
         } else if let apple = appleTranscriber {
             let result = await apple.stop()
             appleTranscriber = nil
@@ -235,10 +260,12 @@ final class TranscriberCoordinator: ObservableObject {
         elevenLabsTranscriber?.cancel()
         openAITranscriber?.cancel()
         appleTranscriber?.cancel()
+        sharedTranscriber?.cancel()
         deepgramTranscriber = nil
         elevenLabsTranscriber = nil
         openAITranscriber = nil
         appleTranscriber = nil
+        sharedTranscriber = nil
         isRunning = false
         startTime = nil
         if AppSettings.shared.liveActivitiesEnabled {

@@ -2,6 +2,8 @@
 import SwiftUI
 import SpeakCore
 import SpeakSync
+import Security
+import OSLog
 
 // swiftlint:disable file_length
 
@@ -72,36 +74,98 @@ public final class AppSettings: ObservableObject {
     }
 
     @Published public var deepgramAPIKey: String {
-        didSet { saveToKeychain(key: deepgramAPIKey, for: "deepgram.apiKey") }
+        didSet { persistSecret(deepgramAPIKey, identifier: Self.deepgramKeyID) }
     }
 
     @Published public var openRouterAPIKey: String {
-        didSet { saveToKeychain(key: openRouterAPIKey, for: "openrouter.apiKey") }
+        didSet { persistSecret(openRouterAPIKey, identifier: Self.openRouterKeyID) }
     }
 
     @Published public var openAIAPIKey: String {
-        didSet { saveToKeychain(key: openAIAPIKey, for: "openai.apiKey") }
+        didSet { persistSecret(openAIAPIKey, identifier: Self.openAIKeyID) }
     }
 
     @Published public var elevenLabsAPIKey: String {
-        didSet {
-            Task {
-                if self.elevenLabsAPIKey.isEmpty {
-                    try? await Self.elevenLabsStorage.removeSecret(identifier: "elevenlabs.apiKey")
+        didSet { persistSecret(elevenLabsAPIKey, identifier: Self.elevenLabsKeyID) }
+    }
+
+    /// API keys for providers that use the shared `StreamingTranscriptionClient`
+    /// path (Cartesia today; Gladia/Modulate/AssemblyAI/Soniox as they are
+    /// ported). Keyed by the provider's `apiKeyIdentifier`.
+    @Published public var cartesiaAPIKey: String {
+        didSet { persistSecret(cartesiaAPIKey, identifier: Self.cartesiaKeyID) }
+    }
+
+    @Published public var sonioxAPIKey: String {
+        didSet { persistSecret(sonioxAPIKey, identifier: Self.sonioxKeyID) }
+    }
+
+    @Published public var modulateAPIKey: String {
+        didSet { persistSecret(modulateAPIKey, identifier: Self.modulateKeyID) }
+    }
+
+    @Published public var assemblyAIAPIKey: String {
+        didSet { persistSecret(assemblyAIAPIKey, identifier: Self.assemblyAIKeyID) }
+    }
+
+    @Published public var gladiaAPIKey: String {
+        didSet { persistSecret(gladiaAPIKey, identifier: Self.gladiaKeyID) }
+    }
+
+    // MARK: - Canonical secure storage for API keys (SpeakCore)
+    //
+    // Every API key is stored through SpeakCore's SecureStorage using the same
+    // service/account as the macOS app, and synced via iCloud Keychain when the
+    // build is entitled (see `SecureStorageConfiguration.iCloudSyncedIfAvailable`).
+    // A key set on one device then appears on the user's other devices.
+    //
+    // iOS <-> macOS sync additionally requires the shared keychain-access-group
+    // to be present in BOTH apps' entitlements and the macOS app to be built
+    // with the iCloud Keychain capability; a Developer-ID macOS build can't use
+    // synchronizable items and falls back to local-only storage.
+    static let deepgramKeyID = "deepgram.apiKey"
+    static let openRouterKeyID = "openrouter.apiKey"
+    static let openAIKeyID = "openai.apiKey"
+    static let elevenLabsKeyID = "elevenlabs.apiKey"
+    static let cartesiaKeyID = "cartesia.apiKey"
+    static let sonioxKeyID = "soniox.apiKey"
+    static let modulateKeyID = "modulate.apiKey"
+    static let assemblyAIKeyID = "assemblyai.apiKey"
+    static let gladiaKeyID = "gladia.apiKey"
+
+    /// Shared keychain access group declared in `SpeakiOS.entitlements`
+    /// (`$(AppIdentifierPrefix)com.justspeaktoit.shared`). Only used when the
+    /// runtime probe confirms the entitlement is present.
+    private static let sharedAccessGroup = "8X4ZN58TYH.com.justspeaktoit.shared"
+
+    private static let credentialStorage = SecureStorage(
+        configuration: .iCloudSyncedIfAvailable(
+            service: "com.justspeaktoit.credentials",
+            masterAccount: "speak-app-secrets",
+            accessGroup: sharedAccessGroup
+        )
+    )
+
+    private static let logger = Logger(subsystem: "com.justspeaktoit.ios", category: "AppSettings")
+
+    /// Persists (or clears when empty) an API key on the canonical secure store.
+    /// Keychain failures are logged rather than silently dropped so a key that
+    /// appears saved but didn't persist is diagnosable from logs.
+    private func persistSecret(_ value: String, identifier: String) {
+        Task {
+            do {
+                if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    try await Self.credentialStorage.removeSecret(identifier: identifier)
                 } else {
-                    try? await Self.elevenLabsStorage.storeSecret(
-                        self.elevenLabsAPIKey,
-                        identifier: "elevenlabs.apiKey"
-                    )
+                    try await Self.credentialStorage.storeSecret(value, identifier: identifier)
                 }
+            } catch {
+                Self.logger.error(
+                    "Failed to persist secret \(identifier, privacy: .public): \(error.localizedDescription)"
+                )
             }
         }
     }
-
-    // MARK: - Shared SecureStorage for ElevenLabs key (SpeakCore canonical pattern)
-    private static let elevenLabsStorage = SecureStorage(
-        configuration: SecureStorageConfiguration(service: "com.speak.ios.credentials")
-    )
 
     @Published public var liveActivitiesEnabled: Bool {
         didSet { UserDefaults.standard.set(liveActivitiesEnabled, forKey: "liveActivitiesEnabled") }
@@ -161,22 +225,30 @@ public final class AppSettings: ObservableObject {
         PostProcessingModelInfo(id: "anthropic/claude-sonnet-4", name: "Claude Sonnet", description: "Best structure preservation"),
     ]
 
+    // swiftlint:disable:next function_body_length
     private init() {
         let selectedRaw = UserDefaults.standard.string(forKey: "selectedModel") ?? "apple/local/SFSpeechRecognizer"
-        // Normalize known model prefixes to their default model IDs
+        // Normalise to canonical catalogue ids. Keep any id already in the
+        // shared catalogue; migrate legacy iOS-only ids (e.g. "deepgram/nova-3",
+        // "elevenlabs/scribe_v1") onto their catalogue equivalents so iOS and
+        // macOS select the same models.
+        let knownLiveIDs = Set(ModelCatalog.liveTranscription.map(\.id))
         let selected: String
-        if selectedRaw.hasPrefix("deepgram/") {
-            selected = "deepgram/nova-3"
+        if knownLiveIDs.contains(selectedRaw) {
+            selected = selectedRaw
+        } else if selectedRaw.hasPrefix("apple/") {
+            selected = selectedRaw
+        } else if selectedRaw.hasPrefix("deepgram/") {
+            selected = "deepgram/nova-3-streaming"
         } else if selectedRaw.hasPrefix("elevenlabs/") {
-            selected = "elevenlabs/scribe_v1"
+            selected = "elevenlabs/scribe-v2-streaming"
         } else if selectedRaw.hasPrefix("openai/") {
             selected = "openai/gpt-realtime-whisper-streaming"
         } else {
-            selected = selectedRaw
+            selected = "apple/local/SFSpeechRecognizer"
         }
-        let deepgram = Self.loadFromKeychain(for: "deepgram.apiKey") ?? ""
-        let openRouter = Self.loadFromKeychain(for: "openrouter.apiKey") ?? ""
-        let openAI = Self.loadFromKeychain(for: "openai.apiKey") ?? ""
+        // API keys load asynchronously from the canonical secure storage (with
+        // legacy migration) in the Task below.
 
         // Default Live Activities to true if not set
         let liveActivities = UserDefaults.standard.object(forKey: "liveActivitiesEnabled") as? Bool ?? true
@@ -194,10 +266,15 @@ public final class AppSettings: ObservableObject {
         let autoPost = UserDefaults.standard.bool(forKey: "autoPostProcess")
 
         self.selectedModel = selected
-        self.deepgramAPIKey = deepgram
-        self.openRouterAPIKey = openRouter
-        self.openAIAPIKey = openAI
+        self.deepgramAPIKey = ""
+        self.openRouterAPIKey = ""
+        self.openAIAPIKey = ""
         self.elevenLabsAPIKey = ""
+        self.cartesiaAPIKey = ""
+        self.sonioxAPIKey = ""
+        self.modulateAPIKey = ""
+        self.assemblyAIAPIKey = ""
+        self.gladiaAPIKey = ""
         self.liveActivitiesEnabled = liveActivities
         self.autoStartRecording = autoStart
         self.hardwareTriggerDestination = hardwareDest
@@ -206,16 +283,24 @@ public final class AppSettings: ObservableObject {
         self.postProcessingPrompt = postPrompt
         self.autoPostProcess = autoPost
 
-        // Auto-configure default provider on first launch or when saved model requires missing key
-        configureDefaultProviderIfNeeded()
-
-        // Load ElevenLabs key asynchronously from SecureStorage (SpeakCore canonical path).
-        // The @Published property is set after init; didSet will re-store the same value, which is harmless.
+        // Load all API keys from the canonical secure storage, migrating any
+        // values from legacy iOS keychain locations first. Default-provider
+        // selection runs afterwards so it sees the loaded keys. Assigning each
+        // @Published value re-persists it via didSet, which is harmless.
         Task { @MainActor [weak self] in
             guard let self else { return }
-            if let key = try? await Self.elevenLabsStorage.secret(identifier: "elevenlabs.apiKey"), !key.isEmpty {
-                self.elevenLabsAPIKey = key
-            }
+            await Self.migrateLegacyKeysIfNeeded()
+            self.deepgramAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.deepgramKeyID)) ?? ""
+            self.openRouterAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.openRouterKeyID)) ?? ""
+            self.openAIAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.openAIKeyID)) ?? ""
+            self.elevenLabsAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.elevenLabsKeyID)) ?? ""
+            self.cartesiaAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.cartesiaKeyID)) ?? ""
+            self.sonioxAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.sonioxKeyID)) ?? ""
+            self.modulateAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.modulateKeyID)) ?? ""
+            self.assemblyAIAPIKey =
+                (try? await Self.credentialStorage.secret(identifier: Self.assemblyAIKeyID)) ?? ""
+            self.gladiaAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.gladiaKeyID)) ?? ""
+            self.configureDefaultProviderIfNeeded()
         }
     }
 
@@ -228,7 +313,7 @@ public final class AppSettings: ObservableObject {
         // Note: ElevenLabs key is loaded async; its fallback is handled at recording time.
         if isFirstLaunch || needsDeepgramKey {
             if hasDeepgramKey {
-                selectedModel = "deepgram/nova-3"
+                selectedModel = "deepgram/nova-3-streaming"
             } else {
                 selectedModel = "apple/local/SFSpeechRecognizer"
             }
@@ -239,9 +324,9 @@ public final class AppSettings: ObservableObject {
     /// Re-configure provider after onboarding or API key changes.
     public func reconfigureDefaultProvider() {
         if hasDeepgramKey {
-            selectedModel = "deepgram/nova-3"
+            selectedModel = "deepgram/nova-3-streaming"
         } else if hasElevenLabsKey {
-            selectedModel = "elevenlabs/scribe_v1"
+            selectedModel = "elevenlabs/scribe-v2-streaming"
         }
     }
 
@@ -249,47 +334,66 @@ public final class AppSettings: ObservableObject {
     public var hasOpenRouterKey: Bool { !openRouterAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasOpenAIKey: Bool { !openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasElevenLabsKey: Bool { !elevenLabsAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    public var hasCartesiaKey: Bool { !cartesiaAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    public var hasSonioxKey: Bool { !sonioxAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    public var hasModulateKey: Bool { !modulateAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    public var hasAssemblyAIKey: Bool { !assemblyAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    public var hasGladiaKey: Bool { !gladiaAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
-    // MARK: - Keychain Helpers
-
-    private func saveToKeychain(key: String, for account: String) {
-        let service = "com.speak.ios.credentials"
-
-        // Delete existing
-        let deleteQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account
-        ]
-        SecItemDelete(deleteQuery as CFDictionary)
-
-        guard !key.isEmpty else { return }
-
-        // Add new
-        let addQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecValueData as String: key.data(using: .utf8)!
-        ]
-        SecItemAdd(addQuery as CFDictionary, nil)
+    /// Returns the stored API key for a resolved live-transcription route, used
+    /// by the generic shared-client recording path.
+    public func liveAPIKey(for route: LiveTranscriptionRoute) -> String {
+        switch route.apiKeyIdentifier {
+        case Self.deepgramKeyID: return deepgramAPIKey
+        case Self.openAIKeyID: return openAIAPIKey
+        case Self.elevenLabsKeyID: return elevenLabsAPIKey
+        case Self.cartesiaKeyID: return cartesiaAPIKey
+        case Self.sonioxKeyID: return sonioxAPIKey
+        case Self.modulateKeyID: return modulateAPIKey
+        case Self.assemblyAIKeyID: return assemblyAIAPIKey
+        case Self.gladiaKeyID: return gladiaAPIKey
+        default: return ""
+        }
     }
 
-    private static func loadFromKeychain(for account: String) -> String? {
-        let service = "com.speak.ios.credentials"
+    // MARK: - Legacy migration
 
+    /// One-time migration of API keys from the pre-unification iOS keychain
+    /// locations (raw per-account items and the old ElevenLabs SecureStorage,
+    /// both under service `com.speak.ios.credentials`) into the canonical,
+    /// iCloud-syncable store. Additive and idempotent: legacy items are read but
+    /// never deleted, and each key is only migrated when the new store lacks it.
+    private static func migrateLegacyKeysIfNeeded() async {
+        let existing = Set(await credentialStorage.knownIdentifiers())
+
+        for identifier in [deepgramKeyID, openRouterKeyID, openAIKeyID] where !existing.contains(identifier) {
+            if let legacy = legacyRawSecret(account: identifier), !legacy.isEmpty {
+                try? await credentialStorage.storeSecret(legacy, identifier: identifier)
+            }
+        }
+
+        if !existing.contains(elevenLabsKeyID) {
+            let legacyStore = SecureStorage(
+                configuration: SecureStorageConfiguration(service: "com.speak.ios.credentials")
+            )
+            if let key = try? await legacyStore.secret(identifier: elevenLabsKeyID), !key.isEmpty {
+                try? await credentialStorage.storeSecret(key, identifier: elevenLabsKeyID)
+            }
+        }
+    }
+
+    /// Reads a value from the legacy raw per-account keychain items.
+    private static func legacyRawSecret(account: String) -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
+            kSecAttrService as String: "com.speak.ios.credentials",
             kSecAttrAccount as String: account,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
 
         var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-
-        guard status == errSecSuccess,
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
               let data = result as? Data,
               let string = String(data: data, encoding: .utf8) else {
             return nil
@@ -301,6 +405,29 @@ public final class AppSettings: ObservableObject {
 
 // MARK: - Settings View
 
+/// One row in the live-model picker: the model's display name plus, for models
+/// whose provider isn't wired up on iOS yet, a caption so users understand why
+/// selecting it falls back to Apple Speech.
+private struct LiveModelRow: View {
+    let option: ModelCatalog.Option
+
+    private var isSupported: Bool {
+        LiveTranscriptionRouting.route(for: option.id)?.isSupportedOnIOS ?? true
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(option.displayName)
+            if !isSupported {
+                Text("Coming to iPhone soon")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+// swiftlint:disable:next type_body_length
 public struct SettingsView: View {
     @StateObject private var settings = AppSettings.shared
     @Environment(\.openURL) private var openURL
@@ -313,35 +440,32 @@ public struct SettingsView: View {
         Form {
             Section("Transcription") {
                 Picker("Live Model", selection: selectedModelBinding) {
-                    // Apple Speech (free, on-device)
-                    Text("Apple Speech (On-Device)").tag("apple/local/SFSpeechRecognizer")
+                    ForEach(ModelCatalog.liveTranscription) { option in
+                        LiveModelRow(option: option).tag(option.id)
+                    }
+                }
+                .pickerStyle(.navigationLink)
 
-                    // Deepgram options (always shown, but warn if no key)
-                    Text("Deepgram Nova-3").tag("deepgram/nova-3")
-
-                    // ElevenLabs Scribe (always shown, but warn if no key)
-                    Text("ElevenLabs Scribe").tag("elevenlabs/scribe_v1")
-
-                    // OpenAI gpt-realtime-whisper streaming
-                    Text("OpenAI gpt-realtime-whisper").tag("openai/gpt-realtime-whisper-streaming")
+                if let route = LiveTranscriptionRouting.route(for: settings.selectedModel),
+                   !route.isSupportedOnIOS {
+                    Label(
+                        "Not available on iPhone yet — recording falls back to Apple Speech.",
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .foregroundStyle(.orange)
+                    .font(.caption)
                 }
 
-                if settings.selectedModel.hasPrefix("openai/") && !settings.hasOpenAIKey {
-                    Label("Add OpenAI API key below to use this model", systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.orange)
-                        .font(.caption)
-                }
-
-                if settings.selectedModel.hasPrefix("deepgram") && !settings.hasDeepgramKey {
-                    Label("Add Deepgram API key below to use this model", systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.orange)
-                        .font(.caption)
-                }
-
-                if settings.selectedModel.hasPrefix("elevenlabs") && !settings.hasElevenLabsKey {
-                    Label("Add ElevenLabs API key below to use this model", systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.orange)
-                        .font(.caption)
+                if let route = LiveTranscriptionRouting.route(for: settings.selectedModel),
+                   route.isSupportedOnIOS,
+                   route.apiKeyIdentifier != nil,
+                   settings.liveAPIKey(for: route).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Label(
+                        "Add this provider's API key below to use this model.",
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .foregroundStyle(.orange)
+                    .font(.caption)
                 }
 
                 LabeledContent("Language") {
@@ -498,6 +622,12 @@ public struct SettingsView: View {
                 } label: {
                     Label("Import from QR Code", systemImage: "qrcode.viewfinder")
                 }
+
+                Text("Share/Import copies your API keys and settings to another "
+                    + "device — the simplest way to sync with the Mac app. iCloud "
+                    + "Keychain keeps your iPhone and iPad in sync automatically.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("OpenClaw") {
@@ -796,12 +926,18 @@ struct PostProcessingSettingsView: View {
 
 // MARK: - API Keys View
 
+// swiftlint:disable:next type_body_length
 struct APIKeysView: View {
     @ObservedObject var settings: AppSettings
     @State private var deepgramKey = ""
     @State private var openRouterKey = ""
     @State private var openAIKey = ""
     @State private var elevenLabsKey = ""
+    @State private var cartesiaKey = ""
+    @State private var sonioxKey = ""
+    @State private var modulateKey = ""
+    @State private var assemblyAIKey = ""
+    @State private var gladiaKey = ""
     @State private var isValidating = false
     @State private var validationMessage: String?
     @State private var showingValidation = false
@@ -899,6 +1035,121 @@ struct APIKeysView: View {
                 }
                 .font(.caption)
             }
+
+            Section {
+                SecureField("API Key", text: $cartesiaKey)
+                    .textContentType(.password)
+                    .autocorrectionDisabled()
+
+                if settings.hasCartesiaKey && cartesiaKey.isEmpty {
+                    Button("Clear Stored Key", role: .destructive) {
+                        settings.cartesiaAPIKey = ""
+                    }
+                }
+            } header: {
+                Label("Cartesia", systemImage: "waveform.circle")
+            } footer: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Get your API key from cartesia.ai. Used by Ink streaming.")
+                    if settings.hasCartesiaKey {
+                        Text("✓ API key is stored")
+                            .foregroundStyle(.green)
+                    }
+                }
+                .font(.caption)
+            }
+
+            Section {
+                SecureField("API Key", text: $sonioxKey)
+                    .textContentType(.password)
+                    .autocorrectionDisabled()
+
+                if settings.hasSonioxKey && sonioxKey.isEmpty {
+                    Button("Clear Stored Key", role: .destructive) {
+                        settings.sonioxAPIKey = ""
+                    }
+                }
+            } header: {
+                Label("Soniox", systemImage: "waveform.badge.mic")
+            } footer: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Get your API key from soniox.com. Used by STT real-time streaming.")
+                    if settings.hasSonioxKey {
+                        Text("✓ API key is stored")
+                            .foregroundStyle(.green)
+                    }
+                }
+                .font(.caption)
+            }
+
+            Section {
+                SecureField("API Key", text: $modulateKey)
+                    .textContentType(.password)
+                    .autocorrectionDisabled()
+
+                if settings.hasModulateKey && modulateKey.isEmpty {
+                    Button("Clear Stored Key", role: .destructive) {
+                        settings.modulateAPIKey = ""
+                    }
+                }
+            } header: {
+                Label("Modulate", systemImage: "waveform.badge.magnifyingglass")
+            } footer: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Get your API key from modulate.ai. Used by Velma streaming.")
+                    if settings.hasModulateKey {
+                        Text("✓ API key is stored")
+                            .foregroundStyle(.green)
+                    }
+                }
+                .font(.caption)
+            }
+
+            Section {
+                SecureField("API Key", text: $assemblyAIKey)
+                    .textContentType(.password)
+                    .autocorrectionDisabled()
+
+                if settings.hasAssemblyAIKey && assemblyAIKey.isEmpty {
+                    Button("Clear Stored Key", role: .destructive) {
+                        settings.assemblyAIAPIKey = ""
+                    }
+                }
+            } header: {
+                Label("AssemblyAI", systemImage: "waveform.badge.plus")
+            } footer: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Get your API key from assemblyai.com. Used by Universal-Streaming.")
+                    if settings.hasAssemblyAIKey {
+                        Text("✓ API key is stored")
+                            .foregroundStyle(.green)
+                    }
+                }
+                .font(.caption)
+            }
+
+            Section {
+                SecureField("API Key", text: $gladiaKey)
+                    .textContentType(.password)
+                    .autocorrectionDisabled()
+
+                if settings.hasGladiaKey && gladiaKey.isEmpty {
+                    Button("Clear Stored Key", role: .destructive) {
+                        settings.gladiaAPIKey = ""
+                    }
+                }
+            } header: {
+                Label("Gladia", systemImage: "waveform.badge.exclamationmark")
+            } footer: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Get your API key from gladia.io. Used by Solaria streaming.")
+                    if settings.hasGladiaKey {
+                        Text("✓ API key is stored")
+                            .foregroundStyle(.green)
+                    }
+                }
+                .font(.caption)
+            }
         }
         .navigationTitle("API Keys")
         .toolbar {
@@ -914,6 +1165,11 @@ struct APIKeysView: View {
                             && openRouterKey.isEmpty
                             && openAIKey.isEmpty
                             && elevenLabsKey.isEmpty
+                            && cartesiaKey.isEmpty
+                            && sonioxKey.isEmpty
+                            && modulateKey.isEmpty
+                            && assemblyAIKey.isEmpty
+                            && gladiaKey.isEmpty
                     )
                 }
             }
@@ -925,6 +1181,7 @@ struct APIKeysView: View {
         }
     }
 
+    // swiftlint:disable:next function_body_length cyclomatic_complexity
     private func saveKeys() {
         Task {
             isValidating = true
@@ -974,6 +1231,41 @@ struct APIKeysView: View {
                 settings.openAIAPIKey = openAIKey
                 openAIKey = ""
                 messages.append("✓ OpenAI key saved")
+            }
+
+            // Save Cartesia key (no cheap validation endpoint)
+            if !cartesiaKey.isEmpty {
+                settings.cartesiaAPIKey = cartesiaKey
+                cartesiaKey = ""
+                messages.append("✓ Cartesia key saved")
+            }
+
+            // Save Soniox key (no cheap validation endpoint)
+            if !sonioxKey.isEmpty {
+                settings.sonioxAPIKey = sonioxKey
+                sonioxKey = ""
+                messages.append("✓ Soniox key saved")
+            }
+
+            // Save Modulate key (no cheap validation endpoint)
+            if !modulateKey.isEmpty {
+                settings.modulateAPIKey = modulateKey
+                modulateKey = ""
+                messages.append("✓ Modulate key saved")
+            }
+
+            // Save AssemblyAI key (no cheap validation endpoint)
+            if !assemblyAIKey.isEmpty {
+                settings.assemblyAIAPIKey = assemblyAIKey
+                assemblyAIKey = ""
+                messages.append("✓ AssemblyAI key saved")
+            }
+
+            // Save Gladia key (no cheap validation endpoint)
+            if !gladiaKey.isEmpty {
+                settings.gladiaAPIKey = gladiaKey
+                gladiaKey = ""
+                messages.append("✓ Gladia key saved")
             }
 
             isValidating = false

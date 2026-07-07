@@ -21,6 +21,7 @@ public final class TranscriptionRecordingService: ObservableObject {
     private var deepgramTranscriber: DeepgramLiveTranscriber?
     private var elevenLabsTranscriber: ElevenLabsLiveTranscriber?
     private var openAITranscriber: OpenAIRealtimeLiveTranscriber?
+    private var sharedTranscriber: SharedClientLiveTranscriber?
     private var startTime: Date?
     private var currentModel: String = ""
 
@@ -41,7 +42,8 @@ public final class TranscriptionRecordingService: ObservableObject {
     // MARK: - Public API
 
     /// Starts a headless recording session with Live Activity.
-    public func startRecording() async throws { // swiftlint:disable:this function_body_length
+    public func startRecording() async throws {
+        // swiftlint:disable:previous function_body_length
         guard !isRunning else { return }
 
         let settings = AppSettings.shared
@@ -53,18 +55,11 @@ public final class TranscriptionRecordingService: ObservableObject {
         sharedState.isRecording = true
         sharedState.recordingStartTime = startTime
 
-        // Fallback to Apple Speech if Deepgram selected but no API key
-        if currentModel.hasPrefix("deepgram") && !settings.hasDeepgramKey {
-            currentModel = "apple/local/SFSpeechRecognizer"
-        }
-
-        // Fallback to Apple Speech if ElevenLabs selected but no API key
-        if currentModel.hasPrefix("elevenlabs") && !settings.hasElevenLabsKey {
-            currentModel = "apple/local/SFSpeechRecognizer"
-        }
-
-        // Fallback to Apple Speech if OpenAI selected but no API key
-        if currentModel.hasPrefix("openai") && !settings.hasOpenAIKey {
+        // Fall back to Apple Speech if the selected provider needs an API key we
+        // don't have (covers every cloud provider via the shared routing).
+        if let route = LiveTranscriptionRouting.route(for: currentModel),
+           route.apiKeyIdentifier != nil,
+           settings.liveAPIKey(for: route).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             currentModel = "apple/local/SFSpeechRecognizer"
         }
 
@@ -75,7 +70,8 @@ public final class TranscriptionRecordingService: ObservableObject {
             if currentModel.hasPrefix("deepgram") {
                 let transcriber = DeepgramLiveTranscriber(audioSessionManager: audioSessionManager)
                 transcriber.configure(apiKey: settings.deepgramAPIKey)
-                transcriber.model = currentModel.replacingOccurrences(of: "deepgram/", with: "")
+                transcriber.model = LiveTranscriptionRouting.route(for: currentModel)?.apiModelName
+                    ?? currentModel.replacingOccurrences(of: "deepgram/", with: "")
 
                 transcriber.onPartialResult = { [weak self] text, _ in
                     Task { @MainActor in
@@ -95,7 +91,8 @@ public final class TranscriptionRecordingService: ObservableObject {
             } else if currentModel.hasPrefix("elevenlabs") {
                 let transcriber = ElevenLabsLiveTranscriber(audioSessionManager: audioSessionManager)
                 transcriber.configure(apiKey: settings.elevenLabsAPIKey)
-                transcriber.modelID = currentModel.replacingOccurrences(of: "elevenlabs/", with: "")
+                transcriber.modelID = LiveTranscriptionRouting.route(for: currentModel)?.apiModelName
+                    ?? currentModel.replacingOccurrences(of: "elevenlabs/", with: "")
 
                 transcriber.onPartialResult = { [weak self] text, _ in
                     Task { @MainActor in
@@ -116,7 +113,8 @@ public final class TranscriptionRecordingService: ObservableObject {
             } else if currentModel.hasPrefix("openai") {
                 let transcriber = OpenAIRealtimeLiveTranscriber(audioSessionManager: audioSessionManager)
                 transcriber.configure(apiKey: settings.openAIAPIKey)
-                transcriber.modelID = currentModel.replacingOccurrences(of: "openai/", with: "")
+                transcriber.modelID = LiveTranscriptionRouting.route(for: currentModel)?.apiModelName
+                    ?? currentModel.replacingOccurrences(of: "openai/", with: "")
 
                 transcriber.onPartialResult = { [weak self] text, _ in
                     Task { @MainActor in
@@ -132,6 +130,27 @@ public final class TranscriptionRecordingService: ObservableObject {
                 openAITranscriber = transcriber
                 elevenLabsTranscriber = nil
                 deepgramTranscriber = nil
+                appleTranscriber = nil
+                sharedTranscriber = nil
+                try await transcriber.start()
+            } else if let route = LiveTranscriptionRouting.route(for: currentModel),
+                      route.provider.isSupportedOnIOS {
+                // Generic shared-client path (Cartesia, and future ported providers).
+                let transcriber = SharedClientLiveTranscriber(
+                    route: route,
+                    apiKey: settings.liveAPIKey(for: route),
+                    audioSessionManager: audioSessionManager
+                )
+                transcriber.onPartialResult = { [weak self] text, _ in
+                    Task { @MainActor in self?.handlePartialResult(text: text) }
+                }
+                transcriber.onError = { [weak self] error in
+                    Task { @MainActor in self?.handleError(error) }
+                }
+                sharedTranscriber = transcriber
+                deepgramTranscriber = nil
+                elevenLabsTranscriber = nil
+                openAITranscriber = nil
                 appleTranscriber = nil
                 try await transcriber.start()
             } else {
@@ -152,6 +171,7 @@ public final class TranscriptionRecordingService: ObservableObject {
                 deepgramTranscriber = nil
                 elevenLabsTranscriber = nil
                 openAITranscriber = nil
+                sharedTranscriber = nil
                 try await transcriber.start()
             }
 
@@ -162,6 +182,7 @@ public final class TranscriptionRecordingService: ObservableObject {
             elevenLabsTranscriber = nil
             openAITranscriber = nil
             appleTranscriber = nil
+            sharedTranscriber = nil
             sharedState.clearRecordingState()
             activityManager.endActivity()
             throw error
@@ -219,10 +240,12 @@ public final class TranscriptionRecordingService: ObservableObject {
         elevenLabsTranscriber?.cancel()
         openAITranscriber?.cancel()
         appleTranscriber?.cancel()
+        sharedTranscriber?.cancel()
         deepgramTranscriber = nil
         elevenLabsTranscriber = nil
         openAITranscriber = nil
         appleTranscriber = nil
+        sharedTranscriber = nil
         isRunning = false
         startTime = nil
         partialText = ""
@@ -296,6 +319,10 @@ private extension TranscriptionRecordingService {
         if let openai = openAITranscriber {
             openAITranscriber = nil
             return await openai.stop()
+        }
+        if let shared = sharedTranscriber {
+            sharedTranscriber = nil
+            return await shared.stop()
         }
         if let apple = appleTranscriber {
             appleTranscriber = nil

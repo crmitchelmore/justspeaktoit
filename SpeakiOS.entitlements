@@ -14,8 +14,10 @@
         <string>group.com.justspeaktoit.ios</string>
     </array>
 
-    <!-- Push Notifications: Required for CloudKit silent push sync -->
+    <!-- Push Notifications: Required for CloudKit silent push sync.
+         App Store / TestFlight builds must use "production"; switch back to
+         "development" only for local Xcode-signed development builds. -->
     <key>aps-environment</key>
-    <string>development</string>
+    <string>production</string>
 </dict>
 </plist>

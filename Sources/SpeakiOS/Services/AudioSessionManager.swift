@@ -34,7 +34,7 @@ public final class AudioSessionManager: ObservableObject {
     /// attributed to the exact step, and both throw an
     /// ``AudioSessionConfigurationError`` carrying the decoded `OSStatus` code
     /// plus a snapshot of the live session state.
-    public func configureForRecording() throws {
+    public func configureForRecording() async throws {
         let session = AVAudioSession.sharedInstance()
 
         do {
@@ -51,8 +51,14 @@ public final class AudioSessionManager: ObservableObject {
         }
 
         do {
-            // Activate the session
-            try session.setActive(true, options: .notifyOthersOnDeactivation)
+            // Activation intermittently fails with `cannotInterruptOthers` when a
+            // recording is triggered from the background (Action Button /
+            // Shortcuts / Siri) while another app is still releasing its audio
+            // session. Retry with a short back-off before surfacing the
+            // diagnostic error — the second attempt almost always succeeds.
+            try await AudioSessionActivation.activate {
+                try session.setActive(true, options: .notifyOthersOnDeactivation)
+            }
         } catch {
             throw configurationFailure(.setActive, error, session)
         }

@@ -71,7 +71,7 @@ public final class DeepgramLiveTranscriber: ObservableObject {
         }
 
         try await ensureMicrophonePermission()
-        try configureAudioSession()
+        try await configureAudioSession()
         connectDeepgramClient(apiKey: apiKey)
         try startAudioEngine()
         resetState()
@@ -91,9 +91,9 @@ public final class DeepgramLiveTranscriber: ObservableObject {
         }
     }
 
-    private func configureAudioSession() throws {
+    private func configureAudioSession() async throws {
         do {
-            try audioSessionManager.configureForRecording()
+            try await audioSessionManager.configureForRecording()
             SpeakLogger.audio.info("Audio session configured for Deepgram")
         } catch {
             let wrappedError = iOSTranscriptionError.audioSessionFailed(error)

@@ -95,6 +95,10 @@ public final class AppSettings: ObservableObject {
         didSet { persistSecret(cartesiaAPIKey, identifier: Self.cartesiaKeyID) }
     }
 
+    @Published public var sonioxAPIKey: String {
+        didSet { persistSecret(sonioxAPIKey, identifier: Self.sonioxKeyID) }
+    }
+
     // MARK: - Canonical secure storage for API keys (SpeakCore)
     //
     // Every API key is stored through SpeakCore's SecureStorage using the same
@@ -111,6 +115,7 @@ public final class AppSettings: ObservableObject {
     static let openAIKeyID = "openai.apiKey"
     static let elevenLabsKeyID = "elevenlabs.apiKey"
     static let cartesiaKeyID = "cartesia.apiKey"
+    static let sonioxKeyID = "soniox.apiKey"
 
     /// Shared keychain access group declared in `SpeakiOS.entitlements`
     /// (`$(AppIdentifierPrefix)com.justspeaktoit.shared`). Only used when the
@@ -239,6 +244,7 @@ public final class AppSettings: ObservableObject {
         self.openAIAPIKey = ""
         self.elevenLabsAPIKey = ""
         self.cartesiaAPIKey = ""
+        self.sonioxAPIKey = ""
         self.liveActivitiesEnabled = liveActivities
         self.autoStartRecording = autoStart
         self.hardwareTriggerDestination = hardwareDest
@@ -259,6 +265,7 @@ public final class AppSettings: ObservableObject {
             self.openAIAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.openAIKeyID)) ?? ""
             self.elevenLabsAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.elevenLabsKeyID)) ?? ""
             self.cartesiaAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.cartesiaKeyID)) ?? ""
+            self.sonioxAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.sonioxKeyID)) ?? ""
             self.configureDefaultProviderIfNeeded()
         }
     }
@@ -294,6 +301,7 @@ public final class AppSettings: ObservableObject {
     public var hasOpenAIKey: Bool { !openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasElevenLabsKey: Bool { !elevenLabsAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasCartesiaKey: Bool { !cartesiaAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    public var hasSonioxKey: Bool { !sonioxAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     /// Returns the stored API key for a resolved live-transcription route, used
     /// by the generic shared-client recording path.
@@ -303,6 +311,7 @@ public final class AppSettings: ObservableObject {
         case Self.openAIKeyID: return openAIAPIKey
         case Self.elevenLabsKeyID: return elevenLabsAPIKey
         case Self.cartesiaKeyID: return cartesiaAPIKey
+        case Self.sonioxKeyID: return sonioxAPIKey
         default: return ""
         }
     }
@@ -578,6 +587,12 @@ public struct SettingsView: View {
                 } label: {
                     Label("Import from QR Code", systemImage: "qrcode.viewfinder")
                 }
+
+                Text("Share/Import copies your API keys and settings to another "
+                    + "device — the simplest way to sync with the Mac app. iCloud "
+                    + "Keychain keeps your iPhone and iPad in sync automatically.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("OpenClaw") {
@@ -883,6 +898,7 @@ struct APIKeysView: View {
     @State private var openAIKey = ""
     @State private var elevenLabsKey = ""
     @State private var cartesiaKey = ""
+    @State private var sonioxKey = ""
     @State private var isValidating = false
     @State private var validationMessage: String?
     @State private var showingValidation = false
@@ -1003,6 +1019,29 @@ struct APIKeysView: View {
                 }
                 .font(.caption)
             }
+
+            Section {
+                SecureField("API Key", text: $sonioxKey)
+                    .textContentType(.password)
+                    .autocorrectionDisabled()
+
+                if settings.hasSonioxKey && sonioxKey.isEmpty {
+                    Button("Clear Stored Key", role: .destructive) {
+                        settings.sonioxAPIKey = ""
+                    }
+                }
+            } header: {
+                Label("Soniox", systemImage: "waveform.badge.mic")
+            } footer: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Get your API key from soniox.com. Used by STT real-time streaming.")
+                    if settings.hasSonioxKey {
+                        Text("✓ API key is stored")
+                            .foregroundStyle(.green)
+                    }
+                }
+                .font(.caption)
+            }
         }
         .navigationTitle("API Keys")
         .toolbar {
@@ -1019,6 +1058,7 @@ struct APIKeysView: View {
                             && openAIKey.isEmpty
                             && elevenLabsKey.isEmpty
                             && cartesiaKey.isEmpty
+                            && sonioxKey.isEmpty
                     )
                 }
             }
@@ -1086,6 +1126,13 @@ struct APIKeysView: View {
                 settings.cartesiaAPIKey = cartesiaKey
                 cartesiaKey = ""
                 messages.append("✓ Cartesia key saved")
+            }
+
+            // Save Soniox key (no cheap validation endpoint)
+            if !sonioxKey.isEmpty {
+                settings.sonioxAPIKey = sonioxKey
+                sonioxKey = ""
+                messages.append("✓ Soniox key saved")
             }
 
             isValidating = false

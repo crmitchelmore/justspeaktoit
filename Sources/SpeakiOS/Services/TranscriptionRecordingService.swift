@@ -74,6 +74,11 @@ public final class TranscriptionRecordingService: ObservableObject {
             currentModel = "apple/local/SFSpeechRecognizer"
         }
 
+        // Fallback to Apple Speech if Soniox selected but no API key
+        if currentModel.hasPrefix("soniox") && !settings.hasSonioxKey {
+            currentModel = "apple/local/SFSpeechRecognizer"
+        }
+
         // Live Activity is mandatory for AudioRecordingIntent
         activityManager.startActivity(provider: modelDisplayName)
 

@@ -40,8 +40,7 @@ public enum SyncConfiguration {
 
     /// Whether this app build has CloudKit entitlements.
     /// Developer ID Sparkle builds may omit CloudKit entitlements.
-    /// iOS builds currently ship without iCloud entitlements until
-    /// the provisioning profile is configured with the correct container.
+    /// iOS builds declare CloudKit entitlements in SpeakiOS.entitlements.
     static var hasCloudKitEntitlement: Bool {
 #if os(macOS)
         guard let task = SecTaskCreateFromSelf(nil) else {
@@ -63,7 +62,7 @@ public enum SyncConfiguration {
         let hasContainerIdentifier = containers?.contains(containerIdentifier) == true
         return hasCloudKitService && hasContainerIdentifier
 #else
-        return false
+        return true
 #endif
     }
 

@@ -1,5 +1,6 @@
 import SpeakCore
 import SpeakHotKeys
+import SpeakSync
 import AppKit
 import Sparkle
 import SwiftUI
@@ -3282,6 +3283,8 @@ struct SettingsView: View {
   private var apiKeySettings: some View {
     ScrollViewReader { proxy in
       LazyVStack(spacing: 20) {
+        CloudKitKeySyncSettingsCard(secureStorage: environment.secureStorage)
+
         // OpenRouter (Legacy)
         apiKeyCard(
         title: "OpenRouter",
@@ -3582,6 +3585,70 @@ struct SettingsView: View {
       }
     }
     .speakTooltip(tooltip)
+  }
+
+  private struct CloudKitKeySyncSettingsCard: View {
+    let secureStorage: SecureAppStorage
+    @ObservedObject private var keySync = CloudKitKeySync.shared
+    @State private var passphrase = ""
+
+    var body: some View {
+      SettingsCard(title: "Encrypted API-Key Sync", systemImage: "lock.icloud", tint: .brandLagoon) {
+        VStack(alignment: .leading, spacing: 12) {
+          HStack {
+            Label("Status", systemImage: keySync.status.isEnabled ? "checkmark.seal.fill" : "lock.fill")
+            Spacer()
+            Text(keySync.status.message)
+              .foregroundStyle(keySync.status.isEnabled ? .green : .secondary)
+          }
+
+          if !keySync.status.isEnabled {
+            SecureField("Sync passphrase", text: $passphrase)
+              .textContentType(.password)
+              .privacySensitive()
+              .textFieldStyle(.roundedBorder)
+
+            Button {
+              Task {
+                try? await keySync.enable(passphrase: passphrase)
+                passphrase = ""
+              }
+            } label: {
+              Label("Enable API-Key Sync", systemImage: "lock.open")
+            }
+            .disabled(passphrase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .buttonStyle(.borderedProminent)
+          } else {
+            HStack {
+              Button {
+                Task { try? await keySync.syncNow() }
+              } label: {
+                Label("Sync Keys Now", systemImage: "arrow.triangle.2.circlepath")
+              }
+              .disabled(keySync.status.isSyncing)
+
+              Button("Disable", role: .destructive) {
+                Task { await keySync.disable() }
+              }
+            }
+          }
+
+          Text(
+            "Opt in to sync API keys through your private CloudKit database. Keys are encrypted with "
+              + "CryptoKit before upload. Developer-ID macOS builds need a managed provisioning profile "
+              + "with CloudKit entitlements; otherwise this stays unavailable and local Keychain storage "
+              + "works normally."
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        }
+      }
+      .task {
+        let coreStorage = await secureStorage.coreStorage()
+        await keySync.configure(secureStorage: coreStorage)
+        _ = await keySync.isAvailable()
+      }
+    }
   }
 
   private func binding(for providerID: String) -> Binding<String> {

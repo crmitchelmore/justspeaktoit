@@ -2,6 +2,8 @@ import Foundation
 import Security
 import os
 
+// swiftlint:disable file_length
+
 // MARK: - Error Types
 
 public enum SecureStorageError: LocalizedError {
@@ -81,7 +83,16 @@ public struct SecureStorageConfiguration: Sendable {
 /// Cross-platform secure storage for API keys and secrets.
 /// Uses Keychain Services on both macOS and iOS.
 public actor SecureStorage {
+    // swiftlint:disable:previous type_body_length
     private static let logger = Logger(subsystem: "com.justspeaktoit", category: "SecureStorage")
+
+    public static let didChangeSecretNotification = Notification.Name("SecureStorageDidChangeSecret")
+
+    public enum NotificationUserInfoKey {
+        public static let identifier = "identifier"
+        public static let operation = "operation"
+        public static let updatedAt = "updatedAt"
+    }
     
     private let configuration: SecureStorageConfiguration
     private let permissionsChecker: any KeychainPermissionsChecking
@@ -117,6 +128,8 @@ public actor SecureStorage {
                 registry.registerAPIKeyIdentifier(identifier)
             }
         }
+
+        postChangeNotification(identifier: identifier, operation: "store")
     }
 
     public func secret(identifier: String) async throws -> String {
@@ -145,6 +158,8 @@ public actor SecureStorage {
                 registry.removeAPIKeyIdentifier(identifier)
             }
         }
+
+        postChangeNotification(identifier: identifier, operation: "remove")
     }
 
     public func knownIdentifiers() async -> [String] {
@@ -395,5 +410,17 @@ public actor SecureStorage {
             .sorted { $0.key < $1.key }
             .map { "\($0.key)=\($0.value)" }
             .joined(separator: ";")
+    }
+
+    private func postChangeNotification(identifier: String, operation: String) {
+        NotificationCenter.default.post(
+            name: Self.didChangeSecretNotification,
+            object: nil,
+            userInfo: [
+                Self.NotificationUserInfoKey.identifier: identifier,
+                Self.NotificationUserInfoKey.operation: operation,
+                Self.NotificationUserInfoKey.updatedAt: Date()
+            ]
+        )
     }
 }

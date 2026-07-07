@@ -162,6 +162,10 @@ actor SecureAppStorage {
         await storage.knownIdentifiers()
     }
 
+    func coreStorage() -> SecureStorage {
+        storage
+    }
+
     func hasSecret(identifier: String) async -> Bool {
         await storage.hasSecret(identifier: identifier)
     }

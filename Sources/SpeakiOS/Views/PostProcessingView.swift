@@ -2,6 +2,8 @@
 import SwiftUI
 import SpeakCore
 
+// swiftlint:disable file_length
+
 // MARK: - Post-Processing Manager
 
 /// Manages post-processing of transcriptions via OpenRouter API.
@@ -70,6 +72,32 @@ public final class iOSPostProcessingManager: ObservableObject {
         streamTask?.cancel()
         streamTask = nil
         isProcessing = false
+    }
+
+    /// Runs post-processing once and returns the full polished result. Unlike
+    /// `process`, this does not mutate the shared published UI state, so it's
+    /// safe to call for background work such as reprocessing a history entry.
+    /// Reuses the same OpenRouter streaming path as the interactive editor.
+    public func polish(
+        text: String,
+        model: String,
+        prompt: String,
+        apiKey: String
+    ) async throws -> String {
+        guard !text.isEmpty else { return text }
+        guard !apiKey.isEmpty else { throw PostProcessingError.apiKeyMissing }
+
+        let effectivePrompt = prompt.isEmpty ? AppSettings.defaultPostProcessingPrompt : prompt
+        var result = ""
+        for try await chunk in sendChatStreaming(
+            systemPrompt: effectivePrompt,
+            userMessage: text,
+            model: model,
+            apiKey: apiKey
+        ) {
+            result += chunk
+        }
+        return result
     }
     
     // MARK: - OpenRouter API

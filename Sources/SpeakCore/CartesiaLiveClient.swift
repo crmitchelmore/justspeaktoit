@@ -148,6 +148,17 @@ public final class CartesiaLiveClient: StreamingTranscriptionClient, @unchecked 
     }
 
     private func parseResponse(_ json: String) {
+        // Surface Cartesia `type: "error"` events instead of silently ignoring them.
+        if let data = json.data(using: .utf8),
+           let errorEvent = try? JSONDecoder().decode(CartesiaErrorEvent.self, from: data),
+           errorEvent.type == "error" {
+            let message = errorEvent.message ?? errorEvent.title ?? "Cartesia streaming error"
+            currentOnError()?(NSError(
+                domain: "Cartesia", code: errorEvent.statusCode ?? -1,
+                userInfo: [NSLocalizedDescriptionKey: message]
+            ))
+            return
+        }
         guard let event = Self.transcriptEvent(from: json) else { return }
         currentOnTranscript()?(event.text, event.isFinal)
     }
@@ -242,5 +253,19 @@ private struct CartesiaTurnResponse: Decodable {
     var transcriptText: String? {
         if let transcript { return transcript }
         return results?.compactMap(\.transcript).first { !$0.isEmpty }
+    }
+}
+
+private struct CartesiaErrorEvent: Decodable {
+    let type: String
+    let statusCode: Int?
+    let title: String?
+    let message: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case statusCode = "status_code"
+        case title
+        case message
     }
 }

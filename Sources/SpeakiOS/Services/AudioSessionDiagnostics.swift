@@ -159,14 +159,15 @@ public enum AudioSessionActivation {
 
     /// Runs `perform`, retrying while `isTransient` classifies the thrown error
     /// as retryable and attempts remain. Sleeps via the injected `sleep`
-    /// closure between attempts (defaults to `Task.sleep`); tests inject a
+    /// closure between attempts (defaults to `Task.sleep`, which propagates task
+    /// cancellation so a cancelled recording stops retrying); tests inject a
     /// no-op sleep to exercise the loop deterministically. The final error is
     /// rethrown once retries are exhausted or the error is non-transient.
     public static func activate(
         maxAttempts: Int = defaultMaxAttempts,
         backoffNanoseconds: (Int) -> UInt64 = { attempt in UInt64(attempt) * 150_000_000 },
         isTransient: (Error) -> Bool = isCannotInterruptOthers,
-        sleep: (UInt64) async -> Void = { try? await Task.sleep(nanoseconds: $0) },
+        sleep: (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) },
         perform: () throws -> Void
     ) async throws {
         var attempt = 1
@@ -177,7 +178,7 @@ public enum AudioSessionActivation {
                 return
             } catch {
                 guard attempt < limit, isTransient(error) else { throw error }
-                await sleep(backoffNanoseconds(attempt))
+                try await sleep(backoffNanoseconds(attempt))
                 attempt += 1
             }
         }

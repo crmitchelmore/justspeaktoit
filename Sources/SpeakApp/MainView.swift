@@ -23,9 +23,6 @@ struct MainView: View {
       guard let item else { return }
       selection = item
     }
-    .task {
-      environment.installStatusBarIfNeeded()
-    }
     .alert(
       environment.main.missingLiveAPIKeyAlert?.title ?? "API key required",
       isPresented: Binding(

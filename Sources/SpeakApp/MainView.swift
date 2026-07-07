@@ -23,12 +23,6 @@ struct MainView: View {
       guard let item else { return }
       selection = item
     }
-    .task {
-      environment.installStatusBarIfNeeded {
-        NSApp.activate(ignoringOtherApps: true)
-        NSApp.windows.first?.makeKeyAndOrderFront(nil)
-      }
-    }
     .alert(
       environment.main.missingLiveAPIKeyAlert?.title ?? "API key required",
       isPresented: Binding(

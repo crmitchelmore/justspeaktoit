@@ -213,6 +213,25 @@ final class AppSettingsDefaultsTests: XCTestCase {
         XCTAssertTrue(settings.shouldShowStatusBarIcon)
     }
 
+    @MainActor
+    func testVisibility_alwaysHasAnAccessPoint() {
+        let settings = AppSettings(defaults: defaults)
+        for visibility in AppSettings.AppVisibility.allCases {
+            for statusBarToggle in [true, false] {
+                settings.appVisibility = visibility
+                settings.showStatusBarIconInDockOnly = statusBarToggle
+
+                let hasDockIcon = visibility.showInDock
+                let hasStatusBarIcon = settings.shouldShowStatusBarIcon
+
+                XCTAssertTrue(
+                    hasDockIcon || hasStatusBarIcon,
+                    "No access point for \(visibility.rawValue) with status bar toggle \(statusBarToggle)"
+                )
+            }
+        }
+    }
+
     // MARK: - HUD Settings
 
     @MainActor

@@ -36,7 +36,9 @@ final class AppEnvironment: ObservableObject {
   @Published var sidebarNavigationTarget: SidebarItem?
 
   private(set) var statusBarController: StatusBarController?
-  private var openMainWindow: (() -> Void)?
+  /// Reopens the main window when the app is running without any visible
+  /// window (e.g. menu-bar-only mode). Supplied by the SwiftUI scene.
+  var reopenMainWindow: (() -> Void)?
   private var statusBarVisibilityObserver: AnyCancellable?
   private(set) var menuBarManager: MenuBarManager?
   private(set) var dockMenuManager: DockMenuManager?
@@ -95,12 +97,12 @@ final class AppEnvironment: ObservableObject {
   /// Alias for permissions manager (for API consistency)
   var permissionsManager: PermissionsManager { permissions }
 
-  /// Installs the status bar controller if needed and wires it to react to
-  /// visibility settings. The `openMainWindow` closure is stored for later use,
-  /// so ensure it captures any strongly-held objects weakly to avoid a retain
-  /// cycle.
-  func installStatusBarIfNeeded(openMainWindow: @escaping () -> Void) {
-    self.openMainWindow = openMainWindow
+  /// Installs the status bar controller and the observer that keeps it in sync
+  /// with the visibility settings. Safe to call more than once; it is
+  /// idempotent. This is intentionally decoupled from any window lifecycle so
+  /// the menu bar access point exists even when no window is on screen (for
+  /// example after launching straight into menu-bar-only mode).
+  func installStatusBarIfNeeded() {
     if statusBarVisibilityObserver == nil {
       statusBarVisibilityObserver = settings.$appVisibility
         .removeDuplicates()
@@ -114,20 +116,41 @@ final class AppEnvironment: ObservableObject {
   }
 
   /// Installs or removes the status bar icon to match the current visibility
-  /// settings. In Dock Only mode the icon follows `showStatusBarIconInDockOnly`.
+  /// settings. In Dock Only mode the icon follows `showStatusBarIconInDockOnly`;
+  /// in every mode without a Dock icon the status bar icon is always shown so
+  /// the app can never end up with no access point.
   private func updateStatusBarVisibility() {
     guard settings.shouldShowStatusBarIcon else {
       statusBarController?.tearDown()
       statusBarController = nil
       return
     }
-    guard statusBarController == nil, let openMainWindow else { return }
+    guard statusBarController == nil else { return }
     statusBarController = StatusBarController(
       appSettings: settings,
       historyManager: history,
       mainManager: main,
-      openMainWindow: openMainWindow
+      openMainWindow: { [weak self] in self?.presentMainWindow() }
     )
+  }
+
+  /// Brings the main window to the front, reopening it if the app is running
+  /// without any visible window. This is the guaranteed access point behind the
+  /// status bar item's "Open Speak…".
+  func presentMainWindow() {
+    NSApp.activate(ignoringOtherApps: true)
+    if let window = NSApp.windows.first(where: { $0.canBecomeMain && $0.isVisible }) {
+      window.makeKeyAndOrderFront(nil)
+      return
+    }
+    // No visible window (e.g. menu-bar-only mode). Defer past the status menu's
+    // event-tracking run loop before asking SwiftUI to reopen the main scene,
+    // otherwise the openWindow action can be dropped. Fall back to fronting any
+    // window SwiftUI produces.
+    DispatchQueue.main.async { [weak self] in
+      self?.reopenMainWindow?()
+      NSApp.windows.first(where: { $0.canBecomeMain })?.makeKeyAndOrderFront(nil)
+    }
   }
 
   func installMenuBar() {

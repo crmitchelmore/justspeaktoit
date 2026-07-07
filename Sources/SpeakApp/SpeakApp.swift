@@ -11,6 +11,7 @@ struct SpeakApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var environmentHolder = EnvironmentHolder()
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
+    @Environment(\.openWindow) private var openWindow
 
     init() {
         // Initialize Sentry as early as possible
@@ -18,7 +19,7 @@ struct SpeakApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("Just Speak to It") {
+        WindowGroup("Just Speak to It", id: "main") {
             Group {
                 if let environment = environmentHolder.environment {
                     if hasCompletedOnboarding {
@@ -71,6 +72,9 @@ struct SpeakApp: App {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .task {
                             environmentHolder.bootstrap()
+                            environmentHolder.environment?.reopenMainWindow = {
+                                openWindow(id: "main")
+                            }
                         }
                 }
             }
@@ -93,7 +97,12 @@ final class EnvironmentHolder: ObservableObject {
 
     func bootstrap() {
         guard environment == nil else { return }
-        environment = WireUp.bootstrap()
+        let env = WireUp.bootstrap()
+        environment = env
+        // Install the status bar access point immediately, independent of any
+        // window, so the app is always reachable — even when launched straight
+        // into menu-bar-only mode with no window on screen.
+        env.installStatusBarIfNeeded()
     }
 }
 

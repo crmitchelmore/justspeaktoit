@@ -2,6 +2,7 @@
 import SwiftUI
 import SpeakCore
 import SpeakSync
+import Security
 
 // swiftlint:disable file_length
 
@@ -72,36 +73,60 @@ public final class AppSettings: ObservableObject {
     }
 
     @Published public var deepgramAPIKey: String {
-        didSet { saveToKeychain(key: deepgramAPIKey, for: "deepgram.apiKey") }
+        didSet { persistSecret(deepgramAPIKey, identifier: Self.deepgramKeyID) }
     }
 
     @Published public var openRouterAPIKey: String {
-        didSet { saveToKeychain(key: openRouterAPIKey, for: "openrouter.apiKey") }
+        didSet { persistSecret(openRouterAPIKey, identifier: Self.openRouterKeyID) }
     }
 
     @Published public var openAIAPIKey: String {
-        didSet { saveToKeychain(key: openAIAPIKey, for: "openai.apiKey") }
+        didSet { persistSecret(openAIAPIKey, identifier: Self.openAIKeyID) }
     }
 
     @Published public var elevenLabsAPIKey: String {
-        didSet {
-            Task {
-                if self.elevenLabsAPIKey.isEmpty {
-                    try? await Self.elevenLabsStorage.removeSecret(identifier: "elevenlabs.apiKey")
-                } else {
-                    try? await Self.elevenLabsStorage.storeSecret(
-                        self.elevenLabsAPIKey,
-                        identifier: "elevenlabs.apiKey"
-                    )
-                }
+        didSet { persistSecret(elevenLabsAPIKey, identifier: Self.elevenLabsKeyID) }
+    }
+
+    // MARK: - Canonical secure storage for API keys (SpeakCore)
+    //
+    // Every API key is stored through SpeakCore's SecureStorage using the same
+    // service/account as the macOS app, and synced via iCloud Keychain when the
+    // build is entitled (see `SecureStorageConfiguration.iCloudSyncedIfAvailable`).
+    // A key set on one device then appears on the user's other devices.
+    //
+    // iOS <-> macOS sync additionally requires the shared keychain-access-group
+    // to be present in BOTH apps' entitlements and the macOS app to be built
+    // with the iCloud Keychain capability; a Developer-ID macOS build can't use
+    // synchronizable items and falls back to local-only storage.
+    static let deepgramKeyID = "deepgram.apiKey"
+    static let openRouterKeyID = "openrouter.apiKey"
+    static let openAIKeyID = "openai.apiKey"
+    static let elevenLabsKeyID = "elevenlabs.apiKey"
+
+    /// Shared keychain access group declared in `SpeakiOS.entitlements`
+    /// (`$(AppIdentifierPrefix)com.justspeaktoit.shared`). Only used when the
+    /// runtime probe confirms the entitlement is present.
+    private static let sharedAccessGroup = "8X4ZN58TYH.com.justspeaktoit.shared"
+
+    private static let credentialStorage = SecureStorage(
+        configuration: .iCloudSyncedIfAvailable(
+            service: "com.justspeaktoit.credentials",
+            masterAccount: "speak-app-secrets",
+            accessGroup: sharedAccessGroup
+        )
+    )
+
+    /// Persists (or clears when empty) an API key on the canonical secure store.
+    private func persistSecret(_ value: String, identifier: String) {
+        Task {
+            if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                try? await Self.credentialStorage.removeSecret(identifier: identifier)
+            } else {
+                try? await Self.credentialStorage.storeSecret(value, identifier: identifier)
             }
         }
     }
-
-    // MARK: - Shared SecureStorage for ElevenLabs key (SpeakCore canonical pattern)
-    private static let elevenLabsStorage = SecureStorage(
-        configuration: SecureStorageConfiguration(service: "com.speak.ios.credentials")
-    )
 
     @Published public var liveActivitiesEnabled: Bool {
         didSet { UserDefaults.standard.set(liveActivitiesEnabled, forKey: "liveActivitiesEnabled") }
@@ -182,9 +207,8 @@ public final class AppSettings: ObservableObject {
         } else {
             selected = "apple/local/SFSpeechRecognizer"
         }
-        let deepgram = Self.loadFromKeychain(for: "deepgram.apiKey") ?? ""
-        let openRouter = Self.loadFromKeychain(for: "openrouter.apiKey") ?? ""
-        let openAI = Self.loadFromKeychain(for: "openai.apiKey") ?? ""
+        // API keys load asynchronously from the canonical secure storage (with
+        // legacy migration) in the Task below.
 
         // Default Live Activities to true if not set
         let liveActivities = UserDefaults.standard.object(forKey: "liveActivitiesEnabled") as? Bool ?? true
@@ -202,9 +226,9 @@ public final class AppSettings: ObservableObject {
         let autoPost = UserDefaults.standard.bool(forKey: "autoPostProcess")
 
         self.selectedModel = selected
-        self.deepgramAPIKey = deepgram
-        self.openRouterAPIKey = openRouter
-        self.openAIAPIKey = openAI
+        self.deepgramAPIKey = ""
+        self.openRouterAPIKey = ""
+        self.openAIAPIKey = ""
         self.elevenLabsAPIKey = ""
         self.liveActivitiesEnabled = liveActivities
         self.autoStartRecording = autoStart
@@ -214,16 +238,18 @@ public final class AppSettings: ObservableObject {
         self.postProcessingPrompt = postPrompt
         self.autoPostProcess = autoPost
 
-        // Auto-configure default provider on first launch or when saved model requires missing key
-        configureDefaultProviderIfNeeded()
-
-        // Load ElevenLabs key asynchronously from SecureStorage (SpeakCore canonical path).
-        // The @Published property is set after init; didSet will re-store the same value, which is harmless.
+        // Load all API keys from the canonical secure storage, migrating any
+        // values from legacy iOS keychain locations first. Default-provider
+        // selection runs afterwards so it sees the loaded keys. Assigning each
+        // @Published value re-persists it via didSet, which is harmless.
         Task { @MainActor [weak self] in
             guard let self else { return }
-            if let key = try? await Self.elevenLabsStorage.secret(identifier: "elevenlabs.apiKey"), !key.isEmpty {
-                self.elevenLabsAPIKey = key
-            }
+            await Self.migrateLegacyKeysIfNeeded()
+            self.deepgramAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.deepgramKeyID)) ?? ""
+            self.openRouterAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.openRouterKeyID)) ?? ""
+            self.openAIAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.openAIKeyID)) ?? ""
+            self.elevenLabsAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.elevenLabsKeyID)) ?? ""
+            self.configureDefaultProviderIfNeeded()
         }
     }
 
@@ -258,46 +284,44 @@ public final class AppSettings: ObservableObject {
     public var hasOpenAIKey: Bool { !openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasElevenLabsKey: Bool { !elevenLabsAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
-    // MARK: - Keychain Helpers
+    // MARK: - Legacy migration
 
-    private func saveToKeychain(key: String, for account: String) {
-        let service = "com.speak.ios.credentials"
+    /// One-time migration of API keys from the pre-unification iOS keychain
+    /// locations (raw per-account items and the old ElevenLabs SecureStorage,
+    /// both under service `com.speak.ios.credentials`) into the canonical,
+    /// iCloud-syncable store. Additive and idempotent: legacy items are read but
+    /// never deleted, and each key is only migrated when the new store lacks it.
+    private static func migrateLegacyKeysIfNeeded() async {
+        let existing = Set(await credentialStorage.knownIdentifiers())
 
-        // Delete existing
-        let deleteQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account
-        ]
-        SecItemDelete(deleteQuery as CFDictionary)
+        for identifier in [deepgramKeyID, openRouterKeyID, openAIKeyID] where !existing.contains(identifier) {
+            if let legacy = legacyRawSecret(account: identifier), !legacy.isEmpty {
+                try? await credentialStorage.storeSecret(legacy, identifier: identifier)
+            }
+        }
 
-        guard !key.isEmpty else { return }
-
-        // Add new
-        let addQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecValueData as String: key.data(using: .utf8)!
-        ]
-        SecItemAdd(addQuery as CFDictionary, nil)
+        if !existing.contains(elevenLabsKeyID) {
+            let legacyStore = SecureStorage(
+                configuration: SecureStorageConfiguration(service: "com.speak.ios.credentials")
+            )
+            if let key = try? await legacyStore.secret(identifier: elevenLabsKeyID), !key.isEmpty {
+                try? await credentialStorage.storeSecret(key, identifier: elevenLabsKeyID)
+            }
+        }
     }
 
-    private static func loadFromKeychain(for account: String) -> String? {
-        let service = "com.speak.ios.credentials"
-
+    /// Reads a value from the legacy raw per-account keychain items.
+    private static func legacyRawSecret(account: String) -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
+            kSecAttrService as String: "com.speak.ios.credentials",
             kSecAttrAccount as String: account,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
 
         var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-
-        guard status == errSecSuccess,
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
               let data = result as? Data,
               let string = String(data: data, encoding: .utf8) else {
             return nil

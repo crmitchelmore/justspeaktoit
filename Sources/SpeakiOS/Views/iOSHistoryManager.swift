@@ -188,6 +188,9 @@ public final class iOSHistoryManager: ObservableObject {
                 apiKey: settings.openRouterAPIKey
             )
             setPostProcessed(polished, for: item.id)
+        } catch is CancellationError {
+            // Reprocess was cancelled (e.g. the user navigated away) — leave the
+            // entry untouched rather than persisting a confusing error.
         } catch {
             setError(error.localizedDescription, for: item.id)
         }
@@ -202,8 +205,18 @@ public final class iOSHistoryManager: ObservableObject {
 
         guard syncEnabled else { return }
         let entry = items[index].toSyncable()
+        // Mark the entry unsynced until the updated version uploads, so a failed
+        // upload is retried by the next full sync instead of silently desyncing.
+        syncedIDs.remove(id)
+        saveSyncedIDs()
         Task {
-            try? await HistorySyncEngine.shared.upload(entry: entry)
+            do {
+                try await HistorySyncEngine.shared.upload(entry: entry)
+                syncedIDs.insert(id)
+                saveSyncedIDs()
+            } catch {
+                print("[iOSHistoryManager] Failed to upload reprocessed item: \(error)")
+            }
         }
     }
 

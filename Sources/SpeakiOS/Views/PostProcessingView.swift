@@ -95,6 +95,7 @@ public final class iOSPostProcessingManager: ObservableObject {
             model: model,
             apiKey: apiKey
         ) {
+            try Task.checkCancellation()
             result += chunk
         }
         return result

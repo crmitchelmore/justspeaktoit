@@ -11,6 +11,7 @@ struct SpeakApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var environmentHolder = EnvironmentHolder()
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
+    @Environment(\.openWindow) private var openWindow
 
     init() {
         // Initialize Sentry as early as possible
@@ -71,16 +72,14 @@ struct SpeakApp: App {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .task {
                             environmentHolder.bootstrap()
+                            environmentHolder.environment?.reopenMainWindow = {
+                                openWindow(id: "main")
+                            }
                         }
                 }
             }
             .tint(.brandAccent)
             .preferredColorScheme(environmentHolder.environment?.settings.appearance.colorScheme)
-            .background {
-                if let environment = environmentHolder.environment {
-                    MainWindowReopenBinder(environment: environment)
-                }
-            }
         }
         .defaultSize(width: 1080, height: 720)
         .commands {

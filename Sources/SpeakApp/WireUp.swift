@@ -139,10 +139,17 @@ final class AppEnvironment: ObservableObject {
   /// status bar item's "Open Speak…".
   func presentMainWindow() {
     NSApp.activate(ignoringOtherApps: true)
-    if let window = NSApp.windows.first(where: { $0.canBecomeMain }) {
+    if let window = NSApp.windows.first(where: { $0.canBecomeMain && $0.isVisible }) {
       window.makeKeyAndOrderFront(nil)
-    } else {
-      reopenMainWindow?()
+      return
+    }
+    // No visible window (e.g. menu-bar-only mode). Defer past the status menu's
+    // event-tracking run loop before asking SwiftUI to reopen the main scene,
+    // otherwise the openWindow action can be dropped. Fall back to fronting any
+    // window SwiftUI produces.
+    DispatchQueue.main.async { [weak self] in
+      self?.reopenMainWindow?()
+      NSApp.windows.first(where: { $0.canBecomeMain })?.makeKeyAndOrderFront(nil)
     }
   }
 

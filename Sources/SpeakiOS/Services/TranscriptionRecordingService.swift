@@ -75,7 +75,8 @@ public final class TranscriptionRecordingService: ObservableObject {
             if currentModel.hasPrefix("deepgram") {
                 let transcriber = DeepgramLiveTranscriber(audioSessionManager: audioSessionManager)
                 transcriber.configure(apiKey: settings.deepgramAPIKey)
-                transcriber.model = currentModel.replacingOccurrences(of: "deepgram/", with: "")
+                transcriber.model = LiveTranscriptionRouting.route(for: currentModel)?.apiModelName
+                    ?? currentModel.replacingOccurrences(of: "deepgram/", with: "")
 
                 transcriber.onPartialResult = { [weak self] text, _ in
                     Task { @MainActor in
@@ -95,7 +96,8 @@ public final class TranscriptionRecordingService: ObservableObject {
             } else if currentModel.hasPrefix("elevenlabs") {
                 let transcriber = ElevenLabsLiveTranscriber(audioSessionManager: audioSessionManager)
                 transcriber.configure(apiKey: settings.elevenLabsAPIKey)
-                transcriber.modelID = currentModel.replacingOccurrences(of: "elevenlabs/", with: "")
+                transcriber.modelID = LiveTranscriptionRouting.route(for: currentModel)?.apiModelName
+                    ?? currentModel.replacingOccurrences(of: "elevenlabs/", with: "")
 
                 transcriber.onPartialResult = { [weak self] text, _ in
                     Task { @MainActor in
@@ -116,7 +118,8 @@ public final class TranscriptionRecordingService: ObservableObject {
             } else if currentModel.hasPrefix("openai") {
                 let transcriber = OpenAIRealtimeLiveTranscriber(audioSessionManager: audioSessionManager)
                 transcriber.configure(apiKey: settings.openAIAPIKey)
-                transcriber.modelID = currentModel.replacingOccurrences(of: "openai/", with: "")
+                transcriber.modelID = LiveTranscriptionRouting.route(for: currentModel)?.apiModelName
+                    ?? currentModel.replacingOccurrences(of: "openai/", with: "")
 
                 transcriber.onPartialResult = { [weak self] text, _ in
                     Task { @MainActor in

@@ -79,7 +79,8 @@ final class TranscriberCoordinator: ObservableObject {
             // Use Deepgram
             let transcriber = DeepgramLiveTranscriber(audioSessionManager: audioSessionManager)
             transcriber.configure(apiKey: settings.deepgramAPIKey)
-            transcriber.model = currentModel.replacingOccurrences(of: "deepgram/", with: "")
+            transcriber.model = LiveTranscriptionRouting.route(for: currentModel)?.apiModelName
+                ?? currentModel.replacingOccurrences(of: "deepgram/", with: "")
 
             transcriber.onPartialResult = { [weak self] text, isFinal in
                 self?.handlePartialResult(text: self?.deepgramTranscriber?.partialText ?? text, isFinal: isFinal)
@@ -98,7 +99,8 @@ final class TranscriberCoordinator: ObservableObject {
             // Use ElevenLabs
             let transcriber = ElevenLabsLiveTranscriber(audioSessionManager: audioSessionManager)
             transcriber.configure(apiKey: settings.elevenLabsAPIKey)
-            transcriber.modelID = currentModel.replacingOccurrences(of: "elevenlabs/", with: "")
+            transcriber.modelID = LiveTranscriptionRouting.route(for: currentModel)?.apiModelName
+                ?? currentModel.replacingOccurrences(of: "elevenlabs/", with: "")
 
             transcriber.onPartialResult = { [weak self] text, isFinal in
                 self?.handlePartialResult(text: self?.elevenLabsTranscriber?.partialText ?? text, isFinal: isFinal)
@@ -117,7 +119,8 @@ final class TranscriberCoordinator: ObservableObject {
             // Use OpenAI Realtime
             let transcriber = OpenAIRealtimeLiveTranscriber(audioSessionManager: audioSessionManager)
             transcriber.configure(apiKey: settings.openAIAPIKey)
-            transcriber.modelID = currentModel.replacingOccurrences(of: "openai/", with: "")
+            transcriber.modelID = LiveTranscriptionRouting.route(for: currentModel)?.apiModelName
+                ?? currentModel.replacingOccurrences(of: "openai/", with: "")
 
             transcriber.onPartialResult = { [weak self] text, isFinal in
                 self?.handlePartialResult(text: self?.openAITranscriber?.partialText ?? text, isFinal: isFinal)

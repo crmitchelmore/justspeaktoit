@@ -163,16 +163,24 @@ public final class AppSettings: ObservableObject {
 
     private init() {
         let selectedRaw = UserDefaults.standard.string(forKey: "selectedModel") ?? "apple/local/SFSpeechRecognizer"
-        // Normalize known model prefixes to their default model IDs
+        // Normalise to canonical catalogue ids. Keep any id already in the
+        // shared catalogue; migrate legacy iOS-only ids (e.g. "deepgram/nova-3",
+        // "elevenlabs/scribe_v1") onto their catalogue equivalents so iOS and
+        // macOS select the same models.
+        let knownLiveIDs = Set(ModelCatalog.liveTranscription.map(\.id))
         let selected: String
-        if selectedRaw.hasPrefix("deepgram/") {
-            selected = "deepgram/nova-3"
+        if knownLiveIDs.contains(selectedRaw) {
+            selected = selectedRaw
+        } else if selectedRaw.hasPrefix("apple/") {
+            selected = selectedRaw
+        } else if selectedRaw.hasPrefix("deepgram/") {
+            selected = "deepgram/nova-3-streaming"
         } else if selectedRaw.hasPrefix("elevenlabs/") {
-            selected = "elevenlabs/scribe_v1"
+            selected = "elevenlabs/scribe-v2-streaming"
         } else if selectedRaw.hasPrefix("openai/") {
             selected = "openai/gpt-realtime-whisper-streaming"
         } else {
-            selected = selectedRaw
+            selected = "apple/local/SFSpeechRecognizer"
         }
         let deepgram = Self.loadFromKeychain(for: "deepgram.apiKey") ?? ""
         let openRouter = Self.loadFromKeychain(for: "openrouter.apiKey") ?? ""
@@ -228,7 +236,7 @@ public final class AppSettings: ObservableObject {
         // Note: ElevenLabs key is loaded async; its fallback is handled at recording time.
         if isFirstLaunch || needsDeepgramKey {
             if hasDeepgramKey {
-                selectedModel = "deepgram/nova-3"
+                selectedModel = "deepgram/nova-3-streaming"
             } else {
                 selectedModel = "apple/local/SFSpeechRecognizer"
             }
@@ -239,9 +247,9 @@ public final class AppSettings: ObservableObject {
     /// Re-configure provider after onboarding or API key changes.
     public func reconfigureDefaultProvider() {
         if hasDeepgramKey {
-            selectedModel = "deepgram/nova-3"
+            selectedModel = "deepgram/nova-3-streaming"
         } else if hasElevenLabsKey {
-            selectedModel = "elevenlabs/scribe_v1"
+            selectedModel = "elevenlabs/scribe-v2-streaming"
         }
     }
 
@@ -301,6 +309,28 @@ public final class AppSettings: ObservableObject {
 
 // MARK: - Settings View
 
+/// One row in the live-model picker: the model's display name plus, for models
+/// whose provider isn't wired up on iOS yet, a caption so users understand why
+/// selecting it falls back to Apple Speech.
+private struct LiveModelRow: View {
+    let option: ModelCatalog.Option
+
+    private var isSupported: Bool {
+        LiveTranscriptionRouting.route(for: option.id)?.isSupportedOnIOS ?? true
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(option.displayName)
+            if !isSupported {
+                Text("Coming to iPhone soon")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
 public struct SettingsView: View {
     @StateObject private var settings = AppSettings.shared
     @Environment(\.openURL) private var openURL
@@ -313,17 +343,20 @@ public struct SettingsView: View {
         Form {
             Section("Transcription") {
                 Picker("Live Model", selection: selectedModelBinding) {
-                    // Apple Speech (free, on-device)
-                    Text("Apple Speech (On-Device)").tag("apple/local/SFSpeechRecognizer")
+                    ForEach(ModelCatalog.liveTranscription) { option in
+                        LiveModelRow(option: option).tag(option.id)
+                    }
+                }
+                .pickerStyle(.navigationLink)
 
-                    // Deepgram options (always shown, but warn if no key)
-                    Text("Deepgram Nova-3").tag("deepgram/nova-3")
-
-                    // ElevenLabs Scribe (always shown, but warn if no key)
-                    Text("ElevenLabs Scribe").tag("elevenlabs/scribe_v1")
-
-                    // OpenAI gpt-realtime-whisper streaming
-                    Text("OpenAI gpt-realtime-whisper").tag("openai/gpt-realtime-whisper-streaming")
+                if let route = LiveTranscriptionRouting.route(for: settings.selectedModel),
+                   !route.isSupportedOnIOS {
+                    Label(
+                        "Not available on iPhone yet — recording falls back to Apple Speech.",
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .foregroundStyle(.orange)
+                    .font(.caption)
                 }
 
                 if settings.selectedModel.hasPrefix("openai/") && !settings.hasOpenAIKey {

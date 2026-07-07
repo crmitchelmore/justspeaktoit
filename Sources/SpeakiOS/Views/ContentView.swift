@@ -286,6 +286,13 @@ public struct ContentView: View {
     @State private var displayText = ""  // Text shown in UI (may be post-processed)
     @Namespace private var controlsNamespace
 
+    /// The headless Action Button / Siri / Shortcuts recorder. Observed so the
+    /// app can surface the most recent background session as the current view and
+    /// badge History when a recording landed while the app was away.
+    @ObservedObject private var backgroundService = TranscriptionRecordingService.shared
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var showHistoryBadge = false
+
     public init() {}
 
     public var body: some View {
@@ -296,14 +303,16 @@ public struct ContentView: View {
                     ScrollViewReader { proxy in
                         ScrollView {
                             VStack(alignment: .leading, spacing: 12) {
-                                if displayText.isEmpty && coordinator.partialText.isEmpty {
-                                    Text("Tap the microphone to start transcription")
+                                if currentText.isEmpty {
+                                    Text(backgroundService.isRunning
+                                         ? "Recording via Action Button…"
+                                         : "Tap the microphone to start transcription")
                                         .font(.title3)
                                         .foregroundStyle(.secondary)
                                         .frame(maxWidth: .infinity, alignment: .center)
                                         .padding(.top, 100)
                                 } else {
-                                    Text(displayText.isEmpty ? coordinator.partialText : displayText)
+                                    Text(currentText)
                                         .font(.title3)
                                         .foregroundStyle(.primary)
                                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -318,6 +327,11 @@ public struct ContentView: View {
                             if coordinator.isRunning {
                                 displayText = ""  // Clear post-processed text during new recording
                             }
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                proxy.scrollTo("transcript", anchor: .bottom)
+                            }
+                        }
+                        .onChange(of: backgroundService.partialText) { _, _ in
                             withAnimation(.easeOut(duration: 0.2)) {
                                 proxy.scrollTo("transcript", anchor: .bottom)
                             }
@@ -340,14 +354,18 @@ public struct ContentView: View {
             .navigationTitle("Just Speak to It")
             .toolbar {
                 // Status indicator in toolbar (system handles glass)
-                if coordinator.isRunning {
+                if coordinator.isRunning || backgroundService.isRunning {
                     ToolbarItem(placement: .topBarLeading) {
                         HStack(spacing: 6) {
                             Circle()
                                 .fill(.red)
                                 .frame(width: 8, height: 8)
-                            if let confidence = coordinator.confidence {
+                            if coordinator.isRunning, let confidence = coordinator.confidence {
                                 Text("\(Int(confidence * 100))%")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            } else if backgroundService.isRunning {
+                                Text("Action Button")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -359,10 +377,19 @@ public struct ContentView: View {
                     HStack(spacing: 16) {
                         NavigationLink {
                             HistoryView()
+                                .onAppear { markHistorySeen() }
                         } label: {
                             Image(systemName: "clock.arrow.circlepath")
+                                .overlay(alignment: .topTrailing) {
+                                    if showHistoryBadge {
+                                        Circle()
+                                            .fill(.red)
+                                            .frame(width: 8, height: 8)
+                                            .offset(x: 5, y: -4)
+                                    }
+                                }
                         }
-                        .accessibilityLabel("History")
+                        .accessibilityLabel(showHistoryBadge ? "History, new background recording" : "History")
 
                         NavigationLink {
                             SettingsView()
@@ -394,6 +421,10 @@ public struct ContentView: View {
                         showingError = true
                     }
                 }
+            }
+            .onAppear { refreshBackgroundState() }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { refreshBackgroundState() }
             }
             .sheet(isPresented: $showingPostProcessing) {
                 PostProcessingView(initialText: currentText) { processedResult in
@@ -531,11 +562,42 @@ public struct ContentView: View {
     // MARK: - Computed Properties
 
     private var hasTextToShow: Bool {
-        !displayText.isEmpty || !coordinator.partialText.isEmpty
+        !currentText.isEmpty
     }
 
     private var currentText: String {
-        displayText.isEmpty ? coordinator.partialText : displayText
+        // A live background (Action Button) session takes precedence so opening
+        // the app mid-recording shows it live.
+        if backgroundService.isRunning {
+            return backgroundService.partialText
+        }
+        return displayText.isEmpty ? coordinator.partialText : displayText
+    }
+
+    // MARK: - Background session surfacing
+
+    /// Surfaces the most recent background (Action Button / Siri / Shortcuts)
+    /// transcript as the current view and updates the History badge. Called on
+    /// appear and whenever the app returns to the foreground so a headless
+    /// recording is never lost behind a stale in-app transcript.
+    private func refreshBackgroundState() {
+        let shared = SharedTranscriptionState.shared
+        showHistoryBadge = shared.hasUnseenBackgroundTranscript
+
+        guard shared.hasUnseenBackgroundTranscript,
+              !coordinator.isRunning,
+              !backgroundService.isRunning,
+              let text = shared.lastCompletedTranscript,
+              !text.isEmpty else {
+            return
+        }
+        displayText = text
+    }
+
+    /// Clears the History badge once the user opens History.
+    private func markHistorySeen() {
+        SharedTranscriptionState.shared.markBackgroundTranscriptSeen()
+        showHistoryBadge = false
     }
 
     // MARK: - Actions
@@ -550,6 +612,16 @@ public struct ContentView: View {
                 showingPostProcessing = true
             }
         } else {
+            // A background (Action Button) session owns the mic; don't start a
+            // second, conflicting in-app recording. The user stops the background
+            // one the same way they started it.
+            guard !backgroundService.isRunning else {
+                errorMessage = "A background recording is already in progress. "
+                    + "Use the Action Button to stop it."
+                showingError = true
+                return
+            }
+
             // Clear previous text when starting new recording
             displayText = ""
             do {

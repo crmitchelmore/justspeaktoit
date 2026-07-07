@@ -22,6 +22,7 @@ enum TranscriptionManagerError: LocalizedError {
   case liveSessionNotRunning
   case recognizerUnavailable
   case permissionsMissing
+  case noUsableAudioInput
 
   var errorDescription: String? {
     switch self {
@@ -33,8 +34,40 @@ enum TranscriptionManagerError: LocalizedError {
       return "The speech recogniser could not be configured for the selected locale."
     case .permissionsMissing:
       return "Required microphone or speech recognition permissions are missing."
+    case .noUsableAudioInput:
+      return "The selected microphone is unavailable. Pick a different input device in Settings and try again."
     }
   }
+}
+
+/// Returns `true` when an `AVAudioEngine` input format describes a usable capture
+/// device. A stale or disconnected input device reports zero channels or a zero
+/// sample rate, which would otherwise surface as `kAudioHardwareBadDeviceError`
+/// (`com.apple.coreaudio.avfaudio error 560227702`) when starting the engine.
+func audioInputFormatIsUsable(_ format: AVAudioFormat) -> Bool {
+  format.channelCount > 0 && format.sampleRate > 0
+}
+
+private let coreAudioBadDeviceErrorCode = 560_227_702
+private let avfaudioErrorDomain = "com.apple.coreaudio.avfaudio"
+
+func normalisedAudioInputStartError(_ error: Error) -> Error {
+  audioInputStartErrorIsBadDevice(error)
+    ? TranscriptionManagerError.noUsableAudioInput
+    : error
+}
+
+func audioInputStartErrorIsBadDevice(_ error: Error) -> Bool {
+  let nsError = error as NSError
+  if nsError.code == coreAudioBadDeviceErrorCode,
+    nsError.domain == avfaudioErrorDomain || nsError.domain == NSOSStatusErrorDomain
+  {
+    return true
+  }
+  if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? Error {
+    return audioInputStartErrorIsBadDevice(underlying)
+  }
+  return false
 }
 
 @MainActor
@@ -273,7 +306,7 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
   private let appSettings: AppSettings
   private let audioDeviceManager: AudioInputDeviceManager
   private var speechRecognizer: SFSpeechRecognizer?
-  private let audioEngine = AVAudioEngine()
+  private var audioEngine = AVAudioEngine()
   private var recognitionTask: SFSpeechRecognitionTask?
   private var request: SFSpeechAudioBufferRecognitionRequest?
   private var currentLocaleIdentifier: String?
@@ -313,6 +346,11 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
 
     let sessionContext = await audioDeviceManager.beginUsingPreferredInput()
 
+    // Bind a fresh engine to the now-selected default input device. Reusing a
+    // long-lived engine across device changes leaves it pointing at a stale HAL
+    // device and `start()` then fails with kAudioHardwareBadDeviceError.
+    audioEngine = AVAudioEngine()
+
     let localeIdentifier = currentLocaleIdentifier ?? appSettings.preferredLocaleIdentifier
 
     guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: localeIdentifier)) else {
@@ -326,6 +364,10 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
     let inputNode = audioEngine.inputNode
     inputNode.removeTap(onBus: 0)
     let format = inputNode.outputFormat(forBus: 0)
+    guard audioInputFormatIsUsable(format) else {
+      await audioDeviceManager.endUsingPreferredInput(session: sessionContext)
+      throw TranscriptionManagerError.noUsableAudioInput
+    }
     inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
       self?.request?.append(buffer)
     }
@@ -335,7 +377,7 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
       try audioEngine.start()
     } catch {
       await audioDeviceManager.endUsingPreferredInput(session: sessionContext)
-      throw error
+      throw normalisedAudioInputStartError(error)
     }
 
     latestResult = nil
@@ -594,7 +636,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
   private var currentLanguage: String?
   private var currentModel: String?
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
-  private let audioEngine = AVAudioEngine()
+  private var audioEngine = AVAudioEngine()
   private let logger = Logger(subsystem: "com.speak.app", category: "DeepgramLiveController")
   private let audioProcessor = DeepgramAudioProcessor()
   /// Guards against calling didFinishWith more than once per session.
@@ -642,12 +684,16 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
 
     let apiKey = try await deepgramAPIKey()
     activeInputSession = await audioDeviceManager.beginUsingPreferredInput()
+    audioEngine = AVAudioEngine()
     resetStartState()
 
     do {
       let inputNode = audioEngine.inputNode
       inputNode.removeTap(onBus: 0)
       let inputFormat = inputNode.outputFormat(forBus: 0)
+      guard audioInputFormatIsUsable(inputFormat) else {
+        throw TranscriptionManagerError.noUsableAudioInput
+      }
       print("[DeepgramLiveController] Input format: \(inputFormat.sampleRate)Hz, \(inputFormat.channelCount) channels")
 
       let outputFormat = try makeDeepgramOutputFormat()
@@ -666,7 +712,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
       print("[DeepgramLiveController] Started successfully")
     } catch {
       await cleanupAfterFailedStart()
-      throw error
+      throw normalisedAudioInputStartError(error)
     }
   }
 
@@ -1056,7 +1102,7 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
   private var currentModel: String?
   private var currentLanguage: String?
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
-  private let audioEngine = AVAudioEngine()
+  private var audioEngine = AVAudioEngine()
   private let logger = Logger(subsystem: "com.speak.app", category: "AssemblyAILiveController")
   private let audioProcessor = AssemblyAIAudioProcessor()
   private var hasFinished: Bool = false
@@ -1101,6 +1147,7 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
 
     let sessionContext = await audioDeviceManager.beginUsingPreferredInput()
     activeInputSession = sessionContext
+    audioEngine = AVAudioEngine()
 
     transcriber = nil
     targetFormat = nil
@@ -1118,6 +1165,9 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
       let inputNode = audioEngine.inputNode
       inputNode.removeTap(onBus: 0)
       let inputFormat = inputNode.outputFormat(forBus: 0)
+      guard audioInputFormatIsUsable(inputFormat) else {
+        throw TranscriptionManagerError.noUsableAudioInput
+      }
 
       guard let outputFormat = AVAudioFormat(
         commonFormat: .pcmFormatInt16,
@@ -1182,7 +1232,7 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
       streamingStartTime = Date()
     } catch {
       await cleanupAfterFailedStart()
-      throw error
+      throw normalisedAudioInputStartError(error)
     }
   }
 
@@ -1547,7 +1597,7 @@ final class ModulateLiveController: NSObject, LiveTranscriptionController {
   private var currentModel: String?
   private var currentLanguage: String?
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
-  private let audioEngine = AVAudioEngine()
+  private var audioEngine = AVAudioEngine()
   private let logger = Logger(subsystem: "com.speak.app", category: "ModulateLiveController")
   private let audioProcessor = ModulateAudioProcessor()
   private var hasFinished: Bool = false
@@ -1589,12 +1639,16 @@ final class ModulateLiveController: NSObject, LiveTranscriptionController {
 
     let apiKey = try await modulateAPIKey()
     activeInputSession = await audioDeviceManager.beginUsingPreferredInput()
+    audioEngine = AVAudioEngine()
     resetStartState()
 
     do {
       let inputNode = audioEngine.inputNode
       inputNode.removeTap(onBus: 0)
       let inputFormat = inputNode.outputFormat(forBus: 0)
+      guard audioInputFormatIsUsable(inputFormat) else {
+        throw TranscriptionManagerError.noUsableAudioInput
+      }
       let outputFormat = try makeModulateOutputFormat()
       let transcriber = try makeModulateTranscriber(apiKey: apiKey)
       installModulateTap(
@@ -1610,7 +1664,7 @@ final class ModulateLiveController: NSObject, LiveTranscriptionController {
       streamingStartTime = Date()
     } catch {
       await cleanupAfterFailedStart()
-      throw error
+      throw normalisedAudioInputStartError(error)
     }
   }
 
@@ -2053,7 +2107,7 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
   private var currentLanguage: String?
   private var currentModel: String?
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
-  private let audioEngine = AVAudioEngine()
+  private var audioEngine = AVAudioEngine()
   private let logger = Logger(subsystem: "com.speak.app", category: "ElevenLabsLiveController")
   private let audioProcessor = ElevenLabsAudioProcessor()
   private var hasFinished: Bool = false
@@ -2091,12 +2145,16 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
 
     let apiKey = try await elevenLabsAPIKey()
     activeInputSession = await audioDeviceManager.beginUsingPreferredInput()
+    audioEngine = AVAudioEngine()
     resetStartState()
 
     do {
       let inputNode = audioEngine.inputNode
       inputNode.removeTap(onBus: 0)
       let inputFormat = inputNode.outputFormat(forBus: 0)
+      guard audioInputFormatIsUsable(inputFormat) else {
+        throw TranscriptionManagerError.noUsableAudioInput
+      }
 
       guard let outputFormat = AVAudioFormat(
         commonFormat: .pcmFormatInt16,
@@ -2153,7 +2211,7 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
       streamingStartTime = Date()
     } catch {
       await cleanupAfterFailedStart()
-      throw error
+      throw normalisedAudioInputStartError(error)
     }
   }
 
@@ -2451,7 +2509,7 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
   private var currentLanguage: String?
   private var currentModel: String?
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
-  private let audioEngine = AVAudioEngine()
+  private var audioEngine = AVAudioEngine()
   private let logger = Logger(subsystem: "com.speak.app", category: "SonioxLiveController")
   private let audioProcessor = SonioxAudioProcessor()
   private var hasFinished: Bool = false
@@ -2490,12 +2548,16 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
 
     let apiKey = try await sonioxAPIKey()
     activeInputSession = await audioDeviceManager.beginUsingPreferredInput()
+    audioEngine = AVAudioEngine()
     resetStartState()
 
     do {
       let inputNode = audioEngine.inputNode
       inputNode.removeTap(onBus: 0)
       let inputFormat = inputNode.outputFormat(forBus: 0)
+      guard audioInputFormatIsUsable(inputFormat) else {
+        throw TranscriptionManagerError.noUsableAudioInput
+      }
 
       guard let outputFormat = AVAudioFormat(
         commonFormat: .pcmFormatInt16,
@@ -2564,7 +2626,7 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
       streamingStartTime = Date()
     } catch {
       await cleanupAfterFailedStart()
-      throw error
+      throw normalisedAudioInputStartError(error)
     }
   }
 

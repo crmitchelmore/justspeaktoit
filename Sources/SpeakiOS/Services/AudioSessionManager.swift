@@ -8,17 +8,17 @@ public final class AudioSessionManager: ObservableObject {
     @Published private(set) public var isConfigured = false
     @Published private(set) public var currentRoute: String = "Unknown"
     @Published private(set) public var lastError: Error?
-    
+
     private var interruptionObserver: NSObjectProtocol?
     private var routeChangeObserver: NSObjectProtocol?
-    
+
     public var onInterruption: ((Bool) -> Void)?
     public var onRouteChange: (() -> Void)?
-    
+
     public init() {
         setupNotificationObservers()
     }
-    
+
     deinit {
         if let observer = interruptionObserver {
             NotificationCenter.default.removeObserver(observer)
@@ -27,11 +27,16 @@ public final class AudioSessionManager: ObservableObject {
             NotificationCenter.default.removeObserver(observer)
         }
     }
-    
+
     /// Configure audio session for recording with speech recognition.
+    ///
+    /// The two configuration calls are attempted separately so a failure can be
+    /// attributed to the exact step, and both throw an
+    /// ``AudioSessionConfigurationError`` carrying the decoded `OSStatus` code
+    /// plus a snapshot of the live session state.
     public func configureForRecording() throws {
         let session = AVAudioSession.sharedInstance()
-        
+
         do {
             // Category: playAndRecord allows simultaneous input/output
             // Mode: measurement for high-quality audio capture
@@ -41,21 +46,78 @@ public final class AudioSessionManager: ObservableObject {
                 mode: .measurement,
                 options: [.allowBluetooth, .defaultToSpeaker, .allowBluetoothA2DP]
             )
-            
+        } catch {
+            throw configurationFailure(.setCategory, error, session)
+        }
+
+        do {
             // Activate the session
             try session.setActive(true, options: .notifyOthersOnDeactivation)
-            
-            isConfigured = true
-            updateCurrentRoute()
-            
-            print("[AudioSessionManager] Configured for recording: \(session.currentRoute.inputs.first?.portName ?? "unknown")")
         } catch {
-            lastError = error
-            isConfigured = false
-            throw error
+            throw configurationFailure(.setActive, error, session)
         }
+
+        isConfigured = true
+        updateCurrentRoute()
+
+        let inputRoute = Self.routeDescription(ports: session.currentRoute.inputs)
+        print("[AudioSessionManager] Configured for recording: \(inputRoute)")
     }
-    
+
+    /// Builds a diagnostic error for a failed configuration step, snapshotting
+    /// the live session state so production failures are traceable from logs.
+    private func configurationFailure(
+        _ operation: AudioSessionConfigurationError.Operation,
+        _ error: Error,
+        _ session: AVAudioSession
+    ) -> AudioSessionConfigurationError {
+        let failure = AudioSessionConfigurationError(
+            operation: operation,
+            underlying: error as NSError,
+            diagnostics: Self.diagnostics(for: session)
+        )
+        lastError = failure
+        isConfigured = false
+        return failure
+    }
+
+    /// Snapshots the current audio session state into a transferable value.
+    static func diagnostics(for session: AVAudioSession) -> AudioSessionDiagnostics {
+        AudioSessionDiagnostics(
+            category: session.category.rawValue,
+            mode: session.mode.rawValue,
+            options: describe(options: session.categoryOptions),
+            isOtherAudioPlaying: session.isOtherAudioPlaying,
+            inputRoute: routeDescription(ports: session.currentRoute.inputs),
+            outputRoute: routeDescription(ports: session.currentRoute.outputs)
+        )
+    }
+
+    /// Describes the audio route using stable, non-localised `portType`
+    /// identifiers (e.g. `MicrophoneBuiltIn`, `BluetoothHFP`, `Speaker`) rather
+    /// than `portName`, which can leak personal device names (e.g. a user's
+    /// AirPods) into logs and is localised.
+    private static func routeDescription(ports: [AVAudioSessionPortDescription]) -> String {
+        ports.isEmpty ? "none" : ports.map(\.portType.rawValue).joined(separator: "+")
+    }
+
+    private static func describe(options: AVAudioSession.CategoryOptions) -> String {
+        var names: [String] = []
+        if options.contains(.mixWithOthers) { names.append("mixWithOthers") }
+        if options.contains(.duckOthers) { names.append("duckOthers") }
+        if options.contains(.allowBluetooth) { names.append("allowBluetooth") }
+        if options.contains(.defaultToSpeaker) { names.append("defaultToSpeaker") }
+        if options.contains(.interruptSpokenAudioAndMixWithOthers) {
+            names.append("interruptSpokenAudioAndMixWithOthers")
+        }
+        if options.contains(.allowBluetoothA2DP) { names.append("allowBluetoothA2DP") }
+        if options.contains(.allowAirPlay) { names.append("allowAirPlay") }
+        if #available(iOS 14.5, *), options.contains(.overrideMutedMicrophoneInterruption) {
+            names.append("overrideMutedMicrophoneInterruption")
+        }
+        return names.isEmpty ? "none" : names.joined(separator: ",")
+    }
+
     /// Deactivate audio session when done recording.
     public func deactivate() {
         do {
@@ -66,12 +128,12 @@ public final class AudioSessionManager: ObservableObject {
             print("[AudioSessionManager] Failed to deactivate: \(error.localizedDescription)")
         }
     }
-    
+
     /// Check if microphone permission is granted.
     public func hasMicrophonePermission() -> Bool {
         AVAudioSession.sharedInstance().recordPermission == .granted
     }
-    
+
     /// Request microphone permission.
     public func requestMicrophonePermission() async -> Bool {
         await withCheckedContinuation { continuation in
@@ -80,9 +142,9 @@ public final class AudioSessionManager: ObservableObject {
             }
         }
     }
-    
+
     // MARK: - Private
-    
+
     private func setupNotificationObservers() {
         // Interruption observer (phone calls, Siri, etc.)
         interruptionObserver = NotificationCenter.default.addObserver(
@@ -92,7 +154,7 @@ public final class AudioSessionManager: ObservableObject {
         ) { [weak self] notification in
             self?.handleInterruption(notification)
         }
-        
+
         // Route change observer (headphones plugged/unplugged, Bluetooth changes)
         routeChangeObserver = NotificationCenter.default.addObserver(
             forName: AVAudioSession.routeChangeNotification,
@@ -102,18 +164,18 @@ public final class AudioSessionManager: ObservableObject {
             self?.handleRouteChange(notification)
         }
     }
-    
+
     private func handleInterruption(_ notification: Notification) {
         guard let userInfo = notification.userInfo,
               let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
               let type = AVAudioSession.InterruptionType(rawValue: typeValue)
         else { return }
-        
+
         switch type {
         case .began:
             print("[AudioSessionManager] Interruption began")
             onInterruption?(true)
-            
+
         case .ended:
             print("[AudioSessionManager] Interruption ended")
             // Check if we should resume
@@ -124,23 +186,23 @@ public final class AudioSessionManager: ObservableObject {
                 }
             }
             onInterruption?(false)
-            
+
         @unknown default:
             break
         }
     }
-    
+
     private func handleRouteChange(_ notification: Notification) {
         guard let userInfo = notification.userInfo,
               let reasonValue = userInfo[AVAudioSessionRouteChangeReasonKey] as? UInt,
               let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue)
         else { return }
-        
+
         print("[AudioSessionManager] Route changed: \(reason)")
         updateCurrentRoute()
         onRouteChange?()
     }
-    
+
     private func updateCurrentRoute() {
         let route = AVAudioSession.sharedInstance().currentRoute
         if let input = route.inputs.first {

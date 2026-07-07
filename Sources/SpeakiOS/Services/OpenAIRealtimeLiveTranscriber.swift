@@ -12,9 +12,10 @@ import os.log
 /// pair, collapsed into a single `ObservableObject` to match the existing
 /// iOS provider shape (`DeepgramLiveTranscriber`, `ElevenLabsLiveTranscriber`).
 ///
-/// Endpoint:
-/// - Beta (default): `wss://api.openai.com/v1/realtime?intent=transcription`
-/// - GA (gpt-realtime-whisper): `wss://api.openai.com/v1/realtime?model=<name>`
+/// Endpoint: `wss://api.openai.com/v1/realtime?intent=transcription`.
+/// All Realtime transcription models use this GA transcription session shape;
+/// `?model=<name>` creates a conversation session and rejects transcription
+/// updates.
 /// Audio: PCM16 mono @ 24 kHz, base64 in `input_audio_buffer.append`.
 /// On stop we wait for the session config ack, flush, send
 /// `input_audio_buffer.commit`, then wait for the final `.completed` event

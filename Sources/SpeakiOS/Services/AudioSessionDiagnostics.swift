@@ -139,9 +139,16 @@ public struct AudioSessionConfigurationError: LocalizedError {
 /// non-mixable session — most commonly when a recording is triggered from the
 /// background via an `AudioRecordingIntent` (Action Button / Shortcuts / Siri)
 /// while the previous audio owner is still tearing down. Apple's guidance for
-/// this specific error is to retry activation; a short bounded back-off almost
+/// this *transient* case is to retry activation; a short bounded back-off almost
 /// always succeeds on the second attempt. This is the Fallback pattern applied
 /// to a flaky boundary.
+///
+/// When the rejection is *not* transient — i.e. the session is simply not
+/// permitted to interrupt others from the background — retrying the identical
+/// activation can never succeed. `AudioSessionManager` handles that case
+/// separately by re-configuring the session as mixable (`.mixWithOthers`) and
+/// activating once more; `isCannotInterruptOthers` is the shared classifier both
+/// tiers use to recognise the error.
 public enum AudioSessionActivation {
     /// Number of activation attempts before giving up.
     public static let defaultMaxAttempts = 4

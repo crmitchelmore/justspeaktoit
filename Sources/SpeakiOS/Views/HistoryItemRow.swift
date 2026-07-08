@@ -7,7 +7,16 @@ import SpeakSync
 struct HistoryItemRow: View {
     let item: iOSHistoryItem
     let isSynced: Bool
+    var isReprocessing: Bool = false
+    var onCopyRaw: () -> Void = {}
+    var onCopyPolished: () -> Void = {}
+    var onReprocess: () -> Void = {}
+    var onDelete: () -> Void = {}
     @State private var isExpanded = false
+
+    private var displayedText: String {
+        item.bestText
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -24,6 +33,11 @@ struct HistoryItemRow: View {
                 Spacer()
 
                 HStack(spacing: 8) {
+                    if isReprocessing {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+
                     Image(
                         systemName: isSynced ? "icloud.fill" : "icloud.slash"
                     )
@@ -45,10 +59,17 @@ struct HistoryItemRow: View {
                 }
             }
 
-            Text(item.transcription)
+            Text(displayedText)
                 .font(.body)
                 .lineLimit(isExpanded ? nil : 3)
                 .animation(.easeInOut(duration: 0.2), value: isExpanded)
+
+            if let error = item.errorMessage {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .lineLimit(isExpanded ? nil : 2)
+            }
 
             HStack {
                 Text(modelDisplayName)
@@ -59,6 +80,17 @@ struct HistoryItemRow: View {
                         Color.secondary.opacity(0.15),
                         in: Capsule()
                     )
+
+                if item.hasPolishedText {
+                    Label("Polished", systemImage: "wand.and.stars")
+                        .font(.caption2)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            Color.purple.opacity(0.15),
+                            in: Capsule()
+                        )
+                }
 
                 if item.originPlatform != "ios" {
                     Text(platformDisplayName)
@@ -73,7 +105,7 @@ struct HistoryItemRow: View {
 
                 Spacer()
 
-                if item.transcription.count > 150 {
+                if displayedText.count > 150 {
                     Button {
                         isExpanded.toggle()
                     } label: {
@@ -86,8 +118,38 @@ struct HistoryItemRow: View {
         .padding(.vertical, 4)
         .contentShape(Rectangle())
         .onTapGesture {
-            if item.transcription.count > 150 {
+            if displayedText.count > 150 {
                 isExpanded.toggle()
+            }
+        }
+        .contextMenu {
+            Button {
+                onCopyRaw()
+            } label: {
+                Label("Copy Transcript", systemImage: "doc.on.doc")
+            }
+
+            if item.hasPolishedText {
+                Button {
+                    onCopyPolished()
+                } label: {
+                    Label("Copy Polished", systemImage: "doc.on.doc.fill")
+                }
+            }
+
+            Button {
+                onReprocess()
+            } label: {
+                Label("Reprocess", systemImage: "wand.and.stars")
+            }
+            .disabled(isReprocessing)
+
+            Divider()
+
+            Button(role: .destructive) {
+                onDelete()
+            } label: {
+                Label("Delete", systemImage: "trash")
             }
         }
     }

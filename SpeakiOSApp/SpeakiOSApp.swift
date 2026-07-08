@@ -57,6 +57,7 @@ struct SpeakiOSApp: App {
             MainTabView()
                 .tint(.brandAccent)
                 .environmentObject(deepLinkRouter)
+                .environment(\.openClawEnabled, FeatureFlags.openClawTabEnabled)
                 .onOpenURL { url in
                     deepLinkRouter.handle(url)
                 }

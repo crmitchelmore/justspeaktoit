@@ -123,7 +123,14 @@ public struct HistoryView: View {
                 ForEach(historyManager.items) { item in
                     HistoryItemRow(
                         item: item,
-                        isSynced: historyManager.isSynced(item)
+                        isSynced: historyManager.isSynced(item),
+                        isReprocessing: historyManager.isReprocessing(item),
+                        onCopyRaw: { UIPasteboard.general.string = item.transcription },
+                        onCopyPolished: {
+                            UIPasteboard.general.string = item.postProcessedTranscription ?? item.transcription
+                        },
+                        onReprocess: { Task { await historyManager.reprocess(item) } },
+                        onDelete: { historyManager.remove(item) }
                     )
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                         Button(role: .destructive) {
@@ -134,7 +141,7 @@ public struct HistoryView: View {
                     }
                     .swipeActions(edge: .leading, allowsFullSwipe: true) {
                         Button {
-                            UIPasteboard.general.string = item.transcription
+                            UIPasteboard.general.string = item.bestText
                         } label: {
                             Label("Copy", systemImage: "doc.on.doc")
                         }

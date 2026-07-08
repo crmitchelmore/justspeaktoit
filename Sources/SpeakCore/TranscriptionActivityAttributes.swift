@@ -75,11 +75,15 @@ public final class TranscriptionActivityManager: ObservableObject {
     
     private init() {}
     
-    /// Starts a new Live Activity for transcription.
-    public func startActivity(provider: String) {
+    /// Starts a new Live Activity for transcription. Returns whether one is now
+    /// active — callers that require a Live Activity (e.g. `AudioRecordingIntent`
+    /// background recording) must not proceed when this returns `false`, or the
+    /// system-policy check will assert (EXC_BREAKPOINT).
+    @discardableResult
+    public func startActivity(provider: String) -> Bool {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else {
             print("[ActivityManager] Live Activities not enabled")
-            return
+            return false
         }
         
         // End any existing activity first
@@ -100,8 +104,10 @@ public final class TranscriptionActivityManager: ObservableObject {
             currentActivity = activity
             isActivityRunning = true
             print("[ActivityManager] Started activity: \(activity.id)")
+            return true
         } catch {
             print("[ActivityManager] Failed to start activity: \(error)")
+            return false
         }
     }
     

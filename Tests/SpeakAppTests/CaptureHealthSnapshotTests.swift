@@ -10,6 +10,7 @@ final class CaptureHealthSnapshotTests: XCTestCase {
   func testSnapshot_defaultEmpty_hasExpectedValues() {
     let snapshot = CaptureHealthSnapshot.empty
     XCTAssertEqual(snapshot.microphonePermission, .notDetermined)
+    XCTAssertFalse(snapshot.noInputDevicesAvailable)
     XCTAssertEqual(snapshot.inputDeviceName, "Unknown")
     XCTAssertEqual(snapshot.providerLabel, "Unknown")
     XCTAssertEqual(snapshot.latencyTier, .medium)
@@ -18,12 +19,14 @@ final class CaptureHealthSnapshotTests: XCTestCase {
   func testSnapshot_equality_sameValues() {
     let snapshotA = CaptureHealthSnapshot(
       microphonePermission: .granted,
+      noInputDevicesAvailable: false,
       inputDeviceName: "MacBook Mic",
       providerLabel: "AssemblyAI Universal",
       latencyTier: .fast
     )
     let snapshotB = CaptureHealthSnapshot(
       microphonePermission: .granted,
+      noInputDevicesAvailable: false,
       inputDeviceName: "MacBook Mic",
       providerLabel: "AssemblyAI Universal",
       latencyTier: .fast
@@ -34,12 +37,14 @@ final class CaptureHealthSnapshotTests: XCTestCase {
   func testSnapshot_equality_differentPermission() {
     let granted = CaptureHealthSnapshot(
       microphonePermission: .granted,
+      noInputDevicesAvailable: false,
       inputDeviceName: "MacBook Mic",
       providerLabel: "Apple Speech",
       latencyTier: .instant
     )
     let denied = CaptureHealthSnapshot(
       microphonePermission: .denied,
+      noInputDevicesAvailable: false,
       inputDeviceName: "MacBook Mic",
       providerLabel: "Apple Speech",
       latencyTier: .instant
@@ -51,6 +56,26 @@ final class CaptureHealthSnapshotTests: XCTestCase {
     XCTAssertTrue(CaptureHealthSnapshot.MicrophonePermission.granted.isGranted)
     XCTAssertFalse(CaptureHealthSnapshot.MicrophonePermission.denied.isGranted)
     XCTAssertFalse(CaptureHealthSnapshot.MicrophonePermission.notDetermined.isGranted)
+  }
+
+  func testSnapshot_noInputDevicesAvailable_isDistinctFromPermissionDenied() {
+    let noDevices = CaptureHealthSnapshot(
+      microphonePermission: .notDetermined,
+      noInputDevicesAvailable: true,
+      inputDeviceName: "System Default",
+      providerLabel: "Apple Speech",
+      latencyTier: .instant
+    )
+    let permDenied = CaptureHealthSnapshot(
+      microphonePermission: .denied,
+      noInputDevicesAvailable: false,
+      inputDeviceName: "Built-in Mic",
+      providerLabel: "Apple Speech",
+      latencyTier: .instant
+    )
+    XCTAssertTrue(noDevices.noInputDevicesAvailable)
+    XCTAssertFalse(permDenied.noInputDevicesAvailable)
+    XCTAssertNotEqual(noDevices, permDenied)
   }
 
   // MARK: - HUDManager captureHealth property
@@ -66,6 +91,7 @@ final class CaptureHealthSnapshotTests: XCTestCase {
     let manager = HUDManager(appSettings: AppSettings())
     let snapshot = CaptureHealthSnapshot(
       microphonePermission: .granted,
+      noInputDevicesAvailable: false,
       inputDeviceName: "USB Microphone",
       providerLabel: "Deepgram Nova-3",
       latencyTier: .fast
@@ -79,12 +105,14 @@ final class CaptureHealthSnapshotTests: XCTestCase {
     let manager = HUDManager(appSettings: AppSettings())
     let first = CaptureHealthSnapshot(
       microphonePermission: .denied,
+      noInputDevicesAvailable: false,
       inputDeviceName: "Built-in Mic",
       providerLabel: "Apple Speech",
       latencyTier: .instant
     )
     let second = CaptureHealthSnapshot(
       microphonePermission: .granted,
+      noInputDevicesAvailable: false,
       inputDeviceName: "USB Microphone",
       providerLabel: "AssemblyAI Universal",
       latencyTier: .fast

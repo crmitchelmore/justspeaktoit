@@ -359,6 +359,7 @@ final class MainManager: ObservableObject {
 
     return CaptureHealthSnapshot(
       microphonePermission: micPermission,
+      noInputDevicesAvailable: audioInputDeviceManager.devices.isEmpty,
       inputDeviceName: deviceName,
       providerLabel: providerLabel,
       latencyTier: latencyTier
@@ -490,6 +491,12 @@ final class MainManager: ObservableObject {
   private func startSession(trigger: SessionTriggerSource) async {
     guard activeSession == nil else { return }
     if await presentMissingLiveAPIKeyAlertIfNeeded() { return }
+
+    if audioInputDeviceManager.devices.isEmpty {
+      state = .failed("No microphone connected. Plug in a USB or Bluetooth microphone and try again.")
+      lastErrorMessage = "No microphone connected. Plug in a USB or Bluetooth microphone and try again."
+      return
+    }
 
     // Failsafe: if live transcription is still running but we have no activeSession,
     // cancel it so the app can always recover without requiring a restart.

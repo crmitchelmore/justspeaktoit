@@ -5,7 +5,7 @@ import Foundation
 /// ActivityKit attributes for live transcription sessions.
 /// Defines the static and dynamic content shown in Live Activities and Dynamic Island.
 public struct TranscriptionActivityAttributes: ActivityAttributes {
-    
+
     /// Static content that doesn't change during the activity.
     public struct ContentState: Codable, Hashable {
         /// Current transcription status
@@ -20,7 +20,7 @@ public struct TranscriptionActivityAttributes: ActivityAttributes {
         public var provider: String
         /// Optional error message
         public var errorMessage: String?
-        
+
         public init(
             status: TranscriptionStatus = .idle,
             lastSnippet: String = "",
@@ -37,7 +37,7 @@ public struct TranscriptionActivityAttributes: ActivityAttributes {
             self.errorMessage = errorMessage
         }
     }
-    
+
     /// Transcription session status
     public enum TranscriptionStatus: String, Codable, Hashable {
         case idle
@@ -47,12 +47,12 @@ public struct TranscriptionActivityAttributes: ActivityAttributes {
         case error
         case completed
     }
-    
+
     /// Session identifier
     public var sessionId: String
     /// Start time of the session
     public var startTime: Date
-    
+
     public init(sessionId: String = UUID().uuidString, startTime: Date = Date()) {
         self.sessionId = sessionId
         self.startTime = startTime
@@ -65,16 +65,16 @@ public struct TranscriptionActivityAttributes: ActivityAttributes {
 @MainActor
 public final class TranscriptionActivityManager: ObservableObject {
     public static let shared = TranscriptionActivityManager()
-    
+
     @Published public private(set) var currentActivity: Activity<TranscriptionActivityAttributes>?
     @Published public private(set) var isActivityRunning = false
-    
+
     private var updateThrottleTask: Task<Void, Never>?
     private var lastUpdateTime: Date = .distantPast
     private let minimumUpdateInterval: TimeInterval = 1.0 // Throttle to 1 update per second
-    
+
     private init() {}
-    
+
     /// Starts a new Live Activity for transcription. Returns whether one is now
     /// active — callers that require a Live Activity (e.g. `AudioRecordingIntent`
     /// background recording) must not proceed when this returns `false`, or the
@@ -85,16 +85,16 @@ public final class TranscriptionActivityManager: ObservableObject {
             print("[ActivityManager] Live Activities not enabled")
             return false
         }
-        
+
         // End any existing activity first
         endActivity()
-        
+
         let attributes = TranscriptionActivityAttributes()
         let initialState = TranscriptionActivityAttributes.ContentState(
             status: .listening,
             provider: provider
         )
-        
+
         do {
             let activity = try Activity.request(
                 attributes: attributes,
@@ -110,7 +110,7 @@ public final class TranscriptionActivityManager: ObservableObject {
             return false
         }
     }
-    
+
     /// Updates the Live Activity with new transcription state.
     public func updateActivity(
         status: TranscriptionActivityAttributes.TranscriptionStatus,
@@ -119,7 +119,7 @@ public final class TranscriptionActivityManager: ObservableObject {
         duration: Int
     ) {
         guard let activity = currentActivity else { return }
-        
+
         // Throttle updates
         let now = Date()
         guard now.timeIntervalSince(lastUpdateTime) >= minimumUpdateInterval else {
@@ -127,10 +127,10 @@ public final class TranscriptionActivityManager: ObservableObject {
             scheduleThrottledUpdate(status: status, lastSnippet: lastSnippet, wordCount: wordCount, duration: duration)
             return
         }
-        
+
         lastUpdateTime = now
         updateThrottleTask?.cancel()
-        
+
         let state = TranscriptionActivityAttributes.ContentState(
             status: status,
             lastSnippet: String(lastSnippet.suffix(100)),
@@ -138,12 +138,12 @@ public final class TranscriptionActivityManager: ObservableObject {
             duration: duration,
             provider: activity.content.state.provider
         )
-        
+
         Task {
             await activity.update(.init(state: state, staleDate: nil))
         }
     }
-    
+
     private func scheduleThrottledUpdate(
         status: TranscriptionActivityAttributes.TranscriptionStatus,
         lastSnippet: String,
@@ -159,11 +159,11 @@ public final class TranscriptionActivityManager: ObservableObject {
             }
         }
     }
-    
+
     /// Marks the activity as completed and ends it.
     public func completeActivity(finalWordCount: Int, duration: Int) {
         guard let activity = currentActivity else { return }
-        
+
         let finalState = TranscriptionActivityAttributes.ContentState(
             status: .completed,
             lastSnippet: "Transcription complete",
@@ -171,7 +171,7 @@ public final class TranscriptionActivityManager: ObservableObject {
             duration: duration,
             provider: activity.content.state.provider
         )
-        
+
         Task {
             await activity.end(.init(state: finalState, staleDate: nil), dismissalPolicy: .after(.now + 5))
             await MainActor.run {
@@ -180,30 +180,32 @@ public final class TranscriptionActivityManager: ObservableObject {
             }
         }
     }
-    
+
     /// Ends the current activity immediately.
     public func endActivity() {
         updateThrottleTask?.cancel()
-        
+
         guard let activity = currentActivity else { return }
-        
+
+        // Clear state synchronously and end the captured activity, so a new
+        // activity started right after (e.g. `startActivity` calls this first)
+        // isn't orphaned when the async end completes and nils `currentActivity`.
+        currentActivity = nil
+        isActivityRunning = false
+
         Task {
             await activity.end(nil, dismissalPolicy: .immediate)
-            await MainActor.run {
-                currentActivity = nil
-                isActivityRunning = false
-            }
         }
     }
-    
+
     /// Reports an error to the Live Activity.
     public func reportError(_ message: String) {
         guard let activity = currentActivity else { return }
-        
+
         var state = activity.content.state
         state.status = .error
         state.errorMessage = message
-        
+
         Task {
             await activity.update(.init(state: state, staleDate: nil))
         }

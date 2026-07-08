@@ -283,12 +283,38 @@ public final class SharedTranscriptionState {
         set {
             if let text = newValue {
                 defaults?.set(text, forKey: "lastCompletedTranscript")
+                // Stamp completion time and flag it unseen so the app can surface
+                // the latest background (Action Button / Siri / Shortcuts) session
+                // and badge History on next foreground. Only background sessions
+                // set this key, so in-app recordings don't raise the marker.
+                defaults?.set(Date(), forKey: "lastCompletedAt")
+                defaults?.set(true, forKey: "hasUnseenBackgroundTranscript")
             } else {
                 defaults?.removeObject(forKey: "lastCompletedTranscript")
+                defaults?.removeObject(forKey: "lastCompletedAt")
+                defaults?.set(false, forKey: "hasUnseenBackgroundTranscript")
             }
         }
     }
-    
+
+    /// When `lastCompletedTranscript` was last written by a background session.
+    public var lastCompletedAt: Date? {
+        defaults?.object(forKey: "lastCompletedAt") as? Date
+    }
+
+    /// Whether a background session finished a transcript the user hasn't been
+    /// shown in-app yet. Drives the History badge and the "surface as current
+    /// view" behaviour.
+    public var hasUnseenBackgroundTranscript: Bool {
+        get { defaults?.bool(forKey: "hasUnseenBackgroundTranscript") ?? false }
+        set { defaults?.set(newValue, forKey: "hasUnseenBackgroundTranscript") }
+    }
+
+    /// Marks the latest background transcript as seen (clears the History badge).
+    public func markBackgroundTranscriptSeen() {
+        hasUnseenBackgroundTranscript = false
+    }
+
     /// Clears recording-specific state when a session ends.
     public func clearRecordingState() {
         isRecording = false

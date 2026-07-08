@@ -86,6 +86,22 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
             return true
         }
     }
+
+    /// Human-readable provider name, used to group models by provider in the
+    /// model picker so the UI scales cleanly as models are added.
+    public var displayName: String {
+        switch self {
+        case .apple: return "Apple"
+        case .deepgram: return "Deepgram"
+        case .cartesia: return "Cartesia"
+        case .gladia: return "Gladia"
+        case .modulate: return "Modulate"
+        case .assemblyai: return "AssemblyAI"
+        case .soniox: return "Soniox"
+        case .elevenlabs: return "ElevenLabs"
+        case .openai: return "OpenAI"
+        }
+    }
 }
 
 // MARK: - Routing

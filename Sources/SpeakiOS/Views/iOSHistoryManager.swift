@@ -12,9 +12,21 @@ public final class iOSHistoryManager: ObservableObject {
     @Published public private(set) var items: [iOSHistoryItem] = []
     @Published public private(set) var isLoading = false
 
+    /// IDs currently being reprocessed (drives per-row progress in the UI).
+    @Published public private(set) var reprocessingIDs: Set<UUID> = []
+
     private let fileURL: URL
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
+
+    /// Whether CloudKit sync is wired up. Disabled in unit tests so persistence
+    /// can be exercised in isolation.
+    private let syncEnabled: Bool
+
+    /// Guards against loading twice and, crucially, against saving from an
+    /// unloaded (empty) state — the root cause of background-recording history
+    /// loss (see `loadHistoryFromDiskIfNeeded`).
+    private var hasLoadedFromDisk = false
 
     /// IDs of entries that have been synced to CloudKit.
     private(set) var syncedIDs: Set<UUID> = []
@@ -33,22 +45,38 @@ public final class iOSHistoryManager: ObservableObject {
         syncedIDs.contains(item.id)
     }
 
-    private init() {
+    private convenience init() {
         let documentsURL = FileManager.default.urls(
             for: .documentDirectory,
             in: .userDomainMask
         )[0]
-        self.fileURL = documentsURL.appendingPathComponent(
-            "transcription-history.json"
+        self.init(
+            fileURL: documentsURL.appendingPathComponent("transcription-history.json"),
+            syncEnabled: true
         )
+    }
+
+    /// Designated initializer. `fileURL` and `syncEnabled` are injectable so
+    /// tests can exercise persistence against a temporary file without touching
+    /// CloudKit.
+    init(fileURL: URL, syncEnabled: Bool) {
+        self.fileURL = fileURL
+        self.syncEnabled = syncEnabled
 
         encoder.dateEncodingStrategy = .iso8601
         decoder.dateDecodingStrategy = .iso8601
 
         loadSyncedIDs()
 
+        // Load history *synchronously* before this initializer returns. A
+        // headless Action Button recording touches `.shared` cold and then
+        // immediately calls `recordTranscription`; the previous async load left
+        // a window where the save ran against an empty in-memory list and wiped
+        // all prior history on disk.
+        loadHistoryFromDiskIfNeeded()
+
+        guard syncEnabled else { return }
         Task {
-            await loadHistory()
             await initializeSync()
         }
     }
@@ -64,15 +92,21 @@ public final class iOSHistoryManager: ObservableObject {
 
     /// Adds a new transcription to history.
     public func add(_ item: iOSHistoryItem) {
+        loadHistoryFromDiskIfNeeded()
         items.insert(item, at: 0)
         saveHistory()
 
+        guard syncEnabled else { return }
         Task {
-            try? await HistorySyncEngine.shared.upload(
-                entry: item.toSyncable()
-            )
-            syncedIDs.insert(item.id)
-            saveSyncedIDs()
+            do {
+                try await HistorySyncEngine.shared.upload(entry: item.toSyncable())
+                syncedIDs.insert(item.id)
+                saveSyncedIDs()
+            } catch {
+                // Leave the item unsynced so a later full sync retries it,
+                // rather than marking it synced after a failed upload.
+                print("[iOSHistoryManager] Failed to upload item: \(error)")
+            }
         }
     }
 
@@ -96,9 +130,11 @@ public final class iOSHistoryManager: ObservableObject {
 
     /// Removes an item from history.
     public func remove(_ item: iOSHistoryItem) {
+        loadHistoryFromDiskIfNeeded()
         items.removeAll { $0.id == item.id }
         saveHistory()
 
+        guard syncEnabled else { return }
         Task {
             try? await HistorySyncEngine.shared.delete(entryID: item.id)
             syncedIDs.remove(item.id)
@@ -108,10 +144,12 @@ public final class iOSHistoryManager: ObservableObject {
 
     /// Clears all history.
     public func clearAll() {
+        loadHistoryFromDiskIfNeeded()
         let allIDs = items.map(\.id)
         items.removeAll()
         saveHistory()
 
+        guard syncEnabled else { return }
         Task {
             for entryID in allIDs {
                 try? await HistorySyncEngine.shared.delete(entryID: entryID)
@@ -126,19 +164,98 @@ public final class iOSHistoryManager: ObservableObject {
         await HistorySyncEngine.shared.sync()
     }
 
+    // MARK: - Reprocess
+
+    /// Re-runs post-processing on an entry with the current model/prompt and
+    /// stores the polished result alongside the raw transcript (mirrors the Mac
+    /// "Reprocess with current model" action). Surfaces failures on the entry.
+    public func reprocess(_ item: iOSHistoryItem) async {
+        let settings = AppSettings.shared
+        guard settings.hasOpenRouterKey else {
+            setError("Add an OpenRouter API key in Settings to reprocess.", for: item.id)
+            return
+        }
+        guard !reprocessingIDs.contains(item.id) else { return }
+
+        reprocessingIDs.insert(item.id)
+        defer { reprocessingIDs.remove(item.id) }
+
+        do {
+            let polished = try await iOSPostProcessingManager.shared.polish(
+                text: item.transcription,
+                model: settings.postProcessingModel,
+                prompt: settings.postProcessingPrompt,
+                apiKey: settings.openRouterAPIKey
+            )
+            setPostProcessed(polished, for: item.id)
+        } catch is CancellationError {
+            // Reprocess was cancelled (e.g. the user navigated away) — leave the
+            // entry untouched rather than persisting a confusing error.
+        } catch {
+            setError(error.localizedDescription, for: item.id)
+        }
+    }
+
+    /// Stores a polished transcript on an entry and re-syncs it.
+    public func setPostProcessed(_ processed: String, for id: UUID) {
+        loadHistoryFromDiskIfNeeded()
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+        items[index] = items[index].withPostProcessed(processed)
+        saveHistory()
+
+        guard syncEnabled else { return }
+        let entry = items[index].toSyncable()
+        // Mark the entry unsynced until the updated version uploads, so a failed
+        // upload is retried by the next full sync instead of silently desyncing.
+        syncedIDs.remove(id)
+        saveSyncedIDs()
+        Task {
+            do {
+                try await HistorySyncEngine.shared.upload(entry: entry)
+                syncedIDs.insert(id)
+                saveSyncedIDs()
+            } catch {
+                print("[iOSHistoryManager] Failed to upload reprocessed item: \(error)")
+            }
+        }
+    }
+
+    /// Records an error against an entry (surfaced in the history UI).
+    public func setError(_ message: String, for id: UUID) {
+        loadHistoryFromDiskIfNeeded()
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+        items[index] = items[index].withError(message)
+        saveHistory()
+    }
+
+    /// Whether an entry is currently being reprocessed.
+    public func isReprocessing(_ item: iOSHistoryItem) -> Bool {
+        reprocessingIDs.contains(item.id)
+    }
+
     // MARK: - Persistence
 
-    private func loadHistory() async {
-        isLoading = true
-        defer { isLoading = false }
+    /// Loads history from disk exactly once, synchronously. Every mutation
+    /// funnels through this first so we never write from an unloaded (empty)
+    /// list and clobber the file. Called eagerly from `init` and defensively
+    /// from `add`/`remove`/`clearAll`.
+    private func loadHistoryFromDiskIfNeeded() {
+        guard !hasLoadedFromDisk else { return }
 
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            // Nothing to load — safe to start from an empty list.
+            hasLoadedFromDisk = true
             return
         }
 
         do {
             let data = try Data(contentsOf: fileURL)
             items = try decoder.decode([iOSHistoryItem].self, from: data)
+            // Only mark loaded once we've actually read the file. A transient
+            // failure (e.g. file protection while the device is locked during a
+            // background recording) must be retried, never treated as "loaded"
+            // and then clobbered by the next save.
+            hasLoadedFromDisk = true
         } catch {
             print("[iOSHistoryManager] Failed to load history: \(error)")
         }
@@ -147,7 +264,13 @@ public final class iOSHistoryManager: ObservableObject {
     private func saveHistory() {
         do {
             let data = try encoder.encode(items)
-            try data.write(to: fileURL, options: .atomic)
+            // `completeUntilFirstUserAuthentication` keeps the file readable and
+            // writable from a background (Action Button) recording after the
+            // first unlock, so headless sessions can persist without data loss.
+            try data.write(
+                to: fileURL,
+                options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+            )
         } catch {
             print("[iOSHistoryManager] Failed to save history: \(error)")
         }

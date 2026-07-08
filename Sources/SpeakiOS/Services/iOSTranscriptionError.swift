@@ -9,6 +9,7 @@ public enum iOSTranscriptionError: LocalizedError {
     case audioSessionFailed(Error)
     case recognitionFailed(Error)
     case interrupted
+    case liveActivityUnavailable
 
     public enum Permission {
         case microphone
@@ -29,6 +30,9 @@ public enum iOSTranscriptionError: LocalizedError {
             return "Recognition failed: \(error.localizedDescription)"
         case .interrupted:
             return "Transcription was interrupted (e.g., by a phone call)."
+        case .liveActivityUnavailable:
+            return "Turn on Live Activities for Just Speak to It in Settings to record with the "
+                + "Action Button."
         }
     }
 }

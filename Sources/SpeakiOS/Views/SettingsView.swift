@@ -427,10 +427,39 @@ private struct LiveModelRow: View {
     }
 }
 
+/// A provider-titled group of live-transcription models, so the picker can list
+/// a growing catalogue in tidy per-provider sections instead of one long list.
+private struct LiveModelGroup: Identifiable {
+    let id: String
+    let title: String
+    let options: [ModelCatalog.Option]
+
+    /// Buckets catalogue options by provider, preserving first-appearance order
+    /// so the sections stay stable as models are added. Options whose id doesn't
+    /// resolve to a known provider are still shown (grouped by their id prefix)
+    /// rather than silently dropped.
+    static func grouped(_ options: [ModelCatalog.Option]) -> [LiveModelGroup] {
+        var order: [String] = []
+        var titles: [String: String] = [:]
+        var buckets: [String: [ModelCatalog.Option]] = [:]
+        for option in options {
+            let route = LiveTranscriptionRouting.route(for: option.id)
+            let key = route?.provider.rawValue ?? String(option.id.prefix { $0 != "/" })
+            if buckets[key] == nil {
+                order.append(key)
+                titles[key] = route?.provider.displayName ?? key.capitalized
+            }
+            buckets[key, default: []].append(option)
+        }
+        return order.map { LiveModelGroup(id: $0, title: titles[$0] ?? $0, options: buckets[$0] ?? []) }
+    }
+}
+
 // swiftlint:disable:next type_body_length
 public struct SettingsView: View {
     @StateObject private var settings = AppSettings.shared
     @Environment(\.openURL) private var openURL
+    @Environment(\.openClawEnabled) private var openClawEnabled
     @State private var showingAPIKeys = false
     @State private var missingTranscriptionAPIKeyAlert: IOSMissingTranscriptionAPIKeyAlert?
 
@@ -440,8 +469,12 @@ public struct SettingsView: View {
         Form {
             Section("Transcription") {
                 Picker("Live Model", selection: selectedModelBinding) {
-                    ForEach(ModelCatalog.liveTranscription) { option in
-                        LiveModelRow(option: option).tag(option.id)
+                    ForEach(LiveModelGroup.grouped(ModelCatalog.liveTranscription)) { group in
+                        Section(group.title) {
+                            ForEach(group.options) { option in
+                                LiveModelRow(option: option).tag(option.id)
+                            }
+                        }
                     }
                 }
                 .pickerStyle(.navigationLink)
@@ -630,17 +663,19 @@ public struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Section("OpenClaw") {
-                NavigationLink {
-                    OpenClawSettingsView()
-                } label: {
-                    Label("Configure OpenClaw", systemImage: "bolt.horizontal.icloud")
-                }
+            if openClawEnabled {
+                Section("OpenClaw") {
+                    NavigationLink {
+                        OpenClawSettingsView()
+                    } label: {
+                        Label("Configure OpenClaw", systemImage: "bolt.horizontal.icloud")
+                    }
 
-                if OpenClawSettings.shared.isConfigured {
-                    Label("Connected", systemImage: "checkmark.circle")
-                        .font(.caption)
-                        .foregroundStyle(.green)
+                    if OpenClawSettings.shared.isConfigured {
+                        Label("Connected", systemImage: "checkmark.circle")
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                    }
                 }
             }
 

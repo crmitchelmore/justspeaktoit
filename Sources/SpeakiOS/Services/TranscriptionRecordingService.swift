@@ -76,8 +76,16 @@ public final class TranscriptionRecordingService: ObservableObject {
             currentModel = "apple/local/SFSpeechRecognizer"
         }
 
-        // Live Activity is mandatory for AudioRecordingIntent
-        activityManager.startActivity(provider: modelDisplayName)
+        // A Live Activity is required to record in the *background* via an
+        // AudioRecordingIntent — without one the AppIntents system-policy check
+        // asserts (EXC_BREAKPOINT). In the foreground a Live Activity is optional,
+        // so only enforce this when the app isn't active.
+        let activityStarted = activityManager.startActivity(provider: modelDisplayName)
+        if !activityStarted && UIApplication.shared.applicationState != .active {
+            startTime = nil
+            sharedState.clearRecordingState()
+            throw iOSTranscriptionError.liveActivityUnavailable
+        }
 
         do {
             if currentModel.hasPrefix("deepgram") {

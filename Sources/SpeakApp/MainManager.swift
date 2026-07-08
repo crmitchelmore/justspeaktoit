@@ -586,8 +586,13 @@ final class MainManager: ObservableObject {
     if await presentMissingLiveAPIKeyAlertIfNeeded() { return }
 
     if audioInputDeviceManager.devices.isEmpty {
-      state = .failed("No microphone connected. Plug in a USB or Bluetooth microphone and try again.")
-      lastErrorMessage = "No microphone connected. Plug in a USB or Bluetooth microphone and try again."
+      let message = "No microphone connected. Plug in a USB or Bluetooth microphone and try again."
+      state = .failed(message)
+      lastErrorMessage = message
+      hudManager.finishFailure(
+        headline: "No microphone connected",
+        message: "Plug in a USB or Bluetooth microphone and try again."
+      )
       return
     }
 

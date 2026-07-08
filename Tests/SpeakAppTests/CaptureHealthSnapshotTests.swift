@@ -62,7 +62,7 @@ final class CaptureHealthSnapshotTests: XCTestCase {
     let noDevices = CaptureHealthSnapshot(
       microphonePermission: .notDetermined,
       noInputDevicesAvailable: true,
-      inputDeviceName: "System Default",
+      inputDeviceName: "Built-in Mic",
       providerLabel: "Apple Speech",
       latencyTier: .instant
     )
@@ -76,6 +76,19 @@ final class CaptureHealthSnapshotTests: XCTestCase {
     XCTAssertTrue(noDevices.noInputDevicesAvailable)
     XCTAssertFalse(permDenied.noInputDevicesAvailable)
     XCTAssertNotEqual(noDevices, permDenied)
+  }
+
+  func testSnapshot_noInputDevicesAvailable_isOnlyDifferingField() {
+    let base = CaptureHealthSnapshot(
+      microphonePermission: .granted,
+      noInputDevicesAvailable: false,
+      inputDeviceName: "Built-in Mic",
+      providerLabel: "Apple Speech",
+      latencyTier: .instant
+    )
+    var noDevices = base
+    noDevices.noInputDevicesAvailable = true
+    XCTAssertNotEqual(base, noDevices)
   }
 
   // MARK: - HUDManager captureHealth property

@@ -3,6 +3,8 @@ import Foundation
 import UIKit
 import SpeakCore
 
+// swiftlint:disable file_length
+
 /// Headless recording coordinator for Action Button / Shortcuts / Siri.
 /// Manages the full lifecycle: start recording → live transcription → stop → clipboard → Live Activity.
 @MainActor
@@ -26,6 +28,17 @@ public final class TranscriptionRecordingService: ObservableObject {
     private var currentModel: String = ""
 
     private init() {}
+
+    /// Picks the first non-blank candidate, else the fallback. Extracted as a
+    /// pure function so the stop-time text-selection priority
+    /// (result → interim → last-completed) is unit-testable.
+    static func bestTranscript(candidates: [String], fallback: String) -> String {
+        for candidate in candidates
+        where !candidate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return candidate
+        }
+        return fallback
+    }
 
     private var elapsedSeconds: Int {
         guard let start = startTime else { return 0 }
@@ -63,8 +76,16 @@ public final class TranscriptionRecordingService: ObservableObject {
             currentModel = "apple/local/SFSpeechRecognizer"
         }
 
-        // Live Activity is mandatory for AudioRecordingIntent
-        activityManager.startActivity(provider: modelDisplayName)
+        // A Live Activity is required to record in the *background* via an
+        // AudioRecordingIntent — without one the AppIntents system-policy check
+        // asserts (EXC_BREAKPOINT). In the foreground a Live Activity is optional,
+        // so only enforce this when the app isn't active.
+        let activityStarted = activityManager.startActivity(provider: modelDisplayName)
+        if !activityStarted && UIApplication.shared.applicationState != .active {
+            startTime = nil
+            sharedState.clearRecordingState()
+            throw iOSTranscriptionError.liveActivityUnavailable
+        }
 
         do {
             if currentModel.hasPrefix("deepgram") {
@@ -201,12 +222,23 @@ public final class TranscriptionRecordingService: ObservableObject {
         isRunning = false
         let duration = elapsedSeconds
 
-        let result = await drainActiveTranscriber(duration: duration)
+        // Keep the (often headless / backgrounded) process alive long enough for
+        // the clipboard write — and any post-processing — to actually commit.
+        // Short recordings were being suspended before the pasteboard flush
+        // landed, so "Copied N words" was reported but nothing arrived.
+        let assertion = beginBackgroundAssertion("Finalise transcription")
+
+        let drained = await drainActiveTranscriber(duration: duration)
         startTime = nil
+
+        // Use the best available text and make the returned result, the history
+        // entry, the clipboard, and the spoken dialog all agree on it.
+        let text = bestAvailableText(from: drained)
+        let result = drained.replacingText(text)
 
         // Record to history (always, regardless of destination).
         iOSHistoryManager.shared.recordTranscription(
-            text: result.text,
+            text: text,
             model: currentModel,
             duration: result.duration
         )
@@ -214,7 +246,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         // Resolve the destination. When nil (legacy callers), preserve the
         // pre-destination behaviour: clipboard + post-process if user opted in.
         let resolvedDestination: HardwareTriggerDestination = destination ?? .clipboard
-        applyDestinationSideEffects(result: result, destination: resolvedDestination)
+        applyDestinationSideEffects(text: text, destination: resolvedDestination)
 
         // Update shared state
         sharedState.clearRecordingState()
@@ -223,12 +255,17 @@ public final class TranscriptionRecordingService: ObservableObject {
         activityManager.completeActivity(finalWordCount: wordCount, duration: duration)
 
         // Kick off background post-processing if the chosen destination + user
-        // settings call for it.
+        // settings call for it. The polished clipboard write must also survive
+        // process suspension, so the background assertion is released only once
+        // post-processing has finished.
         if shouldPostProcess(destination: resolvedDestination, isLegacyCaller: destination == nil)
-            && !result.text.isEmpty {
-            Task { [resolvedDestination] in
-                await postProcess(text: result.text, replacingClipboard: resolvedDestination != .historyOnly)
+            && !text.isEmpty {
+            Task { [resolvedDestination, assertion] in
+                await postProcess(text: text, replacingClipboard: resolvedDestination != .historyOnly)
+                assertion.end()
             }
+        } else {
+            assertion.end()
         }
 
         return result
@@ -344,19 +381,39 @@ private extension TranscriptionRecordingService {
     /// update). History recording is handled by the caller because it always
     /// happens regardless of destination.
     func applyDestinationSideEffects(
-        result: TranscriptionResult,
+        text: String,
         destination: HardwareTriggerDestination
     ) {
-        guard !result.text.isEmpty else { return }
+        guard !text.isEmpty else { return }
         switch destination {
         case .clipboard, .clipboardAndPostProcess:
-            UIPasteboard.general.string = result.text
-            sharedState.lastCompletedTranscript = result.text
+            UIPasteboard.general.string = text
+            sharedState.lastCompletedTranscript = text
         case .historyOnly:
             // Don't touch the pasteboard. We still record `lastCompletedTranscript`
             // because the Live Activity / shared state UI shows it.
-            sharedState.lastCompletedTranscript = result.text
+            sharedState.lastCompletedTranscript = text
         }
+    }
+
+    /// The most complete transcript we can produce at stop time. The transcriber
+    /// result is preferred, but for very short recordings the provider may return
+    /// empty while interim text is still held in `partialText` — falling back
+    /// there keeps the clipboard and dialog honest. We deliberately do NOT fall
+    /// back to the last completed transcript: a silent new session must stay
+    /// empty rather than re-emitting the previous recording's text.
+    func bestAvailableText(from result: TranscriptionResult) -> String {
+        TranscriptionRecordingService.bestTranscript(
+            candidates: [result.text, partialText],
+            fallback: result.text
+        )
+    }
+
+    /// Begins a finite-length background assertion so a headless / backgrounded
+    /// process isn't suspended before the clipboard (and any post-processing)
+    /// write commits. The returned object ends the task exactly once.
+    func beginBackgroundAssertion(_ name: String) -> BackgroundTaskAssertion {
+        BackgroundTaskAssertion(name: name)
     }
 
     /// Decides whether to run the background post-processor.
@@ -378,6 +435,45 @@ private extension TranscriptionRecordingService {
         case .historyOnly:
             return false
         }
+    }
+}
+
+private extension TranscriptionResult {
+    /// Returns a copy with `text` replaced, preserving all other metadata. Used
+    /// so the returned result, history entry, clipboard, and spoken dialog all
+    /// agree on the same best-available transcript.
+    func replacingText(_ newText: String) -> TranscriptionResult {
+        TranscriptionResult(
+            text: newText,
+            segments: segments,
+            confidence: confidence,
+            duration: duration,
+            modelIdentifier: modelIdentifier,
+            cost: cost,
+            rawPayload: rawPayload,
+            debugInfo: debugInfo
+        )
+    }
+}
+
+/// Reference-type wrapper around a UIKit background-task assertion that
+/// guarantees `endBackgroundTask` is called exactly once — whether via the
+/// normal completion path or the system expiration handler — avoiding the
+/// double-end API violation.
+@MainActor
+final class BackgroundTaskAssertion {
+    private var identifier: UIBackgroundTaskIdentifier = .invalid
+
+    init(name: String) {
+        identifier = UIApplication.shared.beginBackgroundTask(withName: name) { [weak self] in
+            self?.end()
+        }
+    }
+
+    func end() {
+        guard identifier != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(identifier)
+        identifier = .invalid
     }
 }
 #endif

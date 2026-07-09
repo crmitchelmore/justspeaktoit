@@ -115,7 +115,7 @@ final class EntitlementsTests: XCTestCase {
 }
 
 /// Verifies the SANDBOXED Mac App Store entitlements file. This is the flavour
-/// selected when the project is generated with `APP_STORE=1` (see Project.swift).
+/// selected when the project is generated with `TUIST_APP_STORE=1` (see Project.swift).
 /// The App Store REQUIRES the sandbox and FORBIDS
 /// `com.apple.security.cs.disable-library-validation`; these tests lock that in so a
 /// mis-edited file can never be submitted.

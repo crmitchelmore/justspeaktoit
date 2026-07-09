@@ -73,12 +73,14 @@ jobs:
 
       - name: Generate Xcode Project
         env:
-          APP_STORE: "1"
+          TUIST_APP_STORE: "1"
         run: |
-          # APP_STORE=1 makes Project.swift define the APP_STORE compilation
+          # TUIST_APP_STORE=1 makes Project.swift define the APP_STORE compilation
           # condition (compiling out Sparkle self-update and the downloaded
           # local-model runtimes) and select the sandboxed entitlements file
           # Config/SpeakMacOS.AppStore.entitlements. Mac App Store REQUIRES the sandbox.
+          # The var MUST be TUIST_-prefixed: Tuist only forwards TUIST_* env vars into
+          # manifest evaluation, so a plain APP_STORE=1 would be silently ignored.
           tuist generate --no-open
 
       - name: Update Version

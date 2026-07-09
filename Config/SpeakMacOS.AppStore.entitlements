@@ -3,7 +3,7 @@
 <!--
   macOS Entitlements for Mac App Store distribution (sandboxed).
 
-  Selected automatically when the project is generated with APP_STORE=1
+  Selected automatically when the project is generated with TUIST_APP_STORE=1
   (see Project.swift). The App Store REQUIRES the sandbox, and forbids
   `com.apple.security.cs.disable-library-validation`, so that entitlement is
   deliberately absent here (it lives only in the Developer ID file).

@@ -3,8 +3,9 @@ import Foundation
 /// The channel this build is distributed through.
 ///
 /// macOS ships in two flavours from one codebase, selected at build time via the
-/// `APP_STORE` Swift active compilation condition (wired in `Project.swift`, set with
-/// `APP_STORE=1 tuist generate`):
+/// `APP_STORE` Swift active compilation condition. That condition is defined by
+/// `swift build -Xswiftc -DAPP_STORE` (SPM) or by `TUIST_APP_STORE=1 tuist generate`,
+/// which wires it into the generated Xcode project (see `Project.swift`):
 ///
 /// - `.direct`   — Developer ID / direct download. Unsandboxed, self-updates via
 ///                 Sparkle, can run downloaded local model runtimes.

@@ -30,11 +30,17 @@ if ProcessInfo.processInfo.environment["SHOW_OPENCLAW_TAB"] != nil {
 
 // Distribution channel selection for macOS. The app compiles from one codebase into
 // two flavours: Developer ID / direct download (default) and Mac App Store. Generate
-// with `APP_STORE=1 tuist generate` to produce a sandboxed App Store build: it defines
-// the `APP_STORE` Swift active compilation condition (gates Sparkle self-update and the
-// downloaded local-model runtimes — see Sources/SpeakCore/DistributionChannel.swift) and
-// selects the sandboxed entitlements file.
-let isAppStoreBuild = ProcessInfo.processInfo.environment["APP_STORE"] != nil
+// with `TUIST_APP_STORE=1 tuist generate` to produce a sandboxed App Store build: it
+// defines the `APP_STORE` Swift active compilation condition (gates Sparkle self-update
+// and the downloaded local-model runtimes — see Sources/SpeakCore/DistributionChannel.swift)
+// and selects the sandboxed entitlements file.
+//
+// NOTE: the env var MUST be `TUIST_`-prefixed. Tuist only forwards environment variables
+// whose names start with `TUIST_` into the manifest evaluation process, so a plain
+// `APP_STORE=1` is silently ignored here and the manifest would fall back to the direct
+// (non-sandboxed) entitlements. The Swift compilation condition itself stays `APP_STORE`
+// (that is what the `#if !APP_STORE` source guards check).
+let isAppStoreBuild = ProcessInfo.processInfo.environment["TUIST_APP_STORE"] != nil
 let macEntitlementsPath = isAppStoreBuild
     ? "Config/SpeakMacOS.AppStore.entitlements"
     : "Config/SpeakMacOS.entitlements"

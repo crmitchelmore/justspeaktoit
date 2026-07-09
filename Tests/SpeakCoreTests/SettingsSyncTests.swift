@@ -131,4 +131,36 @@ final class SettingsSyncTests: XCTestCase {
         let unique = Set(rawValues)
         XCTAssertEqual(rawValues.count, unique.count, "All SyncKey raw values should be unique")
     }
+
+    // MARK: - Auto-detection
+
+    func testSyncAvailability_prefersICloudWhenCloudKitAvailable() {
+        let availability = SyncAvailability(
+            iCloudKVStoreAvailable: false,
+            iCloudCloudKitAvailable: true,
+            transportAvailable: true
+        )
+
+        XCTAssertEqual(availability.preferredBackend, .iCloud)
+    }
+
+    func testSyncAvailability_fallsBackToTransportWhenICloudUnavailable() {
+        let availability = SyncAvailability(
+            iCloudKVStoreAvailable: false,
+            iCloudCloudKitAvailable: false,
+            transportAvailable: true
+        )
+
+        XCTAssertEqual(availability.preferredBackend, .transport)
+    }
+
+    func testSyncAvailability_usesLocalOnlyWhenNoBackendAvailable() {
+        let availability = SyncAvailability(
+            iCloudKVStoreAvailable: false,
+            iCloudCloudKitAvailable: false,
+            transportAvailable: false
+        )
+
+        XCTAssertEqual(availability.preferredBackend, .localOnly)
+    }
 }

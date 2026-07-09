@@ -175,7 +175,7 @@ public struct ToggleTranscriptionControlIntent: SetValueIntent, AudioRecordingIn
         if value {
             try await startRecordingContinuingInForegroundIfNeeded(from: self)
         } else {
-            await service.stopRecording()
+            await service.stopRecording(destination: AppSettings.shared.hardwareTriggerDestination)
         }
         return .result()
     }

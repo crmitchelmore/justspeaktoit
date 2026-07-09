@@ -1,6 +1,6 @@
 import CloudKit
 import Foundation
-#if os(macOS)
+#if os(macOS) || os(iOS)
 import Security
 #endif
 
@@ -40,10 +40,8 @@ public enum SyncConfiguration {
 
     /// Whether this app build has CloudKit entitlements.
     /// Developer ID Sparkle builds may omit CloudKit entitlements.
-    /// iOS builds currently ship without iCloud entitlements until
-    /// the provisioning profile is configured with the correct container.
     static var hasCloudKitEntitlement: Bool {
-#if os(macOS)
+#if os(macOS) || os(iOS)
         guard let task = SecTaskCreateFromSelf(nil) else {
             return false
         }

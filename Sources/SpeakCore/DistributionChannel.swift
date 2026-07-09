@@ -60,6 +60,11 @@ public enum ChannelFeature: String, Sendable, CaseIterable {
     /// Freedom to reference other distribution channels or external purchases in UI copy.
     /// App Store review guidelines discourage this, so App Store builds must not.
     case crossChannelMessaging
+    /// iCloud-backed sync features. Runtime entitlement/account probes still decide
+    /// whether each iCloud service is actually available.
+    case iCloudSync
+    /// Local-network Bonjour transport for cross-device fallback.
+    case localNetworkTransport
 }
 
 public extension DistributionChannel {
@@ -68,6 +73,11 @@ public extension DistributionChannel {
         switch feature {
         case .selfUpdate, .localModelRuntime, .automaticAccessibilityPrompt, .crossChannelMessaging:
             return self == .direct
+        case .iCloudSync, .localNetworkTransport:
+            // Sync transports are compiled into every build; runtime entitlement,
+            // account, and local-network permission probes decide actual availability.
+            // (The macOS Developer ID build also ships CloudKit entitlements.)
+            return true
         }
     }
 
@@ -84,6 +94,13 @@ public extension DistributionChannel {
     /// Whether UI copy may reference other distribution channels (e.g. the direct
     /// download). `false` for App Store builds to stay within review guidelines.
     var allowsCrossChannelMessaging: Bool { supports(.crossChannelMessaging) }
+
+    /// Whether this distribution channel is expected to support iCloud sync when
+    /// the running build also has the required entitlements and account state.
+    var supportsICloudSync: Bool { supports(.iCloudSync) }
+
+    /// Whether Bonjour local-network transport is part of this build.
+    var supportsLocalNetworkTransport: Bool { supports(.localNetworkTransport) }
 
     /// A short, human-readable name for the channel, for diagnostics and about screens.
     var displayName: String {

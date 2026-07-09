@@ -74,7 +74,7 @@ enum PermissionType: CaseIterable, Identifiable {
         "Open \(displayName) settings.",
         "Click the + button at the bottom of the app list, or unlock first if macOS asks.",
         "Navigate to Applications → JustSpeakToIt.",
-        "Click Open, then enable the toggle.",
+        "Click Open, then enable the toggle."
       ]
     case .microphone, .speechRecognition:
       return nil

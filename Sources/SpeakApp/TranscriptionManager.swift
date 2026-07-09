@@ -3952,6 +3952,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     lastStopDate = nowProvider()
   }
 
+  // swiftlint:disable:next cyclomatic_complexity
   private func controller(for model: String) -> any LiveTranscriptionController {
     if model.hasPrefix("assemblyai/") { return assemblyAIController }
     if model.hasPrefix("deepgram/") { return deepgramController }

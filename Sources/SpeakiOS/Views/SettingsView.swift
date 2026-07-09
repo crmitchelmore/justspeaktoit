@@ -626,7 +626,9 @@ public struct SettingsView: View {
                 CloudKitSyncSettingsSection()
 
                 // Sync status
-                let syncStatus = SyncStatus.current(iCloudCloudKitAvailable: HistorySyncEngine.shared.state.isCloudAvailable)
+                let syncStatus = SyncStatus.current(
+                    iCloudCloudKitAvailable: HistorySyncEngine.shared.state.isCloudAvailable
+                )
 
                 HStack {
                     Label("Preferred Sync", systemImage: "arrow.triangle.branch")

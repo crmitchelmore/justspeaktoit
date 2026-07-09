@@ -28,11 +28,39 @@ private func stopResultDialog(
     }
 }
 
+/// Starts recording, transparently recovering when the *background* Live Activity
+/// can't be started.
+///
+/// When the Action Button / a Shortcut / Siri launches the app in the background,
+/// ActivityKit refuses to start a Live Activity (`Activity.request` throws), so
+/// `startRecording()` reports `iOSTranscriptionError.liveActivityUnavailable`
+/// rather than record without the mandatory Live Activity (which the AppIntents
+/// system-policy check would kill). Previously the user just saw a "turn on Live
+/// Activities" error even when they *were* enabled.
+///
+/// Here we recover by continuing in the foreground: the app briefly comes to the
+/// front, where starting a Live Activity is permitted, and recording proceeds.
+/// The foreground hop only happens on that specific failure — when the headless
+/// background start succeeds, recording stays fully headless.
+@available(iOS 18, *)
+private func startRecordingContinuingInForegroundIfNeeded(
+    from intent: some ForegroundContinuableIntent
+) async throws {
+    let service = await TranscriptionRecordingService.shared
+    do {
+        try await service.startRecording()
+    } catch iOSTranscriptionError.liveActivityUnavailable {
+        try await intent.requestToContinueInForeground {
+            try await TranscriptionRecordingService.shared.startRecording()
+        }
+    }
+}
+
 /// Idempotent start intent for users who wire their Action Button / Shortcut
 /// to a one-shot start (and a separate one to stop). If a recording is already
 /// in progress this intent leaves it running and reports the state.
 @available(iOS 18, *)
-public struct StartTranscriptionIntent: AudioRecordingIntent {
+public struct StartTranscriptionIntent: AudioRecordingIntent, ForegroundContinuableIntent {
     public static var title: LocalizedStringResource = "Start Recording"
     public static var description = IntentDescription(
         "Start a fresh transcription. No-op if already recording. Pair with Stop Recording to finish."
@@ -48,7 +76,7 @@ public struct StartTranscriptionIntent: AudioRecordingIntent {
         if isRunning {
             return .result(dialog: "Recording already in progress.")
         }
-        try await service.startRecording()
+        try await startRecordingContinuingInForegroundIfNeeded(from: self)
         return .result(dialog: "Recording started. Run \"Stop Recording\" to finish.")
     }
 }
@@ -57,7 +85,7 @@ public struct StartTranscriptionIntent: AudioRecordingIntent {
 /// Conforms to AudioRecordingIntent so the system allows background audio recording
 /// and shows the recording indicator. Requires iOS 18+.
 @available(iOS 18, *)
-public struct StartTranscriptionRecordingIntent: AudioRecordingIntent {
+public struct StartTranscriptionRecordingIntent: AudioRecordingIntent, ForegroundContinuableIntent {
     public static var title: LocalizedStringResource = "Toggle Recording"
     public static var description = IntentDescription(
         "Start or stop voice transcription. Result lands in the destination you chose in Settings."
@@ -81,7 +109,7 @@ public struct StartTranscriptionRecordingIntent: AudioRecordingIntent {
                 canPostProcess: canPostProcess
             ))
         } else {
-            try await service.startRecording()
+            try await startRecordingContinuingInForegroundIfNeeded(from: self)
             return .result(dialog: "Recording started. Press again to stop.")
         }
     }
@@ -119,6 +147,40 @@ public struct StopTranscriptionRecordingIntent: AppIntent {
     }
 }
 
+/// Control Center toggle intent for one-tap start/stop of transcription.
+///
+/// This lives in SpeakiOSLib (not the widget extension) so it can adopt
+/// `ForegroundContinuableIntent` and reuse the same background-recovery path as
+/// the Action Button. Control Center runs this intent in the app's *background*
+/// process, where ActivityKit refuses to start the mandatory Live Activity, so a
+/// plain `startRecording()` would fail with `liveActivityUnavailable`. Conforming
+/// to `AudioRecordingIntent` requests the background-audio grant, and the
+/// foreground fallback brings the app forward when the headless start is refused.
+///
+/// The widget extension only ever uses this as a `SetValueIntent` (via
+/// `ControlWidgetToggle`), so it never references `ForegroundContinuableIntent`
+/// itself — that protocol is unavailable to app extensions, but merely using a
+/// type that conforms to it is allowed.
+@available(iOS 18, *)
+public struct ToggleTranscriptionControlIntent: SetValueIntent, AudioRecordingIntent, ForegroundContinuableIntent {
+    public static var title: LocalizedStringResource = "Toggle Transcription"
+
+    @Parameter(title: "Recording")
+    public var value: Bool
+
+    public init() {}
+
+    public func perform() async throws -> some IntentResult {
+        let service = await TranscriptionRecordingService.shared
+        if value {
+            try await startRecordingContinuingInForegroundIfNeeded(from: self)
+        } else {
+            await service.stopRecording()
+        }
+        return .result()
+    }
+}
+
 // MARK: - Copy Intents
 
 /// App Intent to copy the last transcribed sentence to clipboard.
@@ -126,23 +188,23 @@ public struct StopTranscriptionRecordingIntent: AppIntent {
 struct CopyLastSentenceIntent: AppIntent {
     static var title: LocalizedStringResource = "Copy Last Sentence"
     static var description = IntentDescription("Copies the most recent transcribed sentence to the clipboard")
-    
+
     // Make this available from Live Activity
     static var openAppWhenRun: Bool = false
-    
+
     func perform() async throws -> some IntentResult {
         // Get the last sentence from UserDefaults (shared between app and extension)
         let defaults = UserDefaults(suiteName: "group.com.speak.ios")
         let lastSentence = defaults?.string(forKey: "lastTranscribedSentence") ?? ""
-        
+
         guard !lastSentence.isEmpty else {
             return .result(value: "No recent transcription to copy")
         }
-        
+
         await MainActor.run {
             UIPasteboard.general.string = lastSentence
         }
-        
+
         return .result(value: "Copied: \(lastSentence.prefix(50))...")
     }
 }
@@ -151,21 +213,21 @@ struct CopyLastSentenceIntent: AppIntent {
 struct CopyFullTranscriptIntent: AppIntent {
     static var title: LocalizedStringResource = "Copy Full Transcript"
     static var description = IntentDescription("Copies the entire transcription to the clipboard")
-    
+
     static var openAppWhenRun: Bool = false
-    
+
     func perform() async throws -> some IntentResult {
         let defaults = UserDefaults(suiteName: "group.com.speak.ios")
         let fullText = defaults?.string(forKey: "currentTranscriptText") ?? ""
-        
+
         guard !fullText.isEmpty else {
             return .result(value: "No transcription to copy")
         }
-        
+
         await MainActor.run {
             UIPasteboard.general.string = fullText
         }
-        
+
         let wordCount = fullText.split(separator: " ").count
         return .result(value: "Copied \(wordCount) words")
     }
@@ -233,38 +295,38 @@ struct TranscriptionShortcuts: AppShortcutsProvider {
 /// Manages state shared between main app and extensions via App Group.
 public final class SharedTranscriptionState {
     public static let shared = SharedTranscriptionState()
-    
+
     private let defaults: UserDefaults?
     private let groupIdentifier = "group.com.speak.ios"
-    
+
     private init() {
         defaults = UserDefaults(suiteName: groupIdentifier)
     }
-    
+
     /// Updates the current transcript text (for copy action)
     public func updateTranscript(_ text: String) {
         defaults?.set(text, forKey: "currentTranscriptText")
-        
+
         // Extract and store last sentence
         if let lastSentence = extractLastSentence(from: text) {
             defaults?.set(lastSentence, forKey: "lastTranscribedSentence")
         }
     }
-    
+
     /// Clears all shared state
     public func clear() {
         defaults?.removeObject(forKey: "currentTranscriptText")
         defaults?.removeObject(forKey: "lastTranscribedSentence")
     }
-    
+
     // MARK: - Recording State
-    
+
     /// Whether a headless recording session is currently active.
     public var isRecording: Bool {
         get { defaults?.bool(forKey: "isRecording") ?? false }
         set { defaults?.set(newValue, forKey: "isRecording") }
     }
-    
+
     /// Start time of the current recording session.
     public var recordingStartTime: Date? {
         get { defaults?.object(forKey: "recordingStartTime") as? Date }
@@ -276,7 +338,7 @@ public final class SharedTranscriptionState {
             }
         }
     }
-    
+
     /// The most recently completed transcript (for clipboard result).
     public var lastCompletedTranscript: String? {
         get { defaults?.string(forKey: "lastCompletedTranscript") }
@@ -320,13 +382,13 @@ public final class SharedTranscriptionState {
         isRecording = false
         recordingStartTime = nil
     }
-    
+
     private func extractLastSentence(from text: String) -> String? {
         // Split by sentence-ending punctuation
         let sentences = text.components(separatedBy: CharacterSet(charactersIn: ".!?"))
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-        
+
         return sentences.last
     }
 }

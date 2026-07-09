@@ -59,23 +59,3 @@ extension JustSpeakToItWidgetExtensionControl {
 struct TranscriptionControlConfiguration: ControlConfigurationIntent {
     static let title: LocalizedStringResource = "Transcription Configuration"
 }
-
-@available(iOS 18.0, *)
-struct ToggleTranscriptionControlIntent: SetValueIntent {
-    static let title: LocalizedStringResource = "Toggle Transcription"
-
-    @Parameter(title: "Recording")
-    var value: Bool
-
-    init() {}
-
-    func perform() async throws -> some IntentResult {
-        let service = await TranscriptionRecordingService.shared
-        if value {
-            try await service.startRecording()
-        } else {
-            await service.stopRecording()
-        }
-        return .result()
-    }
-}

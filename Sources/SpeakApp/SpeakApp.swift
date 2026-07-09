@@ -3,7 +3,9 @@ import AVFoundation
 #if canImport(Sentry)
 import Sentry
 #endif
+#if !APP_STORE
 import Sparkle
+#endif
 import SwiftUI
 
 @main
@@ -113,7 +115,11 @@ struct SpeakCommands: Commands {
 
     var body: some Commands {
         CommandGroup(after: .appInfo) {
+#if !APP_STORE
             CheckForUpdatesView(updater: updaterManager.updater)
+#else
+            CheckForUpdatesView()
+#endif
             Divider()
             Button("Start/Stop Recording") {
                 environment.main.toggleRecordingFromUI()
@@ -131,6 +137,7 @@ struct SpeakCommands: Commands {
     }
 }
 
+#if !APP_STORE
 /// SwiftUI view that wraps Sparkle's check for updates action
 struct CheckForUpdatesView: View {
     @StateObject private var checkForUpdatesViewModel: CheckForUpdatesViewModel
@@ -166,6 +173,15 @@ final class CheckForUpdatesViewModel: ObservableObject {
         updater.checkForUpdates()
     }
 }
+#else
+/// App Store builds receive updates through the Mac App Store.
+struct CheckForUpdatesView: View {
+    var body: some View {
+        Button("Updates are delivered through the App Store") {}
+            .disabled(true)
+    }
+}
+#endif
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var environment: AppEnvironment?

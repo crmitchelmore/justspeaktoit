@@ -1,7 +1,6 @@
 import SpeakCore
 import SpeakHotKeys
 import AppKit
-import Sparkle
 import SwiftUI
 
 // swiftlint:disable file_length type_body_length
@@ -779,10 +778,16 @@ struct SettingsView: View {
               tint: .brandAccentWarm
             )
             .speakTooltip("Have Speak start alongside macOS so recording is always one shortcut away.")
-            Toggle("Automatically check for updates", isOn: $updaterManager.automaticallyChecksForUpdates)
-              .toggleStyle(.switch)
-              .tint(.brandAccentWarm)
-              .speakTooltip("Periodically check for new versions and notify you when updates are available.")
+            if updaterManager.supportsSelfUpdate {
+              Toggle("Automatically check for updates", isOn: $updaterManager.automaticallyChecksForUpdates)
+                .toggleStyle(.switch)
+                .tint(.brandAccentWarm)
+                .speakTooltip("Periodically check for new versions and notify you when updates are available.")
+            } else {
+              Label(updaterManager.updateStatusMessage, systemImage: "app.badge")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            }
             settingsToggle(
               "Show sidebar shortcut hints",
               isOn: settingsBinding(\AppSettings.showSidebarShortcutHints),
@@ -4100,10 +4105,12 @@ struct SettingsView: View {
           VStack(alignment: .leading, spacing: 8) {
             Label("Version \(appVersion)", systemImage: "tag")
             Label("Build \(buildNumber)", systemImage: "hammer")
-            if let latest = updaterManager.latestVersion {
+            if updaterManager.supportsSelfUpdate, let latest = updaterManager.latestVersion {
               Label("Latest \(latest)", systemImage: "arrow.up.circle")
+            } else if updaterManager.supportsSelfUpdate {
+              Label(updaterManager.updateStatusMessage, systemImage: "arrow.up.circle")
             } else {
-              Label("Latest unknown", systemImage: "arrow.up.circle")
+              Label(updaterManager.updateStatusMessage, systemImage: "app.badge")
             }
 
             if let commit = commitRef, !commit.isEmpty {
@@ -4118,18 +4125,22 @@ struct SettingsView: View {
           Divider()
 
           HStack(spacing: 12) {
-            Button {
-              updaterManager.checkForUpdates()
-            } label: {
-              Label("Check for Updates", systemImage: "arrow.triangle.2.circlepath")
+            if updaterManager.supportsSelfUpdate {
+              Button {
+                updaterManager.checkForUpdates()
+              } label: {
+                Label("Check for Updates", systemImage: "arrow.triangle.2.circlepath")
+              }
+              .buttonStyle(.bordered)
+              .disabled(!updaterManager.canCheckForUpdates)
             }
-            .buttonStyle(.bordered)
-            .disabled(!updaterManager.canCheckForUpdates)
 
-            Link(destination: URL(string: "https://github.com/crmitchelmore/justspeaktoit/releases")!) {
-              Label("View Releases", systemImage: "shippingbox")
+            if updaterManager.allowsCrossChannelMessaging {
+              Link(destination: URL(string: "https://github.com/crmitchelmore/justspeaktoit/releases")!) {
+                Label("View Releases", systemImage: "shippingbox")
+              }
+              .buttonStyle(.bordered)
             }
-            .buttonStyle(.bordered)
           }
         }
       }
@@ -4207,7 +4218,14 @@ struct SettingsView: View {
             .foregroundStyle(.secondary)
 
           VStack(alignment: .leading, spacing: 6) {
-            dependencyRow(name: "Sparkle", version: "2.6.0+", url: "https://sparkle-project.org", description: "Auto-update framework")
+            if updaterManager.supportsSelfUpdate {
+              dependencyRow(
+                name: "Sparkle",
+                version: "2.6.0+",
+                url: "https://sparkle-project.org",
+                description: "Auto-update framework"
+              )
+            }
             dependencyRow(name: "SwiftLint", version: "0.55.0+", url: "https://github.com/realm/SwiftLint", description: "Swift linting tool")
             dependencyRow(name: "SwiftFormat", version: "0.53.6+", url: "https://github.com/nicklockwood/SwiftFormat", description: "Code formatting")
           }

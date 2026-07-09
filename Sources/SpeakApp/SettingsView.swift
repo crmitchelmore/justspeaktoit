@@ -4199,14 +4199,21 @@ struct SettingsView: View {
 
   private func shouldShowManualSetupHelp(for permission: PermissionType, status: PermissionStatus) -> Bool {
     guard permission.manualSetupSteps != nil else { return false }
-    return !DistributionChannel.current.supportsAutomaticAccessibilityPrompt || status == .denied
+    if status == .denied { return true }
+    // Only Accessibility lacks an automatic prompt in sandboxed (App Store) builds.
+    // Input Monitoring still prompts via CGRequestListenEventAccess even when sandboxed,
+    // so it only needs manual guidance once the user has actively denied it (handled above).
+    return permission == .accessibility
+      && !DistributionChannel.current.supportsAutomaticAccessibilityPrompt
   }
 
   private func permissionManualSetupNote(for permission: PermissionType, steps: [String]) -> some View {
-    let intro = if DistributionChannel.current.supportsAutomaticAccessibilityPrompt {
-      "Add \(permission.displayName) manually:"
-    } else {
+    let cannotAutoPrompt = permission == .accessibility
+      && !DistributionChannel.current.supportsAutomaticAccessibilityPrompt
+    let intro = if cannotAutoPrompt {
       "This build cannot show the automatic prompt here. Add \(permission.displayName) manually:"
+    } else {
+      "Add \(permission.displayName) manually:"
     }
     return channelAvailabilityNote("\(intro) \(steps.joined(separator: " "))")
   }

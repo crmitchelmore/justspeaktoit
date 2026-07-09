@@ -55,8 +55,10 @@ public enum ChannelFeature: String, Sendable, CaseIterable {
     /// Downloaded local model runtimes (Python venv + llama.cpp / sherpa-onnx) that
     /// spawn subprocesses and build/download executable code — impossible when sandboxed.
     case localModelRuntime
-    /// Automatically prompting the user for Accessibility / Input Monitoring. Sandboxed
-    /// builds cannot auto-prompt; the user must add the app manually in System Settings.
+    /// Automatically prompting the user for Accessibility. Sandboxed builds cannot show the
+    /// Accessibility prompt (`AXIsProcessTrustedWithOptions` is inert under the sandbox), so the
+    /// user must add the app manually in System Settings. Input Monitoring is unaffected — it
+    /// still prompts via `CGRequestListenEventAccess` even when sandboxed.
     case automaticAccessibilityPrompt
     /// Freedom to reference other distribution channels or external purchases in UI copy.
     /// App Store review guidelines discourage this, so App Store builds must not.

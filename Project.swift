@@ -40,7 +40,10 @@ if ProcessInfo.processInfo.environment["SHOW_OPENCLAW_TAB"] != nil {
 // `APP_STORE=1` is silently ignored here and the manifest would fall back to the direct
 // (non-sandboxed) entitlements. The Swift compilation condition itself stays `APP_STORE`
 // (that is what the `#if !APP_STORE` source guards check).
-let isAppStoreBuild = ProcessInfo.processInfo.environment["TUIST_APP_STORE"] != nil
+// Parse an explicit truthy value so `TUIST_APP_STORE=0` (or an empty value) predictably
+// selects the direct build instead of silently enabling the App Store variant.
+let appStoreFlag = (ProcessInfo.processInfo.environment["TUIST_APP_STORE"] ?? "").lowercased()
+let isAppStoreBuild = ["1", "true", "yes"].contains(appStoreFlag)
 let macEntitlementsPath = isAppStoreBuild
     ? "Config/SpeakMacOS.AppStore.entitlements"
     : "Config/SpeakMacOS.entitlements"

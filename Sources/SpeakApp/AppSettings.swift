@@ -354,7 +354,15 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   }
 
   @Published var localTranscriptionMode: LocalTranscriptionMode {
-    didSet { store(localTranscriptionMode.rawValue, key: .localTranscriptionMode) }
+    didSet {
+      #if APP_STORE
+      if !DistributionChannel.current.supportsLocalModelRuntime, localTranscriptionMode == .streaming {
+        localTranscriptionMode = .batch
+        return
+      }
+      #endif
+      store(localTranscriptionMode.rawValue, key: .localTranscriptionMode)
+    }
   }
 
   @Published var localStreamingModelSource: String {
@@ -803,15 +811,26 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       Self.normalizedLocalTranscriptionModel(
         defaults.string(forKey: DefaultsKey.localTranscriptionModel.rawValue)
       )
-    localTranscriptionMode =
-      LocalTranscriptionMode(
-        rawValue: defaults.string(forKey: DefaultsKey.localTranscriptionMode.rawValue)
-          ?? LocalTranscriptionMode.batch.rawValue
-      ) ?? .batch
+    let loadedLocalTranscriptionMode = LocalTranscriptionMode(
+      rawValue: defaults.string(forKey: DefaultsKey.localTranscriptionMode.rawValue)
+        ?? LocalTranscriptionMode.batch.rawValue
+    ) ?? .batch
+    #if APP_STORE
+    localTranscriptionMode = DistributionChannel.current.supportsLocalModelRuntime
+      ? loadedLocalTranscriptionMode
+      : .batch
+    #else
+    localTranscriptionMode = loadedLocalTranscriptionMode
+    #endif
     let storedLocalStreamingSource = defaults.string(forKey: DefaultsKey.localStreamingModelSource.rawValue)
+    #if APP_STORE
+    let defaultLocalStreamingSource = ""
+    let supportedLocalStreamingIDs: Set<String> = []
+    #else
     let defaultLocalStreamingSource = LocalModelManager.recommendedStreamingModelSources.first?.id ?? ""
     let supportedLocalStreamingIDs = Set(LocalModelManager.recommendedStreamingModelSources.map(\.id))
       .union(LocalModelManager.shared.streamingModelSources.map(\.id))
+    #endif
     localStreamingModelSource =
       supportedLocalStreamingIDs.contains(storedLocalStreamingSource ?? "")
       ? storedLocalStreamingSource ?? defaultLocalStreamingSource

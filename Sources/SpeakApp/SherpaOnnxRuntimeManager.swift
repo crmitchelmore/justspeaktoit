@@ -1,6 +1,7 @@
 import Foundation
 import OSLog
 
+#if !APP_STORE
 // swiftlint:disable file_length
 enum SherpaOnnxRuntimeError: LocalizedError {
   case pythonUnavailable
@@ -483,3 +484,5 @@ if __name__ == "__main__":
         sys.exit(1)
 """
 }
+
+#endif

@@ -37,8 +37,12 @@ final class MainManager: ObservableObject {
   }
 
   private var isStreamingTranscriptionMode: Bool {
+    #if APP_STORE
+    appSettings.transcriptionMode == .liveNative
+    #else
     appSettings.transcriptionMode == .liveNative
       || (appSettings.transcriptionMode == .localModel && appSettings.localTranscriptionMode == .streaming)
+    #endif
   }
 
   private var cachedRetryData: RetryData?
@@ -359,9 +363,13 @@ final class MainManager: ObservableObject {
     case .batchRemote:
       activeModel = appSettings.batchTranscriptionModel
     case .localModel:
+      #if APP_STORE
+      activeModel = appSettings.localTranscriptionModel
+      #else
       activeModel = appSettings.localTranscriptionMode == .streaming
         ? appSettings.localStreamingModelSource
         : appSettings.localTranscriptionModel
+      #endif
     }
     let providerLabel = captureHealthProviderLabel(for: activeModel)
     let latencyTier = ModelCatalog.allOptions.first(where: { $0.id == activeModel })?.latencyTier ?? .medium
@@ -382,9 +390,13 @@ final class MainManager: ObservableObject {
     case .batchRemote:
       return appSettings.batchTranscriptionModel
     case .localModel:
+      #if APP_STORE
+      return appSettings.localTranscriptionModel
+      #else
       return appSettings.localTranscriptionMode == .streaming
         ? appSettings.localStreamingModelSource
         : appSettings.localTranscriptionModel
+      #endif
     }
   }
 
@@ -431,11 +443,13 @@ final class MainManager: ObservableObject {
     guard appSettings.transcriptionMode == .localModel else {
       return ModelCatalog.friendlyName(for: modelID)
     }
+    #if !APP_STORE
     if appSettings.localTranscriptionMode == .streaming {
       let source = LocalModelManager.shared.streamingModelSources.first { $0.id == modelID }
         ?? LocalModelManager.recommendedStreamingModelSources.first { $0.id == modelID }
       return source?.modelName ?? "Local Streaming"
     }
+    #endif
     guard let localModel = LocalModelManager.shared.model(for: modelID) else {
       return ModelCatalog.friendlyName(for: modelID)
     }
@@ -726,6 +740,8 @@ final class MainManager: ObservableObject {
         }
         // Log network exchange for live transcription
         let durationStr = String(format: "%.1f", result.duration)
+        var didRecordLiveExchange = false
+        #if !APP_STORE
         if result.modelIdentifier.hasPrefix("local/streaming/") {
           let localURL = URL(string: "local://sherpa-onnx")!
             .appendingPathComponent(result.modelIdentifier)
@@ -743,7 +759,10 @@ final class MainManager: ObservableObject {
               responseBodyPreview: "Transcript: \(String(result.text.prefix(500)))"
             )
           )
-        } else if result.modelIdentifier.contains("deepgram") {
+          didRecordLiveExchange = true
+        }
+        #endif
+        if !didRecordLiveExchange, result.modelIdentifier.contains("deepgram") {
           session.networkExchanges.append(
             HistoryNetworkExchange(
               url: URL(string: "wss://api.deepgram.com/v1/listen")!,
@@ -758,7 +777,7 @@ final class MainManager: ObservableObject {
               responseBodyPreview: result.rawPayload ?? "Transcript: \(String(result.text.prefix(500)))"
             )
           )
-        } else if result.modelIdentifier.contains("apple") {
+        } else if !didRecordLiveExchange, result.modelIdentifier.contains("apple") {
           session.networkExchanges.append(
             HistoryNetworkExchange(
               url: URL(string: "local://SFSpeechRecognizer")!,

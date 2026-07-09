@@ -634,7 +634,7 @@ public struct SettingsView: View {
                     Label("Preferred Sync", systemImage: "arrow.triangle.branch")
                     Spacer()
                     Text(syncStatus.preferredBackend.displayName)
-                        .foregroundStyle(syncStatus.preferredBackend == .localOnly ? .secondary : .green)
+                        .foregroundStyle(syncStatus.preferredBackend != .localOnly ? .green : .secondary)
                 }
                 .accessibilityElement(children: .combine)
 

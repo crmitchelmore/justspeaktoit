@@ -23,10 +23,14 @@ enum LocalModelError: LocalizedError {
     case .invalidHuggingFaceRepo(let repo):
       return "\(repo) is not a valid Hugging Face repo ID. Use owner/repo, for example argmaxinc/whisperkit-coreml."
     case .invalidHuggingFaceModel:
+      #if APP_STORE
+      return "Enter a supported local batch model name. Local Batch expects a WhisperKit variant."
+      #else
       return """
       Enter a supported local model name. Local Batch expects a WhisperKit variant; \
       Local Streaming expects a sherpa-onnx streaming ASR source.
       """
+      #endif
     }
   }
 }
@@ -45,6 +49,7 @@ final class LocalModelManager: ObservableObject {
 
   @Published private(set) var installStates: [String: InstallState] = [:]
   @Published private(set) var importedModels: [LocalTranscriptionModel] = []
+  #if !APP_STORE
   @Published private(set) var streamingModelSources: [LocalStreamingModelSource] = []
 
   static let recommendedStreamingModelSources: [LocalStreamingModelSource] = [
@@ -93,6 +98,7 @@ final class LocalModelManager: ObservableObject {
       approximateSizeMB: 44
     )
   ]
+  #endif
 
   private var activePipelines: [String: WhisperKit] = [:]
   private var loadingPipelines: [String: Task<WhisperKit, Error>] = [:]
@@ -100,7 +106,9 @@ final class LocalModelManager: ObservableObject {
   private let logger = Logger(subsystem: "com.github.speakapp", category: "LocalModelManager")
   private let markerDirectory: URL
   private let importedModelsURL: URL
+  #if !APP_STORE
   private let streamingModelSourcesURL: URL
+  #endif
   private var storageError: Error?
 
   private init(fileManager: FileManager = .default) {
@@ -111,7 +119,9 @@ final class LocalModelManager: ObservableObject {
       .appendingPathComponent("SpeakApp", isDirectory: true)
       .appendingPathComponent("LocalModels", isDirectory: true)
     importedModelsURL = markerDirectory.appendingPathComponent("imported-hugging-face-models.json")
+    #if !APP_STORE
     streamingModelSourcesURL = markerDirectory.appendingPathComponent("streaming-model-sources.json")
+    #endif
     do {
       try fileManager.createDirectory(at: markerDirectory, withIntermediateDirectories: true)
     } catch {
@@ -119,7 +129,9 @@ final class LocalModelManager: ObservableObject {
       logger.error("Failed to prepare local model storage: \(error.localizedDescription, privacy: .public)")
     }
     loadImportedModels()
+    #if !APP_STORE
     loadStreamingModelSources()
+    #endif
     refreshInstallStates()
   }
 
@@ -197,6 +209,7 @@ final class LocalModelManager: ObservableObject {
     return model
   }
 
+  #if !APP_STORE
   @discardableResult
   func addStreamingModelSource(repoID: String, modelName: String) throws -> LocalStreamingModelSource {
     let repoID = repoID.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -232,6 +245,7 @@ final class LocalModelManager: ObservableObject {
       logger.error("Failed to save local streaming model sources: \(error.localizedDescription, privacy: .public)")
     }
   }
+  #endif
 
   func install(_ model: LocalTranscriptionModel) async {
     installStates[model.id] = .installing
@@ -353,6 +367,7 @@ final class LocalModelManager: ObservableObject {
     }
   }
 
+  #if !APP_STORE
   private func loadStreamingModelSources() {
     guard fileManager.fileExists(atPath: streamingModelSourcesURL.path) else { return }
     do {
@@ -369,6 +384,7 @@ final class LocalModelManager: ObservableObject {
       logger.error("Failed to load local streaming model sources: \(error.localizedDescription, privacy: .public)")
     }
   }
+  #endif
 
   private func saveImportedModels() throws {
     let records = importedModels.map(ImportedModelRecord.init(model:))
@@ -376,10 +392,12 @@ final class LocalModelManager: ObservableObject {
     try data.write(to: importedModelsURL, options: .atomic)
   }
 
+  #if !APP_STORE
   private func saveStreamingModelSources() throws {
     let data = try JSONEncoder().encode(streamingModelSources)
     try data.write(to: streamingModelSourcesURL, options: .atomic)
   }
+  #endif
 
   nonisolated static func huggingFaceModelID(repoID: String, modelName: String) -> String {
     "local/whisperkit/huggingface/\(slug(repoID))/\(slug(modelName))"
@@ -423,6 +441,7 @@ final class LocalModelManager: ObservableObject {
     )
   }
 
+  #if !APP_STORE
   nonisolated static func normalizedStreamingModelSource(_ source: LocalStreamingModelSource) -> LocalStreamingModelSource { // swiftlint:disable:this line_length
     LocalStreamingModelSource(
       repoID: source.repoID,
@@ -433,6 +452,7 @@ final class LocalModelManager: ObservableObject {
       archiveURL: source.archiveURL
     )
   }
+  #endif
 
   nonisolated static func slug(_ value: String) -> String {
     value
@@ -452,6 +472,7 @@ final class LocalModelManager: ObservableObject {
     }.reversed()
   }
 
+  #if !APP_STORE
   nonisolated static func streamingRuntimeHint(for repoID: String, modelName: String) -> String {
     let searchText = "\(repoID) \(modelName)".lowercased()
     if searchText.contains("sherpa") || searchText.contains("zipformer") || searchText.contains("onnx") {
@@ -491,6 +512,7 @@ final class LocalModelManager: ObservableObject {
     }
     return text.contains("sherpa") && (text.contains("zipformer") || text.contains("nemotron"))
   }
+  #endif
 
   nonisolated static func resolveHuggingFaceModel(repoID: String, modelName: String) -> ResolvedHuggingFaceModel {
     let repo = repoID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -605,6 +627,7 @@ struct ResolvedHuggingFaceModel: Equatable, Sendable {
   let approximateSizeMB: Int
 }
 
+#if !APP_STORE
 struct LocalStreamingModelSource: Codable, Equatable, Identifiable, Sendable {
   let id: String
   let repoID: String
@@ -635,6 +658,7 @@ struct LocalStreamingModelSource: Codable, Equatable, Identifiable, Sendable {
     "\(modelName) from \(repoID)"
   }
 }
+#endif
 
 private struct ImportedModelRecord: Codable {
   let id: String

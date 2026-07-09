@@ -40,10 +40,16 @@ public enum SyncConfiguration {
 
     /// Whether this app build has CloudKit entitlements.
     /// Developer ID Sparkle builds may omit CloudKit entitlements.
-    /// iOS builds currently ship without iCloud entitlements until
-    /// the provisioning profile is configured with the correct container.
     static var hasCloudKitEntitlement: Bool {
-#if os(macOS)
+#if os(iOS)
+        // iOS App Store / TestFlight builds always ship with the managed
+        // provisioning profile that carries the CloudKit entitlements, and the
+        // SecTask entitlement-introspection APIs (SecTaskCreateFromSelf /
+        // SecTaskCopyValueForEntitlement) are not part of the public iOS SDK.
+        // So assume availability on iOS and only probe on macOS, where Developer
+        // ID (Sparkle) builds may legitimately omit CloudKit.
+        return true
+#elseif os(macOS)
         guard let task = SecTaskCreateFromSelf(nil) else {
             return false
         }

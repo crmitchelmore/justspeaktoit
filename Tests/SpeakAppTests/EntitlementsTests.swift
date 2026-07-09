@@ -113,3 +113,87 @@ final class EntitlementsTests: XCTestCase {
             "If intentional, add them to the allowlist in this test.")
     }
 }
+
+/// Verifies the SANDBOXED Mac App Store entitlements file. This is the flavour
+/// selected when the project is generated with `TUIST_APP_STORE=1` (see Project.swift).
+/// The App Store REQUIRES the sandbox and FORBIDS
+/// `com.apple.security.cs.disable-library-validation`; these tests lock that in so a
+/// mis-edited file can never be submitted.
+final class AppStoreEntitlementsTests: XCTestCase {
+
+    private var entitlements: [String: Any]!
+    private let entitlementsPath = "Config/SpeakMacOS.AppStore.entitlements"
+
+    override func setUpWithError() throws {
+        let url = URL(fileURLWithPath: entitlementsPath)
+        let data = try Data(contentsOf: url)
+        let plist = try PropertyListSerialization.propertyList(from: data, format: nil)
+        entitlements = plist as? [String: Any]
+        XCTAssertNotNil(entitlements, "App Store entitlements file should parse as a dictionary")
+    }
+
+    // MARK: - Required for App Store
+
+    func testSandbox_isEnabled() {
+        let value = entitlements["com.apple.security.app-sandbox"] as? Bool
+        XCTAssertEqual(value, true,
+            "The App Sandbox is REQUIRED for Mac App Store distribution")
+    }
+
+    func testMicrophoneEntitlement_isPresent() {
+        let value = entitlements["com.apple.security.device.audio-input"] as? Bool
+        XCTAssertEqual(value, true, "Audio input is required for microphone access")
+    }
+
+    func testNetworkClientEntitlement_isPresent() {
+        let value = entitlements["com.apple.security.network.client"] as? Bool
+        XCTAssertEqual(value, true,
+            "Outbound network is required to reach transcription/post-processing providers")
+    }
+
+    // MARK: - Forbidden on App Store
+
+    func testDisableLibraryValidation_isAbsent() {
+        // The Mac App Store rejects builds carrying this entitlement.
+        let value = entitlements["com.apple.security.cs.disable-library-validation"]
+        XCTAssertNil(value,
+            "disable-library-validation is FORBIDDEN on the Mac App Store and must not " +
+            "appear in the App Store entitlements file")
+    }
+
+    // MARK: - iCloud (available under the App Store managed profile)
+
+    func testICloud_isConfiguredForSync() {
+        let containers = entitlements["com.apple.developer.icloud-container-identifiers"] as? [String]
+        XCTAssertEqual(containers, ["iCloud.com.justspeaktoit"],
+            "App Store build should be entitled for the CloudKit history-sync container")
+
+        let services = entitlements["com.apple.developer.icloud-services"] as? [String]
+        XCTAssertEqual(services?.contains("CloudKit"), true,
+            "CloudKit service is required for transcription history sync")
+
+        let kvStore = entitlements["com.apple.developer.ubiquity-kvstore-identifier"] as? String
+        XCTAssertNotNil(kvStore, "iCloud KV store identifier is required for settings sync")
+    }
+
+    // MARK: - Integrity
+
+    func testEntitlementsFile_hasNoUnexpectedEntitlements() {
+        let allowedKeys: Set<String> = [
+            "com.apple.security.app-sandbox",
+            "com.apple.security.device.audio-input",
+            "com.apple.security.network.client",
+            "com.apple.security.files.user-selected.read-write",
+            "com.apple.security.automation.apple-events",
+            "keychain-access-groups",
+            "com.apple.developer.ubiquity-kvstore-identifier",
+            "com.apple.developer.icloud-container-identifiers",
+            "com.apple.developer.icloud-services",
+            "aps-environment"
+        ]
+        let unexpected = Set(entitlements.keys).subtracting(allowedKeys)
+        XCTAssertTrue(unexpected.isEmpty,
+            "Unexpected App Store entitlements found: \(unexpected.sorted()). " +
+            "If intentional, add them to the allowlist in this test.")
+    }
+}

@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS Entitlements for Mac App Store distribution (sandboxed).
+
+  Selected automatically when the project is generated with TUIST_APP_STORE=1
+  (see Project.swift). The App Store REQUIRES the sandbox, and forbids
+  `com.apple.security.cs.disable-library-validation`, so that entitlement is
+  deliberately absent here (it lives only in the Developer ID file).
+
+  Unlike Developer ID builds, App Store builds ship with a managed provisioning
+  profile, so iCloud (KV store + CloudKit) and keychain-sharing entitlements are
+  available here — this is what lets settings/history sync work on the App Store
+  build. SyncConfiguration/SettingsSync detect these at runtime and fall back
+  gracefully when absent.
+
+  NOTE: Sandboxed apps cannot auto-prompt for Accessibility / Input Monitoring;
+  users must add the app manually in System Settings. The in-app permission
+  helpers guide them through this (see PermissionsManager + onboarding).
+-->
+<plist version="1.0">
+<dict>
+	<!-- Sandbox (REQUIRED for App Store) -->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+
+	<!-- Microphone access -->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+
+	<!-- Outbound network for transcription/post-processing providers -->
+	<key>com.apple.security.network.client</key>
+	<true/>
+
+	<!-- User-selected files (import/export audio + transcripts) -->
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
+
+	<!-- AppleScript/Automation - send events to other apps for text insertion -->
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+
+	<!-- Shared keychain (App Store managed profile supports this) -->
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)com.justspeaktoit.shared</string>
+	</array>
+
+	<!-- iCloud Key-Value Storage - settings sync -->
+	<key>com.apple.developer.ubiquity-kvstore-identifier</key>
+	<string>$(TeamIdentifierPrefix)com.justspeaktoit</string>
+
+	<!-- iCloud CloudKit - transcription history sync -->
+	<key>com.apple.developer.icloud-container-identifiers</key>
+	<array>
+		<string>iCloud.com.justspeaktoit</string>
+	</array>
+	<key>com.apple.developer.icloud-services</key>
+	<array>
+		<string>CloudKit</string>
+	</array>
+
+	<!-- CloudKit silent push for sync -->
+	<key>aps-environment</key>
+	<string>production</string>
+</dict>
+</plist>

@@ -235,34 +235,133 @@ public enum ConfigTransferError: LocalizedError {
     }
 }
 
+// MARK: - Sync Availability
+
+/// The cross-device sync backend selected by runtime auto-detection.
+public enum SyncBackend: String, CaseIterable, Sendable {
+    /// iCloud settings/history sync is available and preferred.
+    case iCloud
+    /// Bonjour local-network transport is available as the fallback path.
+    case transport
+    /// No cross-device backend is currently available; data remains local.
+    case localOnly
+
+    public var displayName: String {
+        switch self {
+        case .iCloud:
+            return "iCloud"
+        case .transport:
+            return "Bonjour Transport"
+        case .localOnly:
+            return "Local Only"
+        }
+    }
+}
+
+/// Runtime cross-device sync capability summary for UI and app logic.
+public struct SyncAvailability: Equatable, Sendable {
+    public let iCloudKVStoreAvailable: Bool
+    public let iCloudCloudKitAvailable: Bool
+    public let transportAvailable: Bool
+    public let distributionChannel: DistributionChannel
+
+    public init(
+        iCloudKVStoreAvailable: Bool = false,
+        iCloudCloudKitAvailable: Bool = false,
+        transportAvailable: Bool = false,
+        distributionChannel: DistributionChannel = .current
+    ) {
+        self.iCloudKVStoreAvailable = iCloudKVStoreAvailable
+        self.iCloudCloudKitAvailable = iCloudCloudKitAvailable
+        self.transportAvailable = transportAvailable
+        self.distributionChannel = distributionChannel
+    }
+
+    /// Whether any iCloud sync backend is currently usable.
+    public var iCloudAvailable: Bool {
+        iCloudKVStoreAvailable || iCloudCloudKitAvailable
+    }
+
+    /// Prefer iCloud when any iCloud sync path is available, otherwise fall back
+    /// to the canonical Bonjour transport helper, then local-only storage.
+    public var preferredBackend: SyncBackend {
+        if iCloudAvailable {
+            return .iCloud
+        }
+        if transportAvailable {
+            return .transport
+        }
+        return .localOnly
+    }
+
+    /// Checks the build/runtime support for the Bonjour transport fallback.
+    public static var currentTransportAvailable: Bool {
+        DistributionChannel.current.supportsLocalNetworkTransport
+            && !SpeakTransportServiceType.isEmpty
+            && SpeakTransportProtocolVersion > 0
+    }
+
+    /// Checks current sync availability. CloudKit account availability is owned
+    /// by SpeakSync, so callers pass the latest `HistorySyncEngine` state.
+    public static func current(iCloudCloudKitAvailable: Bool = false) -> SyncAvailability {
+        let sync = SettingsSync.shared
+
+        return SyncAvailability(
+            iCloudKVStoreAvailable: sync.isAvailable,
+            iCloudCloudKitAvailable: iCloudCloudKitAvailable,
+            transportAvailable: currentTransportAvailable,
+            distributionChannel: .current
+        )
+    }
+}
+
 // MARK: - Sync Status
 
 /// Represents the current sync status across platforms.
-public struct SyncStatus {
+public struct SyncStatus: Equatable, Sendable {
     public let iCloudKeychainAvailable: Bool
     public let iCloudKVStoreAvailable: Bool
+    public let iCloudCloudKitAvailable: Bool
+    public let transportAvailable: Bool
     public let lastSyncDate: Date?
     public let pendingChanges: Bool
+    public let availability: SyncAvailability
+
+    public var preferredBackend: SyncBackend {
+        availability.preferredBackend
+    }
     
     public init(
         iCloudKeychainAvailable: Bool = false,
         iCloudKVStoreAvailable: Bool = false,
+        iCloudCloudKitAvailable: Bool = false,
+        transportAvailable: Bool = SyncAvailability.currentTransportAvailable,
         lastSyncDate: Date? = nil,
         pendingChanges: Bool = false
     ) {
         self.iCloudKeychainAvailable = iCloudKeychainAvailable
         self.iCloudKVStoreAvailable = iCloudKVStoreAvailable
+        self.iCloudCloudKitAvailable = iCloudCloudKitAvailable
+        self.transportAvailable = transportAvailable
         self.lastSyncDate = lastSyncDate
         self.pendingChanges = pendingChanges
+        self.availability = SyncAvailability(
+            iCloudKVStoreAvailable: iCloudKVStoreAvailable,
+            iCloudCloudKitAvailable: iCloudCloudKitAvailable,
+            transportAvailable: transportAvailable
+        )
     }
     
     /// Checks current sync availability
-    public static func current() -> SyncStatus {
+    public static func current(iCloudCloudKitAvailable: Bool = false) -> SyncStatus {
         let sync = SettingsSync.shared
+        let availability = SyncAvailability.current(iCloudCloudKitAvailable: iCloudCloudKitAvailable)
         
         return SyncStatus(
-            iCloudKeychainAvailable: sync.isAvailable,
-            iCloudKVStoreAvailable: sync.isAvailable,
+            iCloudKeychainAvailable: KeychainSyncAvailability.isAvailable(),
+            iCloudKVStoreAvailable: availability.iCloudKVStoreAvailable,
+            iCloudCloudKitAvailable: availability.iCloudCloudKitAvailable,
+            transportAvailable: availability.transportAvailable,
             lastSyncDate: sync.lastSyncDate,
             pendingChanges: false
         )

@@ -3,6 +3,7 @@ import OSLog
 import SpeakCore
 
 // swiftlint:disable file_length
+#if !APP_STORE
 enum LocalPostProcessingModelError: LocalizedError {
   case pythonUnavailable
   case runtimeUnavailable(String)
@@ -31,6 +32,7 @@ enum LocalPostProcessingModelError: LocalizedError {
     }
   }
 }
+#endif
 
 @MainActor
 // swiftlint:disable:next type_body_length
@@ -51,6 +53,7 @@ final class LocalPostProcessingModelManager: ObservableObject {
 
   nonisolated static let builtInRulesModelID = "local/post-processing/rules"
 
+  #if !APP_STORE
   static let recommendedModels: [LocalPostProcessingModel] = [
     LocalPostProcessingModel(
       id: "local/post-processing/qwen3-1.7b-q4",
@@ -81,9 +84,11 @@ final class LocalPostProcessingModelManager: ObservableObject {
   @Published private(set) var runtimeState: InstallState = .notInstalled
   @Published private(set) var modelStates: [String: InstallState] = [:]
   @Published private(set) var importedModels: [LocalPostProcessingModel] = []
+  #endif
 
   private let fileManager: FileManager
   private let logger = Logger(subsystem: "com.github.speakapp", category: "LocalPostProcessing")
+  #if !APP_STORE
   private let baseDirectory: URL
   private let modelsDirectory: URL
   private let runtimeDirectory: URL
@@ -91,9 +96,11 @@ final class LocalPostProcessingModelManager: ObservableObject {
   private let virtualEnvironmentURL: URL
   private let importedModelsURL: URL
   private var pythonExecutableCache: URL?
+  #endif
 
   private init(fileManager: FileManager = .default) {
     self.fileManager = fileManager
+    #if !APP_STORE
     let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
       ?? fileManager.homeDirectoryForCurrentUser
     baseDirectory = base
@@ -114,10 +121,15 @@ final class LocalPostProcessingModelManager: ObservableObject {
     }
     loadImportedModels()
     refresh()
+    #endif
   }
 
   var availableModels: [LocalPostProcessingModel] {
+    #if APP_STORE
+    []
+    #else
     Self.recommendedModels + importedModels
+    #endif
   }
 
   var availableModelOptions: [ModelCatalog.Option] {
@@ -125,6 +137,7 @@ final class LocalPostProcessingModelManager: ObservableObject {
   }
 
   func refresh() {
+    #if !APP_STORE
     Task { await refreshRuntimeState() }
     for model in availableModels {
       if modelStates[model.id] == .installing {
@@ -132,10 +145,15 @@ final class LocalPostProcessingModelManager: ObservableObject {
       }
       modelStates[model.id] = modelFileExists(for: model) ? .installed : .notInstalled
     }
+    #endif
   }
 
   func installState(for modelID: String) -> InstallState {
+    #if APP_STORE
+    .notInstalled
+    #else
     modelStates[modelID] ?? .notInstalled
+    #endif
   }
 
   func isInstalled(_ modelID: String) -> Bool {
@@ -146,6 +164,7 @@ final class LocalPostProcessingModelManager: ObservableObject {
     availableModels.first { $0.id == modelID }
   }
 
+  #if !APP_STORE
   @discardableResult
   func addHuggingFaceModel(
     repoID: String,
@@ -393,6 +412,7 @@ final class LocalPostProcessingModelManager: ObservableObject {
     if let existing = try? Data(contentsOf: sidecarURL), existing == data { return }
     try data.write(to: sidecarURL, options: .atomic)
   }
+  #endif
 
   nonisolated static func isDownloadedLocalModelID(_ id: String) -> Bool {
     id.lowercased().hasPrefix("local/post-processing/")
@@ -482,6 +502,7 @@ final class LocalPostProcessingModelManager: ObservableObject {
     return "\(base) from \(repoID)"
   }
 
+  #if !APP_STORE
   // swiftlint:disable:next function_body_length
   private nonisolated static func runProcess(
     executableURL: URL,
@@ -628,6 +649,7 @@ def main():
 if __name__ == "__main__":
     main()
 """#
+  #endif
 }
 
 struct LocalPostProcessingModel: Codable, Equatable, Identifiable, Sendable {

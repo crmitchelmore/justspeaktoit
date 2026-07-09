@@ -53,6 +53,33 @@ enum PermissionType: CaseIterable, Identifiable {
       return "Permit hotkey monitoring so Speak notices only the shortcuts you assign—nothing more."
     }
   }
+
+  var settingsURL: URL {
+    switch self {
+    case .microphone:
+      return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!
+    case .speechRecognition:
+      return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition")!
+    case .accessibility:
+      return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
+    case .inputMonitoring:
+      return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")!
+    }
+  }
+
+  var manualSetupSteps: [String]? {
+    switch self {
+    case .accessibility, .inputMonitoring:
+      return [
+        "Open \(displayName) settings.",
+        "Click the + button at the bottom of the app list, or unlock first if macOS asks.",
+        "Navigate to Applications → JustSpeakToIt.",
+        "Click Open, then enable the toggle."
+      ]
+    case .microphone, .speechRecognition:
+      return nil
+    }
+  }
 }
 
 enum PermissionStatus: Equatable {

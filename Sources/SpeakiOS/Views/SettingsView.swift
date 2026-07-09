@@ -626,13 +626,39 @@ public struct SettingsView: View {
                 CloudKitSyncSettingsSection()
 
                 // Sync status
-                let syncStatus = SyncStatus.current()
+                let syncStatus = SyncStatus.current(
+                    iCloudCloudKitAvailable: HistorySyncEngine.shared.state.isCloudAvailable
+                )
 
                 HStack {
-                    Label("iCloud Keychain", systemImage: "icloud")
+                    Label("Preferred Sync", systemImage: "arrow.triangle.branch")
                     Spacer()
-                    Text(syncStatus.iCloudKeychainAvailable ? "Available" : "Unavailable")
+                    Text(syncStatus.preferredBackend.displayName)
+                        .foregroundStyle(syncStatus.preferredBackend == .localOnly ? .secondary : .green)
+                }
+                .accessibilityElement(children: .combine)
+
+                HStack {
+                    Label("iCloud Keychain", systemImage: "key.icloud")
+                    Spacer()
+                    Text(syncStatus.iCloudKeychainAvailable ? "Available" : "Local only")
                         .foregroundStyle(syncStatus.iCloudKeychainAvailable ? .green : .secondary)
+                }
+                .accessibilityElement(children: .combine)
+
+                HStack {
+                    Label("iCloud Settings", systemImage: "icloud")
+                    Spacer()
+                    Text(syncStatus.iCloudKVStoreAvailable ? "Available" : "Local only")
+                        .foregroundStyle(syncStatus.iCloudKVStoreAvailable ? .green : .secondary)
+                }
+                .accessibilityElement(children: .combine)
+
+                HStack {
+                    Label("Bonjour Transport", systemImage: "network")
+                    Spacer()
+                    Text(syncStatus.transportAvailable ? "Ready" : "Unavailable")
+                        .foregroundStyle(syncStatus.transportAvailable ? .green : .secondary)
                 }
                 .accessibilityElement(children: .combine)
 
@@ -656,9 +682,9 @@ public struct SettingsView: View {
                     Label("Import from QR Code", systemImage: "qrcode.viewfinder")
                 }
 
-                Text("Share/Import copies your API keys and settings to another "
-                    + "device — the simplest way to sync with the Mac app. iCloud "
-                    + "Keychain keeps your iPhone and iPad in sync automatically.")
+                Text("Just Speak to It uses iCloud for settings and history when available. "
+                    + "If iCloud is unavailable, Bonjour Transport can send sessions to a paired Mac "
+                    + "on your local network; QR transfer remains available for manual setup.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -1478,18 +1504,20 @@ struct CloudKitSyncSettingsSection: View {
     @State private var isSyncing = false
 
     var body: some View {
+        let availability = SyncAvailability.current(iCloudCloudKitAvailable: syncEngine.state.isCloudAvailable)
+
         // CloudKit status
         HStack {
             Label("iCloud History Sync", systemImage: "icloud")
             Spacer()
-            Text(syncEngine.state.isCloudAvailable ? "Active" : "Unavailable")
+            Text(availability.iCloudCloudKitAvailable ? "Active" : "Unavailable")
                 .foregroundStyle(
-                    syncEngine.state.isCloudAvailable ? .green : .secondary
+                    availability.iCloudCloudKitAvailable ? .green : .secondary
                 )
         }
         .accessibilityElement(children: .combine)
 
-        if syncEngine.state.isCloudAvailable {
+        if availability.iCloudCloudKitAvailable {
             // Sync counts
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
@@ -1555,7 +1583,12 @@ struct CloudKitSyncSettingsSection: View {
             .disabled(isSyncing || syncEngine.state.isSyncing)
         } else {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Sign in to iCloud in Settings to sync transcription history across your devices.")
+                Text(
+                    availability.transportAvailable
+                        ? "Sign in to iCloud to sync history automatically. Until then, Bonjour Transport "
+                            + "can send new sessions to a paired Mac on your local network."
+                        : "Sign in to iCloud in Settings to sync transcription history across your devices."
+                )
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

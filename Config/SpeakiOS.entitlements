@@ -7,13 +7,20 @@
     <key>keychain-access-groups</key>
     <array>
         <!-- Default app keychain group -->
-    <string>$(AppIdentifierPrefix)com.justspeaktoit.shared</string>
+        <string>$(AppIdentifierPrefix)com.justspeaktoit.shared</string>
     </array>
-    
-    <!-- iCloud: Disabled - requires Apple Developer subscription -->
-    <!-- Uncomment if you have a subscription and want iCloud settings sync -->
-    <!-- <key>com.apple.developer.ubiquity-kvstore-identifier</key> -->
-    <!-- <string>$(TeamIdentifierPrefix)com.speak.ios</string> -->
+
+    <!-- iCloud: Enables settings (KVS) and transcription history (CloudKit) sync -->
+    <key>com.apple.developer.ubiquity-kvstore-identifier</key>
+    <string>$(TeamIdentifierPrefix)com.justspeaktoit.ios</string>
+    <key>com.apple.developer.icloud-container-identifiers</key>
+    <array>
+        <string>iCloud.com.justspeaktoit.ios</string>
+    </array>
+    <key>com.apple.developer.icloud-services</key>
+    <array>
+        <string>CloudKit</string>
+    </array>
     
     <!-- App Groups: Enables shared container for widget extension -->
     <key>com.apple.security.application-groups</key>
@@ -21,7 +28,10 @@
         <string>group.com.justspeaktoit.ios</string>
     </array>
     
-    <!-- Background Modes: Required for audio recording -->
-    <!-- Note: Also add to Info.plist UIBackgroundModes array -->
+    <!-- Push Notifications: Required for CloudKit silent push sync.
+         App Store / TestFlight builds must use "production"; switch back to
+         "development" only for local Xcode-signed development builds. -->
+    <key>aps-environment</key>
+    <string>production</string>
 </dict>
 </plist>

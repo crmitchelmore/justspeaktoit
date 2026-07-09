@@ -27,6 +27,27 @@ var iosAppSettings: [String: SettingValue] = [
 if ProcessInfo.processInfo.environment["SHOW_OPENCLAW_TAB"] != nil {
     iosAppSettings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] = "$(inherited) SHOW_OPENCLAW_TAB"
 }
+
+// Distribution channel selection for macOS. The app compiles from one codebase into
+// two flavours: Developer ID / direct download (default) and Mac App Store. Generate
+// with `APP_STORE=1 tuist generate` to produce a sandboxed App Store build: it defines
+// the `APP_STORE` Swift active compilation condition (gates Sparkle self-update and the
+// downloaded local-model runtimes — see Sources/SpeakCore/DistributionChannel.swift) and
+// selects the sandboxed entitlements file.
+let isAppStoreBuild = ProcessInfo.processInfo.environment["APP_STORE"] != nil
+let macEntitlementsPath = isAppStoreBuild
+    ? "Config/SpeakMacOS.AppStore.entitlements"
+    : "Config/SpeakMacOS.entitlements"
+var macAppSettings: [String: SettingValue] = [
+    "DEVELOPMENT_TEAM": "8X4ZN58TYH",
+    "CODE_SIGN_STYLE": "Automatic",
+    "CODE_SIGN_IDENTITY": "Apple Development",
+    "PRODUCT_BUNDLE_IDENTIFIER": "com.justspeaktoit.mac"
+]
+if isAppStoreBuild {
+    macAppSettings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] = "$(inherited) APP_STORE"
+}
+
 var iosWidgetSettings: [String: SettingValue] = [
     "CURRENT_PROJECT_VERSION": "1",
     "MARKETING_VERSION": "\(version)"
@@ -75,7 +96,7 @@ let project = Project(
                 .glob(pattern: "Resources/AppIcon.icns"),
                 .glob(pattern: "Resources/Sounds/**")
             ],
-            entitlements: .file(path: "Config/SpeakMacOS.entitlements"),
+            entitlements: .file(path: .relativeToRoot(macEntitlementsPath)),
             dependencies: [
                 .package(product: "SpeakCore"),
                 .package(product: "SpeakSync"),
@@ -84,12 +105,7 @@ let project = Project(
                 .package(product: "Sparkle"),
                 .package(product: "Sentry")
             ],
-            settings: .settings(base: [
-                "DEVELOPMENT_TEAM": "8X4ZN58TYH",
-                "CODE_SIGN_STYLE": "Automatic",
-                "CODE_SIGN_IDENTITY": "Apple Development",
-                "PRODUCT_BUNDLE_IDENTIFIER": "com.justspeaktoit.mac"
-            ])
+            settings: .settings(base: macAppSettings)
         ),
         .target(
             name: "SpeakiOS",

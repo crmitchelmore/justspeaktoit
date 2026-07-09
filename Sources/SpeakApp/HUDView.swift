@@ -190,8 +190,12 @@ struct HUDOverlay: View {
   @ViewBuilder
   private var captureHealthRow: some View {
     let health = manager.captureHealth
-    let micColor: Color = health.microphonePermission == .denied ? phaseColor : .secondary
+    let micWarning = health.noInputDevicesAvailable || health.microphonePermission == .denied
+    let micColor: Color = micWarning ? phaseColor : .secondary
     let microphonePermissionLabel = {
+      if health.noInputDevicesAvailable {
+        return "No device"
+      }
       switch health.microphonePermission {
       case .granted:
         return "Granted"
@@ -201,19 +205,21 @@ struct HUDOverlay: View {
         return "Unknown"
       }
     }()
+    let micIcon = micWarning ? "mic.slash.fill" : "mic.fill"
+    let deviceLabel = health.noInputDevicesAvailable ? "No microphone connected" : health.inputDeviceName
     HStack(spacing: 8) {
-      Image(systemName: health.microphonePermission == .denied ? "mic.slash.fill" : "mic.fill")
+      Image(systemName: micIcon)
         .font(.system(size: 10, weight: .semibold))
         .foregroundStyle(micColor)
-        .accessibilityLabel("Microphone permission: \(microphonePermissionLabel)")
+        .accessibilityLabel("Microphone: \(microphonePermissionLabel)")
 
-      Text(health.inputDeviceName)
+      Text(deviceLabel)
         .font(.caption2)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(health.noInputDevicesAvailable ? micColor : .secondary)
         .lineLimit(1)
         .truncationMode(.tail)
-        .help(health.inputDeviceName)
-        .accessibilityLabel("Input device: \(health.inputDeviceName)")
+        .help(deviceLabel)
+        .accessibilityLabel("Input device: \(deviceLabel)")
 
       Text(health.providerLabel)
         .font(.caption2)

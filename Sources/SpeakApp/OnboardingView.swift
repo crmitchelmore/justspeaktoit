@@ -643,7 +643,7 @@ struct AccessibilityManualHelper: View {
             HStack(spacing: 12) {
                 Button("Open Accessibility Settings") {
                     // Open directly to Accessibility pane
-                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+                    NSWorkspace.shared.open(PermissionType.accessibility.settingsURL)
                     currentStep = 1
                 }
                 .buttonStyle(.borderedProminent)

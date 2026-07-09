@@ -1684,8 +1684,14 @@ struct SettingsView: View {
   }
 
   private var localRuntimeUnavailableNote: some View {
+    channelAvailabilityNote(
+      "Downloaded local runtimes are not available in this build. Local Batch and built-in cleanup remain available."
+    )
+  }
+
+  private func channelAvailabilityNote(_ text: String) -> some View {
     Label(
-      "Downloaded local runtimes are not available in this build. Local Batch and built-in cleanup remain available.",
+      text,
       systemImage: "info.circle"
     )
     .font(.caption)
@@ -4139,19 +4145,31 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 12) {
           ForEach(PermissionType.allCases) { permission in
             let status = environment.permissions.status(for: permission)
-            HStack(spacing: 12) {
-              Label(permission.displayName, systemImage: permission.systemIconName)
-              Spacer()
-              Text(statusLabel(for: status))
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(statusColor(status).opacity(0.15), in: Capsule())
-                .foregroundStyle(statusColor(status))
-              Button("Request") {
-                Task { await environment.permissions.request(permission) }
+            VStack(alignment: .leading, spacing: 8) {
+              HStack(spacing: 12) {
+                Label(permission.displayName, systemImage: permission.systemIconName)
+                Spacer()
+                Text(statusLabel(for: status))
+                  .padding(.horizontal, 8)
+                  .padding(.vertical, 4)
+                  .background(statusColor(status).opacity(0.15), in: Capsule())
+                  .foregroundStyle(statusColor(status))
+                Button("Open Settings") {
+                  openSettings(for: permission)
+                }
+                .buttonStyle(.bordered)
+                .speakTooltip("Open the macOS privacy pane for \(permission.displayName).")
+                Button("Request") {
+                  Task { await environment.permissions.request(permission) }
+                }
+                .buttonStyle(.bordered)
+                .speakTooltip("Ask macOS to prompt again for \(permission.displayName) access.")
               }
-              .buttonStyle(.bordered)
-              .speakTooltip("Ask macOS to prompt again for \(permission.displayName) access.")
+
+              if shouldShowManualSetupHelp(for: permission, status: status),
+                 let steps = permission.manualSetupSteps {
+                permissionManualSetupNote(for: permission, steps: steps)
+              }
             }
           }
 
@@ -4173,6 +4191,24 @@ struct SettingsView: View {
     case .restricted: return "Restricted"
     case .notDetermined: return "Pending"
     }
+  }
+
+  private func openSettings(for permission: PermissionType) {
+    NSWorkspace.shared.open(permission.settingsURL)
+  }
+
+  private func shouldShowManualSetupHelp(for permission: PermissionType, status: PermissionStatus) -> Bool {
+    guard permission.manualSetupSteps != nil else { return false }
+    return !DistributionChannel.current.supportsAutomaticAccessibilityPrompt || status == .denied
+  }
+
+  private func permissionManualSetupNote(for permission: PermissionType, steps: [String]) -> some View {
+    let intro = if DistributionChannel.current.supportsAutomaticAccessibilityPrompt {
+      "Add \(permission.displayName) manually:"
+    } else {
+      "This build cannot show the automatic prompt here. Add \(permission.displayName) manually:"
+    }
+    return channelAvailabilityNote("\(intro) \(steps.joined(separator: " "))")
   }
 
   private func volumeLabel(for volume: Float) -> String {
@@ -4230,6 +4266,7 @@ struct SettingsView: View {
             }
             Label(buildType, systemImage: buildType == "Release" ? "checkmark.seal" : "wrench.and.screwdriver")
               .foregroundStyle(buildType == "Release" ? .green : .orange)
+            Label("Distribution: \(DistributionChannel.current.displayName)", systemImage: "shippingbox")
           }
           .font(.callout)
           .foregroundStyle(.secondary)
@@ -4309,16 +4346,20 @@ struct SettingsView: View {
           TipJarView()
             .frame(maxWidth: .infinity)
 
-          HStack(spacing: 12) {
-            Link(destination: URL(string: "https://github.com/sponsors/crmitchelmore")!) {
-              Label("GitHub Sponsors", systemImage: "heart")
-            }
-            .buttonStyle(.bordered)
+          // In-app StoreKit tips work in App Store builds; external donation
+          // links are only shown where cross-channel messaging is permitted.
+          if DistributionChannel.current.allowsCrossChannelMessaging {
+            HStack(spacing: 12) {
+              Link(destination: URL(string: "https://github.com/sponsors/crmitchelmore")!) {
+                Label("GitHub Sponsors", systemImage: "heart")
+              }
+              .buttonStyle(.bordered)
 
-            Link(destination: URL(string: "https://ko-fi.com/crmitchelmore")!) {
-              Label("Ko-fi", systemImage: "cup.and.saucer")
+              Link(destination: URL(string: "https://ko-fi.com/crmitchelmore")!) {
+                Label("Ko-fi", systemImage: "cup.and.saucer")
+              }
+              .buttonStyle(.bordered)
             }
-            .buttonStyle(.bordered)
           }
         }
       }

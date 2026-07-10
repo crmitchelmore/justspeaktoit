@@ -15,6 +15,7 @@ env:
 
 jobs:
   build-and-upload:
+    if: ${{ false }}
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
@@ -247,3 +248,58 @@ jobs:
           
           echo "✅ Build exported and uploaded to App Store Connect"
           echo "The build will appear in TestFlight after Apple's processing (5-30 minutes)"
+
+  refresh-profile:
+    runs-on: macos-15
+    steps:
+      - name: Install Fastlane
+        run: |
+          if ! command -v fastlane >/dev/null 2>&1; then
+            brew install fastlane
+          fi
+          fastlane --version
+
+      - name: Install App Store Connect API Key
+        env:
+          APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+        run: |
+          mkdir -p ~/.appstoreconnect/private_keys
+          echo "$APP_STORE_CONNECT_API_KEY" | base64 --decode > ~/.appstoreconnect/private_keys/AuthKey_${{ env.APP_STORE_CONNECT_KEY_ID }}.p8
+
+      - name: Generate CloudKit-enabled App Store profile
+        env:
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          mkdir -p build/profiles
+          jq -n \
+            --arg key_id "${{ env.APP_STORE_CONNECT_KEY_ID }}" \
+            --arg issuer_id "$APP_STORE_CONNECT_ISSUER_ID" \
+            --rawfile key ~/.appstoreconnect/private_keys/AuthKey_${{ env.APP_STORE_CONNECT_KEY_ID }}.p8 \
+            '{key_id: $key_id, issuer_id: $issuer_id, key: $key}' \
+            > "$RUNNER_TEMP/app-store-connect-key.json"
+
+          fastlane sigh \
+            --api_key_path "$RUNNER_TEMP/app-store-connect-key.json" \
+            --app_identifier "com.justspeaktoit.ios" \
+            --team_id "$APPLE_TEAM_ID" \
+            --provisioning_name "JustSpeakToIt iOS" \
+            --force \
+            --output_path build/profiles \
+            --filename ios-appstore.provisionprofile
+
+          security cms -D \
+            -i build/profiles/ios-appstore.provisionprofile \
+            -o "$RUNNER_TEMP/ios-appstore-profile.plist"
+          /usr/libexec/PlistBuddy \
+            -c "Print :Entitlements:com.apple.developer.icloud-container-identifiers" \
+            "$RUNNER_TEMP/ios-appstore-profile.plist" \
+            | grep -q "iCloud.com.justspeaktoit.ios"
+
+      - name: Upload refreshed app profile
+        uses: actions/upload-artifact@v4
+        with:
+          name: refreshed-ios-appstore-profile
+          path: build/profiles/ios-appstore.provisionprofile
+          if-no-files-found: error
+          retention-days: 1

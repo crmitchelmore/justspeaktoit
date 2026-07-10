@@ -149,13 +149,13 @@ public final class AppSettings: ObservableObject {
 
     private static let logger = Logger(subsystem: "com.justspeaktoit.ios", category: "AppSettings")
     private var keyChangeObserver: NSObjectProtocol?
-    private var isApplyingSyncedKeys = false
+    private var syncedKeyReloadDepth = 0
 
     /// Persists (or clears when empty) an API key on the canonical secure store.
     /// Keychain failures are logged rather than silently dropped so a key that
     /// appears saved but didn't persist is diagnosable from logs.
     private func persistSecret(_ value: String, identifier: String) {
-        guard !isApplyingSyncedKeys else { return }
+        guard syncedKeyReloadDepth == 0 else { return }
         Task {
             do {
                 if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -342,8 +342,8 @@ public final class AppSettings: ObservableObject {
     public var hasGladiaKey: Bool { !gladiaAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     public func reloadSyncedAPIKeys() async {
-        isApplyingSyncedKeys = true
-        defer { isApplyingSyncedKeys = false }
+        syncedKeyReloadDepth += 1
+        defer { syncedKeyReloadDepth -= 1 }
         deepgramAPIKey = await Self.syncedAPIKeyValue(
             identifier: Self.deepgramKeyID,
             currentValue: deepgramAPIKey

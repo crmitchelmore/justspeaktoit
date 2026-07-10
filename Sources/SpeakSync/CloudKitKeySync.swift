@@ -136,7 +136,7 @@ public enum EncryptedSecretCrypto {
         return SymmetricKey(data: keyData)
     }
 
-    private static func pbkdf2SHA256(
+    static func pbkdf2SHA256(
         password: Data,
         salt: Data,
         iterations: Int,

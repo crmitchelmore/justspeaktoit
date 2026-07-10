@@ -85,4 +85,18 @@ final class CloudKitKeySyncTests: XCTestCase {
 
         XCTAssertEqual(decoded, mutation)
     }
+
+    func testPBKDF2SHA256_MatchesIndependentKnownAnswerVector() {
+        let derived = EncryptedSecretCrypto.pbkdf2SHA256(
+            password: Data("password".utf8),
+            salt: Data("salt".utf8),
+            iterations: 4_096,
+            keyByteCount: 32
+        )
+
+        XCTAssertEqual(
+            derived.map { String(format: "%02x", $0) }.joined(),
+            "c5e478d59288c841aa530db6845c4c8d962893a001ce4e11a4963873aa98134a"
+        )
+    }
 }

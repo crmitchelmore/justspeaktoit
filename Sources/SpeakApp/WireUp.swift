@@ -27,6 +27,7 @@ final class AppEnvironment: ObservableObject {
   let autoCorrectionTracker: AutoCorrectionTracker
   let main: MainManager
   let transportServer: TransportServer
+  let historySyncAdapter: MacHistorySyncAdapter
   private let hudPresenter: HUDWindowPresenter
 
   /// Coordinator state for cross-view navigation. When set, MainView selects
@@ -69,6 +70,7 @@ final class AppEnvironment: ObservableObject {
     autoCorrectionTracker: AutoCorrectionTracker,
     main: MainManager,
     transportServer: TransportServer,
+    historySyncAdapter: MacHistorySyncAdapter,
     hudPresenter: HUDWindowPresenter
   ) {
     self.settings = settings
@@ -91,6 +93,7 @@ final class AppEnvironment: ObservableObject {
     self.autoCorrectionTracker = autoCorrectionTracker
     self.main = main
     self.transportServer = transportServer
+    self.historySyncAdapter = historySyncAdapter
     self.hudPresenter = hudPresenter
   }
 
@@ -386,6 +389,7 @@ enum WireUp {
 
     // Transport server for "Send to Mac" from iOS
     let transportServer = TransportServer()
+    let syncAdapter = MacHistorySyncAdapter(historyManager: history, transportServer: transportServer)
 
     let environment = AppEnvironment(
       settings: settings,
@@ -408,6 +412,7 @@ enum WireUp {
       autoCorrectionTracker: autoCorrectionTracker,
       main: main,
       transportServer: transportServer,
+      historySyncAdapter: syncAdapter,
       hudPresenter: hudPresenter
     )
 
@@ -436,8 +441,7 @@ enum WireUp {
     NSApp.registerForRemoteNotifications()
     #endif
 
-    let syncAdapter = MacHistorySyncAdapter(historyManager: environment.history)
-    Task { await syncAdapter.start() }
+    Task { await environment.historySyncAdapter.start() }
 
     Task { await secureStorage.preloadTrackedSecrets() }
     Task {

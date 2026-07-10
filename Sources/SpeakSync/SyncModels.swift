@@ -1,40 +1,8 @@
 import Foundation
+@_exported import SpeakCore
 
 /// A platform-agnostic transcription history entry for CloudKit sync.
 /// Both iOS and macOS map their native history types to/from this model.
-public struct SyncableHistoryEntry: Codable, Identifiable, Sendable {
-    public let id: UUID
-    public let createdAt: Date
-    public let rawTranscription: String?
-    public let postProcessedText: String?
-    public let model: String
-    public let duration: TimeInterval
-    public let wordCount: Int
-    public let originPlatform: String
-    public let updatedAt: Date
-
-    public init(
-        id: UUID,
-        createdAt: Date,
-        rawTranscription: String?,
-        postProcessedText: String?,
-        model: String,
-        duration: TimeInterval,
-        wordCount: Int,
-        originPlatform: String,
-        updatedAt: Date
-    ) {
-        self.id = id
-        self.createdAt = createdAt
-        self.rawTranscription = rawTranscription
-        self.postProcessedText = postProcessedText
-        self.model = model
-        self.duration = duration
-        self.wordCount = wordCount
-        self.originPlatform = originPlatform
-        self.updatedAt = updatedAt
-    }
-}
 
 /// Observable sync state for UI updates.
 @MainActor

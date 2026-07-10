@@ -2,6 +2,7 @@ import XCTest
 
 @testable import SpeakCore
 
+// swiftlint:disable:next type_body_length
 final class TransportMessageCodableTests: XCTestCase {
 
     private let encoder: JSONEncoder = {
@@ -178,6 +179,108 @@ final class TransportMessageCodableTests: XCTestCase {
             XCTFail("Expected .ack"); return
         }
         XCTAssertEqual(result.sequenceNumber, 42)
+    }
+
+    // MARK: - History sync
+
+    func testHistorySyncRequest_roundtrip() throws {
+        let requestID = UUID()
+        let requestedAt = Date(timeIntervalSince1970: 1_800_000_000)
+        let msg = HistorySyncRequestMessage(requestID: requestID, requestedAt: requestedAt)
+
+        let decoded = try decoder.decode(
+            TransportMessage.self,
+            from: encoder.encode(TransportMessage.historySyncRequest(msg))
+        )
+
+        guard case .historySyncRequest(let result) = decoded else {
+            XCTFail("Expected .historySyncRequest"); return
+        }
+        XCTAssertEqual(result.requestID, requestID)
+        XCTAssertEqual(result.requestedAt.timeIntervalSince1970, requestedAt.timeIntervalSince1970, accuracy: 1.0)
+    }
+
+    func testHistorySyncBatch_roundtrip() throws {
+        let requestID = UUID()
+        let entry = SyncableHistoryEntry(
+            id: UUID(),
+            createdAt: Date(timeIntervalSince1970: 1),
+            rawTranscription: "raw",
+            postProcessedText: "post",
+            model: "model",
+            duration: 2,
+            wordCount: 1,
+            originPlatform: "ios",
+            updatedAt: Date(timeIntervalSince1970: 3),
+            originDeviceID: "device-b"
+        )
+        let tombstone = HistoryDeletionTombstone(
+            id: UUID(),
+            deletedAt: Date(timeIntervalSince1970: 4),
+            originDeviceID: "device-a"
+        )
+        let msg = HistorySyncBatchMessage(
+            requestID: requestID,
+            batchIndex: 2,
+            isLast: true,
+            entries: [entry],
+            tombstones: [tombstone]
+        )
+
+        let decoded = try decoder.decode(
+            TransportMessage.self,
+            from: encoder.encode(TransportMessage.historySyncBatch(msg))
+        )
+
+        guard case .historySyncBatch(let result) = decoded else {
+            XCTFail("Expected .historySyncBatch"); return
+        }
+        XCTAssertEqual(result.requestID, requestID)
+        XCTAssertEqual(result.batchIndex, 2)
+        XCTAssertTrue(result.isLast)
+        XCTAssertEqual(result.entries, [entry])
+        XCTAssertEqual(result.tombstones, [tombstone])
+    }
+
+    func testHistorySyncComplete_roundtrip() throws {
+        let requestID = UUID()
+        let msg = HistorySyncCompleteMessage(requestID: requestID, receivedBatchCount: 3)
+
+        let decoded = try decoder.decode(
+            TransportMessage.self,
+            from: encoder.encode(TransportMessage.historySyncComplete(msg))
+        )
+
+        guard case .historySyncComplete(let result) = decoded else {
+            XCTFail("Expected .historySyncComplete"); return
+        }
+        XCTAssertEqual(result.requestID, requestID)
+        XCTAssertEqual(result.receivedBatchCount, 3)
+    }
+
+    func testHistorySyncBatchHelperLimitsBatchesToOneHundredItems() {
+        let requestID = UUID()
+        let entries = (0..<205).map { index in
+            SyncableHistoryEntry(
+                id: UUID(),
+                createdAt: Date(timeIntervalSince1970: TimeInterval(index)),
+                rawTranscription: "\(index)",
+                postProcessedText: nil,
+                model: "model",
+                duration: 1,
+                wordCount: 1,
+                originPlatform: "test",
+                updatedAt: Date(timeIntervalSince1970: TimeInterval(index)),
+                originDeviceID: "device"
+            )
+        }
+
+        let batches = HistorySyncBatchMessage.batches(requestID: requestID, entries: entries, tombstones: [])
+
+        XCTAssertEqual(batches.count, 3)
+        XCTAssertTrue(batches.allSatisfy(\.isWithinBatchLimit))
+        XCTAssertEqual(batches.map(\.entries.count), [100, 100, 5])
+        XCTAssertEqual(batches.last?.isLast, true)
     }
 
     // MARK: - .error

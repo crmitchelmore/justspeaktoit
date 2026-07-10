@@ -181,6 +181,7 @@ struct HistoryItem: Codable, Identifiable, Hashable {
   let trigger: HistoryTrigger
   let personalCorrections: PersonalLexiconHistorySummary?
   let errors: [HistoryError]
+  let originDeviceID: String?
   let source: HistoryItemSource?
   let postProcessingPrompt: PostProcessingPromptPayload?
   let diagnosticContext: HistoryDiagnosticContext?
@@ -192,6 +193,7 @@ struct HistoryItem: Codable, Identifiable, Hashable {
     cost: HistoryCost?, audioFileURL: URL?, networkExchanges: [HistoryNetworkExchange],
     events: [HistoryEvent], phaseTimestamps: PhaseTimestamps, trigger: HistoryTrigger,
     personalCorrections: PersonalLexiconHistorySummary?, errors: [HistoryError],
+    originDeviceID: String? = nil,
     source: HistoryItemSource? = nil,
     postProcessingPrompt: PostProcessingPromptPayload? = nil,
     diagnosticContext: HistoryDiagnosticContext? = nil
@@ -212,6 +214,7 @@ struct HistoryItem: Codable, Identifiable, Hashable {
     self.trigger = trigger
     self.personalCorrections = personalCorrections
     self.errors = errors
+    self.originDeviceID = originDeviceID
     self.source = source
     self.postProcessingPrompt = postProcessingPrompt
     self.diagnosticContext = diagnosticContext

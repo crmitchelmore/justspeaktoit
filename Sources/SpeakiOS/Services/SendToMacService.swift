@@ -145,6 +145,14 @@ public final class MacConnection: NSObject, ObservableObject {
 
     @Published public private(set) var state: ConnectionState = .disconnected
     @Published public private(set) var connectedMacName: String?
+    public weak var historyTransportDelegate: HistoryTransportDelegate? {
+        didSet {
+            guard state == .connected else { return }
+            Task { [weak self] in
+                await self?.exchangeHistorySnapshot()
+            }
+        }
+    }
 
     private struct PendingConnection {
         let peerID: MCPeerID
@@ -161,6 +169,7 @@ public final class MacConnection: NSObject, ObservableObject {
     private var connectedPeer: MCPeerID?
     private var pendingConnection: PendingConnection?
     private var sequenceNumber = 0
+    private var historyBatchAccumulator = HistoryBatchAccumulator()
 
     public override convenience init() {
         self.init(discovery: .shared)
@@ -225,6 +234,7 @@ public final class MacConnection: NSObject, ObservableObject {
         connectedPeer = nil
         connectedMacName = nil
         sequenceNumber = 0
+        historyBatchAccumulator.removeAll()
         state = .disconnected
     }
 
@@ -234,6 +244,7 @@ public final class MacConnection: NSObject, ObservableObject {
         connectedPeer = nil
         connectedMacName = nil
         sequenceNumber = 0
+        historyBatchAccumulator.removeAll()
         state = .error(error.localizedDescription)
     }
 
@@ -288,6 +299,9 @@ public final class MacConnection: NSObject, ObservableObject {
         connectedMacName = pending.macName
         state = .connected
         completePendingConnection(for: peerID)
+        Task { [weak self] in
+            await self?.exchangeHistorySnapshot()
+        }
     }
 
     private func handleDisconnected(peerID: MCPeerID) {
@@ -299,6 +313,7 @@ public final class MacConnection: NSObject, ObservableObject {
         connectedPeer = nil
         connectedMacName = nil
         sequenceNumber = 0
+        historyBatchAccumulator.removeAll()
         state = .disconnected
     }
 
@@ -332,6 +347,29 @@ public final class MacConnection: NSObject, ObservableObject {
             Task { [weak self] in
                 try? await self?.sendPong()
             }
+        case .historySyncRequest(let request):
+            Task { [weak self] in
+                try? await self?.sendHistorySnapshot(requestID: request.requestID)
+            }
+        case .historySyncBatch(let batch):
+            guard let assembled = historyBatchAccumulator.append(batch) else { break }
+            Task { [weak self] in
+                guard let self else { return }
+                await self.historyTransportDelegate?.applyHistoryBatch(
+                    entries: assembled.snapshot.entries,
+                    tombstones: assembled.snapshot.tombstones
+                )
+                try? self.send(
+                    .historySyncComplete(
+                        HistorySyncCompleteMessage(
+                            requestID: assembled.requestID,
+                            receivedBatchCount: assembled.receivedBatchCount
+                        )
+                    )
+                )
+            }
+        case .historySyncComplete:
+            break
         case .ack:
             break
         case .error(let error):
@@ -343,6 +381,40 @@ public final class MacConnection: NSObject, ObservableObject {
 
     private func sendPong() async throws {
         try send(.pong)
+    }
+
+    public func broadcastHistoryDelta(
+        entries: [SyncableHistoryEntry],
+        tombstones: [HistoryDeletionTombstone]
+    ) async {
+        guard state == .connected else { return }
+        let requestID = UUID()
+        let batches = HistorySyncBatchMessage.batches(
+            requestID: requestID,
+            entries: entries,
+            tombstones: tombstones
+        )
+        for batch in batches {
+            try? send(.historySyncBatch(batch))
+        }
+    }
+
+    private func exchangeHistorySnapshot() async {
+        let request = HistorySyncRequestMessage()
+        try? send(.historySyncRequest(request))
+    }
+
+    private func sendHistorySnapshot(requestID: UUID) throws {
+        guard let historyTransportDelegate else { return }
+        let snapshot = historyTransportDelegate.historySnapshot(maxEntries: SpeakTransportHistoryMaxSnapshotEntries)
+        let batches = HistorySyncBatchMessage.batches(
+            requestID: requestID,
+            entries: snapshot.entries,
+            tombstones: snapshot.tombstones
+        )
+        for batch in batches {
+            try send(.historySyncBatch(batch))
+        }
     }
 }
 
@@ -380,6 +452,7 @@ extension MacConnection: MCSessionDelegate {
     nonisolated public func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
         Task { @MainActor [weak self] in
             guard let self else { return }
+            guard peerID == self.connectedPeer else { return }
             do {
                 let message = try self.decoder.decode(TransportMessage.self, from: data)
                 self.handleIncomingMessage(message)

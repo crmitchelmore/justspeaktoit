@@ -1,5 +1,7 @@
+// swiftlint:disable file_length
 import AppKit
 import Foundation
+import SpeakCore
 import os.log
 
 // @Implement: This file persists history items to disc and is the interface to fetch a list of them, apply any filtering, sorting, or other standard functions, and surface them to the history view.
@@ -43,7 +45,17 @@ private struct WALEntry: Codable {
   }
 }
 
+struct HistoryMutation {
+  enum Kind {
+    case upsert([HistoryItem])
+    case delete([HistoryDeletionTombstone])
+  }
+
+  let kind: Kind
+}
+
 @MainActor
+// swiftlint:disable:next type_body_length
 final class HistoryManager: ObservableObject {
   @Published private(set) var items: [HistoryItem] = []
   @Published private(set) var statistics: HistoryStatistics = .init(
@@ -71,12 +83,17 @@ final class HistoryManager: ObservableObject {
 
   private let storageURL: URL
   private let walURL: URL
+  private let tombstoneStore: HistoryTombstoneStore
   private let encoder: JSONEncoder
   private let decoder: JSONDecoder
   private let log = Logger(subsystem: "com.github.speakapp", category: "HistoryManager")
 
   /// Pending writes waiting to be flushed
   private var pendingWrites: [WALEntry] = []
+  private(set) var tombstones: [HistoryDeletionTombstone] = []
+  private var isApplyingRemoteChanges = false
+
+  var onMutation: ((HistoryMutation) -> Void)?
 
   /// Timer for periodic flushing
   private var flushTimer: Timer?
@@ -103,7 +120,13 @@ final class HistoryManager: ObservableObject {
   /// Observer for app termination notification
   private var terminationObserver: NSObjectProtocol?
 
-  init(fileManager: FileManager = .default, flushInterval: TimeInterval = defaultFlushInterval, batchSizeThreshold: Int = defaultBatchSizeThreshold, pageSize: Int = 50) {
+  init(
+    fileManager: FileManager = .default,
+    flushInterval: TimeInterval = defaultFlushInterval,
+    batchSizeThreshold: Int = defaultBatchSizeThreshold,
+    pageSize: Int = 50,
+    tombstoneStore: HistoryTombstoneStore? = nil
+  ) {
     self.pageSize = pageSize
     let supportURL =
       fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
@@ -115,6 +138,9 @@ final class HistoryManager: ObservableObject {
     }
     storageURL = historyDir.appendingPathComponent("history-log.json", isDirectory: false)
     walURL = historyDir.appendingPathComponent("history-wal.json", isDirectory: false)
+    self.tombstoneStore = tombstoneStore ?? HistoryTombstoneStore(
+      fileURL: historyDir.appendingPathComponent("history-tombstones.json", isDirectory: false)
+    )
 
     encoder = JSONEncoder()
     encoder.dateEncodingStrategy = .iso8601
@@ -123,6 +149,7 @@ final class HistoryManager: ObservableObject {
 
     self.flushInterval = flushInterval
     self.batchSizeThreshold = batchSizeThreshold
+    tombstones = self.tombstoneStore.load()
 
     Task {
       await loadFromDisk()
@@ -418,6 +445,7 @@ final class HistoryManager: ObservableObject {
 
     // Write to WAL instead of directly to disk
     await appendToWAL(WALEntry(operation: .append, item: item))
+    notifyMutation(.upsert([item]))
   }
 
   func update(_ item: HistoryItem) async {
@@ -438,10 +466,12 @@ final class HistoryManager: ObservableObject {
 
     // Write to WAL instead of directly to disk
     await appendToWAL(WALEntry(operation: .update, item: item))
+    notifyMutation(.upsert([item]))
   }
 
   func remove(id: UUID) async {
     let diskItem = allItemsOnDisk.first(where: { $0.id == id })
+    let tombstone = HistoryDeletionTombstone(id: id, deletedAt: Date())
     allItemsOnDisk.removeAll { $0.id == id }
 
     items.removeAll { $0.id == id }
@@ -454,9 +484,12 @@ final class HistoryManager: ObservableObject {
     if let diskItem {
       await appendToWAL(WALEntry(operation: .remove, item: diskItem))
     }
+    recordTombstones([tombstone])
+    notifyMutation(.delete([tombstone]))
   }
 
   func removeAll() async {
+    let deletionTombstones = allItemsOnDisk.map { HistoryDeletionTombstone(id: $0.id, deletedAt: Date()) }
     allItemsOnDisk = []
     items = []
     let stats = Self.calculateStatistics(for: [])
@@ -465,6 +498,8 @@ final class HistoryManager: ObservableObject {
 
     // Write to WAL instead of directly to disk
     await appendToWAL(WALEntry(operation: .removeAll))
+    recordTombstones(deletionTombstones)
+    notifyMutation(.delete(deletionTombstones))
   }
 
   func deleteHistoryItem(_ item: HistoryItem) async {
@@ -510,6 +545,106 @@ final class HistoryManager: ObservableObject {
       }
 
       return true
+    }
+  }
+
+  // swiftlint:disable:next function_body_length
+  func applyRemote(
+    entries incomingEntries: [SyncableHistoryEntry],
+    tombstones incomingTombstones: [HistoryDeletionTombstone]
+  ) async -> HistorySyncSnapshot {
+    isApplyingRemoteChanges = true
+    defer { isApplyingRemoteChanges = false }
+
+    recordTombstones(incomingTombstones)
+    let existingSyncEntries = allItems.map { $0.toSyncable() }
+    let mergedSyncEntries = HistoryConflictResolver.mergedEntries(
+      existing: existingSyncEntries,
+      incoming: incomingEntries,
+      tombstones: tombstones
+    )
+    let existingByID = Dictionary(uniqueKeysWithValues: allItems.map { ($0.id, $0) })
+    let mergedItems = mergedSyncEntries.map { entry in
+      if let existing = existingByID[entry.id], existing.toSyncable() == entry {
+        return existing
+      }
+      return HistoryItem.fromSyncable(entry)
+    }
+
+    allItemsOnDisk = mergedItems.sorted { $0.createdAt > $1.createdAt }
+    items = Array(allItemsOnDisk.prefix(pageSize))
+    hasMoreItems = allItemsOnDisk.count > pageSize
+    let stats = Self.calculateStatistics(for: allItemsOnDisk)
+    cachedStatistics = stats
+    statistics = stats
+    do {
+      let data = try encoder.encode(allItemsOnDisk)
+      try data.write(to: storageURL, options: [.atomic])
+      pendingWrites.removeAll()
+      clearWAL()
+    } catch {
+      log.error("Failed to persist remote history merge: \(error.localizedDescription, privacy: .public)")
+    }
+
+    let finalEntriesByID = Dictionary(
+      uniqueKeysWithValues: mergedSyncEntries.map { ($0.id, $0) }
+    )
+    let incomingWinners = HistoryConflictResolver.mergedEntries(
+      existing: [],
+      incoming: incomingEntries,
+      tombstones: []
+    )
+    let appliedEntries = incomingWinners.filter { finalEntriesByID[$0.id] == $0 }
+    let incomingTombstonesByID = HistoryConflictResolver.mergedTombstones(
+      existing: [],
+      incoming: incomingTombstones
+    )
+    let storedTombstonesByID = HistoryConflictResolver.mergedTombstones(
+      existing: tombstones,
+      incoming: []
+    )
+    let appliedTombstones = incomingTombstonesByID.values.filter { tombstone in
+      finalEntriesByID[tombstone.id] == nil
+        && storedTombstonesByID[tombstone.id] == tombstone
+    }
+
+    return HistorySyncSnapshot(
+      entries: appliedEntries,
+      tombstones: Array(appliedTombstones)
+    )
+  }
+
+  func historySnapshot(maxEntries: Int) -> HistorySyncSnapshot {
+    let visibleEntries = visibleSyncEntries()
+    return HistorySyncSnapshot(
+      entries: Array(visibleEntries.prefix(maxEntries)),
+      tombstones: Array(tombstones.prefix(maxEntries))
+    )
+  }
+
+  func visibleSyncEntries() -> [SyncableHistoryEntry] {
+    HistoryConflictResolver.visibleEntries(
+      entries: allItems.map { $0.toSyncable() },
+      tombstones: tombstones
+    )
+  }
+
+  private func notifyMutation(_ kind: HistoryMutation.Kind) {
+    guard !isApplyingRemoteChanges else { return }
+    onMutation?(HistoryMutation(kind: kind))
+  }
+
+  private func recordTombstones(_ newTombstones: [HistoryDeletionTombstone]) {
+    guard !newTombstones.isEmpty else { return }
+    let merged = HistoryConflictResolver.mergedTombstones(
+      existing: tombstones,
+      incoming: newTombstones
+    )
+    tombstones = tombstoneStore.pruned(Array(merged.values))
+    do {
+      try tombstoneStore.save(tombstones)
+    } catch {
+      log.error("Failed to save history tombstones: \(error.localizedDescription, privacy: .public)")
     }
   }
 

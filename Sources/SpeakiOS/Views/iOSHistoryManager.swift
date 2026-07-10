@@ -1,11 +1,14 @@
+// swiftlint:disable file_length
 #if os(iOS)
 import Foundation
+import SpeakCore
 import SpeakSync
 
 // MARK: - History Manager
 
 /// Manages transcription history persistence for iOS with CloudKit sync.
 @MainActor
+// swiftlint:disable:next type_body_length
 public final class iOSHistoryManager: ObservableObject {
     public static let shared = iOSHistoryManager()
 
@@ -16,6 +19,7 @@ public final class iOSHistoryManager: ObservableObject {
     @Published public private(set) var reprocessingIDs: Set<UUID> = []
 
     private let fileURL: URL
+    private let tombstoneStore: HistoryTombstoneStore
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
@@ -31,6 +35,7 @@ public final class iOSHistoryManager: ObservableObject {
     /// IDs of entries that have been synced to CloudKit.
     private(set) var syncedIDs: Set<UUID> = []
     private let syncedIDsKey = "speak.sync.syncedHistoryIDs"
+    private(set) var tombstones: [HistoryDeletionTombstone] = []
 
     /// Number of entries synced to CloudKit.
     public var syncedCount: Int { syncedIDs.count }
@@ -59,14 +64,20 @@ public final class iOSHistoryManager: ObservableObject {
     /// Designated initializer. `fileURL` and `syncEnabled` are injectable so
     /// tests can exercise persistence against a temporary file without touching
     /// CloudKit.
-    init(fileURL: URL, syncEnabled: Bool) {
+    init(fileURL: URL, syncEnabled: Bool, tombstoneStore: HistoryTombstoneStore? = nil) {
         self.fileURL = fileURL
         self.syncEnabled = syncEnabled
+        self.tombstoneStore = tombstoneStore ?? HistoryTombstoneStore(
+            fileURL: fileURL
+                .deletingLastPathComponent()
+                .appendingPathComponent("transcription-history-tombstones.json")
+        )
 
         encoder.dateEncodingStrategy = .iso8601
         decoder.dateDecodingStrategy = .iso8601
 
         loadSyncedIDs()
+        tombstones = self.tombstoneStore.load()
 
         // Load history *synchronously* before this initializer returns. A
         // headless Action Button recording touches `.shared` cold and then
@@ -76,6 +87,7 @@ public final class iOSHistoryManager: ObservableObject {
         loadHistoryFromDiskIfNeeded()
 
         guard syncEnabled else { return }
+        MacConnection.shared.historyTransportDelegate = self
         Task {
             await initializeSync()
         }
@@ -97,9 +109,10 @@ public final class iOSHistoryManager: ObservableObject {
         saveHistory()
 
         guard syncEnabled else { return }
+        let entry = item.toSyncable()
         Task {
             do {
-                try await HistorySyncEngine.shared.upload(entry: item.toSyncable())
+                try await HistorySyncEngine.shared.upload(entry: entry)
                 syncedIDs.insert(item.id)
                 saveSyncedIDs()
             } catch {
@@ -107,6 +120,9 @@ public final class iOSHistoryManager: ObservableObject {
                 // rather than marking it synced after a failed upload.
                 print("[iOSHistoryManager] Failed to upload item: \(error)")
             }
+        }
+        Task {
+            await MacConnection.shared.broadcastHistoryDelta(entries: [entry], tombstones: [])
         }
     }
 
@@ -132,6 +148,8 @@ public final class iOSHistoryManager: ObservableObject {
     public func remove(_ item: iOSHistoryItem) {
         loadHistoryFromDiskIfNeeded()
         items.removeAll { $0.id == item.id }
+        let tombstone = HistoryDeletionTombstone(id: item.id, deletedAt: Date())
+        recordTombstones([tombstone])
         saveHistory()
 
         guard syncEnabled else { return }
@@ -140,13 +158,18 @@ public final class iOSHistoryManager: ObservableObject {
             syncedIDs.remove(item.id)
             saveSyncedIDs()
         }
+        Task {
+            await MacConnection.shared.broadcastHistoryDelta(entries: [], tombstones: [tombstone])
+        }
     }
 
     /// Clears all history.
     public func clearAll() {
         loadHistoryFromDiskIfNeeded()
+        let tombstonesToSend = items.map { HistoryDeletionTombstone(id: $0.id, deletedAt: Date()) }
         let allIDs = items.map(\.id)
         items.removeAll()
+        recordTombstones(tombstonesToSend)
         saveHistory()
 
         guard syncEnabled else { return }
@@ -156,6 +179,9 @@ public final class iOSHistoryManager: ObservableObject {
             }
             syncedIDs.removeAll()
             saveSyncedIDs()
+        }
+        Task {
+            await MacConnection.shared.broadcastHistoryDelta(entries: [], tombstones: tombstonesToSend)
         }
     }
 
@@ -218,6 +244,9 @@ public final class iOSHistoryManager: ObservableObject {
                 print("[iOSHistoryManager] Failed to upload reprocessed item: \(error)")
             }
         }
+        Task {
+            await MacConnection.shared.broadcastHistoryDelta(entries: [entry], tombstones: [])
+        }
     }
 
     /// Records an error against an entry (surfaced in the history UI).
@@ -276,6 +305,86 @@ public final class iOSHistoryManager: ObservableObject {
         }
     }
 
+    private func recordTombstones(_ newTombstones: [HistoryDeletionTombstone]) {
+        guard !newTombstones.isEmpty else { return }
+        let merged = HistoryConflictResolver.mergedTombstones(
+            existing: tombstones,
+            incoming: newTombstones
+        )
+        tombstones = tombstoneStore.pruned(Array(merged.values))
+        do {
+            try tombstoneStore.save(tombstones)
+        } catch {
+            print("[iOSHistoryManager] Failed to save history tombstones: \(error)")
+        }
+    }
+
+    // swiftlint:disable:next function_body_length
+    private func applyRemote(
+        entries incomingEntries: [SyncableHistoryEntry],
+        tombstones incomingTombstones: [HistoryDeletionTombstone],
+        markCloudSynced: Bool
+    ) -> HistorySyncSnapshot {
+        loadHistoryFromDiskIfNeeded()
+        let mergedTombstones = HistoryConflictResolver.mergedTombstones(
+            existing: tombstones,
+            incoming: incomingTombstones
+        )
+        tombstones = tombstoneStore.pruned(Array(mergedTombstones.values))
+        do {
+            try tombstoneStore.save(tombstones)
+        } catch {
+            print("[iOSHistoryManager] Failed to save merged history tombstones: \(error)")
+        }
+
+        let existingSyncEntries = items.map { $0.toSyncable() }
+        let mergedSyncEntries = HistoryConflictResolver.mergedEntries(
+            existing: existingSyncEntries,
+            incoming: incomingEntries,
+            tombstones: tombstones
+        )
+        let existingByID = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
+        items = mergedSyncEntries.map { entry in
+            if let existing = existingByID[entry.id], existing.toSyncable() == entry {
+                return existing
+            }
+            return iOSHistoryItem.fromSyncable(entry)
+        }
+        items.sort { $0.createdAt > $1.createdAt }
+        saveHistory()
+
+        let finalEntriesByID = Dictionary(
+            uniqueKeysWithValues: mergedSyncEntries.map { ($0.id, $0) }
+        )
+        let incomingWinners = HistoryConflictResolver.mergedEntries(
+            existing: [],
+            incoming: incomingEntries,
+            tombstones: []
+        )
+        let appliedEntries = incomingWinners.filter { finalEntriesByID[$0.id] == $0 }
+        let incomingTombstonesByID = HistoryConflictResolver.mergedTombstones(
+            existing: [],
+            incoming: incomingTombstones
+        )
+        let appliedTombstones = incomingTombstonesByID.values.filter { tombstone in
+            finalEntriesByID[tombstone.id] == nil
+                && mergedTombstones[tombstone.id] == tombstone
+        }
+
+        if markCloudSynced {
+            let appliedIDs = Set(appliedEntries.map(\.id))
+            syncedIDs.formUnion(appliedIDs)
+            syncedIDs.subtract(incomingEntries.map(\.id).filter { !appliedIDs.contains($0) })
+        }
+        syncedIDs.subtract(incomingTombstones.map(\.id))
+        saveSyncedIDs()
+
+        return HistorySyncSnapshot(
+            entries: appliedEntries,
+            tombstones: Array(appliedTombstones)
+        )
+    }
+
     // MARK: - Synced IDs Tracking
 
     private func loadSyncedIDs() {
@@ -296,28 +405,75 @@ public final class iOSHistoryManager: ObservableObject {
 
 extension iOSHistoryManager: HistorySyncDelegate {
     public func pendingEntries() -> [SyncableHistoryEntry] {
-        items
+        HistoryConflictResolver.visibleEntries(
+            entries: items.map { $0.toSyncable() },
+            tombstones: tombstones
+        )
             .filter { !syncedIDs.contains($0.id) }
-            .map { $0.toSyncable() }
     }
 
     public func didReceiveRemoteEntry(_ entry: SyncableHistoryEntry) {
-        guard !items.contains(where: { $0.id == entry.id }) else {
-            return
-        }
-
-        let item = iOSHistoryItem.fromSyncable(entry)
-        items.insert(item, at: 0)
-        items.sort { $0.createdAt > $1.createdAt }
-        saveHistory()
-        syncedIDs.insert(entry.id)
-        saveSyncedIDs()
+        _ = applyRemote(entries: [entry], tombstones: [], markCloudSynced: true)
     }
 
     public func didDeleteRemoteEntry(id: UUID) {
-        items.removeAll { $0.id == id }
-        saveHistory()
-        syncedIDs.remove(id)
+        _ = applyRemote(
+            entries: [],
+            tombstones: [HistoryDeletionTombstone(id: id, deletedAt: Date(), originDeviceID: "cloudkit")],
+            markCloudSynced: true
+        )
+    }
+
+    public func didUploadPendingEntries(ids: [UUID]) {
+        syncedIDs.formUnion(ids)
+        saveSyncedIDs()
+    }
+}
+
+extension iOSHistoryManager: HistoryTransportDelegate {
+    public func historySnapshot(maxEntries: Int) -> HistorySyncSnapshot {
+        loadHistoryFromDiskIfNeeded()
+        let visibleEntries = HistoryConflictResolver.visibleEntries(
+            entries: items.map { $0.toSyncable() },
+            tombstones: tombstones
+        )
+        return HistorySyncSnapshot(
+            entries: Array(visibleEntries.prefix(maxEntries)),
+            tombstones: Array(tombstones.prefix(maxEntries))
+        )
+    }
+
+    public func applyHistoryBatch(
+        entries: [SyncableHistoryEntry],
+        tombstones: [HistoryDeletionTombstone]
+    ) async {
+        let applied = applyRemote(
+            entries: entries,
+            tombstones: tombstones,
+            markCloudSynced: false
+        )
+        syncedIDs.subtract(applied.entries.map(\.id))
+        syncedIDs.subtract(applied.tombstones.map(\.id))
+        saveSyncedIDs()
+        guard syncEnabled, HistorySyncEngine.shared.state.isCloudAvailable else { return }
+
+        for entry in applied.entries {
+            do {
+                try await HistorySyncEngine.shared.upload(entry: entry)
+                syncedIDs.insert(entry.id)
+            } catch {
+                syncedIDs.remove(entry.id)
+                print("[iOSHistoryManager] Failed to bridge transport entry to CloudKit: \(error)")
+            }
+        }
+        for tombstone in applied.tombstones {
+            do {
+                try await HistorySyncEngine.shared.delete(entryID: tombstone.id)
+                syncedIDs.remove(tombstone.id)
+            } catch {
+                print("[iOSHistoryManager] Failed to bridge transport deletion to CloudKit: \(error)")
+            }
+        }
         saveSyncedIDs()
     }
 }

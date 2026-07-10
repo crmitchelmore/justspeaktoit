@@ -1,4 +1,5 @@
 import Foundation
+import SpeakCore
 import SpeakSync
 import os.log
 
@@ -9,14 +10,22 @@ final class MacHistorySyncAdapter: HistorySyncDelegate {
     private let historyManager: HistoryManager
     private var syncedIDs: Set<UUID> = []
     private let syncedIDsKey = "speak.sync.syncedMacHistoryIDs"
+    private weak var transportServer: TransportServer?
     private let log = Logger(
         subsystem: "com.justspeaktoit",
         category: "MacHistorySync"
     )
 
-    init(historyManager: HistoryManager) {
+    init(historyManager: HistoryManager, transportServer: TransportServer? = nil) {
         self.historyManager = historyManager
+        self.transportServer = transportServer
         loadSyncedIDs()
+        self.transportServer?.historyTransportDelegate = self
+        self.historyManager.onMutation = { [weak self] mutation in
+            Task { @MainActor in
+                await self?.handleLocalMutation(mutation)
+            }
+        }
     }
 
     /// Start sync — call after creating the adapter.
@@ -29,9 +38,13 @@ final class MacHistorySyncAdapter: HistorySyncDelegate {
     func uploadNewItem(_ item: HistoryItem) {
         Task {
             let entry = item.toSyncable()
-            try? await HistorySyncEngine.shared.upload(entry: entry)
-            syncedIDs.insert(item.id)
-            saveSyncedIDs()
+            do {
+                try await HistorySyncEngine.shared.upload(entry: entry)
+                syncedIDs.insert(item.id)
+                saveSyncedIDs()
+            } catch {
+                log.warning("CloudKit upload failed: \(error.localizedDescription, privacy: .public)")
+            }
         }
     }
 
@@ -47,31 +60,66 @@ final class MacHistorySyncAdapter: HistorySyncDelegate {
     // MARK: - HistorySyncDelegate
 
     func pendingEntries() -> [SyncableHistoryEntry] {
-        historyManager.allItems
+        historyManager.visibleSyncEntries()
             .filter { !syncedIDs.contains($0.id) }
             .prefix(SyncConfiguration.batchSize)
-            .map { $0.toSyncable() }
+            .map { $0 }
     }
 
     func didReceiveRemoteEntry(_ entry: SyncableHistoryEntry) {
-        guard !historyManager.allItems.contains(where: { $0.id == entry.id })
-        else {
-            return
-        }
-
-        let item = HistoryItem.fromSyncable(entry)
         Task {
-            await historyManager.append(item)
-            syncedIDs.insert(entry.id)
+            let applied = await historyManager.applyRemote(entries: [entry], tombstones: [])
+            if applied.entries.contains(entry) {
+                syncedIDs.insert(entry.id)
+            } else {
+                syncedIDs.remove(entry.id)
+            }
             saveSyncedIDs()
         }
     }
 
     func didDeleteRemoteEntry(id: UUID) {
         Task {
-            await historyManager.remove(id: id)
+            _ = await historyManager.applyRemote(
+                entries: [],
+                tombstones: [HistoryDeletionTombstone(id: id, deletedAt: Date(), originDeviceID: "cloudkit")]
+            )
             syncedIDs.remove(id)
             saveSyncedIDs()
+        }
+    }
+
+    func didUploadPendingEntries(ids: [UUID]) {
+        syncedIDs.formUnion(ids)
+        saveSyncedIDs()
+    }
+
+    private func handleLocalMutation(_ mutation: HistoryMutation) async {
+        switch mutation.kind {
+        case .upsert(let items):
+            let entries = items.map { $0.toSyncable() }
+            for entry in entries {
+                do {
+                    try await HistorySyncEngine.shared.upload(entry: entry)
+                    syncedIDs.insert(entry.id)
+                } catch {
+                    syncedIDs.remove(entry.id)
+                    log.warning("CloudKit upload failed: \(error.localizedDescription, privacy: .public)")
+                }
+            }
+            saveSyncedIDs()
+            await transportServer?.broadcastHistoryDelta(entries: entries, tombstones: [])
+        case .delete(let tombstones):
+            for tombstone in tombstones {
+                do {
+                    try await HistorySyncEngine.shared.delete(entryID: tombstone.id)
+                    syncedIDs.remove(tombstone.id)
+                } catch {
+                    log.warning("CloudKit delete failed: \(error.localizedDescription, privacy: .public)")
+                }
+            }
+            saveSyncedIDs()
+            await transportServer?.broadcastHistoryDelta(entries: [], tombstones: tombstones)
         }
     }
 
@@ -88,6 +136,51 @@ final class MacHistorySyncAdapter: HistorySyncDelegate {
     private func saveSyncedIDs() {
         let strings = syncedIDs.map(\.uuidString)
         UserDefaults.standard.set(strings, forKey: syncedIDsKey)
+    }
+}
+
+extension MacHistorySyncAdapter: HistoryTransportDelegate {
+    func historySnapshot(maxEntries: Int) -> HistorySyncSnapshot {
+        historyManager.historySnapshot(maxEntries: maxEntries)
+    }
+
+    func applyHistoryBatch(
+        entries: [SyncableHistoryEntry],
+        tombstones: [HistoryDeletionTombstone]
+    ) async {
+        let applied = await historyManager.applyRemote(
+            entries: entries,
+            tombstones: tombstones
+        )
+        syncedIDs.subtract(applied.entries.map(\.id))
+        syncedIDs.subtract(applied.tombstones.map(\.id))
+        saveSyncedIDs()
+        guard HistorySyncEngine.shared.state.isCloudAvailable else { return }
+
+        for entry in applied.entries {
+            do {
+                try await HistorySyncEngine.shared.upload(entry: entry)
+                syncedIDs.insert(entry.id)
+            } catch {
+                syncedIDs.remove(entry.id)
+                let message = error.localizedDescription
+                log.warning(
+                    "Failed to bridge transport entry to CloudKit: \(message, privacy: .public)"
+                )
+            }
+        }
+        for tombstone in applied.tombstones {
+            do {
+                try await HistorySyncEngine.shared.delete(entryID: tombstone.id)
+                syncedIDs.remove(tombstone.id)
+            } catch {
+                let message = error.localizedDescription
+                log.warning(
+                    "Failed to bridge transport deletion to CloudKit: \(message, privacy: .public)"
+                )
+            }
+        }
+        saveSyncedIDs()
     }
 }
 
@@ -111,7 +204,8 @@ extension HistoryItem {
             duration: recordingDuration,
             wordCount: words,
             originPlatform: "macos",
-            updatedAt: updatedAt
+            updatedAt: updatedAt,
+            originDeviceID: originDeviceID ?? DeviceIdentity.deviceId
         )
     }
 
@@ -146,7 +240,8 @@ extension HistoryItem {
                 destinationApplication: nil
             ),
             personalCorrections: nil,
-            errors: []
+            errors: [],
+            originDeviceID: entry.originDeviceID
         )
     }
 }

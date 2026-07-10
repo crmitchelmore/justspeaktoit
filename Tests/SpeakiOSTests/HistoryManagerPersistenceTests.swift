@@ -1,6 +1,7 @@
 #if os(iOS)
 import Foundation
 import XCTest
+import SpeakCore
 
 @testable import SpeakiOSLib
 
@@ -117,6 +118,104 @@ final class HistoryManagerPersistenceTests: XCTestCase {
 
         // Assert.
         XCTAssertEqual(try readHistory().count, 1)
+    }
+
+    func testRemoteApplyUpdatesExistingEntryByLWW() async throws {
+        let id = UUID()
+        let manager = iOSHistoryManager(fileURL: fileURL, syncEnabled: false)
+        manager.add(
+            iOSHistoryItem(
+                id: id,
+                createdAt: Date(timeIntervalSince1970: 1),
+                updatedAt: Date(timeIntervalSince1970: 2),
+                transcription: "old",
+                model: "m",
+                duration: 1,
+                wordCount: 1,
+                originDeviceID: "a"
+            )
+        )
+        let remote = SyncableHistoryEntry(
+            id: id,
+            createdAt: Date(timeIntervalSince1970: 1),
+            rawTranscription: "new",
+            postProcessedText: nil,
+            model: "m",
+            duration: 1,
+            wordCount: 1,
+            originPlatform: "ios",
+            updatedAt: Date(timeIntervalSince1970: 3),
+            originDeviceID: "b"
+        )
+
+        await manager.applyHistoryBatch(entries: [remote], tombstones: [])
+
+        XCTAssertEqual(manager.items.count, 1)
+        XCTAssertEqual(manager.items.first?.transcription, "new")
+        XCTAssertEqual(try readHistory().count, 1)
+    }
+
+    func testRemoteDuplicateAndReorderedDeleteConvergesWithoutResurrection() async throws {
+        let id = UUID()
+        let manager = iOSHistoryManager(fileURL: fileURL, syncEnabled: false)
+        let live = SyncableHistoryEntry(
+            id: id,
+            createdAt: Date(timeIntervalSince1970: 1),
+            rawTranscription: "live",
+            postProcessedText: nil,
+            model: "m",
+            duration: 1,
+            wordCount: 1,
+            originPlatform: "ios",
+            updatedAt: Date(timeIntervalSince1970: 2),
+            originDeviceID: "a"
+        )
+        let tombstone = HistoryDeletionTombstone(
+            id: id,
+            deletedAt: Date(timeIntervalSince1970: 2),
+            originDeviceID: "b"
+        )
+
+        await manager.applyHistoryBatch(entries: [live, live], tombstones: [])
+        await manager.applyHistoryBatch(entries: [], tombstones: [tombstone, tombstone])
+        await manager.applyHistoryBatch(entries: [live], tombstones: [])
+
+        XCTAssertTrue(manager.items.isEmpty)
+        XCTAssertTrue(try readHistory().isEmpty)
+    }
+
+    func testOlderCloudEntryDoesNotMarkNewerLocalRevisionAsSynced() {
+        let id = UUID()
+        let manager = iOSHistoryManager(fileURL: fileURL, syncEnabled: false)
+        manager.add(
+            iOSHistoryItem(
+                id: id,
+                createdAt: Date(timeIntervalSince1970: 1),
+                updatedAt: Date(timeIntervalSince1970: 3),
+                transcription: "newer local",
+                model: "m",
+                duration: 1,
+                wordCount: 2,
+                originDeviceID: "z"
+            )
+        )
+        let olderCloudEntry = SyncableHistoryEntry(
+            id: id,
+            createdAt: Date(timeIntervalSince1970: 1),
+            rawTranscription: "older cloud",
+            postProcessedText: nil,
+            model: "m",
+            duration: 1,
+            wordCount: 2,
+            originPlatform: "ios",
+            updatedAt: Date(timeIntervalSince1970: 2),
+            originDeviceID: "a"
+        )
+
+        manager.didReceiveRemoteEntry(olderCloudEntry)
+
+        XCTAssertEqual(manager.items.first?.transcription, "newer local")
+        XCTAssertFalse(manager.syncedIDs.contains(id))
     }
 }
 #endif

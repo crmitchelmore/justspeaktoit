@@ -1,6 +1,7 @@
 import CloudKit
 import Combine
 import Foundation
+import SpeakCore
 import os.log
 
 /// Delegate protocol that platforms implement to handle synced entries.
@@ -14,6 +15,13 @@ public protocol HistorySyncDelegate: AnyObject {
 
     /// Called when an entry is deleted remotely.
     func didDeleteRemoteEntry(id: UUID)
+
+    /// Called after a batch of pending entries has been written successfully.
+    func didUploadPendingEntries(ids: [UUID])
+}
+
+public extension HistorySyncDelegate {
+    func didUploadPendingEntries(ids: [UUID]) {}
 }
 
 /// Result of a CloudKit zone-changes fetch operation.
@@ -94,9 +102,24 @@ public final class HistorySyncEngine: ObservableObject {
             throw SyncError.cloudUnavailable
         }
 
-        let record = SyncRecord.record(from: entry)
-
         do {
+            let recordID = CKRecord.ID(
+                recordName: entry.id.uuidString,
+                zoneID: SyncConfiguration.zoneID
+            )
+            let record: CKRecord
+            do {
+                let existingRecord = try await database.record(for: recordID)
+                if let existingEntry = SyncRecord.entry(from: existingRecord),
+                   !HistoryConflictResolver.shouldReplace(existing: existingEntry, with: entry) {
+                    delegate?.didReceiveRemoteEntry(existingEntry)
+                    return
+                }
+                record = SyncRecord.record(from: entry, existingRecord: existingRecord)
+            } catch let error as CKError where error.code == .unknownItem {
+                record = SyncRecord.record(from: entry)
+            }
+
             _ = try await database.save(record)
             log.debug("Uploaded entry: \(entry.id.uuidString)")
         } catch {
@@ -287,32 +310,18 @@ public final class HistorySyncEngine: ObservableObject {
 
     private func uploadPendingEntries() async throws {
         guard let delegate else { return }
-        guard let database = SyncConfiguration.privateDatabase else {
-            throw SyncError.cloudUnavailable
-        }
 
         let entries = delegate.pendingEntries()
         guard !entries.isEmpty else { return }
 
         state.pendingUploadCount = entries.count
-        let records = entries.map { SyncRecord.record(from: $0) }
-
-        let operation = CKModifyRecordsOperation(recordsToSave: records, recordIDsToDelete: nil)
-        operation.savePolicy = .changedKeys
-        operation.isAtomic = false
-
-        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            operation.modifyRecordsResultBlock = { result in
-                switch result {
-                case .success:
-                    cont.resume()
-                case .failure(let error):
-                    cont.resume(throwing: error)
-                }
-            }
-            database.add(operation)
+        var uploadedIDs: [UUID] = []
+        for entry in entries {
+            try await upload(entry: entry)
+            uploadedIDs.append(entry.id)
         }
 
-        log.info("Uploaded \(records.count) records")
+        log.info("Uploaded \(uploadedIDs.count) records")
+        delegate.didUploadPendingEntries(ids: uploadedIDs)
     }
 }

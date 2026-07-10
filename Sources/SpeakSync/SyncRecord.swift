@@ -1,5 +1,6 @@
 import CloudKit
 import Foundation
+import SpeakCore
 
 /// Handles conversion between transcription history and CKRecord.
 public struct SyncRecord {
@@ -16,6 +17,7 @@ public struct SyncRecord {
         static let wordCount = "wordCount"
         static let originPlatform = "originPlatform"
         static let updatedAt = "updatedAt"
+        static let originDeviceID = "originDeviceID"
     }
 
     // MARK: - Syncable Entry
@@ -44,6 +46,7 @@ public struct SyncRecord {
         record[FieldKey.wordCount] = entry.wordCount
         record[FieldKey.originPlatform] = entry.originPlatform
         record[FieldKey.updatedAt] = entry.updatedAt
+        record[FieldKey.originDeviceID] = entry.originDeviceID
 
         return record
     }
@@ -65,6 +68,7 @@ public struct SyncRecord {
         let wordCount = record[FieldKey.wordCount] as? Int ?? 0
         let originPlatform = record[FieldKey.originPlatform] as? String ?? "unknown"
         let updatedAt = record[FieldKey.updatedAt] as? Date ?? createdAt
+        let originDeviceID = record[FieldKey.originDeviceID] as? String ?? DeviceIdentity.deviceId
 
         return SyncableHistoryEntry(
             id: entryID,
@@ -75,7 +79,8 @@ public struct SyncRecord {
             duration: duration,
             wordCount: wordCount,
             originPlatform: originPlatform,
-            updatedAt: updatedAt
+            updatedAt: updatedAt,
+            originDeviceID: originDeviceID
         )
     }
 }

@@ -102,6 +102,9 @@ struct MainTabView: View {
                     .tag(1)
             }
         }
+        .task {
+            _ = iOSHistoryManager.shared
+        }
     }
 }
 

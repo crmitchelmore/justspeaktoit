@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 #if os(macOS)
 import Foundation
 import MultipeerConnectivity
@@ -5,6 +6,7 @@ import SpeakCore
 
 /// Advertises the Speak transport service via Bonjour/MPC and accepts encrypted iOS connections.
 @MainActor
+// swiftlint:disable:next type_body_length
 public final class TransportServer: NSObject, ObservableObject {
     @Published public private(set) var isRunning = false
     @Published public private(set) var connectedDevices: [ConnectedDevice] = []
@@ -38,6 +40,7 @@ public final class TransportServer: NSObject, ObservableObject {
     private var advertiser: MCNearbyServiceAdvertiser?
     private var pendingPeers: [MCPeerID: PairingInvitationContext] = [:]
     private var authenticatedPeers: [MCPeerID: AuthenticatedPeer] = [:]
+    private var historyBatchAccumulators: [MCPeerID: HistoryBatchAccumulator] = [:]
     private var failedInvitations: [String: [Date]] = [:]
     private var globalFailedInvitations: [Date] = []
 
@@ -47,6 +50,7 @@ public final class TransportServer: NSObject, ObservableObject {
 
     /// Callback when transcript chunk received.
     public var onTranscriptReceived: ((String, String) -> Void)?
+    public weak var historyTransportDelegate: HistoryTransportDelegate?
 
     public override convenience init() {
         self.init(pairingManager: .shared)
@@ -99,6 +103,7 @@ public final class TransportServer: NSObject, ObservableObject {
         session.disconnect()
         pendingPeers.removeAll()
         authenticatedPeers.removeAll()
+        historyBatchAccumulators.removeAll()
         connectedDevices.removeAll()
         isRunning = false
     }
@@ -108,6 +113,7 @@ public final class TransportServer: NSObject, ObservableObject {
         guard let peer = authenticatedPeers.first(where: { $0.value.deviceId == id })?.key else { return }
         authenticatedPeers.removeValue(forKey: peer)
         pendingPeers.removeValue(forKey: peer)
+        historyBatchAccumulators.removeValue(forKey: peer)
         connectedDevices.removeAll { $0.id == id }
         session.cancelConnectPeer(peer)
     }
@@ -180,15 +186,20 @@ public final class TransportServer: NSObject, ObservableObject {
         SpeakLogger.transport.info(
             "Device authenticated: \(deviceName, privacy: .public) (\(deviceID, privacy: .private))"
         )
+        Task { [weak self] in
+            await self?.exchangeHistorySnapshot(with: peerID)
+        }
     }
 
     private func handleDisconnected(peerID: MCPeerID) {
         pendingPeers.removeValue(forKey: peerID)
+        historyBatchAccumulators.removeValue(forKey: peerID)
         guard let peer = authenticatedPeers.removeValue(forKey: peerID) else { return }
         connectedDevices.removeAll { $0.id == peer.deviceId }
         SpeakLogger.transport.info("Device disconnected: \(peer.deviceId, privacy: .private)")
     }
 
+    // swiftlint:disable:next cyclomatic_complexity function_body_length
     private func handleMessage(_ data: Data, from peerID: MCPeerID) async {
         do {
             guard authenticatedPeers[peerID] != nil else {
@@ -225,6 +236,33 @@ public final class TransportServer: NSObject, ObservableObject {
             case .ping:
                 await send(.pong, to: peerID)
 
+            case .historySyncRequest(let request):
+                markActivity(for: peerID)
+                await sendHistorySnapshot(to: peerID, requestID: request.requestID)
+
+            case .historySyncBatch(let batch):
+                markActivity(for: peerID)
+                var accumulator = historyBatchAccumulators[peerID] ?? HistoryBatchAccumulator()
+                let assembled = accumulator.append(batch)
+                historyBatchAccumulators[peerID] = accumulator
+                guard let assembled else { break }
+                await historyTransportDelegate?.applyHistoryBatch(
+                    entries: assembled.snapshot.entries,
+                    tombstones: assembled.snapshot.tombstones
+                )
+                await send(
+                    .historySyncComplete(
+                        HistorySyncCompleteMessage(
+                            requestID: assembled.requestID,
+                            receivedBatchCount: assembled.receivedBatchCount
+                        )
+                    ),
+                    to: peerID
+                )
+
+            case .historySyncComplete:
+                markActivity(for: peerID)
+
             case .unknown(let type):
                 SpeakLogger.transport.debug("Ignored unknown transport message: \(type, privacy: .public)")
 
@@ -251,6 +289,42 @@ public final class TransportServer: NSObject, ObservableObject {
             try session.send(data, toPeers: [peerID], with: .reliable)
         } catch {
             SpeakLogger.logError(error, context: "Send message", logger: SpeakLogger.transport)
+        }
+    }
+
+    public func broadcastHistoryDelta(
+        entries: [SyncableHistoryEntry],
+        tombstones: [HistoryDeletionTombstone]
+    ) async {
+        guard !authenticatedPeers.isEmpty else { return }
+        let requestID = UUID()
+        let batches = HistorySyncBatchMessage.batches(
+            requestID: requestID,
+            entries: entries,
+            tombstones: tombstones
+        )
+        for peerID in authenticatedPeers.keys {
+            for batch in batches {
+                await send(.historySyncBatch(batch), to: peerID)
+            }
+        }
+    }
+
+    private func exchangeHistorySnapshot(with peerID: MCPeerID) async {
+        let request = HistorySyncRequestMessage()
+        await send(.historySyncRequest(request), to: peerID)
+    }
+
+    private func sendHistorySnapshot(to peerID: MCPeerID, requestID: UUID) async {
+        guard let historyTransportDelegate else { return }
+        let snapshot = historyTransportDelegate.historySnapshot(maxEntries: SpeakTransportHistoryMaxSnapshotEntries)
+        let batches = HistorySyncBatchMessage.batches(
+            requestID: requestID,
+            entries: snapshot.entries,
+            tombstones: snapshot.tombstones
+        )
+        for batch in batches {
+            await send(.historySyncBatch(batch), to: peerID)
         }
     }
 

@@ -43,6 +43,9 @@ public enum TransportMessage: Codable {
     case sessionStart(SessionStartMessage)
     case sessionEnd(SessionEndMessage)
     case transcriptChunk(TranscriptChunkMessage)
+    case historySyncRequest(HistorySyncRequestMessage)
+    case historySyncBatch(HistorySyncBatchMessage)
+    case historySyncComplete(HistorySyncCompleteMessage)
     case ack(AckMessage)
     case error(ErrorMessage)
     case ping
@@ -56,7 +59,7 @@ public enum TransportMessage: Codable {
     private enum MessageType: String, Codable {
         case hello, authenticate, authResult
         case sessionStart, sessionEnd
-        case transcriptChunk, ack, error
+        case transcriptChunk, historySyncRequest, historySyncBatch, historySyncComplete, ack, error
         case ping, pong
     }
     
@@ -82,6 +85,12 @@ public enum TransportMessage: Codable {
             self = .sessionEnd(try container.decode(SessionEndMessage.self, forKey: .payload))
         case .transcriptChunk:
             self = .transcriptChunk(try container.decode(TranscriptChunkMessage.self, forKey: .payload))
+        case .historySyncRequest:
+            self = .historySyncRequest(try container.decode(HistorySyncRequestMessage.self, forKey: .payload))
+        case .historySyncBatch:
+            self = .historySyncBatch(try container.decode(HistorySyncBatchMessage.self, forKey: .payload))
+        case .historySyncComplete:
+            self = .historySyncComplete(try container.decode(HistorySyncCompleteMessage.self, forKey: .payload))
         case .ack:
             self = .ack(try container.decode(AckMessage.self, forKey: .payload))
         case .error:
@@ -115,6 +124,15 @@ public enum TransportMessage: Codable {
             try container.encode(msg, forKey: .payload)
         case .transcriptChunk(let msg):
             try container.encode(MessageType.transcriptChunk, forKey: .type)
+            try container.encode(msg, forKey: .payload)
+        case .historySyncRequest(let msg):
+            try container.encode(MessageType.historySyncRequest, forKey: .type)
+            try container.encode(msg, forKey: .payload)
+        case .historySyncBatch(let msg):
+            try container.encode(MessageType.historySyncBatch, forKey: .type)
+            try container.encode(msg, forKey: .payload)
+        case .historySyncComplete(let msg):
+            try container.encode(MessageType.historySyncComplete, forKey: .type)
             try container.encode(msg, forKey: .payload)
         case .ack(let msg):
             try container.encode(MessageType.ack, forKey: .type)
@@ -207,6 +225,96 @@ public struct TranscriptChunkMessage: Codable {
         self.text = text
         self.isFinal = isFinal
         self.timestamp = timestamp
+    }
+}
+
+// swiftlint:disable identifier_name
+public let SpeakTransportHistoryMaxBatchSize = 100
+public let SpeakTransportHistoryMaxSnapshotEntries = 5_000
+// swiftlint:enable identifier_name
+
+public struct HistorySyncRequestMessage: Codable, Equatable {
+    public var requestID: UUID
+    public var requestedAt: Date
+
+    public init(requestID: UUID = UUID(), requestedAt: Date = Date()) {
+        self.requestID = requestID
+        self.requestedAt = requestedAt
+    }
+}
+
+public struct HistorySyncBatchMessage: Codable, Equatable {
+    public var requestID: UUID
+    public var batchIndex: Int
+    public var isLast: Bool
+    public var entries: [SyncableHistoryEntry]
+    public var tombstones: [HistoryDeletionTombstone]
+
+    public init(
+        requestID: UUID,
+        batchIndex: Int,
+        isLast: Bool,
+        entries: [SyncableHistoryEntry],
+        tombstones: [HistoryDeletionTombstone]
+    ) {
+        self.requestID = requestID
+        self.batchIndex = batchIndex
+        self.isLast = isLast
+        self.entries = Array(entries.prefix(SpeakTransportHistoryMaxBatchSize))
+        let remaining = max(0, SpeakTransportHistoryMaxBatchSize - self.entries.count)
+        self.tombstones = Array(tombstones.prefix(remaining))
+    }
+
+    public var itemCount: Int {
+        entries.count + tombstones.count
+    }
+
+    public var isWithinBatchLimit: Bool {
+        itemCount <= SpeakTransportHistoryMaxBatchSize
+    }
+
+    public static func batches(
+        requestID: UUID,
+        entries: [SyncableHistoryEntry],
+        tombstones: [HistoryDeletionTombstone]
+    ) -> [HistorySyncBatchMessage] {
+        var remainingEntries = ArraySlice(entries)
+        var remainingTombstones = ArraySlice(tombstones)
+        var batches: [HistorySyncBatchMessage] = []
+        var index = 0
+
+        repeat {
+            let entryChunk = Array(remainingEntries.prefix(SpeakTransportHistoryMaxBatchSize))
+            remainingEntries = remainingEntries.dropFirst(entryChunk.count)
+            let tombstoneCapacity = max(0, SpeakTransportHistoryMaxBatchSize - entryChunk.count)
+            let tombstoneChunk = Array(remainingTombstones.prefix(tombstoneCapacity))
+            remainingTombstones = remainingTombstones.dropFirst(tombstoneChunk.count)
+            let isLast = remainingEntries.isEmpty && remainingTombstones.isEmpty
+            batches.append(
+                HistorySyncBatchMessage(
+                    requestID: requestID,
+                    batchIndex: index,
+                    isLast: isLast,
+                    entries: entryChunk,
+                    tombstones: tombstoneChunk
+                )
+            )
+            index += 1
+        } while !remainingEntries.isEmpty || !remainingTombstones.isEmpty
+
+        return batches
+    }
+}
+
+public struct HistorySyncCompleteMessage: Codable, Equatable {
+    public var requestID: UUID
+    public var receivedBatchCount: Int
+    public var completedAt: Date
+
+    public init(requestID: UUID, receivedBatchCount: Int, completedAt: Date = Date()) {
+        self.requestID = requestID
+        self.receivedBatchCount = receivedBatchCount
+        self.completedAt = completedAt
     }
 }
 

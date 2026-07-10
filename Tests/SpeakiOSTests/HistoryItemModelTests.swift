@@ -27,6 +27,23 @@ final class HistoryItemModelTests: XCTestCase {
         XCTAssertNil(errored.withPostProcessed("done").errorMessage)
     }
 
+    func testPostProcessingAdvancesUpdatedAt() {
+        let createdAt = Date(timeIntervalSince1970: 10)
+        let updatedAt = Date(timeIntervalSince1970: 20)
+        let item = iOSHistoryItem(
+            createdAt: createdAt,
+            transcription: "raw",
+            model: "m",
+            duration: 1,
+            wordCount: 1
+        )
+
+        let processed = item.withPostProcessed("done", updatedAt: updatedAt)
+
+        XCTAssertEqual(processed.createdAt, createdAt)
+        XCTAssertEqual(processed.updatedAt, updatedAt)
+    }
+
     func testSyncRoundTripPreservesRawAndPolished() {
         let item = iOSHistoryItem(
             transcription: "raw",
@@ -60,6 +77,7 @@ final class HistoryItemModelTests: XCTestCase {
         XCTAssertNil(item.postProcessedTranscription)
         XCTAssertNil(item.errorMessage)
         XCTAssertEqual(item.bestText, "hello")
+        XCTAssertEqual(item.updatedAt, item.createdAt)
     }
 }
 #endif

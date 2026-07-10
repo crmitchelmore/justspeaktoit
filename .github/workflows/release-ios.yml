@@ -321,14 +321,7 @@ jobs:
           capability_type = Spaceship::ConnectAPI::BundleIdCapability::Type::ICLOUD
           capabilities = bundle_id.get_capabilities(client: client)
           icloud = capabilities.find { |capability| capability.is_type?(capability_type) }
-          if icloud
-            bundle_id.update_capability(
-              capability_type,
-              enabled: true,
-              settings: settings,
-              client: client
-            )
-          else
+          unless icloud
             bundle_id.create_capability(
               capability_type,
               settings: settings,

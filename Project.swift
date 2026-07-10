@@ -12,6 +12,8 @@ let version: String = {
 
 let appProfileName = ProcessInfo.processInfo.environment["APP_PROFILE_NAME"]
 let widgetProfileName = ProcessInfo.processInfo.environment["WIDGET_PROFILE_NAME"]
+let macAppStoreProfileName = ProcessInfo.processInfo.environment["TUIST_MAC_PROFILE_NAME"]
+    ?? ProcessInfo.processInfo.environment["MAC_PROFILE_NAME"]
 
 var iosAppSettings: [String: SettingValue] = [
     "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
@@ -47,15 +49,15 @@ let isAppStoreBuild = ["1", "true", "yes"].contains(appStoreFlag)
 let macEntitlementsPath = isAppStoreBuild
     ? "Config/SpeakMacOS.AppStore.entitlements"
     : "Config/SpeakMacOS.entitlements"
+let macInfoPlistPath = isAppStoreBuild
+    ? "Config/AppInfo.AppStore.plist"
+    : "Config/AppInfo.plist"
 var macAppSettings: [String: SettingValue] = [
     "DEVELOPMENT_TEAM": "8X4ZN58TYH",
     "CODE_SIGN_STYLE": "Automatic",
     "CODE_SIGN_IDENTITY": "Apple Development",
     "PRODUCT_BUNDLE_IDENTIFIER": "com.justspeaktoit.mac"
 ]
-if isAppStoreBuild {
-    macAppSettings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] = "$(inherited) APP_STORE"
-}
 
 var iosWidgetSettings: [String: SettingValue] = [
     "CURRENT_PROJECT_VERSION": "1",
@@ -76,15 +78,40 @@ if let widgetProfileName {
     configureManualSigning(for: &iosWidgetSettings, profileName: widgetProfileName)
 }
 
+if isAppStoreBuild {
+    macAppSettings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] = "$(inherited) APP_STORE"
+    if let macAppStoreProfileName, !macAppStoreProfileName.isEmpty {
+        configureManualSigning(for: &macAppSettings, profileName: macAppStoreProfileName)
+    }
+}
+
+var projectPackages: [Package] = [
+    .package(path: .relativeToRoot(".")),
+    .remote(url: "https://github.com/getsentry/sentry-cocoa.git", requirement: .upToNextMajor(from: "9.3.0")),
+    .remote(url: "https://github.com/argmaxinc/argmax-oss-swift.git", requirement: .upToNextMajor(from: "0.9.0"))
+]
+if !isAppStoreBuild {
+    projectPackages.insert(
+        .remote(url: "https://github.com/sparkle-project/Sparkle.git", requirement: .upToNextMajor(from: "2.6.0")),
+        at: 1
+    )
+}
+
+var macAppDependencies: [TargetDependency] = [
+    .package(product: "SpeakCore"),
+    .package(product: "SpeakSync"),
+    .package(product: "SpeakHotKeys"),
+    .package(product: "WhisperKit"),
+    .package(product: "Sentry")
+]
+if !isAppStoreBuild {
+    macAppDependencies.insert(.package(product: "Sparkle"), at: macAppDependencies.count - 1)
+}
+
 let project = Project(
     name: "Just Speak to It",
     organizationName: "Just Speak to It",
-    packages: [
-        .package(path: .relativeToRoot(".")),
-        .remote(url: "https://github.com/sparkle-project/Sparkle.git", requirement: .upToNextMajor(from: "2.6.0")),
-        .remote(url: "https://github.com/getsentry/sentry-cocoa.git", requirement: .upToNextMajor(from: "9.3.0")),
-        .remote(url: "https://github.com/argmaxinc/argmax-oss-swift.git", requirement: .upToNextMajor(from: "0.9.0"))
-    ],
+    packages: projectPackages,
     settings: .settings(
         base: [
             "DEVELOPMENT_TEAM": "8X4ZN58TYH",
@@ -99,21 +126,14 @@ let project = Project(
             productName: "JustSpeakToIt",
             bundleId: "com.justspeaktoit.mac",
             deploymentTargets: .macOS("14.0"),
-            infoPlist: .file(path: "Config/AppInfo.plist"),
+            infoPlist: .file(path: .relativeToRoot(macInfoPlistPath)),
             sources: ["Sources/SpeakApp/**"],
             resources: [
                 .glob(pattern: "Resources/AppIcon.icns"),
                 .glob(pattern: "Resources/Sounds/**")
             ],
             entitlements: .file(path: .relativeToRoot(macEntitlementsPath)),
-            dependencies: [
-                .package(product: "SpeakCore"),
-                .package(product: "SpeakSync"),
-                .package(product: "SpeakHotKeys"),
-                .package(product: "WhisperKit"),
-                .package(product: "Sparkle"),
-                .package(product: "Sentry")
-            ],
+            dependencies: macAppDependencies,
             settings: .settings(base: macAppSettings)
         ),
         .target(
@@ -131,6 +151,9 @@ let project = Project(
                 "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
                 "NSMicrophoneUsageDescription": "Just Speak to It needs microphone access for voice transcription.",
                 "NSSpeechRecognitionUsageDescription": "Just Speak to It uses speech recognition to transcribe your voice.",
+                "NSLocalNetworkUsageDescription":
+                    "Just Speak to It uses your local network to connect iPhone and Mac for Send to Mac transcription transfer.",
+                "NSBonjourServices": ["_speaktransport._tcp"],
                 "NSCameraUsageDescription": "Just Speak to It does not use the camera, but a linked library requires this declaration.",
                 // Export compliance: the app uses only standard, published encryption
                 // (AES-GCM and PBKDF2 via CryptoKit) to protect the user's own API keys

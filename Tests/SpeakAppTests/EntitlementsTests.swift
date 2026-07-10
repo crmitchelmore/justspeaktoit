@@ -151,6 +151,12 @@ final class AppStoreEntitlementsTests: XCTestCase {
             "Outbound network is required to reach transcription/post-processing providers")
     }
 
+    func testNetworkServerEntitlement_isPresent() {
+        let value = entitlements["com.apple.security.network.server"] as? Bool
+        XCTAssertEqual(value, true,
+            "Inbound network is required for the Bonjour Send to Mac listener")
+    }
+
     // MARK: - Forbidden on App Store
 
     func testDisableLibraryValidation_isAbsent() {
@@ -183,8 +189,8 @@ final class AppStoreEntitlementsTests: XCTestCase {
             "com.apple.security.app-sandbox",
             "com.apple.security.device.audio-input",
             "com.apple.security.network.client",
+            "com.apple.security.network.server",
             "com.apple.security.files.user-selected.read-write",
-            "com.apple.security.automation.apple-events",
             "keychain-access-groups",
             "com.apple.developer.ubiquity-kvstore-identifier",
             "com.apple.developer.icloud-container-identifiers",

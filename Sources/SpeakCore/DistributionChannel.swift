@@ -90,7 +90,7 @@ public extension DistributionChannel {
     /// Downloaded local model runtimes (direct builds only).
     var supportsLocalModelRuntime: Bool { supports(.localModelRuntime) }
 
-    /// Whether the app can auto-prompt for Accessibility / Input Monitoring.
+    /// Whether the app can auto-prompt for Accessibility.
     /// When `false` (App Store), guide the user to add the app manually instead.
     var supportsAutomaticAccessibilityPrompt: Bool { supports(.automaticAccessibilityPrompt) }
 

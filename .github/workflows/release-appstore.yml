@@ -1,5 +1,15 @@
 name: Release to Mac App Store
 
+# Manual signing prerequisites:
+# - APPLE_TEAM_ID
+# - APP_STORE_CONNECT_API_KEY (base64 App Store Connect AuthKey .p8)
+# - APP_STORE_CONNECT_ISSUER_ID
+# - MAC_APP_DISTRIBUTION_P12 and MAC_APP_DISTRIBUTION_PASSWORD
+# - MAC_INSTALLER_DISTRIBUTION_P12 and MAC_INSTALLER_DISTRIBUTION_PASSWORD
+# - MAC_APP_STORE_PROFILE (base64 Mac App Store provisioning profile)
+# This workflow reuses existing signing assets only; it does not create certificates
+# or provisioning profiles.
+
 on:
   workflow_dispatch:
     inputs:
@@ -12,11 +22,14 @@ env:
   PRODUCT_NAME: JustSpeakToIt
   WORKSPACE: "Just Speak to It.xcworkspace"
   BUNDLE_ID: com.justspeaktoit.mac
+  # Matches the existing Release iOS workflow convention. This is the ASC key ID,
+  # not the private key; the private key must remain in APP_STORE_CONNECT_API_KEY.
+  APP_STORE_CONNECT_KEY_ID: S747NJ9DZY
 
 jobs:
   build-and-upload:
     runs-on: macos-15
-    
+
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -29,8 +42,18 @@ jobs:
           xcode-version: latest-stable
 
       - name: Install Tuist
+        run: brew install tuist
+
+      - name: Install App Store Connect API Key
+        env:
+          APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
         run: |
-          brew install tuist
+          if [ -z "$APP_STORE_CONNECT_API_KEY" ]; then
+            echo "::error::APP_STORE_CONNECT_API_KEY secret is required"
+            exit 1
+          fi
+          mkdir -p ~/.appstoreconnect/private_keys
+          echo "$APP_STORE_CONNECT_API_KEY" | base64 --decode > ~/.appstoreconnect/private_keys/AuthKey_${{ env.APP_STORE_CONNECT_KEY_ID }}.p8
 
       - name: Import Code Signing Certificates
         env:
@@ -39,84 +62,168 @@ jobs:
           MAC_INSTALLER_DISTRIBUTION_P12: ${{ secrets.MAC_INSTALLER_DISTRIBUTION_P12 }}
           MAC_INSTALLER_DISTRIBUTION_PASSWORD: ${{ secrets.MAC_INSTALLER_DISTRIBUTION_PASSWORD }}
         run: |
-          # Create temporary keychain
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
           KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
-          
-          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-          
-          # Import Mac App Distribution certificate
-          if [ -n "$MAC_APP_DISTRIBUTION_P12" ]; then
-            echo -n "$MAC_APP_DISTRIBUTION_P12" | base64 --decode -o $RUNNER_TEMP/mac-app-dist.p12
-            security import $RUNNER_TEMP/mac-app-dist.p12 -P "$MAC_APP_DISTRIBUTION_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
-            rm -f $RUNNER_TEMP/mac-app-dist.p12
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+
+          if [ -z "$MAC_APP_DISTRIBUTION_P12" ]; then
+            echo "::error::MAC_APP_DISTRIBUTION_P12 secret is required"
+            exit 1
           fi
-          
-          # Import Mac Installer Distribution certificate (optional, for pkg)
-          if [ -n "$MAC_INSTALLER_DISTRIBUTION_P12" ]; then
-            echo -n "$MAC_INSTALLER_DISTRIBUTION_P12" | base64 --decode -o $RUNNER_TEMP/mac-installer-dist.p12
-            security import $RUNNER_TEMP/mac-installer-dist.p12 -P "$MAC_INSTALLER_DISTRIBUTION_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
-            rm -f $RUNNER_TEMP/mac-installer-dist.p12
+          if [ -z "$MAC_APP_DISTRIBUTION_PASSWORD" ]; then
+            echo "::error::MAC_APP_DISTRIBUTION_PASSWORD secret is required"
+            exit 1
           fi
-          
-          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-          security list-keychain -d user -s $KEYCHAIN_PATH
+          CERT_PATH="$RUNNER_TEMP/mac-app-dist.p12"
+          echo -n "$MAC_APP_DISTRIBUTION_P12" | base64 --decode -o "$CERT_PATH"
+          security import "$CERT_PATH" -P "$MAC_APP_DISTRIBUTION_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          rm -f "$CERT_PATH"
+
+          if [ -z "$MAC_INSTALLER_DISTRIBUTION_P12" ]; then
+            echo "::error::MAC_INSTALLER_DISTRIBUTION_P12 secret is required"
+            exit 1
+          fi
+          if [ -z "$MAC_INSTALLER_DISTRIBUTION_PASSWORD" ]; then
+            echo "::error::MAC_INSTALLER_DISTRIBUTION_PASSWORD secret is required"
+            exit 1
+          fi
+          INSTALLER_CERT_PATH="$RUNNER_TEMP/mac-installer-dist.p12"
+          echo -n "$MAC_INSTALLER_DISTRIBUTION_P12" | base64 --decode -o "$INSTALLER_CERT_PATH"
+          security import "$INSTALLER_CERT_PATH" -P "$MAC_INSTALLER_DISTRIBUTION_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          rm -f "$INSTALLER_CERT_PATH"
+
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
       - name: Install Provisioning Profile
         env:
           MAC_APP_STORE_PROFILE: ${{ secrets.MAC_APP_STORE_PROFILE }}
         run: |
+          if [ -z "$MAC_APP_STORE_PROFILE" ]; then
+            echo "::error::MAC_APP_STORE_PROFILE secret is required"
+            exit 1
+          fi
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-          echo -n "$MAC_APP_STORE_PROFILE" | base64 --decode -o ~/Library/MobileDevice/Provisioning\ Profiles/mac-app-store.provisionprofile
+          PROFILE_PATH="$HOME/Library/MobileDevice/Provisioning Profiles/mac-app-store.provisionprofile"
+          echo -n "$MAC_APP_STORE_PROFILE" | base64 --decode -o "$PROFILE_PATH"
+          MAC_PROFILE_UUID=$(security cms -D -i "$PROFILE_PATH" | plutil -extract UUID raw -)
+          MAC_PROFILE_NAME=$(security cms -D -i "$PROFILE_PATH" | plutil -extract Name raw -)
+          echo "MAC_PROFILE_UUID=$MAC_PROFILE_UUID" >> "$GITHUB_ENV"
+          echo "MAC_PROFILE_NAME=$MAC_PROFILE_NAME" >> "$GITHUB_ENV"
 
       - name: Generate Xcode Project
         env:
           TUIST_APP_STORE: "1"
         run: |
-          # TUIST_APP_STORE=1 makes Project.swift define the APP_STORE compilation
-          # condition (compiling out Sparkle self-update and the downloaded
-          # local-model runtimes) and select the sandboxed entitlements file
-          # Config/SpeakMacOS.AppStore.entitlements. Mac App Store REQUIRES the sandbox.
-          # The var MUST be TUIST_-prefixed: Tuist only forwards TUIST_* env vars into
-          # manifest evaluation, so a plain APP_STORE=1 would be silently ignored.
+          # TUIST_APP_STORE=1 selects the sandboxed App Store flavour: APP_STORE
+          # compilation, Config/SpeakMacOS.AppStore.entitlements,
+          # Config/AppInfo.AppStore.plist, and no Sparkle target dependency.
+          export TUIST_MAC_PROFILE_NAME="$MAC_PROFILE_NAME"
           tuist generate --no-open
 
       - name: Update Version
         run: |
           VERSION="${{ github.event.inputs.version }}"
-          # Update VERSION file
           echo "$VERSION" > VERSION
-          
-          # Update Info.plist
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" Config/AppInfo.plist
-          
-          # Increment build number based on run number
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" Config/AppInfo.AppStore.plist
           BUILD_NUMBER=${{ github.run_number }}
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" Config/AppInfo.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" Config/AppInfo.AppStore.plist
 
       - name: Build Release Archive
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          if [ -z "$APPLE_TEAM_ID" ]; then
+            echo "::error::APPLE_TEAM_ID secret is required"
+            exit 1
+          fi
+          if [ -z "$MAC_PROFILE_NAME" ]; then
+            echo "::error::Installed Mac App Store provisioning profile name is required"
+            exit 1
+          fi
           xcodebuild archive \
             -workspace "$WORKSPACE" \
             -scheme "$SCHEME" \
             -configuration Release \
-            -archivePath $RUNNER_TEMP/$PRODUCT_NAME.xcarchive \
+            -archivePath "$RUNNER_TEMP/$PRODUCT_NAME.xcarchive" \
             -destination "generic/platform=macOS" \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
-            CODE_SIGN_STYLE=Automatic \
-            PRODUCT_BUNDLE_IDENTIFIER=$BUNDLE_ID \
-            -allowProvisioningUpdates
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            PROVISIONING_PROFILE_SPECIFIER="$MAC_PROFILE_NAME" \
+            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID"
 
-      - name: Export for App Store
+      - name: Validate App Store Archive
+        run: |
+          APP_PATH="$RUNNER_TEMP/$PRODUCT_NAME.xcarchive/Products/Applications/$PRODUCT_NAME.app"
+          INFO_PLIST="$APP_PATH/Contents/Info.plist"
+          ENTITLEMENTS_PLIST="build/appstore-archive-entitlements.plist"
+          mkdir -p build
+
+          if [ ! -d "$APP_PATH" ]; then
+            echo "::error::Archived app not found at $APP_PATH"
+            exit 1
+          fi
+
+          codesign -d --entitlements :- "$APP_PATH" > "$ENTITLEMENTS_PLIST"
+
+          expect_entitlement_true() {
+            key="$1"
+            value=$(/usr/libexec/PlistBuddy -c "Print :$key" "$ENTITLEMENTS_PLIST" 2>/dev/null || true)
+            if [ "$value" != "true" ]; then
+              echo "::error::Missing required true entitlement: $key"
+              exit 1
+            fi
+          }
+
+          expect_entitlement_absent() {
+            key="$1"
+            if /usr/libexec/PlistBuddy -c "Print :$key" "$ENTITLEMENTS_PLIST" >/dev/null 2>&1; then
+              echo "::error::Forbidden entitlement present: $key"
+              exit 1
+            fi
+          }
+
+          expect_info_key_absent() {
+            key="$1"
+            if /usr/libexec/PlistBuddy -c "Print :$key" "$INFO_PLIST" >/dev/null 2>&1; then
+              echo "::error::Forbidden Info.plist key present in App Store build: $key"
+              exit 1
+            fi
+          }
+
+          expect_entitlement_true com.apple.security.app-sandbox
+          expect_entitlement_true com.apple.security.network.server
+          expect_entitlement_absent com.apple.security.cs.disable-library-validation
+
+          if [ -d "$APP_PATH/Contents/Frameworks/Sparkle.framework" ]; then
+            echo "::error::Sparkle.framework must not be embedded in the App Store build"
+            exit 1
+          fi
+
+          expect_info_key_absent SUEnableAutomaticChecks
+          expect_info_key_absent SUFeedURL
+          expect_info_key_absent SUPublicEDKey
+          expect_info_key_absent SUScheduledCheckInterval
+
+      - name: Export and Upload to App Store Connect
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         run: |
-          # Create export options plist for App Store
-          cat > $RUNNER_TEMP/ExportOptions.plist << EOF
+          if [ -z "$APP_STORE_CONNECT_ISSUER_ID" ]; then
+            echo "::error::APP_STORE_CONNECT_ISSUER_ID secret is required"
+            exit 1
+          fi
+          if [ -z "$MAC_PROFILE_UUID" ]; then
+            echo "::error::Installed Mac App Store provisioning profile UUID is required"
+            exit 1
+          fi
+
+          cat > build/ExportOptions-AppStore.plist << 'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -124,49 +231,40 @@ jobs:
               <key>method</key>
               <string>app-store-connect</string>
               <key>teamID</key>
-              <string>$APPLE_TEAM_ID</string>
+              <string>APPLE_TEAM_ID_PLACEHOLDER</string>
               <key>signingStyle</key>
-              <string>automatic</string>
+              <string>manual</string>
+              <key>signingCertificate</key>
+              <string>Apple Distribution</string>
+              <key>installerSigningCertificate</key>
+              <string>Mac Installer Distribution</string>
+              <key>provisioningProfiles</key>
+              <dict>
+                  <key>com.justspeaktoit.mac</key>
+                  <string>MAC_PROFILE_UUID_PLACEHOLDER</string>
+              </dict>
               <key>uploadSymbols</key>
               <true/>
               <key>destination</key>
               <string>upload</string>
           </dict>
           </plist>
-          EOF
-          
-          xcodebuild -exportArchive \
-            -archivePath $RUNNER_TEMP/$PRODUCT_NAME.xcarchive \
-            -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist \
-            -exportPath $RUNNER_TEMP/export \
-            -allowProvisioningUpdates
+          PLIST
 
-      - name: Upload to App Store Connect
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          # Find the pkg or app
-          if [ -f "$RUNNER_TEMP/export/$PRODUCT_NAME.pkg" ]; then
-            UPLOAD_FILE="$RUNNER_TEMP/export/$PRODUCT_NAME.pkg"
-          else
-            UPLOAD_FILE="$RUNNER_TEMP/export/$PRODUCT_NAME.app"
-          fi
-          
-          xcrun notarytool store-credentials "AC_PASSWORD" \
-            --apple-id "$APPLE_ID" \
-            --password "$APPLE_ID_PASSWORD" \
-            --team-id "$APPLE_TEAM_ID"
-          
-          xcrun altool --upload-app \
-            --file "$UPLOAD_FILE" \
-            --type macos \
-            --apiKey "$APPLE_ID" \
-            --apiIssuer "$APPLE_TEAM_ID" \
-            || echo "Upload via altool - check App Store Connect for status"
+          sed -i '' "s/APPLE_TEAM_ID_PLACEHOLDER/${APPLE_TEAM_ID}/g" build/ExportOptions-AppStore.plist
+          sed -i '' "s/MAC_PROFILE_UUID_PLACEHOLDER/${MAC_PROFILE_UUID}/g" build/ExportOptions-AppStore.plist
+
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/$PRODUCT_NAME.xcarchive" \
+            -exportOptionsPlist build/ExportOptions-AppStore.plist \
+            -exportPath build/appstore-export \
+            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_${{ env.APP_STORE_CONNECT_KEY_ID }}.p8 \
+            -authenticationKeyID ${{ env.APP_STORE_CONNECT_KEY_ID }} \
+            -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID"
+
+          echo "✅ Build exported and uploaded to App Store Connect"
 
       - name: Cleanup Keychain
         if: always()
         run: |
-          security delete-keychain $RUNNER_TEMP/app-signing.keychain-db || true
+          security delete-keychain "$RUNNER_TEMP/app-signing.keychain-db" || true

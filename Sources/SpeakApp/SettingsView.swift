@@ -96,6 +96,7 @@ struct SettingsView: View {
   @State private var showSystemPromptPreview = false
   @State private var systemPromptPreview = ""
   @State private var showingConfigTransfer = false
+  @ObservedObject private var pairingManager = PairingManager.shared
   @State private var soundPreviewPlayer: RecordingSoundPlayer?
   @State private var huggingFaceRepoID: String = "argmaxinc/whisperkit-coreml"
   @State private var huggingFaceModelName: String = "tiny"
@@ -115,6 +116,10 @@ struct SettingsView: View {
   @State private var localPostProcessingImportError: String?
   #endif
   private let openRouterKeyIdentifier = "openrouter.apiKey"
+
+  private var currentPairingCode: String {
+    pairingManager.currentPairingCode
+  }
 
   private enum TranscriptionLocation: String, CaseIterable, Identifiable {
     case remote
@@ -954,13 +959,13 @@ struct SettingsView: View {
                 Text("Pairing Code:")
                   .font(.headline)
                 Spacer()
-                Text(PairingManager.shared.pairingCode)
+                Text(currentPairingCode)
                   .font(.system(.title2, design: .monospaced))
                   .fontWeight(.bold)
                   .foregroundStyle(.green)
                 Button {
                   NSPasteboard.general.clearContents()
-                  NSPasteboard.general.setString(PairingManager.shared.pairingCode, forType: .string)
+                  NSPasteboard.general.setString(currentPairingCode, forType: .string)
                 } label: {
                   Image(systemName: "doc.on.doc")
                 }
@@ -968,15 +973,18 @@ struct SettingsView: View {
                 .speakTooltip("Copy pairing code to clipboard")
               }
 
-              Text("Enter this code on your iPhone when pairing.")
+              Text(
+                "Enter this ten-character code on your iPhone when pairing. "
+                  + "Codes expire and rotate after successful pairing."
+              )
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
               Button("Regenerate Code") {
-                _ = PairingManager.shared.regeneratePairingCode()
+                _ = pairingManager.regeneratePairingCode()
               }
               .buttonStyle(.bordered)
-              .speakTooltip("Generate a new pairing code. This will disconnect all paired devices.")
+              .speakTooltip("Generate a new time-limited pairing code and invalidate stored pairings.")
             }
             .padding()
             .background(
@@ -1035,6 +1043,12 @@ struct SettingsView: View {
         }
       }
       .speakTooltip("Use your iPhone as a wireless microphone. Transcribe on iPhone, text appears on Mac.")
+      .task(id: pairingManager.pairingCodeExpiresAt) {
+        let delay = max(0, pairingManager.pairingCodeExpiresAt.timeIntervalSinceNow)
+        try? await Task.sleep(for: .seconds(delay))
+        guard !Task.isCancelled else { return }
+        _ = pairingManager.pairingCode
+      }
 
       SettingsCard(title: "Housekeeping", systemImage: "tray.full", tint: Color.brandAccentWarm) {
         VStack(alignment: .leading, spacing: 12) {

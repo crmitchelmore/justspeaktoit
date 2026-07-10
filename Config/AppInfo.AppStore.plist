@@ -44,6 +44,7 @@
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_speaktransport._tcp</string>
+		<string>_speaktransport._udp</string>
 	</array>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Just Speak to It uses the microphone to capture audio for transcription.</string>

@@ -151,7 +151,7 @@ let project = Project(
                 "NSSpeechRecognitionUsageDescription": "Just Speak to It uses speech recognition to transcribe your voice.",
                 "NSLocalNetworkUsageDescription":
                     "Just Speak to It uses your local network to connect iPhone and Mac for Send to Mac transcription transfer.",
-                "NSBonjourServices": ["_speaktransport._tcp"],
+                "NSBonjourServices": ["_speaktransport._tcp", "_speaktransport._udp"],
                 "NSCameraUsageDescription": "Just Speak to It does not use the camera, but a linked library requires this declaration.",
                 // Export compliance: the app uses only standard, published encryption
                 // (AES-GCM and PBKDF2 via CryptoKit) to protect the user's own API keys

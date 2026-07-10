@@ -1,16 +1,41 @@
+// swiftlint:disable file_length
+import Combine
 import Foundation
+
+#if os(iOS)
+import UIKit
+#elseif os(macOS)
+import IOKit
+#endif
 
 // MARK: - Transport Protocol
 
-/// Service type for Bonjour discovery
-public let SpeakTransportServiceType = "_speaktransport._tcp"
+// swiftlint:disable identifier_name
+/// Multipeer Connectivity service type for local transport discovery.
+public let SpeakTransportServiceType = "speaktransport"
+
+/// Bonjour service entries required in app Info.plists for the MPC service.
+public let SpeakTransportBonjourTCPService = "_speaktransport._tcp"
+public let SpeakTransportBonjourUDPService = "_speaktransport._udp"
+public let SpeakTransportBonjourServices = [
+    SpeakTransportBonjourTCPService,
+    SpeakTransportBonjourUDPService
+]
 
 /// Protocol version for compatibility checking
-public let SpeakTransportProtocolVersion = 1
+public let SpeakTransportProtocolVersion = 2
+// swiftlint:enable identifier_name
+
+/// Validates the constrained MPC service-type format before frameworks are involved.
+public func isValidSpeakTransportServiceType(_ serviceType: String) -> Bool {
+    guard (1...15).contains(serviceType.count) else { return false }
+    guard !serviceType.hasPrefix("-"), !serviceType.hasSuffix("-") else { return false }
+    return serviceType.range(of: #"^[a-z0-9-]+$"#, options: .regularExpression) != nil
+}
 
 // MARK: - Message Types
 
-/// Messages exchanged between iOS and macOS over WebSocket.
+/// Messages exchanged between iOS and macOS over the encrypted local transport.
 public enum TransportMessage: Codable {
     case hello(HelloMessage)
     case authenticate(AuthenticateMessage)
@@ -22,6 +47,7 @@ public enum TransportMessage: Codable {
     case error(ErrorMessage)
     case ping
     case pong
+    case unknown(type: String)
     
     private enum CodingKeys: String, CodingKey {
         case type, payload
@@ -34,9 +60,14 @@ public enum TransportMessage: Codable {
         case ping, pong
     }
     
+    // swiftlint:disable:next cyclomatic_complexity
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        let type = try container.decode(MessageType.self, forKey: .type)
+        let rawType = try container.decode(String.self, forKey: .type)
+        guard let type = MessageType(rawValue: rawType) else {
+            self = .unknown(type: rawType)
+            return
+        }
         
         switch type {
         case .hello:
@@ -62,6 +93,7 @@ public enum TransportMessage: Codable {
         }
     }
     
+    // swiftlint:disable:next cyclomatic_complexity
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         
@@ -94,6 +126,8 @@ public enum TransportMessage: Codable {
             try container.encode(MessageType.ping, forKey: .type)
         case .pong:
             try container.encode(MessageType.pong, forKey: .type)
+        case .unknown(let type):
+            try container.encode(type, forKey: .type)
         }
     }
 }
@@ -198,39 +232,101 @@ public struct ErrorMessage: Codable {
     public static let sessionNotFound = ErrorMessage(code: 404, message: "Session not found")
 }
 
+// MARK: - Invitation Context
+
+/// Authentication context sent in the MPC invitation before a session is accepted.
+public struct PairingInvitationContext: Codable, Equatable {
+    public var protocolVersion: Int
+    public var deviceID: String
+    public var deviceName: String
+    public var timestamp: Date
+    public var pairingCode: String
+
+    public init(
+        protocolVersion: Int = SpeakTransportProtocolVersion,
+        deviceID: String,
+        deviceName: String,
+        timestamp: Date = Date(),
+        pairingCode: String
+    ) {
+        self.protocolVersion = protocolVersion
+        self.deviceID = deviceID
+        self.deviceName = deviceName
+        self.timestamp = timestamp
+        self.pairingCode = pairingCode
+    }
+
+    public func isFresh(
+        now: Date = Date(),
+        tolerance: TimeInterval = PairingManager.defaultInvitationFreshness
+    ) -> Bool {
+        abs(now.timeIntervalSince(timestamp)) <= tolerance
+    }
+}
+
 // MARK: - Pairing
 
 /// Manages pairing codes for device authentication.
-public final class PairingManager {
+public final class PairingManager: ObservableObject {
     public static let shared = PairingManager()
     
-    private let defaults = UserDefaults.standard
+    public static let defaultPairingCodeLifetime: TimeInterval = 10 * 60
+    public static let defaultInvitationFreshness: TimeInterval = 2 * 60
+
+    private let defaults: UserDefaults
+    private let now: () -> Date
+    private let codeLifetime: TimeInterval
+    private let codeGenerator: () -> String
     private let pairingCodeKey = "speakTransportPairingCode"
+    private let pairingCodeExpirationKey = "speakTransportPairingCodeExpiration"
     private let pairedDevicesKey = "speakTransportPairedDevices"
+
+    @Published public private(set) var currentPairingCode: String
+    @Published public private(set) var pairingCodeExpiresAt: Date
     
-    private init() {}
+    public init(
+        defaults: UserDefaults = .standard,
+        now: @escaping () -> Date = Date.init,
+        codeLifetime: TimeInterval = PairingManager.defaultPairingCodeLifetime,
+        codeGenerator: @escaping () -> String = PairingManager.generateSecurePairingCode
+    ) {
+        self.defaults = defaults
+        self.now = now
+        self.codeLifetime = codeLifetime
+        self.codeGenerator = codeGenerator
+        self.currentPairingCode = defaults.string(forKey: pairingCodeKey) ?? ""
+        self.pairingCodeExpiresAt =
+            defaults.object(forKey: pairingCodeExpirationKey) as? Date ?? .distantPast
+        if currentPairingCode.isEmpty || pairingCodeExpiresAt <= now() {
+            _ = generateAndPersistPairingCode(clearPairedDevices: false)
+        }
+    }
     
     /// Gets or generates the pairing code for this device.
     public var pairingCode: String {
-        if let existing = defaults.string(forKey: pairingCodeKey) {
-            return existing
+        if pairingCodeExpiresAt > now() {
+            return currentPairingCode
         }
-        let code = generatePairingCode()
-        defaults.set(code, forKey: pairingCodeKey)
-        return code
+        return generateAndPersistPairingCode(clearPairedDevices: false)
     }
     
     /// Regenerates the pairing code (invalidates all existing pairings).
     public func regeneratePairingCode() -> String {
-        let code = generatePairingCode()
-        defaults.set(code, forKey: pairingCodeKey)
-        defaults.removeObject(forKey: pairedDevicesKey)
-        return code
+        generateAndPersistPairingCode(clearPairedDevices: true)
+    }
+
+    /// Rotates the one-time pairing code after a successful pairing without removing trusted devices.
+    @discardableResult
+    public func rotateAfterSuccessfulPairing() -> String {
+        generateAndPersistPairingCode(clearPairedDevices: false)
     }
     
     /// Validates a pairing code.
     public func validatePairingCode(_ code: String) -> Bool {
-        code == pairingCode
+        guard pairingCodeExpiresAt > now() else {
+            return false
+        }
+        return Self.normalizedPairingCode(code) == Self.normalizedPairingCode(currentPairingCode)
     }
     
     /// Records a paired device.
@@ -257,9 +353,30 @@ public final class PairingManager {
         pairedDevices[id] != nil
     }
     
-    private func generatePairingCode() -> String {
-        // Generate 6-digit numeric code
-        String(format: "%06d", Int.random(in: 0...999999))
+    public static func normalizedPairingCode(_ code: String) -> String {
+        code.uppercased().filter { $0.isLetter || $0.isNumber }
+    }
+
+    private func generateAndPersistPairingCode(clearPairedDevices: Bool) -> String {
+        let code = codeGenerator()
+        let expiration = now().addingTimeInterval(codeLifetime)
+        currentPairingCode = code
+        pairingCodeExpiresAt = expiration
+        defaults.set(code, forKey: pairingCodeKey)
+        defaults.set(expiration, forKey: pairingCodeExpirationKey)
+        if clearPairedDevices {
+            defaults.removeObject(forKey: pairedDevicesKey)
+        }
+        return code
+    }
+
+    public static func generateSecurePairingCode() -> String {
+        let alphabet = Array("ABCDEFGHJKLMNPQRSTUVWXYZ23456789")
+        var generator = SystemRandomNumberGenerator()
+        let characters = (0..<10).map { _ in
+            alphabet[Int.random(in: 0..<alphabet.count, using: &generator)]
+        }
+        return String(characters.prefix(5)) + "-" + String(characters.suffix(5))
     }
     
     private func savePairedDevices(_ devices: [String: String]) {
@@ -307,9 +424,3 @@ public struct DeviceIdentity {
         #endif
     }
 }
-
-#if os(iOS)
-import UIKit
-#elseif os(macOS)
-import IOKit
-#endif

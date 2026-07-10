@@ -25,13 +25,15 @@ final class AppStoreInfoPlistTests: XCTestCase {
 
     func testAppStorePlist_declaresLocalNetworkUsage() {
         let value = appStorePlist["NSLocalNetworkUsageDescription"] as? String
-        let expected = "Just Speak to It uses your local network to connect iPhone and Mac for Send to Mac transcription transfer."
+        let expected =
+            "Just Speak to It uses your local network to connect iPhone and Mac "
+            + "for Send to Mac transcription transfer."
         XCTAssertEqual(value, expected)
     }
 
     func testAppStorePlist_declaresBonjourService() {
         let services = appStorePlist["NSBonjourServices"] as? [String]
-        XCTAssertEqual(services, ["_speaktransport._tcp"])
+        XCTAssertEqual(services, ["_speaktransport._tcp", "_speaktransport._udp"])
     }
 
     func testAppStorePlist_matchesDirectPlistExceptSparkleKeys() {

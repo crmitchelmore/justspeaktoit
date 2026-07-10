@@ -1,21 +1,21 @@
 #if os(macOS)
 import Foundation
-import Network
+import MultipeerConnectivity
 import SpeakCore
 
-/// Advertises the Speak transport service via Bonjour and accepts connections from iOS devices.
+/// Advertises the Speak transport service via Bonjour/MPC and accepts encrypted iOS connections.
 @MainActor
-public final class TransportServer: ObservableObject {
+public final class TransportServer: NSObject, ObservableObject {
     @Published public private(set) var isRunning = false
     @Published public private(set) var connectedDevices: [ConnectedDevice] = []
     @Published public private(set) var error: Error?
-    
+
     public struct ConnectedDevice: Identifiable {
         public let id: String
         public let name: String
         public let connectedAt: Date
         public var lastActivity: Date
-        
+
         public init(id: String, name: String, connectedAt: Date = Date()) {
             self.id = id
             self.name = name
@@ -23,274 +23,211 @@ public final class TransportServer: ObservableObject {
             self.lastActivity = connectedAt
         }
     }
-    
-    private var listener: NWListener?
-    private var connections: [String: TransportConnection] = [:]
-    private let pairingManager = PairingManager.shared
-    
-    /// Callback when transcript chunk received
-    public var onTranscriptReceived: ((String, String) -> Void)?
-    
-    public init() {}
-    
-    /// Start advertising and accepting connections.
-    public func start() throws {
-        guard !isRunning else { return }
-        
-        SpeakLogger.transport.info("Starting transport server")
-        
-        let parameters = NWParameters.tcp
-        parameters.includePeerToPeer = true
-        
-        // Advertise Bonjour service
-        let service = NWListener.Service(
-            name: Host.current().localizedName ?? "Mac",
-            type: SpeakTransportServiceType
-        )
-        
-        do {
-            let listener = try NWListener(service: service, using: parameters)
-            
-            listener.stateUpdateHandler = { [weak self] state in
-                Task { @MainActor in
-                    self?.handleListenerState(state)
-                }
-            }
-            
-            listener.newConnectionHandler = { [weak self] connection in
-                Task { @MainActor in
-                    self?.handleNewConnection(connection)
-                }
-            }
-            
-            listener.start(queue: .main)
-            self.listener = listener
-            isRunning = true
-            
-            SpeakLogger.transport.info("Transport server listening on Bonjour")
-        } catch {
-            SpeakLogger.logError(error, context: "TransportServer.start", logger: SpeakLogger.transport)
-            throw error
-        }
-    }
-    
-    /// Stop the server and disconnect all clients.
-    public func stop() {
-        guard isRunning else { return }
-        
-        SpeakLogger.transport.info("Stopping transport server")
-        
-        // Disconnect all clients
-        for connection in connections.values {
-            connection.disconnect()
-        }
-        connections.removeAll()
-        connectedDevices.removeAll()
-        
-        listener?.cancel()
-        listener = nil
-        isRunning = false
-    }
-    
-    /// Disconnect a specific device.
-    public func disconnectDevice(id: String) {
-        connections[id]?.disconnect()
-        connections.removeValue(forKey: id)
-        connectedDevices.removeAll { $0.id == id }
-    }
-    
-    // MARK: - Private
-    
-    private func handleListenerState(_ state: NWListener.State) {
-        switch state {
-        case .ready:
-            SpeakLogger.transport.info("Listener ready")
-        case .failed(let error):
-            SpeakLogger.logError(error, context: "Listener failed", logger: SpeakLogger.transport)
-            self.error = error
-            isRunning = false
-        case .cancelled:
-            isRunning = false
-        default:
-            break
-        }
-    }
-    
-    private func handleNewConnection(_ nwConnection: NWConnection) {
-        SpeakLogger.transport.info("New connection from \(String(describing: nwConnection.endpoint))")
-        
-        let connection = TransportConnection(connection: nwConnection)
-        
-        connection.onAuthenticated = { [weak self] deviceId, deviceName in
-            Task { @MainActor in
-                self?.handleAuthenticated(deviceId: deviceId, deviceName: deviceName, connection: connection)
-            }
-        }
-        
-        connection.onTranscriptChunk = { [weak self] sessionId, text in
-            Task { @MainActor in
-                self?.handleTranscriptChunk(sessionId: sessionId, text: text)
-            }
-        }
-        
-        connection.onDisconnected = { [weak self] deviceId in
-            Task { @MainActor in
-                self?.handleDisconnected(deviceId: deviceId)
-            }
-        }
-        
-        connection.start()
-    }
-    
-    private func handleAuthenticated(deviceId: String, deviceName: String, connection: TransportConnection) {
-        connections[deviceId] = connection
-        
-        let device = ConnectedDevice(id: deviceId, name: deviceName)
-        connectedDevices.append(device)
-        
-        SpeakLogger.transport.info("Device authenticated: \(deviceName, privacy: .public) (\(deviceId, privacy: .private))")
-    }
-    
-    private func handleTranscriptChunk(sessionId: String, text: String) {
-        // Update last activity
-        if let index = connectedDevices.firstIndex(where: { connections[$0.id]?.currentSessionId == sessionId }) {
-            connectedDevices[index].lastActivity = Date()
-        }
-        
-        SpeakLogger.transcription.info("Received chunk: \(text.count) chars for session \(sessionId, privacy: .private)")
-        
-        // Forward to output handler
-        onTranscriptReceived?(sessionId, text)
-    }
-    
-    private func handleDisconnected(deviceId: String) {
-        connections.removeValue(forKey: deviceId)
-        connectedDevices.removeAll { $0.id == deviceId }
-        
-        SpeakLogger.transport.info("Device disconnected: \(deviceId, privacy: .private)")
-    }
-}
 
-// MARK: - Individual Connection Handler
+    private struct AuthenticatedPeer {
+        let deviceId: String
+        let deviceName: String
+        var currentSessionId: String?
+    }
 
-@MainActor
-final class TransportConnection {
-    private let connection: NWConnection
-    private var isAuthenticated = false
-    private var deviceId: String?
-    private var deviceName: String?
-    private(set) var currentSessionId: String?
-    
+    private let localPeerID: MCPeerID
+    private let session: MCSession
+    private let pairingManager: PairingManager
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
-    
-    var onAuthenticated: ((String, String) -> Void)?
-    var onTranscriptChunk: ((String, String) -> Void)?
-    var onDisconnected: ((String) -> Void)?
-    
-    init(connection: NWConnection) {
-        self.connection = connection
+    private var advertiser: MCNearbyServiceAdvertiser?
+    private var pendingPeers: [MCPeerID: PairingInvitationContext] = [:]
+    private var authenticatedPeers: [MCPeerID: AuthenticatedPeer] = [:]
+    private var failedInvitations: [String: [Date]] = [:]
+    private var globalFailedInvitations: [Date] = []
+
+    private let failedInvitationWindow: TimeInterval = 5 * 60
+    private let maximumFailedInvitations = 5
+    private let maximumGlobalFailedInvitations = 20
+
+    /// Callback when transcript chunk received.
+    public var onTranscriptReceived: ((String, String) -> Void)?
+
+    public override convenience init() {
+        self.init(pairingManager: .shared)
+    }
+
+    init(pairingManager: PairingManager) {
+        self.localPeerID = MCPeerID(displayName: DeviceIdentity.deviceName)
+        self.session = MCSession(peer: localPeerID, securityIdentity: nil, encryptionPreference: .required)
+        self.pairingManager = pairingManager
+        super.init()
+        self.session.delegate = self
         encoder.dateEncodingStrategy = .iso8601
         decoder.dateDecodingStrategy = .iso8601
     }
-    
-    func start() {
-        connection.stateUpdateHandler = { [weak self] state in
-            Task { @MainActor in
-                self?.handleState(state)
-            }
+
+    /// Start advertising and accepting encrypted connections.
+    public func start() throws {
+        guard !isRunning else { return }
+        guard isValidSpeakTransportServiceType(SpeakTransportServiceType) else {
+            throw TransportServerError.invalidServiceType(SpeakTransportServiceType)
         }
-        connection.start(queue: .main)
-        startReceiving()
+
+        SpeakLogger.transport.info("Starting transport server")
+
+        let advertiser = MCNearbyServiceAdvertiser(
+            peer: localPeerID,
+            discoveryInfo: [
+                "deviceID": DeviceIdentity.deviceId,
+                "deviceName": DeviceIdentity.deviceName,
+                "protocolVersion": "\(SpeakTransportProtocolVersion)"
+            ],
+            serviceType: SpeakTransportServiceType
+        )
+        advertiser.delegate = self
+        advertiser.startAdvertisingPeer()
+        self.advertiser = advertiser
+        self.error = nil
+        self.isRunning = true
+
+        SpeakLogger.transport.info("Transport server advertising via MPC")
     }
-    
-    func disconnect() {
-        connection.cancel()
+
+    /// Stop the server and disconnect all clients.
+    public func stop() {
+        SpeakLogger.transport.info("Stopping transport server")
+
+        advertiser?.stopAdvertisingPeer()
+        advertiser?.delegate = nil
+        advertiser = nil
+        session.disconnect()
+        pendingPeers.removeAll()
+        authenticatedPeers.removeAll()
+        connectedDevices.removeAll()
+        isRunning = false
     }
-    
-    private func handleState(_ state: NWConnection.State) {
-        switch state {
-        case .ready:
-            SpeakLogger.transport.debug("Connection ready")
-        case .failed(let error):
-            SpeakLogger.logError(error, context: "Connection failed", logger: SpeakLogger.transport)
-            if let deviceId {
-                onDisconnected?(deviceId)
-            }
-        case .cancelled:
-            if let deviceId {
-                onDisconnected?(deviceId)
-            }
-        default:
-            break
+
+    /// Disconnect a specific device.
+    public func disconnectDevice(id: String) {
+        guard let peer = authenticatedPeers.first(where: { $0.value.deviceId == id })?.key else { return }
+        authenticatedPeers.removeValue(forKey: peer)
+        pendingPeers.removeValue(forKey: peer)
+        connectedDevices.removeAll { $0.id == id }
+        session.cancelConnectPeer(peer)
+    }
+
+    private func handleInvitation(
+        from peerID: MCPeerID,
+        context data: Data?,
+        invitationHandler: @escaping (Bool, MCSession?) -> Void
+    ) {
+        let rejectionKey = invitationRejectionKey(peerID: peerID, contextData: data)
+        guard !isRateLimited(rejectionKey) else {
+            SpeakLogger.transport.warning("Rejected rate-limited pairing invitation")
+            invitationHandler(false, nil)
+            return
         }
-    }
-    
-    private func startReceiving() {
-        // Receive length prefix (4 bytes)
-        connection.receive(minimumIncompleteLength: 4, maximumLength: 4) { [weak self] data, _, isComplete, error in
-            guard let self else { return }
-            
-            if let error {
-                SpeakLogger.logError(error, context: "Receive length", logger: SpeakLogger.transport)
+
+        do {
+            guard let data else {
+                recordFailedInvitation(rejectionKey)
+                invitationHandler(false, nil)
                 return
             }
-            
-            guard let data, data.count == 4 else { return }
-            
-            let length = data.withUnsafeBytes { $0.load(as: UInt32.self).bigEndian }
-            
-            // Receive message
-            self.connection.receive(minimumIncompleteLength: Int(length), maximumLength: Int(length)) { messageData, _, _, error in
-                Task { @MainActor in
-                    if let error {
-                        SpeakLogger.logError(error, context: "Receive message", logger: SpeakLogger.transport)
-                        return
-                    }
-                    
-                    guard let messageData else { return }
-                    
-                    await self.handleMessage(messageData)
-                    
-                    // Continue receiving
-                    if !isComplete {
-                        self.startReceiving()
-                    }
-                }
+
+            let context = try decoder.decode(PairingInvitationContext.self, from: data)
+            guard validate(context: context) else {
+                recordFailedInvitation(context.deviceID.isEmpty ? rejectionKey : context.deviceID)
+                invitationHandler(false, nil)
+                return
             }
+
+            pendingPeers[peerID] = context
+            invitationHandler(true, session)
+        } catch {
+            recordFailedInvitation(rejectionKey)
+            SpeakLogger.logError(error, context: "Decode pairing invitation", logger: SpeakLogger.transport)
+            invitationHandler(false, nil)
         }
     }
-    
-    private func handleMessage(_ data: Data) async {
+
+    private func validate(context: PairingInvitationContext) -> Bool {
+        guard context.protocolVersion == SpeakTransportProtocolVersion else { return false }
+        guard context.isFresh() else { return false }
+        guard !context.deviceID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        guard !context.deviceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        return pairingManager.validatePairingCode(context.pairingCode)
+    }
+
+    private func handleConnected(peerID: MCPeerID) {
+        guard let context = pendingPeers.removeValue(forKey: peerID) else {
+            session.cancelConnectPeer(peerID)
+            return
+        }
+
+        authenticatedPeers[peerID] = AuthenticatedPeer(
+            deviceId: context.deviceID,
+            deviceName: context.deviceName,
+            currentSessionId: nil
+        )
+        pairingManager.addPairedDevice(id: context.deviceID, name: context.deviceName)
+        pairingManager.rotateAfterSuccessfulPairing()
+        clearFailedInvitations(for: context.deviceID)
+        globalFailedInvitations.removeAll()
+
+        if !connectedDevices.contains(where: { $0.id == context.deviceID }) {
+            connectedDevices.append(ConnectedDevice(id: context.deviceID, name: context.deviceName))
+        }
+
+        let deviceName = context.deviceName
+        let deviceID = context.deviceID
+        SpeakLogger.transport.info(
+            "Device authenticated: \(deviceName, privacy: .public) (\(deviceID, privacy: .private))"
+        )
+    }
+
+    private func handleDisconnected(peerID: MCPeerID) {
+        pendingPeers.removeValue(forKey: peerID)
+        guard let peer = authenticatedPeers.removeValue(forKey: peerID) else { return }
+        connectedDevices.removeAll { $0.id == peer.deviceId }
+        SpeakLogger.transport.info("Device disconnected: \(peer.deviceId, privacy: .private)")
+    }
+
+    private func handleMessage(_ data: Data, from peerID: MCPeerID) async {
         do {
+            guard authenticatedPeers[peerID] != nil else {
+                await send(.error(.authenticationFailed), to: peerID)
+                return
+            }
+
             let message = try decoder.decode(TransportMessage.self, from: data)
-            
             switch message {
-            case .hello(let hello):
-                deviceId = hello.deviceId
-                deviceName = hello.deviceName
-                SpeakLogger.transport.info("Hello from \(hello.deviceName, privacy: .public)")
-                
-            case .authenticate(let auth):
-                await handleAuthentication(auth)
-                
             case .sessionStart(let session):
-                currentSessionId = session.sessionId
-                SpeakLogger.transcription.info("Session started: \(session.sessionId, privacy: .private) with model \(session.model, privacy: .public)")
-                
+                authenticatedPeers[peerID]?.currentSessionId = session.sessionId
+                markActivity(for: peerID)
+                let sessionID = session.sessionId
+                let model = session.model
+                SpeakLogger.transcription.info(
+                    "Started \(sessionID, privacy: .private), model \(model, privacy: .public)"
+                )
+
             case .transcriptChunk(let chunk):
-                if chunk.isFinal {
-                    onTranscriptChunk?(chunk.sessionId, chunk.text)
-                }
-                await sendAck(chunk.sequenceNumber)
-                
+                markActivity(for: peerID)
+                let characterCount = chunk.text.count
+                let sessionID = chunk.sessionId
+                SpeakLogger.transcription.info(
+                    "Received \(characterCount) chars for \(sessionID, privacy: .private)"
+                )
+                onTranscriptReceived?(chunk.sessionId, chunk.text)
+                await send(.ack(AckMessage(sequenceNumber: chunk.sequenceNumber)), to: peerID)
+
             case .sessionEnd(let end):
+                authenticatedPeers[peerID]?.currentSessionId = nil
+                markActivity(for: peerID)
                 SpeakLogger.transcription.info("Session ended: \(end.wordCount) words in \(end.duration)s")
-                currentSessionId = nil
-                
+
             case .ping:
-                await send(.pong)
-                
+                await send(.pong, to: peerID)
+
+            case .unknown(let type):
+                SpeakLogger.transport.debug("Ignored unknown transport message: \(type, privacy: .public)")
+
             default:
                 break
             }
@@ -298,51 +235,147 @@ final class TransportConnection {
             SpeakLogger.logError(error, context: "Decode message", logger: SpeakLogger.transport)
         }
     }
-    
-    private func handleAuthentication(_ auth: AuthenticateMessage) async {
-        let isValid = PairingManager.shared.validatePairingCode(auth.pairingCode)
-        
-        if isValid, let deviceId, let deviceName {
-            isAuthenticated = true
-            
-            let token = UUID().uuidString
-            let result = AuthResultMessage(success: true, sessionToken: token)
-            await send(.authResult(result))
-            
-            PairingManager.shared.addPairedDevice(id: deviceId, name: deviceName)
-            onAuthenticated?(deviceId, deviceName)
-            
-            SpeakLogger.transport.info("Authentication successful for \(deviceName, privacy: .public)")
-        } else {
-            let result = AuthResultMessage(success: false, errorMessage: "Invalid pairing code")
-            await send(.authResult(result))
-            
-            SpeakLogger.transport.warning("Authentication failed")
-            connection.cancel()
+
+    private func markActivity(for peerID: MCPeerID) {
+        guard let peer = authenticatedPeers[peerID],
+              let index = connectedDevices.firstIndex(where: { $0.id == peer.deviceId })
+        else {
+            return
         }
+        connectedDevices[index].lastActivity = Date()
     }
-    
-    private func sendAck(_ sequenceNumber: Int) async {
-        await send(.ack(AckMessage(sequenceNumber: sequenceNumber)))
-    }
-    
-    private func send(_ message: TransportMessage) async {
+
+    private func send(_ message: TransportMessage, to peerID: MCPeerID) async {
         do {
             let data = try encoder.encode(message)
-            
-            // Send length prefix
-            var length = UInt32(data.count).bigEndian
-            let lengthData = withUnsafeBytes(of: &length) { Data($0) }
-            
-            connection.send(content: lengthData, completion: .contentProcessed { _ in })
-            connection.send(content: data, completion: .contentProcessed { error in
-                if let error {
-                    SpeakLogger.logError(error, context: "Send message", logger: SpeakLogger.transport)
-                }
-            })
+            try session.send(data, toPeers: [peerID], with: .reliable)
         } catch {
-            SpeakLogger.logError(error, context: "Encode message", logger: SpeakLogger.transport)
+            SpeakLogger.logError(error, context: "Send message", logger: SpeakLogger.transport)
         }
     }
+
+    private func invitationRejectionKey(peerID: MCPeerID, contextData: Data?) -> String {
+        guard let contextData,
+              let context = try? decoder.decode(PairingInvitationContext.self, from: contextData),
+              !context.deviceID.isEmpty
+        else {
+            return peerID.displayName
+        }
+        return context.deviceID
+    }
+
+    private func isRateLimited(_ key: String) -> Bool {
+        pruneFailedInvitations(for: key)
+        pruneGlobalFailedInvitations()
+        return (failedInvitations[key]?.count ?? 0) >= maximumFailedInvitations
+            || globalFailedInvitations.count >= maximumGlobalFailedInvitations
+    }
+
+    private func recordFailedInvitation(_ key: String) {
+        pruneFailedInvitations(for: key)
+        pruneGlobalFailedInvitations()
+        failedInvitations[key, default: []].append(Date())
+        globalFailedInvitations.append(Date())
+    }
+
+    private func clearFailedInvitations(for key: String) {
+        failedInvitations.removeValue(forKey: key)
+    }
+
+    private func pruneFailedInvitations(for key: String) {
+        let cutoff = Date().addingTimeInterval(-failedInvitationWindow)
+        failedInvitations[key] = failedInvitations[key, default: []].filter { $0 >= cutoff }
+        if failedInvitations[key]?.isEmpty == true {
+            failedInvitations.removeValue(forKey: key)
+        }
+    }
+
+    private func pruneGlobalFailedInvitations() {
+        let cutoff = Date().addingTimeInterval(-failedInvitationWindow)
+        globalFailedInvitations.removeAll { $0 < cutoff }
+    }
+}
+
+public enum TransportServerError: LocalizedError, Equatable {
+    case invalidServiceType(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .invalidServiceType(let serviceType):
+            return "Invalid Multipeer Connectivity service type: \(serviceType)"
+        }
+    }
+}
+
+extension TransportServer: MCNearbyServiceAdvertiserDelegate {
+    nonisolated public func advertiser(
+        _ advertiser: MCNearbyServiceAdvertiser,
+        didReceiveInvitationFromPeer peerID: MCPeerID,
+        withContext context: Data?,
+        invitationHandler: @escaping (Bool, MCSession?) -> Void
+    ) {
+        Task { @MainActor [weak self] in
+            guard let self else {
+                invitationHandler(false, nil)
+                return
+            }
+            self.handleInvitation(from: peerID, context: context, invitationHandler: invitationHandler)
+        }
+    }
+
+    nonisolated public func advertiser(
+        _ advertiser: MCNearbyServiceAdvertiser,
+        didNotStartAdvertisingPeer error: Error
+    ) {
+        Task { @MainActor [weak self] in
+            self?.error = error
+            self?.isRunning = false
+        }
+    }
+}
+
+extension TransportServer: MCSessionDelegate {
+    nonisolated public func session(_ session: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) {
+        Task { @MainActor [weak self] in
+            switch state {
+            case .connected:
+                self?.handleConnected(peerID: peerID)
+            case .notConnected:
+                self?.handleDisconnected(peerID: peerID)
+            case .connecting:
+                break
+            @unknown default:
+                break
+            }
+        }
+    }
+
+    nonisolated public func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
+        Task { @MainActor [weak self] in
+            await self?.handleMessage(data, from: peerID)
+        }
+    }
+
+    nonisolated public func session(
+        _ session: MCSession,
+        didReceive stream: InputStream,
+        withName streamName: String,
+        fromPeer peerID: MCPeerID
+    ) {}
+
+    nonisolated public func session(
+        _ session: MCSession,
+        didStartReceivingResourceWithName resourceName: String,
+        fromPeer peerID: MCPeerID,
+        with progress: Progress
+    ) {}
+
+    nonisolated public func session(
+        _ session: MCSession,
+        didFinishReceivingResourceWithName resourceName: String,
+        fromPeer peerID: MCPeerID,
+        at localURL: URL?,
+        withError error: Error?
+    ) {}
 }
 #endif

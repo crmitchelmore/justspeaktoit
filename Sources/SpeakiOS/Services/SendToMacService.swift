@@ -1,86 +1,129 @@
+// swiftlint:disable file_length
 #if os(iOS)
 import Foundation
+import MultipeerConnectivity
 import Network
 import SpeakCore
 
 // MARK: - Mac Discovery
 
-/// Discovers available Speak instances on the local network via Bonjour.
+/// Discovers available Speak instances on the local network via Multipeer Connectivity.
 @MainActor
-public final class MacDiscovery: ObservableObject {
+public final class MacDiscovery: NSObject, ObservableObject {
+    public static let shared = MacDiscovery()
+
     @Published public private(set) var discoveredMacs: [DiscoveredMac] = []
     @Published public private(set) var isSearching = false
-    
-    private var browser: NWBrowser?
-    
+    @Published public private(set) var errorMessage: String?
+
+    let localPeerID: MCPeerID
+    private var browser: MCNearbyServiceBrowser?
+
     public struct DiscoveredMac: Identifiable, Equatable {
         public let id: String
         public let name: String
         public let endpoint: NWEndpoint
-        
+        public let peerID: MCPeerID
+
         public init(id: String, name: String, endpoint: NWEndpoint) {
             self.id = id
             self.name = name
             self.endpoint = endpoint
+            self.peerID = MCPeerID(displayName: name)
+        }
+
+        public init(id: String, name: String, endpoint: NWEndpoint, peerID: MCPeerID) {
+            self.id = id
+            self.name = name
+            self.endpoint = endpoint
+            self.peerID = peerID
+        }
+
+        public static func == (lhs: DiscoveredMac, rhs: DiscoveredMac) -> Bool {
+            lhs.id == rhs.id && lhs.peerID == rhs.peerID
         }
     }
-    
-    public init() {}
-    
+
+    public override init() {
+        self.localPeerID = MCPeerID(displayName: DeviceIdentity.deviceName)
+        super.init()
+    }
+
     public func startSearching() {
         guard browser == nil else { return }
-        
+
+        errorMessage = nil
         isSearching = true
-        discoveredMacs = []
-        
-        let parameters = NWParameters()
-        parameters.includePeerToPeer = true
-        
-        let browser = NWBrowser(
-            for: .bonjour(type: SpeakTransportServiceType, domain: "local."),
-            using: parameters
-        )
-        
-        browser.stateUpdateHandler = { [weak self] state in
-            Task { @MainActor in
-                switch state {
-                case .failed(let error):
-                    print("[MacDiscovery] Browser failed: \(error)")
-                    self?.isSearching = false
-                case .cancelled:
-                    self?.isSearching = false
-                default:
-                    break
-                }
-            }
-        }
-        
-        browser.browseResultsChangedHandler = { [weak self] results, changes in
-            Task { @MainActor in
-                self?.handleBrowseResults(results)
-            }
-        }
-        
-        browser.start(queue: .main)
+
+        let browser = MCNearbyServiceBrowser(peer: localPeerID, serviceType: SpeakTransportServiceType)
+        browser.delegate = self
+        browser.startBrowsingForPeers()
         self.browser = browser
     }
-    
+
     public func stopSearching() {
-        browser?.cancel()
+        browser?.stopBrowsingForPeers()
+        browser?.delegate = nil
         browser = nil
         isSearching = false
     }
-    
-    private func handleBrowseResults(_ results: Set<NWBrowser.Result>) {
-        discoveredMacs = results.compactMap { result -> DiscoveredMac? in
-            guard case .service(let name, _, _, _) = result.endpoint else {
-                return nil
-            }
-            return DiscoveredMac(
-                id: "\(result.hashValue)",
-                name: name,
-                endpoint: result.endpoint
-            )
+
+    public func invite(
+        _ mac: DiscoveredMac,
+        to session: MCSession,
+        context: Data,
+        timeout: TimeInterval = 30
+    ) {
+        if browser == nil {
+            startSearching()
+        }
+        browser?.invitePeer(mac.peerID, to: session, withContext: context, timeout: timeout)
+    }
+
+    private func upsert(peerID: MCPeerID, discoveryInfo: [String: String]?) {
+        let id = discoveryInfo?["deviceID"] ?? peerID.displayName
+        let name = discoveryInfo?["deviceName"] ?? peerID.displayName
+        let endpoint = NWEndpoint.service(
+            name: name,
+            type: SpeakTransportBonjourTCPService,
+            domain: "local.",
+            interface: nil
+        )
+        let mac = DiscoveredMac(id: id, name: name, endpoint: endpoint, peerID: peerID)
+
+        if let index = discoveredMacs.firstIndex(where: { $0.id == id || $0.peerID == peerID }) {
+            discoveredMacs[index] = mac
+        } else {
+            discoveredMacs.append(mac)
+        }
+    }
+
+    private func remove(peerID: MCPeerID) {
+        discoveredMacs.removeAll { $0.peerID == peerID }
+    }
+}
+
+extension MacDiscovery: MCNearbyServiceBrowserDelegate {
+    nonisolated public func browser(
+        _ browser: MCNearbyServiceBrowser,
+        foundPeer peerID: MCPeerID,
+        withDiscoveryInfo info: [String: String]?
+    ) {
+        Task { @MainActor [weak self] in
+            self?.upsert(peerID: peerID, discoveryInfo: info)
+        }
+    }
+
+    nonisolated public func browser(_ browser: MCNearbyServiceBrowser, lostPeer peerID: MCPeerID) {
+        Task { @MainActor [weak self] in
+            self?.remove(peerID: peerID)
+        }
+    }
+
+    nonisolated public func browser(_ browser: MCNearbyServiceBrowser, didNotStartBrowsingForPeers error: Error) {
+        Task { @MainActor [weak self] in
+            self?.errorMessage = error.localizedDescription
+            self?.isSearching = false
         }
     }
 }
@@ -89,7 +132,9 @@ public final class MacDiscovery: ObservableObject {
 
 /// Manages connection to a macOS Speak instance.
 @MainActor
-public final class MacConnection: ObservableObject {
+public final class MacConnection: NSObject, ObservableObject {
+    public static let shared = MacConnection()
+
     public enum ConnectionState: Equatable {
         case disconnected
         case connecting
@@ -97,133 +142,105 @@ public final class MacConnection: ObservableObject {
         case connected
         case error(String)
     }
-    
+
     @Published public private(set) var state: ConnectionState = .disconnected
     @Published public private(set) var connectedMacName: String?
-    
-    private var connection: NWConnection?
-    private var webSocketTask: URLSessionWebSocketTask?
-    private var sessionToken: String?
-    private var sequenceNumber = 0
-    
+
+    private struct PendingConnection {
+        let peerID: MCPeerID
+        let macName: String
+        let continuation: CheckedContinuation<Void, Error>
+        let timeoutTask: Task<Void, Never>
+    }
+
+    private let localPeerID: MCPeerID
+    private let session: MCSession
+    private let discovery: MacDiscovery
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
-    
-    public init() {
+    private var connectedPeer: MCPeerID?
+    private var pendingConnection: PendingConnection?
+    private var sequenceNumber = 0
+
+    public override convenience init() {
+        self.init(discovery: .shared)
+    }
+
+    public init(discovery: MacDiscovery) {
+        self.discovery = discovery
+        self.localPeerID = discovery.localPeerID
+        self.session = MCSession(peer: localPeerID, securityIdentity: nil, encryptionPreference: .required)
+        super.init()
+        self.session.delegate = self
         encoder.dateEncodingStrategy = .iso8601
         decoder.dateDecodingStrategy = .iso8601
     }
-    
-    /// Connects to a discovered Mac.
+
+    /// Connects to a discovered Mac using an encrypted MPC invitation context.
     public func connect(to mac: MacDiscovery.DiscoveredMac, pairingCode: String) async throws {
-        state = .connecting
-        
-        // Resolve endpoint to get host and port
-        let connection = NWConnection(to: mac.endpoint, using: .tcp)
-        
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            connection.stateUpdateHandler = { [weak self] newState in
-                Task { @MainActor in
-                    switch newState {
-                    case .ready:
-                        continuation.resume()
-                    case .failed(let error):
-                        self?.state = .error(error.localizedDescription)
-                        continuation.resume()
-                    default:
-                        break
-                    }
+        guard pendingConnection == nil else {
+            throw MacConnectionError.connectionInProgress
+        }
+
+        state = .authenticating
+        connectedMacName = nil
+        connectedPeer = nil
+
+        let context = PairingInvitationContext(
+            deviceID: DeviceIdentity.deviceId,
+            deviceName: DeviceIdentity.deviceName,
+            pairingCode: pairingCode
+        )
+        let contextData = try encoder.encode(context)
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let timeoutTask = Task { [weak self] in
+                do {
+                    try await Task.sleep(for: .seconds(31))
+                } catch {
+                    return
+                }
+                await MainActor.run {
+                    self?.failPendingConnection(
+                        for: mac.peerID,
+                        message: "Pairing timed out. Check the code and make sure the Mac is still advertising."
+                    )
                 }
             }
-            connection.start(queue: .main)
-        }
-        
-        guard case .connecting = state else { return }
-        
-        // Get resolved endpoint info
-        guard let path = connection.currentPath,
-              let endpoint = path.remoteEndpoint,
-              case .hostPort(let host, let port) = endpoint
-        else {
-            state = .error("Could not resolve endpoint")
-            return
-        }
-        
-        connection.cancel()
-        
-        // Create WebSocket connection
-        let hostString: String
-        switch host {
-        case .ipv4(let addr):
-            hostString = "\(addr)"
-        case .ipv6(let addr):
-            hostString = "[\(addr)]"
-        case .name(let name, _):
-            hostString = name
-        @unknown default:
-            hostString = "localhost"
-        }
-        
-        guard let url = URL(string: "ws://\(hostString):\(port)/speak") else {
-            state = .error("Invalid URL")
-            return
-        }
-        
-        let session = URLSession(configuration: .default)
-        let task = session.webSocketTask(with: url)
-        task.resume()
-        
-        webSocketTask = task
-        
-        // Send hello
-        state = .authenticating
-        let hello = TransportMessage.hello(HelloMessage(
-            deviceName: DeviceIdentity.deviceName,
-            deviceId: DeviceIdentity.deviceId
-        ))
-        try await send(hello)
-        
-        // Send auth
-        let auth = TransportMessage.authenticate(AuthenticateMessage(pairingCode: pairingCode))
-        try await send(auth)
-        
-        // Wait for auth result
-        let response = try await receive()
-        
-        switch response {
-        case .authResult(let result):
-            if result.success, let token = result.sessionToken {
-                sessionToken = token
-                connectedMacName = mac.name
-                state = .connected
-                startReceiveLoop()
-            } else {
-                state = .error(result.errorMessage ?? "Authentication failed")
-                disconnect()
-            }
-        case .error(let error):
-            state = .error(error.message)
-            disconnect()
-        default:
-            state = .error("Unexpected response")
-            disconnect()
+
+            pendingConnection = PendingConnection(
+                peerID: mac.peerID,
+                macName: mac.name,
+                continuation: continuation,
+                timeoutTask: timeoutTask
+            )
+            discovery.invite(mac, to: session, context: contextData)
         }
     }
-    
+
     /// Disconnects from the Mac.
     public func disconnect() {
-        webSocketTask?.cancel(with: .goingAway, reason: nil)
-        webSocketTask = nil
-        sessionToken = nil
+        failPendingConnection(message: "Pairing cancelled.")
+        session.disconnect()
+        connectedPeer = nil
         connectedMacName = nil
         sequenceNumber = 0
         state = .disconnected
     }
-    
+
+    public func markTransportError(_ error: Error) {
+        failPendingConnection(message: error.localizedDescription)
+        session.disconnect()
+        connectedPeer = nil
+        connectedMacName = nil
+        sequenceNumber = 0
+        state = .error(error.localizedDescription)
+    }
+
     /// Sends a transcript chunk to the connected Mac.
     public func sendTranscript(sessionId: String, text: String, isFinal: Bool) async throws {
         guard state == .connected else { return }
-        
+
         sequenceNumber += 1
         let chunk = TranscriptChunkMessage(
             sessionId: sessionId,
@@ -231,88 +248,168 @@ public final class MacConnection: ObservableObject {
             text: text,
             isFinal: isFinal
         )
-        try await send(.transcriptChunk(chunk))
+        try send(.transcriptChunk(chunk))
     }
-    
+
     /// Notifies the Mac that a transcription session has started.
     public func sendSessionStart(sessionId: String, model: String) async throws {
         guard state == .connected else { return }
-        
+
         sequenceNumber = 0
         let start = SessionStartMessage(sessionId: sessionId, model: model)
-        try await send(.sessionStart(start))
+        try send(.sessionStart(start))
     }
-    
+
     /// Notifies the Mac that a transcription session has ended.
     public func sendSessionEnd(sessionId: String, finalText: String, duration: TimeInterval, wordCount: Int) async throws {
         guard state == .connected else { return }
-        
+
         let end = SessionEndMessage(
             sessionId: sessionId,
             finalText: finalText,
             duration: duration,
             wordCount: wordCount
         )
-        try await send(.sessionEnd(end))
+        try send(.sessionEnd(end))
     }
-    
-    // MARK: - Private
-    
-    private func send(_ message: TransportMessage) async throws {
+
+    private func send(_ message: TransportMessage) throws {
+        guard let connectedPeer else { return }
         let data = try encoder.encode(message)
-        try await webSocketTask?.send(.data(data))
+        try session.send(data, toPeers: [connectedPeer], with: .reliable)
     }
-    
-    private func receive() async throws -> TransportMessage {
-        guard let task = webSocketTask else {
-            throw URLError(.badServerResponse)
+
+    private func handleConnected(peerID: MCPeerID) {
+        guard let pending = pendingConnection, pending.peerID == peerID else {
+            session.cancelConnectPeer(peerID)
+            return
         }
-        
-        let message = try await task.receive()
-        switch message {
-        case .data(let data):
-            return try decoder.decode(TransportMessage.self, from: data)
-        case .string(let string):
-            guard let data = string.data(using: .utf8) else {
-                throw URLError(.cannotDecodeContentData)
-            }
-            return try decoder.decode(TransportMessage.self, from: data)
-        @unknown default:
-            throw URLError(.unknown)
-        }
+        connectedPeer = peerID
+        connectedMacName = pending.macName
+        state = .connected
+        completePendingConnection(for: peerID)
     }
-    
-    private func startReceiveLoop() {
-        Task {
-            while state == .connected {
-                do {
-                    let message = try await receive()
-                    handleIncomingMessage(message)
-                } catch {
-                    if state == .connected {
-                        state = .error(error.localizedDescription)
-                        disconnect()
-                    }
-                    break
-                }
-            }
+
+    private func handleDisconnected(peerID: MCPeerID) {
+        if pendingConnection?.peerID == peerID {
+            failPendingConnection(for: peerID, message: "Pairing was rejected by the Mac.")
+            return
         }
+        guard connectedPeer == peerID else { return }
+        connectedPeer = nil
+        connectedMacName = nil
+        sequenceNumber = 0
+        state = .disconnected
     }
-    
+
+    private func completePendingConnection(for peerID: MCPeerID) {
+        guard let pending = pendingConnection, pending.peerID == peerID else { return }
+        pending.timeoutTask.cancel()
+        pendingConnection = nil
+        pending.continuation.resume()
+    }
+
+    private func failPendingConnection(for peerID: MCPeerID, message: String) {
+        guard let pending = pendingConnection, pending.peerID == peerID else { return }
+        failPendingConnection(pending, message: message)
+    }
+
+    private func failPendingConnection(message: String) {
+        guard let pending = pendingConnection else { return }
+        failPendingConnection(pending, message: message)
+    }
+
+    private func failPendingConnection(_ pending: PendingConnection, message: String) {
+        pending.timeoutTask.cancel()
+        pendingConnection = nil
+        state = .error(message)
+        pending.continuation.resume(throwing: MacConnectionError.pairingFailed(message))
+    }
+
     private func handleIncomingMessage(_ message: TransportMessage) {
         switch message {
         case .ping:
-            Task { try? await send(.pong) }
+            Task { [weak self] in
+                try? await self?.sendPong()
+            }
         case .ack:
-            // Handle ack if needed
             break
         case .error(let error):
             state = .error(error.message)
-            disconnect()
         default:
             break
         }
     }
+
+    private func sendPong() async throws {
+        try send(.pong)
+    }
+}
+
+public enum MacConnectionError: LocalizedError, Equatable {
+    case connectionInProgress
+    case pairingFailed(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .connectionInProgress:
+            return "A pairing attempt is already in progress."
+        case .pairingFailed(let message):
+            return message
+        }
+    }
+}
+
+extension MacConnection: MCSessionDelegate {
+    nonisolated public func session(_ session: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            switch state {
+            case .connected:
+                self.handleConnected(peerID: peerID)
+            case .connecting:
+                self.state = .connecting
+            case .notConnected:
+                self.handleDisconnected(peerID: peerID)
+            @unknown default:
+                self.state = .error("Unknown connection state")
+            }
+        }
+    }
+
+    nonisolated public func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let message = try self.decoder.decode(TransportMessage.self, from: data)
+                self.handleIncomingMessage(message)
+            } catch {
+                self.state = .error(error.localizedDescription)
+            }
+        }
+    }
+
+    nonisolated public func session(
+        _ session: MCSession,
+        didReceive stream: InputStream,
+        withName streamName: String,
+        fromPeer peerID: MCPeerID
+    ) {}
+
+    nonisolated public func session(
+        _ session: MCSession,
+        didStartReceivingResourceWithName resourceName: String,
+        fromPeer peerID: MCPeerID,
+        with progress: Progress
+    ) {}
+
+    nonisolated public func session(
+        _ session: MCSession,
+        didFinishReceivingResourceWithName resourceName: String,
+        fromPeer peerID: MCPeerID,
+        at localURL: URL?,
+        withError error: Error?
+    ) {}
 }
 
 // MARK: - Send to Mac View
@@ -320,14 +417,16 @@ public final class MacConnection: ObservableObject {
 import SwiftUI
 
 public struct SendToMacView: View {
-    @StateObject private var discovery = MacDiscovery()
-    @StateObject private var connection = MacConnection()
+    @ObservedObject private var discovery = MacDiscovery.shared
+    @ObservedObject private var connection = MacConnection.shared
     @State private var selectedMac: MacDiscovery.DiscoveredMac?
     @State private var pairingCode = ""
+    @State private var pairingError: String?
     @State private var showingPairingSheet = false
-    
+    @State private var isPairing = false
+
     public init() {}
-    
+
     public var body: some View {
         Form {
             Section {
@@ -351,22 +450,29 @@ public struct SendToMacView: View {
                         }
                         .buttonStyle(.bordered)
                     }
-                    
+
                 case .connecting, .authenticating:
                     HStack {
                         ProgressView()
                         Text(connection.state == .connecting ? "Connecting..." : "Authenticating...")
                             .padding(.leading, 8)
                     }
-                    
+
                 case .error(let message):
-                    HStack {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.red)
-                        Text(message)
-                            .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.red)
+                            Text(message)
+                                .foregroundStyle(.secondary)
+                        }
+                        Button("Try Again") {
+                            connection.disconnect()
+                            discovery.startSearching()
+                        }
+                        .buttonStyle(.bordered)
                     }
-                    
+
                 case .disconnected:
                     Text("Not connected to a Mac")
                         .foregroundStyle(.secondary)
@@ -374,7 +480,7 @@ public struct SendToMacView: View {
             } header: {
                 Text("Connection Status")
             }
-            
+
             if case .disconnected = connection.state {
                 Section {
                     if discovery.isSearching {
@@ -384,10 +490,16 @@ public struct SendToMacView: View {
                                 .padding(.leading, 8)
                         }
                     }
-                    
+
+                    if let error = discovery.errorMessage {
+                        Label(error, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.red)
+                    }
+
                     ForEach(discovery.discoveredMacs) { mac in
                         Button {
                             selectedMac = mac
+                            pairingError = nil
                             showingPairingSheet = true
                         } label: {
                             HStack {
@@ -399,7 +511,7 @@ public struct SendToMacView: View {
                             }
                         }
                     }
-                    
+
                     if !discovery.isSearching && discovery.discoveredMacs.isEmpty {
                         ContentUnavailableView {
                             Label("No Macs Found", systemImage: "desktopcomputer")
@@ -418,24 +530,35 @@ public struct SendToMacView: View {
         }
         .navigationTitle("Send to Mac")
         .onAppear { discovery.startSearching() }
-        .onDisappear { discovery.stopSearching() }
         .sheet(isPresented: $showingPairingSheet) {
             PairingSheet(
                 macName: selectedMac?.name ?? "Mac",
                 pairingCode: $pairingCode,
-                onPair: {
-                    guard let mac = selectedMac else { return }
-                    showingPairingSheet = false
-                    Task {
-                        try? await connection.connect(to: mac, pairingCode: pairingCode)
-                        pairingCode = ""
-                    }
-                },
+                pairingError: pairingError,
+                isPairing: isPairing,
+                onPair: pairWithSelectedMac,
                 onCancel: {
                     showingPairingSheet = false
                     pairingCode = ""
+                    pairingError = nil
                 }
             )
+        }
+    }
+
+    private func pairWithSelectedMac() {
+        guard let mac = selectedMac else { return }
+        pairingError = nil
+        isPairing = true
+        Task {
+            do {
+                try await connection.connect(to: mac, pairingCode: pairingCode)
+                pairingCode = ""
+                showingPairingSheet = false
+            } catch {
+                pairingError = error.localizedDescription
+            }
+            isPairing = false
         }
     }
 }
@@ -443,25 +566,40 @@ public struct SendToMacView: View {
 struct PairingSheet: View {
     let macName: String
     @Binding var pairingCode: String
+    let pairingError: String?
+    let isPairing: Bool
     let onPair: () -> Void
     let onCancel: () -> Void
-    
+
     var body: some View {
         NavigationStack {
             Form {
                 Section {
                     Text("Enter the pairing code shown on \(macName)")
                         .foregroundStyle(.secondary)
-                    
-                    TextField("Pairing Code", text: $pairingCode)
-                        .keyboardType(.numberPad)
+
+                    TextField("ABCDE-FGHIJ", text: $pairingCode)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
                         .textContentType(.oneTimeCode)
                         .font(.title2.monospaced())
                         .multilineTextAlignment(.center)
+                        .onChange(of: pairingCode) { _, newValue in
+                            pairingCode = formatPairingCode(newValue)
+                        }
+
+                    if let pairingError {
+                        Label(pairingError, systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
                 }
-                
+
                 Section {
-                    Text("You can find the pairing code in Speak's settings on your Mac.")
+                    Text(
+                        "On your Mac, open Speak Settings → Send to Mac, then copy or type the "
+                            + "ten-character pairing code. Codes expire and rotate after pairing."
+                    )
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -471,14 +609,22 @@ struct PairingSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel", action: onCancel)
+                        .disabled(isPairing)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Pair", action: onPair)
-                        .disabled(pairingCode.count < 6)
+                    Button(isPairing ? "Pairing..." : "Pair", action: onPair)
+                        .disabled(PairingManager.normalizedPairingCode(pairingCode).count < 10 || isPairing)
                 }
             }
         }
         .presentationDetents([.medium])
+    }
+
+    private func formatPairingCode(_ rawValue: String) -> String {
+        let normalised = String(PairingManager.normalizedPairingCode(rawValue).prefix(10))
+        guard normalised.count > 5 else { return normalised }
+        let splitIndex = normalised.index(normalised.startIndex, offsetBy: 5)
+        return String(normalised[..<splitIndex]) + "-" + String(normalised[splitIndex...])
     }
 }
 

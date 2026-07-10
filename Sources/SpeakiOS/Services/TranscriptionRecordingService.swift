@@ -8,6 +8,7 @@ import SpeakCore
 /// Headless recording coordinator for Action Button / Shortcuts / Siri.
 /// Manages the full lifecycle: start recording → live transcription → stop → clipboard → Live Activity.
 @MainActor
+// swiftlint:disable:next type_body_length
 public final class TranscriptionRecordingService: ObservableObject {
     public static let shared = TranscriptionRecordingService()
 
@@ -26,6 +27,8 @@ public final class TranscriptionRecordingService: ObservableObject {
     private var sharedTranscriber: SharedClientLiveTranscriber?
     private var startTime: Date?
     private var currentModel: String = ""
+    private var transportSessionId: String?
+    private var transportSendTask: Task<Void, Never>?
 
     private init() {}
 
@@ -64,6 +67,9 @@ public final class TranscriptionRecordingService: ObservableObject {
         partialText = ""
         wordCount = 0
         startTime = Date()
+        transportSessionId = UUID().uuidString
+        transportSendTask?.cancel()
+        transportSendTask = nil
         sharedState.clear()
         sharedState.isRecording = true
         sharedState.recordingStartTime = startTime
@@ -197,8 +203,12 @@ public final class TranscriptionRecordingService: ObservableObject {
             }
 
             isRunning = true
+            await sendTransportSessionStartIfConnected()
         } catch {
             startTime = nil
+            transportSessionId = nil
+            transportSendTask?.cancel()
+            transportSendTask = nil
             deepgramTranscriber = nil
             elevenLabsTranscriber = nil
             openAITranscriber = nil
@@ -242,6 +252,7 @@ public final class TranscriptionRecordingService: ObservableObject {
             model: currentModel,
             duration: result.duration
         )
+        await sendTransportFinalAndEndIfConnected(text: text, duration: result.duration)
 
         // Resolve the destination. When nil (legacy callers), preserve the
         // pre-destination behaviour: clipboard + post-process if user opted in.
@@ -285,6 +296,9 @@ public final class TranscriptionRecordingService: ObservableObject {
         sharedTranscriber = nil
         isRunning = false
         startTime = nil
+        transportSessionId = nil
+        transportSendTask?.cancel()
+        transportSendTask = nil
         partialText = ""
         wordCount = 0
         sharedState.clearRecordingState()
@@ -304,6 +318,9 @@ public final class TranscriptionRecordingService: ObservableObject {
             wordCount: wordCount,
             duration: elapsedSeconds
         )
+
+        guard isRunning else { return }
+        enqueueTransportTranscript(text: text, isFinal: false)
     }
 
     private func handleError(_ error: Error) {
@@ -327,6 +344,59 @@ public final class TranscriptionRecordingService: ObservableObject {
                 UIPasteboard.general.string = processor.processedText
             }
             sharedState.lastCompletedTranscript = processor.processedText
+        }
+    }
+
+    private func sendTransportSessionStartIfConnected() async {
+        guard let sessionId = transportSessionId else { return }
+        do {
+            try await MacConnection.shared.sendSessionStart(sessionId: sessionId, model: currentModel)
+        } catch {
+            handleTransportError(error)
+        }
+    }
+
+    private func sendTransportTranscriptIfConnected(text: String, isFinal: Bool) async {
+        guard let sessionId = transportSessionId else { return }
+        do {
+            try await MacConnection.shared.sendTranscript(sessionId: sessionId, text: text, isFinal: isFinal)
+        } catch {
+            handleTransportError(error)
+        }
+    }
+
+    private func sendTransportFinalAndEndIfConnected(text: String, duration: TimeInterval) async {
+        guard let sessionId = transportSessionId else { return }
+        let finalWordCount = text.split(whereSeparator: { $0.isWhitespace }).count
+
+        await transportSendTask?.value
+        transportSendTask = nil
+        await sendTransportTranscriptIfConnected(text: text, isFinal: true)
+        do {
+            try await MacConnection.shared.sendSessionEnd(
+                sessionId: sessionId,
+                finalText: text,
+                duration: duration,
+                wordCount: finalWordCount
+            )
+        } catch {
+            handleTransportError(error)
+        }
+        transportSessionId = nil
+    }
+
+    private func enqueueTransportTranscript(text: String, isFinal: Bool) {
+        let previousTask = transportSendTask
+        transportSendTask = Task { @MainActor [weak self] in
+            await previousTask?.value
+            guard !Task.isCancelled else { return }
+            await self?.sendTransportTranscriptIfConnected(text: text, isFinal: isFinal)
+        }
+    }
+
+    private func handleTransportError(_ error: Error) {
+        if case .connected = MacConnection.shared.state {
+            MacConnection.shared.markTransportError(error)
         }
     }
 }

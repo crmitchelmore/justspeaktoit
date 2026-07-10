@@ -204,20 +204,71 @@ final class TransportMessageCodableTests: XCTestCase {
 
     // MARK: - Unknown type
 
-    func testDecode_unknownType_throws() {
-        let json = #"{"type":"unknown_type"}"#
+    func testDecode_unknownType_fallsBackWithoutThrowing() throws {
+        let json = #"{"type":"settingsSync","payload":{"future":true}}"#
         let data = Data(json.utf8)
-        XCTAssertThrowsError(try decoder.decode(TransportMessage.self, from: data))
+        let decoded = try decoder.decode(TransportMessage.self, from: data)
+        guard case .unknown(let type) = decoded else {
+            XCTFail("Expected .unknown, got \(decoded)")
+            return
+        }
+        XCTAssertEqual(type, "settingsSync")
     }
 
     // MARK: - Constants
 
-    func testProtocolVersion_isPositive() {
-        XCTAssertGreaterThan(SpeakTransportProtocolVersion, 0)
+    func testProtocolVersion_isVersion2() {
+        XCTAssertEqual(SpeakTransportProtocolVersion, 2)
     }
 
-    func testServiceType_hasExpectedFormat() {
-        XCTAssertTrue(SpeakTransportServiceType.hasPrefix("_"))
-        XCTAssertTrue(SpeakTransportServiceType.contains("._tcp"))
+    func testServiceType_isValidMultipeerServiceType() {
+        XCTAssertEqual(SpeakTransportServiceType, "speaktransport")
+        XCTAssertTrue(isValidSpeakTransportServiceType(SpeakTransportServiceType))
+        XCTAssertLessThanOrEqual(SpeakTransportServiceType.count, 15)
+        XCTAssertFalse(SpeakTransportServiceType.contains("_"))
+        XCTAssertFalse(SpeakTransportServiceType.contains("."))
+    }
+
+    func testBonjourServices_includeTcpAndUdpDeclarations() {
+        XCTAssertEqual(SpeakTransportBonjourServices, ["_speaktransport._tcp", "_speaktransport._udp"])
+    }
+
+    func testInvitationContext_roundtrip() throws {
+        let date = Date(timeIntervalSince1970: 1_750_000_000)
+        let context = PairingInvitationContext(
+            protocolVersion: 2,
+            deviceID: "ios-device",
+            deviceName: "Chris's iPhone",
+            timestamp: date,
+            pairingCode: "ABCDE-FGHIJ"
+        )
+
+        let data = try encoder.encode(context)
+        let decoded = try decoder.decode(PairingInvitationContext.self, from: data)
+
+        XCTAssertEqual(decoded.protocolVersion, 2)
+        XCTAssertEqual(decoded.deviceID, "ios-device")
+        XCTAssertEqual(decoded.deviceName, "Chris's iPhone")
+        XCTAssertEqual(decoded.pairingCode, "ABCDE-FGHIJ")
+        XCTAssertEqual(decoded.timestamp.timeIntervalSince1970, date.timeIntervalSince1970, accuracy: 1.0)
+    }
+
+    func testInvitationContext_freshnessUsesTolerance() {
+        let now = Date(timeIntervalSince1970: 1_750_000_000)
+        let fresh = PairingInvitationContext(
+            deviceID: "ios-device",
+            deviceName: "iPhone",
+            timestamp: now.addingTimeInterval(-30),
+            pairingCode: "ABCDE-FGHIJ"
+        )
+        let stale = PairingInvitationContext(
+            deviceID: "ios-device",
+            deviceName: "iPhone",
+            timestamp: now.addingTimeInterval(-180),
+            pairingCode: "ABCDE-FGHIJ"
+        )
+
+        XCTAssertTrue(fresh.isFresh(now: now, tolerance: 120))
+        XCTAssertFalse(stale.isFresh(now: now, tolerance: 120))
     }
 }

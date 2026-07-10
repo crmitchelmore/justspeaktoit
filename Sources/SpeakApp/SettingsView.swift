@@ -4428,7 +4428,10 @@ struct SettingsView: View {
 
       SettingsCard(title: "Transfer to iOS", systemImage: "iphone.and.arrow.forward", tint: Color.cyan) {
         VStack(alignment: .leading, spacing: 12) {
-          Text("Transfer your API keys and settings to the iOS app by scanning a QR code.")
+          Text(
+            "Transfer selected settings to the iOS app by scanning a QR code. API keys are not included; "
+              + "enter them manually or sync through iCloud Keychain."
+          )
             .font(.callout)
             .foregroundStyle(.secondary)
 
@@ -4441,7 +4444,7 @@ struct SettingsView: View {
         }
       }
       .sheet(isPresented: $showingConfigTransfer) {
-        ConfigTransferView(secureStorage: environment.secureStorage)
+        ConfigTransferView()
       }
 
       SettingsCard(title: "Support Development", systemImage: "heart.fill", tint: Color.pink) {

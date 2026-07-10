@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 
 @testable import SpeakCore
@@ -6,160 +7,226 @@ final class ConfigTransferManagerTests: XCTestCase {
 
     private let sut = ConfigTransferManager.shared
 
-    // MARK: - Roundtrip encode/decode
+    func testGenerateAndDecode_v2SettingsPayload_roundtripsSupportedSettings() throws {
+        // Arrange
+        let settings = ["selectedModel": "apple/local/SFSpeechRecognizer"]
 
-    func testGenerateAndDecode_emptyPayload_roundtrips() throws {
-        let encoded = try sut.generatePayload(secrets: [:], settings: [:])
+        // Act
+        let encoded = try sut.generatePayload(settings: settings)
         let decoded = try sut.decodePayload(encoded)
+
+        // Assert
+        XCTAssertEqual(decoded.version, 2)
         XCTAssertTrue(decoded.secrets.isEmpty)
-        XCTAssertTrue(decoded.settings.isEmpty)
-        XCTAssertEqual(decoded.version, 1)
+        XCTAssertEqual(decoded.settings, settings)
     }
 
-    func testGenerateAndDecode_withSecrets_roundtrips() throws {
-        let secrets = ["apiKey": "sk-test-12345"]
-        let encoded = try sut.generatePayload(secrets: secrets, settings: [:])
-        let decoded = try sut.decodePayload(encoded)
-        XCTAssertEqual(decoded.secrets["apiKey"], "sk-test-12345")
+    func testGeneratePayload_v2Payload_isPlainJSONWithoutSecretsField() throws {
+        // Arrange
+        let settings = ["selectedModel": "apple/local/SFSpeechRecognizer"]
+
+        // Act
+        let encoded = try sut.generatePayload(settings: settings)
+        let data = try XCTUnwrap(Data(base64Encoded: encoded))
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let decodedSettings = try XCTUnwrap(object["settings"] as? [String: String])
+
+        // Assert
+        XCTAssertEqual(object["version"] as? Int, 2)
+        XCTAssertNil(object["secrets"])
+        XCTAssertEqual(decodedSettings, settings)
     }
 
-    func testGenerateAndDecode_withSettings_roundtrips() throws {
-        let settings = ["selectedModel": "whisper-large", "darkMode": "true"]
-        let encoded = try sut.generatePayload(secrets: [:], settings: settings)
-        let decoded = try sut.decodePayload(encoded)
-        XCTAssertEqual(decoded.settings["selectedModel"], "whisper-large")
-        XCTAssertEqual(decoded.settings["darkMode"], "true")
+    func testGeneratePayload_nonEmptySecrets_throwsSecretTransferUnsupported() {
+        // Arrange
+        let secrets = ["legacyCredential": "credential-value"]
+
+        // Act / Assert
+        XCTAssertThrowsError(try sut.generatePayload(secrets: secrets, settings: [:])) { error in
+            guard case ConfigTransferError.secretTransferUnsupported = error else {
+                XCTFail("Expected ConfigTransferError.secretTransferUnsupported, got \(error)")
+                return
+            }
+        }
     }
 
-    func testGenerateAndDecode_withBothSecretsAndSettings_roundtrips() throws {
-        let secrets = ["key1": "value1"]
-        let settings = ["pref1": "value2"]
-        let encoded = try sut.generatePayload(secrets: secrets, settings: settings)
-        let decoded = try sut.decodePayload(encoded)
-        XCTAssertEqual(decoded.secrets["key1"], "value1")
-        XCTAssertEqual(decoded.settings["pref1"], "value2")
+    func testGeneratePayload_unsupportedSettingKey_throwsUnsupportedSettings() {
+        // Arrange
+        let settings = ["unsupportedSetting": "placeholder"]
+
+        // Act / Assert
+        XCTAssertThrowsError(try sut.generatePayload(settings: settings)) { error in
+            guard case ConfigTransferError.unsupportedSettings(let keys) = error else {
+                XCTFail("Expected ConfigTransferError.unsupportedSettings, got \(error)")
+                return
+            }
+            XCTAssertEqual(keys, ["unsupportedSetting"])
+        }
     }
 
-    func testGenerateAndDecode_unicodeValues_roundtrips() throws {
-        let secrets = ["apiKey": "tëst-kéy-🔑"]
-        let encoded = try sut.generatePayload(secrets: secrets, settings: [:])
-        let decoded = try sut.decodePayload(encoded)
-        XCTAssertEqual(decoded.secrets["apiKey"], "tëst-kéy-🔑")
-    }
-
-    // MARK: - Obfuscation properties
-
-    func testGeneratedPayload_isValidBase64() throws {
-        let encoded = try sut.generatePayload(secrets: ["k": "v"], settings: [:])
-        XCTAssertNotNil(Data(base64Encoded: encoded), "Output should be valid base64")
-    }
-
-    func testGeneratedPayload_secretsAreObfuscated() throws {
-        let encoded = try sut.generatePayload(secrets: ["apiKey": "supersecret"], settings: [:])
-        let rawData = Data(base64Encoded: encoded)!
-        let rawString = String(data: rawData, encoding: .utf8) ?? ""
-        XCTAssertFalse(
-            rawString.contains("supersecret"),
-            "Obfuscated payload should not contain plaintext secrets"
+    func testDecodePayload_unsupportedVersion_throwsUnsupportedVersion() throws {
+        // Arrange
+        let encoded = try encodeCurrentPayload(
+            ConfigTransferPayload(
+                settings: ["selectedModel": "apple/local/SFSpeechRecognizer"],
+                version: 3
+            )
         )
+
+        // Act / Assert
+        XCTAssertThrowsError(try sut.decodePayload(encoded)) { error in
+            guard case ConfigTransferError.unsupportedVersion(let version) = error else {
+                XCTFail("Expected ConfigTransferError.unsupportedVersion, got \(error)")
+                return
+            }
+            XCTAssertEqual(version, 3)
+        }
     }
 
-    func testGeneratedPayload_isDeterministicForSameInput() throws {
-        // Two invocations of generatePayload produce different base64 strings because
-        // timestamps differ — but both should decode to the same secrets/settings.
-        let secrets = ["key": "value"]
-        let encoded1 = try sut.generatePayload(secrets: secrets, settings: [:])
-        let encoded2 = try sut.generatePayload(secrets: secrets, settings: [:])
-        let decoded1 = try sut.decodePayload(encoded1)
-        let decoded2 = try sut.decodePayload(encoded2)
-        XCTAssertEqual(decoded1.secrets["key"], decoded2.secrets["key"])
+    func testDecodePayload_unsupportedSettingKey_throwsUnsupportedSettings() throws {
+        // Arrange
+        let encoded = try encodeCurrentPayload(
+            ConfigTransferPayload(
+                settings: [
+                    "selectedModel": "apple/local/SFSpeechRecognizer",
+                    "unsupportedSetting": "placeholder"
+                ]
+            )
+        )
+
+        // Act / Assert
+        XCTAssertThrowsError(try sut.decodePayload(encoded)) { error in
+            guard case ConfigTransferError.unsupportedSettings(let keys) = error else {
+                XCTFail("Expected ConfigTransferError.unsupportedSettings, got \(error)")
+                return
+            }
+            XCTAssertEqual(keys, ["unsupportedSetting"])
+        }
     }
 
-    // MARK: - Decode errors
+    func testDecodePayload_legacyXORSettingsOnlyPayload_acceptsSupportedSettings() throws {
+        // Arrange
+        let settings = ["selectedModel": "apple/local/SFSpeechRecognizer"]
+        let encoded = try encodeLegacyXORPayload(settings: settings)
+
+        // Act
+        let decoded = try sut.decodePayload(encoded)
+
+        // Assert
+        XCTAssertEqual(decoded.version, 1)
+        XCTAssertTrue(decoded.secrets.isEmpty)
+        XCTAssertEqual(decoded.settings, settings)
+    }
+
+    func testDecodePayload_legacyXORSecretBearingPayload_throwsInsecureLegacyPayload() throws {
+        // Arrange
+        let encoded = try encodeLegacyXORPayload(
+            secrets: ["legacyCredential": "credential-value"],
+            settings: ["selectedModel": "apple/local/SFSpeechRecognizer"]
+        )
+
+        // Act / Assert
+        XCTAssertThrowsError(try sut.decodePayload(encoded)) { error in
+            guard case ConfigTransferError.insecureLegacyPayload = error else {
+                XCTFail("Expected ConfigTransferError.insecureLegacyPayload, got \(error)")
+                return
+            }
+        }
+    }
 
     func testDecodePayload_invalidBase64_throwsInvalidFormat() {
-        XCTAssertThrowsError(try sut.decodePayload("not valid base64!!!")) { error in
-            guard let transferError = error as? ConfigTransferError,
-                  case .invalidFormat = transferError else {
+        // Arrange
+        let encoded = "not valid base64!!!"
+
+        // Act / Assert
+        XCTAssertThrowsError(try sut.decodePayload(encoded)) { error in
+            guard case ConfigTransferError.invalidFormat = error else {
                 XCTFail("Expected ConfigTransferError.invalidFormat, got \(error)")
                 return
             }
         }
     }
 
-    func testDecodePayload_validBase64ButCorruptedData_throwsDecodingFailed() {
-        // "Hello World" base64 — decodes to bytes that, after deobfuscation, won't be valid JSON
-        XCTAssertThrowsError(try sut.decodePayload("SGVsbG8gV29ybGQ=")) { error in
-            guard let transferError = error as? ConfigTransferError,
-                  case .decodingFailed = transferError else {
+    func testDecodePayload_corruptBase64Payload_throwsDecodingFailed() {
+        // Arrange
+        let encoded = "SGVsbG8gV29ybGQ="
+
+        // Act / Assert
+        XCTAssertThrowsError(try sut.decodePayload(encoded)) { error in
+            guard case ConfigTransferError.decodingFailed = error else {
                 XCTFail("Expected ConfigTransferError.decodingFailed, got \(error)")
                 return
             }
         }
     }
 
-    func testDecodePayload_emptyString_throwsDecodingFailed() {
-        XCTAssertThrowsError(try sut.decodePayload("")) { error in
-            guard let transferError = error as? ConfigTransferError,
-                  case .decodingFailed = transferError else {
-                XCTFail("Expected ConfigTransferError.decodingFailed, got \(error)")
-                return
-            }
-        }
-    }
+    func testValidatePayloadFreshness_recentPayload_returnsTrue() {
+        // Arrange
+        let payload = ConfigTransferPayload(timestamp: Date(timeIntervalSinceNow: -30))
 
-    // MARK: - Freshness validation
+        // Act
+        let isFresh = sut.validatePayloadFreshness(payload, maxAge: 60)
 
-    func testValidatePayloadFreshness_newPayload_returnsTrue() {
-        let payload = ConfigTransferPayload()
-        XCTAssertTrue(sut.validatePayloadFreshness(payload))
+        // Assert
+        XCTAssertTrue(isFresh)
     }
 
     func testValidatePayloadFreshness_expiredPayload_returnsFalse() {
-        var payload = ConfigTransferPayload()
-        payload.timestamp = Date(timeIntervalSinceNow: -660) // 11 minutes ago
-        XCTAssertFalse(sut.validatePayloadFreshness(payload, maxAge: 600))
+        // Arrange
+        let payload = ConfigTransferPayload(timestamp: Date(timeIntervalSinceNow: -660))
+
+        // Act
+        let isFresh = sut.validatePayloadFreshness(payload, maxAge: 600)
+
+        // Assert
+        XCTAssertFalse(isFresh)
     }
 
-    func testValidatePayloadFreshness_justUnderMaxAge_returnsTrue() {
-        var payload = ConfigTransferPayload()
-        payload.timestamp = Date(timeIntervalSinceNow: -30) // 30 seconds ago
-        XCTAssertTrue(sut.validatePayloadFreshness(payload, maxAge: 60))
+    func testConfigTransferError_descriptions_areUserFacing() {
+        // Arrange
+        let errors: [ConfigTransferError] = [
+            .invalidFormat,
+            .payloadExpired,
+            .decodingFailed,
+            .secretTransferUnsupported,
+            .insecureLegacyPayload,
+            .unsupportedSettings(["unsupportedSetting"]),
+            .unsupportedVersion(3)
+        ]
+
+        // Act / Assert
+        for error in errors {
+            XCTAssertFalse(error.localizedDescription.isEmpty)
+        }
     }
 
-    func testValidatePayloadFreshness_justOverMaxAge_returnsFalse() {
-        var payload = ConfigTransferPayload()
-        payload.timestamp = Date(timeIntervalSinceNow: -30) // 30 seconds ago
-        XCTAssertFalse(sut.validatePayloadFreshness(payload, maxAge: 20))
+    private func encodeCurrentPayload(_ payload: ConfigTransferPayload) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return try encoder.encode(payload).base64EncodedString()
     }
 
-    func testValidatePayloadFreshness_defaultMaxAgeIs600Seconds() {
-        var fresh = ConfigTransferPayload()
-        fresh.timestamp = Date(timeIntervalSinceNow: -599) // just within default 10 min window
-        XCTAssertTrue(sut.validatePayloadFreshness(fresh))
-
-        var stale = ConfigTransferPayload()
-        stale.timestamp = Date(timeIntervalSinceNow: -601) // just outside default window
-        XCTAssertFalse(sut.validatePayloadFreshness(stale))
+    private func encodeLegacyXORPayload(
+        secrets: [String: String] = [:],
+        settings: [String: String] = [:]
+    ) throws -> String {
+        let payload = ConfigTransferPayload(
+            secrets: secrets,
+            settings: settings,
+            version: 1
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(payload)
+        return xorObfuscate(data).base64EncodedString()
     }
 
-    // MARK: - ConfigTransferError descriptions
-
-    func testConfigTransferError_invalidFormat_hasDescription() {
-        let error = ConfigTransferError.invalidFormat
-        XCTAssertNotNil(error.errorDescription)
-        XCTAssertFalse(error.errorDescription!.isEmpty)
-    }
-
-    func testConfigTransferError_payloadExpired_hasDescription() {
-        let error = ConfigTransferError.payloadExpired
-        XCTAssertNotNil(error.errorDescription)
-        XCTAssertFalse(error.errorDescription!.isEmpty)
-    }
-
-    func testConfigTransferError_decodingFailed_hasDescription() {
-        let error = ConfigTransferError.decodingFailed
-        XCTAssertNotNil(error.errorDescription)
-        XCTAssertFalse(error.errorDescription!.isEmpty)
+    private func xorObfuscate(_ data: Data) -> Data {
+        let key: [UInt8] = [0x53, 0x70, 0x65, 0x61, 0x6B, 0x21]
+        var result = Data(count: data.count)
+        for (index, byte) in data.enumerated() {
+            result[index] = byte ^ key[index % key.count]
+        }
+        return result
     }
 }

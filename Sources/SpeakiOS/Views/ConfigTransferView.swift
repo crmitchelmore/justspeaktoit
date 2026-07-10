@@ -6,13 +6,14 @@ import SwiftUI
 
 // MARK: - QR Code Generator View
 
-/// Displays a QR code containing encrypted configuration for transfer to another device.
+/// Displays a QR code containing settings for transfer to another device.
 struct QRCodeGeneratorView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var qrImage: UIImage?
     @State private var isGenerating = false
     @State private var error: String?
-    
+    @State private var settingCount = 0
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 24) {
@@ -27,11 +28,25 @@ struct QRCodeGeneratorView: View {
                         .frame(maxWidth: 250, maxHeight: 250)
                         .padding()
                         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
-                    
+
                     Text("Scan this code on your other device")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                    
+
+                    Text("This QR code transfers settings only. API keys are not included.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+
+                    Label("\(settingCount) settings", systemImage: "gearshape")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Text("Enter API keys manually, or sync them through iCloud Keychain.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+
                     Text("Code expires in 10 minutes")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
@@ -49,7 +64,7 @@ struct QRCodeGeneratorView: View {
                     ContentUnavailableView {
                         Label("No Configuration", systemImage: "qrcode")
                     } description: {
-                        Text("No API keys or settings to transfer")
+                        Text("No supported settings to transfer")
                     }
                 }
             }
@@ -64,77 +79,55 @@ struct QRCodeGeneratorView: View {
             .task { await generateQRCode() }
         }
     }
-    
+
     private func generateQRCode() async {
         isGenerating = true
         error = nil
-        
+
         do {
-            // Gather secrets and settings
-            let secrets = await gatherSecrets()
             let settings = gatherSettings()
-            
-            guard !secrets.isEmpty || !settings.isEmpty else {
+            settingCount = settings.count
+
+            guard !settings.isEmpty else {
                 qrImage = nil
                 isGenerating = false
                 return
             }
-            
-            let payload = try ConfigTransferManager.shared.generatePayload(
-                secrets: secrets,
-                settings: settings
-            )
-            
+
+            let payload = try ConfigTransferManager.shared.generatePayload(settings: settings)
+
             // Generate QR code image
             let context = CIContext()
             let filter = CIFilter.qrCodeGenerator()
             filter.message = Data(payload.utf8)
             filter.correctionLevel = "M"
-            
+
             guard let outputImage = filter.outputImage else {
                 throw ConfigTransferError.decodingFailed
             }
-            
+
             // Scale up for display
             let scale = 10.0
             let scaledImage = outputImage.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-            
+
             if let cgImage = context.createCGImage(scaledImage, from: scaledImage.extent) {
                 qrImage = UIImage(cgImage: cgImage)
             }
         } catch {
             self.error = error.localizedDescription
         }
-        
+
         isGenerating = false
     }
-    
-    private func gatherSecrets() async -> [String: String] {
-        var secrets: [String: String] = [:]
-        let storage = SecureStorage(
-            configuration: SecureStorageConfiguration(
-                service: "com.speak.ios.credentials"
-            )
-        )
-        
-        let knownKeys = ["deepgram.apiKey", "openrouter.apiKey", "openai.apiKey", "elevenlabs.apiKey"]
-        for key in knownKeys {
-            if let value = try? await storage.secret(identifier: key), !value.isEmpty {
-                secrets[key] = value
-            }
-        }
-        
-        return secrets
-    }
-    
+
     private func gatherSettings() -> [String: String] {
         var settings: [String: String] = [:]
-        let defaults = UserDefaults.standard
-        
-        if let model = defaults.string(forKey: "selectedModel") {
+
+        let model = AppSettings.shared.selectedModel
+        if !model.isEmpty {
             settings["selectedModel"] = model
         }
-        
+
         return settings
     }
 }
@@ -149,18 +142,18 @@ struct QRCodeScannerView: View {
     @State private var pendingPayload: ConfigTransferPayload?
     @State private var importError: String?
     @State private var isImporting = false
-    
+
     var body: some View {
         NavigationStack {
             ZStack {
                 // Camera preview
                 CameraPreviewView(session: scanner.session)
                     .ignoresSafeArea()
-                
+
                 // Overlay
                 VStack {
                     Spacer()
-                    
+
                     // Scanning indicator
                     if scanner.isScanning {
                         Text("Point camera at QR code")
@@ -168,14 +161,14 @@ struct QRCodeScannerView: View {
                             .padding()
                             .background(.ultraThinMaterial, in: Capsule())
                     }
-                    
+
                     Spacer()
-                    
+
                     // Frame guide
                     RoundedRectangle(cornerRadius: 16)
                         .strokeBorder(.white.opacity(0.5), lineWidth: 2)
                         .frame(width: 250, height: 250)
-                    
+
                     Spacer()
                     Spacer()
                 }
@@ -204,7 +197,10 @@ struct QRCodeScannerView: View {
                 }
             } message: {
                 if let payload = pendingPayload {
-                    Text("Import \(payload.secrets.count) API keys and \(payload.settings.count) settings?")
+                    Text(
+                        "Import \(payload.settings.count) settings? "
+                            + "API keys are not included in QR transfers."
+                    )
                 }
             }
             .alert("Import Error", isPresented: .init(
@@ -226,46 +222,39 @@ struct QRCodeScannerView: View {
             }
         }
     }
-    
+
     private func handleScannedCode(_ code: String) {
         scanner.stopScanning()
-        
+
         do {
             let payload = try ConfigTransferManager.shared.decodePayload(code)
-            
+
             guard ConfigTransferManager.shared.validatePayloadFreshness(payload) else {
                 throw ConfigTransferError.payloadExpired
             }
-            
+
             pendingPayload = payload
             showingImportConfirmation = true
         } catch {
             importError = error.localizedDescription
         }
     }
-    
+
     private func importPayload() async {
         guard let payload = pendingPayload else { return }
-        
+
         isImporting = true
-        
+
         do {
-            // Import secrets
-            let storage = SecureStorage(
-                configuration: SecureStorageConfiguration(
-                    service: "com.speak.ios.credentials"
-                )
-            )
-            
-            for (key, value) in payload.secrets {
-                try await storage.storeSecret(value, identifier: key)
-            }
-            
-            // Import settings
             for (key, value) in payload.settings {
-                UserDefaults.standard.set(value, forKey: key)
+                switch key {
+                case "selectedModel":
+                    AppSettings.shared.selectedModel = value
+                default:
+                    throw ConfigTransferError.unsupportedSettings([key])
+                }
             }
-            
+
             isImporting = false
             dismiss()
         } catch {
@@ -279,7 +268,7 @@ struct QRCodeScannerView: View {
 
 struct CameraPreviewView: UIViewRepresentable {
     let session: AVCaptureSession
-    
+
     func makeUIView(context: Context) -> UIView {
         let view = UIView(frame: .zero)
         let previewLayer = AVCaptureVideoPreviewLayer(session: session)
@@ -288,15 +277,15 @@ struct CameraPreviewView: UIViewRepresentable {
         context.coordinator.previewLayer = previewLayer
         return view
     }
-    
+
     func updateUIView(_ uiView: UIView, context: Context) {
         context.coordinator.previewLayer?.frame = uiView.bounds
     }
-    
+
     func makeCoordinator() -> Coordinator {
         Coordinator()
     }
-    
+
     class Coordinator {
         var previewLayer: AVCaptureVideoPreviewLayer?
     }
@@ -308,31 +297,31 @@ struct CameraPreviewView: UIViewRepresentable {
 class QRScannerCoordinator: NSObject, ObservableObject {
     @Published var scannedCode: String?
     @Published var isScanning = false
-    
+
     let session = AVCaptureSession()
     private let metadataOutput = AVCaptureMetadataOutput()
-    
+
     override init() {
         super.init()
         setupSession()
     }
-    
+
     private func setupSession() {
         guard let device = AVCaptureDevice.default(for: .video),
               let input = try? AVCaptureDeviceInput(device: device)
         else { return }
-        
+
         if session.canAddInput(input) {
             session.addInput(input)
         }
-        
+
         if session.canAddOutput(metadataOutput) {
             session.addOutput(metadataOutput)
             metadataOutput.setMetadataObjectsDelegate(self, queue: .main)
             metadataOutput.metadataObjectTypes = [.qr]
         }
     }
-    
+
     func startScanning() {
         scannedCode = nil
         isScanning = true
@@ -340,7 +329,7 @@ class QRScannerCoordinator: NSObject, ObservableObject {
             self?.session.startRunning()
         }
     }
-    
+
     func stopScanning() {
         isScanning = false
         Task.detached { [weak self] in
@@ -359,7 +348,7 @@ extension QRScannerCoordinator: AVCaptureMetadataOutputObjectsDelegate {
               metadataObject.type == .qr,
               let stringValue = metadataObject.stringValue
         else { return }
-        
+
         Task { @MainActor in
             scannedCode = stringValue
         }

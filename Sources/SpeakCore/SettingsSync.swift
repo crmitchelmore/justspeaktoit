@@ -543,80 +543,162 @@ public final class SettingsSync: @unchecked Sendable {
 
 // MARK: - QR Code Configuration Transfer
 
-/// Enables transferring API keys and configuration via QR code when iCloud sync is unavailable.
+/// Enables transferring non-secret settings via QR code when iCloud sync is unavailable.
 public struct ConfigTransferPayload: Codable {
-    public var version: Int = 1
+    public var version: Int
     public var timestamp: Date
     public var secrets: [String: String]
     public var settings: [String: String]
-    
-    public init(secrets: [String: String] = [:], settings: [String: String] = [:]) {
-        self.timestamp = Date()
+
+    private enum CodingKeys: String, CodingKey {
+        case version
+        case timestamp
+        case secrets
+        case settings
+    }
+
+    public init(
+        secrets: [String: String] = [:],
+        settings: [String: String] = [:],
+        version: Int = 2,
+        timestamp: Date = Date()
+    ) {
+        self.version = version
+        self.timestamp = timestamp
         self.secrets = secrets
         self.settings = settings
     }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = try container.decodeIfPresent(Int.self, forKey: .version) ?? 1
+        timestamp = try container.decode(Date.self, forKey: .timestamp)
+        secrets = try container.decodeIfPresent([String: String].self, forKey: .secrets) ?? [:]
+        settings = try container.decodeIfPresent([String: String].self, forKey: .settings) ?? [:]
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(version, forKey: .version)
+        try container.encode(timestamp, forKey: .timestamp)
+        if !secrets.isEmpty {
+            try container.encode(secrets, forKey: .secrets)
+        }
+        try container.encode(settings, forKey: .settings)
+    }
 }
 
-/// Handles encoding/decoding of configuration for QR transfer.
+/// Handles settings-only encoding/decoding for QR transfer.
 public final class ConfigTransferManager {
     public static let shared = ConfigTransferManager()
-    
+    private static let supportedSettingKeys: Set<String> = ["selectedModel"]
+
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
-    
+
     private init() {
         encoder.dateEncodingStrategy = .iso8601
         decoder.dateDecodingStrategy = .iso8601
     }
-    
-    /// Generates an encrypted payload string for QR code generation.
-    /// The payload is base64-encoded JSON with optional encryption.
-    public func generatePayload(secrets: [String: String], settings: [String: String]) throws -> String {
-        let payload = ConfigTransferPayload(secrets: secrets, settings: settings)
-        let jsonData = try encoder.encode(payload)
-        
-        // Simple obfuscation: XOR with a key then base64
-        // In production, use proper encryption with a user-provided PIN
-        let obfuscated = obfuscate(data: jsonData)
-        return obfuscated.base64EncodedString()
+
+    /// Generates a settings-only payload string for QR code generation.
+    public func generatePayload(settings: [String: String]) throws -> String {
+        try generatePayload(secrets: [:], settings: settings)
     }
-    
+
+    /// Generates a settings-only payload string for QR code generation.
+    /// Non-empty secrets are rejected because secure storage/iCloud Keychain are canonical for API keys.
+    public func generatePayload(secrets: [String: String], settings: [String: String]) throws -> String {
+        guard secrets.isEmpty else {
+            throw ConfigTransferError.secretTransferUnsupported
+        }
+
+        let unsupportedKeys = Self.unsupportedSettingKeys(in: settings)
+        guard unsupportedKeys.isEmpty else {
+            throw ConfigTransferError.unsupportedSettings(unsupportedKeys)
+        }
+
+        let payload = ConfigTransferPayload(settings: settings)
+        let jsonData = try encoder.encode(payload)
+        return jsonData.base64EncodedString()
+    }
+
     /// Decodes a payload string from QR code scan.
     public func decodePayload(_ encoded: String) throws -> ConfigTransferPayload {
         guard let data = Data(base64Encoded: encoded) else {
             throw ConfigTransferError.invalidFormat
         }
-        
-        let deobfuscated = deobfuscate(data: data)
-        do {
-            return try decoder.decode(ConfigTransferPayload.self, from: deobfuscated)
-        } catch {
-            throw ConfigTransferError.decodingFailed
+
+        if let payload = try? decoder.decode(ConfigTransferPayload.self, from: data) {
+            return try validatedCurrentPayload(payload)
         }
+
+        let legacyData = deobfuscate(data: data)
+        if let payload = try? decoder.decode(ConfigTransferPayload.self, from: legacyData) {
+            return try validatedLegacyPayload(payload)
+        }
+
+        throw ConfigTransferError.decodingFailed
     }
-    
+
     /// Validates that a payload is recent (within 10 minutes) to prevent replay.
     public func validatePayloadFreshness(_ payload: ConfigTransferPayload, maxAge: TimeInterval = 600) -> Bool {
         abs(payload.timestamp.timeIntervalSinceNow) < maxAge
     }
-    
-    // MARK: - Simple Obfuscation
-    // Note: This is NOT secure encryption. For sensitive data transfer,
-    // implement proper AES encryption with a user-provided PIN.
-    
-    private let obfuscationKey: [UInt8] = [0x53, 0x70, 0x65, 0x61, 0x6B, 0x21] // "Speak!"
-    
-    private func obfuscate(data: Data) -> Data {
+
+    private static func unsupportedSettingKeys(in settings: [String: String]) -> [String] {
+        settings.keys.filter { !supportedSettingKeys.contains($0) }.sorted()
+    }
+
+    // MARK: - Legacy XOR Decode
+
+    private let obfuscationKey: [UInt8] = [0x53, 0x70, 0x65, 0x61, 0x6B, 0x21]
+
+    private func xor(data: Data) -> Data {
         var result = Data(count: data.count)
         for (index, byte) in data.enumerated() {
             result[index] = byte ^ obfuscationKey[index % obfuscationKey.count]
         }
         return result
     }
-    
+
     private func deobfuscate(data: Data) -> Data {
         // XOR is its own inverse
-        obfuscate(data: data)
+        xor(data: data)
+    }
+
+    private func validatedCurrentPayload(_ payload: ConfigTransferPayload) throws -> ConfigTransferPayload {
+        guard payload.version == 2 else {
+            throw ConfigTransferError.unsupportedVersion(payload.version)
+        }
+
+        guard payload.secrets.isEmpty else {
+            throw ConfigTransferError.secretTransferUnsupported
+        }
+
+        let unsupportedKeys = Self.unsupportedSettingKeys(in: payload.settings)
+        guard unsupportedKeys.isEmpty else {
+            throw ConfigTransferError.unsupportedSettings(unsupportedKeys)
+        }
+
+        return payload
+    }
+
+    private func validatedLegacyPayload(_ payload: ConfigTransferPayload) throws -> ConfigTransferPayload {
+        guard payload.version == 1 else {
+            throw ConfigTransferError.unsupportedVersion(payload.version)
+        }
+
+        guard payload.secrets.isEmpty else {
+            throw ConfigTransferError.insecureLegacyPayload
+        }
+
+        let unsupportedKeys = Self.unsupportedSettingKeys(in: payload.settings)
+        guard unsupportedKeys.isEmpty else {
+            throw ConfigTransferError.unsupportedSettings(unsupportedKeys)
+        }
+
+        return payload
     }
 }
 
@@ -624,7 +706,11 @@ public enum ConfigTransferError: LocalizedError {
     case invalidFormat
     case payloadExpired
     case decodingFailed
-    
+    case secretTransferUnsupported
+    case insecureLegacyPayload
+    case unsupportedSettings([String])
+    case unsupportedVersion(Int)
+
     public var errorDescription: String? {
         switch self {
         case .invalidFormat:
@@ -633,6 +719,20 @@ public enum ConfigTransferError: LocalizedError {
             return "This configuration code has expired. Please generate a new one."
         case .decodingFailed:
             return "Failed to decode configuration. The code may be corrupted."
+        case .secretTransferUnsupported:
+            return """
+            QR transfer only supports non-secret settings. Enter API keys manually, or sync them with \
+            iCloud Keychain.
+            """
+        case .insecureLegacyPayload:
+            return """
+            This older QR code contains API keys and cannot be imported. Generate a new settings-only code, \
+            enter API keys manually, or sync them with iCloud Keychain.
+            """
+        case .unsupportedSettings(let keys):
+            return "This configuration code contains unsupported settings: \(keys.joined(separator: ", "))."
+        case .unsupportedVersion(let version):
+            return "This configuration code uses unsupported version \(version). Please generate a new code."
         }
     }
 }
@@ -734,7 +834,7 @@ public struct SyncStatus: Equatable, Sendable {
     public var preferredBackend: SyncBackend {
         availability.preferredBackend
     }
-    
+
     public init(
         iCloudKeychainAvailable: Bool = false,
         iCloudKVStoreAvailable: Bool = false,
@@ -755,7 +855,7 @@ public struct SyncStatus: Equatable, Sendable {
             transportAvailable: transportAvailable
         )
     }
-    
+
     /// Checks current sync availability
     public static func current(
         iCloudCloudKitAvailable: Bool = false,
@@ -767,7 +867,7 @@ public struct SyncStatus: Equatable, Sendable {
             iCloudCloudKitAvailable: iCloudCloudKitAvailable,
             transportAvailable: transportAvailable
         )
-        
+
         return SyncStatus(
             iCloudKeychainAvailable: iCloudKeychainAvailable,
             iCloudKVStoreAvailable: availability.iCloudKVStoreAvailable,

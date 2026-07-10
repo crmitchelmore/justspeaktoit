@@ -286,10 +286,10 @@ jobs:
             --provisioning_name "JustSpeakToIt iOS" \
             --force \
             --output_path build/profiles \
-            --filename ios-appstore.provisionprofile
+            --filename ios-appstore.mobileprovision
 
           security cms -D \
-            -i build/profiles/ios-appstore.provisionprofile \
+            -i build/profiles/ios-appstore.mobileprovision \
             -o "$RUNNER_TEMP/ios-appstore-profile.plist"
           /usr/libexec/PlistBuddy \
             -c "Print :Entitlements:com.apple.developer.icloud-container-identifiers" \
@@ -300,6 +300,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: refreshed-ios-appstore-profile
-          path: build/profiles/ios-appstore.provisionprofile
+          path: build/profiles/ios-appstore.mobileprovision
           if-no-files-found: error
           retention-days: 1

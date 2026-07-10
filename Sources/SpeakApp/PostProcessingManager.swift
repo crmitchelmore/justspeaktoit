@@ -105,6 +105,18 @@ final class PostProcessingManager: ObservableObject {
     }
 
     if Self.isDownloadedLocalPostProcessingModel(model) {
+      #if APP_STORE
+      let cleaned = Self.processLocally(rawText)
+      return .success(
+        .init(
+          original: rawText,
+          processed: cleaned,
+          response: nil,
+          systemPrompt: "Local offline transcript cleanup",
+          promptPayload: nil
+        )
+      )
+      #else
       do {
         let cleaned = try await LocalPostProcessingModelManager.shared.process(
           modelID: model,
@@ -131,6 +143,7 @@ final class PostProcessingManager: ObservableObject {
         log.error("Local post-processing failed: \(error.localizedDescription, privacy: .public)")
         return .failure(error)
       }
+      #endif
     }
 
     let userMessage = """

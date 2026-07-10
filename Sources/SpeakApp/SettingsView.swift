@@ -2,7 +2,6 @@ import SpeakCore
 import SpeakHotKeys
 import SpeakSync
 import AppKit
-import Sparkle
 import SwiftUI
 
 // swiftlint:disable file_length type_body_length
@@ -59,7 +58,9 @@ struct SettingsView: View {
   @EnvironmentObject private var audioDevices: AudioInputDeviceManager
   @ObservedObject private var updaterManager = UpdaterManager.shared
   @ObservedObject private var localModels = LocalModelManager.shared
+  #if !APP_STORE
   @ObservedObject private var sherpaRuntime = SherpaOnnxRuntimeManager.shared
+  #endif
   @ObservedObject private var localPostProcessingModels = LocalPostProcessingModelManager.shared
   private static let localeOptions: [LocaleOption] = [
     LocaleOption(displayName: "English (United States)", identifier: "en_US"),
@@ -99,16 +100,20 @@ struct SettingsView: View {
   @State private var huggingFaceRepoID: String = "argmaxinc/whisperkit-coreml"
   @State private var huggingFaceModelName: String = "tiny"
   @State private var huggingFaceImportError: String?
+  #if !APP_STORE
   @State private var streamingHuggingFaceRepoID: String =
     "csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26"
   @State private var streamingHuggingFaceModelName: String = "streaming-zipformer-en-2023-06-26"
   @State private var selectedRecommendedStreamingSourceID: String =
     LocalModelManager.recommendedStreamingModelSources.first?.id ?? ""
   @State private var streamingHuggingFaceImportError: String?
+  #endif
+  #if !APP_STORE
   @State private var localPostProcessingRepoID: String = "unsloth/Qwen3-0.6B-GGUF"
   @State private var localPostProcessingFilename: String = "Qwen3-0.6B-Q4_K_M.gguf"
   @State private var localPostProcessingSizeMB: String = "450"
   @State private var localPostProcessingImportError: String?
+  #endif
   private let openRouterKeyIdentifier = "openrouter.apiKey"
 
   private enum TranscriptionLocation: String, CaseIterable, Identifiable {
@@ -140,7 +145,9 @@ struct SettingsView: View {
 
   }
 
-  private let orderedLocalTranscriptionModes: [AppSettings.LocalTranscriptionMode] = [.streaming, .batch]
+  private let orderedLocalTranscriptionModes: [AppSettings.LocalTranscriptionMode] = {
+    DistributionChannel.current.supportsLocalModelRuntime ? [.streaming, .batch] : [.batch]
+  }()
   private let orderedRemoteTranscriptionModes: [RemoteTranscriptionMode] = [.streaming, .batch]
 
   private enum PostProcessingLocation: String, CaseIterable, Identifiable {
@@ -780,10 +787,16 @@ struct SettingsView: View {
               tint: .brandAccentWarm
             )
             .speakTooltip("Have Speak start alongside macOS so recording is always one shortcut away.")
-            Toggle("Automatically check for updates", isOn: $updaterManager.automaticallyChecksForUpdates)
-              .toggleStyle(.switch)
-              .tint(.brandAccentWarm)
-              .speakTooltip("Periodically check for new versions and notify you when updates are available.")
+            if updaterManager.supportsSelfUpdate {
+              Toggle("Automatically check for updates", isOn: $updaterManager.automaticallyChecksForUpdates)
+                .toggleStyle(.switch)
+                .tint(.brandAccentWarm)
+                .speakTooltip("Periodically check for new versions and notify you when updates are available.")
+            } else {
+              Label(updaterManager.updateStatusMessage, systemImage: "app.badge")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            }
             settingsToggle(
               "Show sidebar shortcut hints",
               isOn: settingsBinding(\AppSettings.showSidebarShortcutHints),
@@ -1116,16 +1129,20 @@ struct SettingsView: View {
           .accessibilityLabel("Transcription location picker")
 
           if settings.transcriptionMode == .localModel {
-            Picker("Local transcription type", selection: settingsBinding(\AppSettings.localTranscriptionMode)) {
-              ForEach(orderedLocalTranscriptionModes) { mode in
-                Text(transcriptionModeSegmentLabel(from: mode.displayName)).tag(mode)
+            if DistributionChannel.current.supportsLocalModelRuntime {
+              Picker("Local transcription type", selection: settingsBinding(\AppSettings.localTranscriptionMode)) {
+                ForEach(orderedLocalTranscriptionModes) { mode in
+                  Text(transcriptionModeSegmentLabel(from: mode.displayName)).tag(mode)
+                }
               }
+              .modifier(TranscriptionModeSegmentedPickerStyle())
+              .speakTooltip(
+                "Choose Local Batch for offline transcription after recording, or Local Streaming for live local text."
+              )
+              .accessibilityLabel("Local transcription type picker")
+            } else {
+              localRuntimeUnavailableNote
             }
-            .modifier(TranscriptionModeSegmentedPickerStyle())
-            .speakTooltip(
-              "Choose Local Batch for offline transcription after recording, or Local Streaming for live local text."
-            )
-            .accessibilityLabel("Local transcription type picker")
           } else {
             Picker("Remote transcription type", selection: remoteTranscriptionModeBinding) {
               ForEach(orderedRemoteTranscriptionModes) { mode in
@@ -1474,25 +1491,42 @@ struct SettingsView: View {
             )
 
             Text(
-              """
-              Local Batch and Local Streaming are separate from Apple Speech and cloud providers. \
-              Both stay local-only; Local Batch uses downloaded WhisperKit/Core ML models, while \
-              Local Streaming needs a dedicated streaming ASR runtime.
-              """
+              {
+                #if APP_STORE
+                return """
+                Local transcription is separate from Apple Speech and cloud providers. \
+                Local Batch uses downloaded WhisperKit/Core ML models and stays local-only.
+                """
+                #else
+                return """
+                Local Batch and Local Streaming are separate from Apple Speech and cloud providers. \
+                Both stay local-only; Local Batch uses downloaded WhisperKit/Core ML models, while \
+                Local Streaming needs a dedicated streaming ASR runtime.
+                """
+                #endif
+              }()
             )
             .font(.caption)
             .foregroundStyle(.secondary)
+
+            if !DistributionChannel.current.supportsLocalModelRuntime {
+              localRuntimeUnavailableNote
+            }
 
             localModelQuickStart
             if settings.localTranscriptionMode == .batch {
               selectedLocalModelCallout
             }
 
+            #if APP_STORE
+            huggingFaceModelImport
+            #else
             if settings.localTranscriptionMode == .batch {
               huggingFaceModelImport
             } else {
               localStreamingStatus
             }
+            #endif
 
             if settings.localTranscriptionMode == .batch {
               if localTranscriptionOptions.isEmpty {
@@ -1613,6 +1647,18 @@ struct SettingsView: View {
         title: "Choose Local mode",
         detail: "This switches recordings away from cloud providers."
       )
+      #if APP_STORE
+      localModelStep(
+        number: "2",
+        title: "Download a local batch model",
+        detail: "WhisperKit/Core ML models run locally after recording stops."
+      )
+      localModelStep(
+        number: "3",
+        title: "Record normally",
+        detail: "Speak transcribes after recording stops, offline on this Mac."
+      )
+      #else
       localModelStep(
         number: "2",
         title: settings.localTranscriptionMode == .batch
@@ -1629,12 +1675,28 @@ struct SettingsView: View {
           ? "Speak transcribes after recording stops, offline on this Mac."
           : "Once a compatible streaming runtime is connected, Speak will stream partial text locally."
       )
+      #endif
     }
     .padding(12)
     .background(
       RoundedRectangle(cornerRadius: 12, style: .continuous)
         .fill(Color.green.opacity(0.08))
     )
+  }
+
+  private var localRuntimeUnavailableNote: some View {
+    channelAvailabilityNote(
+      "Downloaded local runtimes are not available in this build. Local Batch and built-in cleanup remain available."
+    )
+  }
+
+  private func channelAvailabilityNote(_ text: String) -> some View {
+    Label(
+      text,
+      systemImage: "info.circle"
+    )
+    .font(.caption)
+    .foregroundStyle(.secondary)
   }
 
   private func localModelStep(number: String, title: String, detail: String) -> some View {
@@ -1715,6 +1777,7 @@ struct SettingsView: View {
     )
   }
 
+  #if !APP_STORE
   private var localStreamingStatus: some View {
     VStack(alignment: .leading, spacing: 12) {
       HStack(alignment: .top, spacing: 10) {
@@ -2031,7 +2094,6 @@ struct SettingsView: View {
       return "Experimental prerelease runtime. Requires Python 3 and installs sherpa-onnx locally."
     }
   }
-
   private func localStreamingInstallLabel(for source: LocalStreamingModelSource) -> String {
     switch sherpaRuntime.modelStates[source.id] ?? .notInstalled {
     case .installed:
@@ -2051,6 +2113,7 @@ struct SettingsView: View {
     }
     return "~\(size) MB"
   }
+  #endif
 
   @ViewBuilder
   private var selectedLocalModelCallout: some View {
@@ -2138,10 +2201,14 @@ struct SettingsView: View {
     let builtIn = ModelCatalog.postProcessing.filter {
       PostProcessingManager.isLocalPostProcessingModel($0.id)
     }
+    #if APP_STORE
+    return builtIn
+    #else
     let downloaded = localPostProcessingModels.availableModels
       .filter { localPostProcessingModels.isInstalled($0.id) }
       .map(\.option)
     return builtIn + downloaded
+    #endif
   }
 
   private var cloudPostProcessingOptions: [ModelCatalog.Option] {
@@ -2159,10 +2226,12 @@ struct SettingsView: View {
       && !huggingFaceModelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 
+  #if !APP_STORE
   private var canAddStreamingModelSource: Bool {
     streamingHuggingFaceRepoID.split(separator: "/").count == 2
       && !streamingHuggingFaceModelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
+  #endif
 
   private var isCustomBatchTranscriptionModel: Bool {
     let model = settings.batchTranscriptionModel.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2172,11 +2241,13 @@ struct SettingsView: View {
     }
   }
 
+  #if !APP_STORE
   private var selectedRecommendedStreamingSource: LocalStreamingModelSource? {
     LocalModelManager.recommendedStreamingModelSources.first {
       $0.id == selectedRecommendedStreamingSourceID
     } ?? LocalModelManager.recommendedStreamingModelSources.first
   }
+  #endif
 
   private func openHuggingFaceModelSearch() {
     guard let url = URL(
@@ -2185,6 +2256,7 @@ struct SettingsView: View {
     NSWorkspace.shared.open(url)
   }
 
+  #if !APP_STORE
   private func openLocalStreamingModelSearch() {
     guard let url = URL(
       string: "https://huggingface.co/models?pipeline_tag=automatic-speech-recognition&sort=downloads"
@@ -2192,6 +2264,7 @@ struct SettingsView: View {
     ) else { return }
     NSWorkspace.shared.open(url)
   }
+  #endif
 
   private func installHuggingFaceModel() {
     do {
@@ -2206,6 +2279,7 @@ struct SettingsView: View {
     }
   }
 
+  #if !APP_STORE
   private func addStreamingModelSource() {
     do {
       _ = try localModels.addStreamingModelSource(
@@ -2233,6 +2307,7 @@ struct SettingsView: View {
       $0.id != excludedID && (sherpaRuntime.modelStates[$0.id] ?? .notInstalled) == .installed
     }?.id
   }
+  #endif
 
   private func firstInstalledLocalTranscriptionModelID(excluding excludedID: String? = nil) -> String? {
     localModels.availableModels.first {
@@ -2946,6 +3021,16 @@ struct SettingsView: View {
           .fill(Color.green.opacity(0.12))
       )
 
+      #if APP_STORE
+      Text(
+        """
+        Local post-processing is separate from OpenRouter and cloud LLMs. Use the built-in rules \
+        model for instant cleanup with no downloaded runtime.
+        """
+      )
+      .font(.caption)
+      .foregroundStyle(.secondary)
+      #else
       Text(
         """
         Local post-processing is separate from OpenRouter and cloud LLMs. Use the built-in rules \
@@ -2954,6 +3039,11 @@ struct SettingsView: View {
       )
       .font(.caption)
       .foregroundStyle(.secondary)
+      #endif
+
+      if !DistributionChannel.current.supportsLocalModelRuntime {
+        localRuntimeUnavailableNote
+      }
 
       Label(
         """
@@ -2966,10 +3056,21 @@ struct SettingsView: View {
       .foregroundStyle(.secondary)
 
       localPostProcessingQuickStart
+      #if !APP_STORE
       if !localPostProcessingModels.runtimeState.isInstalled {
         localPostProcessingRuntimeStatus
       }
+      #endif
 
+      #if APP_STORE
+      ModelPicker(
+        title: "Local Post-processing Model",
+        help: "Used for local-only cleanup after transcription. Built-in rules need no runtime.",
+        options: localPostProcessingOptions,
+        value: localPostProcessingModelBinding,
+        allowsCustom: false
+      )
+      #else
       ModelPicker(
         title: "Local Post-processing Model",
         help: """
@@ -2980,16 +3081,21 @@ struct SettingsView: View {
         value: localPostProcessingModelBinding,
         allowsCustom: false
       )
+      #endif
 
+      #if !APP_STORE
       localPostProcessingManualImport
+      #endif
 
       VStack(spacing: 10) {
         ForEach(ModelCatalog.postProcessing.filter { $0.id == LocalPostProcessingModelManager.builtInRulesModelID }) { option in
           builtInLocalPostProcessingRow(option)
         }
+        #if !APP_STORE
         ForEach(localPostProcessingModels.availableModels) { model in
           localPostProcessingModelRow(model)
         }
+        #endif
       }
     }
     .padding(12)
@@ -3010,6 +3116,18 @@ struct SettingsView: View {
         title: "Choose Local",
         detail: "This switches transcript cleanup away from OpenRouter."
       )
+      #if APP_STORE
+      localModelStep(
+        number: "2",
+        title: "Use the built-in rules model",
+        detail: "The built-in rules model stays available with no download or runtime."
+      )
+      localModelStep(
+        number: "3",
+        title: "Record normally",
+        detail: "Speak runs built-in cleanup locally after transcription."
+      )
+      #else
       localModelStep(
         number: "2",
         title: "Download a local LLM model",
@@ -3023,6 +3141,7 @@ struct SettingsView: View {
         title: "Record normally",
         detail: "Speak runs cleanup locally after transcription. Downloaded models use the app-owned llama.cpp runtime."
       )
+      #endif
     }
     .padding(12)
     .background(
@@ -3031,6 +3150,7 @@ struct SettingsView: View {
     )
   }
 
+  #if !APP_STORE
   private var localPostProcessingRuntimeStatus: some View {
     HStack(alignment: .top, spacing: 12) {
       Image(systemName: localPostProcessingRuntimeIcon)
@@ -3113,6 +3233,7 @@ struct SettingsView: View {
         .fill(Color(nsColor: .controlBackgroundColor))
     )
   }
+  #endif
 
   private func builtInLocalPostProcessingRow(_ option: ModelCatalog.Option) -> some View {
     let isSelected = PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel)
@@ -3156,6 +3277,7 @@ struct SettingsView: View {
     }
   }
 
+  #if !APP_STORE
   // swiftlint:disable:next function_body_length
   private func localPostProcessingModelRow(_ model: LocalPostProcessingModel) -> some View {
       let state = localPostProcessingModels.installState(for: model.id)
@@ -3279,6 +3401,7 @@ struct SettingsView: View {
       localPostProcessingImportError = error.localizedDescription
     }
   }
+  #endif
 
   private var apiKeySettings: some View {
     ScrollViewReader { proxy in
@@ -4108,19 +4231,31 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 12) {
           ForEach(PermissionType.allCases) { permission in
             let status = environment.permissions.status(for: permission)
-            HStack(spacing: 12) {
-              Label(permission.displayName, systemImage: permission.systemIconName)
-              Spacer()
-              Text(statusLabel(for: status))
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(statusColor(status).opacity(0.15), in: Capsule())
-                .foregroundStyle(statusColor(status))
-              Button("Request") {
-                Task { await environment.permissions.request(permission) }
+            VStack(alignment: .leading, spacing: 8) {
+              HStack(spacing: 12) {
+                Label(permission.displayName, systemImage: permission.systemIconName)
+                Spacer()
+                Text(statusLabel(for: status))
+                  .padding(.horizontal, 8)
+                  .padding(.vertical, 4)
+                  .background(statusColor(status).opacity(0.15), in: Capsule())
+                  .foregroundStyle(statusColor(status))
+                Button("Open Settings") {
+                  openSettings(for: permission)
+                }
+                .buttonStyle(.bordered)
+                .speakTooltip("Open the macOS privacy pane for \(permission.displayName).")
+                Button("Request") {
+                  Task { await environment.permissions.request(permission) }
+                }
+                .buttonStyle(.bordered)
+                .speakTooltip("Ask macOS to prompt again for \(permission.displayName) access.")
               }
-              .buttonStyle(.bordered)
-              .speakTooltip("Ask macOS to prompt again for \(permission.displayName) access.")
+
+              if shouldShowManualSetupHelp(for: permission, status: status),
+                 let steps = permission.manualSetupSteps {
+                permissionManualSetupNote(for: permission, steps: steps)
+              }
             }
           }
 
@@ -4142,6 +4277,31 @@ struct SettingsView: View {
     case .restricted: return "Restricted"
     case .notDetermined: return "Pending"
     }
+  }
+
+  private func openSettings(for permission: PermissionType) {
+    NSWorkspace.shared.open(permission.settingsURL)
+  }
+
+  private func shouldShowManualSetupHelp(for permission: PermissionType, status: PermissionStatus) -> Bool {
+    guard permission.manualSetupSteps != nil else { return false }
+    if status == .denied { return true }
+    // Only Accessibility lacks an automatic prompt in sandboxed (App Store) builds.
+    // Input Monitoring still prompts via CGRequestListenEventAccess even when sandboxed,
+    // so it only needs manual guidance once the user has actively denied it (handled above).
+    return permission == .accessibility
+      && !DistributionChannel.current.supportsAutomaticAccessibilityPrompt
+  }
+
+  private func permissionManualSetupNote(for permission: PermissionType, steps: [String]) -> some View {
+    let cannotAutoPrompt = permission == .accessibility
+      && !DistributionChannel.current.supportsAutomaticAccessibilityPrompt
+    let intro = if cannotAutoPrompt {
+      "This build cannot show the automatic prompt here. Add \(permission.displayName) manually:"
+    } else {
+      "Add \(permission.displayName) manually:"
+    }
+    return channelAvailabilityNote("\(intro) \(steps.joined(separator: " "))")
   }
 
   private func volumeLabel(for volume: Float) -> String {
@@ -4186,10 +4346,12 @@ struct SettingsView: View {
           VStack(alignment: .leading, spacing: 8) {
             Label("Version \(appVersion)", systemImage: "tag")
             Label("Build \(buildNumber)", systemImage: "hammer")
-            if let latest = updaterManager.latestVersion {
+            if updaterManager.supportsSelfUpdate, let latest = updaterManager.latestVersion {
               Label("Latest \(latest)", systemImage: "arrow.up.circle")
+            } else if updaterManager.supportsSelfUpdate {
+              Label(updaterManager.updateStatusMessage, systemImage: "arrow.up.circle")
             } else {
-              Label("Latest unknown", systemImage: "arrow.up.circle")
+              Label(updaterManager.updateStatusMessage, systemImage: "app.badge")
             }
 
             if let commit = commitRef, !commit.isEmpty {
@@ -4197,6 +4359,7 @@ struct SettingsView: View {
             }
             Label(buildType, systemImage: buildType == "Release" ? "checkmark.seal" : "wrench.and.screwdriver")
               .foregroundStyle(buildType == "Release" ? .green : .orange)
+            Label("Distribution: \(DistributionChannel.current.displayName)", systemImage: "shippingbox")
           }
           .font(.callout)
           .foregroundStyle(.secondary)
@@ -4204,18 +4367,22 @@ struct SettingsView: View {
           Divider()
 
           HStack(spacing: 12) {
-            Button {
-              updaterManager.checkForUpdates()
-            } label: {
-              Label("Check for Updates", systemImage: "arrow.triangle.2.circlepath")
+            if updaterManager.supportsSelfUpdate {
+              Button {
+                updaterManager.checkForUpdates()
+              } label: {
+                Label("Check for Updates", systemImage: "arrow.triangle.2.circlepath")
+              }
+              .buttonStyle(.bordered)
+              .disabled(!updaterManager.canCheckForUpdates)
             }
-            .buttonStyle(.bordered)
-            .disabled(!updaterManager.canCheckForUpdates)
 
-            Link(destination: URL(string: "https://github.com/crmitchelmore/justspeaktoit/releases")!) {
-              Label("View Releases", systemImage: "shippingbox")
+            if updaterManager.allowsCrossChannelMessaging {
+              Link(destination: URL(string: "https://github.com/crmitchelmore/justspeaktoit/releases")!) {
+                Label("View Releases", systemImage: "shippingbox")
+              }
+              .buttonStyle(.bordered)
             }
-            .buttonStyle(.bordered)
           }
         }
       }
@@ -4272,16 +4439,20 @@ struct SettingsView: View {
           TipJarView()
             .frame(maxWidth: .infinity)
 
-          HStack(spacing: 12) {
-            Link(destination: URL(string: "https://github.com/sponsors/crmitchelmore")!) {
-              Label("GitHub Sponsors", systemImage: "heart")
-            }
-            .buttonStyle(.bordered)
+          // In-app StoreKit tips work in App Store builds; external donation
+          // links are only shown where cross-channel messaging is permitted.
+          if DistributionChannel.current.allowsCrossChannelMessaging {
+            HStack(spacing: 12) {
+              Link(destination: URL(string: "https://github.com/sponsors/crmitchelmore")!) {
+                Label("GitHub Sponsors", systemImage: "heart")
+              }
+              .buttonStyle(.bordered)
 
-            Link(destination: URL(string: "https://ko-fi.com/crmitchelmore")!) {
-              Label("Ko-fi", systemImage: "cup.and.saucer")
+              Link(destination: URL(string: "https://ko-fi.com/crmitchelmore")!) {
+                Label("Ko-fi", systemImage: "cup.and.saucer")
+              }
+              .buttonStyle(.bordered)
             }
-            .buttonStyle(.bordered)
           }
         }
       }
@@ -4293,7 +4464,14 @@ struct SettingsView: View {
             .foregroundStyle(.secondary)
 
           VStack(alignment: .leading, spacing: 6) {
-            dependencyRow(name: "Sparkle", version: "2.6.0+", url: "https://sparkle-project.org", description: "Auto-update framework")
+            if updaterManager.supportsSelfUpdate {
+              dependencyRow(
+                name: "Sparkle",
+                version: "2.6.0+",
+                url: "https://sparkle-project.org",
+                description: "Auto-update framework"
+              )
+            }
             dependencyRow(name: "SwiftLint", version: "0.55.0+", url: "https://github.com/realm/SwiftLint", description: "Swift linting tool")
             dependencyRow(name: "SwiftFormat", version: "0.53.6+", url: "https://github.com/nicklockwood/SwiftFormat", description: "Code formatting")
           }

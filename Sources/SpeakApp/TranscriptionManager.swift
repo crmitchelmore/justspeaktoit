@@ -269,15 +269,20 @@ final class TranscriptionManager: ObservableObject {
   }
 
   private func liveTranscriptionModelForCurrentMode() throws -> String {
-    try Self.resolvedLiveTranscriptionModel(
+    #if APP_STORE
+    let availableStreamingSourceIDs: Set<String> = []
+    #else
+    let availableStreamingSourceIDs = Set(
+      LocalModelManager.recommendedStreamingModelSources.map(\.id)
+        + LocalModelManager.shared.streamingModelSources.map(\.id)
+    )
+    #endif
+    return try Self.resolvedLiveTranscriptionModel(
       transcriptionMode: appSettings.transcriptionMode,
       localTranscriptionMode: appSettings.localTranscriptionMode,
       localStreamingModelSource: appSettings.localStreamingModelSource,
       liveTranscriptionModel: appSettings.liveTranscriptionModel,
-      availableStreamingSourceIDs: Set(
-        LocalModelManager.recommendedStreamingModelSources.map(\.id)
-          + LocalModelManager.shared.streamingModelSources.map(\.id)
-      )
+      availableStreamingSourceIDs: availableStreamingSourceIDs
     )
   }
 
@@ -288,6 +293,11 @@ final class TranscriptionManager: ObservableObject {
     liveTranscriptionModel: String,
     availableStreamingSourceIDs: Set<String>
   ) throws -> String {
+    #if APP_STORE
+    if transcriptionMode == .localModel, localTranscriptionMode == .streaming {
+      return liveTranscriptionModel
+    }
+    #endif
     guard transcriptionMode == .localModel, localTranscriptionMode == .streaming else {
       return liveTranscriptionModel
     }
@@ -696,6 +706,7 @@ final class UnsupportedLocalLiveTranscriber: LiveTranscriptionController {
   }
 }
 
+#if !APP_STORE
 @MainActor
 // swiftlint:disable type_body_length
 final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
@@ -1061,6 +1072,7 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
   }
 }
 // swiftlint:enable type_body_length
+#endif
 
 struct RemoteAudioTranscriber: BatchTranscriptionClient {
   let client: OpenRouterAPIClient
@@ -3806,7 +3818,9 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   private var cartesiaController: CartesiaLiveController
   private var gladiaController: GladiaLiveController
   private var openAIRealtimeController: OpenAIRealtimeLiveController
+  #if !APP_STORE
   private var sherpaOnnxController: SherpaOnnxLiveController
+  #endif
   private var unsupportedLocalLiveController: UnsupportedLocalLiveTranscriber
   private var currentLanguage: String?
   private var currentModel: String?
@@ -3881,12 +3895,14 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       audioDeviceManager: audioDeviceManager,
       secureStorage: secureStorage
     )
+    #if !APP_STORE
     sherpaOnnxController = SherpaOnnxLiveController(
       appSettings: appSettings,
       permissionsManager: permissionsManager,
       audioDeviceManager: audioDeviceManager,
       runtimeManager: SherpaOnnxRuntimeManager.shared
     )
+    #endif
     unsupportedLocalLiveController = UnsupportedLocalLiveTranscriber()
     applyDelegateAndConfiguration()
     startObservingLifecycle()
@@ -3936,6 +3952,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     lastStopDate = nowProvider()
   }
 
+  // swiftlint:disable:next cyclomatic_complexity
   private func controller(for model: String) -> any LiveTranscriptionController {
     if model.hasPrefix("assemblyai/") { return assemblyAIController }
     if model.hasPrefix("deepgram/") { return deepgramController }
@@ -3948,13 +3965,17 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     // OpenAI's only live transcription transport is the Realtime WebSocket
     // API. So any openai/* live model is handled by openAIRealtimeController.
     if model.hasPrefix("openai/") { return openAIRealtimeController }
+    #if !APP_STORE
     if model.hasPrefix("local/streaming/") { return sherpaOnnxController }
+    #else
+    if model.hasPrefix("local/streaming/") { return unsupportedLocalLiveController }
+    #endif
     if ModelRouting.family(for: model).isDownloadedLocal { return unsupportedLocalLiveController }
     return nativeController
   }
 
   private func applyDelegateAndConfiguration() {
-    let controllers: [any LiveTranscriptionController] = [
+    var controllers: [any LiveTranscriptionController] = [
       nativeController,
       deepgramController,
       modulateController,
@@ -3964,9 +3985,11 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       cartesiaController,
       gladiaController,
       openAIRealtimeController,
-      sherpaOnnxController,
       unsupportedLocalLiveController
     ]
+    #if !APP_STORE
+    controllers.insert(sherpaOnnxController, at: controllers.count - 1)
+    #endif
     let model = currentModel ?? appSettings.liveTranscriptionModel
     for controller in controllers {
       controller.delegate = delegate
@@ -4038,12 +4061,14 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       audioDeviceManager: audioDeviceManager,
       secureStorage: secureStorage
     )
+    #if !APP_STORE
     sherpaOnnxController = SherpaOnnxLiveController(
       appSettings: appSettings,
       permissionsManager: permissionsManager,
       audioDeviceManager: audioDeviceManager,
       runtimeManager: SherpaOnnxRuntimeManager.shared
     )
+    #endif
     unsupportedLocalLiveController = UnsupportedLocalLiveTranscriber()
     invalidateBeforeNextStart = false
     lastStopDate = nil

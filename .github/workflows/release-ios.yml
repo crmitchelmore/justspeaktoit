@@ -303,7 +303,7 @@ jobs:
           api_key_path = ARGV.fetch(0)
           bundle_identifier = "com.justspeaktoit.ios"
           container_identifier = "iCloud.com.justspeaktoit.ios"
-          token = Spaceship::ConnectAPI::Token.create(api_key_path: api_key_path)
+          token = Spaceship::ConnectAPI::Token.from_json_file(api_key_path)
           client = Spaceship::ConnectAPI::Provisioning::Client.new(token: token)
 
           bundle_id = Spaceship::ConnectAPI::BundleId.find(bundle_identifier, client: client)

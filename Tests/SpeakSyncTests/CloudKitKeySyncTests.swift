@@ -54,4 +54,35 @@ final class CloudKitKeySyncTests: XCTestCase {
         XCTAssertEqual(record.recordID.recordName, EncryptedSecretRecordMapper.recordName(for: secret.identifier))
         XCTAssertEqual(mapped, secret)
     }
+
+    func testDeriveKeyOffMainActor_MatchesSynchronousDerivation() async {
+        let salt = Data("stable-test-salt".utf8)
+        let expected = EncryptedSecretCrypto.deriveKey(
+            passphrase: "correct horse battery staple",
+            salt: salt
+        )
+        let actual = await EncryptedSecretCrypto.deriveKeyOffMainActor(
+            passphrase: "correct horse battery staple",
+            salt: salt
+        )
+
+        XCTAssertEqual(
+            expected.withUnsafeBytes { Data($0) },
+            actual.withUnsafeBytes { Data($0) }
+        )
+    }
+
+    func testPendingMutation_CodableRoundTripsDeletion() throws {
+        let mutation = PendingKeySyncMutation(
+            operationID: UUID(uuidString: "E30F13E5-8DAB-4D46-8BD1-5566B3D72893")!,
+            identifier: "openai.apiKey",
+            updatedAt: Date(timeIntervalSince1970: 1_720_000_002),
+            kind: .deletion
+        )
+
+        let encoded = try JSONEncoder().encode(mutation)
+        let decoded = try JSONDecoder().decode(PendingKeySyncMutation.self, from: encoded)
+
+        XCTAssertEqual(decoded, mutation)
+    }
 }

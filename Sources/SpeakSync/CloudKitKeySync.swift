@@ -77,6 +77,7 @@ public enum CloudKitKeySyncError: LocalizedError, Equatable {
     case malformedRecord
     case passphraseTooShort(minimumLength: Int)
     case randomGenerationFailed
+    case notConfigured
 
     public var errorDescription: String? {
         switch self {
@@ -94,6 +95,8 @@ public enum CloudKitKeySyncError: LocalizedError, Equatable {
             return "Use an API-key sync passphrase with at least \(minimumLength) characters."
         case .randomGenerationFailed:
             return "Failed to generate secure random bytes for API-key sync."
+        case .notConfigured:
+            return "API-key sync has not finished configuring secure storage."
         }
     }
 }
@@ -124,6 +127,13 @@ public enum EncryptedSecretCrypto {
             keyByteCount: keyByteCount
         )
         return SymmetricKey(data: derived)
+    }
+
+    static func deriveKeyOffMainActor(passphrase: String, salt: Data) async -> SymmetricKey {
+        let keyData = await Task.detached(priority: .userInitiated) {
+            deriveKey(passphrase: passphrase, salt: salt).withUnsafeBytes { Data($0) }
+        }.value
+        return SymmetricKey(data: keyData)
     }
 
     private static func pbkdf2SHA256(
@@ -333,6 +343,19 @@ private struct KeySyncFetchResult {
     var records: [CKRecord]
     var deletedIDs: [CKRecord.ID]
     var serverChangeToken: CKServerChangeToken?
+    var moreComing: Bool
+}
+
+struct PendingKeySyncMutation: Codable, Equatable, Sendable {
+    enum Kind: String, Codable, Sendable {
+        case update
+        case deletion
+    }
+
+    let operationID: UUID
+    let identifier: String
+    let updatedAt: Date
+    let kind: Kind
 }
 
 private final class KeySyncFetchAccumulator: @unchecked Sendable {
@@ -340,6 +363,8 @@ private final class KeySyncFetchAccumulator: @unchecked Sendable {
     private var records: [CKRecord] = []
     private var deletedIDs: [CKRecord.ID] = []
     private var serverChangeToken: CKServerChangeToken?
+    private var moreComing = false
+    private var errors: [Error] = []
 
     func append(record: CKRecord) {
         lock.withLock { records.append(record) }
@@ -354,14 +379,30 @@ private final class KeySyncFetchAccumulator: @unchecked Sendable {
         lock.withLock { serverChangeToken = token }
     }
 
-    func result() -> KeySyncFetchResult {
-        lock.withLock {
-            KeySyncFetchResult(
-                records: records,
-                deletedIDs: deletedIDs,
-                serverChangeToken: serverChangeToken
+    func updateMoreComing(_ value: Bool) {
+        lock.withLock { moreComing = value }
+    }
+
+    func append(error: Error) {
+        lock.withLock { errors.append(error) }
+    }
+
+    func result() throws -> KeySyncFetchResult {
+        let snapshot = lock.withLock {
+            (
+                errors.first,
+                KeySyncFetchResult(
+                    records: records,
+                    deletedIDs: deletedIDs,
+                    serverChangeToken: serverChangeToken,
+                    moreComing: moreComing
+                )
             )
         }
+        if let error = snapshot.0 {
+            throw error
+        }
+        return snapshot.1
     }
 }
 
@@ -388,29 +429,77 @@ public final class CloudKitKeySync: ObservableObject {
     private static let syncTokenKey = "speak.keysync.serverChangeToken"
     private static let subscriptionCreatedKey = "speak.keysync.subscriptionCreated"
     private static let zoneCreatedKey = "speak.keysync.zoneCreated"
+    private static let accountIdentifierKey = "speak.keysync.accountIdentifier"
+    private static let pendingMutationPrefix = "speak.keysync.pending."
     private static let localDerivedKeyIdentifier = "cloudkitKeySync.derivedKey"
     private static let localUpdatedPrefix = "speak.keysync.localUpdatedAt."
     private static let subscriptionID = "encrypted-secret-changes"
     private static let localUploadDebounceNanoseconds: UInt64 = 750_000_000
+    private static let localUploadInitialRetryNanoseconds: UInt64 = 2_000_000_000
+    private static let localUploadMaximumRetryNanoseconds: UInt64 = 60_000_000_000
+
+    private struct ActiveSync {
+        let id: UUID
+        let task: Task<Void, Error>
+    }
+
+    private struct SuspendedWork {
+        let syncTask: Task<Void, Error>?
+        let uploadTasks: [Task<Void, Never>]
+    }
+
+    private enum SecretUploadResult: Equatable {
+        case uploaded
+        case superseded
+    }
 
     private let log = Logger(subsystem: "com.justspeaktoit", category: "CloudKitKeySync")
+    private let stateStorage: SecureStorage
     private var secureStorage: SecureStorage
+    private var isConfigured = false
     private var symmetricKey: SymmetricKey?
     private var observer: NSObjectProtocol?
+    private var accountObserver: NSObjectProtocol?
     private var applyingRemoteIdentifiers = Set<String>()
-    private var pendingLocalUploadDates: [String: Date] = [:]
-    private var pendingLocalDeletions: [String: Bool] = [:]
+    private var pendingMutations: [String: PendingKeySyncMutation] = [:]
+    private var retryAttempts: [String: Int] = [:]
     private var localUploadTasks: [String: Task<Void, Never>] = [:]
+    private var localUploadTaskIDs: [String: UUID] = [:]
+    private var activeSync: ActiveSync?
+    private var syncGeneration: UInt64 = 0
+    private var lifecycleIsLocked = false
+    private var lifecycleWaiters: [CheckedContinuation<Void, Never>] = []
 
-    private init(secureStorage: SecureStorage = SecureStorage()) {
+    private init(
+        secureStorage: SecureStorage = SecureStorage(),
+        stateStorage: SecureStorage = SecureStorage(
+            configuration: SecureStorageConfiguration(
+                service: "com.justspeaktoit.keysync-state",
+                masterAccount: "cloudkit-key-sync-state",
+                accessGroup: nil,
+                synchronizable: false
+            )
+        )
+    ) {
         self.secureStorage = secureStorage
-        self.status.isEnabled = UserDefaults.standard.bool(forKey: Self.enabledKey)
+        self.stateStorage = stateStorage
+        self.pendingMutations = Self.loadPersistedPendingMutations()
         observeLocalKeyChanges()
+        observeCloudKitAccountChanges()
+    }
+
+    deinit {
+        if let observer {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let accountObserver {
+            NotificationCenter.default.removeObserver(accountObserver)
+        }
     }
 
     public func configure(secureStorage: SecureStorage) async {
         self.secureStorage = secureStorage
-        await restoreSavedKeyIfNeeded()
+        isConfigured = true
     }
 
     public func isAvailable() async -> Bool {
@@ -422,8 +511,19 @@ public final class CloudKitKeySync: ObservableObject {
 
         do {
             let accountStatus = try await container.accountStatus()
-            status.isCloudAvailable = accountStatus == .available
-            return status.isCloudAvailable
+            guard accountStatus == .available else {
+                status.isCloudAvailable = false
+                return false
+            }
+            try await validateCurrentAccount(container: container)
+            status.isCloudAvailable = true
+            status.lastErrorDescription = nil
+            status.isEnabled = UserDefaults.standard.bool(forKey: Self.enabledKey)
+            if status.isEnabled, isConfigured {
+                await restoreSavedKeyIfNeeded()
+                restorePendingMutationTasks()
+            }
+            return true
         } catch {
             status.isCloudAvailable = false
             status.lastErrorDescription = error.localizedDescription
@@ -432,6 +532,7 @@ public final class CloudKitKeySync: ObservableObject {
     }
 
     public func enable(passphrase: String) async throws {
+        guard isConfigured else { throw CloudKitKeySyncError.notConfigured }
         let trimmed = passphrase.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw CloudKitKeySyncError.missingPassphrase }
         try EncryptedSecretCrypto.validatePassphrase(trimmed)
@@ -439,56 +540,153 @@ public final class CloudKitKeySync: ObservableObject {
             throw CloudKitKeySyncError.cloudUnavailable
         }
 
-        try await setupCloudKitInfrastructure(database: database)
-        let key = try await loadOrCreateMetadataKey(passphrase: trimmed, database: database)
-        symmetricKey = key
-        try await secureStorage.storeSecret(
-            key.withUnsafeBytes { Data($0).base64EncodedString() },
-            identifier: Self.localDerivedKeyIdentifier
-        )
-        UserDefaults.standard.set(true, forKey: Self.enabledKey)
-        status.isEnabled = true
-        status.lastErrorDescription = nil
+        await acquireLifecycleLock()
+        do {
+            let generation = syncGeneration
+            try await setupCloudKitInfrastructure(database: database)
+            try ensureGenerationIsCurrent(generation)
+            let key = try await loadOrCreateMetadataKey(passphrase: trimmed, database: database)
+            try ensureGenerationIsCurrent(generation)
+            symmetricKey = key
+            try await stateStorage.storeSecret(
+                key.withUnsafeBytes { Data($0).base64EncodedString() },
+                identifier: Self.localDerivedKeyIdentifier
+            )
+            try ensureGenerationIsCurrent(generation)
+            try await seedPendingMutationsForExistingSecrets()
+            try ensureGenerationIsCurrent(generation)
+            UserDefaults.standard.set(true, forKey: Self.enabledKey)
+            status.isEnabled = true
+            status.lastErrorDescription = nil
+            restorePendingMutationTasks()
+            try ensureSyncIsActive(generation: generation)
+        } catch {
+            releaseLifecycleLock()
+            throw error
+        }
+        releaseLifecycleLock()
         try await syncNow()
     }
 
     public func disable() async {
-        UserDefaults.standard.set(false, forKey: Self.enabledKey)
-        try? await secureStorage.removeSecret(identifier: Self.localDerivedKeyIdentifier)
-        localUploadTasks.values.forEach { $0.cancel() }
+        await acquireLifecycleLock()
+        defer { releaseLifecycleLock() }
+        let syncTask = activeSync?.task
+        let uploadTasks = Array(localUploadTasks.values)
+        syncGeneration &+= 1
+        syncTask?.cancel()
+        uploadTasks.forEach { $0.cancel() }
+        activeSync = nil
         localUploadTasks.removeAll()
-        pendingLocalUploadDates.removeAll()
-        pendingLocalDeletions.removeAll()
+        localUploadTaskIDs.removeAll()
+        UserDefaults.standard.set(false, forKey: Self.enabledKey)
         symmetricKey = nil
         status.isEnabled = false
+        status.isSyncing = false
+
+        if let syncTask {
+            do {
+                try await syncTask.value
+            } catch is CancellationError {
+                // Expected when disabling an active sync.
+            } catch {
+                log.warning("Active key sync stopped with error during disable: \(error.localizedDescription)")
+            }
+        }
+        for task in uploadTasks {
+            await task.value
+        }
+
+        retryAttempts.removeAll()
+        pendingMutations.removeAll()
+        Self.clearPersistedPendingMutations()
+        do {
+            try await stateStorage.removeSecret(identifier: Self.localDerivedKeyIdentifier)
+        } catch {
+            log.error("Could not remove the local key-sync key: \(error.localizedDescription)")
+        }
+        status.lastSyncTime = nil
         status.lastErrorDescription = nil
     }
 
+    // swiftlint:disable:next cyclomatic_complexity
     public func syncNow() async throws {
+        guard isConfigured else { throw CloudKitKeySyncError.notConfigured }
+        if let activeSync {
+            try await activeSync.task.value
+            return
+        }
         guard UserDefaults.standard.bool(forKey: Self.enabledKey) else { return }
-        await restoreSavedKeyIfNeeded()
-        guard let key = symmetricKey else { throw CloudKitKeySyncError.missingPassphrase }
         guard await isAvailable(), let database = SyncConfiguration.privateDatabase else {
             throw CloudKitKeySyncError.cloudUnavailable
         }
+        guard UserDefaults.standard.bool(forKey: Self.enabledKey) else { return }
+        await restoreSavedKeyIfNeeded()
+        guard let key = symmetricKey else { throw CloudKitKeySyncError.missingPassphrase }
 
-        status.isSyncing = true
-        status.lastErrorDescription = nil
-        defer { status.isSyncing = false }
-
+        if let activeSync {
+            try await activeSync.task.value
+            return
+        }
+        let id = UUID()
+        let generation = syncGeneration
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            try await self.performSync(
+                database: database,
+                key: key,
+                generation: generation
+            )
+        }
+        activeSync = ActiveSync(id: id, task: task)
         do {
-            try await setupCloudKitInfrastructure(database: database)
-            try await fetchRemoteChanges(database: database, key: key)
-            try await uploadLocalSecrets(database: database, key: key)
-            status.lastSyncTime = Date()
+            try await task.value
         } catch {
-            status.lastErrorDescription = error.localizedDescription
+            if activeSync?.id == id {
+                activeSync = nil
+            }
             throw error
+        }
+        if activeSync?.id == id {
+            activeSync = nil
         }
     }
 
-    public func handleRemoteNotification() async {
-        try? await syncNow()
+    public func handleRemoteNotification() async throws {
+        try await syncNow()
+    }
+
+    private func performSync(
+        database: CKDatabase,
+        key: SymmetricKey,
+        generation: UInt64
+    ) async throws {
+        try ensureSyncIsActive(generation: generation)
+
+        status.isSyncing = true
+        status.lastErrorDescription = nil
+        defer {
+            if generation == syncGeneration {
+                status.isSyncing = false
+            }
+        }
+
+        do {
+            try await setupCloudKitInfrastructure(database: database)
+            try ensureSyncIsActive(generation: generation)
+            try await fetchRemoteChanges(database: database, key: key, generation: generation)
+            try ensureSyncIsActive(generation: generation)
+            try await uploadLocalSecrets(database: database, key: key, generation: generation)
+            try ensureSyncIsActive(generation: generation)
+            status.lastSyncTime = Date()
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            if generation == syncGeneration {
+                status.lastErrorDescription = error.localizedDescription
+            }
+            throw error
+        }
     }
 
     private func observeLocalKeyChanges() {
@@ -506,68 +704,114 @@ public final class CloudKitKeySync: ObservableObject {
 
             Task { @MainActor in
                 guard !self.applyingRemoteIdentifiers.contains(identifier),
-                      self.status.isEnabled else {
+                      UserDefaults.standard.bool(forKey: Self.enabledKey) else {
                     return
                 }
                 let updatedAt = notification
                     .userInfo?[SecureStorage.NotificationUserInfoKey.updatedAt] as? Date ?? Date()
                 let operation = notification
                     .userInfo?[SecureStorage.NotificationUserInfoKey.operation] as? String
-                self.scheduleLocalUpload(
+                let mutation = PendingKeySyncMutation(
+                    operationID: UUID(),
                     identifier: identifier,
                     updatedAt: updatedAt,
-                    isDeletion: operation == "remove"
+                    kind: operation == "remove" ? .deletion : .update
                 )
+                Self.persistPendingMutation(mutation)
+                self.pendingMutations[identifier] = mutation
+                self.scheduleLocalUpload(identifier: identifier)
             }
         }
     }
 
-    private func scheduleLocalUpload(identifier: String, updatedAt: Date, isDeletion: Bool) {
-        pendingLocalUploadDates[identifier] = updatedAt
-        pendingLocalDeletions[identifier] = isDeletion
+    private func observeCloudKitAccountChanges() {
+        accountObserver = NotificationCenter.default.addObserver(
+            forName: .CKAccountChanged,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            Task { @MainActor in
+                await self?.handleCloudKitAccountChange()
+            }
+        }
+    }
 
-        guard localUploadTasks[identifier] == nil else { return }
+    // swiftlint:disable:next cyclomatic_complexity function_body_length
+    private func scheduleLocalUpload(identifier: String) {
+        guard localUploadTasks[identifier] == nil,
+              pendingMutations[identifier] != nil else {
+            return
+        }
 
+        let generation = syncGeneration
+        let taskID = UUID()
+        localUploadTaskIDs[identifier] = taskID
         localUploadTasks[identifier] = Task { @MainActor [weak self] in
             defer {
-                self?.localUploadTasks[identifier] = nil
+                if self?.localUploadTaskIDs[identifier] == taskID {
+                    self?.localUploadTasks[identifier] = nil
+                    self?.localUploadTaskIDs[identifier] = nil
+                    self?.retryAttempts[identifier] = nil
+                }
             }
 
             while !Task.isCancelled {
-                let observedUpdatedAt = self?.pendingLocalUploadDates[identifier]
+                guard let self,
+                      let observedMutation = self.pendingMutations[identifier] else {
+                    return
+                }
+
                 do {
                     try await Task.sleep(nanoseconds: Self.localUploadDebounceNanoseconds)
                 } catch {
                     return
                 }
 
-                guard let self else { return }
-                guard self.pendingLocalUploadDates[identifier] == observedUpdatedAt else {
+                guard self.pendingMutations[identifier]?.operationID == observedMutation.operationID else {
                     continue
                 }
-                guard let updatedAt = self.pendingLocalUploadDates.removeValue(forKey: identifier),
-                      self.status.isEnabled,
-                      let key = self.symmetricKey,
+                if self.activeSync != nil {
+                    continue
+                }
+                guard let key = self.symmetricKey,
                       let database = SyncConfiguration.privateDatabase else {
-                    self.pendingLocalDeletions.removeValue(forKey: identifier)
                     return
                 }
-                let isDeletion = self.pendingLocalDeletions.removeValue(forKey: identifier) ?? false
 
                 do {
-                    try await self.uploadSecret(
+                    try self.ensureSyncIsActive(generation: generation)
+                    let uploadResult = try await self.uploadSecret(
                         identifier: identifier,
-                        updatedAt: updatedAt,
+                        updatedAt: observedMutation.updatedAt,
                         database: database,
                         key: key,
-                        isDeletion: isDeletion
+                        isDeletion: observedMutation.kind == .deletion,
+                        generation: generation
                     )
-                    await self.saveLocalUpdatedAt(updatedAt, identifier: identifier)
+                    if uploadResult == .uploaded {
+                        try await self.saveLocalUpdatedAt(observedMutation.updatedAt, identifier: identifier)
+                        self.clearPendingMutation(ifMatching: observedMutation)
+                    }
+                    self.retryAttempts[identifier] = nil
+                } catch is CancellationError {
+                    return
                 } catch {
                     self.log.error("Debounced key upload failed for \(identifier): \(error.localizedDescription)")
+                    let attempt = (self.retryAttempts[identifier] ?? 0) + 1
+                    self.retryAttempts[identifier] = attempt
+                    let shift = UInt64(min(attempt - 1, 5))
+                    let delay = min(
+                        Self.localUploadInitialRetryNanoseconds << shift,
+                        Self.localUploadMaximumRetryNanoseconds
+                    )
+                    do {
+                        try await Task.sleep(nanoseconds: delay)
+                    } catch {
+                        return
+                    }
                 }
 
-                if self.pendingLocalUploadDates[identifier] == nil {
+                if self.pendingMutations[identifier] == nil {
                     return
                 }
             }
@@ -577,11 +821,190 @@ public final class CloudKitKeySync: ObservableObject {
     private func restoreSavedKeyIfNeeded() async {
         guard symmetricKey == nil,
               UserDefaults.standard.bool(forKey: Self.enabledKey),
-              let stored = try? await secureStorage.secret(identifier: Self.localDerivedKeyIdentifier),
+              let stored = try? await stateStorage.secret(identifier: Self.localDerivedKeyIdentifier),
               let data = Data(base64Encoded: stored) else {
             return
         }
         symmetricKey = SymmetricKey(data: data)
+    }
+
+    private func restorePendingMutationTasks() {
+        pendingMutations = Self.loadPersistedPendingMutations()
+        for identifier in pendingMutations.keys {
+            scheduleLocalUpload(identifier: identifier)
+        }
+    }
+
+    private func seedPendingMutationsForExistingSecrets() async throws {
+        var mutationsToPersist: [PendingKeySyncMutation] = []
+        for identifier in Self.syncableIdentifiers.sorted() where pendingMutations[identifier] == nil {
+            do {
+                _ = try await secureStorage.secret(identifier: identifier)
+                mutationsToPersist.append(PendingKeySyncMutation(
+                    operationID: UUID(),
+                    identifier: identifier,
+                    updatedAt: Date(),
+                    kind: .update
+                ))
+            } catch SecureStorageError.valueNotFound {
+                continue
+            } catch {
+                log.error("Could not inspect local encrypted secret \(identifier): \(error.localizedDescription)")
+                throw error
+            }
+        }
+        for mutation in mutationsToPersist {
+            Self.persistPendingMutation(mutation)
+            pendingMutations[mutation.identifier] = mutation
+        }
+    }
+
+    private func clearPendingMutation(ifMatching mutation: PendingKeySyncMutation) {
+        guard pendingMutations[mutation.identifier]?.operationID == mutation.operationID,
+              Self.loadPersistedPendingMutation(identifier: mutation.identifier)?.operationID
+                == mutation.operationID else {
+            return
+        }
+        pendingMutations[mutation.identifier] = nil
+        UserDefaults.standard.removeObject(forKey: Self.pendingMutationKey(identifier: mutation.identifier))
+    }
+
+    private static func pendingMutationKey(identifier: String) -> String {
+        pendingMutationPrefix + identifier
+    }
+
+    private static func persistPendingMutation(_ mutation: PendingKeySyncMutation) {
+        guard let data = try? JSONEncoder().encode(mutation) else { return }
+        UserDefaults.standard.set(data, forKey: pendingMutationKey(identifier: mutation.identifier))
+    }
+
+    private static func loadPersistedPendingMutation(identifier: String) -> PendingKeySyncMutation? {
+        guard let data = UserDefaults.standard.data(forKey: pendingMutationKey(identifier: identifier)) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(PendingKeySyncMutation.self, from: data)
+    }
+
+    private static func loadPersistedPendingMutations() -> [String: PendingKeySyncMutation] {
+        syncableIdentifiers.reduce(into: [:]) { mutations, identifier in
+            mutations[identifier] = loadPersistedPendingMutation(identifier: identifier)
+        }
+    }
+
+    private static func clearPersistedPendingMutations() {
+        for identifier in syncableIdentifiers {
+            UserDefaults.standard.removeObject(forKey: pendingMutationKey(identifier: identifier))
+        }
+    }
+
+    private func validateCurrentAccount(container: CKContainer) async throws {
+        let recordName = try await container.userRecordID().recordName
+        let fingerprint = SHA256.hash(data: Data(recordName.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        try await resetAccountBoundState(ifNeededFor: fingerprint)
+    }
+
+    private func handleCloudKitAccountChange() async {
+        let suspendedWork = suspendActiveWork()
+        await acquireLifecycleLock()
+        symmetricKey = nil
+        status.isEnabled = false
+        status.isCloudAvailable = false
+        await waitForSuspendedWork(suspendedWork)
+        releaseLifecycleLock()
+        _ = await isAvailable()
+    }
+
+    private func resetAccountBoundState(ifNeededFor fingerprint: String) async throws {
+        await acquireLifecycleLock()
+        defer { releaseLifecycleLock() }
+        guard UserDefaults.standard.string(forKey: Self.accountIdentifierKey) != fingerprint else {
+            return
+        }
+        let suspendedWork = suspendActiveWork()
+        await waitForSuspendedWork(suspendedWork)
+        pendingMutations.removeAll()
+        retryAttempts.removeAll()
+        Self.clearPersistedPendingMutations()
+        UserDefaults.standard.removeObject(forKey: Self.enabledKey)
+        UserDefaults.standard.removeObject(forKey: Self.syncTokenKey)
+        UserDefaults.standard.removeObject(forKey: Self.zoneCreatedKey)
+        UserDefaults.standard.removeObject(forKey: Self.subscriptionCreatedKey)
+        try await stateStorage.removeSecret(identifier: Self.localDerivedKeyIdentifier)
+        for identifier in Self.syncableIdentifiers {
+            try await stateStorage.removeSecret(identifier: Self.localUpdatedPrefix + identifier)
+        }
+        symmetricKey = nil
+        status.isEnabled = false
+        status.isSyncing = false
+        status.lastSyncTime = nil
+        status.lastErrorDescription = nil
+        UserDefaults.standard.set(fingerprint, forKey: Self.accountIdentifierKey)
+    }
+
+    private func suspendActiveWork() -> SuspendedWork {
+        let suspendedWork = SuspendedWork(
+            syncTask: activeSync?.task,
+            uploadTasks: Array(localUploadTasks.values)
+        )
+        syncGeneration &+= 1
+        suspendedWork.syncTask?.cancel()
+        suspendedWork.uploadTasks.forEach { $0.cancel() }
+        activeSync = nil
+        localUploadTasks.removeAll()
+        localUploadTaskIDs.removeAll()
+        retryAttempts.removeAll()
+        status.isSyncing = false
+        return suspendedWork
+    }
+
+    private func waitForSuspendedWork(_ suspendedWork: SuspendedWork) async {
+        if let syncTask = suspendedWork.syncTask {
+            do {
+                try await syncTask.value
+            } catch is CancellationError {
+                // Expected after invalidating the previous account generation.
+            } catch {
+                log.warning("Suspended key sync ended with error: \(error.localizedDescription)")
+            }
+        }
+        for task in suspendedWork.uploadTasks {
+            await task.value
+        }
+    }
+
+    private func acquireLifecycleLock() async {
+        guard lifecycleIsLocked else {
+            lifecycleIsLocked = true
+            return
+        }
+        await withCheckedContinuation { continuation in
+            lifecycleWaiters.append(continuation)
+        }
+    }
+
+    private func releaseLifecycleLock() {
+        guard !lifecycleWaiters.isEmpty else {
+            lifecycleIsLocked = false
+            return
+        }
+        lifecycleWaiters.removeFirst().resume()
+    }
+
+    private func ensureSyncIsActive(generation: UInt64) throws {
+        try ensureGenerationIsCurrent(generation)
+        guard UserDefaults.standard.bool(forKey: Self.enabledKey),
+              status.isEnabled else {
+            throw CancellationError()
+        }
+    }
+
+    private func ensureGenerationIsCurrent(_ generation: UInt64) throws {
+        try Task.checkCancellation()
+        guard generation == syncGeneration else {
+            throw CancellationError()
+        }
     }
 
     private func setupCloudKitInfrastructure(database: CKDatabase) async throws {
@@ -613,7 +1036,10 @@ public final class CloudKitKeySync: ObservableObject {
             guard let metadata = KeySyncMetadataRecordMapper.metadata(from: record) else {
                 throw CloudKitKeySyncError.malformedRecord
             }
-            let key = EncryptedSecretCrypto.deriveKey(passphrase: passphrase, salt: metadata.salt)
+            let key = await EncryptedSecretCrypto.deriveKeyOffMainActor(
+                passphrase: passphrase,
+                salt: metadata.salt
+            )
             guard EncryptedSecretCrypto.verifyToken(
                 nonce: metadata.verifierNonce,
                 ciphertext: metadata.verifierCiphertext,
@@ -626,7 +1052,7 @@ public final class CloudKitKeySync: ObservableObject {
         }
 
         let salt = try randomData(byteCount: 32)
-        let key = EncryptedSecretCrypto.deriveKey(passphrase: passphrase, salt: salt)
+        let key = await EncryptedSecretCrypto.deriveKeyOffMainActor(passphrase: passphrase, salt: salt)
         let token = try EncryptedSecretCrypto.makeVerificationToken(key: key)
         let metadata = KeySyncMetadata(
             salt: salt,
@@ -638,41 +1064,96 @@ public final class CloudKitKeySync: ObservableObject {
         return key
     }
 
-    private func fetchRemoteChanges(database: CKDatabase, key: SymmetricKey) async throws {
-        let result = try await executeFetchOperation(database: database, changeToken: loadChangeToken())
+    private func fetchRemoteChanges(
+        database: CKDatabase,
+        key: SymmetricKey,
+        generation: UInt64
+    ) async throws {
+        do {
+            try await fetchAndApplyRemoteChanges(
+                database: database,
+                key: key,
+                changeToken: loadChangeToken(),
+                generation: generation
+            )
+        } catch {
+            guard Self.isChangeTokenExpired(error) else { throw error }
+            clearChangeToken()
+            try ensureSyncIsActive(generation: generation)
+            try await fetchAndApplyRemoteChanges(
+                database: database,
+                key: key,
+                changeToken: nil,
+                generation: generation
+            )
+        }
+    }
+
+    // swiftlint:disable:next cyclomatic_complexity
+    private func fetchAndApplyRemoteChanges(
+        database: CKDatabase,
+        key: SymmetricKey,
+        changeToken: CKServerChangeToken?,
+        generation: UInt64
+    ) async throws {
+        let result = try await executeFetchOperation(database: database, changeToken: changeToken)
+        try ensureSyncIsActive(generation: generation)
+        var firstError: Error?
 
         for record in result.records {
+            try ensureSyncIsActive(generation: generation)
+            guard record.recordType == EncryptedSecretRecordMapper.recordType else { continue }
             guard let secret = EncryptedSecretRecordMapper.secret(from: record) else {
-                log.warning("Skipping malformed encrypted secret record: \(record.recordID.recordName)")
+                let error = CloudKitKeySyncError.malformedRecord
+                firstError = firstError ?? error
+                log.error("Malformed encrypted secret record: \(record.recordID.recordName)")
                 continue
             }
 
             do {
-                try await applyRemoteSecret(secret, key: key)
+                try await applyRemoteSecret(secret, key: key, generation: generation)
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
-                log.error("Skipping encrypted secret \(secret.identifier): \(error.localizedDescription)")
+                firstError = firstError ?? error
+                log.error("Could not apply encrypted secret \(secret.identifier): \(error.localizedDescription)")
             }
         }
 
         for recordID in result.deletedIDs {
+            try ensureSyncIsActive(generation: generation)
             guard let identifier = identifierFromRecordName(recordID.recordName) else { continue }
 
             do {
-                try await applyRemoteDeletion(identifier: identifier, updatedAt: Date())
+                try await applyRemoteDeletion(identifier: identifier, updatedAt: Date(), generation: generation)
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
-                log.error("Skipping encrypted secret deletion \(identifier): \(error.localizedDescription)")
+                firstError = firstError ?? error
+                log.error("Could not apply encrypted secret deletion \(identifier): \(error.localizedDescription)")
             }
         }
 
+        if let firstError {
+            throw firstError
+        }
+        try ensureSyncIsActive(generation: generation)
         if let token = result.serverChangeToken {
             saveChangeToken(token)
         }
     }
 
-    private func applyRemoteSecret(_ secret: EncryptedSecret, key: SymmetricKey) async throws {
+    private func applyRemoteSecret(
+        _ secret: EncryptedSecret,
+        key: SymmetricKey,
+        generation: UInt64
+    ) async throws {
         guard Self.syncableIdentifiers.contains(secret.identifier) else { return }
-        let localUpdatedAt = await loadLocalUpdatedAt(identifier: secret.identifier)
-        guard localUpdatedAt == nil || secret.updatedAt >= (localUpdatedAt ?? .distantPast) else { return }
+        let pendingMutation = pendingMutations[secret.identifier]
+            ?? Self.loadPersistedPendingMutation(identifier: secret.identifier)
+        let localUpdatedAt = try await effectiveLocalUpdatedAt(identifier: secret.identifier)
+        guard localUpdatedAt == nil || secret.updatedAt > (localUpdatedAt ?? .distantPast) else { return }
+        try ensureSyncIsActive(generation: generation)
 
         applyingRemoteIdentifiers.insert(secret.identifier)
         defer { applyingRemoteIdentifiers.remove(secret.identifier) }
@@ -683,71 +1164,113 @@ public final class CloudKitKeySync: ObservableObject {
             let value = try EncryptedSecretCrypto.decryptSecret(secret, key: key)
             try await secureStorage.storeSecret(value, identifier: secret.identifier)
         }
-        await saveLocalUpdatedAt(secret.updatedAt, identifier: secret.identifier)
-    }
-
-    private func applyRemoteDeletion(identifier: String, updatedAt: Date) async throws {
-        guard Self.syncableIdentifiers.contains(identifier) else { return }
-        applyingRemoteIdentifiers.insert(identifier)
-        defer { applyingRemoteIdentifiers.remove(identifier) }
-        try await secureStorage.removeSecret(identifier: identifier)
-        await saveLocalUpdatedAt(updatedAt, identifier: identifier)
-    }
-
-    private func uploadLocalSecrets(database: CKDatabase, key: SymmetricKey) async throws {
-        let identifiers = (await secureStorage.knownIdentifiers())
-            .filter { Self.syncableIdentifiers.contains($0) }
-            .prefix(SyncConfiguration.batchSize)
-        for identifier in identifiers {
-            let updatedAt = await loadLocalUpdatedAt(identifier: identifier) ?? Date()
-            do {
-                try await uploadSecret(
-                    identifier: identifier,
-                    updatedAt: updatedAt,
-                    database: database,
-                    key: key,
-                    isDeletion: false
-                )
-                await saveLocalUpdatedAt(updatedAt, identifier: identifier)
-            } catch {
-                log.error("Skipping local encrypted secret upload \(identifier): \(error.localizedDescription)")
-            }
+        try ensureSyncIsActive(generation: generation)
+        try await saveLocalUpdatedAt(secret.updatedAt, identifier: secret.identifier)
+        if let pendingMutation {
+            clearPendingMutation(ifMatching: pendingMutation)
         }
     }
 
+    private func applyRemoteDeletion(identifier: String, updatedAt: Date, generation: UInt64) async throws {
+        guard Self.syncableIdentifiers.contains(identifier) else { return }
+        guard pendingMutations[identifier] == nil,
+              Self.loadPersistedPendingMutation(identifier: identifier) == nil else {
+            return
+        }
+        try ensureSyncIsActive(generation: generation)
+        applyingRemoteIdentifiers.insert(identifier)
+        defer { applyingRemoteIdentifiers.remove(identifier) }
+        try await secureStorage.removeSecret(identifier: identifier)
+        try ensureSyncIsActive(generation: generation)
+        try await saveLocalUpdatedAt(updatedAt, identifier: identifier)
+    }
+
+    private func uploadLocalSecrets(
+        database: CKDatabase,
+        key: SymmetricKey,
+        generation: UInt64
+    ) async throws {
+        var firstError: Error?
+        let mutations = Self.syncableIdentifiers
+            .compactMap { identifier in
+                pendingMutations[identifier]
+                    ?? Self.loadPersistedPendingMutation(identifier: identifier)
+            }
+            .sorted { $0.identifier < $1.identifier }
+            .prefix(SyncConfiguration.batchSize)
+
+        for mutation in mutations {
+            try ensureSyncIsActive(generation: generation)
+            do {
+                let uploadResult = try await uploadSecret(
+                    identifier: mutation.identifier,
+                    updatedAt: mutation.updatedAt,
+                    database: database,
+                    key: key,
+                    isDeletion: mutation.kind == .deletion,
+                    generation: generation
+                )
+                if uploadResult == .uploaded {
+                    try await saveLocalUpdatedAt(mutation.updatedAt, identifier: mutation.identifier)
+                    clearPendingMutation(ifMatching: mutation)
+                }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                firstError = firstError ?? error
+                log.error(
+                    "Could not upload local encrypted secret \(mutation.identifier): \(error.localizedDescription)"
+                )
+            }
+        }
+
+        if let firstError {
+            throw firstError
+        }
+    }
+
+    // swiftlint:disable:next function_parameter_count
     private func uploadSecret(
         identifier: String,
         updatedAt: Date,
         database: CKDatabase,
         key: SymmetricKey,
-        isDeletion: Bool
-    ) async throws {
+        isDeletion: Bool,
+        generation: UInt64
+    ) async throws -> SecretUploadResult {
         let value: String
         if isDeletion {
             value = ""
         } else {
-            do {
-                value = try await secureStorage.secret(identifier: identifier)
-            } catch SecureStorageError.valueNotFound {
-                log.warning("Skipping missing local encrypted secret \(identifier)")
-                return
-            }
+            value = try await secureStorage.secret(identifier: identifier)
         }
-        let isDeleted = isDeletion
+        try ensureSyncIsActive(generation: generation)
         let secret = try EncryptedSecretCrypto.encryptSecret(
             identifier: identifier,
             value: value,
             updatedAt: updatedAt,
             key: key,
-            isDeleted: isDeleted
+            isDeleted: isDeletion
         )
         let recordID = CKRecord.ID(
             recordName: EncryptedSecretRecordMapper.recordName(for: identifier),
             zoneID: SyncConfiguration.zoneID
         )
         let existing = try await fetchRecord(id: recordID, database: database)
+        try ensureSyncIsActive(generation: generation)
+        if let existing {
+            guard let remoteSecret = EncryptedSecretRecordMapper.secret(from: existing) else {
+                throw CloudKitKeySyncError.malformedRecord
+            }
+            if remoteSecret.updatedAt > updatedAt {
+                try await applyRemoteSecret(remoteSecret, key: key, generation: generation)
+                return .superseded
+            }
+        }
         let record = EncryptedSecretRecordMapper.record(from: secret, existingRecord: existing)
         _ = try await database.save(record)
+        try ensureSyncIsActive(generation: generation)
+        return .uploaded
     }
 
     private func executeFetchOperation(
@@ -760,12 +1283,18 @@ public final class CloudKitKeySync: ObservableObject {
             recordZoneIDs: [SyncConfiguration.zoneID],
             configurationsByRecordZoneID: [SyncConfiguration.zoneID: config]
         )
+        operation.fetchAllChanges = true
 
         let accumulator = KeySyncFetchAccumulator()
 
         operation.recordWasChangedBlock = { _, result in
-            if case .success(let record) = result {
+            switch result {
+            case .success(let record) where record.recordType == EncryptedSecretRecordMapper.recordType:
                 accumulator.append(record: record)
+            case .success:
+                break
+            case .failure(let error):
+                accumulator.append(error: error)
             }
         }
         operation.recordWithIDWasDeletedBlock = { recordID, _ in
@@ -775,8 +1304,12 @@ public final class CloudKitKeySync: ObservableObject {
             accumulator.updateToken(token)
         }
         operation.recordZoneFetchResultBlock = { _, result in
-            if case .success(let (token, _, _)) = result {
+            switch result {
+            case .success(let (token, _, moreComing)):
                 accumulator.updateToken(token)
+                accumulator.updateMoreComing(moreComing)
+            case .failure(let error):
+                accumulator.append(error: error)
             }
         }
 
@@ -792,7 +1325,7 @@ public final class CloudKitKeySync: ObservableObject {
             database.add(operation)
         }
 
-        return accumulator.result()
+        return try accumulator.result()
     }
 
     private func fetchRecord(id: CKRecord.ID, database: CKDatabase) async throws -> CKRecord? {
@@ -814,19 +1347,46 @@ public final class CloudKitKeySync: ObservableObject {
         }
     }
 
-    private func saveLocalUpdatedAt(_ date: Date, identifier: String) async {
-        try? await secureStorage.storeSecret(
+    private func clearChangeToken() {
+        UserDefaults.standard.removeObject(forKey: Self.syncTokenKey)
+    }
+
+    private static func isChangeTokenExpired(_ error: Error) -> Bool {
+        guard let cloudError = error as? CKError else { return false }
+        if cloudError.code == .changeTokenExpired {
+            return true
+        }
+        return cloudError.partialErrorsByItemID?.values.contains {
+            isChangeTokenExpired($0)
+        } == true
+    }
+
+    private func saveLocalUpdatedAt(_ date: Date, identifier: String) async throws {
+        try await stateStorage.storeSecret(
             String(date.timeIntervalSince1970),
             identifier: Self.localUpdatedPrefix + identifier
         )
     }
 
-    private func loadLocalUpdatedAt(identifier: String) async -> Date? {
-        guard let value = try? await secureStorage.secret(identifier: Self.localUpdatedPrefix + identifier),
-              let timestamp = TimeInterval(value) else {
+    private func loadLocalUpdatedAt(identifier: String) async throws -> Date? {
+        let value: String
+        do {
+            value = try await stateStorage.secret(identifier: Self.localUpdatedPrefix + identifier)
+        } catch SecureStorageError.valueNotFound {
             return nil
         }
+        guard let timestamp = TimeInterval(value) else {
+            throw CloudKitKeySyncError.malformedRecord
+        }
         return Date(timeIntervalSince1970: timestamp)
+    }
+
+    private func effectiveLocalUpdatedAt(identifier: String) async throws -> Date? {
+        let committed = try await loadLocalUpdatedAt(identifier: identifier)
+        let pending = pendingMutations[identifier]
+            ?? Self.loadPersistedPendingMutation(identifier: identifier)
+        guard let pending else { return committed }
+        return max(committed ?? .distantPast, pending.updatedAt)
     }
 
     private func randomData(byteCount: Int) throws -> Data {

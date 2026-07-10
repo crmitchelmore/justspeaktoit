@@ -304,7 +304,10 @@ jobs:
           bundle_identifier = "com.justspeaktoit.ios"
           container_identifier = "iCloud.com.justspeaktoit.ios"
           token = Spaceship::ConnectAPI::Token.from_json_file(api_key_path)
-          client = Spaceship::ConnectAPI::Provisioning::Client.new(token: token)
+          client = Spaceship::ConnectAPI::Provisioning::Client.new(
+            token: token,
+            current_team_id: ENV.fetch("APPLE_TEAM_ID")
+          )
 
           bundle_id = Spaceship::ConnectAPI::BundleId.find(bundle_identifier, client: client)
           abort("Bundle ID not found: #{bundle_identifier}") unless bundle_id

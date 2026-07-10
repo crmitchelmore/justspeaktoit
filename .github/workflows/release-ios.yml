@@ -276,7 +276,7 @@ jobs:
             --arg key_id "${{ env.APP_STORE_CONNECT_KEY_ID }}" \
             --arg issuer_id "$APP_STORE_CONNECT_ISSUER_ID" \
             --rawfile key ~/.appstoreconnect/private_keys/AuthKey_${{ env.APP_STORE_CONNECT_KEY_ID }}.p8 \
-            '{key_id: $key_id, issuer_id: $issuer_id, key: $key}' \
+            '{key_id: $key_id, issuer_id: $issuer_id, key: $key, in_house: false}' \
             > "$RUNNER_TEMP/app-store-connect-key.json"
 
           fastlane sigh \

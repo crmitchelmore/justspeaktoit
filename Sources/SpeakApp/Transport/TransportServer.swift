@@ -41,6 +41,7 @@ public final class TransportServer: NSObject, ObservableObject {
     private var pendingPeers: [MCPeerID: PairingInvitationContext] = [:]
     private var authenticatedPeers: [MCPeerID: AuthenticatedPeer] = [:]
     private var historyBatchAccumulators: [MCPeerID: HistoryBatchAccumulator] = [:]
+    private var settingsBatchAccumulators: [MCPeerID: SettingsBatchAccumulator] = [:]
     private var failedInvitations: [String: [Date]] = [:]
     private var globalFailedInvitations: [Date] = []
 
@@ -51,6 +52,7 @@ public final class TransportServer: NSObject, ObservableObject {
     /// Callback when transcript chunk received.
     public var onTranscriptReceived: ((String, String) -> Void)?
     public weak var historyTransportDelegate: HistoryTransportDelegate?
+    public weak var settingsTransportDelegate: SettingsTransportDelegate?
 
     public override convenience init() {
         self.init(pairingManager: .shared)
@@ -104,6 +106,7 @@ public final class TransportServer: NSObject, ObservableObject {
         pendingPeers.removeAll()
         authenticatedPeers.removeAll()
         historyBatchAccumulators.removeAll()
+        settingsBatchAccumulators.removeAll()
         connectedDevices.removeAll()
         isRunning = false
     }
@@ -114,6 +117,7 @@ public final class TransportServer: NSObject, ObservableObject {
         authenticatedPeers.removeValue(forKey: peer)
         pendingPeers.removeValue(forKey: peer)
         historyBatchAccumulators.removeValue(forKey: peer)
+        settingsBatchAccumulators.removeValue(forKey: peer)
         connectedDevices.removeAll { $0.id == id }
         session.cancelConnectPeer(peer)
     }
@@ -188,12 +192,14 @@ public final class TransportServer: NSObject, ObservableObject {
         )
         Task { [weak self] in
             await self?.exchangeHistorySnapshot(with: peerID)
+            await self?.exchangeSettingsSnapshot(with: peerID)
         }
     }
 
     private func handleDisconnected(peerID: MCPeerID) {
         pendingPeers.removeValue(forKey: peerID)
         historyBatchAccumulators.removeValue(forKey: peerID)
+        settingsBatchAccumulators.removeValue(forKey: peerID)
         guard let peer = authenticatedPeers.removeValue(forKey: peerID) else { return }
         connectedDevices.removeAll { $0.id == peer.deviceId }
         SpeakLogger.transport.info("Device disconnected: \(peer.deviceId, privacy: .private)")
@@ -263,6 +269,30 @@ public final class TransportServer: NSObject, ObservableObject {
             case .historySyncComplete:
                 markActivity(for: peerID)
 
+            case .settingsSyncRequest(let request):
+                markActivity(for: peerID)
+                await sendSettingsSnapshot(to: peerID, requestID: request.requestID)
+
+            case .settingsSyncBatch(let batch):
+                markActivity(for: peerID)
+                var accumulator = settingsBatchAccumulators[peerID] ?? SettingsBatchAccumulator()
+                let assembled = accumulator.append(batch)
+                settingsBatchAccumulators[peerID] = accumulator
+                guard let assembled else { break }
+                _ = await settingsTransportDelegate?.applySettingsBatch(records: assembled.snapshot.records)
+                await send(
+                    .settingsSyncComplete(
+                        SettingsSyncCompleteMessage(
+                            requestID: assembled.requestID,
+                            receivedBatchCount: assembled.receivedBatchCount
+                        )
+                    ),
+                    to: peerID
+                )
+
+            case .settingsSyncComplete:
+                markActivity(for: peerID)
+
             case .unknown(let type):
                 SpeakLogger.transport.debug("Ignored unknown transport message: \(type, privacy: .public)")
 
@@ -310,9 +340,25 @@ public final class TransportServer: NSObject, ObservableObject {
         }
     }
 
+    public func broadcastSettingsDelta(records: [SyncedSettingRecord]) async {
+        guard !authenticatedPeers.isEmpty, !records.isEmpty else { return }
+        let requestID = UUID()
+        let batches = SettingsSyncBatchMessage.batches(requestID: requestID, records: records)
+        for peerID in authenticatedPeers.keys {
+            for batch in batches {
+                await send(.settingsSyncBatch(batch), to: peerID)
+            }
+        }
+    }
+
     private func exchangeHistorySnapshot(with peerID: MCPeerID) async {
         let request = HistorySyncRequestMessage()
         await send(.historySyncRequest(request), to: peerID)
+    }
+
+    private func exchangeSettingsSnapshot(with peerID: MCPeerID) async {
+        let request = SettingsSyncRequestMessage()
+        await send(.settingsSyncRequest(request), to: peerID)
     }
 
     private func sendHistorySnapshot(to peerID: MCPeerID, requestID: UUID) async {
@@ -325,6 +371,15 @@ public final class TransportServer: NSObject, ObservableObject {
         )
         for batch in batches {
             await send(.historySyncBatch(batch), to: peerID)
+        }
+    }
+
+    private func sendSettingsSnapshot(to peerID: MCPeerID, requestID: UUID) async {
+        guard let settingsTransportDelegate else { return }
+        let records = settingsTransportDelegate.settingsSnapshot(maxRecords: SpeakTransportSettingsMaxBatchSize)
+        let batches = SettingsSyncBatchMessage.batches(requestID: requestID, records: records)
+        for batch in batches {
+            await send(.settingsSyncBatch(batch), to: peerID)
         }
     }
 

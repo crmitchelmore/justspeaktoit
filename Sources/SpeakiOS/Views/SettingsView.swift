@@ -66,12 +66,16 @@ public enum HardwareTriggerDestination: String, CaseIterable, Identifiable, Send
 
 /// Simple UserDefaults-based settings for iOS app.
 @MainActor
+// swiftlint:disable:next type_body_length
 public final class AppSettings: ObservableObject {
-    // swiftlint:disable:previous type_body_length
     public static let shared = AppSettings()
+    private var isApplyingSyncedSettings = false
 
     @Published public var selectedModel: String {
-        didSet { UserDefaults.standard.set(selectedModel, forKey: "selectedModel") }
+        didSet {
+            UserDefaults.standard.set(selectedModel, forKey: "selectedModel")
+            syncSetting(.string(selectedModel), for: .selectedModel)
+        }
     }
 
     @Published public var deepgramAPIKey: String {
@@ -138,6 +142,7 @@ public final class AppSettings: ObservableObject {
     /// (`$(AppIdentifierPrefix)com.justspeaktoit.shared`). Only used when the
     /// runtime probe confirms the entitlement is present.
     private static let sharedAccessGroup = "8X4ZN58TYH.com.justspeaktoit.shared"
+    public static var sharedAccessGroupIdentifier: String { sharedAccessGroup }
 
     private static let credentialStorage = SecureStorage(
         configuration: .iCloudSyncedIfAvailable(
@@ -172,11 +177,17 @@ public final class AppSettings: ObservableObject {
     }
 
     @Published public var liveActivitiesEnabled: Bool {
-        didSet { UserDefaults.standard.set(liveActivitiesEnabled, forKey: "liveActivitiesEnabled") }
+        didSet {
+            UserDefaults.standard.set(liveActivitiesEnabled, forKey: "liveActivitiesEnabled")
+            syncSetting(.bool(liveActivitiesEnabled), for: .liveActivitiesEnabled)
+        }
     }
 
     @Published public var autoStartRecording: Bool {
-        didSet { UserDefaults.standard.set(autoStartRecording, forKey: "autoStartRecording") }
+        didSet {
+            UserDefaults.standard.set(autoStartRecording, forKey: "autoStartRecording")
+            syncSetting(.bool(autoStartRecording), for: .autoStartRecording)
+        }
     }
 
     /// What happens to the transcript when a hardware-triggered recording (Action Button,
@@ -184,25 +195,38 @@ public final class AppSettings: ObservableObject {
     @Published public var hardwareTriggerDestination: HardwareTriggerDestination {
         didSet {
             UserDefaults.standard.set(hardwareTriggerDestination.rawValue, forKey: "hardwareTriggerDestination")
+            syncSetting(.string(hardwareTriggerDestination.rawValue), for: .hardwareTriggerDestination)
         }
     }
 
     // MARK: - Post-Processing Settings
 
     @Published public var postProcessingEnabled: Bool {
-        didSet { UserDefaults.standard.set(postProcessingEnabled, forKey: "postProcessingEnabled") }
+        didSet {
+            UserDefaults.standard.set(postProcessingEnabled, forKey: "postProcessingEnabled")
+            syncSetting(.bool(postProcessingEnabled), for: .postProcessingEnabled)
+        }
     }
 
     @Published public var postProcessingModel: String {
-        didSet { UserDefaults.standard.set(postProcessingModel, forKey: "postProcessingModel") }
+        didSet {
+            UserDefaults.standard.set(postProcessingModel, forKey: "postProcessingModel")
+            syncSetting(.string(postProcessingModel), for: .postProcessingModel)
+        }
     }
 
     @Published public var postProcessingPrompt: String {
-        didSet { UserDefaults.standard.set(postProcessingPrompt, forKey: "postProcessingPrompt") }
+        didSet {
+            UserDefaults.standard.set(postProcessingPrompt, forKey: "postProcessingPrompt")
+            syncSetting(.string(postProcessingPrompt), for: .postProcessingPrompt)
+        }
     }
 
     @Published public var autoPostProcess: Bool {
-        didSet { UserDefaults.standard.set(autoPostProcess, forKey: "autoPostProcess") }
+        didSet {
+            UserDefaults.standard.set(autoPostProcess, forKey: "autoPostProcess")
+            syncSetting(.bool(autoPostProcess), for: .autoPostProcess)
+        }
     }
 
     public static let defaultPostProcessingPrompt = """
@@ -231,25 +255,9 @@ public final class AppSettings: ObservableObject {
 
     private init() {
         let selectedRaw = UserDefaults.standard.string(forKey: "selectedModel") ?? "apple/local/SFSpeechRecognizer"
-        // Normalise to canonical catalogue ids. Keep any id already in the
-        // shared catalogue; migrate legacy iOS-only ids (e.g. "deepgram/nova-3",
-        // "elevenlabs/scribe_v1") onto their catalogue equivalents so iOS and
-        // macOS select the same models.
-        let knownLiveIDs = Set(ModelCatalog.liveTranscription.map(\.id))
-        let selected: String
-        if knownLiveIDs.contains(selectedRaw) {
-            selected = selectedRaw
-        } else if selectedRaw.hasPrefix("apple/") {
-            selected = selectedRaw
-        } else if selectedRaw.hasPrefix("deepgram/") {
-            selected = "deepgram/nova-3-streaming"
-        } else if selectedRaw.hasPrefix("elevenlabs/") {
-            selected = "elevenlabs/scribe-v2-streaming"
-        } else if selectedRaw.hasPrefix("openai/") {
-            selected = "openai/gpt-realtime-whisper-streaming"
-        } else {
-            selected = "apple/local/SFSpeechRecognizer"
-        }
+        let selected =
+            Self.normalizedSelectedModel(selectedRaw)
+            ?? "apple/local/SFSpeechRecognizer"
         // API keys load asynchronously from the canonical secure storage (with
         // legacy migration) in the Task below.
 
@@ -425,6 +433,114 @@ public final class AppSettings: ObservableObject {
         }
     }
 
+    public func publishCurrentSyncedSettings() {
+        syncSetting(.string(selectedModel), for: .selectedModel)
+        syncSetting(.bool(autoStartRecording), for: .autoStartRecording)
+        syncSetting(.bool(liveActivitiesEnabled), for: .liveActivitiesEnabled)
+        syncSetting(.string(hardwareTriggerDestination.rawValue), for: .hardwareTriggerDestination)
+        syncSetting(.bool(postProcessingEnabled), for: .postProcessingEnabled)
+        syncSetting(.string(postProcessingModel), for: .postProcessingModel)
+        syncSetting(.string(postProcessingPrompt), for: .postProcessingPrompt)
+        syncSetting(.bool(autoPostProcess), for: .autoPostProcess)
+    }
+
+    @discardableResult
+    // swiftlint:disable:next cyclomatic_complexity
+    public func applySyncedSettings(records: [SyncedSettingRecord]) -> [SettingsSync.SyncKey] {
+        var applied: [SettingsSync.SyncKey] = []
+        isApplyingSyncedSettings = true
+        defer { isApplyingSyncedSettings = false }
+
+        for record in records {
+            switch (record.key, record.value) {
+            case (.selectedModel, .string(let value)):
+                guard let normalized = Self.normalizedSelectedModel(value) else { continue }
+                guard selectedModel != normalized else { continue }
+                selectedModel = normalized
+                applied.append(record.key)
+            case (.autoStartRecording, .bool(let value)) where autoStartRecording != value:
+                autoStartRecording = value
+                applied.append(record.key)
+            case (.liveActivitiesEnabled, .bool(let value)) where liveActivitiesEnabled != value:
+                liveActivitiesEnabled = value
+                applied.append(record.key)
+            case (.hardwareTriggerDestination, .string(let value)):
+                guard let destination = HardwareTriggerDestination(rawValue: value),
+                      hardwareTriggerDestination != destination
+                else { continue }
+                hardwareTriggerDestination = destination
+                applied.append(record.key)
+            case (.postProcessingEnabled, .bool(let value)) where postProcessingEnabled != value:
+                postProcessingEnabled = value
+                applied.append(record.key)
+            case (.postProcessingModel, .string(let value))
+            where Self.postProcessingModels.contains(where: { $0.id == value })
+                && postProcessingModel != value:
+                postProcessingModel = value
+                applied.append(record.key)
+            case (.postProcessingPrompt, .string(let value))
+            where !hasLocalCredentialLikePrompt && postProcessingPrompt != value:
+                postProcessingPrompt = value
+                applied.append(record.key)
+            case (.postProcessingPrompt, .null)
+            where !hasLocalCredentialLikePrompt && !postProcessingPrompt.isEmpty:
+                postProcessingPrompt = ""
+                applied.append(record.key)
+            case (.autoPostProcess, .bool(let value)) where autoPostProcess != value:
+                autoPostProcess = value
+                applied.append(record.key)
+            default:
+                continue
+            }
+        }
+        return applied
+    }
+
+    private func syncSetting(_ value: SyncedSettingValue, for key: SettingsSync.SyncKey) {
+        guard !isApplyingSyncedSettings else { return }
+        guard SettingsSync.shared.record(forKey: key)?.value != value else { return }
+        if key == .postProcessingPrompt {
+            let candidate = SyncedSettingRecord(
+                key: key,
+                value: value,
+                updatedAt: Date(),
+                originDeviceID: DeviceIdentity.deviceId
+            )
+            guard SettingsSync.isAllowed(record: candidate) else {
+                SettingsSync.shared.set(.null, forKey: key)
+                return
+            }
+        }
+        SettingsSync.shared.set(value, forKey: key)
+    }
+
+    private var hasLocalCredentialLikePrompt: Bool {
+        guard !postProcessingPrompt.isEmpty else { return false }
+        return !SettingsSync.isAllowed(record: SyncedSettingRecord(
+            key: .postProcessingPrompt,
+            value: .string(postProcessingPrompt),
+            updatedAt: .distantPast,
+            originDeviceID: DeviceIdentity.deviceId
+        ))
+    }
+
+    private static func normalizedSelectedModel(_ selectedRaw: String) -> String? {
+        let knownLiveIDs = Set(ModelCatalog.liveTranscription.map(\.id))
+        if knownLiveIDs.contains(selectedRaw) || selectedRaw.hasPrefix("apple/") {
+            return selectedRaw
+        }
+        if selectedRaw.hasPrefix("deepgram/") {
+            return "deepgram/nova-3-streaming"
+        }
+        if selectedRaw.hasPrefix("elevenlabs/") {
+            return "elevenlabs/scribe-v2-streaming"
+        }
+        if selectedRaw.hasPrefix("openai/") {
+            return "openai/gpt-realtime-whisper-streaming"
+        }
+        return nil
+    }
+
     /// Returns the stored API key for a resolved live-transcription route, used
     /// by the generic shared-client recording path.
     public func liveAPIKey(for route: LiveTranscriptionRoute) -> String {
@@ -542,11 +658,14 @@ private struct LiveModelGroup: Identifiable {
 
 // swiftlint:disable:next type_body_length
 public struct SettingsView: View {
-    @StateObject private var settings = AppSettings.shared
+    @ObservedObject private var settings = AppSettings.shared
+    @ObservedObject private var macDiscovery = MacDiscovery.shared
+    @ObservedObject private var macConnection = MacConnection.shared
     @Environment(\.openURL) private var openURL
     @Environment(\.openClawEnabled) private var openClawEnabled
     @State private var showingAPIKeys = false
     @State private var missingTranscriptionAPIKeyAlert: IOSMissingTranscriptionAPIKeyAlert?
+    @State private var keychainSyncAvailable: Bool?
 
     public init() {}
 
@@ -713,8 +832,12 @@ public struct SettingsView: View {
                 CloudKitKeySyncSettingsSection()
 
                 // Sync status
+                let transportConnected = macConnection.state == .connected
+                let discoveredMacCount = macDiscovery.discoveredMacs.count
                 let syncStatus = SyncStatus.current(
-                    iCloudCloudKitAvailable: HistorySyncEngine.shared.state.isCloudAvailable
+                    iCloudCloudKitAvailable: HistorySyncEngine.shared.state.isCloudAvailable,
+                    transportAvailable: transportConnected,
+                    iCloudKeychainAvailable: keychainSyncAvailable ?? false
                 )
 
                 HStack {
@@ -748,10 +871,15 @@ public struct SettingsView: View {
                 HStack {
                     Label("Bonjour Transport", systemImage: "network")
                     Spacer()
-                    Text(syncStatus.transportAvailable ? "Ready" : "Unavailable")
-                        .foregroundStyle(syncStatus.transportAvailable ? .green : .secondary)
+                    Text(transportConnected ? "Connected" : (discoveredMacCount > 0 ? "Mac Found" : "Not Found"))
+                        .foregroundStyle(transportConnected ? .green : (discoveredMacCount > 0 ? .orange : .secondary))
                 }
                 .accessibilityElement(children: .combine)
+
+                Text("Bonjour replicates settings and history only after pairing and while your Mac is connected. "
+                    + "iCloud remains preferred whenever it is available.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 if let lastSync = syncStatus.lastSyncDate {
                     LabeledContent("Last Sync") {
@@ -774,8 +902,8 @@ public struct SettingsView: View {
                 }
 
                 Text("Just Speak to It uses iCloud for settings and history when available. "
-                    + "If iCloud is unavailable, Bonjour Transport can send sessions to a paired Mac "
-                    + "on your local network; QR transfer remains available for manual setup.")
+                    + "If iCloud is unavailable, use Send to Mac to pair on your local network; "
+                    + "you may be asked to allow local-network access.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -869,6 +997,16 @@ public struct SettingsView: View {
             showingAPIKeys: $showingAPIKeys,
             openURL: openURL
         )
+        .task {
+            if keychainSyncAvailable == nil {
+                let accessGroup = AppSettings.sharedAccessGroupIdentifier
+                keychainSyncAvailable = await Task.detached {
+                    KeychainSyncAvailability.isAvailable(accessGroup: accessGroup)
+                }.value
+            }
+            macDiscovery.startSearching()
+            iOSSettingsSyncAdapter.shared.start()
+        }
     }
 
     private var postProcessingModelName: String {
@@ -1591,11 +1729,15 @@ struct PermissionRow: View {
 
 struct CloudKitSyncSettingsSection: View {
     @ObservedObject private var syncEngine = HistorySyncEngine.shared
+    @ObservedObject private var macConnection = MacConnection.shared
     @StateObject private var historyManager = iOSHistoryManager.shared
     @State private var isSyncing = false
 
     var body: some View {
-        let availability = SyncAvailability.current(iCloudCloudKitAvailable: syncEngine.state.isCloudAvailable)
+        let availability = SyncAvailability.current(
+            iCloudCloudKitAvailable: syncEngine.state.isCloudAvailable,
+            transportAvailable: macConnection.state == .connected
+        )
 
         // CloudKit status
         HStack {

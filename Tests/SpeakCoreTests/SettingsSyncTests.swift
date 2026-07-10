@@ -2,137 +2,263 @@ import XCTest
 
 @testable import SpeakCore
 
-/// Tests for SettingsSync's stable behaviour.
-///
-/// The fallback-path assertions only run when `SettingsSync.shared` is using
-/// local storage in the current test environment.
 final class SettingsSyncTests: XCTestCase {
+    private final class MemoryStore: SettingsSyncBackingStore {
+        var values: [String: Any] = [:]
+        var synchronizeCount = 0
 
-    private let sut = SettingsSync.shared
-    private var keysToCleanup: [SettingsSync.SyncKey] = []
+        func object(forKey defaultName: String) -> Any? {
+            values[defaultName]
+        }
 
-    private func requireFallbackMode() throws {
-        guard sut.isAvailable == false else {
-            throw XCTSkip("SettingsSync fallback path is unavailable in this environment")
+        func set(_ value: Any?, forKey defaultName: String) {
+            values[defaultName] = value
+        }
+
+        func removeObject(forKey defaultName: String) {
+            values.removeValue(forKey: defaultName)
+        }
+
+        func synchronize() -> Bool {
+            synchronizeCount += 1
+            return true
         }
     }
 
+    private var suiteNames: [String] = []
+
     override func tearDown() {
-        for key in keysToCleanup {
-            UserDefaults.standard.removeObject(forKey: key.rawValue)
+        for suiteName in suiteNames {
+            UserDefaults.standard.removePersistentDomain(forName: suiteName)
         }
-        keysToCleanup.removeAll()
+        suiteNames.removeAll()
         super.tearDown()
     }
 
-    // MARK: - Availability
-
-    func testIsAvailable_inTestSandbox_isFalse() throws {
-        try requireFallbackMode()
-        // iCloud entitlement not granted in unit test sandbox
-        XCTAssertFalse(sut.isAvailable)
+    private func makeDefaults() -> UserDefaults {
+        let suiteName = "SettingsSyncTests.\(UUID().uuidString)"
+        suiteNames.append(suiteName)
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        return defaults
     }
 
-    func testSynchronize_whenUnavailable_returnsTrue() throws {
-        try requireFallbackMode()
-        // When iCloud is unavailable, synchronize() is a no-op that returns true
-        XCTAssertTrue(sut.synchronize())
+    private func makeSUT(
+        store: SettingsSyncBackingStore? = nil,
+        defaults: UserDefaults? = nil,
+        isAvailable: Bool = false,
+        now: @escaping () -> Date = Date.init,
+        deviceID: @escaping () -> String = { "device-a" }
+    ) -> SettingsSync {
+        SettingsSync(
+            ubiquitousStore: store,
+            localStorage: defaults ?? makeDefaults(),
+            isUbiquitousStoreAvailable: isAvailable,
+            now: now,
+            deviceID: deviceID
+        )
     }
 
-    func testLastSyncDate_whenUnavailable_isNil() throws {
-        try requireFallbackMode()
-        XCTAssertNil(sut.lastSyncDate)
+    func testTypedRecordCodable_roundtripsStringBoolDoubleArrayAndNull() throws {
+        let records = [
+            SyncedSettingRecord(
+                key: .selectedModel, value: .string("model"),
+                updatedAt: Date(timeIntervalSince1970: 1), originDeviceID: "a"
+            ),
+            SyncedSettingRecord(
+                key: .autoStartRecording, value: .bool(true),
+                updatedAt: Date(timeIntervalSince1970: 2), originDeviceID: "a"
+            ),
+            SyncedSettingRecord(
+                key: .lastSyncTimestamp, value: .double(3),
+                updatedAt: Date(timeIntervalSince1970: 3), originDeviceID: "a"
+            ),
+            SyncedSettingRecord(
+                key: .hapticFeedback, value: .stringArray(["one", "two"]),
+                updatedAt: Date(timeIntervalSince1970: 4), originDeviceID: "a"
+            ),
+            SyncedSettingRecord(
+                key: .postProcessingPrompt, value: .null,
+                updatedAt: Date(timeIntervalSince1970: 5), originDeviceID: "a"
+            )
+        ]
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let decoded = try decoder.decode([SyncedSettingRecord].self, from: encoder.encode(records))
+
+        XCTAssertEqual(decoded, records)
     }
 
-    // MARK: - String set/get via UserDefaults fallback
+    func testLWWResolver_newerTimestampWins() {
+        let older = SyncedSettingRecord(
+            key: .selectedModel,
+            value: .string("old"),
+            updatedAt: Date(timeIntervalSince1970: 1),
+            originDeviceID: "device-z"
+        )
+        let newer = SyncedSettingRecord(
+            key: .selectedModel,
+            value: .string("new"),
+            updatedAt: Date(timeIntervalSince1970: 2),
+            originDeviceID: "device-a"
+        )
 
-    func testSetString_thenGet_roundtrips() throws {
-        try requireFallbackMode()
-        let key = SettingsSync.SyncKey.selectedModel
-        keysToCleanup.append(key)
-        sut.set("whisper-large", forKey: key)
-        XCTAssertEqual(sut.string(forKey: key), "whisper-large")
+        XCTAssertTrue(SettingsConflictResolver.shouldReplace(existing: older, with: newer))
+        XCTAssertFalse(SettingsConflictResolver.shouldReplace(existing: newer, with: older))
     }
 
-    func testSetStringNil_clearsExistingValue() throws {
-        try requireFallbackMode()
-        let key = SettingsSync.SyncKey.selectedModel
-        keysToCleanup.append(key)
-        sut.set("initial", forKey: key)
-        sut.set(nil as String?, forKey: key)
-        XCTAssertNil(sut.string(forKey: key))
+    func testLWWResolver_equalTimestampUsesStableOriginDeviceTieBreak() {
+        let date = Date(timeIntervalSince1970: 1)
+        let lower = SyncedSettingRecord(
+            key: .selectedModel, value: .string("lower"),
+            updatedAt: date, originDeviceID: "device-a"
+        )
+        let higher = SyncedSettingRecord(
+            key: .selectedModel, value: .string("higher"),
+            updatedAt: date, originDeviceID: "device-b"
+        )
+
+        XCTAssertTrue(SettingsConflictResolver.shouldReplace(existing: lower, with: higher))
+        XCTAssertFalse(SettingsConflictResolver.shouldReplace(existing: higher, with: lower))
     }
 
-    func testSetString_overwrite_returnsLatestValue() throws {
-        try requireFallbackMode()
-        let key = SettingsSync.SyncKey.darkModePreference
-        keysToCleanup.append(key)
-        sut.set("light", forKey: key)
-        sut.set("dark", forKey: key)
-        XCTAssertEqual(sut.string(forKey: key), "dark")
+    func testUnchangedSetPreservesTimestampAndDoesNotNotifyAgain() {
+        var now = Date(timeIntervalSince1970: 10)
+        let sut = makeSUT(now: { now })
+        var localNotificationCount = 0
+        let observer = NotificationCenter.default.addObserver(
+            forName: SettingsSync.didChangeLocalRecordsNotification,
+            object: sut,
+            queue: nil
+        ) { _ in
+            localNotificationCount += 1
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        sut.set(.string("model-a"), forKey: .selectedModel)
+        now = Date(timeIntervalSince1970: 20)
+        sut.set(.string("model-a"), forKey: .selectedModel)
+
+        XCTAssertEqual(sut.record(forKey: .selectedModel)?.updatedAt, Date(timeIntervalSince1970: 10))
+        XCTAssertEqual(localNotificationCount, 1)
     }
 
-    func testGetString_keyNeverSet_returnsNil() throws {
-        try requireFallbackMode()
-        let key = SettingsSync.SyncKey.showConfidenceScore
-        // Ensure the key is not set (clean state)
-        UserDefaults.standard.removeObject(forKey: key.rawValue)
-        XCTAssertNil(sut.string(forKey: key))
+    func testLocalFallbackRecordRoundtripAndMergeChangedKeys() {
+        let defaults = makeDefaults()
+        let sut = makeSUT(defaults: defaults, now: { Date(timeIntervalSince1970: 10) })
+        sut.set(.bool(true), forKey: .autoStartRecording)
+
+        let reloaded = makeSUT(defaults: defaults)
+        XCTAssertEqual(reloaded.record(forKey: .autoStartRecording)?.value, .bool(true))
+
+        let changed = reloaded.mergeIncomingRecords([
+            SyncedSettingRecord(
+                key: .autoStartRecording,
+                value: .bool(false),
+                updatedAt: Date(timeIntervalSince1970: 20),
+                originDeviceID: "device-b"
+            ),
+            SyncedSettingRecord(
+                key: .postProcessingEnabled,
+                value: .bool(true),
+                updatedAt: Date(timeIntervalSince1970: 20),
+                originDeviceID: "device-b"
+            )
+        ])
+
+        XCTAssertEqual(changed, [.autoStartRecording, .postProcessingEnabled])
+        XCTAssertFalse(reloaded.bool(forKey: .autoStartRecording))
+        XCTAssertTrue(reloaded.bool(forKey: .postProcessingEnabled))
     }
 
-    // MARK: - Bool set/get via UserDefaults fallback
+    func testKVSAndLocalFallbackShareRecordMetadata() {
+        let kvs = MemoryStore()
+        let defaults = makeDefaults()
+        let date = Date(timeIntervalSince1970: 42)
+        let sut = makeSUT(store: kvs, defaults: defaults, isAvailable: true, now: { date }, deviceID: { "device-kvs" })
 
-    func testSetBoolTrue_thenGet_returnsTrue() throws {
-        try requireFallbackMode()
-        let key = SettingsSync.SyncKey.autoStartRecording
-        keysToCleanup.append(key)
-        sut.set(true, forKey: key)
-        XCTAssertTrue(sut.bool(forKey: key))
+        sut.set(.string("openai/gpt-realtime-whisper-streaming"), forKey: .selectedModel)
+
+        let localReloaded = makeSUT(defaults: defaults)
+        let kvsReloaded = makeSUT(store: kvs, defaults: makeDefaults(), isAvailable: true)
+        XCTAssertEqual(localReloaded.record(forKey: .selectedModel), kvsReloaded.record(forKey: .selectedModel))
+        XCTAssertEqual(kvsReloaded.record(forKey: .selectedModel)?.updatedAt, date)
+        XCTAssertEqual(kvsReloaded.record(forKey: .selectedModel)?.originDeviceID, "device-kvs")
     }
 
-    func testSetBoolFalse_thenGet_returnsFalse() throws {
-        try requireFallbackMode()
-        let key = SettingsSync.SyncKey.hapticFeedback
-        keysToCleanup.append(key)
-        sut.set(false, forKey: key)
-        XCTAssertFalse(sut.bool(forKey: key))
+    func testLegacyPrimitiveMigratesWithDistantPastTimestamp() {
+        let defaults = makeDefaults()
+        defaults.set("legacy-model", forKey: SettingsSync.SyncKey.selectedModel.rawValue)
+
+        let sut = makeSUT(defaults: defaults)
+
+        let record = sut.record(forKey: .selectedModel)
+        XCTAssertEqual(record?.value, .string("legacy-model"))
+        XCTAssertEqual(record?.updatedAt, .distantPast)
+        XCTAssertEqual(record?.originDeviceID, "legacy")
     }
 
-    func testSetBool_overwrite_returnsLatestValue() throws {
-        try requireFallbackMode()
-        let key = SettingsSync.SyncKey.autoStartRecording
-        keysToCleanup.append(key)
-        sut.set(true, forKey: key)
-        sut.set(false, forKey: key)
-        XCTAssertFalse(sut.bool(forKey: key))
-    }
+    func testSecretLikeSyncKeyNamesCannotDecodeAsRecords() {
+        let forbiddenKeys = ["sync.apiKey", "sync.token", "sync.secret", "sync.password"]
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
 
-    func testBool_differentKeysAreIndependent() throws {
-        try requireFallbackMode()
-        let keyA = SettingsSync.SyncKey.autoStartRecording
-        let keyB = SettingsSync.SyncKey.hapticFeedback
-        keysToCleanup.append(contentsOf: [keyA, keyB])
-        sut.set(true, forKey: keyA)
-        sut.set(false, forKey: keyB)
-        XCTAssertTrue(sut.bool(forKey: keyA))
-        XCTAssertFalse(sut.bool(forKey: keyB))
-    }
-
-    // MARK: - SyncKey enum integrity
-
-    func testSyncKey_allCases_haveNonEmptyRawValues() {
-        for key in SettingsSync.SyncKey.allCases {
-            XCTAssertFalse(key.rawValue.isEmpty, "\(key) should have a non-empty raw value")
+        for key in forbiddenKeys {
+            let json =
+                #"{"key":"\#(key)","value":{"type":"string","value":"x"},"#
+                + #""updatedAt":"2026-01-01T00:00:00Z","originDeviceID":"device"}"#
+            XCTAssertThrowsError(try decoder.decode(SyncedSettingRecord.self, from: Data(json.utf8)))
         }
     }
 
-    func testSyncKey_allCases_haveUniqueRawValues() {
-        let rawValues = SettingsSync.SyncKey.allCases.map(\.rawValue)
-        let unique = Set(rawValues)
-        XCTAssertEqual(rawValues.count, unique.count, "All SyncKey raw values should be unique")
+    func testCredentialLikePromptIsRejected() {
+        let sut = makeSUT()
+        let result = sut.set(.string("use this API key sk-sensitive"), forKey: .postProcessingPrompt)
+
+        XCTAssertNil(result)
+        XCTAssertNil(sut.record(forKey: .postProcessingPrompt))
     }
 
-    // MARK: - Auto-detection
+    func testTransportAllowlistExcludesMetadataAndCredentialLikeKeys() {
+        let forbiddenFragments = ["apikey", "api_key", "token", "secret", "password"]
+        for key in SettingsSync.SyncKey.allCases {
+            let lower = key.rawValue.lowercased()
+            XCTAssertFalse(forbiddenFragments.contains(where: lower.contains))
+        }
+
+        let metadata = SyncedSettingRecord(
+            key: .lastSyncTimestamp,
+            value: .double(1),
+            updatedAt: Date(timeIntervalSince1970: 1),
+            originDeviceID: "device"
+        )
+        XCTAssertFalse(SettingsSync.isAllowed(record: metadata))
+    }
+
+    func testSettingsBatchAccumulatorConvergesDuplicateAndReorderedBatchesAtomically() {
+        let requestID = UUID()
+        let records = (0..<205).map { index in
+            SyncedSettingRecord(
+                key: SettingsSync.SyncKey.allCases[index % SettingsSync.SyncKey.allCases.count],
+                value: .string("value-\(index)"),
+                updatedAt: Date(timeIntervalSince1970: TimeInterval(index)),
+                originDeviceID: "device"
+            )
+        }
+        let batches = SettingsSyncBatchMessage.batches(requestID: requestID, records: records)
+        var accumulator = SettingsBatchAccumulator()
+
+        XCTAssertNil(accumulator.append(batches[1]))
+        XCTAssertNil(accumulator.append(batches[1]))
+        XCTAssertNil(accumulator.append(batches[2]))
+        let assembled = accumulator.append(batches[0])
+
+        XCTAssertEqual(assembled?.receivedBatchCount, 3)
+        XCTAssertEqual(assembled?.snapshot.records, records)
+    }
 
     func testSyncAvailability_prefersICloudWhenCloudKitAvailable() {
         let availability = SyncAvailability(

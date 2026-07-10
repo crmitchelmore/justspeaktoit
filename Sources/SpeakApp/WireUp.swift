@@ -6,6 +6,7 @@ import SpeakSync
 // swiftlint:disable file_length
 
 @MainActor
+// swiftlint:disable:next type_body_length
 final class AppEnvironment: ObservableObject {
   let settings: AppSettings
   let permissions: PermissionsManager
@@ -28,6 +29,7 @@ final class AppEnvironment: ObservableObject {
   let main: MainManager
   let transportServer: TransportServer
   let historySyncAdapter: MacHistorySyncAdapter
+  let settingsSyncAdapter: MacSettingsSyncAdapter
   private let hudPresenter: HUDWindowPresenter
 
   /// Coordinator state for cross-view navigation. When set, MainView selects
@@ -71,6 +73,7 @@ final class AppEnvironment: ObservableObject {
     main: MainManager,
     transportServer: TransportServer,
     historySyncAdapter: MacHistorySyncAdapter,
+    settingsSyncAdapter: MacSettingsSyncAdapter,
     hudPresenter: HUDWindowPresenter
   ) {
     self.settings = settings
@@ -94,6 +97,7 @@ final class AppEnvironment: ObservableObject {
     self.main = main
     self.transportServer = transportServer
     self.historySyncAdapter = historySyncAdapter
+    self.settingsSyncAdapter = settingsSyncAdapter
     self.hudPresenter = hudPresenter
   }
 
@@ -390,6 +394,7 @@ enum WireUp {
     // Transport server for "Send to Mac" from iOS
     let transportServer = TransportServer()
     let syncAdapter = MacHistorySyncAdapter(historyManager: history, transportServer: transportServer)
+    let settingsSyncAdapter = MacSettingsSyncAdapter(settings: settings, transportServer: transportServer)
 
     let environment = AppEnvironment(
       settings: settings,
@@ -413,6 +418,7 @@ enum WireUp {
       main: main,
       transportServer: transportServer,
       historySyncAdapter: syncAdapter,
+      settingsSyncAdapter: settingsSyncAdapter,
       hudPresenter: hudPresenter
     )
 
@@ -442,6 +448,7 @@ enum WireUp {
     #endif
 
     Task { await environment.historySyncAdapter.start() }
+    environment.settingsSyncAdapter.start()
 
     Task { await secureStorage.preloadTrackedSecrets() }
     Task {

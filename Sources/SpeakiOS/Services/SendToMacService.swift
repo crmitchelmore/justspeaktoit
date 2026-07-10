@@ -132,6 +132,7 @@ extension MacDiscovery: MCNearbyServiceBrowserDelegate {
 
 /// Manages connection to a macOS Speak instance.
 @MainActor
+// swiftlint:disable:next type_body_length
 public final class MacConnection: NSObject, ObservableObject {
     public static let shared = MacConnection()
 
@@ -153,6 +154,14 @@ public final class MacConnection: NSObject, ObservableObject {
             }
         }
     }
+    public weak var settingsTransportDelegate: SettingsTransportDelegate? {
+        didSet {
+            guard state == .connected else { return }
+            Task { [weak self] in
+                await self?.exchangeSettingsSnapshot()
+            }
+        }
+    }
 
     private struct PendingConnection {
         let peerID: MCPeerID
@@ -170,6 +179,7 @@ public final class MacConnection: NSObject, ObservableObject {
     private var pendingConnection: PendingConnection?
     private var sequenceNumber = 0
     private var historyBatchAccumulator = HistoryBatchAccumulator()
+    private var settingsBatchAccumulator = SettingsBatchAccumulator()
 
     public override convenience init() {
         self.init(discovery: .shared)
@@ -235,6 +245,7 @@ public final class MacConnection: NSObject, ObservableObject {
         connectedMacName = nil
         sequenceNumber = 0
         historyBatchAccumulator.removeAll()
+        settingsBatchAccumulator.removeAll()
         state = .disconnected
     }
 
@@ -245,6 +256,7 @@ public final class MacConnection: NSObject, ObservableObject {
         connectedMacName = nil
         sequenceNumber = 0
         historyBatchAccumulator.removeAll()
+        settingsBatchAccumulator.removeAll()
         state = .error(error.localizedDescription)
     }
 
@@ -301,6 +313,7 @@ public final class MacConnection: NSObject, ObservableObject {
         completePendingConnection(for: peerID)
         Task { [weak self] in
             await self?.exchangeHistorySnapshot()
+            await self?.exchangeSettingsSnapshot()
         }
     }
 
@@ -314,6 +327,7 @@ public final class MacConnection: NSObject, ObservableObject {
         connectedMacName = nil
         sequenceNumber = 0
         historyBatchAccumulator.removeAll()
+        settingsBatchAccumulator.removeAll()
         state = .disconnected
     }
 
@@ -341,6 +355,7 @@ public final class MacConnection: NSObject, ObservableObject {
         pending.continuation.resume(throwing: MacConnectionError.pairingFailed(message))
     }
 
+    // swiftlint:disable:next cyclomatic_complexity function_body_length
     private func handleIncomingMessage(_ message: TransportMessage) {
         switch message {
         case .ping:
@@ -349,7 +364,7 @@ public final class MacConnection: NSObject, ObservableObject {
             }
         case .historySyncRequest(let request):
             Task { [weak self] in
-                try? await self?.sendHistorySnapshot(requestID: request.requestID)
+                try? self?.sendHistorySnapshot(requestID: request.requestID)
             }
         case .historySyncBatch(let batch):
             guard let assembled = historyBatchAccumulator.append(batch) else { break }
@@ -369,6 +384,26 @@ public final class MacConnection: NSObject, ObservableObject {
                 )
             }
         case .historySyncComplete:
+            break
+        case .settingsSyncRequest(let request):
+            Task { [weak self] in
+                try? self?.sendSettingsSnapshot(requestID: request.requestID)
+            }
+        case .settingsSyncBatch(let batch):
+            guard let assembled = settingsBatchAccumulator.append(batch) else { break }
+            Task { [weak self] in
+                guard let self else { return }
+                _ = await self.settingsTransportDelegate?.applySettingsBatch(records: assembled.snapshot.records)
+                try? self.send(
+                    .settingsSyncComplete(
+                        SettingsSyncCompleteMessage(
+                            requestID: assembled.requestID,
+                            receivedBatchCount: assembled.receivedBatchCount
+                        )
+                    )
+                )
+            }
+        case .settingsSyncComplete:
             break
         case .ack:
             break
@@ -399,9 +434,23 @@ public final class MacConnection: NSObject, ObservableObject {
         }
     }
 
+    public func broadcastSettingsDelta(records: [SyncedSettingRecord]) async {
+        guard state == .connected, !records.isEmpty else { return }
+        let requestID = UUID()
+        let batches = SettingsSyncBatchMessage.batches(requestID: requestID, records: records)
+        for batch in batches {
+            try? send(.settingsSyncBatch(batch))
+        }
+    }
+
     private func exchangeHistorySnapshot() async {
         let request = HistorySyncRequestMessage()
         try? send(.historySyncRequest(request))
+    }
+
+    private func exchangeSettingsSnapshot() async {
+        let request = SettingsSyncRequestMessage()
+        try? send(.settingsSyncRequest(request))
     }
 
     private func sendHistorySnapshot(requestID: UUID) throws {
@@ -414,6 +463,15 @@ public final class MacConnection: NSObject, ObservableObject {
         )
         for batch in batches {
             try send(.historySyncBatch(batch))
+        }
+    }
+
+    private func sendSettingsSnapshot(requestID: UUID) throws {
+        guard let settingsTransportDelegate else { return }
+        let records = settingsTransportDelegate.settingsSnapshot(maxRecords: SpeakTransportSettingsMaxBatchSize)
+        let batches = SettingsSyncBatchMessage.batches(requestID: requestID, records: records)
+        for batch in batches {
+            try send(.settingsSyncBatch(batch))
         }
     }
 }

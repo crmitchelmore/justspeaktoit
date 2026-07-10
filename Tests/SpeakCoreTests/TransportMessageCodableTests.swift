@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import XCTest
 
 @testable import SpeakCore
@@ -283,6 +284,84 @@ final class TransportMessageCodableTests: XCTestCase {
         XCTAssertEqual(batches.last?.isLast, true)
     }
 
+    // MARK: - Settings sync
+
+    func testSettingsSyncRequest_roundtrip() throws {
+        let requestID = UUID()
+        let requestedAt = Date(timeIntervalSince1970: 1_800_000_123)
+        let msg = SettingsSyncRequestMessage(requestID: requestID, requestedAt: requestedAt)
+
+        let decoded = try decoder.decode(
+            TransportMessage.self,
+            from: encoder.encode(TransportMessage.settingsSyncRequest(msg))
+        )
+
+        guard case .settingsSyncRequest(let result) = decoded else {
+            XCTFail("Expected .settingsSyncRequest"); return
+        }
+        XCTAssertEqual(result.requestID, requestID)
+        XCTAssertEqual(result.requestedAt.timeIntervalSince1970, requestedAt.timeIntervalSince1970, accuracy: 1.0)
+    }
+
+    func testSettingsSyncBatch_roundtrip() throws {
+        let requestID = UUID()
+        let record = SyncedSettingRecord(
+            key: .postProcessingModel,
+            value: .string("openai/gpt-4o-mini"),
+            updatedAt: Date(timeIntervalSince1970: 100),
+            originDeviceID: "device"
+        )
+        let msg = SettingsSyncBatchMessage(requestID: requestID, batchIndex: 1, isLast: true, records: [record])
+
+        let decoded = try decoder.decode(
+            TransportMessage.self,
+            from: encoder.encode(TransportMessage.settingsSyncBatch(msg))
+        )
+
+        guard case .settingsSyncBatch(let result) = decoded else {
+            XCTFail("Expected .settingsSyncBatch"); return
+        }
+        XCTAssertEqual(result.requestID, requestID)
+        XCTAssertEqual(result.batchIndex, 1)
+        XCTAssertTrue(result.isLast)
+        XCTAssertEqual(result.records, [record])
+    }
+
+    func testSettingsSyncComplete_roundtrip() throws {
+        let requestID = UUID()
+        let msg = SettingsSyncCompleteMessage(requestID: requestID, receivedBatchCount: 2)
+
+        let decoded = try decoder.decode(
+            TransportMessage.self,
+            from: encoder.encode(TransportMessage.settingsSyncComplete(msg))
+        )
+
+        guard case .settingsSyncComplete(let result) = decoded else {
+            XCTFail("Expected .settingsSyncComplete"); return
+        }
+        XCTAssertEqual(result.requestID, requestID)
+        XCTAssertEqual(result.receivedBatchCount, 2)
+    }
+
+    func testSettingsSyncBatchHelperLimitsBatchesToOneHundredRecords() {
+        let requestID = UUID()
+        let records = (0..<205).map { index in
+            SyncedSettingRecord(
+                key: SettingsSync.SyncKey.allCases[index % SettingsSync.SyncKey.allCases.count],
+                value: .string("value-\(index)"),
+                updatedAt: Date(timeIntervalSince1970: TimeInterval(index)),
+                originDeviceID: "device"
+            )
+        }
+
+        let batches = SettingsSyncBatchMessage.batches(requestID: requestID, records: records)
+
+        XCTAssertEqual(batches.count, 3)
+        XCTAssertTrue(batches.allSatisfy(\.isWithinBatchLimit))
+        XCTAssertEqual(batches.map(\.records.count), [100, 100, 5])
+        XCTAssertEqual(batches.last?.isLast, true)
+    }
+
     // MARK: - .error
 
     func testError_roundtrip() throws {
@@ -308,14 +387,14 @@ final class TransportMessageCodableTests: XCTestCase {
     // MARK: - Unknown type
 
     func testDecode_unknownType_fallsBackWithoutThrowing() throws {
-        let json = #"{"type":"settingsSync","payload":{"future":true}}"#
+        let json = #"{"type":"futureSettingsSync","payload":{"future":true}}"#
         let data = Data(json.utf8)
         let decoded = try decoder.decode(TransportMessage.self, from: data)
         guard case .unknown(let type) = decoded else {
             XCTFail("Expected .unknown, got \(decoded)")
             return
         }
-        XCTAssertEqual(type, "settingsSync")
+        XCTAssertEqual(type, "futureSettingsSync")
     }
 
     // MARK: - Constants

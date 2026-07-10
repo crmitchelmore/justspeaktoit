@@ -312,9 +312,13 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     "openrouter/gpt-4o-mini": defaultPostProcessingModel,
     "openrouter/gpt-4o": "openai/gpt-4o"
   ]
+  private var isApplyingSyncedSettings = false
 
   @Published var appearance: Appearance {
-    didSet { store(appearance.rawValue, key: .appearance) }
+    didSet {
+      store(appearance.rawValue, key: .appearance)
+      syncSetting(.string(appearance.rawValue), for: .appearance)
+    }
   }
 
   @Published var transcriptionMode: TranscriptionMode {
@@ -327,6 +331,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   @Published var liveTranscriptionModel: String {
     didSet {
       store(liveTranscriptionModel, key: .liveTranscriptionModel)
+      syncSetting(.string(liveTranscriptionModel), for: .selectedModel)
       enforceSpeedModeConstraints()
     }
   }
@@ -370,7 +375,10 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   }
 
   @Published var preferredLocaleIdentifier: String {
-    didSet { store(preferredLocaleIdentifier, key: .preferredLocale) }
+    didSet {
+      store(preferredLocaleIdentifier, key: .preferredLocale)
+      syncSetting(.string(preferredLocaleIdentifier), for: .preferredLocale)
+    }
   }
 
   @Published var preferredAudioInputUID: String? {
@@ -392,6 +400,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
         return
       }
       store(postProcessingEnabled, key: .postProcessingEnabled)
+      syncSetting(.bool(postProcessingEnabled), for: .postProcessingEnabled)
     }
   }
 
@@ -403,6 +412,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
         return
       }
       store(postProcessingModel, key: .postProcessingModel)
+      syncSetting(.string(postProcessingModel), for: .postProcessingModel)
     }
   }
 
@@ -411,7 +421,10 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   }
 
   @Published var postProcessingSystemPrompt: String {
-    didSet { store(postProcessingSystemPrompt, key: .postProcessingSystemPrompt) }
+    didSet {
+      store(postProcessingSystemPrompt, key: .postProcessingSystemPrompt)
+      syncSetting(.string(postProcessingSystemPrompt), for: .postProcessingPrompt)
+    }
   }
 
   @Published var assemblyAIKeyterms: String {
@@ -1051,6 +1064,84 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     default:
       defaults.set(value, forKey: key.rawValue)
     }
+  }
+
+  func publishCurrentSyncedSettings() {
+    syncSetting(.string(liveTranscriptionModel), for: .selectedModel)
+    syncSetting(.bool(postProcessingEnabled), for: .postProcessingEnabled)
+    syncSetting(.string(postProcessingModel), for: .postProcessingModel)
+    syncSetting(.string(postProcessingSystemPrompt), for: .postProcessingPrompt)
+    syncSetting(.string(preferredLocaleIdentifier), for: .preferredLocale)
+    syncSetting(.string(appearance.rawValue), for: .appearance)
+  }
+
+  @discardableResult
+  func applySyncedSettings(records: [SyncedSettingRecord]) -> [SettingsSync.SyncKey] {
+    var applied: [SettingsSync.SyncKey] = []
+    isApplyingSyncedSettings = true
+    defer { isApplyingSyncedSettings = false }
+
+    for record in records {
+      switch (record.key, record.value) {
+      case (.selectedModel, .string(let value))
+      where (ModelCatalog.liveTranscription.contains { $0.id == value } || value.hasPrefix("apple/"))
+        && liveTranscriptionModel != value:
+        liveTranscriptionModel = value
+        applied.append(record.key)
+      case (.postProcessingEnabled, .bool(let value)) where postProcessingEnabled != value:
+        postProcessingEnabled = value
+        applied.append(record.key)
+      case (.postProcessingModel, .string(let value)) where postProcessingModel != value:
+        postProcessingModel = value
+        applied.append(record.key)
+      case (.postProcessingPrompt, .string(let value))
+      where !hasLocalCredentialLikePrompt && postProcessingSystemPrompt != value:
+        postProcessingSystemPrompt = value
+        applied.append(record.key)
+      case (.postProcessingPrompt, .null)
+      where !hasLocalCredentialLikePrompt && !postProcessingSystemPrompt.isEmpty:
+        postProcessingSystemPrompt = ""
+        applied.append(record.key)
+      case (.preferredLocale, .string(let value)) where preferredLocaleIdentifier != value:
+        preferredLocaleIdentifier = value
+        applied.append(record.key)
+      case (.appearance, .string(let value)), (.darkModePreference, .string(let value)):
+        guard let next = Appearance(rawValue: value), appearance != next else { continue }
+        appearance = next
+        applied.append(record.key)
+      default:
+        continue
+      }
+    }
+    return applied
+  }
+
+  private func syncSetting(_ value: SyncedSettingValue, for key: SettingsSync.SyncKey) {
+    guard !isApplyingSyncedSettings else { return }
+    guard SettingsSync.shared.record(forKey: key)?.value != value else { return }
+    if key == .postProcessingPrompt {
+      let candidate = SyncedSettingRecord(
+        key: key,
+        value: value,
+        updatedAt: Date(),
+        originDeviceID: DeviceIdentity.deviceId
+      )
+      guard SettingsSync.isAllowed(record: candidate) else {
+        SettingsSync.shared.set(.null, forKey: key)
+        return
+      }
+    }
+    SettingsSync.shared.set(value, forKey: key)
+  }
+
+  private var hasLocalCredentialLikePrompt: Bool {
+    guard !postProcessingSystemPrompt.isEmpty else { return false }
+    return !SettingsSync.isAllowed(record: SyncedSettingRecord(
+      key: .postProcessingPrompt,
+      value: .string(postProcessingSystemPrompt),
+      updatedAt: .distantPast,
+      originDeviceID: DeviceIdentity.deviceId
+    ))
   }
 
   /// Applies the current app visibility setting to show/hide dock icon

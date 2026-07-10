@@ -104,6 +104,7 @@ struct MainTabView: View {
         }
         .task {
             _ = iOSHistoryManager.shared
+            iOSSettingsSyncAdapter.shared.start()
         }
     }
 }

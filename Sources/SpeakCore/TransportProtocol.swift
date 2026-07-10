@@ -46,6 +46,9 @@ public enum TransportMessage: Codable {
     case historySyncRequest(HistorySyncRequestMessage)
     case historySyncBatch(HistorySyncBatchMessage)
     case historySyncComplete(HistorySyncCompleteMessage)
+    case settingsSyncRequest(SettingsSyncRequestMessage)
+    case settingsSyncBatch(SettingsSyncBatchMessage)
+    case settingsSyncComplete(SettingsSyncCompleteMessage)
     case ack(AckMessage)
     case error(ErrorMessage)
     case ping
@@ -59,7 +62,9 @@ public enum TransportMessage: Codable {
     private enum MessageType: String, Codable {
         case hello, authenticate, authResult
         case sessionStart, sessionEnd
-        case transcriptChunk, historySyncRequest, historySyncBatch, historySyncComplete, ack, error
+        case transcriptChunk, historySyncRequest, historySyncBatch, historySyncComplete
+        case settingsSyncRequest, settingsSyncBatch, settingsSyncComplete
+        case ack, error
         case ping, pong
     }
     
@@ -91,6 +96,12 @@ public enum TransportMessage: Codable {
             self = .historySyncBatch(try container.decode(HistorySyncBatchMessage.self, forKey: .payload))
         case .historySyncComplete:
             self = .historySyncComplete(try container.decode(HistorySyncCompleteMessage.self, forKey: .payload))
+        case .settingsSyncRequest:
+            self = .settingsSyncRequest(try container.decode(SettingsSyncRequestMessage.self, forKey: .payload))
+        case .settingsSyncBatch:
+            self = .settingsSyncBatch(try container.decode(SettingsSyncBatchMessage.self, forKey: .payload))
+        case .settingsSyncComplete:
+            self = .settingsSyncComplete(try container.decode(SettingsSyncCompleteMessage.self, forKey: .payload))
         case .ack:
             self = .ack(try container.decode(AckMessage.self, forKey: .payload))
         case .error:
@@ -102,7 +113,7 @@ public enum TransportMessage: Codable {
         }
     }
     
-    // swiftlint:disable:next cyclomatic_complexity
+    // swiftlint:disable:next cyclomatic_complexity function_body_length
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         
@@ -133,6 +144,15 @@ public enum TransportMessage: Codable {
             try container.encode(msg, forKey: .payload)
         case .historySyncComplete(let msg):
             try container.encode(MessageType.historySyncComplete, forKey: .type)
+            try container.encode(msg, forKey: .payload)
+        case .settingsSyncRequest(let msg):
+            try container.encode(MessageType.settingsSyncRequest, forKey: .type)
+            try container.encode(msg, forKey: .payload)
+        case .settingsSyncBatch(let msg):
+            try container.encode(MessageType.settingsSyncBatch, forKey: .type)
+            try container.encode(msg, forKey: .payload)
+        case .settingsSyncComplete(let msg):
+            try container.encode(MessageType.settingsSyncComplete, forKey: .type)
             try container.encode(msg, forKey: .payload)
         case .ack(let msg):
             try container.encode(MessageType.ack, forKey: .type)
@@ -231,6 +251,7 @@ public struct TranscriptChunkMessage: Codable {
 // swiftlint:disable identifier_name
 public let SpeakTransportHistoryMaxBatchSize = 100
 public let SpeakTransportHistoryMaxSnapshotEntries = 5_000
+public let SpeakTransportSettingsMaxBatchSize = 100
 // swiftlint:enable identifier_name
 
 public struct HistorySyncRequestMessage: Codable, Equatable {
@@ -307,6 +328,68 @@ public struct HistorySyncBatchMessage: Codable, Equatable {
 }
 
 public struct HistorySyncCompleteMessage: Codable, Equatable {
+    public var requestID: UUID
+    public var receivedBatchCount: Int
+    public var completedAt: Date
+
+    public init(requestID: UUID, receivedBatchCount: Int, completedAt: Date = Date()) {
+        self.requestID = requestID
+        self.receivedBatchCount = receivedBatchCount
+        self.completedAt = completedAt
+    }
+}
+
+public struct SettingsSyncRequestMessage: Codable, Equatable, Sendable {
+    public var requestID: UUID
+    public var requestedAt: Date
+
+    public init(requestID: UUID = UUID(), requestedAt: Date = Date()) {
+        self.requestID = requestID
+        self.requestedAt = requestedAt
+    }
+}
+
+public struct SettingsSyncBatchMessage: Codable, Equatable, Sendable {
+    public var requestID: UUID
+    public var batchIndex: Int
+    public var isLast: Bool
+    public var records: [SyncedSettingRecord]
+
+    public init(requestID: UUID, batchIndex: Int, isLast: Bool, records: [SyncedSettingRecord]) {
+        self.requestID = requestID
+        self.batchIndex = batchIndex
+        self.isLast = isLast
+        self.records = Array(records.prefix(SpeakTransportSettingsMaxBatchSize))
+    }
+
+    public var isWithinBatchLimit: Bool {
+        records.count <= SpeakTransportSettingsMaxBatchSize
+    }
+
+    public static func batches(requestID: UUID, records: [SyncedSettingRecord]) -> [SettingsSyncBatchMessage] {
+        var remaining = ArraySlice(records)
+        var batches: [SettingsSyncBatchMessage] = []
+        var index = 0
+
+        repeat {
+            let chunk = Array(remaining.prefix(SpeakTransportSettingsMaxBatchSize))
+            remaining = remaining.dropFirst(chunk.count)
+            batches.append(
+                SettingsSyncBatchMessage(
+                    requestID: requestID,
+                    batchIndex: index,
+                    isLast: remaining.isEmpty,
+                    records: chunk
+                )
+            )
+            index += 1
+        } while !remaining.isEmpty
+
+        return batches
+    }
+}
+
+public struct SettingsSyncCompleteMessage: Codable, Equatable, Sendable {
     public var requestID: UUID
     public var receivedBatchCount: Int
     public var completedAt: Date

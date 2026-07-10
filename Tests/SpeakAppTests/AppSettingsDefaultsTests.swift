@@ -1,7 +1,9 @@
 import XCTest
 
+import SpeakCore
 @testable import SpeakApp
 
+// swiftlint:disable:next type_body_length
 final class AppSettingsDefaultsTests: XCTestCase {
 
     private var suiteName: String!
@@ -39,6 +41,84 @@ final class AppSettingsDefaultsTests: XCTestCase {
     func testCoreDefaults_appearanceIsSystem() {
         let settings = AppSettings(defaults: defaults)
         XCTAssertEqual(settings.appearance, .system)
+    }
+
+    @MainActor
+    func testApplySyncedSettings_mapsCrossPlatformRecordsAndPersistsLocally() {
+        let settings = AppSettings(defaults: defaults)
+        let changed = settings.applySyncedSettings(records: [
+            SyncedSettingRecord(
+                key: .selectedModel,
+                value: .string("openai/gpt-realtime-whisper-streaming"),
+                updatedAt: Date(timeIntervalSince1970: 1),
+                originDeviceID: "ios"
+            ),
+            SyncedSettingRecord(
+                key: .postProcessingEnabled,
+                value: .bool(false),
+                updatedAt: Date(timeIntervalSince1970: 2),
+                originDeviceID: "ios"
+            ),
+            SyncedSettingRecord(
+                key: .postProcessingPrompt,
+                value: .string("Use full stops."),
+                updatedAt: Date(timeIntervalSince1970: 3),
+                originDeviceID: "ios"
+            ),
+            SyncedSettingRecord(
+                key: .preferredLocale,
+                value: .string("fr-FR"),
+                updatedAt: Date(timeIntervalSince1970: 4),
+                originDeviceID: "ios"
+            ),
+            SyncedSettingRecord(
+                key: .appearance,
+                value: .string("dark"),
+                updatedAt: Date(timeIntervalSince1970: 5),
+                originDeviceID: "ios"
+            )
+        ])
+
+        XCTAssertEqual(
+            changed,
+            [.selectedModel, .postProcessingEnabled, .postProcessingPrompt, .preferredLocale, .appearance]
+        )
+        XCTAssertEqual(settings.liveTranscriptionModel, "openai/gpt-realtime-whisper-streaming")
+        XCTAssertFalse(settings.postProcessingEnabled)
+        XCTAssertEqual(settings.postProcessingSystemPrompt, "Use full stops.")
+        XCTAssertEqual(settings.preferredLocaleIdentifier, "fr-FR")
+        XCTAssertEqual(settings.appearance, .dark)
+        XCTAssertEqual(
+            defaults.string(forKey: AppSettings.DefaultsKey.liveTranscriptionModel.rawValue),
+            settings.liveTranscriptionModel
+        )
+        XCTAssertEqual(
+            defaults.string(forKey: AppSettings.DefaultsKey.postProcessingSystemPrompt.rawValue),
+            "Use full stops."
+        )
+    }
+
+    @MainActor
+    func testApplySyncedSettings_preservesCredentialLikeLocalPrompt() {
+        defaults.set(
+            "Use this API key sk-sensitive only on this Mac.",
+            forKey: AppSettings.DefaultsKey.postProcessingSystemPrompt.rawValue
+        )
+        let settings = AppSettings(defaults: defaults)
+        let remotePrompt = SyncedSettingRecord(
+            key: .postProcessingPrompt,
+            value: .string("Remote safe prompt"),
+            updatedAt: Date(timeIntervalSince1970: 10),
+            originDeviceID: "ios"
+        )
+
+        let changed = settings.applySyncedSettings(records: [remotePrompt])
+
+        XCTAssertFalse(changed.contains(.postProcessingPrompt))
+        XCTAssertEqual(
+            settings.postProcessingSystemPrompt,
+            "Use this API key sk-sensitive only on this Mac."
+        )
     }
 
     @MainActor

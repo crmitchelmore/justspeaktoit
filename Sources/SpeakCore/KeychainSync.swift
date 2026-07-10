@@ -37,6 +37,9 @@ extension SecureStorageConfiguration {
 
 /// Detects whether this process may create iCloud-synchronized keychain items.
 public enum KeychainSyncAvailability {
+    private static let cacheLock = NSLock()
+    private static var cachedResults: [String: Bool] = [:]
+
     /// Probes the keychain by attempting to add (and immediately delete) a throw
     /// away synchronizable item, optionally within `accessGroup`.
     ///
@@ -44,6 +47,14 @@ public enum KeychainSyncAvailability {
     /// Developer-ID macOS, or a missing/incorrect keychain-access-group), so
     /// callers can fall back to local-only storage instead of failing writes.
     public static func isAvailable(accessGroup: String? = nil) -> Bool {
+        let cacheKey = accessGroup ?? "<default>"
+        cacheLock.lock()
+        if let cached = cachedResults[cacheKey] {
+            cacheLock.unlock()
+            return cached
+        }
+        cacheLock.unlock()
+
         let account = "sync-probe-\(UUID().uuidString)"
         var addQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -57,7 +68,10 @@ public enum KeychainSyncAvailability {
         }
 
         let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
-        guard addStatus == errSecSuccess else { return false }
+        guard addStatus == errSecSuccess else {
+            cache(result: false, forKey: cacheKey)
+            return false
+        }
 
         var deleteQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -69,6 +83,13 @@ public enum KeychainSyncAvailability {
             deleteQuery[kSecAttrAccessGroup as String] = accessGroup
         }
         SecItemDelete(deleteQuery as CFDictionary)
+        cache(result: true, forKey: cacheKey)
         return true
+    }
+
+    private static func cache(result: Bool, forKey key: String) {
+        cacheLock.lock()
+        cachedResults[key] = result
+        cacheLock.unlock()
     }
 }

@@ -694,7 +694,7 @@ public struct SettingsView: View {
                 // CloudKit History Sync
                 CloudKitSyncSettingsSection()
 
-                CloudKitKeySyncSettingsSection(settings: settings)
+                CloudKitKeySyncSettingsSection()
 
                 // Sync status
                 let syncStatus = SyncStatus.current()
@@ -1636,7 +1636,6 @@ struct CloudKitSyncSettingsSection: View {
 
 struct CloudKitKeySyncSettingsSection: View {
     @ObservedObject private var keySync = CloudKitKeySync.shared
-    @ObservedObject var settings: AppSettings
     @State private var passphrase = ""
     @State private var syncError: String?
 
@@ -1660,7 +1659,7 @@ struct CloudKitKeySyncSettingsSection: View {
                     Task {
                         do {
                             try await keySync.enable(passphrase: passphrase)
-                            await settings.reloadSyncedAPIKeys()
+                            await AppSettings.shared.reloadSyncedAPIKeys()
                             passphrase = ""
                             syncError = nil
                         } catch {
@@ -1677,7 +1676,7 @@ struct CloudKitKeySyncSettingsSection: View {
                         Task {
                             do {
                                 try await keySync.syncNow()
-                                await settings.reloadSyncedAPIKeys()
+                                await AppSettings.shared.reloadSyncedAPIKeys()
                                 syncError = nil
                             } catch {
                                 syncError = error.localizedDescription

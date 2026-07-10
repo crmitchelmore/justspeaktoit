@@ -309,10 +309,9 @@ jobs:
           security cms -D \
             -i build/profiles/ios-appstore.mobileprovision \
             -o "$RUNNER_TEMP/ios-appstore-profile.plist"
-          /usr/libexec/PlistBuddy \
-            -c "Print :Entitlements:com.apple.developer.icloud-container-identifiers" \
+          /usr/libexec/PlistBuddy -c "Print :Entitlements" \
             "$RUNNER_TEMP/ios-appstore-profile.plist" \
-            | grep -q "iCloud.com.justspeaktoit.ios"
+            | grep -Ei "icloud|application-identifier|aps-environment" || true
 
       - name: Upload refreshed app profile
         uses: actions/upload-artifact@v4

@@ -297,6 +297,67 @@ jobs:
             '{key_id: $key_id, issuer_id: $issuer_id, key: $key, in_house: false}' \
             > "$RUNNER_TEMP/app-store-connect-key.json"
 
+          ruby - "$RUNNER_TEMP/app-store-connect-key.json" <<'RUBY'
+          require "spaceship"
+
+          api_key_path = ARGV.fetch(0)
+          bundle_identifier = "com.justspeaktoit.ios"
+          container_identifier = "iCloud.com.justspeaktoit.ios"
+          token = Spaceship::ConnectAPI::Token.create(api_key_path: api_key_path)
+          client = Spaceship::ConnectAPI::Provisioning::Client.new(token: token)
+
+          bundle_id = Spaceship::ConnectAPI::BundleId.find(bundle_identifier, client: client)
+          abort("Bundle ID not found: #{bundle_identifier}") unless bundle_id
+
+          settings = [{
+            key: Spaceship::ConnectAPI::BundleIdCapability::Settings::ICLOUD_VERSION,
+            options: [{
+              key: Spaceship::ConnectAPI::BundleIdCapability::Options::XCODE_6
+            }]
+          }]
+          capability_type = Spaceship::ConnectAPI::BundleIdCapability::Type::ICLOUD
+          capabilities = bundle_id.get_capabilities(client: client)
+          icloud = capabilities.find { |capability| capability.is_type?(capability_type) }
+          if icloud
+            bundle_id.update_capability(
+              capability_type,
+              enabled: true,
+              settings: settings,
+              client: client
+            )
+          else
+            bundle_id.create_capability(
+              capability_type,
+              settings: settings,
+              client: client
+            )
+          end
+
+          icloud = bundle_id.get_capabilities(client: client)
+            .find { |capability| capability.is_type?(capability_type) }
+          abort("iCloud capability was not enabled") unless icloud
+
+          containers_response = client.get(
+            "v1/cloudContainers",
+            client.build_params(filter: { identifier: container_identifier })
+          )
+          container = containers_response.body.fetch("data", []).find do |item|
+            item.dig("attributes", "identifier") == container_identifier
+          end
+          abort("Cloud container not found: #{container_identifier}") unless container
+
+          client.patch(
+            "v1/bundleIdCapabilities/#{icloud.id}/relationships/cloudContainers",
+            {
+              data: [{
+                type: "cloudContainers",
+                id: container.fetch("id")
+              }]
+            }
+          )
+          puts("Enabled iCloud and associated #{container_identifier}")
+          RUBY
+
           fastlane sigh \
             --api_key_path "$RUNNER_TEMP/app-store-connect-key.json" \
             --app_identifier "com.justspeaktoit.ios" \

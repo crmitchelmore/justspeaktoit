@@ -76,8 +76,13 @@
 	<key>com.apple.security.cs.disable-library-validation</key>
 	<true/>
 
-	<!-- Restricted for Developer ID (iCloud/APNs): requires embedded provisioning profile.
-	     For App Store builds, uncomment and set aps-environment to production.
+	<!-- Restricted for Developer ID (iCloud/APNs): requires an embedded managed
+	     provisioning profile that explicitly includes the CloudKit container.
+	     The Developer-ID Sparkle build intentionally ships without these active
+	     entitlements today; SpeakSync checks the runtime entitlements and disables
+	     CloudKit history/API-key sync gracefully when they are absent, without
+	     blocking local Keychain storage. For App Store or managed-profile
+	     Developer-ID builds, uncomment these and set aps-environment correctly.
 	<key>com.apple.developer.icloud-container-identifiers</key>
 	<array>
 		<string>iCloud.com.justspeaktoit</string>

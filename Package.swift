@@ -32,6 +32,7 @@ let package = Package(
         ),
         .target(
             name: "SpeakSync",
+            dependencies: ["SpeakCore"],
             path: "Sources/SpeakSync"
         ),
         .target(
@@ -59,6 +60,10 @@ let package = Package(
         .testTarget(
             name: "SpeakCoreTests",
             dependencies: ["SpeakCore"]
+        ),
+        .testTarget(
+            name: "SpeakSyncTests",
+            dependencies: ["SpeakSync"]
         ),
         .testTarget(
             name: "SpeakAppTests",

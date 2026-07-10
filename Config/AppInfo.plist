@@ -24,6 +24,13 @@
 	<string>1</string>
 	<key>GitCommitSHA</key>
 	<string></string>
+	<!-- Export compliance: the app uses only standard, published encryption
+	     (AES-GCM and PBKDF2 via CryptoKit) to protect the user's own API keys for
+	     end-to-end encrypted iCloud/CloudKit key sync, alongside OS-provided HTTPS
+	     and Keychain. This qualifies for the U.S. EAR Category 5 Part 2 export
+	     exemption, so the app uses no *non-exempt* encryption. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.productivity</string>
 	<key>LSArchitecturePriority</key>

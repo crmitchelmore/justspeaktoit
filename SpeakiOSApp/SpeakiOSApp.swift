@@ -8,10 +8,25 @@ final class SpeakiOSAppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        application.registerForRemoteNotifications()
+        Task { @MainActor in
+            _ = await AppSettings.shared.syncCloudKitKeys()
+        }
         if let shortcutItem = launchOptions?[.shortcutItem] as? UIApplicationShortcutItem {
             return !handleQuickAction(shortcutItem, application: application)
         }
         return true
+    }
+
+    func application(
+        _ application: UIApplication,
+        didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+        fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
+    ) {
+        Task { @MainActor in
+            let synced = await AppSettings.shared.syncCloudKitKeys()
+            completionHandler(synced ? .newData : .noData)
+        }
     }
 
     func application(

@@ -67,6 +67,7 @@ public enum HardwareTriggerDestination: String, CaseIterable, Identifiable, Send
 /// Simple UserDefaults-based settings for iOS app.
 @MainActor
 public final class AppSettings: ObservableObject {
+    // swiftlint:disable:previous type_body_length
     public static let shared = AppSettings()
 
     @Published public var selectedModel: String {
@@ -147,11 +148,14 @@ public final class AppSettings: ObservableObject {
     )
 
     private static let logger = Logger(subsystem: "com.justspeaktoit.ios", category: "AppSettings")
+    private var keyChangeObserver: NSObjectProtocol?
+    private var syncedKeyReloadDepth = 0
 
     /// Persists (or clears when empty) an API key on the canonical secure store.
     /// Keychain failures are logged rather than silently dropped so a key that
     /// appears saved but didn't persist is diagnosable from logs.
     private func persistSecret(_ value: String, identifier: String) {
+        guard syncedKeyReloadDepth == 0 else { return }
         Task {
             do {
                 if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -225,7 +229,6 @@ public final class AppSettings: ObservableObject {
         PostProcessingModelInfo(id: "anthropic/claude-sonnet-4", name: "Claude Sonnet", description: "Best structure preservation"),
     ]
 
-    // swiftlint:disable:next function_body_length
     private init() {
         let selectedRaw = UserDefaults.standard.string(forKey: "selectedModel") ?? "apple/local/SFSpeechRecognizer"
         // Normalise to canonical catalogue ids. Keep any id already in the
@@ -290,17 +293,15 @@ public final class AppSettings: ObservableObject {
         Task { @MainActor [weak self] in
             guard let self else { return }
             await Self.migrateLegacyKeysIfNeeded()
-            self.deepgramAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.deepgramKeyID)) ?? ""
-            self.openRouterAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.openRouterKeyID)) ?? ""
-            self.openAIAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.openAIKeyID)) ?? ""
-            self.elevenLabsAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.elevenLabsKeyID)) ?? ""
-            self.cartesiaAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.cartesiaKeyID)) ?? ""
-            self.sonioxAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.sonioxKeyID)) ?? ""
-            self.modulateAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.modulateKeyID)) ?? ""
-            self.assemblyAIAPIKey =
-                (try? await Self.credentialStorage.secret(identifier: Self.assemblyAIKeyID)) ?? ""
-            self.gladiaAPIKey = (try? await Self.credentialStorage.secret(identifier: Self.gladiaKeyID)) ?? ""
+            await self.reloadSyncedAPIKeys()
+            self.observeSecureStorageChanges()
             self.configureDefaultProviderIfNeeded()
+        }
+    }
+
+    deinit {
+        if let keyChangeObserver {
+            NotificationCenter.default.removeObserver(keyChangeObserver)
         }
     }
 
@@ -339,6 +340,90 @@ public final class AppSettings: ObservableObject {
     public var hasModulateKey: Bool { !modulateAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasAssemblyAIKey: Bool { !assemblyAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasGladiaKey: Bool { !gladiaAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    public func reloadSyncedAPIKeys() async {
+        syncedKeyReloadDepth += 1
+        defer { syncedKeyReloadDepth -= 1 }
+        deepgramAPIKey = await Self.syncedAPIKeyValue(
+            identifier: Self.deepgramKeyID,
+            currentValue: deepgramAPIKey
+        )
+        openRouterAPIKey = await Self.syncedAPIKeyValue(
+            identifier: Self.openRouterKeyID,
+            currentValue: openRouterAPIKey
+        )
+        openAIAPIKey = await Self.syncedAPIKeyValue(
+            identifier: Self.openAIKeyID,
+            currentValue: openAIAPIKey
+        )
+        elevenLabsAPIKey = await Self.syncedAPIKeyValue(
+            identifier: Self.elevenLabsKeyID,
+            currentValue: elevenLabsAPIKey
+        )
+        cartesiaAPIKey = await Self.syncedAPIKeyValue(
+            identifier: Self.cartesiaKeyID,
+            currentValue: cartesiaAPIKey
+        )
+        sonioxAPIKey = await Self.syncedAPIKeyValue(
+            identifier: Self.sonioxKeyID,
+            currentValue: sonioxAPIKey
+        )
+        modulateAPIKey = await Self.syncedAPIKeyValue(
+            identifier: Self.modulateKeyID,
+            currentValue: modulateAPIKey
+        )
+        assemblyAIAPIKey = await Self.syncedAPIKeyValue(
+            identifier: Self.assemblyAIKeyID,
+            currentValue: assemblyAIAPIKey
+        )
+        gladiaAPIKey = await Self.syncedAPIKeyValue(
+            identifier: Self.gladiaKeyID,
+            currentValue: gladiaAPIKey
+        )
+    }
+
+    @discardableResult
+    public func syncCloudKitKeys() async -> Bool {
+        let keySync = CloudKitKeySync.shared
+        await keySync.configure(secureStorage: Self.credentialStorage)
+        guard await keySync.isAvailable() else { return false }
+
+        do {
+            try await keySync.syncNow()
+            await reloadSyncedAPIKeys()
+            return true
+        } catch {
+            Self.logger.error("CloudKit API-key sync failed: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
+    }
+
+    private static func syncedAPIKeyValue(identifier: String, currentValue: String) async -> String {
+        do {
+            return try await credentialStorage.secret(identifier: identifier)
+        } catch SecureStorageError.valueNotFound {
+            return ""
+        } catch {
+            return currentValue
+        }
+    }
+
+    private func observeSecureStorageChanges() {
+        guard keyChangeObserver == nil else { return }
+        keyChangeObserver = NotificationCenter.default.addObserver(
+            forName: SecureStorage.didChangeSecretNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let identifier = notification.userInfo?[SecureStorage.NotificationUserInfoKey.identifier] as? String,
+                  CloudKitKeySync.syncableIdentifiers.contains(identifier) else {
+                return
+            }
+            Task { @MainActor [weak self] in
+                await self?.reloadSyncedAPIKeys()
+            }
+        }
+    }
 
     /// Returns the stored API key for a resolved live-transcription route, used
     /// by the generic shared-client recording path.
@@ -624,6 +709,8 @@ public struct SettingsView: View {
             Section("Sync") {
                 // CloudKit History Sync
                 CloudKitSyncSettingsSection()
+
+                CloudKitKeySyncSettingsSection()
 
                 // Sync status
                 let syncStatus = SyncStatus.current(
@@ -1592,6 +1679,81 @@ struct CloudKitSyncSettingsSection: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+}
+
+struct CloudKitKeySyncSettingsSection: View {
+    @ObservedObject private var keySync = CloudKitKeySync.shared
+    @State private var passphrase = ""
+    @State private var syncError: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("Encrypted API-Key Sync", systemImage: "lock.icloud")
+                Spacer()
+                Text(keySync.status.message)
+                    .foregroundStyle(keySync.status.isEnabled ? .green : .secondary)
+            }
+            .accessibilityElement(children: .combine)
+
+            if !keySync.status.isEnabled {
+                SecureField("Sync passphrase", text: $passphrase)
+                    .textContentType(.password)
+                    .autocorrectionDisabled()
+                    .privacySensitive()
+
+                Button {
+                    Task {
+                        do {
+                            try await keySync.enable(passphrase: passphrase)
+                            await AppSettings.shared.reloadSyncedAPIKeys()
+                            passphrase = ""
+                            syncError = nil
+                        } catch {
+                            syncError = error.localizedDescription
+                        }
+                    }
+                } label: {
+                    Label("Enable API-Key Sync", systemImage: "lock.open")
+                }
+                .disabled(passphrase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            } else {
+                HStack {
+                    Button {
+                        Task {
+                            do {
+                                try await keySync.syncNow()
+                                await AppSettings.shared.reloadSyncedAPIKeys()
+                                syncError = nil
+                            } catch {
+                                syncError = error.localizedDescription
+                            }
+                        }
+                    } label: {
+                        Label("Sync Keys Now", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .disabled(keySync.status.isSyncing)
+
+                    Button("Disable", role: .destructive) {
+                        Task { await keySync.disable() }
+                    }
+                }
+            }
+
+            if let syncError {
+                Text(syncError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+
+            Text("Keys are encrypted on this device before they are written to your private CloudKit database.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .task {
+            _ = await AppSettings.shared.syncCloudKitKeys()
         }
     }
 }

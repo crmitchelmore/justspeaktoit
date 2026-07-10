@@ -432,10 +432,25 @@ enum WireUp {
       try? environment.transportServer.start()
     }
 
+    #if APP_STORE
+    NSApp.registerForRemoteNotifications()
+    #endif
+
     let syncAdapter = MacHistorySyncAdapter(historyManager: environment.history)
     Task { await syncAdapter.start() }
 
     Task { await secureStorage.preloadTrackedSecrets() }
+    Task {
+      let coreStorage = await secureStorage.coreStorage()
+      let keySync = CloudKitKeySync.shared
+      await keySync.configure(secureStorage: coreStorage)
+      guard await keySync.isAvailable() else { return }
+      do {
+        try await keySync.syncNow()
+      } catch {
+        print("[WireUp] CloudKit API-key sync failed: \(error.localizedDescription)")
+      }
+    }
     Task {
       await configureDefaultTranscriptionProvider(settings: settings, secureStorage: secureStorage)
     }

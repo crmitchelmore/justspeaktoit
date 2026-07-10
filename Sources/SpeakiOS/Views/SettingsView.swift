@@ -139,7 +139,7 @@ public final class AppSettings: ObservableObject {
     /// runtime probe confirms the entitlement is present.
     private static let sharedAccessGroup = "8X4ZN58TYH.com.justspeaktoit.shared"
 
-    static let credentialStorage = SecureStorage(
+    private static let credentialStorage = SecureStorage(
         configuration: .iCloudSyncedIfAvailable(
             service: "com.justspeaktoit.credentials",
             masterAccount: "speak-app-secrets",
@@ -380,6 +380,22 @@ public final class AppSettings: ObservableObject {
             identifier: Self.gladiaKeyID,
             currentValue: gladiaAPIKey
         )
+    }
+
+    @discardableResult
+    public func syncCloudKitKeys() async -> Bool {
+        let keySync = CloudKitKeySync.shared
+        await keySync.configure(secureStorage: Self.credentialStorage)
+        guard await keySync.isAvailable() else { return false }
+
+        do {
+            try await keySync.syncNow()
+            await reloadSyncedAPIKeys()
+            return true
+        } catch {
+            Self.logger.error("CloudKit API-key sync failed: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
     }
 
     private static func syncedAPIKeyValue(identifier: String, currentValue: String) async -> String {
@@ -1737,8 +1753,7 @@ struct CloudKitKeySyncSettingsSection: View {
                 .foregroundStyle(.secondary)
         }
         .task {
-            await keySync.configure(secureStorage: AppSettings.credentialStorage)
-            _ = await keySync.isAvailable()
+            _ = await AppSettings.shared.syncCloudKitKeys()
         }
     }
 }

@@ -8,9 +8,8 @@ import SpeakCore
 /// Headless recording coordinator for Action Button / Shortcuts / Siri.
 /// Manages the full lifecycle: start recording → live transcription → stop → clipboard → Live Activity.
 @MainActor
-public final class TranscriptionRecordingService: ObservableObject {
+public final class TranscriptionRecordingService: ObservableObject { // swiftlint:disable:this type_body_length
     public static let shared = TranscriptionRecordingService()
-    static let polishingClipboardPlaceholder = "Polishing… please wait."
 
     @Published public private(set) var isRunning = false
     @Published public private(set) var partialText = ""
@@ -27,6 +26,8 @@ public final class TranscriptionRecordingService: ObservableObject {
     private var sharedTranscriber: SharedClientLiveTranscriber?
     private var startTime: Date?
     private var currentModel: String = ""
+
+    static let polishingClipboardPlaceholder = "Polishing… please wait"
 
     private init() {}
 
@@ -238,7 +239,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         let result = drained.replacingText(text)
 
         // Record to history (always, regardless of destination).
-        let historyID = iOSHistoryManager.shared.recordTranscription(
+        let historyItem = iOSHistoryManager.shared.recordTranscription(
             text: text,
             model: currentModel,
             duration: result.duration
@@ -247,30 +248,27 @@ public final class TranscriptionRecordingService: ObservableObject {
         // Resolve the destination. When nil (legacy callers), preserve the
         // pre-destination behaviour: clipboard + post-process if user opted in.
         let resolvedDestination: HardwareTriggerDestination = destination ?? .clipboard
-        applyDestinationSideEffects(text: text, destination: resolvedDestination)
-        let willPostProcess = shouldPostProcess(
-            destination: resolvedDestination,
-            isLegacyCaller: destination == nil
-        ) && !text.isEmpty
-        if willPostProcess && resolvedDestination != .historyOnly {
-            UIPasteboard.general.string = Self.polishingClipboardPlaceholder
-        }
+        await applyDestinationSideEffects(text: text, destination: resolvedDestination)
 
         // Update shared state
         sharedState.clearRecordingState()
 
         // Complete Live Activity with clipboard confirmation
-        activityManager.completeActivity(finalWordCount: wordCount, duration: duration)
+        activityManager.completeActivity(finalWordCount: wordCount, duration: duration, keepPrimed: true)
 
         // Kick off background post-processing if the chosen destination + user
         // settings call for it. The polished clipboard write must also survive
         // process suspension, so the background assertion is released only once
         // post-processing has finished.
-        if willPostProcess {
+        if shouldPostProcess(destination: resolvedDestination, isLegacyCaller: destination == nil)
+            && !text.isEmpty {
+            if let historyItem {
+                iOSHistoryManager.shared.beginPostProcessing(for: historyItem.id)
+            }
             Task { [resolvedDestination, assertion] in
                 await postProcess(
                     text: text,
-                    historyID: historyID,
+                    historyItemID: historyItem?.id,
                     replacingClipboard: resolvedDestination != .historyOnly
                 )
                 assertion.end()
@@ -321,19 +319,14 @@ public final class TranscriptionRecordingService: ObservableObject {
         activityManager.reportError(error.localizedDescription)
     }
 
-}
-
-// MARK: - Stop helpers
-
-@MainActor
-private extension TranscriptionRecordingService {
-    func postProcess(
+    private func postProcess(
         text: String,
-        historyID: UUID?,
+        historyItemID: UUID?,
         replacingClipboard: Bool = true
     ) async {
         let settings = AppSettings.shared
         let processor = iOSPostProcessingManager.shared
+
         do {
             let polished = try await processor.polish(
                 text: text,
@@ -341,24 +334,31 @@ private extension TranscriptionRecordingService {
                 prompt: settings.postProcessingPrompt,
                 apiKey: settings.openRouterAPIKey
             )
-            let finalText = polished.isEmpty ? text : polished
+            guard !polished.isEmpty else { throw PostProcessingError.emptyResult }
             if replacingClipboard {
-                UIPasteboard.general.string = finalText
+                await Self.writeClipboardReliably(polished)
             }
-            sharedState.lastCompletedTranscript = finalText
-            if let historyID, !polished.isEmpty {
-                iOSHistoryManager.shared.setPostProcessed(polished, for: historyID)
+            sharedState.lastCompletedTranscript = polished
+            if let historyItemID {
+                iOSHistoryManager.shared.setPostProcessed(polished, for: historyItemID)
             }
         } catch {
-            // Never leave the waiting marker on the clipboard if OpenRouter
-            // fails or the background task expires; raw text is still useful.
+            // Never strand the user with the temporary polishing message.
             if replacingClipboard {
-                UIPasteboard.general.string = text
+                await Self.writeClipboardReliably(text)
             }
-            sharedState.lastCompletedTranscript = text
+            if let historyItemID {
+                iOSHistoryManager.shared.setError(error.localizedDescription, for: historyItemID)
+                iOSHistoryManager.shared.endPostProcessing(for: historyItemID)
+            }
         }
     }
+}
 
+// MARK: - Stop helpers
+
+@MainActor
+private extension TranscriptionRecordingService {
     /// Stops whichever transcriber is currently active and returns its result.
     /// Falls back to a synthetic `TranscriptionResult` built from `partialText`
     /// if no transcriber is wired up (defensive — shouldn't happen in practice).
@@ -407,16 +407,32 @@ private extension TranscriptionRecordingService {
     func applyDestinationSideEffects(
         text: String,
         destination: HardwareTriggerDestination
-    ) {
+    ) async {
         guard !text.isEmpty else { return }
         switch destination {
-        case .clipboard, .clipboardAndPostProcess:
-            UIPasteboard.general.string = text
+        case .clipboard:
+            await Self.writeClipboardReliably(text)
+            sharedState.lastCompletedTranscript = text
+        case .clipboardAndPostProcess:
+            await Self.writeClipboardReliably(Self.polishingClipboardPlaceholder)
             sharedState.lastCompletedTranscript = text
         case .historyOnly:
             // Don't touch the pasteboard. We still record `lastCompletedTranscript`
             // because the Live Activity / shared state UI shows it.
             sharedState.lastCompletedTranscript = text
+        }
+    }
+
+    /// Pasteboard writes from a background AppIntent can race process
+    /// suspension. Verify the value and retry briefly before reporting success.
+    static func writeClipboardReliably(_ text: String) async {
+        for attempt in 0..<3 {
+            UIPasteboard.general.string = text
+            await Task.yield()
+            if UIPasteboard.general.string == text { return }
+            if attempt < 2 {
+                try? await Task.sleep(for: .milliseconds(80))
+            }
         }
     }
 

@@ -14,10 +14,6 @@ struct HistoryItemRow: View {
     var onDelete: () -> Void = {}
     @State private var isExpanded = false
 
-    private var displayedText: String {
-        item.bestText
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -59,10 +55,15 @@ struct HistoryItemRow: View {
                 }
             }
 
-            Text(displayedText)
-                .font(.body)
-                .lineLimit(isExpanded ? nil : 3)
-                .animation(.easeInOut(duration: 0.2), value: isExpanded)
+            transcriptSection(title: "Original", text: item.transcription)
+
+            if isReprocessing {
+                Label("Polishing… please wait", systemImage: "wand.and.stars")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else if let polished = item.postProcessedTranscription, !polished.isEmpty {
+                transcriptSection(title: "Polished", text: polished)
+            }
 
             if let error = item.errorMessage {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
@@ -105,7 +106,7 @@ struct HistoryItemRow: View {
 
                 Spacer()
 
-                if displayedText.count > 150 {
+                if max(item.transcription.count, item.postProcessedTranscription?.count ?? 0) > 150 {
                     Button {
                         isExpanded.toggle()
                     } label: {
@@ -118,7 +119,7 @@ struct HistoryItemRow: View {
         .padding(.vertical, 4)
         .contentShape(Rectangle())
         .onTapGesture {
-            if displayedText.count > 150 {
+            if max(item.transcription.count, item.postProcessedTranscription?.count ?? 0) > 150 {
                 isExpanded.toggle()
             }
         }
@@ -152,6 +153,18 @@ struct HistoryItemRow: View {
                 Label("Delete", systemImage: "trash")
             }
         }
+    }
+
+    private func transcriptSection(title: String, text: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title.uppercased())
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(text)
+                .font(.body)
+                .lineLimit(isExpanded ? nil : 3)
+        }
+        .animation(.easeInOut(duration: 0.2), value: isExpanded)
     }
 
     private var modelDisplayName: String {

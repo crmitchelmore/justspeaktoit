@@ -187,6 +187,7 @@ enum PostProcessingError: LocalizedError {
     case invalidResponse
     case httpError(Int)
     case apiKeyMissing
+    case emptyResult
     
     var errorDescription: String? {
         switch self {
@@ -194,6 +195,7 @@ enum PostProcessingError: LocalizedError {
         case .invalidResponse: return "Invalid response from server"
         case .httpError(let code): return "Server error: \(code)"
         case .apiKeyMissing: return "OpenRouter API key is required"
+        case .emptyResult: return "Polishing returned no text"
         }
     }
 }
@@ -389,8 +391,7 @@ public struct PostProcessingView: View {
     }
     
     private var modelDisplayName: String {
-        AppSettings.postProcessingModels.first { $0.id == settings.postProcessingModel }?.name 
-            ?? settings.postProcessingModel
+        ModelCatalog.friendlyName(for: settings.postProcessingModel)
     }
     
     // MARK: - Model Picker Sheet
@@ -406,9 +407,9 @@ public struct PostProcessingView: View {
                     } label: {
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(model.name)
+                                Text(model.displayName)
                                     .foregroundStyle(.primary)
-                                Text(model.description)
+                                Text(model.description ?? "")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }

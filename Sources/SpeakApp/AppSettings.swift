@@ -307,11 +307,6 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     "openrouter/whisper-medium",
     "openrouter/whisper-small"
   ]
-  private static let defaultPostProcessingModel = "openai/gpt-4o-mini"
-  private static let legacyPostProcessingModelMapping: [String: String] = [
-    "openrouter/gpt-4o-mini": defaultPostProcessingModel,
-    "openrouter/gpt-4o": "openai/gpt-4o"
-  ]
 
   @Published var appearance: Appearance {
     didSet { store(appearance.rawValue, key: .appearance) }
@@ -1073,12 +1068,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   }
 
   private static func normalizedPostProcessingModel(_ identifier: String?) -> String {
-    let trimmed = identifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    guard !trimmed.isEmpty else { return defaultPostProcessingModel }
-    if let mapped = legacyPostProcessingModelMapping[trimmed] {
-      return mapped
-    }
-    return trimmed
+    ModelCatalog.normalizedPostProcessingModel(identifier)
   }
 
   private func ensureRecordingsDirectoryExists() {

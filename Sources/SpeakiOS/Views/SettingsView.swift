@@ -7,15 +7,6 @@ import OSLog
 
 // swiftlint:disable file_length
 
-// MARK: - Post-Processing Model
-
-/// Model info for post-processing provider selection.
-public struct PostProcessingModelInfo: Identifiable {
-    public let id: String
-    public let name: String
-    public let description: String
-}
-
 // MARK: - Hardware Trigger Destination
 
 /// What happens to the transcript after a hardware-triggered recording stops.
@@ -221,29 +212,9 @@ public final class AppSettings: ObservableObject {
         Edits forbidden: Add content, delete unless obvious stutter/duplicate
         """
 
-    /// Cloud cleanup choices shared with the Mac app. Keeping a second iOS-only
-    /// list caused retired models to remain visible long after the main catalogue
-    /// had moved on. Local cleanup is omitted because iOS post-processing uses
-    /// OpenRouter and cannot run the Mac's local rules engine.
-    public static let postProcessingModels: [PostProcessingModelInfo] = ModelCatalog.postProcessing
-        .filter { !$0.id.hasPrefix("local/") }
-        .map {
-            PostProcessingModelInfo(
-                id: $0.id,
-                name: $0.displayName,
-                description: $0.description ?? "Transcript cleanup"
-            )
-        }
+    public static let postProcessingModels = ModelCatalog.cloudPostProcessing
 
-    public static let defaultPostProcessingModel = "openai/gpt-5-mini"
-
-    private static func availablePostProcessingModel(_ savedModel: String?) -> String {
-        let availableIDs = Set(postProcessingModels.map(\.id))
-        return savedModel.flatMap { availableIDs.contains($0) ? $0 : nil }
-            ?? defaultPostProcessingModel
-    }
-
-    private init() {
+    private init() { // swiftlint:disable:this function_body_length
         let selectedRaw = UserDefaults.standard.string(forKey: "selectedModel") ?? "apple/local/SFSpeechRecognizer"
         // Normalise to canonical catalogue ids. Keep any id already in the
         // shared catalogue; migrate legacy iOS-only ids (e.g. "deepgram/nova-3",
@@ -278,8 +249,11 @@ public final class AppSettings: ObservableObject {
 
         // Post-processing settings
         let postEnabled = UserDefaults.standard.bool(forKey: "postProcessingEnabled")
-        let savedPostModel = UserDefaults.standard.string(forKey: "postProcessingModel")
-        let postModel = Self.availablePostProcessingModel(savedPostModel)
+        let storedPostModel = UserDefaults.standard.string(forKey: "postProcessingModel")
+        let normalizedPostModel = ModelCatalog.normalizedPostProcessingModel(storedPostModel)
+        let postModel = Self.postProcessingModels.contains { $0.id == normalizedPostModel }
+            ? normalizedPostModel
+            : ModelCatalog.defaultPostProcessingModel
         let postPrompt = UserDefaults.standard.string(forKey: "postProcessingPrompt") ?? ""
         let autoPost = UserDefaults.standard.bool(forKey: "autoPostProcess")
 
@@ -883,8 +857,7 @@ public struct SettingsView: View {
     }
 
     private var postProcessingModelName: String {
-        AppSettings.postProcessingModels.first { $0.id == settings.postProcessingModel }?.name
-            ?? settings.postProcessingModel
+        ModelCatalog.friendlyName(for: settings.postProcessingModel)
     }
 }
 
@@ -1041,9 +1014,9 @@ struct PostProcessingSettingsView: View {
                     } label: {
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(model.name)
+                                Text(model.displayName)
                                     .foregroundStyle(.primary)
-                                Text(model.description)
+                                Text(model.description ?? "")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }

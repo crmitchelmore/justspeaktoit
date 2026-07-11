@@ -9,6 +9,13 @@ import XCTest
 @MainActor
 final class TranscriptionRecordingServiceTextTests: XCTestCase {
 
+    func testPolishingPlaceholderDoesNotExposePreviousClipboardContent() {
+        XCTAssertEqual(
+            TranscriptionRecordingService.polishingClipboardPlaceholder,
+            "Polishing… please wait."
+        )
+    }
+
     func testPrefersTranscriberResultWhenPresent() {
         let text = TranscriptionRecordingService.bestTranscript(
             candidates: ["final result", "interim", "older"],

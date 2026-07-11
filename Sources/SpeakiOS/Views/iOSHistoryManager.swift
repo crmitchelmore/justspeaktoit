@@ -111,13 +111,14 @@ public final class iOSHistoryManager: ObservableObject {
     }
 
     /// Creates and adds a history item from transcription result.
+    @discardableResult
     public func recordTranscription(
         text: String,
         model: String,
         duration: TimeInterval
-    ) {
+    ) -> UUID? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty else { return nil }
 
         let item = iOSHistoryItem(
             transcription: text,
@@ -126,6 +127,7 @@ public final class iOSHistoryManager: ObservableObject {
             wordCount: text.split(separator: " ").count
         )
         add(item)
+        return item.id
     }
 
     /// Removes an item from history.

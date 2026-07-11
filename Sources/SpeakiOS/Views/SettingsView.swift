@@ -221,13 +221,27 @@ public final class AppSettings: ObservableObject {
         Edits forbidden: Add content, delete unless obvious stutter/duplicate
         """
 
-    public static let postProcessingModels: [PostProcessingModelInfo] = [
-        PostProcessingModelInfo(id: "openai/gpt-4o-mini", name: "GPT-4o Mini", description: "Fast & cheap, reliable cleanup"),
-        PostProcessingModelInfo(id: "google/gemini-2.0-flash-lite-001", name: "Gemini Flash Lite", description: "Ultra-fast, budget option"),
-        PostProcessingModelInfo(id: "openai/gpt-4o", name: "GPT-4o", description: "Premium quality cleanup"),
-        PostProcessingModelInfo(id: "anthropic/claude-3.5-haiku", name: "Claude Haiku", description: "Great instruction following"),
-        PostProcessingModelInfo(id: "anthropic/claude-sonnet-4", name: "Claude Sonnet", description: "Best structure preservation"),
-    ]
+    /// Cloud cleanup choices shared with the Mac app. Keeping a second iOS-only
+    /// list caused retired models to remain visible long after the main catalogue
+    /// had moved on. Local cleanup is omitted because iOS post-processing uses
+    /// OpenRouter and cannot run the Mac's local rules engine.
+    public static let postProcessingModels: [PostProcessingModelInfo] = ModelCatalog.postProcessing
+        .filter { !$0.id.hasPrefix("local/") }
+        .map {
+            PostProcessingModelInfo(
+                id: $0.id,
+                name: $0.displayName,
+                description: $0.description ?? "Transcript cleanup"
+            )
+        }
+
+    public static let defaultPostProcessingModel = "openai/gpt-5-mini"
+
+    private static func availablePostProcessingModel(_ savedModel: String?) -> String {
+        let availableIDs = Set(postProcessingModels.map(\.id))
+        return savedModel.flatMap { availableIDs.contains($0) ? $0 : nil }
+            ?? defaultPostProcessingModel
+    }
 
     private init() {
         let selectedRaw = UserDefaults.standard.string(forKey: "selectedModel") ?? "apple/local/SFSpeechRecognizer"
@@ -264,7 +278,8 @@ public final class AppSettings: ObservableObject {
 
         // Post-processing settings
         let postEnabled = UserDefaults.standard.bool(forKey: "postProcessingEnabled")
-        let postModel = UserDefaults.standard.string(forKey: "postProcessingModel") ?? "openai/gpt-4o-mini"
+        let savedPostModel = UserDefaults.standard.string(forKey: "postProcessingModel")
+        let postModel = Self.availablePostProcessingModel(savedPostModel)
         let postPrompt = UserDefaults.standard.string(forKey: "postProcessingPrompt") ?? ""
         let autoPost = UserDefaults.standard.bool(forKey: "autoPostProcess")
 
@@ -868,7 +883,8 @@ public struct SettingsView: View {
     }
 
     private var postProcessingModelName: String {
-        AppSettings.postProcessingModels.first { $0.id == settings.postProcessingModel }?.name ?? "GPT-4o Mini"
+        AppSettings.postProcessingModels.first { $0.id == settings.postProcessingModel }?.name
+            ?? settings.postProcessingModel
     }
 }
 

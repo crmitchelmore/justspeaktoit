@@ -339,16 +339,6 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             contextLength: 262_144
         ),
         Option(
-            id: "openai/gpt-4o-mini",
-            displayName: "GPT-4o mini",
-            description: "Fast, reliable transcript cleanup and formatting.",
-            estimatedLatencyMs: 500,
-            latencyTier: .fast,
-            tags: [.fast, .cheap, .leading],
-            pricing: Pricing(promptPerMTokens: 0.15, completionPerMTokens: 0.6),
-            contextLength: 128_000
-        ),
-        Option(
             id: "google/gemini-2.5-flash-lite",
             displayName: "Gemini 2.5 Flash Lite",
             description: "Very fast and inexpensive for everyday cleanup.",
@@ -505,6 +495,23 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
     ]
 
     public static let localTranscriptionOptions: [Option] = localTranscription.map(\.option)
+
+    /// Cloud cleanup choices supported on every platform. Platform-specific
+    /// local cleanup engines remain in `postProcessing` for macOS.
+    public static let cloudPostProcessing: [Option] = postProcessing.filter {
+        !$0.id.hasPrefix("local/post-processing/")
+    }
+
+    public static let defaultPostProcessingModel = "openai/gpt-5-mini"
+
+    /// Migrates retired selections while preserving valid catalogue entries
+    /// and custom local cleanup models installed by the user.
+    public static func normalizedPostProcessingModel(_ identifier: String?) -> String {
+        let trimmed = identifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if trimmed.hasPrefix("local/post-processing/") { return trimmed }
+        if postProcessing.contains(where: { $0.id == trimmed }) { return trimmed }
+        return defaultPostProcessingModel
+    }
 
     public static let allOptions: [Option] =
         liveTranscription + batchTranscription + localTranscriptionOptions + postProcessing

@@ -49,7 +49,7 @@ final class PostProcessingManagerTests: XCTestCase {
   func testEmptyTranscriptSkipsPostProcessingAndReturnsEmptyText() async throws {
     let client = SpyChatClient(responseText: "This is a raw transcript.")
     let settings = makeSettings()
-    settings.postProcessingModel = "openai/gpt-4o-mini"
+    settings.postProcessingModel = ModelCatalog.defaultPostProcessingModel
     let manager = PostProcessingManager(
       client: client,
       settings: settings,
@@ -110,7 +110,7 @@ final class PostProcessingManagerTests: XCTestCase {
   func testCloudPostProcessingStillUsesLLMClient() async throws {
     let client = SpyChatClient(responseText: "Cleaned by cloud")
     let settings = makeSettings()
-    settings.postProcessingModel = "openai/gpt-4o-mini"
+    settings.postProcessingModel = ModelCatalog.defaultPostProcessingModel
     settings.postProcessingSystemPrompt = "Put a full stop after each word."
     let manager = PostProcessingManager(
       client: client,
@@ -128,7 +128,7 @@ final class PostProcessingManagerTests: XCTestCase {
     XCTAssertEqual(outcome.processed, "Cleaned by cloud")
     XCTAssertNotNil(outcome.response)
     let promptPayload = try XCTUnwrap(outcome.promptPayload)
-    XCTAssertEqual(promptPayload.modelIdentifier, "openai/gpt-4o-mini")
+    XCTAssertEqual(promptPayload.modelIdentifier, ModelCatalog.defaultPostProcessingModel)
     XCTAssertEqual(promptPayload.customPrompt, "Put a full stop after each word.")
     XCTAssertFalse(promptPayload.systemPrompt.isEmpty)
     XCTAssertTrue(
@@ -142,7 +142,7 @@ final class PostProcessingManagerTests: XCTestCase {
   func testHistoryPromptPayloadSeparatesGeneratedLanguageInstructionFromCustomPrompt() async throws {
     let client = SpyChatClient(responseText: "Cleaned by cloud")
     let settings = makeSettings()
-    settings.postProcessingModel = "openai/gpt-4o-mini"
+    settings.postProcessingModel = ModelCatalog.defaultPostProcessingModel
     settings.postProcessingOutputLanguage = "ENGB"
     settings.postProcessingSystemPrompt = "Keep every sentence short."
     let manager = PostProcessingManager(

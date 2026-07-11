@@ -86,8 +86,23 @@ public final class TranscriptionActivityManager: ObservableObject {
             return false
         }
 
-        // End any existing activity first
-        endActivity()
+        // Reuse a primed activity when possible. ActivityKit will not allow a
+        // background AppIntent to request a brand-new Live Activity, but it can
+        // update one that was created while the app was foregrounded. Keeping
+        // that activity idle between Action Button recordings avoids asking the
+        // user to "continue in the app" on every single start.
+        if let activity = currentActivity ?? Activity<TranscriptionActivityAttributes>.activities.first {
+            currentActivity = activity
+            isActivityRunning = true
+            let state = TranscriptionActivityAttributes.ContentState(
+                status: .listening,
+                provider: provider
+            )
+            Task {
+                await activity.update(.init(state: state, staleDate: nil))
+            }
+            return true
+        }
 
         let attributes = TranscriptionActivityAttributes()
         let initialState = TranscriptionActivityAttributes.ContentState(
@@ -160,8 +175,9 @@ public final class TranscriptionActivityManager: ObservableObject {
         }
     }
 
-    /// Marks the activity as completed and ends it.
-    public func completeActivity(finalWordCount: Int, duration: Int) {
+    /// Marks the activity as completed. Headless recordings keep it primed so
+    /// the next Action Button invocation can start entirely in the background.
+    public func completeActivity(finalWordCount: Int, duration: Int, keepPrimed: Bool = false) {
         guard let activity = currentActivity else { return }
 
         let finalState = TranscriptionActivityAttributes.ContentState(
@@ -173,10 +189,22 @@ public final class TranscriptionActivityManager: ObservableObject {
         )
 
         Task {
-            await activity.end(.init(state: finalState, staleDate: nil), dismissalPolicy: .after(.now + 5))
-            await MainActor.run {
-                currentActivity = nil
-                isActivityRunning = false
+            if keepPrimed {
+                await activity.update(.init(state: finalState, staleDate: nil))
+                try? await Task.sleep(for: .seconds(5))
+                guard !Task.isCancelled, activity.activityState == .active else { return }
+                let idleState = TranscriptionActivityAttributes.ContentState(
+                    status: .idle,
+                    lastSnippet: "Ready for the Action Button",
+                    provider: finalState.provider
+                )
+                await activity.update(.init(state: idleState, staleDate: nil))
+            } else {
+                await activity.end(.init(state: finalState, staleDate: nil), dismissalPolicy: .after(.now + 5))
+                await MainActor.run {
+                    currentActivity = nil
+                    isActivityRunning = false
+                }
             }
         }
     }

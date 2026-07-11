@@ -7,15 +7,6 @@ import OSLog
 
 // swiftlint:disable file_length
 
-// MARK: - Post-Processing Model
-
-/// Model info for post-processing provider selection.
-public struct PostProcessingModelInfo: Identifiable {
-    public let id: String
-    public let name: String
-    public let description: String
-}
-
 // MARK: - Hardware Trigger Destination
 
 /// What happens to the transcript after a hardware-triggered recording stops.
@@ -221,15 +212,9 @@ public final class AppSettings: ObservableObject {
         Edits forbidden: Add content, delete unless obvious stutter/duplicate
         """
 
-    public static let postProcessingModels: [PostProcessingModelInfo] = [
-        PostProcessingModelInfo(id: "openai/gpt-4o-mini", name: "GPT-4o Mini", description: "Fast & cheap, reliable cleanup"),
-        PostProcessingModelInfo(id: "google/gemini-2.0-flash-lite-001", name: "Gemini Flash Lite", description: "Ultra-fast, budget option"),
-        PostProcessingModelInfo(id: "openai/gpt-4o", name: "GPT-4o", description: "Premium quality cleanup"),
-        PostProcessingModelInfo(id: "anthropic/claude-3.5-haiku", name: "Claude Haiku", description: "Great instruction following"),
-        PostProcessingModelInfo(id: "anthropic/claude-sonnet-4", name: "Claude Sonnet", description: "Best structure preservation"),
-    ]
+    public static let postProcessingModels = ModelCatalog.cloudPostProcessing
 
-    private init() {
+    private init() { // swiftlint:disable:this function_body_length
         let selectedRaw = UserDefaults.standard.string(forKey: "selectedModel") ?? "apple/local/SFSpeechRecognizer"
         // Normalise to canonical catalogue ids. Keep any id already in the
         // shared catalogue; migrate legacy iOS-only ids (e.g. "deepgram/nova-3",
@@ -264,7 +249,11 @@ public final class AppSettings: ObservableObject {
 
         // Post-processing settings
         let postEnabled = UserDefaults.standard.bool(forKey: "postProcessingEnabled")
-        let postModel = UserDefaults.standard.string(forKey: "postProcessingModel") ?? "openai/gpt-4o-mini"
+        let storedPostModel = UserDefaults.standard.string(forKey: "postProcessingModel")
+        let normalizedPostModel = ModelCatalog.normalizedPostProcessingModel(storedPostModel)
+        let postModel = Self.postProcessingModels.contains { $0.id == normalizedPostModel }
+            ? normalizedPostModel
+            : ModelCatalog.defaultPostProcessingModel
         let postPrompt = UserDefaults.standard.string(forKey: "postProcessingPrompt") ?? ""
         let autoPost = UserDefaults.standard.bool(forKey: "autoPostProcess")
 
@@ -868,7 +857,7 @@ public struct SettingsView: View {
     }
 
     private var postProcessingModelName: String {
-        AppSettings.postProcessingModels.first { $0.id == settings.postProcessingModel }?.name ?? "GPT-4o Mini"
+        ModelCatalog.friendlyName(for: settings.postProcessingModel)
     }
 }
 
@@ -1025,9 +1014,9 @@ struct PostProcessingSettingsView: View {
                     } label: {
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(model.name)
+                                Text(model.displayName)
                                     .foregroundStyle(.primary)
-                                Text(model.description)
+                                Text(model.description ?? "")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }

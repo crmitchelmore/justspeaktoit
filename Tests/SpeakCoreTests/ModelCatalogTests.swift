@@ -151,4 +151,34 @@ final class ModelCatalogTests: XCTestCase {
         XCTAssertNotNil(localCleanup)
         XCTAssertTrue(localCleanup?.tags.contains(.privacy) == true)
     }
+
+    func testCloudPostProcessing_isExactNonLocalProjection() {
+        XCTAssertEqual(
+            ModelCatalog.cloudPostProcessing,
+            ModelCatalog.postProcessing.filter { !$0.id.hasPrefix("local/post-processing/") }
+        )
+    }
+
+    func testPostProcessingDefault_isAvailableCloudModel() {
+        XCTAssertTrue(ModelCatalog.cloudPostProcessing.contains {
+            $0.id == ModelCatalog.defaultPostProcessingModel
+        })
+    }
+
+    func testPostProcessingNormalization_migratesRemovedModels() {
+        for removed in [nil, "", "openai/gpt-4o-mini", "openrouter/gpt-4o", "unknown/model"] {
+            XCTAssertEqual(
+                ModelCatalog.normalizedPostProcessingModel(removed),
+                ModelCatalog.defaultPostProcessingModel
+            )
+        }
+        XCTAssertEqual(
+            ModelCatalog.normalizedPostProcessingModel("openai/gpt-5.4-nano"),
+            "openai/gpt-5.4-nano"
+        )
+        XCTAssertEqual(
+            ModelCatalog.normalizedPostProcessingModel("local/post-processing/custom"),
+            "local/post-processing/custom"
+        )
+    }
 }

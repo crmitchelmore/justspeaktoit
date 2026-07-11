@@ -160,6 +160,18 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
 #endif
 ```
 
+### Shared Evolving Catalogues
+
+- Any capability list that can grow over time (models, providers, voices,
+  languages, presets, migrations, defaults, or display metadata) must have one
+  canonical definition in `SpeakCore` when both platforms consume it.
+- Platform targets may expose filtered projections for genuine capability
+  differences, but must not copy catalogue entries or defaults.
+- Add parity/invariant tests in `SpeakCore` so a new shared entry automatically
+  appears on every supported platform and retired identifiers migrate safely.
+- If platform behaviour differs deliberately, document the capability rule next
+  to the shared catalogue rather than encoding a second platform-owned list.
+
 ## Coding Style & Naming Conventions
 - Swift files use 4-space indentation and LF line endings (configured via `.swiftformat`)
 - Prefer expressive type names (`ContentView`, `SpeakApp`)

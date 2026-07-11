@@ -111,13 +111,14 @@ public final class iOSHistoryManager: ObservableObject {
     }
 
     /// Creates and adds a history item from transcription result.
+    @discardableResult
     public func recordTranscription(
         text: String,
         model: String,
         duration: TimeInterval
-    ) {
+    ) -> iOSHistoryItem? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty else { return nil }
 
         let item = iOSHistoryItem(
             transcription: text,
@@ -126,6 +127,7 @@ public final class iOSHistoryManager: ObservableObject {
             wordCount: text.split(separator: " ").count
         )
         add(item)
+        return item
     }
 
     /// Removes an item from history.
@@ -201,6 +203,7 @@ public final class iOSHistoryManager: ObservableObject {
         loadHistoryFromDiskIfNeeded()
         guard let index = items.firstIndex(where: { $0.id == id }) else { return }
         items[index] = items[index].withPostProcessed(processed)
+        reprocessingIDs.remove(id)
         saveHistory()
 
         guard syncEnabled else { return }
@@ -218,6 +221,14 @@ public final class iOSHistoryManager: ObservableObject {
                 print("[iOSHistoryManager] Failed to upload reprocessed item: \(error)")
             }
         }
+    }
+
+    public func beginPostProcessing(for id: UUID) {
+        reprocessingIDs.insert(id)
+    }
+
+    public func endPostProcessing(for id: UUID) {
+        reprocessingIDs.remove(id)
     }
 
     /// Records an error against an entry (surfaced in the history UI).

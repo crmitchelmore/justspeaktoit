@@ -1,0 +1,111 @@
+import Foundation
+
+/// Cross-platform projection used for history search, filtering and statistics.
+/// Platform history records can retain richer persistence details while sharing
+/// the behaviour users expect on Mac and iPhone.
+public struct HistoryPresentationItem: Identifiable, Hashable, Sendable {
+    public let id: UUID
+    public let createdAt: Date
+    public let rawTranscription: String?
+    public let processedTranscription: String?
+    public let modelIdentifiers: [String]
+    public let recordingDuration: TimeInterval
+    public let cost: Decimal
+    public let errorCount: Int
+    public let originPlatform: String
+
+    public init(
+        id: UUID,
+        createdAt: Date,
+        rawTranscription: String?,
+        processedTranscription: String?,
+        modelIdentifiers: [String],
+        recordingDuration: TimeInterval,
+        cost: Decimal = 0,
+        errorCount: Int = 0,
+        originPlatform: String
+    ) {
+        self.id = id
+        self.createdAt = createdAt
+        self.rawTranscription = rawTranscription
+        self.processedTranscription = processedTranscription
+        self.modelIdentifiers = modelIdentifiers
+        self.recordingDuration = recordingDuration
+        self.cost = cost
+        self.errorCount = errorCount
+        self.originPlatform = originPlatform
+    }
+
+    public var bestTranscription: String? {
+        let processed = processedTranscription?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let processed, !processed.isEmpty { return processed }
+        let raw = rawTranscription?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return raw?.isEmpty == false ? raw : nil
+    }
+
+    public var wordCount: Int {
+        bestTranscription?.split(whereSeparator: \.isWhitespace).count ?? 0
+    }
+}
+
+public struct HistorySearchQuery: Equatable, Sendable {
+    public var searchText: String?
+    public var modelIdentifiers: Set<String>
+    public var includeErrorsOnly: Bool
+    public var dateRange: ClosedRange<Date>?
+
+    public init(
+        searchText: String? = nil,
+        modelIdentifiers: Set<String> = [],
+        includeErrorsOnly: Bool = false,
+        dateRange: ClosedRange<Date>? = nil
+    ) {
+        self.searchText = searchText
+        self.modelIdentifiers = modelIdentifiers
+        self.includeErrorsOnly = includeErrorsOnly
+        self.dateRange = dateRange
+    }
+
+    public static let none = HistorySearchQuery()
+
+    public func matches(_ item: HistoryPresentationItem) -> Bool {
+        if let term = searchText?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+           !term.isEmpty {
+            let transcriptMatches = item.rawTranscription?.lowercased().contains(term) == true
+                || item.processedTranscription?.lowercased().contains(term) == true
+            let modelMatches = item.modelIdentifiers.contains { identifier in
+                identifier.lowercased().contains(term)
+                    || ModelCatalog.friendlyName(for: identifier).lowercased().contains(term)
+            }
+            guard transcriptMatches || modelMatches else { return false }
+        }
+
+        if !modelIdentifiers.isEmpty {
+            let requested = Set(modelIdentifiers.map { $0.lowercased() })
+            let actual = Set(item.modelIdentifiers.map { $0.lowercased() })
+            guard !requested.isDisjoint(with: actual) else { return false }
+        }
+
+        if includeErrorsOnly, item.errorCount == 0 { return false }
+        if let dateRange, !dateRange.contains(item.createdAt) { return false }
+        return true
+    }
+}
+
+public struct HistoryPresentationStatistics: Equatable, Sendable {
+    public let totalSessions: Int
+    public let cumulativeRecordingDuration: TimeInterval
+    public let totalSpend: Decimal
+    public let averageSessionLength: TimeInterval
+    public let sessionsWithErrors: Int
+    public let totalWords: Int
+
+    public init(items: [HistoryPresentationItem]) {
+        totalSessions = items.count
+        cumulativeRecordingDuration = items.reduce(0) { $0 + max(0, $1.recordingDuration) }
+        totalSpend = items.reduce(Decimal(0)) { $0 + $1.cost }
+        averageSessionLength = items.isEmpty ? 0 : cumulativeRecordingDuration / Double(items.count)
+        sessionsWithErrors = items.filter { $0.errorCount > 0 }.count
+        totalWords = items.reduce(0) { $0 + $1.wordCount }
+    }
+}

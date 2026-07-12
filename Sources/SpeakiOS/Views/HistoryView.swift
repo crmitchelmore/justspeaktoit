@@ -1,5 +1,6 @@
 #if os(iOS)
 import SwiftUI
+import SpeakCore
 import SpeakSync
 
 // MARK: - History View
@@ -9,6 +10,13 @@ public struct HistoryView: View {
     @ObservedObject private var syncEngine = HistorySyncEngine.shared
     @State private var showingClearConfirmation = false
     @State private var showSkeletonLoading = false
+    @State private var showingFilters = false
+    @State private var searchText = ""
+    @State private var errorsOnly = false
+    @State private var selectedModel: String?
+    @State private var dateRangeEnabled = false
+    @State private var startDate = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
+    @State private var endDate = Date()
 
     public init() {}
 
@@ -20,6 +28,8 @@ public struct HistoryView: View {
                 ProgressView("Loading history...")
             } else if historyManager.items.isEmpty {
                 emptyState
+            } else if filteredItems.isEmpty {
+                noMatchesState
             } else {
                 historyList
             }
@@ -31,6 +41,14 @@ public struct HistoryView: View {
             }
             if !historyManager.items.isEmpty {
                 ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showingFilters = true
+                    } label: {
+                        Image(systemName: hasActiveFilters ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                    }
+                    .accessibilityLabel("Filter history")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     Button(role: .destructive) {
                         showingClearConfirmation = true
                     } label: {
@@ -38,6 +56,20 @@ public struct HistoryView: View {
                     }
                 }
             }
+        }
+        .searchable(text: $searchText, prompt: "Transcripts or models")
+        .sheet(isPresented: $showingFilters) {
+            NavigationStack {
+                HistoryFilterSheet(
+                    errorsOnly: $errorsOnly,
+                    selectedModel: $selectedModel,
+                    dateRangeEnabled: $dateRangeEnabled,
+                    startDate: $startDate,
+                    endDate: $endDate,
+                    availableModels: availableModels
+                )
+            }
+            .presentationDetents([.medium, .large])
         }
         .refreshable {
             await historyManager.triggerSync()
@@ -104,6 +136,10 @@ public struct HistoryView: View {
         }
     }
 
+    private var noMatchesState: some View {
+        ContentUnavailableView.search(text: searchText)
+    }
+
     private var historyList: some View {
         List {
             if syncEngine.state.isCloudAvailable {
@@ -120,7 +156,7 @@ public struct HistoryView: View {
                 statsHeader
             }
             Section {
-                ForEach(historyManager.items) { item in
+                ForEach(filteredItems) { item in
                     HistoryItemRow(
                         item: item,
                         isSynced: historyManager.isSynced(item),
@@ -153,19 +189,15 @@ public struct HistoryView: View {
     }
 
     private var statsHeader: some View {
-        HStack(spacing: 20) {
-            statBadge(
-                value: "\(historyManager.items.count)",
-                label: "Transcriptions"
-            )
-            statBadge(
-                value: formatDuration(totalDuration),
-                label: "Total Time"
-            )
-            statBadge(
-                value: "\(totalWords)",
-                label: "Words"
-            )
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 24) {
+                statBadge(value: "\(statistics.totalSessions)", label: "Sessions")
+                statBadge(value: formatDuration(statistics.averageSessionLength), label: "Average")
+                statBadge(value: formatDuration(statistics.cumulativeRecordingDuration), label: "Total Time")
+                statBadge(value: "\(statistics.totalWords)", label: "Words")
+                statBadge(value: "\(statistics.sessionsWithErrors)", label: "Errors")
+            }
+            .padding(.horizontal, 4)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
@@ -182,12 +214,41 @@ public struct HistoryView: View {
         }
     }
 
-    private var totalDuration: TimeInterval {
-        historyManager.items.reduce(0) { $0 + $1.duration }
+    private var availableModels: [String] {
+        Array(Set(historyManager.items.map(\.model))).sorted {
+            ModelCatalog.friendlyName(for: $0) < ModelCatalog.friendlyName(for: $1)
+        }
     }
 
-    private var totalWords: Int {
-        historyManager.items.reduce(0) { $0 + $1.wordCount }
+    private var query: HistorySearchQuery {
+        let range: ClosedRange<Date>?
+        if dateRangeEnabled {
+            let calendar = Calendar.current
+            let lower = calendar.startOfDay(for: startDate)
+            let upper = calendar.date(byAdding: DateComponents(day: 1, second: -1), to: calendar.startOfDay(for: endDate))
+                ?? endDate
+            range = lower...upper
+        } else {
+            range = nil
+        }
+        return HistorySearchQuery(
+            searchText: searchText,
+            modelIdentifiers: selectedModel.map { [$0] } ?? [],
+            includeErrorsOnly: errorsOnly,
+            dateRange: range
+        )
+    }
+
+    private var filteredItems: [iOSHistoryItem] {
+        historyManager.items.filter { query.matches($0.presentationItem) }
+    }
+
+    private var statistics: HistoryPresentationStatistics {
+        HistoryPresentationStatistics(items: filteredItems.map(\.presentationItem))
+    }
+
+    private var hasActiveFilters: Bool {
+        errorsOnly || selectedModel != nil || dateRangeEnabled
     }
 
     private func formatDuration(_ seconds: TimeInterval) -> String {
@@ -197,6 +258,55 @@ public struct HistoryView: View {
             return "\(minutes)m \(secs)s"
         }
         return "\(secs)s"
+    }
+}
+
+private struct HistoryFilterSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var errorsOnly: Bool
+    @Binding var selectedModel: String?
+    @Binding var dateRangeEnabled: Bool
+    @Binding var startDate: Date
+    @Binding var endDate: Date
+    let availableModels: [String]
+
+    var body: some View {
+        Form {
+            Section("Show") {
+                Toggle("Errors only", isOn: $errorsOnly)
+                Picker("Model", selection: $selectedModel) {
+                    Text("All Models").tag(String?.none)
+                    ForEach(availableModels, id: \.self) { model in
+                        Text(ModelCatalog.friendlyName(for: model)).tag(String?.some(model))
+                    }
+                }
+            }
+
+            Section("Date Range") {
+                Toggle("Limit by date", isOn: $dateRangeEnabled)
+                if dateRangeEnabled {
+                    DatePicker("From", selection: $startDate, displayedComponents: .date)
+                    DatePicker("To", selection: $endDate, in: startDate..., displayedComponents: .date)
+                }
+            }
+
+            if errorsOnly || selectedModel != nil || dateRangeEnabled {
+                Section {
+                    Button("Reset Filters", role: .destructive) {
+                        errorsOnly = false
+                        selectedModel = nil
+                        dateRangeEnabled = false
+                    }
+                }
+            }
+        }
+        .navigationTitle("Filter History")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") { dismiss() }
+            }
+        }
     }
 }
 

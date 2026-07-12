@@ -1,5 +1,6 @@
 #if os(iOS)
 import Foundation
+import SpeakCore
 import SpeakSync
 
 // MARK: - History Item Model
@@ -107,6 +108,21 @@ public struct iOSHistoryItem: Identifiable, Codable {
             duration: entry.duration,
             wordCount: entry.wordCount,
             originPlatform: entry.originPlatform
+        )
+    }
+}
+
+extension iOSHistoryItem {
+    var presentationItem: HistoryPresentationItem {
+        HistoryPresentationItem(
+            id: id,
+            createdAt: createdAt,
+            rawTranscription: transcription,
+            processedTranscription: postProcessedTranscription,
+            modelIdentifiers: [model],
+            recordingDuration: duration,
+            errorCount: errorMessage == nil ? 0 : 1,
+            originPlatform: originPlatform
         )
     }
 }

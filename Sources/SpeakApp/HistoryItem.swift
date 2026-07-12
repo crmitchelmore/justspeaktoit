@@ -268,3 +268,19 @@ struct HistoryItem: Codable, Identifiable, Hashable {
     errors: []
   )
 }
+
+extension HistoryItem {
+  var presentationItem: HistoryPresentationItem {
+    HistoryPresentationItem(
+      id: id,
+      createdAt: createdAt,
+      rawTranscription: rawTranscription,
+      processedTranscription: postProcessedTranscription,
+      modelIdentifiers: modelUsages.isEmpty ? modelsUsed : modelUsages.map(\.modelIdentifier),
+      recordingDuration: recordingDuration,
+      cost: cost?.total ?? 0,
+      errorCount: errors.count,
+      originPlatform: "macos"
+    )
+  }
+}

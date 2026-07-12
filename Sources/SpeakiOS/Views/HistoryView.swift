@@ -5,7 +5,7 @@ import SpeakSync
 
 // MARK: - History View
 
-// swiftlint:disable type_body_length
+// swiftlint:disable:next type_body_length
 public struct HistoryView: View {
     @StateObject private var historyManager = iOSHistoryManager.shared
     @ObservedObject private var syncEngine = HistorySyncEngine.shared

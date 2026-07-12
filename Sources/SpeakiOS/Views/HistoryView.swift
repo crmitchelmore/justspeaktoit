@@ -17,6 +17,10 @@ public struct HistoryView: View {
     @State private var dateRangeEnabled = false
     @State private var startDate = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
     @State private var endDate = Date()
+    @State private var filteredItems: [iOSHistoryItem] = []
+    @State private var statistics = HistoryPresentationStatistics(items: [])
+    @State private var availableModels: [String] = []
+    @State private var derivedStateReady = false
 
     public init() {}
 
@@ -28,6 +32,8 @@ public struct HistoryView: View {
                 ProgressView("Loading history...")
             } else if historyManager.items.isEmpty {
                 emptyState
+            } else if !derivedStateReady {
+                ProgressView("Preparing history...")
             } else if filteredItems.isEmpty {
                 noMatchesState
             } else {
@@ -73,6 +79,9 @@ public struct HistoryView: View {
         }
         .refreshable {
             await historyManager.triggerSync()
+        }
+        .task(id: refreshKey) {
+            refreshDerivedState()
         }
         .confirmationDialog(
             "Clear History",
@@ -214,20 +223,10 @@ public struct HistoryView: View {
         }
     }
 
-    private var availableModels: [String] {
-        Array(Set(historyManager.items.map(\.model))).sorted {
-            ModelCatalog.friendlyName(for: $0) < ModelCatalog.friendlyName(for: $1)
-        }
-    }
-
     private var query: HistorySearchQuery {
         let range: ClosedRange<Date>?
         if dateRangeEnabled {
-            let calendar = Calendar.current
-            let lower = calendar.startOfDay(for: startDate)
-            let upper = calendar.date(byAdding: DateComponents(day: 1, second: -1), to: calendar.startOfDay(for: endDate))
-                ?? endDate
-            range = lower...upper
+            range = HistorySearchQuery.normalizedDayRange(from: startDate, through: endDate)
         } else {
             range = nil
         }
@@ -239,12 +238,27 @@ public struct HistoryView: View {
         )
     }
 
-    private var filteredItems: [iOSHistoryItem] {
-        historyManager.items.filter { query.matches($0.presentationItem) }
+    private var refreshKey: HistoryRefreshKey {
+        HistoryRefreshKey(
+            items: historyManager.items.map(\.presentationItem),
+            searchText: searchText,
+            errorsOnly: errorsOnly,
+            selectedModel: selectedModel,
+            dateRangeEnabled: dateRangeEnabled,
+            startDate: startDate,
+            endDate: endDate
+        )
     }
 
-    private var statistics: HistoryPresentationStatistics {
-        HistoryPresentationStatistics(items: filteredItems.map(\.presentationItem))
+    private func refreshDerivedState() {
+        let currentQuery = query
+        let newItems = historyManager.items.filter { currentQuery.matches($0.presentationItem) }
+        filteredItems = newItems
+        statistics = HistoryPresentationStatistics(items: newItems.map(\.presentationItem))
+        availableModels = Array(Set(historyManager.items.map(\.model))).sorted {
+            ModelCatalog.friendlyName(for: $0) < ModelCatalog.friendlyName(for: $1)
+        }
+        derivedStateReady = true
     }
 
     private var hasActiveFilters: Bool {
@@ -259,6 +273,16 @@ public struct HistoryView: View {
         }
         return "\(secs)s"
     }
+}
+
+private struct HistoryRefreshKey: Hashable {
+    let items: [HistoryPresentationItem]
+    let searchText: String
+    let errorsOnly: Bool
+    let selectedModel: String?
+    let dateRangeEnabled: Bool
+    let startDate: Date
+    let endDate: Date
 }
 
 private struct HistoryFilterSheet: View {

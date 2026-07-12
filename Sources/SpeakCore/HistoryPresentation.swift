@@ -60,7 +60,7 @@ public struct HistorySearchQuery: Equatable, Sendable {
         includeErrorsOnly: Bool = false,
         dateRange: ClosedRange<Date>? = nil
     ) {
-        self.searchText = searchText
+        self.searchText = searchText?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         self.modelIdentifiers = modelIdentifiers
         self.includeErrorsOnly = includeErrorsOnly
         self.dateRange = dateRange
@@ -68,9 +68,19 @@ public struct HistorySearchQuery: Equatable, Sendable {
 
     public static let none = HistorySearchQuery()
 
+    public static func normalizedDayRange(
+        from startDate: Date,
+        through endDate: Date,
+        calendar: Calendar = .current
+    ) -> ClosedRange<Date> {
+        let lower = calendar.startOfDay(for: startDate)
+        let endStart = calendar.startOfDay(for: max(startDate, endDate))
+        let upper = calendar.date(byAdding: DateComponents(day: 1, second: -1), to: endStart) ?? endStart
+        return lower...upper
+    }
+
     public func matches(_ item: HistoryPresentationItem) -> Bool {
-        if let term = searchText?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
-           !term.isEmpty {
+        if let term = searchText, !term.isEmpty {
             let transcriptMatches = item.rawTranscription?.lowercased().contains(term) == true
                 || item.processedTranscription?.lowercased().contains(term) == true
             let modelMatches = item.modelIdentifiers.contains { identifier in
@@ -101,11 +111,22 @@ public struct HistoryPresentationStatistics: Equatable, Sendable {
     public let totalWords: Int
 
     public init(items: [HistoryPresentationItem]) {
+        var duration: TimeInterval = 0
+        var spend: Decimal = 0
+        var errorSessions = 0
+        var words = 0
+        for item in items {
+            duration += max(0, item.recordingDuration)
+            spend += item.cost
+            if item.errorCount > 0 { errorSessions += 1 }
+            words += item.wordCount
+        }
+
         totalSessions = items.count
-        cumulativeRecordingDuration = items.reduce(0) { $0 + max(0, $1.recordingDuration) }
-        totalSpend = items.reduce(Decimal(0)) { $0 + $1.cost }
-        averageSessionLength = items.isEmpty ? 0 : cumulativeRecordingDuration / Double(items.count)
-        sessionsWithErrors = items.filter { $0.errorCount > 0 }.count
-        totalWords = items.reduce(0) { $0 + $1.wordCount }
+        cumulativeRecordingDuration = duration
+        totalSpend = spend
+        averageSessionLength = items.isEmpty ? 0 : duration / Double(items.count)
+        sessionsWithErrors = errorSessions
+        totalWords = words
     }
 }

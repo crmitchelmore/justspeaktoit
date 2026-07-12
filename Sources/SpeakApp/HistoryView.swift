@@ -133,10 +133,7 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
   }
 
   private var normalizedDateRange: ClosedRange<Date> {
-    let calendar = Calendar.current
-    let start = calendar.startOfDay(for: startDate)
-    let end = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: endDate) ?? endDate
-    return start...end
+    HistorySearchQuery.normalizedDayRange(from: startDate, through: endDate)
   }
 
   var body: some View {

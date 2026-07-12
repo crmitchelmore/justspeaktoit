@@ -36,6 +36,19 @@ final class HistoryPresentationTests: XCTestCase {
         XCTAssertEqual(statistics.totalSpend, Decimal(string: "0.3"))
     }
 
+    func testNormalizedDayRange_includesWholeEndDay() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Europe/London")!
+        let start = Date(timeIntervalSince1970: 1_709_251_200)
+        let end = calendar.date(byAdding: .day, value: 2, to: start)!
+
+        let range = HistorySearchQuery.normalizedDayRange(from: start, through: end, calendar: calendar)
+
+        XCTAssertEqual(range.lowerBound, calendar.startOfDay(for: start))
+        XCTAssertTrue(range.contains(calendar.date(bySettingHour: 23, minute: 59, second: 59, of: end)!))
+        XCTAssertFalse(range.contains(calendar.date(byAdding: .second, value: 1, to: range.upperBound)!))
+    }
+
     private func makeItem(
         raw: String,
         processed: String? = nil,

@@ -300,13 +300,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     case selectedHotKey
   }
 
-  private static let defaultBatchTranscriptionModel = "google/gemini-2.0-flash-001"
   private static let defaultLocalTranscriptionModel = "local/whisperkit/tiny"
-  private static let legacyWhisperModelIDs: Set<String> = [
-    "openrouter/whisper-large-v3",
-    "openrouter/whisper-medium",
-    "openrouter/whisper-small"
-  ]
 
   @Published var appearance: Appearance {
     didSet { store(appearance.rawValue, key: .appearance) }
@@ -1055,10 +1049,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   }
 
   private static func normalizedBatchModel(_ identifier: String?) -> String {
-    let trimmed = identifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    guard !trimmed.isEmpty else { return defaultBatchTranscriptionModel }
-    if legacyWhisperModelIDs.contains(trimmed) { return defaultBatchTranscriptionModel }
-    return trimmed
+    ModelCatalog.normalizedBatchTranscriptionModel(identifier)
   }
 
   private static func normalizedLocalTranscriptionModel(_ identifier: String?) -> String {

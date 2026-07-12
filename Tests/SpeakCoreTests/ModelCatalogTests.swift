@@ -143,6 +143,20 @@ final class ModelCatalogTests: XCTestCase {
         XCTAssertTrue(ids.contains("qwen/qwen3.6-flash"))
     }
 
+    func testBatchTranscription_defaultAndRetiredMigrationStayInCatalogue() {
+        let ids = Set(ModelCatalog.batchTranscription.map(\.id))
+
+        XCTAssertTrue(ids.contains(ModelCatalog.defaultBatchTranscriptionModel))
+        XCTAssertEqual(
+            ModelCatalog.normalizedBatchTranscriptionModel("openrouter/whisper-large-v3"),
+            ModelCatalog.defaultBatchTranscriptionModel
+        )
+        XCTAssertEqual(
+            ModelCatalog.normalizedBatchTranscriptionModel(" custom/provider-model "),
+            "custom/provider-model"
+        )
+    }
+
     func testPostProcessing_includesGPT56ModelsWithCurrentMetadata() {
         let expected: [String: ModelCatalog.Pricing] = [
             "openai/gpt-5.6-luna": .init(promptPerMTokens: 1.0, completionPerMTokens: 6.0),

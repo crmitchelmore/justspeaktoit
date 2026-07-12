@@ -139,11 +139,23 @@ final class ModelCatalogTests: XCTestCase {
         XCTAssertTrue(ids.contains("openai/gpt-5-mini"))
         XCTAssertTrue(ids.contains("openai/gpt-5.4-mini"))
         XCTAssertTrue(ids.contains("openai/gpt-5.4-nano"))
-        XCTAssertTrue(ids.contains("openai/gpt-5.6-luna"))
-        XCTAssertTrue(ids.contains("openai/gpt-5.6-terra"))
-        XCTAssertTrue(ids.contains("openai/gpt-5.6-sol"))
         XCTAssertTrue(ids.contains("google/gemini-3.1-flash-lite"))
         XCTAssertTrue(ids.contains("qwen/qwen3.6-flash"))
+    }
+
+    func testPostProcessing_includesGPT56ModelsWithCurrentMetadata() {
+        let expected: [String: ModelCatalog.Pricing] = [
+            "openai/gpt-5.6-luna": .init(promptPerMTokens: 1.0, completionPerMTokens: 6.0),
+            "openai/gpt-5.6-terra": .init(promptPerMTokens: 2.5, completionPerMTokens: 15.0),
+            "openai/gpt-5.6-sol": .init(promptPerMTokens: 5.0, completionPerMTokens: 30.0)
+        ]
+
+        for (id, pricing) in expected {
+            let option = ModelCatalog.postProcessing.first { $0.id == id }
+            XCTAssertNotNil(option, "Missing \(id)")
+            XCTAssertEqual(option?.pricing, pricing, "Incorrect pricing for \(id)")
+            XCTAssertEqual(option?.contextLength, 1_050_000, "Incorrect context length for \(id)")
+        }
     }
 
     func testPostProcessing_keepsLocalCleanupVisible() {

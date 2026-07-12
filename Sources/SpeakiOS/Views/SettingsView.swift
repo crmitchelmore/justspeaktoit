@@ -65,6 +65,17 @@ public final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(selectedModel, forKey: "selectedModel") }
     }
 
+    @Published public var batchTranscriptionModel: String {
+        didSet {
+            let normalized = ModelCatalog.normalizedBatchTranscriptionModel(batchTranscriptionModel)
+            if normalized != batchTranscriptionModel {
+                batchTranscriptionModel = normalized
+            } else {
+                UserDefaults.standard.set(batchTranscriptionModel, forKey: "batchTranscriptionModel")
+            }
+        }
+    }
+
     @Published public var deepgramAPIKey: String {
         didSet { persistSecret(deepgramAPIKey, identifier: Self.deepgramKeyID) }
     }
@@ -256,8 +267,12 @@ public final class AppSettings: ObservableObject {
             : ModelCatalog.defaultPostProcessingModel
         let postPrompt = UserDefaults.standard.string(forKey: "postProcessingPrompt") ?? ""
         let autoPost = UserDefaults.standard.bool(forKey: "autoPostProcess")
+        let batchModel = ModelCatalog.normalizedBatchTranscriptionModel(
+            UserDefaults.standard.string(forKey: "batchTranscriptionModel")
+        )
 
         self.selectedModel = selected
+        self.batchTranscriptionModel = batchModel
         self.deepgramAPIKey = ""
         self.openRouterAPIKey = ""
         self.openAIAPIKey = ""
@@ -529,6 +544,41 @@ private struct LiveModelGroup: Identifiable {
     }
 }
 
+private struct BatchModelGroup: Identifiable {
+    let id: String
+    let title: String
+    let options: [ModelCatalog.Option]
+
+    static func grouped(_ options: [ModelCatalog.Option]) -> [BatchModelGroup] {
+        let grouped = Dictionary(grouping: options) { option in
+            String(option.id.prefix { $0 != "/" })
+        }
+        return grouped.keys.sorted().map { provider in
+            BatchModelGroup(
+                id: provider,
+                title: providerDisplayName(provider),
+                options: grouped[provider, default: []]
+            )
+        }
+    }
+
+    private static func providerDisplayName(_ provider: String) -> String {
+        let names = [
+            "openai": "OpenAI",
+            "groq": "Groq",
+            "revai": "Rev.ai",
+            "mistral": "Mistral",
+            "soniox": "Soniox",
+            "deepgram": "Deepgram",
+            "assemblyai": "AssemblyAI",
+            "elevenlabs": "ElevenLabs",
+            "modulate": "Modulate",
+            "google": "Google via OpenRouter"
+        ]
+        return names[provider] ?? provider.capitalized
+    }
+}
+
 // swiftlint:disable:next type_body_length
 public struct SettingsView: View {
     @StateObject private var settings = AppSettings.shared
@@ -552,6 +602,24 @@ public struct SettingsView: View {
                     }
                 }
                 .pickerStyle(.navigationLink)
+
+                Picker("Batch Model", selection: $settings.batchTranscriptionModel) {
+                    ForEach(BatchModelGroup.grouped(ModelCatalog.batchTranscription)) { group in
+                        Section(group.title) {
+                            ForEach(group.options) { option in
+                                Text(ModelCatalog.friendlyName(for: option.id)).tag(option.id)
+                            }
+                        }
+                    }
+                }
+                .pickerStyle(.navigationLink)
+
+                Text(
+                    "Used for imported and saved-audio transcription. "
+                        + "The same catalogue and model IDs are shared with Mac."
+                )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 if let route = LiveTranscriptionRouting.route(for: settings.selectedModel),
                    !route.isSupportedOnIOS {

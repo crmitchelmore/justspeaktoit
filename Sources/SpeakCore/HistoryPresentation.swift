@@ -68,6 +68,7 @@ public struct HistorySearchQuery: Equatable, Sendable {
 
     public static let none = HistorySearchQuery()
 
+    /// Expands two user-selected dates into an inclusive, daylight-saving-safe day range.
     public static func normalizedDayRange(
         from startDate: Date,
         through endDate: Date,
@@ -79,6 +80,7 @@ public struct HistorySearchQuery: Equatable, Sendable {
         return lower...upper
     }
 
+    /// Returns whether an entry satisfies every active search and filter constraint.
     public func matches(_ item: HistoryPresentationItem) -> Bool {
         if let term = searchText, !term.isEmpty {
             let transcriptMatches = item.rawTranscription?.lowercased().contains(term) == true
@@ -110,6 +112,7 @@ public struct HistoryPresentationStatistics: Equatable, Sendable {
     public let sessionsWithErrors: Int
     public let totalWords: Int
 
+    /// Aggregates all user-facing history metrics in one pass over the supplied entries.
     public init(items: [HistoryPresentationItem]) {
         var duration: TimeInterval = 0
         var spend: Decimal = 0

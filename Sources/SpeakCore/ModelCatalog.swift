@@ -275,6 +275,24 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             estimatedLatencyMs: 900, latencyTier: .fast)
     ]
 
+    public static let defaultBatchTranscriptionModel = "google/gemini-2.0-flash-001"
+
+    private static let retiredBatchTranscriptionModels: Set<String> = [
+        "openrouter/whisper-large-v3",
+        "openrouter/whisper-medium",
+        "openrouter/whisper-small"
+    ]
+
+    /// Keeps catalogue defaults and retired-model migration identical on Mac and iPhone.
+    /// Unknown identifiers remain valid because the Mac supports custom OpenRouter batch models.
+    public static func normalizedBatchTranscriptionModel(_ identifier: String?) -> String {
+        let trimmed = identifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty, !retiredBatchTranscriptionModels.contains(trimmed) else {
+            return defaultBatchTranscriptionModel
+        }
+        return trimmed
+    }
+
     // Curated, static set for transcript cleanup (OpenRouter) with pricing + tags.
     // Pricing is based on OpenRouter's /api/v1/models at time of writing.
     public static let postProcessing: [Option] = [

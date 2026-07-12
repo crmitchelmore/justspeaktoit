@@ -607,7 +607,7 @@ public struct SettingsView: View {
                     ForEach(BatchModelGroup.grouped(ModelCatalog.batchTranscription)) { group in
                         Section(group.title) {
                             ForEach(group.options) { option in
-                                LiveModelRow(option: option).tag(option.id)
+                                Text(ModelCatalog.friendlyName(for: option.id)).tag(option.id)
                             }
                         }
                     }

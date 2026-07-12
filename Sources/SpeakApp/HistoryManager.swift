@@ -3,6 +3,10 @@ import Foundation
 import SpeakCore
 import os.log
 
+// Existing persistence implementation exceeds the project defaults; keep this
+// explicit until it is split by responsibility in a dedicated refactor.
+// swiftlint:disable file_length type_body_length
+
 // @Implement: This file persists history items to disc and is the interface to fetch a list of them, apply any filtering, sorting, or other standard functions, and surface them to the history view.
 
 typealias HistoryFilter = HistorySearchQuery

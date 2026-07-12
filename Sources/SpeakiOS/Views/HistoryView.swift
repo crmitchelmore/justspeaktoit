@@ -5,6 +5,7 @@ import SpeakSync
 
 // MARK: - History View
 
+// swiftlint:disable type_body_length
 public struct HistoryView: View {
     @StateObject private var historyManager = iOSHistoryManager.shared
     @ObservedObject private var syncEngine = HistorySyncEngine.shared
@@ -50,7 +51,11 @@ public struct HistoryView: View {
                     Button {
                         showingFilters = true
                     } label: {
-                        Image(systemName: hasActiveFilters ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                        Image(
+                            systemName: hasActiveFilters
+                                ? "line.3.horizontal.decrease.circle.fill"
+                                : "line.3.horizontal.decrease.circle"
+                        )
                     }
                     .accessibilityLabel("Filter history")
                 }

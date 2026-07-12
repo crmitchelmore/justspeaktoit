@@ -1,17 +1,15 @@
 import AppKit
 import Foundation
+import SpeakCore
 import os.log
+
+// Existing persistence implementation exceeds the project defaults; keep this
+// explicit until it is split by responsibility in a dedicated refactor.
+// swiftlint:disable file_length
 
 // @Implement: This file persists history items to disc and is the interface to fetch a list of them, apply any filtering, sorting, or other standard functions, and surface them to the history view.
 
-struct HistoryFilter: Equatable {
-  var searchText: String?
-  var modelIdentifiers: Set<String> = []
-  var includeErrorsOnly: Bool = false
-  var dateRange: ClosedRange<Date>?
-
-  static let none = HistoryFilter()
-}
+typealias HistoryFilter = HistorySearchQuery
 
 struct HistoryStatistics: Equatable {
   let totalSessions: Int
@@ -44,6 +42,7 @@ private struct WALEntry: Codable {
 }
 
 @MainActor
+// swiftlint:disable:next type_body_length
 final class HistoryManager: ObservableObject {
   @Published private(set) var items: [HistoryItem] = []
   @Published private(set) var statistics: HistoryStatistics = .init(
@@ -482,35 +481,7 @@ final class HistoryManager: ObservableObject {
   }
 
   func items(matching filter: HistoryFilter) -> [HistoryItem] {
-    // Filter from the currently loaded items only
-    items.filter { item in
-      if let text = filter.searchText?.lowercased(), !text.isEmpty {
-        let combined = [item.rawTranscription, item.postProcessedTranscription]
-          .compactMap { $0?.lowercased() }
-          .joined(separator: "\n")
-        if !combined.contains(text) {
-          return false
-        }
-      }
-
-      if !filter.modelIdentifiers.isEmpty,
-        filter.modelIdentifiers.intersection(item.modelsUsed).isEmpty
-      {
-        return false
-      }
-
-      if filter.includeErrorsOnly && item.errors.isEmpty {
-        return false
-      }
-
-      if let range = filter.dateRange {
-        if !range.contains(item.createdAt) {
-          return false
-        }
-      }
-
-      return true
-    }
+    items.filter { filter.matches($0.presentationItem) }
   }
 
   private nonisolated static func calculateStatistics(for items: [HistoryItem]) -> HistoryStatistics {
@@ -624,3 +595,5 @@ final class HistoryManager: ObservableObject {
     statistics = updated
   }
 }
+
+// swiftlint:enable file_length

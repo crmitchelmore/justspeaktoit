@@ -133,10 +133,7 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
   }
 
   private var normalizedDateRange: ClosedRange<Date> {
-    let calendar = Calendar.current
-    let start = calendar.startOfDay(for: startDate)
-    let end = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: endDate) ?? endDate
-    return start...end
+    HistorySearchQuery.normalizedDayRange(from: startDate, through: endDate)
   }
 
   var body: some View {
@@ -447,45 +444,7 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
   }
 
   private func apply(filter: HistoryFilter, to items: [HistoryItem]) -> [HistoryItem] {
-    guard filter != .none else { return items }
-
-    // Pre-lower the model filter identifiers once, outside the per-item loop.
-    let requestedModels: Set<String> = filter.modelIdentifiers.isEmpty
-      ? []
-      : Set(filter.modelIdentifiers.map { $0.lowercased() })
-
-    return items.filter { item in
-      if let text = filter.searchText?.lowercased(), !text.isEmpty {
-        // Check each transcription field directly to avoid building intermediate arrays/strings.
-        let inTranscript = item.rawTranscription?.lowercased().contains(text) == true
-          || item.postProcessedTranscription?.lowercased().contains(text) == true
-        // Only inspect model names when the transcript fields didn't already match.
-        if !inTranscript {
-          let inModels = item.modelsUsed.contains { model in
-            model.lowercased().contains(text)
-              || ModelCatalog.friendlyName(for: model).lowercased().contains(text)
-          }
-          if !inModels { return false }
-        }
-      }
-
-      if !requestedModels.isEmpty {
-        let itemModels = Set(item.modelsUsed.map { $0.lowercased() })
-        if requestedModels.isDisjoint(with: itemModels) {
-          return false
-        }
-      }
-
-      if filter.includeErrorsOnly && item.errors.isEmpty {
-        return false
-      }
-
-      if let range = filter.dateRange, !range.contains(item.createdAt) {
-        return false
-      }
-
-      return true
-    }
+    items.filter { filter.matches($0.presentationItem) }
   }
 }
 

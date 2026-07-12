@@ -309,6 +309,36 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             contextLength: 400_000
         ),
         Option(
+            id: "openai/gpt-5.6-luna",
+            displayName: "GPT-5.6 Luna",
+            description: "Fastest GPT-5.6 model for efficient, high-volume transcript cleanup.",
+            estimatedLatencyMs: 450,
+            latencyTier: .fast,
+            tags: [.fast, .quality],
+            pricing: Pricing(promptPerMTokens: 1.0, completionPerMTokens: 6.0),
+            contextLength: 1_000_000
+        ),
+        Option(
+            id: "openai/gpt-5.6-terra",
+            displayName: "GPT-5.6 Terra",
+            description: "Balanced GPT-5.6 capability and cost for high-quality transcript cleanup.",
+            estimatedLatencyMs: 750,
+            latencyTier: .medium,
+            tags: [.quality, .leading],
+            pricing: Pricing(promptPerMTokens: 2.5, completionPerMTokens: 15.0),
+            contextLength: 1_000_000
+        ),
+        Option(
+            id: "openai/gpt-5.6-sol",
+            displayName: "GPT-5.6 Sol",
+            description: "Flagship GPT-5.6 model for the highest-quality transcript cleanup.",
+            estimatedLatencyMs: 1_200,
+            latencyTier: .slow,
+            tags: [.quality, .leading],
+            pricing: Pricing(promptPerMTokens: 5.0, completionPerMTokens: 30.0),
+            contextLength: 1_000_000
+        ),
+        Option(
             id: "google/gemini-3.1-flash-lite",
             displayName: "Gemini 3.1 Flash Lite",
             description: "Latest Gemini Flash Lite generation with low cost and a long context window.",

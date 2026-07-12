@@ -139,6 +139,9 @@ final class ModelCatalogTests: XCTestCase {
         XCTAssertTrue(ids.contains("openai/gpt-5-mini"))
         XCTAssertTrue(ids.contains("openai/gpt-5.4-mini"))
         XCTAssertTrue(ids.contains("openai/gpt-5.4-nano"))
+        XCTAssertTrue(ids.contains("openai/gpt-5.6-luna"))
+        XCTAssertTrue(ids.contains("openai/gpt-5.6-terra"))
+        XCTAssertTrue(ids.contains("openai/gpt-5.6-sol"))
         XCTAssertTrue(ids.contains("google/gemini-3.1-flash-lite"))
         XCTAssertTrue(ids.contains("qwen/qwen3.6-flash"))
     }

@@ -24,6 +24,7 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
     private var elevenLabsTranscriber: ElevenLabsLiveTranscriber?
     private var openAITranscriber: OpenAIRealtimeLiveTranscriber?
     private var sharedTranscriber: SharedClientLiveTranscriber?
+    private var batchTranscriber: IOSBatchTranscriber?
     private var startTime: Date?
     private var currentModel: String = ""
 
@@ -48,6 +49,7 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
     }
 
     private var modelDisplayName: String {
+        if batchTranscriber != nil { return ModelCatalog.friendlyName(for: currentModel) }
         if currentModel.hasPrefix("deepgram") { return "Deepgram" }
         if currentModel.hasPrefix("elevenlabs") { return "ElevenLabs" }
         if currentModel.hasPrefix("openai") { return "OpenAI gpt-realtime-whisper" }
@@ -62,7 +64,9 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
         guard !isRunning else { return }
 
         let settings = AppSettings.shared
-        currentModel = settings.selectedModel
+        currentModel = settings.transcriptionMode == .batch
+            ? settings.batchTranscriptionModel
+            : settings.selectedModel
         partialText = ""
         wordCount = 0
         startTime = Date()
@@ -72,7 +76,8 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
 
         // Fall back to Apple Speech if the selected provider needs an API key we
         // don't have (covers every cloud provider via the shared routing).
-        if let route = LiveTranscriptionRouting.route(for: currentModel),
+        if settings.transcriptionMode == .streaming,
+           let route = LiveTranscriptionRouting.route(for: currentModel),
            route.apiKeyIdentifier != nil,
            settings.liveAPIKey(for: route).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             currentModel = "apple/local/SFSpeechRecognizer"
@@ -90,7 +95,20 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
         }
 
         do {
-            if currentModel.hasPrefix("deepgram") {
+            if settings.transcriptionMode == .batch {
+                let transcriber = IOSBatchTranscriber(
+                    audioSessionManager: audioSessionManager,
+                    model: currentModel,
+                    apiKey: settings.batchAPIKey
+                )
+                batchTranscriber = transcriber
+                appleTranscriber = nil
+                deepgramTranscriber = nil
+                elevenLabsTranscriber = nil
+                openAITranscriber = nil
+                sharedTranscriber = nil
+                try await transcriber.start()
+            } else if currentModel.hasPrefix("deepgram") {
                 let transcriber = DeepgramLiveTranscriber(audioSessionManager: audioSessionManager)
                 transcriber.configure(apiKey: settings.deepgramAPIKey)
                 transcriber.model = LiveTranscriptionRouting.route(for: currentModel)?.apiModelName
@@ -206,6 +224,7 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
             openAITranscriber = nil
             appleTranscriber = nil
             sharedTranscriber = nil
+            batchTranscriber = nil
             sharedState.clearRecordingState()
             activityManager.endActivity()
             throw error
@@ -230,6 +249,15 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
         // landed, so "Copied N words" was reported but nothing arrived.
         let assertion = beginBackgroundAssertion("Finalise transcription")
 
+        if batchTranscriber != nil {
+            activityManager.updateActivity(
+                status: .processing,
+                lastSnippet: "Transcribing recording…",
+                wordCount: 0,
+                duration: duration
+            )
+        }
+
         let drained = await drainActiveTranscriber(duration: duration)
         startTime = nil
 
@@ -237,6 +265,8 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
         // entry, the clipboard, and the spoken dialog all agree on it.
         let text = bestAvailableText(from: drained)
         let result = drained.replacingText(text)
+        partialText = text
+        wordCount = text.split(whereSeparator: \.isWhitespace).count
 
         // Record to history (always, regardless of destination).
         let historyItem = iOSHistoryManager.shared.recordTranscription(
@@ -287,11 +317,13 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
         openAITranscriber?.cancel()
         appleTranscriber?.cancel()
         sharedTranscriber?.cancel()
+        batchTranscriber?.cancel()
         deepgramTranscriber = nil
         elevenLabsTranscriber = nil
         openAITranscriber = nil
         appleTranscriber = nil
         sharedTranscriber = nil
+        batchTranscriber = nil
         isRunning = false
         startTime = nil
         partialText = ""
@@ -369,6 +401,24 @@ private extension TranscriptionRecordingService {
     /// and otherwise both calls would see the same non-nil transcriber and try
     /// to stop it twice.
     func drainActiveTranscriber(duration: Int) async -> TranscriptionResult {
+        if let batch = batchTranscriber {
+            batchTranscriber = nil
+            do {
+                return try await batch.stop(language: Locale.current.identifier)
+            } catch {
+                handleError(error)
+                return TranscriptionResult(
+                    text: "",
+                    segments: [],
+                    confidence: nil,
+                    duration: TimeInterval(duration),
+                    modelIdentifier: currentModel,
+                    cost: nil,
+                    rawPayload: nil,
+                    debugInfo: nil
+                )
+            }
+        }
         if let deepgram = deepgramTranscriber {
             deepgramTranscriber = nil
             return await deepgram.stop()

@@ -55,6 +55,20 @@ public enum HardwareTriggerDestination: String, CaseIterable, Identifiable, Send
 
 // MARK: - Settings Storage
 
+public enum IOSTranscriptionMode: String, CaseIterable, Identifiable, Sendable {
+    case streaming
+    case batch
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .streaming: return "Streaming"
+        case .batch: return "Batch"
+        }
+    }
+}
+
 /// Simple UserDefaults-based settings for iOS app.
 @MainActor
 public final class AppSettings: ObservableObject {
@@ -63,6 +77,10 @@ public final class AppSettings: ObservableObject {
 
     @Published public var selectedModel: String {
         didSet { UserDefaults.standard.set(selectedModel, forKey: "selectedModel") }
+    }
+
+    @Published public var transcriptionMode: IOSTranscriptionMode {
+        didSet { UserDefaults.standard.set(transcriptionMode.rawValue, forKey: "transcriptionMode") }
     }
 
     @Published public var batchTranscriptionModel: String {
@@ -207,6 +225,7 @@ public final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(autoPostProcess, forKey: "autoPostProcess") }
     }
 
+    // swiftlint:disable line_length
     public static let defaultPostProcessingPrompt = """
         You are a transcription formatter.
 
@@ -222,6 +241,7 @@ public final class AppSettings: ObservableObject {
         Edits allowed: Fix spelling, typos, capitalization, punctuation, grammar
         Edits forbidden: Add content, delete unless obvious stutter/duplicate
         """
+    // swiftlint:enable line_length
 
     public static let postProcessingModels = ModelCatalog.cloudPostProcessing
 
@@ -270,8 +290,12 @@ public final class AppSettings: ObservableObject {
         let batchModel = ModelCatalog.normalizedBatchTranscriptionModel(
             UserDefaults.standard.string(forKey: "batchTranscriptionModel")
         )
+        let mode = IOSTranscriptionMode(
+            rawValue: UserDefaults.standard.string(forKey: "transcriptionMode") ?? ""
+        ) ?? .streaming
 
         self.selectedModel = selected
+        self.transcriptionMode = mode
         self.batchTranscriptionModel = batchModel
         self.deepgramAPIKey = ""
         self.openRouterAPIKey = ""
@@ -445,6 +469,30 @@ public final class AppSettings: ObservableObject {
         }
     }
 
+    public var batchAPIKey: String {
+        if Self.openAIBatchModelIDs.contains(batchTranscriptionModel) {
+            return openAIAPIKey
+        }
+        return openRouterAPIKey
+    }
+
+    public static let openAIBatchModelIDs: Set<String> = [
+        "openai/whisper-1",
+        "openai/gpt-4o-mini-transcribe",
+        "openai/gpt-4o-transcribe",
+        "openai/gpt-4o-transcribe-diarize"
+    ]
+
+    /// iOS currently supports OpenAI's transcription endpoint and OpenRouter's
+    /// audio-capable batch models. Other catalogue entries remain shared with
+    /// Mac but are hidden until their upload clients are available on iPhone.
+    public static let supportedBatchModels: [ModelCatalog.Option] =
+        ModelCatalog.batchTranscription.filter { option in
+            openAIBatchModelIDs.contains(option.id)
+                || option.id.hasPrefix("google/")
+                || option.id == "openai/gpt-4o-audio-preview-2024-12-17"
+        }
+
     // MARK: - Legacy migration
 
     /// One-time migration of API keys from the pre-unification iOS keychain
@@ -592,36 +640,45 @@ public struct SettingsView: View {
     public var body: some View {
         Form {
             Section("Transcription") {
-                Picker("Live Model", selection: selectedModelBinding) {
-                    ForEach(LiveModelGroup.grouped(ModelCatalog.liveTranscription)) { group in
-                        Section(group.title) {
-                            ForEach(group.options) { option in
-                                LiveModelRow(option: option).tag(option.id)
+                Picker("Mode", selection: $settings.transcriptionMode) {
+                    ForEach(IOSTranscriptionMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                if settings.transcriptionMode == .streaming {
+                    Picker("Streaming Model", selection: selectedModelBinding) {
+                        ForEach(LiveModelGroup.grouped(ModelCatalog.liveTranscription)) { group in
+                            Section(group.title) {
+                                ForEach(group.options) { option in
+                                    LiveModelRow(option: option).tag(option.id)
+                                }
                             }
                         }
                     }
-                }
-                .pickerStyle(.navigationLink)
-
-                Picker("Batch Model", selection: $settings.batchTranscriptionModel) {
-                    ForEach(BatchModelGroup.grouped(ModelCatalog.batchTranscription)) { group in
-                        Section(group.title) {
-                            ForEach(group.options) { option in
-                                Text(ModelCatalog.friendlyName(for: option.id)).tag(option.id)
+                    .pickerStyle(.navigationLink)
+                } else {
+                    Picker("Batch Model", selection: $settings.batchTranscriptionModel) {
+                        ForEach(BatchModelGroup.grouped(AppSettings.supportedBatchModels)) { group in
+                            Section(group.title) {
+                                ForEach(group.options) { option in
+                                    Text(ModelCatalog.friendlyName(for: option.id)).tag(option.id)
+                                }
                             }
                         }
                     }
+                    .pickerStyle(.navigationLink)
                 }
-                .pickerStyle(.navigationLink)
 
-                Text(
-                    "Used for imported and saved-audio transcription. "
-                        + "The same catalogue and model IDs are shared with Mac."
-                )
+                Text(settings.transcriptionMode == .streaming
+                    ? "Text appears while you speak."
+                    : "Audio is recorded first, then uploaded when you stop for a more complete transcript.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                if let route = LiveTranscriptionRouting.route(for: settings.selectedModel),
+                if settings.transcriptionMode == .streaming,
+                   let route = LiveTranscriptionRouting.route(for: settings.selectedModel),
                    !route.isSupportedOnIOS {
                     Label(
                         "Not available on iPhone yet — recording falls back to Apple Speech.",
@@ -631,12 +688,25 @@ public struct SettingsView: View {
                     .font(.caption)
                 }
 
-                if let route = LiveTranscriptionRouting.route(for: settings.selectedModel),
+                if settings.transcriptionMode == .streaming,
+                   let route = LiveTranscriptionRouting.route(for: settings.selectedModel),
                    route.isSupportedOnIOS,
                    route.apiKeyIdentifier != nil,
                    settings.liveAPIKey(for: route).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Label(
                         "Add this provider's API key below to use this model.",
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .foregroundStyle(.orange)
+                    .font(.caption)
+                }
+
+                if settings.transcriptionMode == .batch,
+                   settings.batchAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Label(
+                        AppSettings.openAIBatchModelIDs.contains(settings.batchTranscriptionModel)
+                            ? "Add an OpenAI API key below to use this model."
+                            : "Add an OpenRouter API key below to use this model.",
                         systemImage: "exclamationmark.triangle"
                     )
                     .foregroundStyle(.orange)
@@ -1487,6 +1557,7 @@ struct PrivacyView: View {
         Form {
             Section {
                 VStack(alignment: .leading, spacing: 12) {
+                    // swiftlint:disable:next line_length
                     Text("Speak is designed with privacy in mind. Your audio and transcripts are processed according to the provider you select.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -1523,6 +1594,7 @@ struct PrivacyView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Label("Secure Storage", systemImage: "lock.fill")
                         .font(.headline)
+                    // swiftlint:disable:next line_length
                     Text("API keys are encrypted in your device Keychain and never leave your device except when syncing via iCloud Keychain (end-to-end encrypted).")
                         .font(.caption)
                         .foregroundStyle(.secondary)

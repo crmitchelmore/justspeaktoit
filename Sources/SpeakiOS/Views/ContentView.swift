@@ -6,6 +6,7 @@ import SpeakCore
 /// Unified transcriber that switches between Apple Speech and Deepgram.
 /// Integrates with Live Activity for lock screen presence.
 @MainActor
+// swiftlint:disable:next type_body_length
 final class TranscriberCoordinator: ObservableObject {
     @Published private(set) var isRunning = false
     @Published private(set) var partialText = ""
@@ -23,6 +24,7 @@ final class TranscriberCoordinator: ObservableObject {
     private var elevenLabsTranscriber: ElevenLabsLiveTranscriber?
     private var openAITranscriber: OpenAIRealtimeLiveTranscriber?
     private var sharedTranscriber: SharedClientLiveTranscriber?
+    private var batchTranscriber: IOSBatchTranscriber?
     private var startTime: Date?
 
     init() {
@@ -30,6 +32,9 @@ final class TranscriberCoordinator: ObservableObject {
     }
 
     var modelDisplayName: String {
+        if batchTranscriber != nil {
+            return ModelCatalog.friendlyName(for: currentModel)
+        }
         if currentModel.hasPrefix("deepgram") {
             return "Deepgram"
         }
@@ -50,7 +55,9 @@ final class TranscriberCoordinator: ObservableObject {
     // swiftlint:disable:next function_body_length
     func start() async throws {
         let settings = AppSettings.shared
-        currentModel = settings.selectedModel
+        currentModel = settings.transcriptionMode == .batch
+            ? settings.batchTranscriptionModel
+            : settings.selectedModel
         partialText = ""
         wordCount = 0
         startTime = Date()
@@ -58,7 +65,8 @@ final class TranscriberCoordinator: ObservableObject {
 
         // Fall back to Apple Speech if the selected provider needs an API key we
         // don't have (covers every cloud provider via the shared routing).
-        if let route = LiveTranscriptionRouting.route(for: currentModel),
+        if settings.transcriptionMode == .streaming,
+           let route = LiveTranscriptionRouting.route(for: currentModel),
            route.apiKeyIdentifier != nil,
            settings.liveAPIKey(for: route).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             currentModel = "apple/local/SFSpeechRecognizer"
@@ -69,7 +77,21 @@ final class TranscriberCoordinator: ObservableObject {
             activityManager.startActivity(provider: modelDisplayName)
         }
 
-        if currentModel.hasPrefix("deepgram") {
+        if settings.transcriptionMode == .batch {
+            let transcriber = IOSBatchTranscriber(
+                audioSessionManager: audioSessionManager,
+                model: currentModel,
+                apiKey: settings.batchAPIKey
+            )
+            batchTranscriber = transcriber
+            appleTranscriber = nil
+            deepgramTranscriber = nil
+            elevenLabsTranscriber = nil
+            openAITranscriber = nil
+            sharedTranscriber = nil
+            try await transcriber.start()
+            isRunning = true
+        } else if currentModel.hasPrefix("deepgram") {
             // Use Deepgram
             let transcriber = DeepgramLiveTranscriber(audioSessionManager: audioSessionManager)
             transcriber.configure(apiKey: settings.deepgramAPIKey)
@@ -201,16 +223,40 @@ final class TranscriberCoordinator: ObservableObject {
         }
     }
 
+    // swiftlint:disable:next function_body_length
     func stop() async -> TranscriptionResult {
         isRunning = false
         let duration = elapsedSeconds
 
-        // Complete Live Activity (if enabled)
+        // Streaming results can complete immediately. Batch recordings remain
+        // in a processing state until the upload returns.
         if AppSettings.shared.liveActivitiesEnabled {
-            activityManager.completeActivity(finalWordCount: wordCount, duration: duration)
+            if batchTranscriber != nil {
+                activityManager.updateActivity(
+                    status: .processing,
+                    lastSnippet: "Transcribing recording…",
+                    wordCount: 0,
+                    duration: duration
+                )
+            } else {
+                activityManager.completeActivity(finalWordCount: wordCount, duration: duration)
+            }
         }
 
-        if let deepgram = deepgramTranscriber {
+        if let batch = batchTranscriber {
+            batchTranscriber = nil
+            do {
+                let result = try await batch.stop(language: Locale.current.identifier)
+                partialText = result.text
+                wordCount = result.text.split(whereSeparator: \.isWhitespace).count
+                if AppSettings.shared.liveActivitiesEnabled {
+                    activityManager.completeActivity(finalWordCount: wordCount, duration: duration)
+                }
+                return finishStop(with: result)
+            } catch {
+                handleError(error)
+            }
+        } else if let deepgram = deepgramTranscriber {
             let result = await deepgram.stop()
             deepgramTranscriber = nil
             return finishStop(with: result)
@@ -261,11 +307,13 @@ final class TranscriberCoordinator: ObservableObject {
         openAITranscriber?.cancel()
         appleTranscriber?.cancel()
         sharedTranscriber?.cancel()
+        batchTranscriber?.cancel()
         deepgramTranscriber = nil
         elevenLabsTranscriber = nil
         openAITranscriber = nil
         appleTranscriber = nil
         sharedTranscriber = nil
+        batchTranscriber = nil
         isRunning = false
         startTime = nil
         if AppSettings.shared.liveActivitiesEnabled {

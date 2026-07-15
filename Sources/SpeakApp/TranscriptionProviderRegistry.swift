@@ -17,6 +17,7 @@ actor TranscriptionProviderRegistry {
         providers["assemblyai"] = AssemblyAITranscriptionProvider()
         providers["elevenlabs"] = ElevenLabsTranscriptionProvider()
         providers["soniox"] = SonioxTranscriptionProvider()
+        providers["speechmatics"] = SpeechmaticsTranscriptionProvider()
         providers["groq"] = GroqTranscriptionProvider()
         providers["cartesia"] = CartesiaTranscriptionProvider()
         providers["mistral"] = MistralTranscriptionProvider()

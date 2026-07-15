@@ -76,11 +76,13 @@ final class LiveTranscriptionRoutingTests: XCTestCase {
 
     // MARK: - iOS availability
 
-    func testIsSupportedOnIOS_allCatalogueProvidersWired() {
-        // Assert: every provider the catalogue exposes now runs on iOS.
-        for provider in LiveTranscriptionProviderID.allCases {
+    func testIsSupportedOnIOS_onlyPlatformWiredProvidersAreSelectable() {
+        // Speechmatics remains macOS-only until its shared client is moved to
+        // SpeakCore; every existing shared/native provider stays selectable.
+        for provider in LiveTranscriptionProviderID.allCases where provider != .speechmatics {
             XCTAssertTrue(provider.isSupportedOnIOS, "\(provider) should be iOS-supported")
         }
+        XCTAssertFalse(LiveTranscriptionProviderID.speechmatics.isSupportedOnIOS)
     }
 
     // MARK: - Factory

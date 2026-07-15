@@ -3815,6 +3815,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   private var assemblyAIController: AssemblyAILiveController
   private var elevenlabsController: ElevenLabsLiveController
   private var sonioxController: SonioxLiveController
+  private var speechmaticsController: SpeechmaticsLiveController
   private var cartesiaController: CartesiaLiveController
   private var gladiaController: GladiaLiveController
   private var openAIRealtimeController: OpenAIRealtimeLiveController
@@ -3872,6 +3873,12 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       secureStorage: secureStorage
     )
     sonioxController = SonioxLiveController(
+      appSettings: appSettings,
+      permissionsManager: permissionsManager,
+      audioDeviceManager: audioDeviceManager,
+      secureStorage: secureStorage
+    )
+    speechmaticsController = SpeechmaticsLiveController(
       appSettings: appSettings,
       permissionsManager: permissionsManager,
       audioDeviceManager: audioDeviceManager,
@@ -3952,15 +3959,10 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     lastStopDate = nowProvider()
   }
 
-  // swiftlint:disable:next cyclomatic_complexity
   private func controller(for model: String) -> any LiveTranscriptionController {
-    if model.hasPrefix("assemblyai/") { return assemblyAIController }
-    if model.hasPrefix("deepgram/") { return deepgramController }
-    if model.hasPrefix("modulate/") { return modulateController }
-    if model.hasPrefix("elevenlabs/") { return elevenlabsController }
-    if model.hasPrefix("soniox/") { return sonioxController }
-    if model.hasPrefix("cartesia/") { return cartesiaController }
-    if model.hasPrefix("gladia/") { return gladiaController }
+    if let route = controllerRoutes.first(where: { model.hasPrefix($0.prefix) }) {
+      return route.controller
+    }
     // SwitchingLiveTranscriber only routes live transcription models, and
     // OpenAI's only live transcription transport is the Realtime WebSocket
     // API. So any openai/* live model is handled by openAIRealtimeController.
@@ -3974,6 +3976,19 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     return nativeController
   }
 
+  private var controllerRoutes: [(prefix: String, controller: any LiveTranscriptionController)] {
+    [
+      ("assemblyai/", assemblyAIController),
+      ("deepgram/", deepgramController),
+      ("modulate/", modulateController),
+      ("elevenlabs/", elevenlabsController),
+      ("soniox/", sonioxController),
+      ("speechmatics/", speechmaticsController),
+      ("cartesia/", cartesiaController),
+      ("gladia/", gladiaController)
+    ]
+  }
+
   private func applyDelegateAndConfiguration() {
     var controllers: [any LiveTranscriptionController] = [
       nativeController,
@@ -3982,6 +3997,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       assemblyAIController,
       elevenlabsController,
       sonioxController,
+      speechmaticsController,
       cartesiaController,
       gladiaController,
       openAIRealtimeController,
@@ -4038,6 +4054,12 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       secureStorage: secureStorage
     )
     sonioxController = SonioxLiveController(
+      appSettings: appSettings,
+      permissionsManager: permissionsManager,
+      audioDeviceManager: audioDeviceManager,
+      secureStorage: secureStorage
+    )
+    speechmaticsController = SpeechmaticsLiveController(
       appSettings: appSettings,
       permissionsManager: permissionsManager,
       audioDeviceManager: audioDeviceManager,

@@ -91,6 +91,10 @@ extension ModelCatalog {
         "soniox/stt-rt-v5-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish]
         ),
+        "speechmatics/enhanced-streaming": LiveModelCapabilities(
+            supportedSpeedModes: [.instant, .livePolish],
+            postStopFinalizeBudget: 2.0
+        ),
         "elevenlabs/scribe-v2-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish]
         ),

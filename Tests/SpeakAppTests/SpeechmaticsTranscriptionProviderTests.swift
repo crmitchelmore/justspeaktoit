@@ -70,6 +70,20 @@ final class SpeechmaticsTranscriptionProviderTests: XCTestCase {
     XCTAssertNil(event.confidence)
   }
 
+  func testEndOfStreamSequence_usesSentFrameCountWhenAcknowledgementsLag() {
+    XCTAssertEqual(
+      SpeechmaticsLiveTranscriber.endOfStreamLastSequenceNumber(lastAcknowledged: 2, sentFrameCount: 3),
+      3
+    )
+  }
+
+  func testEndOfStreamSequence_usesHighestAcknowledgement() {
+    XCTAssertEqual(
+      SpeechmaticsLiveTranscriber.endOfStreamLastSequenceNumber(lastAcknowledged: 4, sentFrameCount: 3),
+      4
+    )
+  }
+
   func testTranscriptEvent_parsesFinalMetadataAndSegments() throws {
     let json = #"""
     {

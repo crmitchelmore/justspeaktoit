@@ -42,7 +42,7 @@ struct SpeechmaticsTranscriptionProvider: TranscriptionProvider {
     website: "https://www.speechmatics.com"
   )
 
-  private let validationURL = URL(string: "https://eu1.asr.api.speechmatics.com/v2/jobs/")!
+  private let validationURL = URL(string: "https://eu1.asr.api.speechmatics.com/v2/jobs")!
   private let session: URLSession
 
   init(session: URLSession = .shared) {
@@ -221,6 +221,12 @@ private struct SpeechmaticsPreStartAudioFlush {
   let continuation: CheckedContinuation<Bool, Never>?
 }
 
+private struct SpeechmaticsOutboundFrame {
+  let task: URLSessionWebSocketTask
+  let message: URLSessionWebSocketTask.Message
+  let completion: (Error?) -> Void
+}
+
 private struct SpeechmaticsErrorMessage: Decodable {
   let type: String?
   let reason: String?
@@ -246,6 +252,7 @@ final class SpeechmaticsLiveTranscriber: @unchecked Sendable {
   private let logger = Logger(subsystem: "com.speak.app", category: "SpeechmaticsLiveTranscriber")
   private let stateLock = NSLock()
   private let pendingSendGroup = DispatchGroup()
+  private let outboundSendQueue = DispatchQueue(label: "com.speak.app.speechmatics.outbound")
 
   private var webSocketTask: URLSessionWebSocketTask?
   private var onTranscript: ((SpeechmaticsTranscriptEvent) -> Void)?
@@ -258,6 +265,8 @@ final class SpeechmaticsLiveTranscriber: @unchecked Sendable {
   private var endOfTranscriptReceived = false
   private var endOfTranscriptContinuation: CheckedContinuation<Void, Never>?
   private var recognitionStartedContinuation: CheckedContinuation<Bool, Never>?
+  private var outboundFrames: [SpeechmaticsOutboundFrame] = []
+  private var outboundSendInFlight = false
 
   init(
     apiKey: String,
@@ -326,7 +335,10 @@ final class SpeechmaticsLiveTranscriber: @unchecked Sendable {
   func sendEndOfStream() {
     guard let task = currentWebSocketTask(), task.state == .running else { return }
     let lastSeqNo = withStateLock {
-      max(self.lastAcknowledgedSeqNo, self.sentAudioFrameCount - 1, 0)
+      Self.endOfStreamLastSequenceNumber(
+        lastAcknowledged: self.lastAcknowledgedSeqNo,
+        sentFrameCount: self.sentAudioFrameCount
+      )
     }
     let payload: [String: Any] = [
       "message": "EndOfStream",
@@ -478,6 +490,10 @@ final class SpeechmaticsLiveTranscriber: @unchecked Sendable {
     )
   }
 
+  static func endOfStreamLastSequenceNumber(lastAcknowledged: Int, sentFrameCount: Int) -> Int {
+    max(lastAcknowledged, sentFrameCount, 0)
+  }
+
   private func connectWebSocket() {
     var components = URLComponents()
     components.scheme = "wss"
@@ -511,10 +527,7 @@ final class SpeechmaticsLiveTranscriber: @unchecked Sendable {
   private func sendStartRecognition(on task: URLSessionWebSocketTask) {
     do {
       let payload = try Self.startRecognitionPayload(language: language, model: model, sampleRate: sampleRate)
-      let sendGroup = pendingSendGroup
-      sendGroup.enter()
-      task.send(.string(payload)) { [weak self] error in
-        defer { sendGroup.leave() }
+      enqueueOutbound(.string(payload), on: task) { [weak self] error in
         guard let self else { return }
         if let error, !self.isStoppingState() {
           self.currentOnError()?(error)
@@ -533,10 +546,7 @@ final class SpeechmaticsLiveTranscriber: @unchecked Sendable {
     }
 
     let dataToSend = buffer
-    let sendGroup = pendingSendGroup
-    sendGroup.enter()
-    task.send(.data(dataToSend)) { [weak self] error in
-      defer { sendGroup.leave() }
+    enqueueOutbound(.data(dataToSend), on: task) { [weak self] error in
       guard let self else { return }
       var returnBuffer = buffer
       self.bufferPool.returnBuffer(&returnBuffer)
@@ -552,13 +562,40 @@ final class SpeechmaticsLiveTranscriber: @unchecked Sendable {
     guard let data = try? JSONSerialization.data(withJSONObject: payload, options: []),
           let json = String(data: data, encoding: .utf8)
     else { return }
-    let sendGroup = pendingSendGroup
-    sendGroup.enter()
-    task.send(.string(json)) { [weak self] error in
-      defer { sendGroup.leave() }
+    enqueueOutbound(.string(json), on: task) { [weak self] error in
       guard let self else { return }
       if let error, !self.isStoppingState(), !self.shouldIgnoreSocketError(error) {
         self.currentOnError()?(error)
+      }
+    }
+  }
+
+  private func enqueueOutbound(
+    _ message: URLSessionWebSocketTask.Message,
+    on task: URLSessionWebSocketTask,
+    completion: @escaping (Error?) -> Void
+  ) {
+    pendingSendGroup.enter()
+    outboundSendQueue.async {
+      self.outboundFrames.append(
+        SpeechmaticsOutboundFrame(task: task, message: message, completion: completion)
+      )
+      self.sendNextOutboundFrameIfNeeded()
+    }
+  }
+
+  private func sendNextOutboundFrameIfNeeded() {
+    dispatchPrecondition(condition: .onQueue(outboundSendQueue))
+    guard !outboundSendInFlight, let frame = outboundFrames.first else { return }
+    outboundSendInFlight = true
+    frame.task.send(frame.message) { [weak self] error in
+      guard let self else { return }
+      self.outboundSendQueue.async {
+        let completed = self.outboundFrames.removeFirst()
+        self.outboundSendInFlight = false
+        completed.completion(error)
+        self.pendingSendGroup.leave()
+        self.sendNextOutboundFrameIfNeeded()
       }
     }
   }
@@ -625,25 +662,35 @@ final class SpeechmaticsLiveTranscriber: @unchecked Sendable {
   }
 
   private func handleRecognitionStarted() {
-    let flush = withStateLock { () -> SpeechmaticsPreStartAudioFlush in
-      self.recognitionStarted = true
-      let frames = self.preStartAudioBuffer
-      self.preStartAudioBuffer = []
-      let continuation = self.recognitionStartedContinuation
-      self.recognitionStartedContinuation = nil
-      return SpeechmaticsPreStartAudioFlush(
-        task: self.webSocketTask,
-        frames: frames,
-        continuation: continuation
-      )
-    }
-    if let task = flush.task, task.state == .running, !flush.frames.isEmpty {
-      logger.info("Flushing \(flush.frames.count) pre-start audio frames to Speechmatics")
-      for frame in flush.frames {
-        sendAudioFrame(frame, on: task)
+    while true {
+      let flush = withStateLock { () -> SpeechmaticsPreStartAudioFlush in
+        let frames = self.preStartAudioBuffer
+        self.preStartAudioBuffer = []
+        let continuation: CheckedContinuation<Bool, Never>?
+        if frames.isEmpty {
+          self.recognitionStarted = true
+          continuation = self.recognitionStartedContinuation
+          self.recognitionStartedContinuation = nil
+        } else {
+          continuation = nil
+        }
+        return SpeechmaticsPreStartAudioFlush(
+          task: self.webSocketTask,
+          frames: frames,
+          continuation: continuation
+        )
+      }
+      guard !flush.frames.isEmpty else {
+        flush.continuation?.resume(returning: true)
+        return
+      }
+      if let task = flush.task, task.state == .running {
+        logger.info("Flushing \(flush.frames.count) pre-start audio frames to Speechmatics")
+        for frame in flush.frames {
+          sendAudioFrame(frame, on: task)
+        }
       }
     }
-    flush.continuation?.resume(returning: true)
   }
 
   private static func segments(from results: [SpeechmaticsResult]) -> [TranscriptionSegment] {

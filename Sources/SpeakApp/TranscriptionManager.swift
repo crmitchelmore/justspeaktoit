@@ -3959,7 +3959,6 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     lastStopDate = nowProvider()
   }
 
-  // swiftlint:disable:next cyclomatic_complexity
   private func controller(for model: String) -> any LiveTranscriptionController {
     if let route = controllerRoutes.first(where: { model.hasPrefix($0.prefix) }) {
       return route.controller

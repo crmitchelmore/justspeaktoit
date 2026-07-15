@@ -2,13 +2,11 @@
 import Foundation
 import os.log
 import SpeakCore
-
 // swiftlint:disable type_body_length
 @MainActor
 final class SpeechmaticsLiveController: NSObject, LiveTranscriptionController {
   weak var delegate: LiveTranscriptionSessionDelegate?
   private(set) var isRunning = false
-
   private let appSettings: AppSettings
   private let permissionsManager: PermissionsManager
   private let audioDeviceManager: AudioInputDeviceManager
@@ -21,7 +19,6 @@ final class SpeechmaticsLiveController: NSObject, LiveTranscriptionController {
   private let logger = Logger(subsystem: "com.speak.app", category: "SpeechmaticsLiveController")
   private let audioProcessor = SpeechmaticsAudioProcessor()
   private var hasFinished = false
-
   private let targetSampleRate: Double = 16000
   private var targetFormat: AVAudioFormat?
   private var streamingStartTime: Date?
@@ -263,6 +260,7 @@ final class SpeechmaticsLiveController: NSObject, LiveTranscriptionController {
       return copy
     }
 
+    // swiftlint:disable:next function_body_length
     private func processAndSendAudio(
       _ buffer: AVAudioPCMBuffer,
       from inputFormat: AVAudioFormat,
@@ -301,11 +299,16 @@ final class SpeechmaticsLiveController: NSObject, LiveTranscriptionController {
 
       converter.reset()
       var error: NSError?
+      var suppliedInput = false
       let status = converter.convert(to: outputBuffer, error: &error) { _, outStatus in
+        guard !suppliedInput else {
+          outStatus.pointee = .noDataNow
+          return nil
+        }
+        suppliedInput = true
         outStatus.pointee = .haveData
         return buffer
       }
-
       guard status != .error, error == nil else { return }
       guard let int16Data = outputBuffer.int16ChannelData else { return }
       let frameLength = Int(outputBuffer.frameLength)
@@ -325,7 +328,6 @@ final class SpeechmaticsLiveController: NSObject, LiveTranscriptionController {
   }
 }
 // swiftlint:enable type_body_length
-
 private extension SpeechmaticsLiveController {
   func ensurePermissions() async -> Bool {
     let microphone = await permissionsManager.ensureGranted(.microphone)

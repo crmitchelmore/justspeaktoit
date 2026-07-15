@@ -49,6 +49,7 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
     case soniox
     case elevenlabs
     case openai
+    case speechmatics
 
     /// Keychain identifier for this provider's API key, or `nil` for on-device
     /// providers that need no credential. Matches the identifiers used by both
@@ -84,6 +85,8 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
         switch self {
         case .apple, .deepgram, .elevenlabs, .openai, .cartesia, .soniox, .modulate, .assemblyai, .gladia:
             return true
+        case .speechmatics:
+            return false
         }
     }
 
@@ -100,6 +103,7 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
         case .soniox: return "Soniox"
         case .elevenlabs: return "ElevenLabs"
         case .openai: return "OpenAI"
+        case .speechmatics: return "Speechmatics"
         }
     }
 }
@@ -276,7 +280,7 @@ public enum LiveTranscriptionClientFactory {
                 language: language,
                 sampleRate: route.sampleRate
             )
-        case .apple, .openai:
+        case .apple, .openai, .speechmatics:
             return nil
         }
     }

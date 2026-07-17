@@ -67,14 +67,13 @@ jobs:
       - name: Build iOS Library
         run: swift build --disable-dependency-cache --target SpeakiOSLib
 
-      - name: Test SpeakCore (iOS Simulator)
+      - name: Select iOS Simulator
         run: |
-          xcodebuild test \
-            -scheme SpeakCore \
-            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
-            -skipPackagePluginValidation \
-            -quiet \
-            2>&1 | tail -20
+          SIMULATOR_ID=$(xcrun simctl list devices available -j | jq -r \
+            '([.devices[][] | select(.name == "iPhone 17 Pro")][0].udid) //
+             ([.devices[][] | select(.name | startswith("iPhone"))][0].udid)')
+          test -n "$SIMULATOR_ID"
+          echo "SIMULATOR_ID=$SIMULATOR_ID" >> "$GITHUB_ENV"
 
       - name: Generate iOS App Project
         run: tuist generate --no-open
@@ -85,7 +84,7 @@ jobs:
           xcodebuild test \
             -workspace "Just Speak to It.xcworkspace" \
             -scheme SpeakiOS \
-            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
             -only-testing:SpeakiOSTests \
             -only-testing:SpeakiOSUITests \
             -skipPackagePluginValidation \

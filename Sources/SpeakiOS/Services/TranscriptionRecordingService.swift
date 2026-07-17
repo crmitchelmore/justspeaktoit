@@ -94,6 +94,14 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
             throw iOSTranscriptionError.liveActivityUnavailable
         }
 
+        #if DEBUG && targetEnvironment(simulator)
+        if let transcript = sharedState.simulatorValidationTranscript {
+            handlePartialResult(text: transcript)
+            isRunning = true
+            return
+        }
+        #endif
+
         do {
             if settings.transcriptionMode == .batch {
                 let transcriber = IOSBatchTranscriber(
@@ -390,6 +398,27 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
 // MARK: - Stop helpers
 
 @MainActor
+extension TranscriptionRecordingService {
+    /// The pasteboard value that should be committed synchronously when the
+    /// recording stops. Polishing gets a non-sensitive placeholder only when a
+    /// post-processor can actually replace it; without a key, the raw transcript
+    /// must be copied instead of leaving "Polishing… please wait" forever.
+    static func clipboardTextAtStop(
+        transcript: String,
+        destination: HardwareTriggerDestination,
+        canPostProcess: Bool
+    ) -> String? {
+        switch destination {
+        case .clipboard:
+            return transcript
+        case .clipboardAndPostProcess:
+            return canPostProcess ? polishingClipboardPlaceholder : transcript
+        case .historyOnly:
+            return nil
+        }
+    }
+}
+
 private extension TranscriptionRecordingService {
     /// Stops whichever transcriber is currently active and returns its result.
     /// Falls back to a synthetic `TranscriptionResult` built from `partialText`
@@ -459,18 +488,18 @@ private extension TranscriptionRecordingService {
         destination: HardwareTriggerDestination
     ) async {
         guard !text.isEmpty else { return }
-        switch destination {
-        case .clipboard:
-            await Self.writeClipboardReliably(text)
-            sharedState.lastCompletedTranscript = text
-        case .clipboardAndPostProcess:
-            await Self.writeClipboardReliably(Self.polishingClipboardPlaceholder)
-            sharedState.lastCompletedTranscript = text
-        case .historyOnly:
-            // Don't touch the pasteboard. We still record `lastCompletedTranscript`
-            // because the Live Activity / shared state UI shows it.
-            sharedState.lastCompletedTranscript = text
+        if let clipboardText = Self.clipboardTextAtStop(
+            transcript: text,
+            destination: destination,
+            canPostProcess: AppSettings.shared.hasOpenRouterKey
+        ) {
+            await Self.writeClipboardReliably(clipboardText)
         }
+
+        // History-only intentionally leaves the pasteboard untouched. Every
+        // destination still publishes the completed transcript so the Live
+        // Activity and foreground handoff can surface it.
+        sharedState.lastCompletedTranscript = text
     }
 
     /// Pasteboard writes from a background AppIntent can race process

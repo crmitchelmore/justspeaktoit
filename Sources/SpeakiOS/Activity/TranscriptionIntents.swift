@@ -3,6 +3,10 @@ import AppIntents
 import SpeakCore
 import UIKit
 
+// App Intent declarations intentionally stay together so Shortcuts metadata and
+// foreground-continuation behavior remain auditable in one place.
+// swiftlint:disable file_length
+
 // MARK: - Audio Recording Intent (Action Button / Shortcuts)
 
 @available(iOS 18, *)
@@ -76,7 +80,16 @@ public struct StartTranscriptionIntent: AudioRecordingIntent, ForegroundContinua
         if isRunning {
             return .result(dialog: "Recording already in progress.")
         }
-        try await startRecordingContinuingInForegroundIfNeeded(from: self)
+        if SharedTranscriptionState.shared.isRecording {
+            return .result(dialog: "A recording is already in progress in the app. Use the in-app stop button.")
+        }
+        do {
+            try await startRecordingContinuingInForegroundIfNeeded(from: self)
+        } catch {
+            return .result(
+                dialog: "Couldn’t start recording. Check microphone and speech-recognition access, then try again."
+            )
+        }
         return .result(dialog: "Recording started. Run \"Stop Recording\" to finish.")
     }
 }
@@ -108,9 +121,17 @@ public struct StartTranscriptionRecordingIntent: AudioRecordingIntent, Foregroun
                 destination: destination,
                 canPostProcess: canPostProcess
             ))
+        } else if SharedTranscriptionState.shared.isRecording {
+            return .result(dialog: "A recording is already in progress in the app. Use the in-app stop button.")
         } else {
-            try await startRecordingContinuingInForegroundIfNeeded(from: self)
-            return .result(dialog: "Recording started. Press again to stop.")
+            do {
+                try await startRecordingContinuingInForegroundIfNeeded(from: self)
+            } catch {
+                return .result(
+                    dialog: "Couldn’t start recording. Check microphone and speech-recognition access, then try again."
+                )
+            }
+            return .result(dialog: "Recording started. Tap Done, then press again to stop.")
         }
     }
 }
@@ -118,7 +139,7 @@ public struct StartTranscriptionRecordingIntent: AudioRecordingIntent, Foregroun
 /// Intent to stop an active recording from a Live Activity button or a dedicated
 /// Shortcut paired with `StartTranscriptionIntent`.
 @available(iOS 18, *)
-public struct StopTranscriptionRecordingIntent: AppIntent {
+public struct StopTranscriptionRecordingIntent: AudioRecordingIntent {
     public static var title: LocalizedStringResource = "Stop Recording"
     public static var description = IntentDescription(
         "Stops the current transcription and routes the result to the destination you chose in Settings."
@@ -133,6 +154,9 @@ public struct StopTranscriptionRecordingIntent: AppIntent {
         let isRunning = await service.isRunning
 
         guard isRunning else {
+            if SharedTranscriptionState.shared.isRecording {
+                return .result(dialog: "A recording is active in the app. Use the in-app stop button.")
+            }
             return .result(dialog: "No active recording.")
         }
 
@@ -193,9 +217,7 @@ struct CopyLastSentenceIntent: AppIntent {
     static var openAppWhenRun: Bool = false
 
     func perform() async throws -> some IntentResult {
-        // Get the last sentence from UserDefaults (shared between app and extension)
-        let defaults = UserDefaults(suiteName: "group.com.speak.ios")
-        let lastSentence = defaults?.string(forKey: "lastTranscribedSentence") ?? ""
+        let lastSentence = SharedTranscriptionState.shared.lastTranscribedSentence
 
         guard !lastSentence.isEmpty else {
             return .result(value: "No recent transcription to copy")
@@ -217,8 +239,7 @@ struct CopyFullTranscriptIntent: AppIntent {
     static var openAppWhenRun: Bool = false
 
     func perform() async throws -> some IntentResult {
-        let defaults = UserDefaults(suiteName: "group.com.speak.ios")
-        let fullText = defaults?.string(forKey: "currentTranscriptText") ?? ""
+        let fullText = SharedTranscriptionState.shared.currentTranscriptText
 
         guard !fullText.isEmpty else {
             return .result(value: "No transcription to copy")
@@ -295,13 +316,38 @@ struct TranscriptionShortcuts: AppShortcutsProvider {
 /// Manages state shared between main app and extensions via App Group.
 public final class SharedTranscriptionState {
     public static let shared = SharedTranscriptionState()
+    public static let appGroupIdentifier = "group.com.justspeaktoit.ios"
 
     private let defaults: UserDefaults?
-    private let groupIdentifier = "group.com.speak.ios"
 
     private init() {
-        defaults = UserDefaults(suiteName: groupIdentifier)
+        defaults = UserDefaults(suiteName: Self.appGroupIdentifier)
+        #if DEBUG && targetEnvironment(simulator)
+        if let value = ProcessInfo.processInfo.environment["JUSTSPEAKTOIT_SIMULATOR_TRANSCRIPT"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !value.isEmpty {
+            defaults?.set(value, forKey: "simulatorValidationTranscript")
+        }
+        #endif
     }
+
+    #if DEBUG && targetEnvironment(simulator)
+    /// Deterministic transcript used only by Simulator UX validation. App Intent
+    /// execution does not reliably inherit launchd environment variables, so the
+    /// App Group value keeps the real Shortcut lifecycle testable across hosts.
+    var simulatorValidationTranscript: String? {
+        let environmentValue = ProcessInfo.processInfo.environment["JUSTSPEAKTOIT_SIMULATOR_TRANSCRIPT"]
+        let value = environmentValue ?? defaults?.string(forKey: "simulatorValidationTranscript")
+        let trimmedValue = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedValue?.isEmpty == false ? trimmedValue : nil
+    }
+    #endif
+
+    /// The full transcript currently shared with extensions and App Intents.
+    public var currentTranscriptText: String { defaults?.string(forKey: "currentTranscriptText") ?? "" }
+
+    /// The most recent sentence shared with extensions and App Intents.
+    public var lastTranscribedSentence: String { defaults?.string(forKey: "lastTranscribedSentence") ?? "" }
 
     /// Updates the current transcript text (for copy action)
     public func updateTranscript(_ text: String) {

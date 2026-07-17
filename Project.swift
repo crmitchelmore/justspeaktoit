@@ -127,6 +127,8 @@ let project = Project(
                 "UILaunchStoryboardName": "LaunchScreen",
                 "UIRequiresFullScreen": false,
                 "CFBundleDisplayName": "Just Speak to It",
+                "CFBundleShortVersionString": "$(MARKETING_VERSION)",
+                "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
                 "NSMicrophoneUsageDescription": "Just Speak to It needs microphone access for voice transcription.",
                 "NSSpeechRecognitionUsageDescription": "Just Speak to It uses speech recognition to transcribe your voice.",
                 "NSCameraUsageDescription": "Just Speak to It does not use the camera, but a linked library requires this declaration.",
@@ -176,6 +178,7 @@ let project = Project(
             deploymentTargets: .iOS("17.0"),
             infoPlist: .file(path: "JustSpeakToItWidgetExtension/Info.plist"),
             sources: ["JustSpeakToItWidgetExtension/**"],
+            entitlements: .file(path: "JustSpeakToItWidgetExtension/JustSpeakToItWidgetExtension.entitlements"),
             dependencies: [
                 .package(product: "SpeakCore"),
                 .package(product: "SpeakiOSLib")
@@ -190,6 +193,33 @@ let project = Project(
             sources: ["Tests/SpeakAppUITests/**"],
             dependencies: [
                 .target(name: "SpeakApp")
+            ]
+        ),
+        .target(
+            name: "SpeakiOSUITests",
+            destinations: .iOS,
+            product: .uiTests,
+            bundleId: "com.justspeaktoit.ios.uitests",
+            deploymentTargets: .iOS("17.0"),
+            sources: ["Tests/SpeakiOSUITests/**"],
+            dependencies: [
+                .target(name: "SpeakiOS")
+            ]
+        ),
+        .target(
+            name: "SpeakiOSTests",
+            destinations: .iOS,
+            product: .unitTests,
+            bundleId: "com.justspeaktoit.ios.tests",
+            deploymentTargets: .iOS("17.0"),
+            sources: ["Tests/SpeakiOSTests/**"],
+            resources: [
+                "SpeakiOS.entitlements",
+                "JustSpeakToItWidgetExtension/JustSpeakToItWidgetExtension.entitlements"
+            ],
+            dependencies: [
+                .target(name: "SpeakiOS"),
+                .package(product: "SpeakiOSLib")
             ]
         )
     ]

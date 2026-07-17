@@ -60,18 +60,38 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install Tuist
+        run: brew install tuist
 
       - name: Build iOS Library
         run: swift build --disable-dependency-cache --target SpeakiOSLib
 
-      - name: Test SpeakCore (iOS Simulator)
+      - name: Select iOS Simulator
         run: |
+          SIMULATOR_ID=$(xcrun simctl list devices available -j | jq -r \
+            '([.devices[][] | select(.name == "iPhone 17 Pro")][0].udid) //
+             ([.devices[][] | select(.name | startswith("iPhone"))][0].udid)')
+          test -n "$SIMULATOR_ID"
+          echo "SIMULATOR_ID=$SIMULATOR_ID" >> "$GITHUB_ENV"
+
+      - name: Generate iOS App Project
+        run: tuist generate --no-open
+
+      - name: Test iOS App and Action Button Settings
+        run: |
+          set -o pipefail
           xcodebuild test \
-            -scheme SpeakCore \
-            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+            -workspace "Just Speak to It.xcworkspace" \
+            -scheme SpeakiOS \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
+            -only-testing:SpeakiOSTests \
+            -only-testing:SpeakiOSUITests \
             -skipPackagePluginValidation \
             -quiet \
-            2>&1 | tail -20
+            2>&1 | tail -50
 
   lint:
     name: Lint

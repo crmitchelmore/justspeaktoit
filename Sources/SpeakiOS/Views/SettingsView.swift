@@ -753,6 +753,7 @@ public struct SettingsView: View {
                             .lineLimit(1)
                     }
                 }
+                .accessibilityIdentifier("hardwareTriggerSettingsLink")
 
                 Text("Trigger transcription from the Action Button, Siri, Lock Screen, Control Center, or Back Tap.")
                     .font(.caption)
@@ -1013,9 +1014,12 @@ struct HardwareTriggerSettingsView: View {
             Section("When Recording Stops") {
                 Picker("Destination", selection: $settings.hardwareTriggerDestination) {
                     ForEach(HardwareTriggerDestination.allCases) { destination in
-                        Text(destination.displayName).tag(destination)
+                        Text(destination.displayName)
+                            .accessibilityIdentifier("hardwareTriggerDestination.\(destination.rawValue)")
+                            .tag(destination)
                     }
                 }
+                .accessibilityIdentifier("hardwareTriggerDestinationPicker")
                 .pickerStyle(.inline)
                 .labelsHidden()
 
@@ -1061,6 +1065,7 @@ struct HardwareTriggerSettingsView: View {
                 } label: {
                     Label("Open Shortcuts App", systemImage: "arrow.up.right.square")
                 }
+                .accessibilityIdentifier("openShortcutsAppButton")
             }
 
             Section("Other Trigger Options") {

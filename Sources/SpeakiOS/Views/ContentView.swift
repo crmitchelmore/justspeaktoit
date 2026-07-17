@@ -77,6 +77,14 @@ final class TranscriberCoordinator: ObservableObject {
             activityManager.startActivity(provider: modelDisplayName)
         }
 
+        #if DEBUG && targetEnvironment(simulator)
+        if let transcript = sharedState.simulatorValidationTranscript {
+            handlePartialResult(text: transcript, isFinal: true)
+            markRecordingStarted()
+            return
+        }
+        #endif
+
         if settings.transcriptionMode == .batch {
             let transcriber = IOSBatchTranscriber(
                 audioSessionManager: audioSessionManager,
@@ -90,7 +98,7 @@ final class TranscriberCoordinator: ObservableObject {
             openAITranscriber = nil
             sharedTranscriber = nil
             try await transcriber.start()
-            isRunning = true
+            markRecordingStarted()
         } else if currentModel.hasPrefix("deepgram") {
             // Use Deepgram
             let transcriber = DeepgramLiveTranscriber(audioSessionManager: audioSessionManager)
@@ -110,7 +118,7 @@ final class TranscriberCoordinator: ObservableObject {
             elevenLabsTranscriber = nil
 
             try await transcriber.start()
-            isRunning = true
+            markRecordingStarted()
         } else if currentModel.hasPrefix("elevenlabs") {
             // Use ElevenLabs
             let transcriber = ElevenLabsLiveTranscriber(audioSessionManager: audioSessionManager)
@@ -130,7 +138,7 @@ final class TranscriberCoordinator: ObservableObject {
             appleTranscriber = nil
 
             try await transcriber.start()
-            isRunning = true
+            markRecordingStarted()
         } else if currentModel.hasPrefix("openai") {
             // Use OpenAI Realtime
             let transcriber = OpenAIRealtimeLiveTranscriber(audioSessionManager: audioSessionManager)
@@ -151,7 +159,7 @@ final class TranscriberCoordinator: ObservableObject {
             appleTranscriber = nil
 
             try await transcriber.start()
-            isRunning = true
+            markRecordingStarted()
         } else if let route = LiveTranscriptionRouting.route(for: currentModel),
                   route.provider.isSupportedOnIOS {
             // Generic shared-client path (Cartesia, and future ported providers).
@@ -174,7 +182,7 @@ final class TranscriberCoordinator: ObservableObject {
             appleTranscriber = nil
 
             try await transcriber.start()
-            isRunning = true
+            markRecordingStarted()
         } else {
             // Use Apple Speech
             let transcriber = iOSLiveTranscriber(audioSessionManager: audioSessionManager)
@@ -194,8 +202,14 @@ final class TranscriberCoordinator: ObservableObject {
             sharedTranscriber = nil
 
             try await transcriber.start()
-            isRunning = true
+            markRecordingStarted()
         }
+    }
+
+    private func markRecordingStarted() {
+        isRunning = true
+        sharedState.isRecording = true
+        sharedState.recordingStartTime = startTime
     }
 
     private func handlePartialResult(text: String, isFinal: Bool) {
@@ -226,6 +240,7 @@ final class TranscriberCoordinator: ObservableObject {
     // swiftlint:disable:next function_body_length
     func stop() async -> TranscriptionResult {
         isRunning = false
+        sharedState.clearRecordingState()
         let duration = elapsedSeconds
 
         // Streaming results can complete immediately. Batch recordings remain
@@ -320,6 +335,7 @@ final class TranscriberCoordinator: ObservableObject {
             activityManager.endActivity()
         }
         sharedState.clear()
+        sharedState.clearRecordingState()
     }
 }
 
@@ -415,12 +431,12 @@ public struct ContentView: View {
                                 Text("\(Int(confidence * 100))%")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
-                            } else if backgroundService.isRunning {
-                                Text("Action Button")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
                             }
                         }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(
+                            backgroundService.isRunning ? "Recording via Action Button" : "Recording"
+                        )
                     }
                 }
 
@@ -517,17 +533,17 @@ public struct ContentView: View {
                         await toggleRecording()
                     }
                 } label: {
-                    Image(systemName: coordinator.isRunning ? "stop.fill" : "mic.fill")
+                    Image(systemName: isAnyRecording ? "stop.fill" : "mic.fill")
                         .font(.system(size: 28))
                         .frame(width: 64, height: 64)
                 }
                 .buttonStyle(.glassProminent)
-                .tint(coordinator.isRunning ? .red : .brandAccent)
+                .tint(isAnyRecording ? .red : .brandAccent)
                 .clipShape(Circle())
-                .accessibilityLabel(coordinator.isRunning ? "Stop recording" : "Start recording")
+                .accessibilityLabel(isAnyRecording ? "Stop recording" : "Start recording")
 
                 // Secondary actions (only visible when there's text and not recording)
-                if hasTextToShow && !coordinator.isRunning {
+                if hasTextToShow && !isAnyRecording {
                     // Polish/Post-process button
                     Button {
                         showingPostProcessing = true
@@ -560,6 +576,7 @@ public struct ContentView: View {
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: hasTextToShow)
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: coordinator.isRunning)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: backgroundService.isRunning)
     }
     #endif
 
@@ -572,17 +589,17 @@ public struct ContentView: View {
                     await toggleRecording()
                 }
             } label: {
-                Image(systemName: coordinator.isRunning ? "stop.fill" : "mic.fill")
+                Image(systemName: isAnyRecording ? "stop.fill" : "mic.fill")
                     .font(.system(size: 28))
                     .frame(width: 64, height: 64)
             }
             .buttonStyle(.borderedProminent)
-            .tint(coordinator.isRunning ? .red : .accentColor)
+            .tint(isAnyRecording ? .red : .accentColor)
             .clipShape(Circle())
-            .accessibilityLabel(coordinator.isRunning ? "Stop recording" : "Start recording")
+            .accessibilityLabel(isAnyRecording ? "Stop recording" : "Start recording")
 
             // Secondary actions (only visible when there's text and not recording)
-            if hasTextToShow && !coordinator.isRunning {
+            if hasTextToShow && !isAnyRecording {
                 // Polish/Post-process button
                 Button {
                     showingPostProcessing = true
@@ -613,12 +630,17 @@ public struct ContentView: View {
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: hasTextToShow)
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: coordinator.isRunning)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: backgroundService.isRunning)
     }
 
     // MARK: - Computed Properties
 
     private var hasTextToShow: Bool {
         !currentText.isEmpty
+    }
+
+    private var isAnyRecording: Bool {
+        coordinator.isRunning || backgroundService.isRunning
     }
 
     private var currentText: String {
@@ -668,7 +690,12 @@ public struct ContentView: View {
     // MARK: - Actions
 
     private func toggleRecording() async {
-        if coordinator.isRunning {
+        if backgroundService.isRunning {
+            let result = await backgroundService.stopRecording(
+                destination: settings.hardwareTriggerDestination
+            )
+            displayText = result.text
+        } else if coordinator.isRunning {
             let result = await coordinator.stop()
             print("[ContentView] Final result: \(result.text.count) chars, duration: \(result.duration)s")
 

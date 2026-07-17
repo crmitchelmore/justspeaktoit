@@ -1,4 +1,5 @@
 #if os(iOS)
+import AppIntents
 import XCTest
 
 @testable import SpeakiOSLib
@@ -14,6 +15,55 @@ final class TranscriptionRecordingServiceTextTests: XCTestCase {
             TranscriptionRecordingService.polishingClipboardPlaceholder,
             "Polishing… please wait"
         )
+    }
+
+    func testClipboardDestinationCopiesTranscriptAtStop() {
+        XCTAssertEqual(
+            TranscriptionRecordingService.clipboardTextAtStop(
+                transcript: "Action button transcript",
+                destination: .clipboard,
+                canPostProcess: false
+            ),
+            "Action button transcript"
+        )
+    }
+
+    func testPolishWithoutAPIKeyCopiesRawTranscriptInsteadOfPermanentPlaceholder() {
+        XCTAssertEqual(
+            TranscriptionRecordingService.clipboardTextAtStop(
+                transcript: "Action button transcript",
+                destination: .clipboardAndPostProcess,
+                canPostProcess: false
+            ),
+            "Action button transcript"
+        )
+    }
+
+    func testPolishWithAPIKeyUsesPlaceholderUntilReplacementLands() {
+        XCTAssertEqual(
+            TranscriptionRecordingService.clipboardTextAtStop(
+                transcript: "Action button transcript",
+                destination: .clipboardAndPostProcess,
+                canPostProcess: true
+            ),
+            TranscriptionRecordingService.polishingClipboardPlaceholder
+        )
+    }
+
+    func testHistoryOnlyDoesNotTouchClipboard() {
+        XCTAssertNil(
+            TranscriptionRecordingService.clipboardTextAtStop(
+                transcript: "Action button transcript",
+                destination: .historyOnly,
+                canPostProcess: false
+            )
+        )
+    }
+
+    @available(iOS 18, *)
+    func testLiveActivityStopIntentKeepsAudioRecordingExecutionContext() {
+        let intentType: any AudioRecordingIntent.Type = StopTranscriptionRecordingIntent.self
+        XCTAssertTrue(intentType == StopTranscriptionRecordingIntent.self)
     }
 
     func testPrefersTranscriberResultWhenPresent() {

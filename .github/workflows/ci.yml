@@ -60,6 +60,8 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Install Tuist
         run: brew install tuist

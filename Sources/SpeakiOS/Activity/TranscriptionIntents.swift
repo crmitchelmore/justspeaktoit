@@ -193,9 +193,7 @@ struct CopyLastSentenceIntent: AppIntent {
     static var openAppWhenRun: Bool = false
 
     func perform() async throws -> some IntentResult {
-        // Get the last sentence from UserDefaults (shared between app and extension)
-        let defaults = UserDefaults(suiteName: SharedTranscriptionState.appGroupIdentifier)
-        let lastSentence = defaults?.string(forKey: "lastTranscribedSentence") ?? ""
+        let lastSentence = SharedTranscriptionState.shared.lastTranscribedSentence
 
         guard !lastSentence.isEmpty else {
             return .result(value: "No recent transcription to copy")
@@ -217,8 +215,7 @@ struct CopyFullTranscriptIntent: AppIntent {
     static var openAppWhenRun: Bool = false
 
     func perform() async throws -> some IntentResult {
-        let defaults = UserDefaults(suiteName: SharedTranscriptionState.appGroupIdentifier)
-        let fullText = defaults?.string(forKey: "currentTranscriptText") ?? ""
+        let fullText = SharedTranscriptionState.shared.currentTranscriptText
 
         guard !fullText.isEmpty else {
             return .result(value: "No transcription to copy")
@@ -302,6 +299,12 @@ public final class SharedTranscriptionState {
     private init() {
         defaults = UserDefaults(suiteName: Self.appGroupIdentifier)
     }
+
+    /// The full transcript currently shared with extensions and App Intents.
+    public var currentTranscriptText: String { defaults?.string(forKey: "currentTranscriptText") ?? "" }
+
+    /// The most recent sentence shared with extensions and App Intents.
+    public var lastTranscribedSentence: String { defaults?.string(forKey: "lastTranscribedSentence") ?? "" }
 
     /// Updates the current transcript text (for copy action)
     public func updateTranscript(_ text: String) {

@@ -213,6 +213,10 @@ let project = Project(
             bundleId: "com.justspeaktoit.ios.tests",
             deploymentTargets: .iOS("17.0"),
             sources: ["Tests/SpeakiOSTests/**"],
+            resources: [
+                "SpeakiOS.entitlements",
+                "JustSpeakToItWidgetExtension/JustSpeakToItWidgetExtension.entitlements"
+            ],
             dependencies: [
                 .target(name: "SpeakiOS"),
                 .package(product: "SpeakiOSLib")

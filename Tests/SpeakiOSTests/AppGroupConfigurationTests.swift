@@ -6,25 +6,22 @@ import XCTest
 
 final class AppGroupConfigurationTests: XCTestCase {
     func testSharedStateUsesEntitledAppGroup() throws {
-        let entitledGroups = try appGroups(
-            in: repositoryRoot.appendingPathComponent("SpeakiOS.entitlements")
-        )
+        let entitledGroups = try appGroups(inResourceNamed: "SpeakiOS")
 
         XCTAssertEqual(SharedTranscriptionState.appGroupIdentifier, "group.com.justspeaktoit.ios")
         XCTAssertTrue(entitledGroups.contains(SharedTranscriptionState.appGroupIdentifier))
     }
 
     func testWidgetUsesSameEntitledAppGroup() throws {
-        let entitledGroups = try appGroups(
-            in: repositoryRoot
-                .appendingPathComponent("JustSpeakToItWidgetExtension")
-                .appendingPathComponent("JustSpeakToItWidgetExtension.entitlements")
-        )
+        let entitledGroups = try appGroups(inResourceNamed: "JustSpeakToItWidgetExtension")
 
         XCTAssertTrue(entitledGroups.contains(SharedTranscriptionState.appGroupIdentifier))
     }
 
-    private func appGroups(in entitlementsURL: URL) throws -> [String] {
+    private func appGroups(inResourceNamed resourceName: String) throws -> [String] {
+        let entitlementsURL = try XCTUnwrap(
+            Bundle(for: Self.self).url(forResource: resourceName, withExtension: "entitlements")
+        )
         let data = try Data(contentsOf: entitlementsURL)
         let plist = try XCTUnwrap(
             PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
@@ -34,13 +31,6 @@ final class AppGroupConfigurationTests: XCTestCase {
         )
 
         return entitledGroups
-    }
-
-    private var repositoryRoot: URL {
-        URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
     }
 }
 #endif

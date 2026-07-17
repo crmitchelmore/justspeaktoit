@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy — JustSpeakToIt</title>
+  <meta name="description" content="How JustSpeakToIt handles recordings, transcripts, diagnostics, API keys, and optional cloud services.">
+  <meta name="robots" content="index,follow">
+  <link rel="canonical" href="https://justspeaktoit.com/privacy">
+  <link rel="preconnect" href="https://api.fontshare.com">
+  <link href="https://api.fontshare.com/v2/css?f[]=satoshi@700,900&amp;f[]=general-sans@400,500,600&amp;display=swap" rel="stylesheet">
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b0f14;
+      --surface: #111a26;
+      --text: #f8fafc;
+      --muted: #a8b3c7;
+      --accent: #ff6a3d;
+      --border: rgba(255, 255, 255, 0.1);
+      --display: 'Satoshi', -apple-system, BlinkMacSystemFont, sans-serif;
+      --body: 'General Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 90% 0%, rgba(255, 106, 61, 0.16), transparent 34rem),
+        var(--bg);
+      color: var(--text);
+      font-family: var(--body);
+      font-size: 17px;
+      line-height: 1.7;
+    }
+
+    a { color: var(--accent); }
+
+    .nav {
+      border-bottom: 1px solid var(--border);
+      background: rgba(11, 15, 20, 0.88);
+      backdrop-filter: blur(18px);
+    }
+
+    .nav__inner,
+    main,
+    footer {
+      width: min(100% - 2rem, 860px);
+      margin-inline: auto;
+    }
+
+    .nav__inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 68px;
+    }
+
+    .brand {
+      color: var(--text);
+      font-family: var(--display);
+      font-size: 1.1rem;
+      font-weight: 900;
+      text-decoration: none;
+    }
+
+    .back {
+      color: var(--muted);
+      font-size: 0.95rem;
+      text-decoration: none;
+    }
+
+    main { padding: 5rem 0 3rem; }
+
+    .eyebrow {
+      color: var(--accent);
+      font-size: 0.82rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    h1, h2 { font-family: var(--display); line-height: 1.15; }
+    h1 { margin: 0.4rem 0 1rem; font-size: clamp(2.5rem, 8vw, 4.4rem); }
+    h2 { margin: 2.6rem 0 0.7rem; font-size: 1.55rem; }
+    p, li { color: var(--muted); }
+    strong { color: var(--text); }
+
+    .summary {
+      margin: 2rem 0 3rem;
+      padding: 1.5rem;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: linear-gradient(145deg, rgba(255, 106, 61, 0.09), var(--surface));
+    }
+
+    .summary p { margin: 0; color: var(--text); }
+    ul { padding-left: 1.4rem; }
+    li + li { margin-top: 0.55rem; }
+
+    footer {
+      padding: 2rem 0 4rem;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    @media (max-width: 540px) {
+      body { font-size: 16px; }
+      main { padding-top: 3.5rem; }
+      .back { font-size: 0.88rem; }
+    }
+  </style>
+</head>
+<body>
+  <nav class="nav" aria-label="Primary navigation">
+    <div class="nav__inner">
+      <a class="brand" href="/">🎙️ JustSpeakToIt</a>
+      <a class="back" href="/">Back to the app</a>
+    </div>
+  </nav>
+
+  <main>
+    <p class="eyebrow">Privacy Policy</p>
+    <h1>Your words stay under your control.</h1>
+    <p>Last updated: 17 July 2026</p>
+
+    <section class="summary" aria-label="Privacy summary">
+      <p><strong>JustSpeakToIt does not sell your data, show ads, or track you across apps and websites.</strong> Local transcription can stay on your device. Cloud features are optional and send only the data needed to the service you choose.</p>
+    </section>
+
+    <h2>Recordings and transcripts</h2>
+    <p>JustSpeakToIt accesses the microphone only when you start a recording or a hands-free feature that clearly indicates it is listening. Apple Speech can process speech on-device where supported. Recordings and transcripts may be stored locally in History until you delete them.</p>
+    <p>If you enable iCloud sync, transcript history and selected settings are stored in your private iCloud account so they can appear on your Apple devices. Apple processes that data under its own privacy policy.</p>
+
+    <h2>Optional cloud services</h2>
+    <p>When you choose a cloud transcription, post-processing, text-to-speech, or OpenClaw service, the app sends the audio, transcript, prompt, or message needed to perform that feature directly to the provider you configured. This may include providers such as Deepgram, ElevenLabs, or OpenAI. Their handling of that data is governed by their privacy policies and your account settings.</p>
+    <p>JustSpeakToIt does not operate an intermediary server that receives or stores your recordings or transcripts. Cloud features use credentials you provide and can be avoided by using supported local options.</p>
+
+    <h2>API keys and credentials</h2>
+    <p>Provider API keys are stored in Apple Keychain. If you enable key sync, supported credentials are encrypted on your device before being written to your private CloudKit database. We do not receive or sell your keys.</p>
+
+    <h2>Clipboard and sharing</h2>
+    <p>The app writes a transcript to the system clipboard only when you copy it or select an after-recording action that copies it. Clipboard contents may then be available to the operating system and other apps according to your device settings. Sharing or sending a transcript is always initiated by you or by an automation you configured.</p>
+
+    <h2>Diagnostics</h2>
+    <p>JustSpeakToIt may send crash reports and performance diagnostics to Sentry so we can find and fix reliability problems. This diagnostic data is not used for advertising or tracking and is not linked to your identity. We configure diagnostics to avoid collecting transcript contents, recordings, and API keys.</p>
+
+    <h2>Data we do not collect</h2>
+    <ul>
+      <li>No advertising identifiers or cross-app tracking data.</li>
+      <li>No account profile is required to use the app.</li>
+      <li>No sale of personal information.</li>
+      <li>No developer-operated storage of your recordings or transcript history.</li>
+    </ul>
+
+    <h2>Your choices</h2>
+    <p>You can use local transcription, remove provider credentials, disable iCloud features, clear History, and delete the app's local data at any time. You can also manage microphone, speech recognition, iCloud, and Live Activity permissions in system Settings.</p>
+
+    <h2>Children</h2>
+    <p>JustSpeakToIt is a general-purpose productivity app and is not directed at children. We do not knowingly collect personal information from children through a developer-operated account or service.</p>
+
+    <h2>Changes to this policy</h2>
+    <p>We may update this policy when the app's data practices change. The date at the top identifies the latest version.</p>
+
+    <h2>Contact</h2>
+    <p>Questions about privacy can be sent to <a href="mailto:hello@justspeaktoit.com">hello@justspeaktoit.com</a>.</p>
+  </main>
+
+  <footer>
+    © 2026 JustSpeakToIt. All rights reserved.
+  </footer>
+</body>
+</html>

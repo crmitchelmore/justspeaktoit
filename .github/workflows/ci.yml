@@ -56,7 +56,7 @@ jobs:
           fi
 
   build-ios:
-    name: Build & Test (iOS)
+    name: Build iOS Library
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7

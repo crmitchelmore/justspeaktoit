@@ -48,7 +48,7 @@ extension JustSpeakToItWidgetExtensionControl {
         }
 
         func currentValue(configuration: TranscriptionControlConfiguration) async throws -> Value {
-            let defaults = UserDefaults(suiteName: "group.com.speak.ios")
+            let defaults = UserDefaults(suiteName: SharedTranscriptionState.appGroupIdentifier)
             let isRecording = defaults?.bool(forKey: "isRecording") ?? false
             return Value(isRecording: isRecording)
         }

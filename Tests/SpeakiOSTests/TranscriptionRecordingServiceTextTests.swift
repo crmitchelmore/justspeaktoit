@@ -12,7 +12,7 @@ final class TranscriptionRecordingServiceTextTests: XCTestCase {
     func testPolishingPlaceholderDoesNotExposePreviousClipboardContent() {
         XCTAssertEqual(
             TranscriptionRecordingService.polishingClipboardPlaceholder,
-            "Polishing… please wait."
+            "Polishing… please wait"
         )
     }
 

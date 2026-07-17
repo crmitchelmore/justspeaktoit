@@ -194,7 +194,7 @@ struct CopyLastSentenceIntent: AppIntent {
 
     func perform() async throws -> some IntentResult {
         // Get the last sentence from UserDefaults (shared between app and extension)
-        let defaults = UserDefaults(suiteName: "group.com.speak.ios")
+        let defaults = UserDefaults(suiteName: SharedTranscriptionState.appGroupIdentifier)
         let lastSentence = defaults?.string(forKey: "lastTranscribedSentence") ?? ""
 
         guard !lastSentence.isEmpty else {
@@ -217,7 +217,7 @@ struct CopyFullTranscriptIntent: AppIntent {
     static var openAppWhenRun: Bool = false
 
     func perform() async throws -> some IntentResult {
-        let defaults = UserDefaults(suiteName: "group.com.speak.ios")
+        let defaults = UserDefaults(suiteName: SharedTranscriptionState.appGroupIdentifier)
         let fullText = defaults?.string(forKey: "currentTranscriptText") ?? ""
 
         guard !fullText.isEmpty else {
@@ -295,12 +295,12 @@ struct TranscriptionShortcuts: AppShortcutsProvider {
 /// Manages state shared between main app and extensions via App Group.
 public final class SharedTranscriptionState {
     public static let shared = SharedTranscriptionState()
+    public static let appGroupIdentifier = "group.com.justspeaktoit.ios"
 
     private let defaults: UserDefaults?
-    private let groupIdentifier = "group.com.speak.ios"
 
     private init() {
-        defaults = UserDefaults(suiteName: groupIdentifier)
+        defaults = UserDefaults(suiteName: Self.appGroupIdentifier)
     }
 
     /// Updates the current transcript text (for copy action)

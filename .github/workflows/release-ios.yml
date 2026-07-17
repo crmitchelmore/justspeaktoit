@@ -198,6 +198,31 @@ jobs:
             MARKETING_VERSION="$VERSION" \
             CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
 
+      - name: Verify Archived App Metadata
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD_NUMBER: ${{ steps.build_number.outputs.build }}
+        run: |
+          APP_PATH="build/SpeakiOS.xcarchive/Products/Applications/JustSpeakToIt.app"
+          WIDGET_PATH="$APP_PATH/PlugIns/JustSpeakToItWidgetExtension.appex"
+
+          APP_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PATH/Info.plist")
+          WIDGET_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$WIDGET_PATH/Info.plist")
+          APP_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PATH/Info.plist")
+          WIDGET_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$WIDGET_PATH/Info.plist")
+
+          test "$APP_VERSION" = "$VERSION"
+          test "$WIDGET_VERSION" = "$VERSION"
+          test "$APP_BUILD" = "$BUILD_NUMBER"
+          test "$WIDGET_BUILD" = "$BUILD_NUMBER"
+
+          codesign -d --entitlements :- "$APP_PATH" > "$RUNNER_TEMP/app-entitlements.plist" 2>/dev/null
+          codesign -d --entitlements :- "$WIDGET_PATH" > "$RUNNER_TEMP/widget-entitlements.plist" 2>/dev/null
+          plutil -extract com.apple.security.application-groups xml1 -o - "$RUNNER_TEMP/app-entitlements.plist" \
+            | grep -q 'group.com.justspeaktoit.ios'
+          plutil -extract com.apple.security.application-groups xml1 -o - "$RUNNER_TEMP/widget-entitlements.plist" \
+            | grep -q 'group.com.justspeaktoit.ios'
+
       - name: Export IPA
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}

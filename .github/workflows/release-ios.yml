@@ -216,8 +216,8 @@ jobs:
           [ "$APP_BUILD" = "$BUILD_NUMBER" ] || { echo "App build mismatch: expected '$BUILD_NUMBER', got '$APP_BUILD'"; exit 1; }
           [ "$WIDGET_BUILD" = "$BUILD_NUMBER" ] || { echo "Widget build mismatch: expected '$BUILD_NUMBER', got '$WIDGET_BUILD'"; exit 1; }
 
-          codesign -d --entitlements :- "$APP_PATH" > "$RUNNER_TEMP/app-entitlements.plist"
-          codesign -d --entitlements :- "$WIDGET_PATH" > "$RUNNER_TEMP/widget-entitlements.plist"
+          codesign -d --entitlements - --xml "$APP_PATH" > "$RUNNER_TEMP/app-entitlements.plist"
+          codesign -d --entitlements - --xml "$WIDGET_PATH" > "$RUNNER_TEMP/widget-entitlements.plist"
           plutil -extract com.apple.security.application-groups xml1 -o - "$RUNNER_TEMP/app-entitlements.plist" \
             | grep -q 'group.com.justspeaktoit.ios' \
             || { echo "Missing group.com.justspeaktoit.ios in app entitlements"; exit 1; }

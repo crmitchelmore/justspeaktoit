@@ -218,12 +218,17 @@ jobs:
 
           codesign -d --entitlements - --xml "$APP_PATH" > "$RUNNER_TEMP/app-entitlements.plist"
           codesign -d --entitlements - --xml "$WIDGET_PATH" > "$RUNNER_TEMP/widget-entitlements.plist"
-          plutil -extract com.apple.security.application-groups xml1 -o - "$RUNNER_TEMP/app-entitlements.plist" \
-            | grep -q 'group.com.justspeaktoit.ios' \
-            || { echo "Missing group.com.justspeaktoit.ios in app entitlements"; exit 1; }
-          plutil -extract com.apple.security.application-groups xml1 -o - "$RUNNER_TEMP/widget-entitlements.plist" \
-            | grep -q 'group.com.justspeaktoit.ios' \
-            || { echo "Missing group.com.justspeaktoit.ios in widget entitlements"; exit 1; }
+          APP_GROUP=$(/usr/libexec/PlistBuddy \
+            -c 'Print :com.apple.security.application-groups:0' \
+            "$RUNNER_TEMP/app-entitlements.plist" 2>/dev/null || true)
+          WIDGET_GROUP=$(/usr/libexec/PlistBuddy \
+            -c 'Print :com.apple.security.application-groups:0' \
+            "$RUNNER_TEMP/widget-entitlements.plist" 2>/dev/null || true)
+
+          [ "$APP_GROUP" = "group.com.justspeaktoit.ios" ] \
+            || { echo "App group mismatch: expected 'group.com.justspeaktoit.ios', got '${APP_GROUP:-missing}'"; exit 1; }
+          [ "$WIDGET_GROUP" = "group.com.justspeaktoit.ios" ] \
+            || { echo "Widget group mismatch: expected 'group.com.justspeaktoit.ios', got '${WIDGET_GROUP:-missing}'"; exit 1; }
 
       - name: Export IPA
         env:

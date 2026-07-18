@@ -80,6 +80,7 @@ if let widgetProfileName {
 
 if isAppStoreBuild {
     macAppSettings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] = "$(inherited) APP_STORE"
+    macAppSettings["CODE_SIGN_IDENTITY"] = "Apple Distribution"
     if let macAppStoreProfileName, !macAppStoreProfileName.isEmpty {
         configureManualSigning(for: &macAppSettings, profileName: macAppStoreProfileName)
     }

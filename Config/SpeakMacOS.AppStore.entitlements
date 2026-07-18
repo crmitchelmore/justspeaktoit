@@ -14,9 +14,10 @@
   build. SyncConfiguration/SettingsSync detect these at runtime and fall back
   gracefully when absent.
 
-  NOTE: Sandboxed apps cannot auto-prompt for Accessibility / Input Monitoring;
-  users must add the app manually in System Settings. The in-app permission
-  helpers guide them through this (see PermissionsManager + onboarding).
+  NOTE: Only Accessibility lacks an automatic prompt in sandboxed builds; users
+  must add the app manually in System Settings. Input Monitoring can still prompt
+  via CGRequestListenEventAccess. The in-app permission helpers guide users
+  through this (see PermissionsManager + onboarding).
 -->
 <plist version="1.0">
 <dict>
@@ -32,12 +33,12 @@
 	<key>com.apple.security.network.client</key>
 	<true/>
 
-	<!-- User-selected files (import/export audio + transcripts) -->
-	<key>com.apple.security.files.user-selected.read-write</key>
+	<!-- Inbound Bonjour listener for Send to Mac local-network transfer -->
+	<key>com.apple.security.network.server</key>
 	<true/>
 
-	<!-- AppleScript/Automation - send events to other apps for text insertion -->
-	<key>com.apple.security.automation.apple-events</key>
+	<!-- User-selected files (import/export audio + transcripts) -->
+	<key>com.apple.security.files.user-selected.read-write</key>
 	<true/>
 
 	<!-- Shared keychain (App Store managed profile supports this) -->

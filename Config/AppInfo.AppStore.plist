@@ -62,13 +62,5 @@
 	<true/>
 	<key>NSSupportsSuddenTermination</key>
 	<false/>
-	<key>SUEnableAutomaticChecks</key>
-	<true/>
-	<key>SUFeedURL</key>
-	<string>https://justspeaktoit.com/appcast.xml</string>
-	<key>SUPublicEDKey</key>
-	<string>amLMkCNmSNgwrbpuN+cW6RFxKApcZL/ylhCS5JZLXRE=</string>
-	<key>SUScheduledCheckInterval</key>
-	<integer>86400</integer>
 </dict>
 </plist>

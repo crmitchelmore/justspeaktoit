@@ -25,7 +25,8 @@ final class AppStoreInfoPlistTests: XCTestCase {
 
     func testAppStorePlist_declaresLocalNetworkUsage() {
         let value = appStorePlist["NSLocalNetworkUsageDescription"] as? String
-        let expected = "Just Speak to It uses your local network to connect iPhone and Mac for Send to Mac transcription transfer."
+        let expected = "Just Speak to It uses your local network to connect iPhone and Mac "
+            + "for Send to Mac transcription transfer."
         XCTAssertEqual(value, expected)
     }
 

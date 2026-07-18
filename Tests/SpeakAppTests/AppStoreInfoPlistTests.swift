@@ -57,7 +57,11 @@ final class AppStoreInfoPlistTests: XCTestCase {
         let data = try Data(contentsOf: url)
         let parsed = try PropertyListSerialization.propertyList(from: data, format: nil)
         guard let plist = parsed as? [String: Any] else {
-            throw XCTSkip("Expected \(path) to parse as a dictionary")
+            throw NSError(
+                domain: "AppStoreInfoPlistTests",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Expected \(path) to parse as a dictionary"]
+            )
         }
         return plist
     }

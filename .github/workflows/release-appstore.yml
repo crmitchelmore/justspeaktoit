@@ -110,8 +110,30 @@ jobs:
           tuist generate --no-open
 
       - name: Update Version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ github.event.inputs.version }}
         run: |
-          VERSION="${{ github.event.inputs.version }}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Version must use X.Y.Z format"
+            exit 1
+          fi
+
+          LATEST_TAG="$(gh release list \
+            --repo "${{ github.repository }}" \
+            --exclude-drafts \
+            --limit 100 \
+            --json tagName \
+            --jq '[.[] | select(.tagName | startswith("mac-v"))][0].tagName // empty')"
+          if [ -z "$LATEST_TAG" ]; then
+            echo "::error::No published mac-v* GitHub release found"
+            exit 1
+          fi
+          if [ "$LATEST_TAG" != "mac-v$VERSION" ]; then
+            echo "::error::Version $VERSION does not match latest macOS release $LATEST_TAG"
+            exit 1
+          fi
+
           echo "$VERSION" > VERSION
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" Config/AppInfo.AppStore.plist
           BUILD_NUMBER=${{ github.run_number }}

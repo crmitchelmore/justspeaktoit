@@ -18,13 +18,31 @@ final class ActionButtonSettingsUITests: XCTestCase {
         hardwareTriggerLink.tap()
 
         XCTAssertTrue(app.navigationBars["Action Button & Shortcuts"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["openShortcutsAppButton"].exists)
 
         let historyDestination = app.buttons["Save to History Only"]
         XCTAssertTrue(historyDestination.waitForExistence(timeout: 5))
         historyDestination.tap()
 
+        let clipboardGuidance = app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS %@", "Do not add a separate Copy to Clipboard action")
+        ).firstMatch
+        XCTAssertTrue(scrollUpUntilExists(clipboardGuidance))
+        XCTAssertTrue(scrollUpUntilExists(app.buttons["openShortcutsAppButton"]))
+
         app.navigationBars.buttons.element(boundBy: 0).tap()
         XCTAssertTrue(app.staticTexts["Save to History Only"].waitForExistence(timeout: 5))
+    }
+
+    private func scrollUpUntilExists(_ element: XCUIElement, maxSwipes: Int = 6) -> Bool {
+        if element.waitForExistence(timeout: 1) {
+            return true
+        }
+        for _ in 0..<maxSwipes {
+            app.swipeUp()
+            if element.waitForExistence(timeout: 1) {
+                return true
+            }
+        }
+        return false
     }
 }

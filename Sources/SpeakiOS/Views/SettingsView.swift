@@ -1050,7 +1050,9 @@ struct HardwareTriggerSettingsView: View {
                 StepRow(
                     number: 2,
                     text: "Search for JustSpeakToIt and choose Toggle Recording for a single-button flow. "
-                        + "Use Start Recording only if you also create a separate Stop Recording shortcut."
+                        + "Do not add a separate Copy to Clipboard action — JustSpeakToIt copies the transcript "
+                        + "when you stop. Use Start Recording only if you also create a separate Stop Recording "
+                        + "shortcut."
                 )
                 StepRow(number: 3, text: "Name the shortcut and tap Done.")
                 StepRow(

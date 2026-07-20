@@ -66,6 +66,21 @@ final class TranscriptionRecordingServiceTextTests: XCTestCase {
         XCTAssertTrue(intentType == StopTranscriptionRecordingIntent.self)
     }
 
+    @available(iOS 18, *)
+    func testToggleIntentDoesNotExposeStatusTextAsShortcutOutput() {
+        // The closure is intentionally not executed: this is a compile-time
+        // assertion that the toggle intent's Result.Dialog type is Never.
+        func requireDialogFreeResult<Result: IntentResult>(
+            _ operation: @escaping () async throws -> Result
+        ) where Result.Dialog == Never {
+            _ = operation
+        }
+
+        requireDialogFreeResult {
+            try await StartTranscriptionRecordingIntent().perform()
+        }
+    }
+
     func testPrefersTranscriberResultWhenPresent() {
         let text = TranscriptionRecordingService.bestTranscript(
             candidates: ["final result", "interim", "older"],

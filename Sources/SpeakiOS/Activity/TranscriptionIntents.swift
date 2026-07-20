@@ -99,6 +99,17 @@ public struct StartTranscriptionIntent: AudioRecordingIntent, ForegroundContinua
 /// and shows the recording indicator. Requires iOS 18+.
 @available(iOS 18, *)
 public struct StartTranscriptionRecordingIntent: AudioRecordingIntent, ForegroundContinuableIntent {
+    private enum ToggleRecordingError: LocalizedError {
+        case alreadyRecordingInApp
+
+        var errorDescription: String? {
+            switch self {
+            case .alreadyRecordingInApp:
+                return "A recording is already in progress in the app. Use the in-app stop button."
+            }
+        }
+    }
+
     public static var title: LocalizedStringResource = "Toggle Recording"
     public static var description = IntentDescription(
         "Start or stop voice transcription. Result lands in the destination you chose in Settings."
@@ -108,30 +119,25 @@ public struct StartTranscriptionRecordingIntent: AudioRecordingIntent, Foregroun
 
     public init() {}
 
-    public func perform() async throws -> some IntentResult & ProvidesDialog {
+    /// Returns no Shortcuts value or dialog. Shortcuts promotes textual intent
+    /// feedback to the next action's input, so a shortcut containing an extra
+    /// Copy to Clipboard step could overwrite the completed transcript with
+    /// "Recording started" or "Copied N words" after this intent finished.
+    /// Recording feedback already lives in the Live Activity; the pasteboard is
+    /// owned exclusively by `stopRecording(destination:)`.
+    public func perform() async throws -> IntentResultContainer<Never, Never, Never, Never> {
         let service = await TranscriptionRecordingService.shared
         let isRunning = await service.isRunning
-        let destination = await AppSettings.shared.hardwareTriggerDestination
-        let canPostProcess = await AppSettings.shared.hasOpenRouterKey
 
         if isRunning {
-            let result = await service.stopRecording(destination: destination)
-            return .result(dialog: stopResultDialog(
-                for: result,
-                destination: destination,
-                canPostProcess: canPostProcess
-            ))
+            let destination = await AppSettings.shared.hardwareTriggerDestination
+            await service.stopRecording(destination: destination)
+            return .result()
         } else if SharedTranscriptionState.shared.isRecording {
-            return .result(dialog: "A recording is already in progress in the app. Use the in-app stop button.")
+            throw ToggleRecordingError.alreadyRecordingInApp
         } else {
-            do {
-                try await startRecordingContinuingInForegroundIfNeeded(from: self)
-            } catch {
-                return .result(
-                    dialog: "Couldn’t start recording. Check microphone and speech-recognition access, then try again."
-                )
-            }
-            return .result(dialog: "Recording started. Tap Done, then press again to stop.")
+            try await startRecordingContinuingInForegroundIfNeeded(from: self)
+            return .result()
         }
     }
 }

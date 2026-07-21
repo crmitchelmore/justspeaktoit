@@ -29,7 +29,12 @@ public enum DistributionChannel: String, Sendable, CaseIterable {
     /// App Store (macOS Mac App Store, or iOS App Store / TestFlight).
     case appStore
 
-    /// The channel the current build was compiled for.
+    /// The channel the current app bundle was built for.
+    ///
+    /// Xcode does not propagate an app target's active compilation conditions into
+    /// local Swift-package dependencies, so the generated macOS app records its
+    /// channel in Info.plist. The compile-time branch remains useful for SwiftPM
+    /// release/test builds that explicitly pass `-DAPP_STORE`.
     public static var current: DistributionChannel {
         #if os(iOS)
         // iOS only ever ships through the App Store / TestFlight.
@@ -37,6 +42,12 @@ public enum DistributionChannel: String, Sendable, CaseIterable {
         #elseif APP_STORE
         return .appStore
         #else
+        if let configuredChannel = Bundle.main.object(
+            forInfoDictionaryKey: "SpeakDistributionChannel"
+        ) as? String,
+            configuredChannel == DistributionChannel.appStore.rawValue {
+            return .appStore
+        }
         return .direct
         #endif
     }

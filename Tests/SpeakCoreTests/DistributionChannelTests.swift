@@ -72,8 +72,8 @@ final class DistributionChannelTests: XCTestCase {
         // Arrange
         let channel = DistributionChannel.current
 
-        // Act & Assert — `current` is derived from compile-time flags, so it must be
-        // one of the two known channels and its sandbox state must agree.
+        // Act & Assert — package tests use the direct fallback unless an App Store
+        // compilation condition is explicitly supplied.
         #if os(iOS)
         XCTAssertEqual(channel, .appStore, "iOS always ships through the App Store")
         #elseif APP_STORE

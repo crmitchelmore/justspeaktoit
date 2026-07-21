@@ -24,6 +24,8 @@
 	<string>1</string>
 	<key>GitCommitSHA</key>
 	<string></string>
+	<key>SpeakDistributionChannel</key>
+	<string>appStore</string>
 	<!-- Export compliance: the app uses only standard, published encryption
 	     (AES-GCM and PBKDF2 via CryptoKit) to protect the user's own API keys for
 	     end-to-end encrypted iCloud/CloudKit key sync, alongside OS-provided HTTPS

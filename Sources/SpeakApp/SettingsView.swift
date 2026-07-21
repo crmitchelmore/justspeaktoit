@@ -4023,9 +4023,8 @@ struct SettingsView: View {
 
           Text(
             "Opt in to sync API keys through your private CloudKit database. Keys are encrypted with "
-              + "CryptoKit before upload. Developer-ID macOS builds need a managed provisioning profile "
-              + "with CloudKit entitlements; otherwise this stays unavailable and local Keychain storage "
-              + "works normally."
+              + "CryptoKit before upload. Sync is available when this app is signed into iCloud and "
+              + "CloudKit is available."
           )
           .font(.caption)
           .foregroundStyle(.secondary)

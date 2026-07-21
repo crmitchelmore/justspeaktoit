@@ -264,7 +264,7 @@ struct DashboardView: View {
       LazyVGrid(
         columns: Array(repeating: GridItem(.flexible(), spacing: 16), count: 2), spacing: 16
       ) {
-        ForEach(PermissionType.allCases) { permission in
+        ForEach(PermissionType.availablePermissions(for: DistributionChannel.current)) { permission in
           permissionCard(for: permission)
         }
       }

@@ -1,10 +1,12 @@
 #if os(iOS)
 import SwiftUI
+import SpeakCore
 import SpeakSync
 
 // MARK: - History Item Row
 
 struct HistoryItemRow: View {
+    @Environment(\.appVisualDensity) private var density
     let item: iOSHistoryItem
     let isSynced: Bool
     var isReprocessing: Bool = false
@@ -15,7 +17,7 @@ struct HistoryItemRow: View {
     @State private var isExpanded = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: density == .compact ? 5 : 8) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(item.createdAt, style: .date)
@@ -116,7 +118,7 @@ struct HistoryItemRow: View {
                 }
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, density.listRowVerticalPadding)
         .contentShape(Rectangle())
         .onTapGesture {
             if max(item.transcription.count, item.postProcessedTranscription?.count ?? 0) > 150 {

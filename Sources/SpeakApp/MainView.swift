@@ -1,10 +1,12 @@
 import AppKit
+import SpeakCore
 import SwiftUI
 
 struct MainView: View {
   @EnvironmentObject private var environment: AppEnvironment
   @EnvironmentObject private var history: HistoryManager
   @EnvironmentObject private var personalLexicon: PersonalLexiconService
+  @EnvironmentObject private var settings: AppSettings
   @State private var selection: SidebarItem? = .dashboard
 
   var body: some View {
@@ -14,10 +16,11 @@ struct MainView: View {
     } detail: {
       detailView
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding()
+        .padding(settings.visualDensity == .compact ? 8 : 16)
         .background(Color(nsColor: .windowBackgroundColor))
     }
     .frame(minWidth: 960, minHeight: 640)
+    .environment(\.appVisualDensity, settings.visualDensity)
     .toolbar { toolbar }
     .onReceive(environment.$sidebarNavigationTarget) { item in
       guard let item else { return }

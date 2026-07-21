@@ -239,6 +239,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
 
   enum DefaultsKey: String {
     case appearance
+    case visualDensity
     case transcriptionMode
     case liveTranscriptionModel
     case batchTranscriptionModel
@@ -317,6 +318,10 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
 
   @Published var appearance: Appearance {
     didSet { store(appearance.rawValue, key: .appearance) }
+  }
+
+  @Published var visualDensity: AppVisualDensity {
+    didSet { store(visualDensity.rawValue, key: .visualDensity) }
   }
 
   @Published var transcriptionMode: TranscriptionMode {
@@ -792,6 +797,10 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       Appearance(
         rawValue: defaults.string(forKey: DefaultsKey.appearance.rawValue)
           ?? Appearance.system.rawValue) ?? .system
+    visualDensity =
+      AppVisualDensity(
+        rawValue: defaults.string(forKey: DefaultsKey.visualDensity.rawValue)
+          ?? AppVisualDensity.normal.rawValue) ?? .normal
     transcriptionMode =
       TranscriptionMode(
         rawValue: defaults.string(forKey: DefaultsKey.transcriptionMode.rawValue)

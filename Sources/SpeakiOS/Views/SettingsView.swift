@@ -184,6 +184,10 @@ public final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(liveActivitiesEnabled, forKey: "liveActivitiesEnabled") }
     }
 
+    @Published public var visualDensity: AppVisualDensity {
+        didSet { UserDefaults.standard.set(visualDensity.rawValue, forKey: "visualDensity") }
+    }
+
     @Published public var autoStartRecording: Bool {
         didSet { UserDefaults.standard.set(autoStartRecording, forKey: "autoStartRecording") }
     }
@@ -260,6 +264,9 @@ public final class AppSettings: ObservableObject {
 
         // Default Live Activities to true if not set
         let liveActivities = UserDefaults.standard.object(forKey: "liveActivitiesEnabled") as? Bool ?? true
+        let density = AppVisualDensity(
+            rawValue: UserDefaults.standard.string(forKey: "visualDensity") ?? ""
+        ) ?? .normal
         let autoStart = UserDefaults.standard.bool(forKey: "autoStartRecording")
 
         // Hardware trigger destination (Action Button, Siri, Shortcuts).
@@ -296,6 +303,7 @@ public final class AppSettings: ObservableObject {
         self.assemblyAIAPIKey = ""
         self.gladiaAPIKey = ""
         self.liveActivitiesEnabled = liveActivities
+        self.visualDensity = density
         self.autoStartRecording = autoStart
         self.hardwareTriggerDestination = hardwareDest
         self.postProcessingEnabled = postEnabled
@@ -644,6 +652,19 @@ public struct SettingsView: View {
 
     public var body: some View {
         Form {
+            Section("Appearance") {
+                Picker("Layout Density", selection: $settings.visualDensity) {
+                    ForEach(AppVisualDensity.allCases) { density in
+                        Text(density.displayName).tag(density)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text("Compact reduces whitespace across lists, forms, and cards while keeping controls easy to tap.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Transcription") {
                 Picker("Where transcription runs", selection: transcriptionLocationBinding) {
                     ForEach(IOSTranscriptionLocation.allCases) { location in
@@ -1012,6 +1033,8 @@ public struct SettingsView: View {
                 }
             }
         }
+        .environment(\.defaultMinListRowHeight, settings.visualDensity.minimumListRowHeight)
+        .listSectionSpacing(settings.visualDensity.listSectionSpacing)
         .navigationTitle("Settings")
         .navigationDestination(isPresented: $showingAPIKeys) {
             APIKeysView(settings: settings)
@@ -1251,218 +1274,96 @@ struct APIKeysView: View {
     @State private var isValidating = false
     @State private var validationMessage: String?
     @State private var showingValidation = false
+    @State private var searchText = ""
+    @State private var statusFilter: APIKeyStatusFilter = .all
+    @State private var sortOrder: APIKeySortOrder = .name
+
+    private struct KeyPresentation {
+        let title: String
+        let systemImage: String
+        let help: String
+    }
+
+    private var allEntries: [APIKeyListEntry] {
+        [
+            APIKeyListEntry(
+                id: "deepgram", title: "Deepgram", category: "Transcription", isStored: settings.hasDeepgramKey
+            ),
+            APIKeyListEntry(
+                id: "elevenlabs", title: "ElevenLabs", category: "Transcription & Voice Output",
+                isStored: settings.hasElevenLabsKey
+            ),
+            APIKeyListEntry(
+                id: "openrouter", title: "OpenRouter", category: "Post-processing", isStored: settings.hasOpenRouterKey
+            ),
+            APIKeyListEntry(
+                id: "openai", title: "OpenAI", category: "Transcription", isStored: settings.hasOpenAIKey
+            ),
+            APIKeyListEntry(
+                id: "cartesia", title: "Cartesia", category: "Transcription", isStored: settings.hasCartesiaKey
+            ),
+            APIKeyListEntry(
+                id: "soniox", title: "Soniox", category: "Transcription", isStored: settings.hasSonioxKey
+            ),
+            APIKeyListEntry(
+                id: "modulate", title: "Modulate", category: "Transcription", isStored: settings.hasModulateKey
+            ),
+            APIKeyListEntry(
+                id: "assemblyai", title: "AssemblyAI", category: "Transcription",
+                isStored: settings.hasAssemblyAIKey
+            ),
+            APIKeyListEntry(
+                id: "gladia", title: "Gladia", category: "Transcription", isStored: settings.hasGladiaKey
+            )
+        ]
+    }
+
+    private var visibleEntries: [APIKeyListEntry] {
+        APIKeyListQuery.apply(
+            to: allEntries,
+            searchText: searchText,
+            status: statusFilter,
+            sortOrder: sortOrder
+        )
+    }
 
     var body: some View {
         Form {
-            Section {
-                SecureField("API Key", text: $deepgramKey)
-                    .textContentType(.password)
-                    .autocorrectionDisabled()
-
-                if settings.hasDeepgramKey && deepgramKey.isEmpty {
-                    Button("Clear Stored Key", role: .destructive) {
-                        settings.deepgramAPIKey = ""
-                    }
+            if visibleEntries.isEmpty {
+                ContentUnavailableView(
+                    "No API Keys",
+                    systemImage: "key.slash",
+                    description: Text("Try another search or status filter.")
+                )
+            } else {
+                ForEach(visibleEntries) { entry in
+                    apiKeySection(for: entry)
                 }
-            } header: {
-                Label("Deepgram", systemImage: "waveform")
-            } footer: {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Get your API key from deepgram.com")
-                    if settings.hasDeepgramKey {
-                        Text("✓ API key is stored")
-                            .foregroundStyle(.green)
-                    }
-                }
-                .font(.caption)
-            }
-
-            Section {
-                SecureField("API Key", text: $elevenLabsKey)
-                    .textContentType(.password)
-                    .autocorrectionDisabled()
-
-                if settings.hasElevenLabsKey && elevenLabsKey.isEmpty {
-                    Button("Clear Stored Key", role: .destructive) {
-                        settings.elevenLabsAPIKey = ""
-                    }
-                }
-            } header: {
-                Label("ElevenLabs", systemImage: "mic.and.signal.meter")
-            } footer: {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Get your API key from elevenlabs.io")
-                    if settings.hasElevenLabsKey {
-                        Text("✓ API key is stored")
-                            .foregroundStyle(.green)
-                    }
-                }
-                .font(.caption)
-            }
-
-            Section {
-                SecureField("API Key", text: $openRouterKey)
-                    .textContentType(.password)
-                    .autocorrectionDisabled()
-
-                if settings.hasOpenRouterKey && openRouterKey.isEmpty {
-                    Button("Clear Stored Key", role: .destructive) {
-                        settings.openRouterAPIKey = ""
-                    }
-                }
-            } header: {
-                Label("OpenRouter", systemImage: "network")
-            } footer: {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Get your API key from openrouter.ai")
-                    if settings.hasOpenRouterKey {
-                        Text("✓ API key is stored")
-                            .foregroundStyle(.green)
-                    }
-                }
-                .font(.caption)
-            }
-
-            Section {
-                SecureField("API Key", text: $openAIKey)
-                    .textContentType(.password)
-                    .autocorrectionDisabled()
-
-                if settings.hasOpenAIKey && openAIKey.isEmpty {
-                    Button("Clear Stored Key", role: .destructive) {
-                        settings.openAIAPIKey = ""
-                    }
-                }
-            } header: {
-                Label("OpenAI", systemImage: "brain.head.profile")
-            } footer: {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Get your API key from platform.openai.com. Used by gpt-realtime-whisper streaming.")
-                    if settings.hasOpenAIKey {
-                        Text("✓ API key is stored")
-                            .foregroundStyle(.green)
-                    }
-                }
-                .font(.caption)
-            }
-
-            Section {
-                SecureField("API Key", text: $cartesiaKey)
-                    .textContentType(.password)
-                    .autocorrectionDisabled()
-
-                if settings.hasCartesiaKey && cartesiaKey.isEmpty {
-                    Button("Clear Stored Key", role: .destructive) {
-                        settings.cartesiaAPIKey = ""
-                    }
-                }
-            } header: {
-                Label("Cartesia", systemImage: "waveform.circle")
-            } footer: {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Get your API key from cartesia.ai. Used by Ink streaming.")
-                    if settings.hasCartesiaKey {
-                        Text("✓ API key is stored")
-                            .foregroundStyle(.green)
-                    }
-                }
-                .font(.caption)
-            }
-
-            Section {
-                SecureField("API Key", text: $sonioxKey)
-                    .textContentType(.password)
-                    .autocorrectionDisabled()
-
-                if settings.hasSonioxKey && sonioxKey.isEmpty {
-                    Button("Clear Stored Key", role: .destructive) {
-                        settings.sonioxAPIKey = ""
-                    }
-                }
-            } header: {
-                Label("Soniox", systemImage: "waveform.badge.mic")
-            } footer: {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Get your API key from soniox.com. Used by STT real-time streaming.")
-                    if settings.hasSonioxKey {
-                        Text("✓ API key is stored")
-                            .foregroundStyle(.green)
-                    }
-                }
-                .font(.caption)
-            }
-
-            Section {
-                SecureField("API Key", text: $modulateKey)
-                    .textContentType(.password)
-                    .autocorrectionDisabled()
-
-                if settings.hasModulateKey && modulateKey.isEmpty {
-                    Button("Clear Stored Key", role: .destructive) {
-                        settings.modulateAPIKey = ""
-                    }
-                }
-            } header: {
-                Label("Modulate", systemImage: "waveform.badge.magnifyingglass")
-            } footer: {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Get your API key from modulate.ai. Used by Velma streaming.")
-                    if settings.hasModulateKey {
-                        Text("✓ API key is stored")
-                            .foregroundStyle(.green)
-                    }
-                }
-                .font(.caption)
-            }
-
-            Section {
-                SecureField("API Key", text: $assemblyAIKey)
-                    .textContentType(.password)
-                    .autocorrectionDisabled()
-
-                if settings.hasAssemblyAIKey && assemblyAIKey.isEmpty {
-                    Button("Clear Stored Key", role: .destructive) {
-                        settings.assemblyAIAPIKey = ""
-                    }
-                }
-            } header: {
-                Label("AssemblyAI", systemImage: "waveform.badge.plus")
-            } footer: {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Get your API key from assemblyai.com. Used by Universal-Streaming.")
-                    if settings.hasAssemblyAIKey {
-                        Text("✓ API key is stored")
-                            .foregroundStyle(.green)
-                    }
-                }
-                .font(.caption)
-            }
-
-            Section {
-                SecureField("API Key", text: $gladiaKey)
-                    .textContentType(.password)
-                    .autocorrectionDisabled()
-
-                if settings.hasGladiaKey && gladiaKey.isEmpty {
-                    Button("Clear Stored Key", role: .destructive) {
-                        settings.gladiaAPIKey = ""
-                    }
-                }
-            } header: {
-                Label("Gladia", systemImage: "waveform.badge.exclamationmark")
-            } footer: {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Get your API key from gladia.io. Used by Solaria streaming.")
-                    if settings.hasGladiaKey {
-                        Text("✓ API key is stored")
-                            .foregroundStyle(.green)
-                    }
-                }
-                .font(.caption)
             }
         }
+        .environment(\.defaultMinListRowHeight, settings.visualDensity.minimumListRowHeight)
+        .listSectionSpacing(settings.visualDensity.listSectionSpacing)
         .navigationTitle("API Keys")
+        .searchable(text: $searchText, prompt: "Provider or use")
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Menu {
+                    Picker("Status", selection: $statusFilter) {
+                        ForEach(APIKeyStatusFilter.allCases) { filter in
+                            Text(filter.displayName).tag(filter)
+                        }
+                    }
+                    Picker("Sort", selection: $sortOrder) {
+                        ForEach(APIKeySortOrder.allCases) { order in
+                            Text(order.displayName).tag(order)
+                        }
+                    }
+                } label: {
+                    Label("Filter and Sort", systemImage: statusFilter == .all
+                        ? "line.3.horizontal.decrease.circle"
+                        : "line.3.horizontal.decrease.circle.fill")
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 if isValidating {
                     ProgressView()
@@ -1488,6 +1389,97 @@ struct APIKeysView: View {
             Button("OK") {}
         } message: {
             Text(validationMessage ?? "Keys saved")
+        }
+    }
+
+    private func apiKeySection(for entry: APIKeyListEntry) -> some View {
+        let presentation = presentation(for: entry.id)
+        return Section {
+            SecureField("API Key", text: draftBinding(for: entry.id))
+                .textContentType(.password)
+                .autocorrectionDisabled()
+
+            if entry.isStored && draftBinding(for: entry.id).wrappedValue.isEmpty {
+                Button("Clear Stored Key", role: .destructive) {
+                    clearStoredKey(for: entry.id)
+                }
+            }
+        } header: {
+            HStack {
+                Label(presentation.title, systemImage: presentation.systemImage)
+                Spacer()
+                Text(entry.isStored ? "Stored" : "Missing")
+                    .font(.caption)
+                    .foregroundStyle(entry.isStored ? .green : .secondary)
+            }
+        } footer: {
+            Text(presentation.help)
+                .font(.caption)
+        }
+    }
+
+    private func presentation(for id: String) -> KeyPresentation {
+        switch id {
+        case "deepgram":
+            return KeyPresentation(title: "Deepgram", systemImage: "waveform", help: "Get your key from deepgram.com.")
+        case "elevenlabs":
+            return KeyPresentation(
+                title: "ElevenLabs", systemImage: "mic.and.signal.meter", help: "Get your key from elevenlabs.io."
+            )
+        case "openrouter":
+            return KeyPresentation(title: "OpenRouter", systemImage: "network", help: "Get your key from openrouter.ai.")
+        case "openai":
+            return KeyPresentation(
+                title: "OpenAI", systemImage: "brain.head.profile", help: "Get your key from platform.openai.com."
+            )
+        case "cartesia":
+            return KeyPresentation(
+                title: "Cartesia", systemImage: "waveform.circle", help: "Get your key from cartesia.ai."
+            )
+        case "soniox":
+            return KeyPresentation(
+                title: "Soniox", systemImage: "waveform.badge.mic", help: "Get your key from soniox.com."
+            )
+        case "modulate":
+            return KeyPresentation(
+                title: "Modulate", systemImage: "waveform.badge.magnifyingglass", help: "Get your key from modulate.ai."
+            )
+        case "assemblyai":
+            return KeyPresentation(
+                title: "AssemblyAI", systemImage: "waveform.badge.plus", help: "Get your key from assemblyai.com."
+            )
+        default:
+            return KeyPresentation(
+                title: "Gladia", systemImage: "waveform.badge.exclamationmark", help: "Get your key from gladia.io."
+            )
+        }
+    }
+
+    private func draftBinding(for id: String) -> Binding<String> {
+        switch id {
+        case "deepgram": return $deepgramKey
+        case "elevenlabs": return $elevenLabsKey
+        case "openrouter": return $openRouterKey
+        case "openai": return $openAIKey
+        case "cartesia": return $cartesiaKey
+        case "soniox": return $sonioxKey
+        case "modulate": return $modulateKey
+        case "assemblyai": return $assemblyAIKey
+        default: return $gladiaKey
+        }
+    }
+
+    private func clearStoredKey(for id: String) {
+        switch id {
+        case "deepgram": settings.deepgramAPIKey = ""
+        case "elevenlabs": settings.elevenLabsAPIKey = ""
+        case "openrouter": settings.openRouterAPIKey = ""
+        case "openai": settings.openAIAPIKey = ""
+        case "cartesia": settings.cartesiaAPIKey = ""
+        case "soniox": settings.sonioxAPIKey = ""
+        case "modulate": settings.modulateAPIKey = ""
+        case "assemblyai": settings.assemblyAIAPIKey = ""
+        default: settings.gladiaAPIKey = ""
         }
     }
 

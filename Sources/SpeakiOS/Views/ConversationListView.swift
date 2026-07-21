@@ -6,6 +6,7 @@ import SpeakCore
 
 /// Shows a list of OpenClaw conversations with the ability to create new ones.
 public struct ConversationListView: View {
+    @Environment(\.appVisualDensity) private var density
     @ObservedObject private var store = ConversationStore.shared
     @ObservedObject private var settings = OpenClawSettings.shared
     @EnvironmentObject private var deepLinkRouter: DeepLinkRouter
@@ -25,6 +26,7 @@ public struct ConversationListView: View {
             }
         }
         .navigationTitle("OpenClaw")
+        .environment(\.defaultMinListRowHeight, density.minimumListRowHeight)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 12) {
@@ -118,12 +120,14 @@ public struct ConversationListView: View {
                 }
             }
         }
+        .listSectionSpacing(density.listSectionSpacing)
     }
 }
 
 // MARK: - Conversation Row
 
 struct ConversationRow: View {
+    @Environment(\.appVisualDensity) private var density
     let conversation: OpenClawClient.Conversation
 
     var body: some View {
@@ -153,7 +157,7 @@ struct ConversationRow: View {
                     .foregroundStyle(.tertiary)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, density.listRowVerticalPadding)
     }
 }
 

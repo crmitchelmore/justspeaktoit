@@ -8,6 +8,7 @@ import SpeakCore
 /// Shows all locally saved audio recordings with playback,
 /// delete, and re-transcribe support.
 public struct RecordingsView: View {
+    @Environment(\.appVisualDensity) private var density
     @State private var recordings: [RecordingInfo] = []
     @State private var playingURL: URL?
     @State private var audioPlayer: AVAudioPlayer?
@@ -54,6 +55,7 @@ public struct RecordingsView: View {
             }
         }
         .navigationTitle("Recordings")
+        .environment(\.defaultMinListRowHeight, density.minimumListRowHeight)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { reload() }
         .onDisappear { stopPlayback() }
@@ -141,6 +143,7 @@ public struct RecordingsView: View {
 // MARK: - Recording Row
 
 struct RecordingRow: View {
+    @Environment(\.appVisualDensity) private var density
     let recording: RecordingInfo
     let isPlaying: Bool
     let onPlay: () -> Void
@@ -203,7 +206,7 @@ struct RecordingRow: View {
                 Label("Delete", systemImage: "trash")
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, density.listRowVerticalPadding)
     }
 }
 

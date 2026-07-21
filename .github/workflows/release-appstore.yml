@@ -98,6 +98,13 @@ jobs:
           rm -f "$CERT_PATH" "$INSTALLER_CERT_PATH"
           security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
+          MAC_INSTALLER_IDENTITY_HASH=$(security find-identity -v -p basic "$KEYCHAIN_PATH" | sed -nE '/(3rd Party Mac Developer Installer|Mac Installer Distribution)/s/^[[:space:]]*[0-9]+\)[[:space:]]+([0-9A-F]{40}).*/\1/p' | head -1)
+          if ! [[ "$MAC_INSTALLER_IDENTITY_HASH" =~ ^[0-9A-F]{40}$ ]]; then
+            echo "::error::Imported Mac installer signing identity could not be resolved"
+            exit 1
+          fi
+          echo "MAC_INSTALLER_IDENTITY_HASH=$MAC_INSTALLER_IDENTITY_HASH" >> "$GITHUB_ENV"
+
       - name: Install Mac App Store Provisioning Profile
         env:
           MAC_APP_STORE_PROFILE: ${{ secrets.MAC_APP_STORE_PROFILE }}
@@ -241,6 +248,10 @@ jobs:
             echo "::error::Installed Mac App Store provisioning profile UUID is required"
             exit 1
           fi
+          if [ -z "$MAC_INSTALLER_IDENTITY_HASH" ]; then
+            echo "::error::Imported Mac installer signing identity hash is required"
+            exit 1
+          fi
           cat > build/ExportOptions-AppStore.plist << 'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -255,7 +266,7 @@ jobs:
               <key>signingCertificate</key>
               <string>Apple Distribution</string>
               <key>installerSigningCertificate</key>
-              <string>Mac Installer Distribution</string>
+              <string>MAC_INSTALLER_IDENTITY_HASH_PLACEHOLDER</string>
               <key>provisioningProfiles</key>
               <dict>
                   <key>com.justspeaktoit.mac</key>
@@ -271,6 +282,7 @@ jobs:
 
           sed -i '' "s/APPLE_TEAM_ID_PLACEHOLDER/${APPLE_TEAM_ID}/g" build/ExportOptions-AppStore.plist
           sed -i '' "s/MAC_PROFILE_UUID_PLACEHOLDER/${MAC_PROFILE_UUID}/g" build/ExportOptions-AppStore.plist
+          sed -i '' "s/MAC_INSTALLER_IDENTITY_HASH_PLACEHOLDER/${MAC_INSTALLER_IDENTITY_HASH}/g" build/ExportOptions-AppStore.plist
 
           xcodebuild -exportArchive \
             -archivePath "$RUNNER_TEMP/$PRODUCT_NAME.xcarchive" \

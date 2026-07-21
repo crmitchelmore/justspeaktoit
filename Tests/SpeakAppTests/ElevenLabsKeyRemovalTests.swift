@@ -13,7 +13,11 @@ final class ElevenLabsKeyRemovalTests: XCTestCase {
         let settings = AppSettings()
         let permissions = PermissionsManager()
         let audioDevices = AudioInputDeviceManager(appSettings: settings)
-        let secureStorage = SecureAppStorage(permissionsManager: permissions, appSettings: settings)
+        let secureStorage = SecureAppStorage(
+            permissionsManager: permissions,
+            appSettings: settings,
+            keychainService: "com.justspeaktoit.tests.elevenlabs.removal.\(UUID().uuidString)"
+        )
 
         let transcriber = SwitchingLiveTranscriber(
             appSettings: settings,
@@ -31,7 +35,7 @@ final class ElevenLabsKeyRemovalTests: XCTestCase {
     // to the underlying SwitchingLiveTranscriber stale flag.
     @MainActor
     func testInvalidateLiveControllerCache_isExposedOnTranscriptionManager() {
-        let env = WireUp.bootstrap()
+        let env = WireUp.bootstrap(options: makeWireUpTestOptions())
         // Should not throw or crash — the method delegates to markControllersStale()
         env.transcription.invalidateLiveControllerCache()
         // No observable assertion needed here: the call itself validates the API contract.

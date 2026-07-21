@@ -7,6 +7,7 @@ import SpeakSync
 
 // swiftlint:disable:next type_body_length
 public struct HistoryView: View {
+    @Environment(\.appVisualDensity) private var density
     @StateObject private var historyManager = iOSHistoryManager.shared
     @ObservedObject private var syncEngine = HistorySyncEngine.shared
     @State private var showingClearConfirmation = false
@@ -42,6 +43,7 @@ public struct HistoryView: View {
             }
         }
         .navigationTitle("History")
+        .environment(\.defaultMinListRowHeight, density.minimumListRowHeight)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 syncStatusIcon
@@ -200,11 +202,12 @@ public struct HistoryView: View {
                 }
             }
         }
+        .listSectionSpacing(density.listSectionSpacing)
     }
 
     private var statsHeader: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 24) {
+            HStack(spacing: density == .compact ? 14 : 24) {
                 statBadge(value: "\(statistics.totalSessions)", label: "Sessions")
                 statBadge(value: formatDuration(statistics.averageSessionLength), label: "Average")
                 statBadge(value: formatDuration(statistics.cumulativeRecordingDuration), label: "Total Time")

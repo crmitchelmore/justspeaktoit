@@ -44,12 +44,27 @@ final class AppStoreInfoPlistTests: XCTestCase {
         ]
         var directWithoutSparkle = directPlist!
         sparkleKeys.forEach { directWithoutSparkle.removeValue(forKey: $0) }
+        directWithoutSparkle["CFBundleDisplayName"] = "Just Speak to It (App Store)"
+        directWithoutSparkle["CFBundleName"] = "Just Speak to It App Store"
+        directWithoutSparkle["SpeakDistributionChannel"] = "appStore"
 
         XCTAssertEqual(
             appStorePlist as NSDictionary,
             directWithoutSparkle as NSDictionary,
-            "Distribution plists should differ only by the direct build's Sparkle metadata"
+            "Distribution plists should differ only by Sparkle metadata and channel-specific identity"
         )
+    }
+
+    func testDistributionPlists_declareTheirRuntimeChannel() {
+        XCTAssertEqual(directPlist["SpeakDistributionChannel"] as? String, "direct")
+        XCTAssertEqual(appStorePlist["SpeakDistributionChannel"] as? String, "appStore")
+    }
+
+    func testDistributionNames_allowSideBySideInstallation() {
+        XCTAssertEqual(directPlist["CFBundleDisplayName"] as? String, "Just Speak to It")
+        XCTAssertEqual(appStorePlist["CFBundleDisplayName"] as? String, "Just Speak to It (App Store)")
+        XCTAssertEqual(directPlist["CFBundleName"] as? String, "Just Speak to It")
+        XCTAssertEqual(appStorePlist["CFBundleName"] as? String, "Just Speak to It App Store")
     }
 
     private static func loadPlist(at path: String) throws -> [String: Any] {

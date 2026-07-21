@@ -22,7 +22,10 @@ on:
 
 env:
   SCHEME: SpeakApp
-  PRODUCT_NAME: JustSpeakToIt
+  # Deliberately distinct from the direct/Sparkle app so both bundles and
+  # processes can coexist on one Mac. The App Store bundle identifier remains
+  # tied to the existing App Store Connect record.
+  PRODUCT_NAME: JustSpeakToItAppStore
   WORKSPACE: "Just Speak to It.xcworkspace"
   BUNDLE_ID: com.justspeaktoit.mac
   # Matches the existing Release iOS workflow convention. This is the ASC key ID,
@@ -221,9 +224,22 @@ jobs:
             fi
           }
 
+          expect_info_value() {
+            key="$1"
+            expected="$2"
+            value=$(/usr/libexec/PlistBuddy -c "Print :$key" "$INFO_PLIST" 2>/dev/null || true)
+            if [ "$value" != "$expected" ]; then
+              echo "::error::Unexpected $key: expected '$expected', got '${value:-missing}'"
+              exit 1
+            fi
+          }
+
           expect_entitlement_true com.apple.security.app-sandbox
           expect_entitlement_true com.apple.security.network.server
           expect_entitlement_absent com.apple.security.cs.disable-library-validation
+          expect_info_value CFBundleIdentifier "$BUNDLE_ID"
+          expect_info_value CFBundleExecutable "$PRODUCT_NAME"
+          expect_info_value CFBundleDisplayName "Just Speak to It (App Store)"
 
           if [ -d "$APP_PATH/Contents/Frameworks/Sparkle.framework" ]; then
             echo "::error::Sparkle.framework must not be embedded in the App Store build"

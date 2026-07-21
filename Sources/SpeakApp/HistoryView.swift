@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 
 struct HistoryView: View { // swiftlint:disable:this type_body_length
   @EnvironmentObject private var environment: AppEnvironment
+  @Environment(\.appVisualDensity) private var density
   @State private var searchText: String = ""
   @State private var showErrorsOnly: Bool = false
   @State private var dateRangeEnabled: Bool = false
@@ -139,14 +140,14 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
   var body: some View {
     ScrollViewReader { proxy in
       ScrollView {
-        VStack(alignment: .leading, spacing: 24) {
+        VStack(alignment: .leading, spacing: density.sectionSpacing) {
           header
           if isInitialLoad {
             skeletonLoadingView
           } else if filteredItems.isEmpty {
             emptyState
           } else {
-            LazyVStack(spacing: 20) {
+            LazyVStack(spacing: density.sectionSpacing) {
               ForEach(filteredItems) { item in
                 HistoryListRow(item: item)
                   .id(item.id)
@@ -155,7 +156,7 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
             .animation(.spring(response: 0.28, dampingFraction: 0.88), value: filteredItems)
           }
         }
-        .padding(24)
+        .padding(density.pagePadding)
         .frame(maxWidth: 1100, alignment: .center)
       }
       .onAppear {
@@ -237,7 +238,7 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
 
 
   private var header: some View {
-    return VStack(alignment: .leading, spacing: 18) {
+    VStack(alignment: .leading, spacing: 18) {
       VStack(alignment: .leading, spacing: 8) {
         Text("Session History")
           .font(.largeTitle.bold())
@@ -919,8 +920,7 @@ private struct HistoryListRow: View { // swiftlint:disable:this type_body_length
 
         metaTile(icon: "clock.arrow.circlepath", title: "Timeline") {
           if let start = item.phaseTimestamps.recordingStarted,
-            let end = item.phaseTimestamps.outputDelivered
-          {
+            let end = item.phaseTimestamps.outputDelivered {
             let total = end.timeIntervalSince(start)
             Text("Total: \(formatDuration(total))")
           } else {
@@ -943,8 +943,7 @@ private struct HistoryListRow: View { // swiftlint:disable:this type_body_length
       }
 
       if let summary = item.personalCorrections,
-        !(summary.applied.isEmpty && summary.suggestions.isEmpty)
-      {
+        !(summary.applied.isEmpty && summary.suggestions.isEmpty) {
         personalCorrectionsSection(summary)
       }
     }
@@ -1471,8 +1470,7 @@ private struct HistoryListRow: View { // swiftlint:disable:this type_body_length
 
     if let raw = item.rawTranscription,
       raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        == processed.trimmingCharacters(in: .whitespacesAndNewlines)
-    {
+        == processed.trimmingCharacters(in: .whitespacesAndNewlines) {
       return nil
     }
 
@@ -1484,8 +1482,7 @@ private struct HistoryListRow: View { // swiftlint:disable:this type_body_length
       return processed
     }
     if let raw = item.rawTranscription,
-      !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    {
+      !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
       return raw
     }
     return nil

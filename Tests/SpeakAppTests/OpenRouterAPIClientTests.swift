@@ -164,7 +164,11 @@ final class OpenRouterAPIClientTests: XCTestCase {
     let defaults = UserDefaults(suiteName: suiteName) ?? .standard
     let settings = AppSettings(defaults: defaults)
     let permissions = PermissionsManager()
-    return SecureAppStorage(permissionsManager: permissions, appSettings: settings)
+    return SecureAppStorage(
+      permissionsManager: permissions,
+      appSettings: settings,
+      keychainService: "com.justspeaktoit.tests.openrouter.\(UUID().uuidString)"
+    )
   }
 
   private func makeAudioFile(extension fileExtension: String, data: Data) throws -> URL {

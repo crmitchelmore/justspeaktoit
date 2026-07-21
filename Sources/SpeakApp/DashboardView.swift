@@ -1,18 +1,21 @@
 import SpeakCore
 import SwiftUI
 
+// swiftlint:disable file_length
+// swiftlint:disable:next type_body_length
 struct DashboardView: View {
   @EnvironmentObject private var environment: AppEnvironment
   @EnvironmentObject private var history: HistoryManager
+  @Environment(\.appVisualDensity) private var density
   @State private var requestingPermission: PermissionType?
 
   var body: some View {
     ScrollView {
-      VStack(alignment: .leading, spacing: 24) {
+      VStack(alignment: .leading, spacing: density.sectionSpacing) {
         heroHeader
         dashboardSections
       }
-      .padding(24)
+      .padding(density.pagePadding)
       .frame(maxWidth: 1100, alignment: .center)
     }
     .background(
@@ -112,8 +115,11 @@ struct DashboardView: View {
   }
 
   private var dashboardSections: some View {
-    VStack(spacing: 24) {
-      LazyVGrid(columns: [GridItem(.adaptive(minimum: 340), spacing: 24)], spacing: 24) {
+    VStack(spacing: density.sectionSpacing) {
+      LazyVGrid(
+        columns: [GridItem(.adaptive(minimum: 340), spacing: density.sectionSpacing)],
+        spacing: density.sectionSpacing
+      ) {
         permissionsSection
         statisticsSection
         recentSection
@@ -122,13 +128,19 @@ struct DashboardView: View {
       // Usage Charts
       dailyUsageChartSection
 
-      LazyVGrid(columns: [GridItem(.adaptive(minimum: 340), spacing: 24)], spacing: 24) {
+      LazyVGrid(
+        columns: [GridItem(.adaptive(minimum: 340), spacing: density.sectionSpacing)],
+        spacing: density.sectionSpacing
+      ) {
         transcriptionModelChartSection
         postProcessingModelChartSection
       }
 
       // TTS Charts
-      LazyVGrid(columns: [GridItem(.adaptive(minimum: 340), spacing: 24)], spacing: 24) {
+      LazyVGrid(
+        columns: [GridItem(.adaptive(minimum: 340), spacing: density.sectionSpacing)],
+        spacing: density.sectionSpacing
+      ) {
         ttsUsageChartSection
         ttsProviderChartSection
       }
@@ -252,7 +264,7 @@ struct DashboardView: View {
       LazyVGrid(
         columns: Array(repeating: GridItem(.flexible(), spacing: 16), count: 2), spacing: 16
       ) {
-        ForEach(PermissionType.allCases) { permission in
+        ForEach(PermissionType.availablePermissions(for: DistributionChannel.current)) { permission in
           permissionCard(for: permission)
         }
       }
@@ -377,8 +389,7 @@ struct DashboardView: View {
   }
 
   private var recentSection: some View {
-    DashboardCard(title: "Recent Session", systemImage: "clock.arrow.circlepath", tint: Color.brandLagoon)
-    {
+    DashboardCard(title: "Recent Session", systemImage: "clock.arrow.circlepath", tint: Color.brandLagoon) {
       if let item = history.items.first {
         recentItemView(item)
       } else {

@@ -69,6 +69,10 @@ public final class HotKeyEngine: ObservableObject {
   /// Start monitoring for the given hotkey.
   public func start(for hotKey: HotKey) {
     stop()
+    guard hotKey.isSupportedForGlobalMonitoring else {
+      log.error("Refusing unsupported unmodified global hotkey: \(hotKey.displayString)")
+      return
+    }
     activeHotKey = hotKey
     isMonitoring = true
 

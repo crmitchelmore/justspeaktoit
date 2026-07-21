@@ -52,6 +52,12 @@ let macEntitlementsPath = isAppStoreBuild
 let macInfoPlistPath = isAppStoreBuild
     ? "Config/AppInfo.AppStore.plist"
     : "Config/AppInfo.plist"
+// Keep the existing direct-download product name stable for Sparkle updates, while
+// giving the App Store build a distinct bundle filename and process name. Both
+// channels intentionally retain the registered com.justspeaktoit.mac identifier:
+// Sparkle treats the direct bundle identifier as immutable, and App Store Connect
+// does not allow changing the identifier of the existing Mac app record.
+let macProductName = isAppStoreBuild ? "JustSpeakToItAppStore" : "JustSpeakToIt"
 var macAppSettings: [String: SettingValue] = [
     "DEVELOPMENT_TEAM": "8X4ZN58TYH",
     "CODE_SIGN_STYLE": "Automatic",
@@ -123,7 +129,7 @@ let project = Project(
             name: "SpeakApp",
             destinations: .macOS,
             product: .app,
-            productName: "JustSpeakToIt",
+            productName: macProductName,
             bundleId: "com.justspeaktoit.mac",
             deploymentTargets: .macOS("14.0"),
             infoPlist: .file(path: .relativeToRoot(macInfoPlistPath)),

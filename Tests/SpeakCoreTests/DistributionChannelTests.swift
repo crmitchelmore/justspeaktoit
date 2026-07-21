@@ -15,8 +15,13 @@ final class DistributionChannelTests: XCTestCase {
 
         // Act & Assert
         XCTAssertTrue(channel.supportsSelfUpdate)
-        XCTAssertTrue(channel.supportsLocalModelRuntime)
+        XCTAssertTrue(channel.supportsDownloadedCoreMLModels)
+        XCTAssertTrue(channel.supportsExternalLocalModelRuntime)
+        XCTAssertFalse(channel.supportsEncryptedCloudKitKeySync)
+        XCTAssertFalse(channel.supportsICloudSync)
+        XCTAssertEqual(channel.apiKeyStorageMode, .localKeychainOnly)
         XCTAssertTrue(channel.supportsAutomaticAccessibilityPrompt)
+        XCTAssertTrue(channel.supportsAccessibilityTextInsertion)
         XCTAssertTrue(channel.allowsCrossChannelMessaging)
         XCTAssertFalse(channel.isSandboxed)
     }
@@ -28,10 +33,17 @@ final class DistributionChannelTests: XCTestCase {
         // Act & Assert
         XCTAssertFalse(channel.supportsSelfUpdate,
             "App Store builds update through the store, not Sparkle")
-        XCTAssertFalse(channel.supportsLocalModelRuntime,
-            "Downloaded local-model runtimes cannot run in the App Store sandbox")
+        XCTAssertTrue(channel.supportsDownloadedCoreMLModels,
+            "WhisperKit/Core ML model data can run through the bundled in-process runtime")
+        XCTAssertFalse(channel.supportsExternalLocalModelRuntime,
+            "Executable local-model runtimes cannot run in the App Store sandbox")
+        XCTAssertTrue(channel.supportsEncryptedCloudKitKeySync)
+        XCTAssertTrue(channel.supportsICloudSync)
+        XCTAssertEqual(channel.apiKeyStorageMode, .encryptedCloudKit)
         XCTAssertFalse(channel.supportsAutomaticAccessibilityPrompt,
             "Sandboxed apps cannot auto-prompt for Accessibility/Input Monitoring")
+        XCTAssertFalse(channel.supportsAccessibilityTextInsertion,
+            "The App Store sandbox blocks AXUIElement access to other apps")
         XCTAssertFalse(channel.allowsCrossChannelMessaging,
             "App Store builds must not advertise other distribution channels")
         XCTAssertTrue(channel.isSandboxed)
@@ -41,11 +53,16 @@ final class DistributionChannelTests: XCTestCase {
         // Arrange / Act / Assert
         for channel in DistributionChannel.allCases {
             XCTAssertEqual(channel.supports(.selfUpdate), channel.supportsSelfUpdate)
-            XCTAssertEqual(channel.supports(.localModelRuntime), channel.supportsLocalModelRuntime)
+            XCTAssertEqual(channel.supports(.downloadedCoreMLModels), channel.supportsDownloadedCoreMLModels)
+            XCTAssertEqual(channel.supports(.externalLocalModelRuntime), channel.supportsExternalLocalModelRuntime)
             XCTAssertEqual(channel.supports(.automaticAccessibilityPrompt),
                            channel.supportsAutomaticAccessibilityPrompt)
+            XCTAssertEqual(channel.supports(.accessibilityTextInsertion),
+                           channel.supportsAccessibilityTextInsertion)
             XCTAssertEqual(channel.supports(.crossChannelMessaging),
                            channel.allowsCrossChannelMessaging)
+            XCTAssertEqual(channel.supports(.encryptedCloudKitKeySync),
+                           channel.supportsEncryptedCloudKitKeySync)
         }
     }
 
@@ -55,8 +72,8 @@ final class DistributionChannelTests: XCTestCase {
         // Arrange
         let channel = DistributionChannel.current
 
-        // Act & Assert — `current` is derived from compile-time flags, so it must be
-        // one of the two known channels and its sandbox state must agree.
+        // Act & Assert — package tests use the direct fallback unless an App Store
+        // compilation condition is explicitly supplied.
         #if os(iOS)
         XCTAssertEqual(channel, .appStore, "iOS always ships through the App Store")
         #elseif APP_STORE

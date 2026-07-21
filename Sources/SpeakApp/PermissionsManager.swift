@@ -3,6 +3,7 @@ import AppKit
 import Combine
 import CoreGraphics
 import Foundation
+import SpeakCore
 import Speech
 
 // @Implement This class manages system permissions. It knows how to request the following permissions when asked and also surface the current status of permissions as per the system
@@ -14,6 +15,12 @@ enum PermissionType: CaseIterable, Identifiable {
   case inputMonitoring
 
   var id: String { displayName }
+
+  static func availablePermissions(for channel: DistributionChannel) -> [PermissionType] {
+    allCases.filter { permission in
+      permission != .accessibility || channel.supportsAccessibilityTextInsertion
+    }
+  }
 
   var displayName: String {
     switch self {
@@ -97,9 +104,24 @@ enum PermissionStatus: Equatable {
 @MainActor
 final class PermissionsManager: ObservableObject {
   @Published private(set) var statuses: [PermissionType: PermissionStatus] = [:]
+  private let statusProvider: (PermissionType) -> PermissionStatus
+  private let notificationCenter: NotificationCenter
+  private var lifecycleObservers: [NSObjectProtocol] = []
 
-  init() {
+  init(
+    statusProvider: @escaping (PermissionType) -> PermissionStatus = PermissionsManager.systemStatus,
+    notificationCenter: NotificationCenter = .default
+  ) {
+    self.statusProvider = statusProvider
+    self.notificationCenter = notificationCenter
     refreshAll()
+    registerLifecycleObservers()
+  }
+
+  deinit {
+    for observer in lifecycleObservers {
+      notificationCenter.removeObserver(observer)
+    }
   }
 
   func status(for type: PermissionType) -> PermissionStatus {
@@ -168,39 +190,57 @@ final class PermissionsManager: ObservableObject {
   }
 
   private func computeStatus(for type: PermissionType) -> PermissionStatus {
+    statusProvider(type)
+  }
+
+  private nonisolated static func systemStatus(for type: PermissionType) -> PermissionStatus {
     switch type {
     case .microphone:
-      switch AVCaptureDevice.authorizationStatus(for: .audio) {
-      case .authorized:
-        return .granted
-      case .notDetermined:
-        return .notDetermined
-      case .denied:
-        return .denied
-      case .restricted:
-        return .restricted
-      @unknown default:
-        return .restricted
-      }
+      return microphoneStatus()
     case .speechRecognition:
-      switch SFSpeechRecognizer.authorizationStatus() {
-      case .authorized:
-        return .granted
-      case .notDetermined:
-        return .notDetermined
-      case .denied:
-        return .denied
-      case .restricted:
-        return .restricted
-      @unknown default:
-        return .restricted
-      }
+      return speechRecognitionStatus()
     case .accessibility:
       return AXIsProcessTrusted() ? .granted : .denied
     case .inputMonitoring:
-      let granted = CGPreflightListenEventAccess()
-      return granted ? .granted : .denied
+      return inputMonitoringStatus(
+        hasListenAccess: CGPreflightListenEventAccess(),
+        hasAccessibilityAccess: AXIsProcessTrusted()
+      )
     }
+  }
+
+  private nonisolated static func microphoneStatus() -> PermissionStatus {
+    switch AVCaptureDevice.authorizationStatus(for: .audio) {
+    case .authorized: return .granted
+    case .notDetermined: return .notDetermined
+    case .denied: return .denied
+    case .restricted: return .restricted
+    @unknown default: return .restricted
+    }
+  }
+
+  private nonisolated static func speechRecognitionStatus() -> PermissionStatus {
+    switch SFSpeechRecognizer.authorizationStatus() {
+    case .authorized: return .granted
+    case .notDetermined: return .notDetermined
+    case .denied: return .denied
+    case .restricted: return .restricted
+    @unknown default: return .restricted
+    }
+  }
+
+  /// Accessibility permission is a superset of event-listening permission on macOS.
+  /// Treat either TCC grant as effective access so the app does not report Input
+  /// Monitoring as disabled while its global event tap is allowed to run.
+  nonisolated static func inputMonitoringStatus(
+    hasListenAccess: Bool,
+    hasAccessibilityAccess: Bool
+  ) -> PermissionStatus {
+    hasListenAccess || hasAccessibilityAccess ? .granted : .denied
+  }
+
+  nonisolated static func shouldPromptForAccessibility(channel: DistributionChannel) -> Bool {
+    channel.supportsAutomaticAccessibilityPrompt
   }
 
   private func requestMicrophone() async -> PermissionStatus {
@@ -230,13 +270,37 @@ final class PermissionsManager: ObservableObject {
   }
 
   private func requestAccessibility() -> PermissionStatus {
-    let options: NSDictionary = [kAXTrustedCheckOptionPrompt.takeRetainedValue() as NSString: true]
-    let trusted = AXIsProcessTrustedWithOptions(options)
+    let trusted: Bool
+    if Self.shouldPromptForAccessibility(channel: DistributionChannel.current) {
+      let options: NSDictionary = [kAXTrustedCheckOptionPrompt.takeRetainedValue() as NSString: true]
+      trusted = AXIsProcessTrustedWithOptions(options)
+    } else {
+      // The App Store sandbox cannot present the Accessibility prompt. It can
+      // only observe a grant the user made manually in System Settings.
+      trusted = AXIsProcessTrusted()
+    }
     return trusted ? .granted : .denied
   }
 
   private func requestInputMonitoring() -> PermissionStatus {
     let granted = CGRequestListenEventAccess()
-    return granted ? .granted : .denied
+    return Self.inputMonitoringStatus(
+      hasListenAccess: granted,
+      hasAccessibilityAccess: AXIsProcessTrusted()
+    )
+  }
+
+  private func registerLifecycleObservers() {
+    lifecycleObservers = [
+      notificationCenter.addObserver(
+        forName: NSApplication.didBecomeActiveNotification,
+        object: nil,
+        queue: .main
+      ) { [weak self] _ in
+        Task { @MainActor in
+          self?.refreshAll()
+        }
+      }
+    ]
   }
 }

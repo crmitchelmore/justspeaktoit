@@ -369,7 +369,10 @@ public struct ContentView: View {
                 VStack {
                     ScrollViewReader { proxy in
                         ScrollView {
-                            VStack(alignment: .leading, spacing: 12) {
+                            VStack(
+                                alignment: .leading,
+                                spacing: settings.visualDensity == .compact ? 8 : 12
+                            ) {
                                 if currentText.isEmpty {
                                     Text(backgroundService.isRunning
                                          ? "Recording via Action Button…"
@@ -386,7 +389,7 @@ public struct ContentView: View {
                                         .textSelection(.enabled)
                                 }
                             }
-                            .padding()
+                            .padding(settings.visualDensity == .compact ? 12 : 16)
                             .id("transcript")
                         }
                         .onChange(of: coordinator.partialText) { _, _ in
@@ -504,6 +507,8 @@ public struct ContentView: View {
                 }
             }
         }
+        .environment(\.appVisualDensity, settings.visualDensity)
+        .environment(\.defaultMinListRowHeight, settings.visualDensity.minimumListRowHeight)
     }
 
     // MARK: - Floating Controls with Glass Effect

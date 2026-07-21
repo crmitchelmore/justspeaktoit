@@ -64,74 +64,37 @@ actor SecureAppStorage {
     private nonisolated let permissionsManager: PermissionsManager
     private nonisolated let appSettings: AppSettings
 
-    init(permissionsManager: PermissionsManager, appSettings: AppSettings) {
+    init(
+        permissionsManager: PermissionsManager,
+        appSettings: AppSettings,
+        keychainService: String = "com.justspeaktoit.credentials"
+    ) {
         self.permissionsManager = permissionsManager
         self.appSettings = appSettings
-        
-        // Check if we can use iCloud Keychain sync (kSecAttrSynchronizable)
-        // Developer ID builds cannot use this - it requires keychain-access-groups entitlement
-        let canUseSync = Self.hasKeychainSyncEntitlement()
-        
-        // IMPORTANT: For Developer ID (non-App Store) builds, we MUST NOT use:
-        // - kSecAttrSynchronizable (requires keychain-access-groups entitlement) - causes -34018
-        // - kSecAttrAccessGroup (requires keychain-access-groups entitlement in some cases)
+
+        // The local Keychain is the vault for every Mac build. App Store builds
+        // opt in to the separate passphrase-encrypted CloudKit sync layer; direct
+        // builds remain local-only. Do not silently add iCloud Keychain as a third
+        // API-key sync path.
         let configuration = SecureStorageConfiguration(
-            service: "com.justspeaktoit.credentials",
+            service: keychainService,
             masterAccount: "speak-app-secrets",
-            // Don't use access group for Developer ID - not needed and may cause issues
             accessGroup: nil,
-            // Only enable sync if we verified the entitlement exists
-            synchronizable: canUseSync
+            synchronizable: false
         )
-        
+
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         print("[SecureAppStorage] Keychain Configuration:")
-        print("  canUseSync: \(canUseSync)")
         print("  accessGroup: \(configuration.accessGroup ?? "nil")")
         print("  synchronizable: \(configuration.synchronizable)")
         print("  service: \(configuration.service)")
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        
+
         self.storage = SecureStorage(
             configuration: configuration,
             permissionsChecker: PermissionsManagerBridge(permissionsManager: permissionsManager),
             identifierRegistry: appSettings
         )
-    }
-    
-    /// Check if the app can use iCloud keychain sync by testing kSecAttrSynchronizable.
-    /// Developer ID (non-App Store) builds cannot use synchronizable items.
-    private static func hasKeychainSyncEntitlement() -> Bool {
-        let testService = "com.justspeaktoit.entitlement-check"
-        let testAccount = "sync-test-\(UUID().uuidString)"
-        
-        // Test with kSecAttrSynchronizable - THIS is what requires the entitlement
-        let addQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: testService,
-            kSecAttrAccount as String: testAccount,
-            kSecAttrSynchronizable as String: kCFBooleanTrue!,
-            kSecValueData as String: "test".data(using: .utf8)!
-        ]
-        
-        let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
-        
-        // Clean up if we succeeded
-        if addStatus == errSecSuccess {
-            let deleteQuery: [String: Any] = [
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: testService,
-                kSecAttrAccount as String: testAccount,
-                kSecAttrSynchronizable as String: kCFBooleanTrue!
-            ]
-            SecItemDelete(deleteQuery as CFDictionary)
-            print("[SecureAppStorage] iCloud Keychain sync entitlement available")
-            return true
-        }
-        
-        // errSecMissingEntitlement (-34018) means we can't use synchronizable
-        print("[SecureAppStorage] No iCloud Keychain sync entitlement (status: \(addStatus)), disabling sync")
-        return false
     }
 
     func storeSecret(_ value: String, identifier: String, label _: String? = nil) async throws {

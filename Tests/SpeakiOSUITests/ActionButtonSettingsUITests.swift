@@ -14,7 +14,7 @@ final class ActionButtonSettingsUITests: XCTestCase {
         app.buttons["Settings"].tap()
 
         let hardwareTriggerLink = app.buttons["hardwareTriggerSettingsLink"]
-        XCTAssertTrue(hardwareTriggerLink.waitForExistence(timeout: 5))
+        XCTAssertTrue(scrollUpUntilExists(hardwareTriggerLink))
         hardwareTriggerLink.tap()
 
         XCTAssertTrue(app.navigationBars["Action Button & Shortcuts"].waitForExistence(timeout: 5))

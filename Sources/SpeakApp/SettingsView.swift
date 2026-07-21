@@ -52,6 +52,18 @@ enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
   }
 }
 
+private struct MacAPIKeyItem: Identifiable {
+  enum Source {
+    case openRouter
+    case transcription(TranscriptionProviderMetadata)
+    case textToSpeech(TTSProvider)
+  }
+
+  let entry: APIKeyListEntry
+  let source: Source
+  var id: String { entry.id }
+}
+
 struct SettingsView: View {
   @EnvironmentObject private var environment: AppEnvironment
   @EnvironmentObject private var settings: AppSettings
@@ -92,6 +104,9 @@ struct SettingsView: View {
   @State private var providerValidationStates: [String: ValidationViewState] = [:]
   @State private var ttsProviderAPIKeys: [String: String] = [:]
   @State private var ttsProviderValidationStates: [String: ValidationViewState] = [:]
+  @State private var apiKeySearchText = ""
+  @State private var apiKeyStatusFilter: APIKeyStatusFilter = .all
+  @State private var apiKeySortOrder: APIKeySortOrder = .name
   @State private var missingTranscriptionAPIKeyAlert: MissingLiveAPIKeyAlert?
   @State private var showSystemPromptPreview = false
   @State private var systemPromptPreview = ""
@@ -145,8 +160,22 @@ struct SettingsView: View {
 
   }
 
+  private enum LocalTranscriptionSource: String, CaseIterable, Identifiable {
+    case apple
+    case downloaded
+
+    var id: String { rawValue }
+
+    var displayName: String {
+      switch self {
+      case .apple: return "Apple Speech"
+      case .downloaded: return "Downloaded Model"
+      }
+    }
+  }
+
   private let orderedLocalTranscriptionModes: [AppSettings.LocalTranscriptionMode] = {
-    DistributionChannel.current.supportsLocalModelRuntime ? [.streaming, .batch] : [.batch]
+    DistributionChannel.current.supportsExternalLocalModelRuntime ? [.streaming, .batch] : [.batch]
   }()
   private let orderedRemoteTranscriptionModes: [RemoteTranscriptionMode] = [.streaming, .batch]
 
@@ -181,6 +210,56 @@ struct SettingsView: View {
   private var isValidatingKey: Bool {
     if case .validating = apiKeyValidationState { return true }
     return false
+  }
+
+  private var allMacAPIKeyItems: [MacAPIKeyItem] {
+    var items = [
+      MacAPIKeyItem(
+        entry: APIKeyListEntry(
+          id: "general-openrouter",
+          title: "OpenRouter",
+          category: "Post-processing",
+          isStored: isOpenRouterKeyStored
+        ),
+        source: .openRouter
+      )
+    ]
+    items += transcriptionProviders
+      .filter { $0.id != "elevenlabs" }
+      .map { provider in
+        MacAPIKeyItem(
+          entry: APIKeyListEntry(
+            id: "transcription-\(provider.id)",
+            title: provider.displayName,
+            category: "Transcription",
+            isStored: settings.trackedAPIKeyIdentifiers.contains(provider.apiKeyIdentifier)
+          ),
+          source: .transcription(provider)
+        )
+      }
+    items += [TTSProvider.elevenlabs, .openai, .azure, .deepgram].map { provider in
+      MacAPIKeyItem(
+        entry: APIKeyListEntry(
+          id: "tts-\(provider.id)",
+          title: provider == .elevenlabs ? "ElevenLabs" : provider.displayName,
+          category: provider == .elevenlabs ? "Transcription & Voice Output" : "Voice Output",
+          isStored: settings.trackedAPIKeyIdentifiers.contains(provider.apiKeyIdentifier)
+        ),
+        source: .textToSpeech(provider)
+      )
+    }
+    return items
+  }
+
+  private var visibleMacAPIKeyItems: [MacAPIKeyItem] {
+    let orderedEntries = APIKeyListQuery.apply(
+      to: allMacAPIKeyItems.map(\.entry),
+      searchText: apiKeySearchText,
+      status: apiKeyStatusFilter,
+      sortOrder: apiKeySortOrder
+    )
+    let itemsByID = Dictionary(uniqueKeysWithValues: allMacAPIKeyItems.map { ($0.id, $0) })
+    return orderedEntries.compactMap { itemsByID[$0.id] }
   }
 
   private var overviewPostProcessingValue: String {
@@ -386,15 +465,33 @@ struct SettingsView: View {
   private var transcriptionLocationBinding: Binding<TranscriptionLocation> {
     Binding(
       get: {
-        settings.transcriptionMode == .localModel ? .local : .remote
+        isLocalTranscriptionSelected ? .local : .remote
       },
       set: { location in
         switch location {
         case .remote:
-          if settings.transcriptionMode == .localModel {
-            settings.transcriptionMode = .liveNative
+          if isLocalTranscriptionSelected {
+            settings.liveTranscriptionModel = ModelCatalog.defaultRemoteLiveTranscriptionModel
+              ?? settings.liveTranscriptionModel
           }
+          settings.transcriptionMode = .liveNative
         case .local:
+          settings.liveTranscriptionModel = ModelCatalog.defaultOnDeviceLiveTranscriptionModel
+          settings.transcriptionMode = .liveNative
+        }
+      }
+    )
+  }
+
+  private var localTranscriptionSourceBinding: Binding<LocalTranscriptionSource> {
+    Binding(
+      get: { isAppleOnDeviceTranscriptionSelected ? .apple : .downloaded },
+      set: { source in
+        switch source {
+        case .apple:
+          settings.liveTranscriptionModel = ModelCatalog.defaultOnDeviceLiveTranscriptionModel
+          settings.transcriptionMode = .liveNative
+        case .downloaded:
           settings.transcriptionMode = .localModel
         }
       }
@@ -407,7 +504,15 @@ struct SettingsView: View {
         settings.transcriptionMode == .batchRemote ? .batch : .streaming
       },
       set: { mode in
-        settings.transcriptionMode = mode == .streaming ? .liveNative : .batchRemote
+        if mode == .streaming {
+          if ModelCatalog.isOnDeviceLiveTranscriptionModel(settings.liveTranscriptionModel) {
+            settings.liveTranscriptionModel = ModelCatalog.defaultRemoteLiveTranscriptionModel
+              ?? settings.liveTranscriptionModel
+          }
+          settings.transcriptionMode = .liveNative
+        } else {
+          settings.transcriptionMode = .batchRemote
+        }
       }
     )
   }
@@ -421,6 +526,19 @@ struct SettingsView: View {
   private var isStreamingTranscriptionSelected: Bool {
     settings.transcriptionMode == .liveNative
       || (settings.transcriptionMode == .localModel && settings.localTranscriptionMode == .streaming)
+  }
+
+  private var isAppleOnDeviceTranscriptionSelected: Bool {
+    settings.transcriptionMode == .liveNative
+      && ModelCatalog.isOnDeviceLiveTranscriptionModel(settings.liveTranscriptionModel)
+  }
+
+  private var isLocalTranscriptionSelected: Bool {
+    settings.transcriptionMode == .localModel || isAppleOnDeviceTranscriptionSelected
+  }
+
+  private var isRemoteStreamingTranscriptionSelected: Bool {
+    settings.transcriptionMode == .liveNative && !isAppleOnDeviceTranscriptionSelected
   }
 
   private var cloudPostProcessingModelBinding: Binding<String> {
@@ -587,12 +705,13 @@ struct SettingsView: View {
   }
 
   var body: some View {
+    let density = settings.visualDensity
     ScrollView {
-      VStack(alignment: .leading, spacing: 28) {
+      VStack(alignment: .leading, spacing: density == .compact ? 16 : 28) {
         overviewHeader
         tabContent
       }
-      .padding(24)
+      .padding(density.pagePadding)
       .frame(maxWidth: 1100, alignment: .center)
     }
     .background(
@@ -668,28 +787,55 @@ struct SettingsView: View {
           )
           .speakTooltip("Choose whether Speak follows macOS appearance or stays in light or dark mode all the time.")
           .accessibilityLabel("Appearance theme picker")
-        }
-      }
-      .speakTooltip("Set Speak's look to match your workspace with light, dark, or system themes.")
 
-      SettingsCard(title: "Output", systemImage: "textformat.alt", tint: Color.brandLagoon) {
-        VStack(alignment: .leading, spacing: 12) {
-          Picker("Text Output", selection: settingsBinding(\AppSettings.textOutputMethod)) {
-            ForEach(AppSettings.TextOutputMethod.allCases) { method in
-              Text(method.displayName).tag(method)
+          Picker("Layout Density", selection: settingsBinding(\AppSettings.visualDensity)) {
+            ForEach(AppVisualDensity.allCases) { density in
+              Text(density.displayName).tag(density)
             }
           }
-          .pickerStyle(.menu)
+          .pickerStyle(.segmented)
           .padding(.horizontal, 12)
           .padding(.vertical, 8)
           .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
               .fill(Color(nsColor: .controlBackgroundColor))
           )
-          .speakTooltip("Decide how Speak returns transcripts—typed for you, placed on the clipboard, or saved for later.")
-          .accessibilityLabel("Text output method picker")
+          .speakTooltip("Choose normal spacing or a higher-density layout across Speak.")
+          .accessibilityLabel("Application layout density picker")
+        }
+      }
+      .speakTooltip("Set Speak's look to match your workspace with light, dark, or system themes.")
 
-          if settings.textOutputMethod != .clipboardOnly {
+      SettingsCard(title: "Output", systemImage: "textformat.alt", tint: Color.brandLagoon) {
+        VStack(alignment: .leading, spacing: 12) {
+          if DistributionChannel.current.supportsAccessibilityTextInsertion {
+            Picker("Text Output", selection: settingsBinding(\AppSettings.textOutputMethod)) {
+              ForEach(AppSettings.availableTextOutputMethods(for: DistributionChannel.current)) { method in
+                Text(method.displayName).tag(method)
+              }
+            }
+            .pickerStyle(.menu)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+              RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor))
+            )
+            .speakTooltip("Decide how Speak returns transcripts—typed for you or placed on the clipboard.")
+            .accessibilityLabel("Text output method picker")
+          } else {
+            Label("Clipboard delivery", systemImage: "doc.on.clipboard")
+              .font(.subheadline.weight(.medium))
+            Text(
+              "The App Store sandbox blocks changing text in other apps. "
+                + "Transcripts stay on the clipboard, ready to paste."
+            )
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+
+          if DistributionChannel.current.supportsAccessibilityTextInsertion,
+             settings.textOutputMethod != .clipboardOnly {
             Picker("Accessibility Insertion", selection: settingsBinding(\AppSettings.accessibilityInsertionMode)) {
               ForEach(AppSettings.AccessibilityInsertionMode.allCases) { mode in
                 Text(mode.displayName).tag(mode)
@@ -711,12 +857,16 @@ struct SettingsView: View {
               .foregroundStyle(.secondary)
           }
           VStack(alignment: .leading, spacing: 8) {
-            settingsToggle(
-              "Restore clipboard after paste",
-              isOn: settingsBinding(\AppSettings.restoreClipboardAfterPaste),
-              tint: .brandLagoon
-            )
-            .speakTooltip("After Speak pastes your transcript, we put your original clipboard content back automatically.")
+            if DistributionChannel.current.supportsAccessibilityTextInsertion {
+              settingsToggle(
+                "Restore clipboard after paste",
+                isOn: settingsBinding(\AppSettings.restoreClipboardAfterPaste),
+                tint: .brandLagoon
+              )
+              .speakTooltip(
+                "After Speak pastes your transcript, we put your original clipboard content back automatically."
+              )
+            }
             settingsToggle(
               "Show HUD during sessions",
               isOn: settingsBinding(\AppSettings.showHUDDuringSessions),
@@ -1128,20 +1278,36 @@ struct SettingsView: View {
           .speakTooltip("Choose whether Speak transcribes locally on this Mac or remotely with a provider.")
           .accessibilityLabel("Transcription location picker")
 
-          if settings.transcriptionMode == .localModel {
-            if DistributionChannel.current.supportsLocalModelRuntime {
-              Picker("Local transcription type", selection: settingsBinding(\AppSettings.localTranscriptionMode)) {
-                ForEach(orderedLocalTranscriptionModes) { mode in
-                  Text(transcriptionModeSegmentLabel(from: mode.displayName)).tag(mode)
-                }
+          if isLocalTranscriptionSelected {
+            Picker("Local transcription source", selection: localTranscriptionSourceBinding) {
+              ForEach(LocalTranscriptionSource.allCases) { source in
+                Text(source.displayName).tag(source)
               }
-              .modifier(TranscriptionModeSegmentedPickerStyle())
-              .speakTooltip(
-                "Choose Local Batch for offline transcription after recording, or Local Streaming for live local text."
-              )
-              .accessibilityLabel("Local transcription type picker")
-            } else {
-              localRuntimeUnavailableNote
+            }
+            .modifier(TranscriptionModeSegmentedPickerStyle())
+            .speakTooltip("Choose built-in Apple Speech or a downloaded Core ML model.")
+            .accessibilityLabel("Local transcription source picker")
+
+            if settings.transcriptionMode == .localModel {
+              if DistributionChannel.current.supportsExternalLocalModelRuntime {
+                Picker(
+                  "Downloaded transcription type",
+                  selection: settingsBinding(\AppSettings.localTranscriptionMode)
+                ) {
+                  ForEach(orderedLocalTranscriptionModes) { mode in
+                    Text(transcriptionModeSegmentLabel(from: mode.displayName)).tag(mode)
+                  }
+                }
+                .modifier(TranscriptionModeSegmentedPickerStyle())
+                .speakTooltip(
+                  "Choose Batch for WhisperKit/Core ML, or Streaming for a direct-build external ASR runtime."
+                )
+                .accessibilityLabel("Downloaded transcription type picker")
+              } else {
+                Text("Downloaded WhisperKit/Core ML models run in-process as Local Batch transcription.")
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+              }
             }
           } else {
             Picker("Remote transcription type", selection: remoteTranscriptionModeBinding) {
@@ -1175,7 +1341,7 @@ struct SettingsView: View {
       }
       .speakTooltip("Choose which transcription flow Speak uses and the locale it should prefer.")
 
-      if settings.transcriptionMode == .liveNative {
+      if isRemoteStreamingTranscriptionSelected {
         SettingsCard(
           title: "Processing Speed",
           systemImage: "gauge.with.dots.needle.67percent",
@@ -1367,7 +1533,7 @@ struct SettingsView: View {
         .speakTooltip("Configure automatic recording stop based on silence detection.")
       }
 
-      if settings.transcriptionMode == .liveNative {
+      if isRemoteStreamingTranscriptionSelected {
         SettingsCard(title: "Remote Streaming model", systemImage: "mic.fill", tint: Color.brandAccentDeep) {
           VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
@@ -1391,10 +1557,10 @@ struct SettingsView: View {
             ModelPicker(
               title: "Remote Streaming Model",
               help: "Choose the remote provider model used while recording.",
-              options: ModelCatalog.liveTranscription,
+              options: ModelCatalog.remoteLiveTranscription,
               value: remoteTranscriptionModelBinding(
                 \AppSettings.liveTranscriptionModel,
-                options: ModelCatalog.liveTranscription
+                options: ModelCatalog.remoteLiveTranscription
               )
             )
           }
@@ -1464,6 +1630,31 @@ struct SettingsView: View {
         .speakTooltip("Tell Speak which cloud transcription model should polish the full recording.")
       }
 
+      if isAppleOnDeviceTranscriptionSelected {
+        SettingsCard(
+          title: "Apple on-device transcription",
+          systemImage: "apple.logo",
+          tint: Color.green
+        ) {
+          VStack(alignment: .leading, spacing: 12) {
+            Text("Uses Apple's built-in speech engine. Audio stays on this device.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+            ModelPicker(
+              title: "Apple Model",
+              help: "Choose the Apple on-device engine used while recording.",
+              options: ModelCatalog.onDeviceLiveTranscription,
+              value: remoteTranscriptionModelBinding(
+                \AppSettings.liveTranscriptionModel,
+                options: ModelCatalog.onDeviceLiveTranscription
+              ),
+              allowsCustom: false
+            )
+          }
+        }
+        .speakTooltip("Choose an on-device Apple transcription engine.")
+      }
+
       if settings.transcriptionMode == .localModel {
         SettingsCard(
           title: "Local transcription models",
@@ -1494,14 +1685,14 @@ struct SettingsView: View {
               {
                 #if APP_STORE
                 return """
-                Local transcription is separate from Apple Speech and cloud providers. \
-                Local Batch uses downloaded WhisperKit/Core ML models and stays local-only.
+                Downloaded transcription is separate from Apple Speech and cloud providers. \
+                WhisperKit/Core ML model data runs in-process and is supported in this App Store build.
                 """
                 #else
                 return """
-                Local Batch and Local Streaming are separate from Apple Speech and cloud providers. \
-                Both stay local-only; Local Batch uses downloaded WhisperKit/Core ML models, while \
-                Local Streaming needs a dedicated streaming ASR runtime.
+                Downloaded transcription is separate from Apple Speech and cloud providers. \
+                Local Batch uses in-process WhisperKit/Core ML model data. Local Streaming installs \
+                a dedicated external ASR runtime and is available only in the direct-download build.
                 """
                 #endif
               }()
@@ -1509,7 +1700,7 @@ struct SettingsView: View {
             .font(.caption)
             .foregroundStyle(.secondary)
 
-            if !DistributionChannel.current.supportsLocalModelRuntime {
+            if !DistributionChannel.current.supportsExternalLocalModelRuntime {
               localRuntimeUnavailableNote
             }
 
@@ -3041,7 +3232,7 @@ struct SettingsView: View {
       .foregroundStyle(.secondary)
       #endif
 
-      if !DistributionChannel.current.supportsLocalModelRuntime {
+      if !DistributionChannel.current.supportsExternalLocalModelRuntime {
         localRuntimeUnavailableNote
       }
 
@@ -3405,11 +3596,85 @@ struct SettingsView: View {
 
   private var apiKeySettings: some View {
     ScrollViewReader { proxy in
-      LazyVStack(spacing: 20) {
-        CloudKitKeySyncSettingsCard(secureStorage: environment.secureStorage)
+      LazyVStack(spacing: settings.visualDensity.sectionSpacing) {
+        apiKeyListControls
 
-        // OpenRouter (Legacy)
-        apiKeyCard(
+        if DistributionChannel.current.supportsEncryptedCloudKitKeySync {
+          CloudKitKeySyncSettingsCard(secureStorage: environment.secureStorage)
+        } else {
+          LocalKeychainStorageCard()
+        }
+
+        if visibleMacAPIKeyItems.isEmpty {
+          ContentUnavailableView(
+            "No API Keys",
+            systemImage: "key.slash",
+            description: Text("Try a different search or status filter.")
+          )
+          .padding(.vertical, 24)
+        } else {
+          ForEach(visibleMacAPIKeyItems) { item in
+            macAPIKeyView(for: item)
+              .id(item.id)
+          }
+        }
+      }
+      .onAppear {
+        if let target = environment.apiKeysScrollTarget {
+          revealAPIKeyTarget()
+          DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            withAnimation { proxy.scrollTo(target, anchor: .top) }
+            environment.apiKeysScrollTarget = nil
+          }
+        }
+      }
+      .onChange(of: environment.apiKeysScrollTarget) { _, newValue in
+        guard let target = newValue else { return }
+        revealAPIKeyTarget()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+          withAnimation { proxy.scrollTo(target, anchor: .top) }
+          environment.apiKeysScrollTarget = nil
+        }
+      }
+    }
+  }
+
+  private var apiKeyListControls: some View {
+    SettingsCard(title: "Find API Keys", systemImage: "magnifyingglass", tint: .brandAccent) {
+      VStack(alignment: .leading, spacing: settings.visualDensity == .compact ? 8 : 12) {
+        TextField("Search provider or category", text: $apiKeySearchText)
+          .textFieldStyle(.roundedBorder)
+          .accessibilityLabel("Search API keys")
+
+        HStack(spacing: 12) {
+          Picker("Status", selection: $apiKeyStatusFilter) {
+            ForEach(APIKeyStatusFilter.allCases) { filter in
+              Text(filter.displayName).tag(filter)
+            }
+          }
+          .pickerStyle(.menu)
+
+          Picker("Sort", selection: $apiKeySortOrder) {
+            ForEach(APIKeySortOrder.allCases) { order in
+              Text(order.displayName).tag(order)
+            }
+          }
+          .pickerStyle(.menu)
+
+          Spacer()
+          Text("\(visibleMacAPIKeyItems.count) of \(allMacAPIKeyItems.count)")
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.secondary)
+        }
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func macAPIKeyView(for item: MacAPIKeyItem) -> some View {
+    switch item.source {
+    case .openRouter:
+      apiKeyCard(
         title: "OpenRouter",
         systemImage: "network",
         tint: .green,
@@ -3437,35 +3702,16 @@ struct SettingsView: View {
         link: nil,
         linkLabel: nil
       )
-
-      // Transcription Providers (Dynamic) — ElevenLabs excluded; it shares the TTS card below
-      ForEach(transcriptionProviders.filter { $0.id != "elevenlabs" }) { provider in
-        providerAPIKeyCard(for: provider)
-          .id("transcription-\(provider.id)")
-      }
-
-      // TTS Providers
-      ForEach([TTSProvider.elevenlabs, .openai, .azure, .deepgram]) { provider in
-        ttsProviderAPIKeyCard(for: provider)
-          .id("tts-\(provider.id)")
-      }
+    case .transcription(let provider):
+      providerAPIKeyCard(for: provider)
+    case .textToSpeech(let provider):
+      ttsProviderAPIKeyCard(for: provider)
     }
-    .onAppear {
-        if let target = environment.apiKeysScrollTarget {
-          DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            withAnimation { proxy.scrollTo(target, anchor: .top) }
-            environment.apiKeysScrollTarget = nil
-          }
-        }
-      }
-      .onChange(of: environment.apiKeysScrollTarget) { _, newValue in
-        guard let target = newValue else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-          withAnimation { proxy.scrollTo(target, anchor: .top) }
-          environment.apiKeysScrollTarget = nil
-        }
-      }
-    }
+  }
+
+  private func revealAPIKeyTarget() {
+    apiKeySearchText = ""
+    apiKeyStatusFilter = .all
   }
 
   private func providerAPIKeyCard(for provider: TranscriptionProviderMetadata) -> some View {
@@ -3777,9 +4023,8 @@ struct SettingsView: View {
 
           Text(
             "Opt in to sync API keys through your private CloudKit database. Keys are encrypted with "
-              + "CryptoKit before upload. Developer-ID macOS builds need a managed provisioning profile "
-              + "with CloudKit entitlements; otherwise this stays unavailable and local Keychain storage "
-              + "works normally."
+              + "CryptoKit before upload. Sync is available when this app is signed into iCloud and "
+              + "CloudKit is available."
           )
           .font(.caption)
           .foregroundStyle(.secondary)
@@ -3789,6 +4034,23 @@ struct SettingsView: View {
         let coreStorage = await secureStorage.coreStorage()
         await keySync.configure(secureStorage: coreStorage)
         _ = await keySync.isAvailable()
+      }
+    }
+  }
+
+  private struct LocalKeychainStorageCard: View {
+    var body: some View {
+      SettingsCard(title: "Local Keychain Storage", systemImage: "key.fill", tint: .brandLagoon) {
+        VStack(alignment: .leading, spacing: 8) {
+          Label("Stored locally on this Mac", systemImage: "checkmark.seal.fill")
+            .foregroundStyle(.green)
+          Text(
+            "API keys stay in the macOS Keychain for this direct-download build. "
+              + "Encrypted CloudKit API-key sync is available only in App Store builds."
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        }
       }
     }
   }
@@ -4229,7 +4491,7 @@ struct SettingsView: View {
     LazyVStack(spacing: 20) {
       SettingsCard(title: "System permissions", systemImage: "lock.shield", tint: Color.red) {
         VStack(alignment: .leading, spacing: 12) {
-          ForEach(PermissionType.allCases) { permission in
+          ForEach(PermissionType.availablePermissions(for: DistributionChannel.current)) { permission in
             let status = environment.permissions.status(for: permission)
             VStack(alignment: .leading, spacing: 8) {
               HStack(spacing: 12) {
@@ -4267,6 +4529,12 @@ struct SettingsView: View {
         }
       }
       .speakTooltip("Review and refresh the macOS permissions Speak depends on.")
+    }
+    .task {
+      while !Task.isCancelled {
+        environment.permissions.refreshAll()
+        try? await Task.sleep(for: .seconds(1))
+      }
     }
   }
 
@@ -4824,6 +5092,7 @@ private struct SettingsInlineInfo: View {
 }
 
 private struct SettingsCard<Content: View>: View {
+  @Environment(\.appVisualDensity) private var density
   let title: String
   let systemImage: String
   let tint: Color
@@ -4837,7 +5106,7 @@ private struct SettingsCard<Content: View>: View {
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 18) {
+    VStack(alignment: .leading, spacing: density.cardContentSpacing) {
       HStack(spacing: 14) {
         ZStack {
           RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -4856,7 +5125,7 @@ private struct SettingsCard<Content: View>: View {
 
       content
     }
-    .padding(24)
+    .padding(density.cardPadding)
     .frame(maxWidth: .infinity, alignment: .leading)
     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
     .overlay(

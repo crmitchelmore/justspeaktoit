@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import Foundation
+import SpeakCore
 import SpeakSync
 
 // swiftlint:disable file_length
@@ -313,6 +314,7 @@ enum WireUp {
   struct BootstrapOptions {
     var settingsOverride: AppSettings?
     var permissionsOverride: PermissionsManager?
+    var keychainServiceOverride: String?
 
     static let `default` = BootstrapOptions()
   }
@@ -333,7 +335,11 @@ enum WireUp {
       permissionsManager: permissions,
       audioDeviceManager: audioDevices
     )
-    let secureStorage = SecureAppStorage(permissionsManager: permissions, appSettings: settings)
+    let secureStorage = SecureAppStorage(
+      permissionsManager: permissions,
+      appSettings: settings,
+      keychainService: options.keychainServiceOverride ?? "com.justspeaktoit.credentials"
+    )
     let openRouter = OpenRouterAPIClient(secureStorage: secureStorage)
     let transcription = TranscriptionManager(
       appSettings: settings,
@@ -440,15 +446,17 @@ enum WireUp {
     Task { await syncAdapter.start() }
 
     Task { await secureStorage.preloadTrackedSecrets() }
-    Task {
-      let coreStorage = await secureStorage.coreStorage()
-      let keySync = CloudKitKeySync.shared
-      await keySync.configure(secureStorage: coreStorage)
-      guard await keySync.isAvailable() else { return }
-      do {
-        try await keySync.syncNow()
-      } catch {
-        print("[WireUp] CloudKit API-key sync failed: \(error.localizedDescription)")
+    if DistributionChannel.current.supportsEncryptedCloudKitKeySync {
+      Task {
+        let coreStorage = await secureStorage.coreStorage()
+        let keySync = CloudKitKeySync.shared
+        await keySync.configure(secureStorage: coreStorage)
+        guard await keySync.isAvailable() else { return }
+        do {
+          try await keySync.syncNow()
+        } catch {
+          print("[WireUp] CloudKit API-key sync failed: \(error.localizedDescription)")
+        }
       }
     }
     Task {

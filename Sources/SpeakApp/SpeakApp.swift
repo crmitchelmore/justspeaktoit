@@ -98,9 +98,9 @@ struct SpeakApp: App {
 final class EnvironmentHolder: ObservableObject {
     @Published var environment: AppEnvironment?
 
-    func bootstrap() {
+    func bootstrap(options: WireUp.BootstrapOptions = .default) {
         guard environment == nil else { return }
-        let env = WireUp.bootstrap()
+        let env = WireUp.bootstrap(options: options)
         environment = env
         // Install the status bar access point immediately, independent of any
         // window, so the app is always reachable — even when launched straight

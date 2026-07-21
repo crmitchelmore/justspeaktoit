@@ -16,7 +16,7 @@ final class WireUpBootstrapTests: XCTestCase {
     @MainActor
     func testBootstrap_completesWithoutCrashing() {
         // This is the P0 test. If this fails, the app cannot launch.
-        let environment = WireUp.bootstrap()
+        let environment = WireUp.bootstrap(options: makeWireUpTestOptions())
         XCTAssertNotNil(environment, "WireUp.bootstrap() must return a valid AppEnvironment")
     }
 
@@ -24,7 +24,7 @@ final class WireUpBootstrapTests: XCTestCase {
 
     @MainActor
     func testBootstrap_allServicesAreInitialised() {
-        let env = WireUp.bootstrap()
+        let env = WireUp.bootstrap(options: makeWireUpTestOptions())
 
         // Every service in the dependency graph must be non-nil and accessible.
         // We access each property to ensure it doesn't trigger a lazy-init crash.
@@ -57,7 +57,7 @@ final class WireUpBootstrapTests: XCTestCase {
         // Verify that the environment wires a shared AppSettings instance —
         // a mutation on env.settings should be observable by any service that
         // holds the same reference. We toggle a boolean as a proxy.
-        let env = WireUp.bootstrap()
+        let env = WireUp.bootstrap(options: makeWireUpTestOptions())
         let before = env.settings.postProcessingEnabled
         env.settings.postProcessingEnabled.toggle()
         XCTAssertNotEqual(env.settings.postProcessingEnabled, before,
@@ -68,7 +68,7 @@ final class WireUpBootstrapTests: XCTestCase {
     @MainActor
     func testBootstrap_permissionsManagerAlias() {
         // AppEnvironment has a `permissionsManager` alias for `permissions`
-        let env = WireUp.bootstrap()
+        let env = WireUp.bootstrap(options: makeWireUpTestOptions())
         XCTAssertTrue(env.permissionsManager === env.permissions,
                       "permissionsManager should be an alias for permissions")
     }
@@ -79,8 +79,8 @@ final class WireUpBootstrapTests: XCTestCase {
     func testBootstrap_canBeCalledMultipleTimes() {
         // EnvironmentHolder guards against double-init, but bootstrap itself
         // should be safe to call multiple times (e.g., during testing)
-        let env1 = WireUp.bootstrap()
-        let env2 = WireUp.bootstrap()
+        let env1 = WireUp.bootstrap(options: makeWireUpTestOptions())
+        let env2 = WireUp.bootstrap(options: makeWireUpTestOptions())
         XCTAssertNotNil(env1)
         XCTAssertNotNil(env2)
         // They should be different instances (no singleton)
@@ -94,17 +94,17 @@ final class WireUpBootstrapTests: XCTestCase {
         let holder = EnvironmentHolder()
         XCTAssertNil(holder.environment, "Environment should not be created until bootstrap() is called")
 
-        holder.bootstrap()
+        holder.bootstrap(options: makeWireUpTestOptions())
         XCTAssertNotNil(holder.environment, "Environment should be created after bootstrap()")
     }
 
     @MainActor
     func testEnvironmentHolder_bootstrapIsIdempotent() {
         let holder = EnvironmentHolder()
-        holder.bootstrap()
+        holder.bootstrap(options: makeWireUpTestOptions())
         let first = holder.environment
 
-        holder.bootstrap() // second call should be a no-op
+        holder.bootstrap(options: makeWireUpTestOptions()) // second call should be a no-op
         let second = holder.environment
 
         XCTAssertTrue(first === second, "Second bootstrap() call should not create a new environment")

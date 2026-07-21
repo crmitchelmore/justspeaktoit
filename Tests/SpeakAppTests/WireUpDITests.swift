@@ -10,9 +10,7 @@ final class WireUpDITests: XCTestCase {
         let customSettings = AppSettings()
         customSettings.postProcessingEnabled = false
 
-        let options = WireUp.BootstrapOptions(
-            settingsOverride: customSettings
-        )
+        let options = makeWireUpTestOptions(settingsOverride: customSettings)
         let env = WireUp.bootstrap(options: options)
 
         XCTAssertFalse(
@@ -24,16 +22,14 @@ final class WireUpDITests: XCTestCase {
     @MainActor
     func testBootstrap_defaultOptionsMatchesProduction() {
         // Ensure default bootstrap still works (no arguments)
-        let env = WireUp.bootstrap()
+        let env = WireUp.bootstrap(options: makeWireUpTestOptions())
         XCTAssertNotNil(env.main)
     }
 
     @MainActor
     func testBootstrap_acceptsCustomPermissions() {
         let customPermissions = PermissionsManager()
-        let options = WireUp.BootstrapOptions(
-            permissionsOverride: customPermissions
-        )
+        let options = makeWireUpTestOptions(permissionsOverride: customPermissions)
         let env = WireUp.bootstrap(options: options)
 
         XCTAssertTrue(
@@ -45,9 +41,7 @@ final class WireUpDITests: XCTestCase {
     @MainActor
     func testBootstrap_injectedSettingsIsSharedAcrossServices() {
         let customSettings = AppSettings()
-        let options = WireUp.BootstrapOptions(
-            settingsOverride: customSettings
-        )
+        let options = makeWireUpTestOptions(settingsOverride: customSettings)
         let env = WireUp.bootstrap(options: options)
 
         XCTAssertTrue(

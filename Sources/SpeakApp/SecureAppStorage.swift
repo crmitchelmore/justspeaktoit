@@ -64,7 +64,11 @@ actor SecureAppStorage {
     private nonisolated let permissionsManager: PermissionsManager
     private nonisolated let appSettings: AppSettings
 
-    init(permissionsManager: PermissionsManager, appSettings: AppSettings) {
+    init(
+        permissionsManager: PermissionsManager,
+        appSettings: AppSettings,
+        keychainService: String = "com.justspeaktoit.credentials"
+    ) {
         self.permissionsManager = permissionsManager
         self.appSettings = appSettings
 
@@ -73,7 +77,7 @@ actor SecureAppStorage {
         // builds remain local-only. Do not silently add iCloud Keychain as a third
         // API-key sync path.
         let configuration = SecureStorageConfiguration(
-            service: "com.justspeaktoit.credentials",
+            service: keychainService,
             masterAccount: "speak-app-secrets",
             accessGroup: nil,
             synchronizable: false

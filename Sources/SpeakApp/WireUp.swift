@@ -314,6 +314,7 @@ enum WireUp {
   struct BootstrapOptions {
     var settingsOverride: AppSettings?
     var permissionsOverride: PermissionsManager?
+    var keychainServiceOverride: String?
 
     static let `default` = BootstrapOptions()
   }
@@ -334,7 +335,11 @@ enum WireUp {
       permissionsManager: permissions,
       audioDeviceManager: audioDevices
     )
-    let secureStorage = SecureAppStorage(permissionsManager: permissions, appSettings: settings)
+    let secureStorage = SecureAppStorage(
+      permissionsManager: permissions,
+      appSettings: settings,
+      keychainService: options.keychainServiceOverride ?? "com.justspeaktoit.credentials"
+    )
     let openRouter = OpenRouterAPIClient(secureStorage: secureStorage)
     let transcription = TranscriptionManager(
       appSettings: settings,

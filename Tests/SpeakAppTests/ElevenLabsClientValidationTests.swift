@@ -50,7 +50,11 @@ final class ElevenLabsClientValidationTests: XCTestCase {
     private func makeSecureStorage() -> SecureAppStorage {
         let settings = AppSettings()
         let permissions = PermissionsManager()
-        return SecureAppStorage(permissionsManager: permissions, appSettings: settings)
+        return SecureAppStorage(
+            permissionsManager: permissions,
+            appSettings: settings,
+            keychainService: "com.justspeaktoit.tests.elevenlabs.validation.\(UUID().uuidString)"
+        )
     }
 
     // Plan requirement: TTS-only restricted key → `/user` 200, `/speech-to-text` 403 → `.invalid`

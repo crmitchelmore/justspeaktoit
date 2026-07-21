@@ -42,6 +42,21 @@ final class AppSettingsDefaultsTests: XCTestCase {
     }
 
     @MainActor
+    func testCoreDefaults_visualDensityIsNormal() {
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertEqual(settings.visualDensity, .normal)
+    }
+
+    @MainActor
+    func testVisualDensity_compactPersists() {
+        let settings = AppSettings(defaults: defaults)
+        settings.visualDensity = .compact
+
+        XCTAssertEqual(defaults.string(forKey: "visualDensity"), "compact")
+        XCTAssertEqual(AppSettings(defaults: defaults).visualDensity, .compact)
+    }
+
+    @MainActor
     func testCoreDefaults_accessibilityInsertionModeIsInsertAtCursor() {
         let settings = AppSettings(defaults: defaults)
         XCTAssertEqual(settings.accessibilityInsertionMode, .insertAtCursor)

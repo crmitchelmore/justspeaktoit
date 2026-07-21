@@ -52,6 +52,18 @@ enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
   }
 }
 
+private struct MacAPIKeyItem: Identifiable {
+  enum Source {
+    case openRouter
+    case transcription(TranscriptionProviderMetadata)
+    case textToSpeech(TTSProvider)
+  }
+
+  let entry: APIKeyListEntry
+  let source: Source
+  var id: String { entry.id }
+}
+
 struct SettingsView: View {
   @EnvironmentObject private var environment: AppEnvironment
   @EnvironmentObject private var settings: AppSettings
@@ -92,6 +104,9 @@ struct SettingsView: View {
   @State private var providerValidationStates: [String: ValidationViewState] = [:]
   @State private var ttsProviderAPIKeys: [String: String] = [:]
   @State private var ttsProviderValidationStates: [String: ValidationViewState] = [:]
+  @State private var apiKeySearchText = ""
+  @State private var apiKeyStatusFilter: APIKeyStatusFilter = .all
+  @State private var apiKeySortOrder: APIKeySortOrder = .name
   @State private var missingTranscriptionAPIKeyAlert: MissingLiveAPIKeyAlert?
   @State private var showSystemPromptPreview = false
   @State private var systemPromptPreview = ""
@@ -181,6 +196,56 @@ struct SettingsView: View {
   private var isValidatingKey: Bool {
     if case .validating = apiKeyValidationState { return true }
     return false
+  }
+
+  private var allMacAPIKeyItems: [MacAPIKeyItem] {
+    var items = [
+      MacAPIKeyItem(
+        entry: APIKeyListEntry(
+          id: "general-openrouter",
+          title: "OpenRouter",
+          category: "Post-processing",
+          isStored: isOpenRouterKeyStored
+        ),
+        source: .openRouter
+      )
+    ]
+    items += transcriptionProviders
+      .filter { $0.id != "elevenlabs" }
+      .map { provider in
+        MacAPIKeyItem(
+          entry: APIKeyListEntry(
+            id: "transcription-\(provider.id)",
+            title: provider.displayName,
+            category: "Transcription",
+            isStored: settings.trackedAPIKeyIdentifiers.contains(provider.apiKeyIdentifier)
+          ),
+          source: .transcription(provider)
+        )
+      }
+    items += [TTSProvider.elevenlabs, .openai, .azure, .deepgram].map { provider in
+      MacAPIKeyItem(
+        entry: APIKeyListEntry(
+          id: "tts-\(provider.id)",
+          title: provider == .elevenlabs ? "ElevenLabs" : provider.displayName,
+          category: provider == .elevenlabs ? "Transcription & Voice Output" : "Voice Output",
+          isStored: settings.trackedAPIKeyIdentifiers.contains(provider.apiKeyIdentifier)
+        ),
+        source: .textToSpeech(provider)
+      )
+    }
+    return items
+  }
+
+  private var visibleMacAPIKeyItems: [MacAPIKeyItem] {
+    let orderedEntries = APIKeyListQuery.apply(
+      to: allMacAPIKeyItems.map(\.entry),
+      searchText: apiKeySearchText,
+      status: apiKeyStatusFilter,
+      sortOrder: apiKeySortOrder
+    )
+    let itemsByID = Dictionary(uniqueKeysWithValues: allMacAPIKeyItems.map { ($0.id, $0) })
+    return orderedEntries.compactMap { itemsByID[$0.id] }
   }
 
   private var overviewPostProcessingValue: String {
@@ -587,12 +652,13 @@ struct SettingsView: View {
   }
 
   var body: some View {
+    let density = settings.visualDensity
     ScrollView {
-      VStack(alignment: .leading, spacing: 28) {
+      VStack(alignment: .leading, spacing: density == .compact ? 16 : 28) {
         overviewHeader
         tabContent
       }
-      .padding(24)
+      .padding(density.pagePadding)
       .frame(maxWidth: 1100, alignment: .center)
     }
     .background(
@@ -668,6 +734,21 @@ struct SettingsView: View {
           )
           .speakTooltip("Choose whether Speak follows macOS appearance or stays in light or dark mode all the time.")
           .accessibilityLabel("Appearance theme picker")
+
+          Picker("Layout Density", selection: settingsBinding(\AppSettings.visualDensity)) {
+            ForEach(AppVisualDensity.allCases) { density in
+              Text(density.displayName).tag(density)
+            }
+          }
+          .pickerStyle(.segmented)
+          .padding(.horizontal, 12)
+          .padding(.vertical, 8)
+          .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+              .fill(Color(nsColor: .controlBackgroundColor))
+          )
+          .speakTooltip("Choose normal spacing or a higher-density layout across Speak.")
+          .accessibilityLabel("Application layout density picker")
         }
       }
       .speakTooltip("Set Speak's look to match your workspace with light, dark, or system themes.")
@@ -3405,11 +3486,81 @@ struct SettingsView: View {
 
   private var apiKeySettings: some View {
     ScrollViewReader { proxy in
-      LazyVStack(spacing: 20) {
+      LazyVStack(spacing: settings.visualDensity.sectionSpacing) {
+        apiKeyListControls
+
         CloudKitKeySyncSettingsCard(secureStorage: environment.secureStorage)
 
-        // OpenRouter (Legacy)
-        apiKeyCard(
+        if visibleMacAPIKeyItems.isEmpty {
+          ContentUnavailableView(
+            "No API Keys",
+            systemImage: "key.slash",
+            description: Text("Try a different search or status filter.")
+          )
+          .padding(.vertical, 24)
+        } else {
+          ForEach(visibleMacAPIKeyItems) { item in
+            macAPIKeyView(for: item)
+              .id(item.id)
+          }
+        }
+      }
+      .onAppear {
+        if let target = environment.apiKeysScrollTarget {
+          revealAPIKeyTarget()
+          DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            withAnimation { proxy.scrollTo(target, anchor: .top) }
+            environment.apiKeysScrollTarget = nil
+          }
+        }
+      }
+      .onChange(of: environment.apiKeysScrollTarget) { _, newValue in
+        guard let target = newValue else { return }
+        revealAPIKeyTarget()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+          withAnimation { proxy.scrollTo(target, anchor: .top) }
+          environment.apiKeysScrollTarget = nil
+        }
+      }
+    }
+  }
+
+  private var apiKeyListControls: some View {
+    SettingsCard(title: "Find API Keys", systemImage: "magnifyingglass", tint: .brandAccent) {
+      VStack(alignment: .leading, spacing: settings.visualDensity == .compact ? 8 : 12) {
+        TextField("Search provider or category", text: $apiKeySearchText)
+          .textFieldStyle(.roundedBorder)
+          .accessibilityLabel("Search API keys")
+
+        HStack(spacing: 12) {
+          Picker("Status", selection: $apiKeyStatusFilter) {
+            ForEach(APIKeyStatusFilter.allCases) { filter in
+              Text(filter.displayName).tag(filter)
+            }
+          }
+          .pickerStyle(.menu)
+
+          Picker("Sort", selection: $apiKeySortOrder) {
+            ForEach(APIKeySortOrder.allCases) { order in
+              Text(order.displayName).tag(order)
+            }
+          }
+          .pickerStyle(.menu)
+
+          Spacer()
+          Text("\(visibleMacAPIKeyItems.count) of \(allMacAPIKeyItems.count)")
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.secondary)
+        }
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func macAPIKeyView(for item: MacAPIKeyItem) -> some View {
+    switch item.source {
+    case .openRouter:
+      apiKeyCard(
         title: "OpenRouter",
         systemImage: "network",
         tint: .green,
@@ -3437,35 +3588,16 @@ struct SettingsView: View {
         link: nil,
         linkLabel: nil
       )
-
-      // Transcription Providers (Dynamic) — ElevenLabs excluded; it shares the TTS card below
-      ForEach(transcriptionProviders.filter { $0.id != "elevenlabs" }) { provider in
-        providerAPIKeyCard(for: provider)
-          .id("transcription-\(provider.id)")
-      }
-
-      // TTS Providers
-      ForEach([TTSProvider.elevenlabs, .openai, .azure, .deepgram]) { provider in
-        ttsProviderAPIKeyCard(for: provider)
-          .id("tts-\(provider.id)")
-      }
+    case .transcription(let provider):
+      providerAPIKeyCard(for: provider)
+    case .textToSpeech(let provider):
+      ttsProviderAPIKeyCard(for: provider)
     }
-    .onAppear {
-        if let target = environment.apiKeysScrollTarget {
-          DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            withAnimation { proxy.scrollTo(target, anchor: .top) }
-            environment.apiKeysScrollTarget = nil
-          }
-        }
-      }
-      .onChange(of: environment.apiKeysScrollTarget) { _, newValue in
-        guard let target = newValue else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-          withAnimation { proxy.scrollTo(target, anchor: .top) }
-          environment.apiKeysScrollTarget = nil
-        }
-      }
-    }
+  }
+
+  private func revealAPIKeyTarget() {
+    apiKeySearchText = ""
+    apiKeyStatusFilter = .all
   }
 
   private func providerAPIKeyCard(for provider: TranscriptionProviderMetadata) -> some View {
@@ -4824,6 +4956,7 @@ private struct SettingsInlineInfo: View {
 }
 
 private struct SettingsCard<Content: View>: View {
+  @Environment(\.appVisualDensity) private var density
   let title: String
   let systemImage: String
   let tint: Color
@@ -4837,7 +4970,7 @@ private struct SettingsCard<Content: View>: View {
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 18) {
+    VStack(alignment: .leading, spacing: density.cardContentSpacing) {
       HStack(spacing: 14) {
         ZStack {
           RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -4856,7 +4989,7 @@ private struct SettingsCard<Content: View>: View {
 
       content
     }
-    .padding(24)
+    .padding(density.cardPadding)
     .frame(maxWidth: .infinity, alignment: .leading)
     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
     .overlay(

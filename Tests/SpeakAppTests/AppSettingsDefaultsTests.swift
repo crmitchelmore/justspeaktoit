@@ -1,4 +1,5 @@
 import XCTest
+import SpeakHotKeys
 
 @testable import SpeakApp
 
@@ -95,6 +96,39 @@ final class AppSettingsDefaultsTests: XCTestCase {
     func testRecordingDefaults_selectedHotKeyIsFnKey() {
         let settings = AppSettings(defaults: defaults)
         XCTAssertEqual(settings.selectedHotKey, .fnKey)
+    }
+
+    @MainActor
+    func testStoredHotKey_unsupportedOrdinarySingleKeyFallsBackToFn() throws {
+        let unsupported = HotKey.custom(keyCode: 0, modifiers: [])
+        defaults.set(try JSONEncoder().encode(unsupported), forKey: "selectedHotKey")
+
+        let settings = AppSettings(defaults: defaults)
+
+        XCTAssertEqual(settings.selectedHotKey, .fnKey)
+    }
+
+    func testTextOutputAvailability_appStoreOnlyOffersClipboard() {
+        XCTAssertEqual(AppSettings.availableTextOutputMethods(for: .appStore), [.clipboardOnly])
+        XCTAssertEqual(
+            AppSettings.normalizedTextOutputMethod(.accessibilityOnly, for: .appStore),
+            .clipboardOnly
+        )
+        XCTAssertEqual(
+            AppSettings.normalizedTextOutputMethod(.smart, for: .appStore),
+            .clipboardOnly
+        )
+    }
+
+    func testTextOutputAvailability_directKeepsAccessibilityOptions() {
+        XCTAssertEqual(
+            AppSettings.availableTextOutputMethods(for: .direct),
+            AppSettings.TextOutputMethod.allCases
+        )
+        XCTAssertEqual(
+            AppSettings.normalizedTextOutputMethod(.accessibilityOnly, for: .direct),
+            .accessibilityOnly
+        )
     }
 
     // MARK: - Speed Mode Settings

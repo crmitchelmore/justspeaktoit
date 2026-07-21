@@ -129,6 +129,13 @@ struct ShortcutsSettingsView: View {
         }
         .padding(.vertical, 4)
         .opacity(binding.isEnabled ? 1.0 : 0.6)
+
+        if isRecording, let recordingError = shortcutManager.recordingError {
+            Label(recordingError, systemImage: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundStyle(.red)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
 

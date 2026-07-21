@@ -27,6 +27,10 @@ public final class HotKeyStore: ObservableObject {
     else {
       return .fnKey
     }
+    guard decoded.isSupportedForGlobalMonitoring else {
+      log.error("Discarding unsupported stored hotkey: \(decoded.displayString)")
+      return .fnKey
+    }
     log.debug("Loaded hotkey: \(decoded.displayString)")
     return decoded
   }

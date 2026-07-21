@@ -17,6 +17,7 @@ final class DistributionChannelTests: XCTestCase {
         XCTAssertTrue(channel.supportsSelfUpdate)
         XCTAssertTrue(channel.supportsLocalModelRuntime)
         XCTAssertTrue(channel.supportsAutomaticAccessibilityPrompt)
+        XCTAssertTrue(channel.supportsAccessibilityTextInsertion)
         XCTAssertTrue(channel.allowsCrossChannelMessaging)
         XCTAssertFalse(channel.isSandboxed)
     }
@@ -32,6 +33,8 @@ final class DistributionChannelTests: XCTestCase {
             "Downloaded local-model runtimes cannot run in the App Store sandbox")
         XCTAssertFalse(channel.supportsAutomaticAccessibilityPrompt,
             "Sandboxed apps cannot auto-prompt for Accessibility/Input Monitoring")
+        XCTAssertFalse(channel.supportsAccessibilityTextInsertion,
+            "The App Store sandbox blocks AXUIElement access to other apps")
         XCTAssertFalse(channel.allowsCrossChannelMessaging,
             "App Store builds must not advertise other distribution channels")
         XCTAssertTrue(channel.isSandboxed)
@@ -44,6 +47,8 @@ final class DistributionChannelTests: XCTestCase {
             XCTAssertEqual(channel.supports(.localModelRuntime), channel.supportsLocalModelRuntime)
             XCTAssertEqual(channel.supports(.automaticAccessibilityPrompt),
                            channel.supportsAutomaticAccessibilityPrompt)
+            XCTAssertEqual(channel.supports(.accessibilityTextInsertion),
+                           channel.supportsAccessibilityTextInsertion)
             XCTAssertEqual(channel.supports(.crossChannelMessaging),
                            channel.allowsCrossChannelMessaging)
         }

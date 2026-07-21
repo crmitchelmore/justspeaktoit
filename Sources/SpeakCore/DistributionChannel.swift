@@ -60,6 +60,9 @@ public enum ChannelFeature: String, Sendable, CaseIterable {
     /// user must add the app manually in System Settings. Input Monitoring is unaffected — it
     /// still prompts via `CGRequestListenEventAccess` even when sandboxed.
     case automaticAccessibilityPrompt
+    /// Cross-app text insertion via AXUIElement. The App Store sandbox blocks
+    /// reading and mutating another app's accessibility hierarchy.
+    case accessibilityTextInsertion
     /// Freedom to reference other distribution channels or external purchases in UI copy.
     /// App Store review guidelines discourage this, so App Store builds must not.
     case crossChannelMessaging
@@ -74,7 +77,8 @@ public extension DistributionChannel {
     /// Whether `feature` is available in this build.
     func supports(_ feature: ChannelFeature) -> Bool {
         switch feature {
-        case .selfUpdate, .localModelRuntime, .automaticAccessibilityPrompt, .crossChannelMessaging:
+        case .selfUpdate, .localModelRuntime, .automaticAccessibilityPrompt,
+             .accessibilityTextInsertion, .crossChannelMessaging:
             return self == .direct
         case .iCloudSync, .localNetworkTransport:
             // Sync transports are compiled into every build; runtime entitlement,
@@ -93,6 +97,9 @@ public extension DistributionChannel {
     /// Whether the app can auto-prompt for Accessibility.
     /// When `false` (App Store), guide the user to add the app manually instead.
     var supportsAutomaticAccessibilityPrompt: Bool { supports(.automaticAccessibilityPrompt) }
+
+    /// Whether this build may insert text directly into another app via AXUIElement.
+    var supportsAccessibilityTextInsertion: Bool { supports(.accessibilityTextInsertion) }
 
     /// Whether UI copy may reference other distribution channels (e.g. the direct
     /// download). `false` for App Store builds to stay within review guidelines.

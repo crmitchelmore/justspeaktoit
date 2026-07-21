@@ -110,6 +110,18 @@ public enum KeyCodeMapping {
     105, 106, 107, 113,  // F13-F16
     114  // Insert/Help
   ]
+
+  /// Whether a custom hotkey can be registered safely system-wide.
+  ///
+  /// Ordinary unmodified keys are deliberately rejected because registering one
+  /// globally would steal normal typing. Dedicated extended keys remain useful
+  /// as single-key triggers and are explicitly allow-listed above.
+  public static func isSupportedCustomHotKey(keyCode: UInt16, hasModifiers: Bool) -> Bool {
+    hasModifiers || singleKeyHotKeyCodes.contains(keyCode)
+  }
+
+  public static let unsupportedSingleKeyMessage =
+    "Use Command, Option, Shift, or Control with this key. F13-F20 and Insert can be used alone."
 }
 
 #endif

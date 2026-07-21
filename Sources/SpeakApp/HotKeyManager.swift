@@ -78,7 +78,7 @@ final class HotKeyManager: ObservableObject {
 
 		Task { [weak self] in
 			guard let self else { return }
-			for permission in [PermissionType.accessibility, .inputMonitoring] {
+			for permission in [PermissionType.inputMonitoring] {
 				let status = await MainActor.run { self.permissionsManager.status(for: permission) }
 				if !status.isGranted {
 					_ = await self.permissionsManager.request(permission)

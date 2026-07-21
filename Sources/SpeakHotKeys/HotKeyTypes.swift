@@ -69,6 +69,19 @@ public enum HotKey: Codable, Hashable, Sendable {
     if case .fnKey = self { return true }
     return false
   }
+
+  /// Whether this binding is safe and supported for system-wide monitoring.
+  public var isSupportedForGlobalMonitoring: Bool {
+    switch self {
+    case .fnKey:
+      return true
+    case .custom(let keyCode, let modifiers):
+      return KeyCodeMapping.isSupportedCustomHotKey(
+        keyCode: keyCode,
+        hasModifiers: !modifiers.isEmpty
+      )
+    }
+  }
 }
 
 /// Gesture types emitted by the hotkey engine.

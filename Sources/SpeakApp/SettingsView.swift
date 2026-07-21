@@ -145,8 +145,22 @@ struct SettingsView: View {
 
   }
 
+  private enum LocalTranscriptionSource: String, CaseIterable, Identifiable {
+    case apple
+    case downloaded
+
+    var id: String { rawValue }
+
+    var displayName: String {
+      switch self {
+      case .apple: return "Apple Speech"
+      case .downloaded: return "Downloaded Model"
+      }
+    }
+  }
+
   private let orderedLocalTranscriptionModes: [AppSettings.LocalTranscriptionMode] = {
-    DistributionChannel.current.supportsLocalModelRuntime ? [.streaming, .batch] : [.batch]
+    DistributionChannel.current.supportsExternalLocalModelRuntime ? [.streaming, .batch] : [.batch]
   }()
   private let orderedRemoteTranscriptionModes: [RemoteTranscriptionMode] = [.streaming, .batch]
 
@@ -386,15 +400,33 @@ struct SettingsView: View {
   private var transcriptionLocationBinding: Binding<TranscriptionLocation> {
     Binding(
       get: {
-        settings.transcriptionMode == .localModel ? .local : .remote
+        isLocalTranscriptionSelected ? .local : .remote
       },
       set: { location in
         switch location {
         case .remote:
-          if settings.transcriptionMode == .localModel {
-            settings.transcriptionMode = .liveNative
+          if isLocalTranscriptionSelected {
+            settings.liveTranscriptionModel = ModelCatalog.defaultRemoteLiveTranscriptionModel
+              ?? settings.liveTranscriptionModel
           }
+          settings.transcriptionMode = .liveNative
         case .local:
+          settings.liveTranscriptionModel = ModelCatalog.defaultOnDeviceLiveTranscriptionModel
+          settings.transcriptionMode = .liveNative
+        }
+      }
+    )
+  }
+
+  private var localTranscriptionSourceBinding: Binding<LocalTranscriptionSource> {
+    Binding(
+      get: { isAppleOnDeviceTranscriptionSelected ? .apple : .downloaded },
+      set: { source in
+        switch source {
+        case .apple:
+          settings.liveTranscriptionModel = ModelCatalog.defaultOnDeviceLiveTranscriptionModel
+          settings.transcriptionMode = .liveNative
+        case .downloaded:
           settings.transcriptionMode = .localModel
         }
       }
@@ -407,7 +439,15 @@ struct SettingsView: View {
         settings.transcriptionMode == .batchRemote ? .batch : .streaming
       },
       set: { mode in
-        settings.transcriptionMode = mode == .streaming ? .liveNative : .batchRemote
+        if mode == .streaming {
+          if ModelCatalog.isOnDeviceLiveTranscriptionModel(settings.liveTranscriptionModel) {
+            settings.liveTranscriptionModel = ModelCatalog.defaultRemoteLiveTranscriptionModel
+              ?? settings.liveTranscriptionModel
+          }
+          settings.transcriptionMode = .liveNative
+        } else {
+          settings.transcriptionMode = .batchRemote
+        }
       }
     )
   }
@@ -421,6 +461,19 @@ struct SettingsView: View {
   private var isStreamingTranscriptionSelected: Bool {
     settings.transcriptionMode == .liveNative
       || (settings.transcriptionMode == .localModel && settings.localTranscriptionMode == .streaming)
+  }
+
+  private var isAppleOnDeviceTranscriptionSelected: Bool {
+    settings.transcriptionMode == .liveNative
+      && ModelCatalog.isOnDeviceLiveTranscriptionModel(settings.liveTranscriptionModel)
+  }
+
+  private var isLocalTranscriptionSelected: Bool {
+    settings.transcriptionMode == .localModel || isAppleOnDeviceTranscriptionSelected
+  }
+
+  private var isRemoteStreamingTranscriptionSelected: Bool {
+    settings.transcriptionMode == .liveNative && !isAppleOnDeviceTranscriptionSelected
   }
 
   private var cloudPostProcessingModelBinding: Binding<String> {
@@ -1128,20 +1181,36 @@ struct SettingsView: View {
           .speakTooltip("Choose whether Speak transcribes locally on this Mac or remotely with a provider.")
           .accessibilityLabel("Transcription location picker")
 
-          if settings.transcriptionMode == .localModel {
-            if DistributionChannel.current.supportsLocalModelRuntime {
-              Picker("Local transcription type", selection: settingsBinding(\AppSettings.localTranscriptionMode)) {
-                ForEach(orderedLocalTranscriptionModes) { mode in
-                  Text(transcriptionModeSegmentLabel(from: mode.displayName)).tag(mode)
-                }
+          if isLocalTranscriptionSelected {
+            Picker("Local transcription source", selection: localTranscriptionSourceBinding) {
+              ForEach(LocalTranscriptionSource.allCases) { source in
+                Text(source.displayName).tag(source)
               }
-              .modifier(TranscriptionModeSegmentedPickerStyle())
-              .speakTooltip(
-                "Choose Local Batch for offline transcription after recording, or Local Streaming for live local text."
-              )
-              .accessibilityLabel("Local transcription type picker")
-            } else {
-              localRuntimeUnavailableNote
+            }
+            .modifier(TranscriptionModeSegmentedPickerStyle())
+            .speakTooltip("Choose built-in Apple Speech or a downloaded Core ML model.")
+            .accessibilityLabel("Local transcription source picker")
+
+            if settings.transcriptionMode == .localModel {
+              if DistributionChannel.current.supportsExternalLocalModelRuntime {
+                Picker(
+                  "Downloaded transcription type",
+                  selection: settingsBinding(\AppSettings.localTranscriptionMode)
+                ) {
+                  ForEach(orderedLocalTranscriptionModes) { mode in
+                    Text(transcriptionModeSegmentLabel(from: mode.displayName)).tag(mode)
+                  }
+                }
+                .modifier(TranscriptionModeSegmentedPickerStyle())
+                .speakTooltip(
+                  "Choose Batch for WhisperKit/Core ML, or Streaming for a direct-build external ASR runtime."
+                )
+                .accessibilityLabel("Downloaded transcription type picker")
+              } else {
+                Text("Downloaded WhisperKit/Core ML models run in-process as Local Batch transcription.")
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+              }
             }
           } else {
             Picker("Remote transcription type", selection: remoteTranscriptionModeBinding) {
@@ -1175,7 +1244,7 @@ struct SettingsView: View {
       }
       .speakTooltip("Choose which transcription flow Speak uses and the locale it should prefer.")
 
-      if settings.transcriptionMode == .liveNative {
+      if isRemoteStreamingTranscriptionSelected {
         SettingsCard(
           title: "Processing Speed",
           systemImage: "gauge.with.dots.needle.67percent",
@@ -1367,7 +1436,7 @@ struct SettingsView: View {
         .speakTooltip("Configure automatic recording stop based on silence detection.")
       }
 
-      if settings.transcriptionMode == .liveNative {
+      if isRemoteStreamingTranscriptionSelected {
         SettingsCard(title: "Remote Streaming model", systemImage: "mic.fill", tint: Color.brandAccentDeep) {
           VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
@@ -1391,10 +1460,10 @@ struct SettingsView: View {
             ModelPicker(
               title: "Remote Streaming Model",
               help: "Choose the remote provider model used while recording.",
-              options: ModelCatalog.liveTranscription,
+              options: ModelCatalog.remoteLiveTranscription,
               value: remoteTranscriptionModelBinding(
                 \AppSettings.liveTranscriptionModel,
-                options: ModelCatalog.liveTranscription
+                options: ModelCatalog.remoteLiveTranscription
               )
             )
           }
@@ -1464,6 +1533,31 @@ struct SettingsView: View {
         .speakTooltip("Tell Speak which cloud transcription model should polish the full recording.")
       }
 
+      if isAppleOnDeviceTranscriptionSelected {
+        SettingsCard(
+          title: "Apple on-device transcription",
+          systemImage: "apple.logo",
+          tint: Color.green
+        ) {
+          VStack(alignment: .leading, spacing: 12) {
+            Text("Uses Apple's built-in speech engine. Audio stays on this device.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+            ModelPicker(
+              title: "Apple Model",
+              help: "Choose the Apple on-device engine used while recording.",
+              options: ModelCatalog.onDeviceLiveTranscription,
+              value: remoteTranscriptionModelBinding(
+                \AppSettings.liveTranscriptionModel,
+                options: ModelCatalog.onDeviceLiveTranscription
+              ),
+              allowsCustom: false
+            )
+          }
+        }
+        .speakTooltip("Choose an on-device Apple transcription engine.")
+      }
+
       if settings.transcriptionMode == .localModel {
         SettingsCard(
           title: "Local transcription models",
@@ -1494,14 +1588,14 @@ struct SettingsView: View {
               {
                 #if APP_STORE
                 return """
-                Local transcription is separate from Apple Speech and cloud providers. \
-                Local Batch uses downloaded WhisperKit/Core ML models and stays local-only.
+                Downloaded transcription is separate from Apple Speech and cloud providers. \
+                WhisperKit/Core ML model data runs in-process and is supported in this App Store build.
                 """
                 #else
                 return """
-                Local Batch and Local Streaming are separate from Apple Speech and cloud providers. \
-                Both stay local-only; Local Batch uses downloaded WhisperKit/Core ML models, while \
-                Local Streaming needs a dedicated streaming ASR runtime.
+                Downloaded transcription is separate from Apple Speech and cloud providers. \
+                Local Batch uses in-process WhisperKit/Core ML model data. Local Streaming installs \
+                a dedicated external ASR runtime and is available only in the direct-download build.
                 """
                 #endif
               }()
@@ -1509,7 +1603,7 @@ struct SettingsView: View {
             .font(.caption)
             .foregroundStyle(.secondary)
 
-            if !DistributionChannel.current.supportsLocalModelRuntime {
+            if !DistributionChannel.current.supportsExternalLocalModelRuntime {
               localRuntimeUnavailableNote
             }
 
@@ -3041,7 +3135,7 @@ struct SettingsView: View {
       .foregroundStyle(.secondary)
       #endif
 
-      if !DistributionChannel.current.supportsLocalModelRuntime {
+      if !DistributionChannel.current.supportsExternalLocalModelRuntime {
         localRuntimeUnavailableNote
       }
 
@@ -3406,7 +3500,11 @@ struct SettingsView: View {
   private var apiKeySettings: some View {
     ScrollViewReader { proxy in
       LazyVStack(spacing: 20) {
-        CloudKitKeySyncSettingsCard(secureStorage: environment.secureStorage)
+        if DistributionChannel.current.supportsEncryptedCloudKitKeySync {
+          CloudKitKeySyncSettingsCard(secureStorage: environment.secureStorage)
+        } else {
+          LocalKeychainStorageCard()
+        }
 
         // OpenRouter (Legacy)
         apiKeyCard(
@@ -3789,6 +3887,23 @@ struct SettingsView: View {
         let coreStorage = await secureStorage.coreStorage()
         await keySync.configure(secureStorage: coreStorage)
         _ = await keySync.isAvailable()
+      }
+    }
+  }
+
+  private struct LocalKeychainStorageCard: View {
+    var body: some View {
+      SettingsCard(title: "Local Keychain Storage", systemImage: "key.fill", tint: .brandLagoon) {
+        VStack(alignment: .leading, spacing: 8) {
+          Label("Stored locally on this Mac", systemImage: "checkmark.seal.fill")
+            .foregroundStyle(.green)
+          Text(
+            "API keys stay in the macOS Keychain for this direct-download build. "
+              + "Encrypted CloudKit API-key sync is available only in App Store builds."
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        }
       }
     }
   }

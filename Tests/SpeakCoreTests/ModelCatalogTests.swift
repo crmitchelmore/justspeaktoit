@@ -126,6 +126,26 @@ final class ModelCatalogTests: XCTestCase {
         XCTAssertEqual(ModelRouting.family(for: "local/whisperkit/tiny"), .downloadedLocal(engine: "whisperkit"))
     }
 
+    func testLiveTranscriptionPlacement_keepsAppleModelsOnlyOnDevice() {
+        let onDeviceIDs = Set(ModelCatalog.onDeviceLiveTranscription.map(\.id))
+        let remoteIDs = Set(ModelCatalog.remoteLiveTranscription.map(\.id))
+
+        XCTAssertTrue(onDeviceIDs.contains("apple/local/SFSpeechRecognizer"))
+        XCTAssertTrue(onDeviceIDs.contains("apple/local/Dictation"))
+        XCTAssertTrue(onDeviceIDs.allSatisfy(ModelCatalog.isOnDeviceLiveTranscriptionModel))
+        XCTAssertTrue(remoteIDs.allSatisfy { !ModelCatalog.isOnDeviceLiveTranscriptionModel($0) })
+        XCTAssertTrue(onDeviceIDs.isDisjoint(with: remoteIDs))
+        XCTAssertEqual(onDeviceIDs.union(remoteIDs), Set(ModelCatalog.liveTranscription.map(\.id)))
+    }
+
+    func testLiveTranscriptionPlacement_defaultsMatchTheirLocation() throws {
+        XCTAssertTrue(ModelCatalog.isOnDeviceLiveTranscriptionModel(
+            ModelCatalog.defaultOnDeviceLiveTranscriptionModel
+        ))
+        let remoteDefault = try XCTUnwrap(ModelCatalog.defaultRemoteLiveTranscriptionModel)
+        XCTAssertFalse(ModelCatalog.isOnDeviceLiveTranscriptionModel(remoteDefault))
+    }
+
     func testModelRouting_treatsLocalCleanupAsPostProcessing() {
         XCTAssertEqual(
             ModelRouting.family(for: "local/post-processing/rules"),

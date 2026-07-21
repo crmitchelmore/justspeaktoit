@@ -105,7 +105,27 @@
       transition: color .18s ease;
     }
     .nav__links a:hover { color: #fff; }
-    .nav__download { justify-self: end; }
+    .nav__actions {
+      display: flex;
+      align-items: center;
+      justify-self: end;
+      gap: .65rem;
+    }
+    .github-link {
+      display: inline-flex;
+      min-height: 44px;
+      align-items: center;
+      gap: .5rem;
+      padding: .65rem .75rem;
+      border-radius: 8px;
+      color: #d8dade;
+      font-size: .88rem;
+      font-weight: 600;
+      text-decoration: none;
+      transition: color .18s ease, background-color .18s ease;
+    }
+    .github-link:hover { color: #fff; background: rgba(255,255,255,.08); }
+    .github-link svg { width: 21px; height: 21px; fill: currentColor; }
 
     .button {
       display: inline-flex;
@@ -200,122 +220,38 @@
     }
     @keyframes breathe { to { transform: scaleY(.55); opacity: .62; } }
 
-    .mac-window {
+    .product-shot {
+      margin: 0;
       position: absolute;
-      z-index: 2;
-      top: 24px;
-      left: 0;
-      right: 90px;
       overflow: hidden;
-      border: 1px solid #3e4247;
-      border-radius: 12px;
-      background: #151719;
+      background: #111315;
       box-shadow: 0 38px 90px rgba(0,0,0,.52);
     }
-    .window-bar {
-      height: 42px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 14px;
-      border-bottom: 1px solid #303338;
-      background: #202225;
-      font-size: .76rem;
+    .product-shot img {
+      display: block;
+      width: 100%;
+      height: auto;
     }
-    .traffic { display: flex; gap: 7px; }
-    .traffic i { width: 10px; height: 10px; border-radius: 50%; background: #ff5f57; }
-    .traffic i:nth-child(2) { background: #febc2e; }
-    .traffic i:nth-child(3) { background: #28c840; }
-    .window-title { color: #d9dbde; font-weight: 600; }
-    .window-live { color: #87d9d0; }
-    .transcript-panel { padding: 1.25rem 1.35rem 1rem; }
-    .transcript-tools {
-      display: flex;
-      align-items: center;
-      gap: .55rem;
-      color: #d9dcde;
-      font-size: .73rem;
+    .product-shot--mac {
+      z-index: 2;
+      top: 30px;
+      left: 0;
+      right: 105px;
+      border: 1px solid #3e4247;
+      border-radius: 14px;
+      transform: rotate(-.6deg);
     }
-    .select-chip {
-      padding: .35rem .55rem;
-      border: 1px solid #3d4146;
-      border-radius: 6px;
-      background: #24272a;
-    }
-    .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--teal); }
-    .live-copy {
-      min-height: 105px;
-      margin-top: 1rem;
-      padding: 1rem;
-      border: 1px solid #2d3034;
-      border-radius: 8px;
-      color: #f2f3f4;
-      background: #111315;
-      font-size: .98rem;
-      line-height: 1.42;
-    }
-    .cursor { color: var(--orange); animation: blink 1s steps(2,end) infinite; }
-    @keyframes blink { 50% { opacity: 0; } }
-    .history-label {
-      margin-top: 1rem;
-      color: #8e939a;
-      font-size: .67rem;
-      font-weight: 600;
-      letter-spacing: .08em;
-      text-transform: uppercase;
-    }
-    .history-row {
-      display: grid;
-      grid-template-columns: 1.5fr .8fr .55fr;
-      gap: .7rem;
-      align-items: center;
-      min-height: 46px;
-      border-top: 1px solid #2b2e32;
-      color: #d3d5d8;
-      font-size: .72rem;
-    }
-    .history-row__model { color: #9ba0a6; }
-    .history-row__time { text-align: right; color: #858b92; }
-
-    .phone {
-      position: absolute;
+    .product-shot--ios {
       z-index: 4;
       right: 0;
-      bottom: 0;
-      width: 214px;
-      padding: 8px;
-      border: 2px solid #7a7e83;
-      border-radius: 36px;
+      bottom: -6px;
+      width: 210px;
+      border: 5px solid #090a0b;
+      border-radius: 34px;
       background: #070809;
       box-shadow: 0 30px 70px rgba(0,0,0,.58);
+      transform: rotate(2deg);
     }
-    .phone__screen {
-      min-height: 420px;
-      padding: 14px 15px 18px;
-      border-radius: 28px;
-      background: #121416;
-      text-align: center;
-    }
-    .phone__status { display: flex; justify-content: space-between; color: #e3e4e6; font-size: .58rem; }
-    .phone__title { margin-top: 1.2rem; color: #b9bdc1; font-size: .72rem; }
-    .action-orb {
-      width: 84px;
-      height: 84px;
-      margin: 2rem auto 1.1rem;
-      display: grid;
-      place-items: center;
-      border: 3px solid #fd9d7f;
-      border-radius: 50%;
-      background: var(--orange);
-      box-shadow: 0 0 0 8px rgba(255,107,61,.12);
-    }
-    .orb-bars { display: flex; align-items: center; gap: 3px; height: 36px; }
-    .orb-bars i { width: 3px; height: var(--h); border-radius: 3px; background: #fff; }
-    .phone__state { font-family: var(--display); font-size: 1rem; font-weight: 700; }
-    .phone__timer { color: var(--orange); font-variant-numeric: tabular-nums; }
-    .phone__text { margin-top: 1.4rem; color: #aeb2b7; font-size: .68rem; line-height: 1.45; }
-    .phone__model { margin-top: 1rem; color: #78d4ca; font-size: .62rem; }
-    .phone__stop { margin-top: 1.3rem; padding: .62rem; border-radius: 7px; background: #24272b; font-size: .69rem; }
 
     .section { border-bottom: 1px solid var(--rule); }
     .models { padding-block: clamp(4.5rem, 8vw, 7.5rem); }
@@ -610,12 +546,9 @@
       .hero h1 { font-size: clamp(3.4rem, 15.5vw, 5rem); white-space: normal; }
       .hero__lede { font-size: 1rem; }
       .product-stage { min-height: 530px; margin-top: 2rem; }
-      .mac-window { right: 0; }
-      .history-row { grid-template-columns: 1.35fr .8fr; }
-      .history-row__time { display: none; }
-      .phone { width: 175px; }
-      .phone__screen { min-height: 350px; }
-      .action-orb { width: 67px; height: 67px; }
+      .product-shot--mac { right: 0; }
+      .product-shot--ios { width: 170px; }
+      .github-link span { display: none; }
       .model-rails, .steps { grid-template-columns: 1fr; }
       .model-rail { padding: 2rem 0; }
       .model-rail + .model-rail { border-top: 1px solid var(--rule); border-left: 0; }
@@ -655,7 +588,13 @@
       <nav class="nav__links" aria-label="Primary navigation">
         <a href="#models">Models</a><a href="#workflow">How it works</a><a href="#apps">Apps</a><a href="#creator">Creator</a>
       </nav>
-      <a class="button button--orange nav__download" href="https://github.com/crmitchelmore/justspeaktoit/releases/latest">Download for Mac</a>
+      <div class="nav__actions">
+        <a class="github-link" href="https://github.com/crmitchelmore/justspeaktoit" aria-label="View Just Speak to It on GitHub">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .7C5.6.7.4 5.9.4 12.3c0 5.1 3.3 9.4 7.8 10.9.6.1.8-.3.8-.6v-2.2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.7 1.3 3.3 1 .1-.8.4-1.3.8-1.6-2.5-.3-5.2-1.3-5.2-5.7 0-1.3.4-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.2 1.2a11 11 0 0 1 5.8 0c2.2-1.5 3.2-1.2 3.2-1.2.6 1.6.2 2.8.1 3.1.8.9 1.2 1.9 1.2 3.1 0 4.4-2.7 5.4-5.2 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6a11.6 11.6 0 0 0 7.8-10.9C23.6 5.9 18.4.7 12 .7Z"/></svg>
+          <span>GitHub</span>
+        </a>
+        <a class="button button--orange nav__download" href="https://github.com/crmitchelmore/justspeaktoit/releases/latest">Download for Mac</a>
+      </div>
     </div>
   </header>
 
@@ -671,34 +610,16 @@
           </div>
         </div>
 
-        <div class="product-stage" aria-label="Just Speak to It on Mac and iPhone">
+        <div class="product-stage" aria-label="Real screenshots of Just Speak to It on Mac and iPhone">
           <div class="stage-wave" aria-hidden="true">
             <i style="--h:16%;--d:-.2s"></i><i style="--h:28%;--d:-1.1s"></i><i style="--h:52%;--d:-.7s"></i><i style="--h:77%;--d:-1.7s"></i><i style="--h:42%;--d:-.5s"></i><i style="--h:85%;--d:-1.3s"></i><i style="--h:38%;--d:-.9s"></i><i style="--h:64%;--d:-.1s"></i><i style="--h:32%;--d:-1.5s"></i><i style="--h:72%;--d:-.8s"></i><i style="--h:44%;--d:-1.8s"></i><i style="--h:88%;--d:-.4s"></i><i style="--h:56%;--d:-1.2s;--c:#ee7b4f"></i><i style="--h:35%;--d:-.6s;--c:#d98e61"></i><i style="--h:60%;--d:-1.6s;--c:#c29e73"></i><i style="--h:29%;--d:-.3s;--c:#a6ac82"></i><i style="--h:70%;--d:-1s;--c:#80b991"></i><i style="--h:41%;--d:-1.9s;--c:#59bf9d"></i><i style="--h:80%;--d:-.5s;--c:#37b3a2"></i><i style="--h:48%;--d:-1.4s;--c:#159c95"></i><i style="--h:65%;--d:-.8s;--c:#159c95"></i><i style="--h:33%;--d:-.2s;--c:#159c95"></i>
           </div>
-          <div class="mac-window" aria-hidden="true">
-            <div class="window-bar">
-              <span class="traffic" aria-hidden="true"><i></i><i></i><i></i></span>
-              <span class="window-title">Just Speak to It</span><span class="window-live">● Connected</span>
-            </div>
-            <div class="transcript-panel">
-              <div class="transcript-tools"><span class="select-chip">Live</span><span class="select-chip">Deepgram Nova-3</span><span class="live-dot"></span><span>00:00:27</span></div>
-              <div class="live-copy">Building great tools is about removing friction. The more natural the interface, the more human the result.<span class="cursor">|</span></div>
-              <div class="history-label">Recent history</div>
-              <div class="history-row"><span>Q3 product strategy notes</span><span class="history-row__model">Deepgram Nova-3</span><span class="history-row__time">Today, 14:42</span></div>
-              <div class="history-row"><span>Interview with Alex</span><span class="history-row__model">WhisperKit local</span><span class="history-row__time">Today, 09:18</span></div>
-              <div class="history-row"><span>Design review — mobile</span><span class="history-row__model">AssemblyAI U3 Pro</span><span class="history-row__time">Yesterday</span></div>
-              <div class="history-row"><span>Weekly engineering sync</span><span class="history-row__model">GPT-4o Transcribe</span><span class="history-row__time">Yesterday</span></div>
-            </div>
-          </div>
-          <div class="phone" aria-hidden="true">
-            <div class="phone__screen">
-              <div class="phone__status"><span>9:41</span><span>● ●●</span></div><div class="phone__title">Action Button</div>
-              <div class="action-orb"><span class="orb-bars"><i style="--h:14px"></i><i style="--h:28px"></i><i style="--h:21px"></i><i style="--h:34px"></i><i style="--h:17px"></i></span></div>
-              <div class="phone__state">Recording…</div><div class="phone__timer">00:00:27</div>
-              <div class="phone__text">Gathering thoughts and turning them into clear, useful notes without breaking flow.</div>
-              <div class="phone__model">● Live · Deepgram Nova-3</div><div class="phone__stop">■ &nbsp; Stop</div>
-            </div>
-          </div>
+          <figure class="product-shot product-shot--mac">
+            <img src="/images/mac-dashboard.png" width="1200" height="800" alt="Just Speak to It Mac dashboard showing real recording usage and permissions" fetchpriority="high" decoding="async">
+          </figure>
+          <figure class="product-shot product-shot--ios">
+            <img src="/images/ios-history.png" width="660" height="1434" alt="Just Speak to It iPhone history showing real transcription sessions" fetchpriority="high" decoding="async">
+          </figure>
         </div>
       </div>
     </section>

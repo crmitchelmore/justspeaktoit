@@ -259,7 +259,7 @@ final class OnboardingState: ObservableObject {
         // on-device speech) so re-running onboarding never clobbers a returning
         // user's deliberately configured model / batch / post-processing setup.
         if let liveModel = selectedProvider.defaultLiveTranscriptionModel,
-           settings.liveTranscriptionModel == "apple/local/SFSpeechRecognizer" {
+           AppleLocalModels.isAppleSpeechModel(settings.liveTranscriptionModel) {
             settings.transcriptionMode = .liveNative
             settings.liveTranscriptionModel = liveModel
             settings.postProcessingEnabled = false

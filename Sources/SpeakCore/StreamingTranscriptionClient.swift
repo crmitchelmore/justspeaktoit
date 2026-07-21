@@ -164,6 +164,21 @@ public enum LiveTranscriptionRouting {
         ModelCatalog.liveTranscription.compactMap { route(for: $0.id) }
     }
 
+    /// Resolves the model that can actually start with the supplied credential.
+    /// On-device routes never need a credential. A cloud route with a missing
+    /// or blank API key falls back to the shared on-device default so every
+    /// platform applies the same safe startup behavior.
+    public static func resolvedModelID(for modelID: String, apiKey: String?) -> String {
+        guard let route = route(for: modelID) else {
+            return modelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        guard route.apiKeyIdentifier != nil else { return route.modelID }
+        guard !(apiKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return ModelCatalog.defaultOnDeviceLiveTranscriptionModel
+        }
+        return route.modelID
+    }
+
     /// Translates a catalog id into the provider's own API model name.
     ///
     /// The general rule strips the `provider/` prefix and the `-streaming`

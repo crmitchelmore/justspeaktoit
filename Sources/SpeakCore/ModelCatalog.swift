@@ -115,11 +115,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
 
     public static let customOptionID = "__model_custom__"
 
-    public static let liveTranscription: [Option] = [
-        Option(
-            id: "apple/local/SFSpeechRecognizer", displayName: "Apple Speech (On-device)",
-            description: "Uses the built-in Speech framework for immediate on-device transcripts.",
-            estimatedLatencyMs: 50, latencyTier: .instant),
+    public static let liveTranscription: [Option] = appleLiveTranscriptionOptions + [
         Option(
             id: "apple/local/Dictation", displayName: "Apple Dictation",
             description: "Alternative on-device engine that mirrors system dictation.",
@@ -194,7 +190,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             estimatedLatencyMs: 280, latencyTier: .fast)
     ]
 
-    public static let batchTranscription: [Option] = [
+    public static let batchTranscription: [Option] = appleBatchTranscriptionOptions + [
         // Dedicated transcription providers (OpenAI, Rev.ai, etc.)
         Option(
             id: "openai/whisper-1", displayName: "Whisper (OpenAI)",
@@ -282,6 +278,39 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
 
     public static let defaultBatchTranscriptionModel = "google/gemini-2.0-flash-001"
 
+    private static let appleLiveTranscriptionOptions: [Option] = {
+        if AppleLocalModels.supportsSpeechTranscriber {
+            return [Option(
+                id: AppleLocalModels.speechTranscriberModelID,
+                displayName: "Apple SpeechTranscriber (On-device)",
+                description: "Apple's latest private on-device model for fast, accurate live transcription.",
+                estimatedLatencyMs: 50,
+                latencyTier: .instant,
+                tags: [.fast, .privacy]
+            )]
+        }
+        return [Option(
+            id: AppleLocalModels.legacySpeechModelID,
+            displayName: "Apple Speech (On-device)",
+            description: "Uses the built-in Speech framework for immediate on-device transcripts.",
+            estimatedLatencyMs: 50,
+            latencyTier: .instant,
+            tags: [.fast, .privacy]
+        )]
+    }()
+
+    private static let appleBatchTranscriptionOptions: [Option] = {
+        guard AppleLocalModels.supportsSpeechTranscriber else { return [] }
+        return [Option(
+            id: AppleLocalModels.speechTranscriberModelID,
+            displayName: "Apple SpeechTranscriber (On-device)",
+            description: "Transcribes recorded audio locally with Apple's latest long-form speech model.",
+            estimatedLatencyMs: 250,
+            latencyTier: .instant,
+            tags: [.fast, .privacy]
+        )]
+    }()
+
     private static let retiredBatchTranscriptionModels: Set<String> = [
         "openrouter/whisper-large-v3",
         "openrouter/whisper-medium",
@@ -292,6 +321,10 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
     /// Unknown identifiers remain valid because the Mac supports custom OpenRouter batch models.
     public static func normalizedBatchTranscriptionModel(_ identifier: String?) -> String {
         let trimmed = identifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if trimmed == AppleLocalModels.speechTranscriberModelID,
+           !AppleLocalModels.supportsSpeechTranscriber {
+            return defaultBatchTranscriptionModel
+        }
         guard !trimmed.isEmpty, !retiredBatchTranscriptionModels.contains(trimmed) else {
             return defaultBatchTranscriptionModel
         }
@@ -300,7 +333,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
 
     // Curated, static set for transcript cleanup (OpenRouter) with pricing + tags.
     // Pricing is based on OpenRouter's /api/v1/models at time of writing.
-    public static let postProcessing: [Option] = [
+    public static let postProcessing: [Option] = applePostProcessingOptions + [
         Option(
             id: "local/post-processing/rules",
             displayName: "Local Cleanup (Offline)",
@@ -552,7 +585,27 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
     /// Cloud cleanup choices supported on every platform. Platform-specific
     /// local cleanup engines remain in `postProcessing` for macOS.
     public static let cloudPostProcessing: [Option] = postProcessing.filter {
-        !$0.id.hasPrefix("local/post-processing/")
+        !$0.id.hasPrefix("local/post-processing/") && $0.id != AppleLocalModels.foundationModelID
+    }
+
+    private static let applePostProcessingOptions: [Option] = {
+        guard AppleLocalModels.supportsFoundationModels else { return [] }
+        return [Option(
+            id: AppleLocalModels.foundationModelID,
+            displayName: "Apple Intelligence (On-device)",
+            description: "Polishes transcripts privately with Apple's built-in on-device language model.",
+            estimatedLatencyMs: 300,
+            latencyTier: .fast,
+            tags: [.fast, .privacy]
+        )]
+    }()
+
+    public static func normalizedLiveTranscriptionModel(_ identifier: String?) -> String {
+        let trimmed = identifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if AppleLocalModels.isAppleSpeechModel(trimmed) || trimmed.isEmpty {
+            return AppleLocalModels.preferredSpeechModelID
+        }
+        return trimmed
     }
 
     public static let defaultPostProcessingModel = "openai/gpt-5-mini"

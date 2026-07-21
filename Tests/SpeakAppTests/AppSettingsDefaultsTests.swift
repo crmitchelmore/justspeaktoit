@@ -1,5 +1,6 @@
 import XCTest
 import SpeakHotKeys
+import SpeakCore
 
 @testable import SpeakApp
 
@@ -172,7 +173,7 @@ final class AppSettingsDefaultsTests: XCTestCase {
     @MainActor
     func testTranscriptionDefaults_liveTranscriptionModelIsAppleLocal() {
         let settings = AppSettings(defaults: defaults)
-        XCTAssertEqual(settings.liveTranscriptionModel, "apple/local/SFSpeechRecognizer")
+        XCTAssertEqual(settings.liveTranscriptionModel, AppleLocalModels.preferredSpeechModelID)
     }
 
     // MARK: - TTS Settings

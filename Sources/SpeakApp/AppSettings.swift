@@ -805,7 +805,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       TranscriptionMode(
         rawValue: defaults.string(forKey: DefaultsKey.transcriptionMode.rawValue)
           ?? TranscriptionMode.liveNative.rawValue) ?? .liveNative
-    let liveModel = defaults.string(forKey: "liveTranscriptionModel") ?? "apple/local/SFSpeechRecognizer"
+    let liveModel = defaults.string(forKey: "liveTranscriptionModel")
+      ?? AppleLocalModels.preferredSpeechModelID
     let legacyAssemblyAILiveIDs: Set<String> = [
       "universal-streaming",
       "universal-streaming-english",
@@ -824,7 +825,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     } else {
       migratedLive = liveModel
     }
-    liveTranscriptionModel = migratedLive
+    liveTranscriptionModel = ModelCatalog.normalizedLiveTranscriptionModel(migratedLive)
     batchTranscriptionModel =
       Self.normalizedBatchModel(
         defaults.string(forKey: DefaultsKey.batchTranscriptionModel.rawValue))

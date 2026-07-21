@@ -237,10 +237,13 @@ public final class AppSettings: ObservableObject {
         """
     // swiftlint:enable line_length
 
-    public static let postProcessingModels = ModelCatalog.cloudPostProcessing
+    public static let postProcessingModels = ModelCatalog.postProcessing.filter {
+        !$0.id.hasPrefix("local/post-processing/")
+    }
 
     private init() { // swiftlint:disable:this function_body_length
-        let selectedRaw = UserDefaults.standard.string(forKey: "selectedModel") ?? "apple/local/SFSpeechRecognizer"
+        let selectedRaw = UserDefaults.standard.string(forKey: "selectedModel")
+            ?? AppleLocalModels.preferredSpeechModelID
         // Normalise to canonical catalogue ids. Keep only models that this iOS
         // target can actually run; a previously stored macOS-only model falls
         // back to Apple Speech instead of leaking into the iPhone picker.
@@ -248,7 +251,9 @@ public final class AppSettings: ObservableObject {
             (ModelCatalog.onDeviceLiveTranscription + Self.supportedLiveModels).map(\.id)
         )
         let selected: String
-        if selectableLiveIDs.contains(selectedRaw) {
+        if AppleLocalModels.isAppleSpeechModel(selectedRaw) {
+            selected = ModelCatalog.normalizedLiveTranscriptionModel(selectedRaw)
+        } else if selectableLiveIDs.contains(selectedRaw) {
             selected = selectedRaw
         } else if selectedRaw.hasPrefix("apple/") {
             selected = selectedRaw
@@ -259,7 +264,7 @@ public final class AppSettings: ObservableObject {
         } else if selectedRaw.hasPrefix("openai/") {
             selected = "openai/gpt-realtime-whisper-streaming"
         } else {
-            selected = "apple/local/SFSpeechRecognizer"
+            selected = AppleLocalModels.preferredSpeechModelID
         }
         // API keys load asynchronously from the canonical secure storage (with
         // legacy migration) in the Task below.
@@ -343,7 +348,7 @@ public final class AppSettings: ObservableObject {
             if hasDeepgramKey {
                 selectedModel = "deepgram/nova-3-streaming"
             } else {
-                selectedModel = "apple/local/SFSpeechRecognizer"
+                selectedModel = AppleLocalModels.preferredSpeechModelID
             }
             UserDefaults.standard.set(true, forKey: "hasLaunchedBefore")
         }
@@ -469,6 +474,9 @@ public final class AppSettings: ObservableObject {
     }
 
     public var batchAPIKey: String {
+        if batchTranscriptionModel == AppleLocalModels.speechTranscriberModelID {
+            return ""
+        }
         if Self.openAIBatchModelIDs.contains(batchTranscriptionModel) {
             return openAIAPIKey
         }
@@ -495,7 +503,8 @@ public final class AppSettings: ObservableObject {
     /// Mac but are hidden until their upload clients are available on iPhone.
     public static let supportedBatchModels: [ModelCatalog.Option] =
         ModelCatalog.batchTranscription.filter { option in
-            openAIBatchModelIDs.contains(option.id)
+            option.id == AppleLocalModels.speechTranscriberModelID
+                || openAIBatchModelIDs.contains(option.id)
                 || option.id.hasPrefix("google/")
                 || option.id == "openai/gpt-4o-audio-preview-2024-12-17"
         }
@@ -727,6 +736,7 @@ public struct SettingsView: View {
 
                 if transcriptionLocationBinding.wrappedValue == .remote,
                    settings.transcriptionMode == .batch,
+                   settings.batchTranscriptionModel != AppleLocalModels.speechTranscriberModelID,
                    settings.batchAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Label(
                         AppSettings.openAIBatchModelIDs.contains(settings.batchTranscriptionModel)
@@ -1020,6 +1030,13 @@ public struct SettingsView: View {
             showingAPIKeys: $showingAPIKeys,
             openURL: openURL
         )
+    }
+
+    private var batchModeDescription: String {
+        if settings.batchTranscriptionModel == AppleLocalModels.speechTranscriberModelID {
+            return "Audio is recorded first, then transcribed privately on this device when you stop."
+        }
+        return "Audio is recorded first, then uploaded when you stop for a more complete transcript."
     }
 
     private var postProcessingModelName: String {

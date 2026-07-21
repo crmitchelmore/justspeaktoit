@@ -28,7 +28,8 @@ public final class iOSPostProcessingManager: ObservableObject {
         apiKey: String
     ) async {
         guard !text.isEmpty else { return }
-        guard !apiKey.isEmpty else {
+        let usesAppleModel = model == AppleLocalModels.foundationModelID
+        guard usesAppleModel || !apiKey.isEmpty else {
             error = "OpenRouter API key required for post-processing"
             return
         }
@@ -44,16 +45,23 @@ public final class iOSPostProcessingManager: ObservableObject {
         streamTask = Task {
             do {
                 let effectivePrompt = prompt.isEmpty ? AppSettings.defaultPostProcessingPrompt : prompt
-                
-                // Use streaming for real-time updates
-                for try await chunk in sendChatStreaming(
-                    systemPrompt: effectivePrompt,
-                    userMessage: text,
-                    model: model,
-                    apiKey: apiKey
-                ) {
-                    if Task.isCancelled { break }
-                    streamingText += chunk
+
+                if usesAppleModel {
+                    streamingText = try await AppleFoundationModelPolisher.process(
+                        text: text,
+                        systemPrompt: effectivePrompt
+                    )
+                } else {
+                    // Use streaming for real-time updates
+                    for try await chunk in sendChatStreaming(
+                        systemPrompt: effectivePrompt,
+                        userMessage: text,
+                        model: model,
+                        apiKey: apiKey
+                    ) {
+                        if Task.isCancelled { break }
+                        streamingText += chunk
+                    }
                 }
                 
                 processedText = streamingText
@@ -85,9 +93,15 @@ public final class iOSPostProcessingManager: ObservableObject {
         apiKey: String
     ) async throws -> String {
         guard !text.isEmpty else { return text }
+        let effectivePrompt = prompt.isEmpty ? AppSettings.defaultPostProcessingPrompt : prompt
+        if model == AppleLocalModels.foundationModelID {
+            return try await AppleFoundationModelPolisher.process(
+                text: text,
+                systemPrompt: effectivePrompt
+            )
+        }
         guard !apiKey.isEmpty else { throw PostProcessingError.apiKeyMissing }
 
-        let effectivePrompt = prompt.isEmpty ? AppSettings.defaultPostProcessingPrompt : prompt
         var result = ""
         for try await chunk in sendChatStreaming(
             systemPrompt: effectivePrompt,

@@ -6,6 +6,15 @@ import SpeakCore
 
 @MainActor
 final class PostProcessingManagerTests: XCTestCase {
+  func testAppleFoundationModelIsTreatedAsLocal() {
+    XCTAssertTrue(
+      PostProcessingManager.isLocalPostProcessingModel(AppleLocalModels.foundationModelID)
+    )
+    XCTAssertTrue(
+      PostProcessingManager.isAppleFoundationModel(AppleLocalModels.foundationModelID)
+    )
+  }
+
   func testLocalPostProcessingCleansTextWithoutCallingLLM() async throws {
     let client = SpyChatClient()
     let settings = makeSettings()

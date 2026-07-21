@@ -22,6 +22,7 @@ public final class iOSLiveTranscriber: ObservableObject {
 
     public var language: String = Locale.current.identifier
     public var preferOnDevice: Bool = true
+    public var modelID: String = AppleLocalModels.preferredSpeechModelID
 
     // MARK: - Callbacks
 
@@ -37,6 +38,9 @@ public final class iOSLiveTranscriber: ObservableObject {
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
     private var latestResult: SFSpeechRecognitionResult?
+    private var speechAnalyzerSession: Any?
+    private var speechAnalyzerConverter: Any?
+    private var activeModelID = AppleLocalModels.legacySpeechModelID
     private var startTime: Date?
     private var accumulatedSegments: [TranscriptionSegment] = []
     private var segments: [TranscriptionSegment] = []
@@ -112,9 +116,29 @@ public final class iOSLiveTranscriber: ObservableObject {
             throw iOSTranscriptionError.audioSessionFailed(error)
         }
 
+        resetState()
+
+        if modelID == AppleLocalModels.speechTranscriberModelID {
+            if #available(iOS 26.0, *) {
+                do {
+                    try await startSpeechAnalyzer()
+                    activeModelID = AppleLocalModels.speechTranscriberModelID
+                    isRunning = true
+                    print("[iOSLiveTranscriber] Started with SpeechAnalyzer")
+                    return
+                } catch {
+                    SpeakLogger.logError(
+                        error,
+                        context: "SpeechAnalyzer setup; falling back to SFSpeechRecognizer",
+                        logger: SpeakLogger.transcription
+                    )
+                }
+            }
+        }
+
+        activeModelID = AppleLocalModels.legacySpeechModelID
         let (recognizer, request) = try setupRecognition()
         try startAudioEngine()
-        resetState()
 
         // Start recognition
         recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
@@ -125,6 +149,49 @@ public final class iOSLiveTranscriber: ObservableObject {
 
         isRunning = true
         print("[iOSLiveTranscriber] Started")
+    }
+
+    @available(iOS 26.0, *)
+    private func startSpeechAnalyzer() async throws {
+        let session = try await AppleSpeechAnalyzerLiveSession(
+            localeIdentifier: language
+        ) { [weak self] update in
+            Task { @MainActor [weak self] in
+                self?.handleSpeechAnalyzerUpdate(update)
+            }
+        }
+        let inputNode = audioEngine.inputNode
+        let recordingFormat = inputNode.outputFormat(forBus: 0)
+
+        do {
+            let converter = try AppleSpeechAudioConverter(
+                sourceFormat: recordingFormat,
+                targetFormat: session.audioFormat
+            )
+            inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
+                self?.audioRecorder.writeBuffer(buffer)
+                guard let converted = converter.convert(buffer) else { return }
+                session.send(converted)
+            }
+            audioEngine.prepare()
+            try audioEngine.start()
+            _ = try? audioRecorder.startRecording(format: recordingFormat)
+            speechAnalyzerSession = session
+            speechAnalyzerConverter = converter
+        } catch {
+            audioEngine.stop()
+            inputNode.removeTap(onBus: 0)
+            await session.cancel()
+            throw error
+        }
+    }
+
+    @available(iOS 26.0, *)
+    private func handleSpeechAnalyzerUpdate(_ update: AppleSpeechAnalyzerUpdate) {
+        partialText = update.text
+        isFinal = update.isFinal
+        confidence = update.confidence
+        onPartialResult?(update.text, update.isFinal)
     }
 
     private func setupRecognition() throws -> (SFSpeechRecognizer, SFSpeechAudioBufferRecognitionRequest) {
@@ -158,7 +225,7 @@ public final class iOSLiveTranscriber: ObservableObject {
         }
         audioEngine.prepare()
         try audioEngine.start()
-        try? audioRecorder.startRecording(format: recordingFormat)
+        _ = try? audioRecorder.startRecording(format: recordingFormat)
     }
 
     private func resetState() {
@@ -183,11 +250,16 @@ public final class iOSLiveTranscriber: ObservableObject {
                 segments: segments,
                 confidence: confidence,
                 duration: 0,
-                modelIdentifier: "apple/local/SFSpeechRecognizer",
+                modelIdentifier: activeModelID,
                 cost: nil,
                 rawPayload: nil,
                 debugInfo: nil
             )
+        }
+
+        if #available(iOS 26.0, *),
+           let session = speechAnalyzerSession as? AppleSpeechAnalyzerLiveSession {
+            return await stopSpeechAnalyzer(session)
         }
 
         isShuttingDownRecognitionTask = true
@@ -223,6 +295,54 @@ public final class iOSLiveTranscriber: ObservableObject {
         return result
     }
 
+    @available(iOS 26.0, *)
+    private func stopSpeechAnalyzer(_ session: AppleSpeechAnalyzerLiveSession) async -> TranscriptionResult {
+        audioEngine.stop()
+        audioEngine.inputNode.removeTap(onBus: 0)
+        _ = audioRecorder.stopRecording()
+
+        let elapsed = startTime.map { Date().timeIntervalSince($0) } ?? 0
+        let result: TranscriptionResult
+        do {
+            let analyzerResult = try await session.finish()
+            result = TranscriptionResult(
+                text: analyzerResult.text,
+                segments: analyzerResult.segments,
+                confidence: analyzerResult.confidence,
+                duration: max(elapsed, analyzerResult.duration),
+                modelIdentifier: AppleLocalModels.speechTranscriberModelID,
+                cost: nil,
+                rawPayload: nil,
+                debugInfo: nil
+            )
+        } catch {
+            self.error = error
+            onError?(error)
+            result = TranscriptionResult(
+                text: partialText,
+                segments: [],
+                confidence: confidence,
+                duration: elapsed,
+                modelIdentifier: AppleLocalModels.speechTranscriberModelID,
+                cost: nil,
+                rawPayload: nil,
+                debugInfo: nil
+            )
+        }
+
+        speechAnalyzerSession = nil
+        speechAnalyzerConverter = nil
+        isRunning = false
+        audioSessionManager.deactivate()
+        SpeakLogger.logTranscription(
+            event: "stop",
+            model: "Apple SpeechTranscriber",
+            wordCount: result.text.split(separator: " ").count
+        )
+        onFinalResult?(result)
+        return result
+    }
+
     /// Cancel transcription without returning result.
     public func cancel() {
         guard isRunning else { return }
@@ -238,9 +358,16 @@ public final class iOSLiveTranscriber: ObservableObject {
         // Cancel persistent recording (keeps partial file by default)
         audioRecorder.cancelRecording()
 
+        if #available(iOS 26.0, *),
+           let session = speechAnalyzerSession as? AppleSpeechAnalyzerLiveSession {
+            Task { await session.cancel() }
+        }
+
         recognitionRequest = nil
         recognitionTask = nil
         speechRecognizer = nil
+        speechAnalyzerSession = nil
+        speechAnalyzerConverter = nil
         isRunning = false
 
         audioSessionManager.deactivate()
@@ -397,7 +524,7 @@ public final class iOSLiveTranscriber: ObservableObject {
             segments: finalSegments,
             confidence: confidence,
             duration: duration,
-            modelIdentifier: "apple/local/SFSpeechRecognizer",
+            modelIdentifier: activeModelID,
             cost: nil,
             rawPayload: nil,
             debugInfo: nil

@@ -577,8 +577,16 @@
 
     @media (max-width: 1060px) {
       .nav__inner { grid-template-columns: 1fr auto; }
-      .nav__links { display: none; }
-      .hero__inner { grid-template-columns: 1fr; padding-top: 130px; }
+      .nav__links {
+        grid-column: 1 / -1;
+        width: 100%;
+        justify-content: flex-start;
+        overflow-x: auto;
+        padding-bottom: .85rem;
+        scrollbar-width: none;
+      }
+      .nav__links::-webkit-scrollbar { display: none; }
+      .hero__inner { grid-template-columns: 1fr; padding-top: 160px; }
       .hero__copy { max-width: 720px; }
       .product-stage { min-height: 560px; }
       .models__header { grid-template-columns: 1fr; }
@@ -599,7 +607,7 @@
       .nav__download { min-height: 40px; padding: .55rem .75rem; font-size: .82rem; }
       .hero, .hero__inner { min-height: auto; }
       .hero__inner { padding-top: 120px; padding-bottom: 3rem; }
-      .hero h1 { font-size: clamp(3.4rem, 15.5vw, 5rem); }
+      .hero h1 { font-size: clamp(3.4rem, 15.5vw, 5rem); white-space: normal; }
       .hero__lede { font-size: 1rem; }
       .product-stage { min-height: 530px; margin-top: 2rem; }
       .mac-window { right: 0; }
@@ -638,13 +646,13 @@
   </style>
 </head>
 <body>
-  <header class="nav" aria-label="Primary navigation">
+  <header class="nav">
     <div class="shell nav__inner">
       <a class="brand" href="#top" aria-label="Just Speak to It home">
         <span class="brand__wave" aria-hidden="true"><i style="--h:10px"></i><i style="--h:20px"></i><i style="--h:28px"></i><i style="--h:18px"></i><i style="--h:25px"></i><i style="--h:13px"></i></span>
         <span>Just Speak to It</span>
       </a>
-      <nav class="nav__links">
+      <nav class="nav__links" aria-label="Primary navigation">
         <a href="#models">Models</a><a href="#workflow">How it works</a><a href="#apps">Apps</a><a href="#creator">Creator</a>
       </nav>
       <a class="button button--orange nav__download" href="https://github.com/crmitchelmore/justspeaktoit/releases/latest">Download for Mac</a>
@@ -656,7 +664,7 @@
       <div class="shell hero__inner">
         <div class="hero__copy">
           <h1>Your voice.<br>Your model.<br>Your words.</h1>
-          <p class="hero__lede">Fast, private dictation for Mac and iPhone. Run speech models locally, stream with your own provider keys, and paste polished text anywhere.</p>
+          <p class="hero__lede">Fast, private dictation for Mac, iPhone, and iPad. Run speech models locally, stream with your own provider keys, and paste polished text anywhere.</p>
           <div class="hero__actions">
             <a class="button button--orange" href="https://github.com/crmitchelmore/justspeaktoit/releases/latest">Download for Mac <span aria-hidden="true">→</span></a>
             <a class="button button--outline" href="#models">Explore the models</a>
@@ -667,7 +675,7 @@
           <div class="stage-wave" aria-hidden="true">
             <i style="--h:16%;--d:-.2s"></i><i style="--h:28%;--d:-1.1s"></i><i style="--h:52%;--d:-.7s"></i><i style="--h:77%;--d:-1.7s"></i><i style="--h:42%;--d:-.5s"></i><i style="--h:85%;--d:-1.3s"></i><i style="--h:38%;--d:-.9s"></i><i style="--h:64%;--d:-.1s"></i><i style="--h:32%;--d:-1.5s"></i><i style="--h:72%;--d:-.8s"></i><i style="--h:44%;--d:-1.8s"></i><i style="--h:88%;--d:-.4s"></i><i style="--h:56%;--d:-1.2s;--c:#ee7b4f"></i><i style="--h:35%;--d:-.6s;--c:#d98e61"></i><i style="--h:60%;--d:-1.6s;--c:#c29e73"></i><i style="--h:29%;--d:-.3s;--c:#a6ac82"></i><i style="--h:70%;--d:-1s;--c:#80b991"></i><i style="--h:41%;--d:-1.9s;--c:#59bf9d"></i><i style="--h:80%;--d:-.5s;--c:#37b3a2"></i><i style="--h:48%;--d:-1.4s;--c:#159c95"></i><i style="--h:65%;--d:-.8s;--c:#159c95"></i><i style="--h:33%;--d:-.2s;--c:#159c95"></i>
           </div>
-          <div class="mac-window">
+          <div class="mac-window" aria-hidden="true">
             <div class="window-bar">
               <span class="traffic" aria-hidden="true"><i></i><i></i><i></i></span>
               <span class="window-title">Just Speak to It</span><span class="window-live">● Connected</span>

@@ -135,15 +135,10 @@ public final class AppSettings: ObservableObject {
 
     // MARK: - Canonical secure storage for API keys (SpeakCore)
     //
-    // Every API key is stored through SpeakCore's SecureStorage using the same
-    // service/account as the macOS app, and synced via iCloud Keychain when the
-    // build is entitled (see `SecureStorageConfiguration.iCloudSyncedIfAvailable`).
-    // A key set on one device then appears on the user's other devices.
-    //
-    // iOS <-> macOS sync additionally requires the shared keychain-access-group
-    // to be present in BOTH apps' entitlements and the macOS app to be built
-    // with the iCloud Keychain capability; a Developer-ID macOS build can't use
-    // synchronizable items and falls back to local-only storage.
+    // Every API key is stored locally through SpeakCore's SecureStorage using the
+    // same service/account as the macOS app. Cross-device transfer is handled only
+    // by the explicit passphrase-encrypted CloudKit sync feature below; the base
+    // Keychain item is deliberately not kSecAttrSynchronizable.
     static let deepgramKeyID = "deepgram.apiKey"
     static let openRouterKeyID = "openrouter.apiKey"
     static let openAIKeyID = "openai.apiKey"
@@ -154,16 +149,10 @@ public final class AppSettings: ObservableObject {
     static let assemblyAIKeyID = "assemblyai.apiKey"
     static let gladiaKeyID = "gladia.apiKey"
 
-    /// Shared keychain access group declared in `SpeakiOS.entitlements`
-    /// (`$(AppIdentifierPrefix)com.justspeaktoit.shared`). Only used when the
-    /// runtime probe confirms the entitlement is present.
-    private static let sharedAccessGroup = "8X4ZN58TYH.com.justspeaktoit.shared"
-
     private static let credentialStorage = SecureStorage(
-        configuration: .iCloudSyncedIfAvailable(
+        configuration: SecureStorageConfiguration(
             service: "com.justspeaktoit.credentials",
-            masterAccount: "speak-app-secrets",
-            accessGroup: sharedAccessGroup
+            masterAccount: "speak-app-secrets"
         )
     )
 
@@ -627,6 +616,22 @@ private struct BatchModelGroup: Identifiable {
     }
 }
 
+private enum IOSTranscriptionLocation: String, CaseIterable, Identifiable {
+    case local
+    case remote
+
+    var id: String { rawValue }
+    var displayName: String { rawValue.capitalized }
+}
+
+private enum IOSRemoteTranscriptionMode: String, CaseIterable, Identifiable {
+    case streaming
+    case batch
+
+    var id: String { rawValue }
+    var displayName: String { rawValue.capitalized }
+}
+
 // swiftlint:disable:next type_body_length
 public struct SettingsView: View {
     @StateObject private var settings = AppSettings.shared
@@ -640,44 +645,65 @@ public struct SettingsView: View {
     public var body: some View {
         Form {
             Section("Transcription") {
-                Picker("Mode", selection: $settings.transcriptionMode) {
-                    ForEach(IOSTranscriptionMode.allCases) { mode in
-                        Text(mode.displayName).tag(mode)
+                Picker("Where transcription runs", selection: transcriptionLocationBinding) {
+                    ForEach(IOSTranscriptionLocation.allCases) { location in
+                        Text(location.displayName).tag(location)
                     }
                 }
                 .pickerStyle(.segmented)
 
-                if settings.transcriptionMode == .streaming {
-                    Picker("Streaming Model", selection: selectedModelBinding) {
-                        ForEach(LiveModelGroup.grouped(ModelCatalog.liveTranscription)) { group in
-                            Section(group.title) {
-                                ForEach(group.options) { option in
-                                    LiveModelRow(option: option).tag(option.id)
-                                }
-                            }
+                if transcriptionLocationBinding.wrappedValue == .local {
+                    Picker("Apple On-Device Model", selection: selectedModelBinding) {
+                        ForEach(ModelCatalog.onDeviceLiveTranscription) { option in
+                            Text(option.displayName).tag(option.id)
                         }
                     }
                     .pickerStyle(.navigationLink)
+
+                    Text("Uses Apple's built-in speech engine. Audio stays on this device.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 } else {
-                    Picker("Batch Model", selection: $settings.batchTranscriptionModel) {
-                        ForEach(BatchModelGroup.grouped(AppSettings.supportedBatchModels)) { group in
-                            Section(group.title) {
-                                ForEach(group.options) { option in
-                                    Text(ModelCatalog.friendlyName(for: option.id)).tag(option.id)
+                    Picker("Remote Mode", selection: remoteTranscriptionModeBinding) {
+                        ForEach(IOSRemoteTranscriptionMode.allCases) { mode in
+                            Text(mode.displayName).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    if settings.transcriptionMode == .streaming {
+                        Picker("Remote Streaming Model", selection: selectedModelBinding) {
+                            ForEach(LiveModelGroup.grouped(ModelCatalog.remoteLiveTranscription)) { group in
+                                Section(group.title) {
+                                    ForEach(group.options) { option in
+                                        LiveModelRow(option: option).tag(option.id)
+                                    }
                                 }
                             }
                         }
+                        .pickerStyle(.navigationLink)
+                    } else {
+                        Picker("Remote Batch Model", selection: $settings.batchTranscriptionModel) {
+                            ForEach(BatchModelGroup.grouped(AppSettings.supportedBatchModels)) { group in
+                                Section(group.title) {
+                                    ForEach(group.options) { option in
+                                        Text(ModelCatalog.friendlyName(for: option.id)).tag(option.id)
+                                    }
+                                }
+                            }
+                        }
+                        .pickerStyle(.navigationLink)
                     }
-                    .pickerStyle(.navigationLink)
+
+                    Text(settings.transcriptionMode == .streaming
+                        ? "Text appears while audio is streamed to the selected provider."
+                        : "Audio is uploaded after recording for a more complete transcript.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
-                Text(settings.transcriptionMode == .streaming
-                    ? "Text appears while you speak."
-                    : "Audio is recorded first, then uploaded when you stop for a more complete transcript.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                if settings.transcriptionMode == .streaming,
+                if transcriptionLocationBinding.wrappedValue == .remote,
+                   settings.transcriptionMode == .streaming,
                    let route = LiveTranscriptionRouting.route(for: settings.selectedModel),
                    !route.isSupportedOnIOS {
                     Label(
@@ -688,7 +714,8 @@ public struct SettingsView: View {
                     .font(.caption)
                 }
 
-                if settings.transcriptionMode == .streaming,
+                if transcriptionLocationBinding.wrappedValue == .remote,
+                   settings.transcriptionMode == .streaming,
                    let route = LiveTranscriptionRouting.route(for: settings.selectedModel),
                    route.isSupportedOnIOS,
                    route.apiKeyIdentifier != nil,
@@ -701,7 +728,8 @@ public struct SettingsView: View {
                     .font(.caption)
                 }
 
-                if settings.transcriptionMode == .batch,
+                if transcriptionLocationBinding.wrappedValue == .remote,
+                   settings.transcriptionMode == .batch,
                    settings.batchAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Label(
                         AppSettings.openAIBatchModelIDs.contains(settings.batchTranscriptionModel)
@@ -1907,6 +1935,46 @@ struct CloudKitKeySyncSettingsSection: View {
 }
 
 private extension SettingsView {
+    @MainActor
+    private var transcriptionLocationBinding: Binding<IOSTranscriptionLocation> {
+        Binding(
+            get: {
+                settings.transcriptionMode == .streaming
+                    && ModelCatalog.isOnDeviceLiveTranscriptionModel(settings.selectedModel)
+                    ? .local
+                    : .remote
+            },
+            set: { location in
+                switch location {
+                case .local:
+                    settings.selectedModel = ModelCatalog.defaultOnDeviceLiveTranscriptionModel
+                    settings.transcriptionMode = .streaming
+                case .remote:
+                    if ModelCatalog.isOnDeviceLiveTranscriptionModel(settings.selectedModel) {
+                        settings.selectedModel = ModelCatalog.defaultRemoteLiveTranscriptionModel
+                            ?? settings.selectedModel
+                    }
+                    settings.transcriptionMode = .streaming
+                }
+            }
+        )
+    }
+
+    @MainActor
+    private var remoteTranscriptionModeBinding: Binding<IOSRemoteTranscriptionMode> {
+        Binding(
+            get: { settings.transcriptionMode == .batch ? .batch : .streaming },
+            set: { mode in
+                if mode == .streaming,
+                   ModelCatalog.isOnDeviceLiveTranscriptionModel(settings.selectedModel) {
+                    settings.selectedModel = ModelCatalog.defaultRemoteLiveTranscriptionModel
+                        ?? settings.selectedModel
+                }
+                settings.transcriptionMode = mode == .batch ? .batch : .streaming
+            }
+        )
+    }
+
     @MainActor
     private var selectedModelBinding: Binding<String> {
         Binding(

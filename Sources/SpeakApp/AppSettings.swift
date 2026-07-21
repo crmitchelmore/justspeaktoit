@@ -345,7 +345,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   @Published var localTranscriptionMode: LocalTranscriptionMode {
     didSet {
       #if APP_STORE
-      if !DistributionChannel.current.supportsLocalModelRuntime, localTranscriptionMode == .streaming {
+      if !DistributionChannel.current.supportsExternalLocalModelRuntime, localTranscriptionMode == .streaming {
         localTranscriptionMode = .batch
         return
       }
@@ -805,7 +805,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
         ?? LocalTranscriptionMode.batch.rawValue
     ) ?? .batch
     #if APP_STORE
-    localTranscriptionMode = DistributionChannel.current.supportsLocalModelRuntime
+    localTranscriptionMode = DistributionChannel.current.supportsExternalLocalModelRuntime
       ? loadedLocalTranscriptionMode
       : .batch
     #else

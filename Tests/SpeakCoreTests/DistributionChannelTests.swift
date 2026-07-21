@@ -15,7 +15,11 @@ final class DistributionChannelTests: XCTestCase {
 
         // Act & Assert
         XCTAssertTrue(channel.supportsSelfUpdate)
-        XCTAssertTrue(channel.supportsLocalModelRuntime)
+        XCTAssertTrue(channel.supportsDownloadedCoreMLModels)
+        XCTAssertTrue(channel.supportsExternalLocalModelRuntime)
+        XCTAssertFalse(channel.supportsEncryptedCloudKitKeySync)
+        XCTAssertFalse(channel.supportsICloudSync)
+        XCTAssertEqual(channel.apiKeyStorageMode, .localKeychainOnly)
         XCTAssertTrue(channel.supportsAutomaticAccessibilityPrompt)
         XCTAssertTrue(channel.allowsCrossChannelMessaging)
         XCTAssertFalse(channel.isSandboxed)
@@ -28,8 +32,13 @@ final class DistributionChannelTests: XCTestCase {
         // Act & Assert
         XCTAssertFalse(channel.supportsSelfUpdate,
             "App Store builds update through the store, not Sparkle")
-        XCTAssertFalse(channel.supportsLocalModelRuntime,
-            "Downloaded local-model runtimes cannot run in the App Store sandbox")
+        XCTAssertTrue(channel.supportsDownloadedCoreMLModels,
+            "WhisperKit/Core ML model data can run through the bundled in-process runtime")
+        XCTAssertFalse(channel.supportsExternalLocalModelRuntime,
+            "Executable local-model runtimes cannot run in the App Store sandbox")
+        XCTAssertTrue(channel.supportsEncryptedCloudKitKeySync)
+        XCTAssertTrue(channel.supportsICloudSync)
+        XCTAssertEqual(channel.apiKeyStorageMode, .encryptedCloudKit)
         XCTAssertFalse(channel.supportsAutomaticAccessibilityPrompt,
             "Sandboxed apps cannot auto-prompt for Accessibility/Input Monitoring")
         XCTAssertFalse(channel.allowsCrossChannelMessaging,
@@ -41,11 +50,14 @@ final class DistributionChannelTests: XCTestCase {
         // Arrange / Act / Assert
         for channel in DistributionChannel.allCases {
             XCTAssertEqual(channel.supports(.selfUpdate), channel.supportsSelfUpdate)
-            XCTAssertEqual(channel.supports(.localModelRuntime), channel.supportsLocalModelRuntime)
+            XCTAssertEqual(channel.supports(.downloadedCoreMLModels), channel.supportsDownloadedCoreMLModels)
+            XCTAssertEqual(channel.supports(.externalLocalModelRuntime), channel.supportsExternalLocalModelRuntime)
             XCTAssertEqual(channel.supports(.automaticAccessibilityPrompt),
                            channel.supportsAutomaticAccessibilityPrompt)
             XCTAssertEqual(channel.supports(.crossChannelMessaging),
                            channel.allowsCrossChannelMessaging)
+            XCTAssertEqual(channel.supports(.encryptedCloudKitKeySync),
+                           channel.supportsEncryptedCloudKitKeySync)
         }
     }
 

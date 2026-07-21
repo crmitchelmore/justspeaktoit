@@ -6,6 +6,8 @@ name: Release to Mac App Store
 # - APP_STORE_CONNECT_ISSUER_ID
 # - IOS_DISTRIBUTION_P12 and IOS_DISTRIBUTION_PASSWORD (the existing Apple
 #   Distribution certificate is valid for both iOS and Mac App Store apps)
+# - MAC_INSTALLER_P12 and MAC_INSTALLER_PASSWORD (Mac Installer Distribution
+#   identity required when exporting the signed installer package)
 # - MAC_APP_STORE_PROFILE (base64 Mac App Store provisioning profile)
 # The archive reuses the existing cross-platform Apple Distribution identity.
 # The App Store Connect API key remains responsible only for the upload, matching
@@ -60,6 +62,8 @@ jobs:
         env:
           APPLE_DISTRIBUTION_P12: ${{ secrets.IOS_DISTRIBUTION_P12 }}
           APPLE_DISTRIBUTION_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_PASSWORD }}
+          MAC_INSTALLER_P12: ${{ secrets.MAC_INSTALLER_P12 }}
+          MAC_INSTALLER_PASSWORD: ${{ secrets.MAC_INSTALLER_PASSWORD }}
         run: |
           KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
           KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
@@ -77,10 +81,21 @@ jobs:
             echo "::error::IOS_DISTRIBUTION_PASSWORD secret is required"
             exit 1
           fi
+          if [ -z "$MAC_INSTALLER_P12" ]; then
+            echo "::error::MAC_INSTALLER_P12 secret is required"
+            exit 1
+          fi
+          if [ -z "$MAC_INSTALLER_PASSWORD" ]; then
+            echo "::error::MAC_INSTALLER_PASSWORD secret is required"
+            exit 1
+          fi
           CERT_PATH="$RUNNER_TEMP/apple-distribution.p12"
+          INSTALLER_CERT_PATH="$RUNNER_TEMP/mac-installer-distribution.p12"
           echo -n "$APPLE_DISTRIBUTION_P12" | base64 --decode -o "$CERT_PATH"
+          echo -n "$MAC_INSTALLER_P12" | base64 --decode -o "$INSTALLER_CERT_PATH"
           security import "$CERT_PATH" -P "$APPLE_DISTRIBUTION_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
-          rm -f "$CERT_PATH"
+          security import "$INSTALLER_CERT_PATH" -P "$MAC_INSTALLER_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          rm -f "$CERT_PATH" "$INSTALLER_CERT_PATH"
           security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
       - name: Install Mac App Store Provisioning Profile
@@ -239,6 +254,8 @@ jobs:
               <string>manual</string>
               <key>signingCertificate</key>
               <string>Apple Distribution</string>
+              <key>installerSigningCertificate</key>
+              <string>Mac Installer Distribution</string>
               <key>provisioningProfiles</key>
               <dict>
                   <key>com.justspeaktoit.mac</key>

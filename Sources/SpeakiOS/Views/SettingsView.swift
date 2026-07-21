@@ -1421,13 +1421,21 @@ struct APIKeysView: View {
     private func presentation(for id: String) -> KeyPresentation {
         switch id {
         case "deepgram":
-            return KeyPresentation(title: "Deepgram", systemImage: "waveform", help: "Get your key from deepgram.com.")
+            return KeyPresentation(
+                title: "Deepgram",
+                systemImage: "waveform",
+                help: "Get your key from deepgram.com."
+            )
         case "elevenlabs":
             return KeyPresentation(
                 title: "ElevenLabs", systemImage: "mic.and.signal.meter", help: "Get your key from elevenlabs.io."
             )
         case "openrouter":
-            return KeyPresentation(title: "OpenRouter", systemImage: "network", help: "Get your key from openrouter.ai.")
+            return KeyPresentation(
+                title: "OpenRouter",
+                systemImage: "network",
+                help: "Get your key from openrouter.ai."
+            )
         case "openai":
             return KeyPresentation(
                 title: "OpenAI", systemImage: "brain.head.profile", help: "Get your key from platform.openai.com."

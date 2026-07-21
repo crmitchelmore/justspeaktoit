@@ -1,6 +1,8 @@
 import SpeakCore
 import SwiftUI
 
+// swiftlint:disable file_length
+// swiftlint:disable:next type_body_length
 struct DashboardView: View {
   @EnvironmentObject private var environment: AppEnvironment
   @EnvironmentObject private var history: HistoryManager

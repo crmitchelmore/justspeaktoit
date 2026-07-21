@@ -68,6 +68,7 @@ struct ShortcutsSettingsView: View {
     }
 
     @ViewBuilder
+    // swiftlint:disable:next function_body_length
     private func shortcutRow(for action: ShortcutAction) -> some View {
         let binding = shortcutManager.binding(for: action)
         let isRecording = shortcutManager.isRecordingShortcut && shortcutManager.recordingAction == action

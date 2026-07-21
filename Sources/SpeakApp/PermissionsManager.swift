@@ -196,31 +196,9 @@ final class PermissionsManager: ObservableObject {
   private nonisolated static func systemStatus(for type: PermissionType) -> PermissionStatus {
     switch type {
     case .microphone:
-      switch AVCaptureDevice.authorizationStatus(for: .audio) {
-      case .authorized:
-        return .granted
-      case .notDetermined:
-        return .notDetermined
-      case .denied:
-        return .denied
-      case .restricted:
-        return .restricted
-      @unknown default:
-        return .restricted
-      }
+      return microphoneStatus()
     case .speechRecognition:
-      switch SFSpeechRecognizer.authorizationStatus() {
-      case .authorized:
-        return .granted
-      case .notDetermined:
-        return .notDetermined
-      case .denied:
-        return .denied
-      case .restricted:
-        return .restricted
-      @unknown default:
-        return .restricted
-      }
+      return speechRecognitionStatus()
     case .accessibility:
       return AXIsProcessTrusted() ? .granted : .denied
     case .inputMonitoring:
@@ -228,6 +206,26 @@ final class PermissionsManager: ObservableObject {
         hasListenAccess: CGPreflightListenEventAccess(),
         hasAccessibilityAccess: AXIsProcessTrusted()
       )
+    }
+  }
+
+  private nonisolated static func microphoneStatus() -> PermissionStatus {
+    switch AVCaptureDevice.authorizationStatus(for: .audio) {
+    case .authorized: return .granted
+    case .notDetermined: return .notDetermined
+    case .denied: return .denied
+    case .restricted: return .restricted
+    @unknown default: return .restricted
+    }
+  }
+
+  private nonisolated static func speechRecognitionStatus() -> PermissionStatus {
+    switch SFSpeechRecognizer.authorizationStatus() {
+    case .authorized: return .granted
+    case .notDetermined: return .notDetermined
+    case .denied: return .denied
+    case .restricted: return .restricted
+    @unknown default: return .restricted
     }
   }
 

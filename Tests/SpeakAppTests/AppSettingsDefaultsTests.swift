@@ -3,6 +3,7 @@ import SpeakHotKeys
 
 @testable import SpeakApp
 
+// swiftlint:disable:next type_body_length
 final class AppSettingsDefaultsTests: XCTestCase {
 
     private var suiteName: String!

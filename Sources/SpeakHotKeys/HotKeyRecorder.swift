@@ -11,6 +11,7 @@ public struct HotKeyRecorder: View {
   @State private var isRecording = false
   @State private var pendingModifiers: HotKey.ModifierSet = []
   @State private var eventMonitor: Any?
+  @State private var validationMessage: String?
 
   private let label: String
 
@@ -34,6 +35,13 @@ public struct HotKeyRecorder: View {
         if !hotKey.isFnKey {
           clearButton
         }
+      }
+
+      if let validationMessage {
+        Label(validationMessage, systemImage: "exclamationmark.triangle.fill")
+          .font(.caption)
+          .foregroundStyle(.red)
+          .fixedSize(horizontal: false, vertical: true)
       }
     }
     .onDisappear {
@@ -134,6 +142,7 @@ public struct HotKeyRecorder: View {
     stopRecording()
     isRecording = true
     pendingModifiers = []
+    validationMessage = nil
     NotificationCenter.default.post(name: .speakHotKeyShouldPause, object: nil)
 
     eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
@@ -172,8 +181,15 @@ public struct HotKeyRecorder: View {
     )
 
     // Allow dedicated extended keys as single-key hotkeys, but keep ordinary typing keys modifier-gated.
-    guard !modifiers.isEmpty || KeyCodeMapping.singleKeyHotKeyCodes.contains(event.keyCode) else { return true }
+    guard KeyCodeMapping.isSupportedCustomHotKey(
+      keyCode: event.keyCode,
+      hasModifiers: !modifiers.isEmpty
+    ) else {
+      validationMessage = KeyCodeMapping.unsupportedSingleKeyMessage
+      return true
+    }
 
+    validationMessage = nil
     hotKey = .custom(keyCode: event.keyCode, modifiers: modifiers)
     stopRecording()
     return true

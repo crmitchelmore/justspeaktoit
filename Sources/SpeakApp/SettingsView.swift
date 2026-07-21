@@ -727,22 +727,34 @@ struct SettingsView: View {
 
       SettingsCard(title: "Output", systemImage: "textformat.alt", tint: Color.brandLagoon) {
         VStack(alignment: .leading, spacing: 12) {
-          Picker("Text Output", selection: settingsBinding(\AppSettings.textOutputMethod)) {
-            ForEach(AppSettings.TextOutputMethod.allCases) { method in
-              Text(method.displayName).tag(method)
+          if DistributionChannel.current.supportsAccessibilityTextInsertion {
+            Picker("Text Output", selection: settingsBinding(\AppSettings.textOutputMethod)) {
+              ForEach(AppSettings.availableTextOutputMethods(for: DistributionChannel.current)) { method in
+                Text(method.displayName).tag(method)
+              }
             }
+            .pickerStyle(.menu)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+              RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor))
+            )
+            .speakTooltip("Decide how Speak returns transcripts—typed for you or placed on the clipboard.")
+            .accessibilityLabel("Text output method picker")
+          } else {
+            Label("Clipboard delivery", systemImage: "doc.on.clipboard")
+              .font(.subheadline.weight(.medium))
+            Text(
+              "The App Store sandbox blocks changing text in other apps. "
+                + "Transcripts stay on the clipboard, ready to paste."
+            )
+              .font(.caption)
+              .foregroundStyle(.secondary)
           }
-          .pickerStyle(.menu)
-          .padding(.horizontal, 12)
-          .padding(.vertical, 8)
-          .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-              .fill(Color(nsColor: .controlBackgroundColor))
-          )
-          .speakTooltip("Decide how Speak returns transcripts—typed for you, placed on the clipboard, or saved for later.")
-          .accessibilityLabel("Text output method picker")
 
-          if settings.textOutputMethod != .clipboardOnly {
+          if DistributionChannel.current.supportsAccessibilityTextInsertion,
+             settings.textOutputMethod != .clipboardOnly {
             Picker("Accessibility Insertion", selection: settingsBinding(\AppSettings.accessibilityInsertionMode)) {
               ForEach(AppSettings.AccessibilityInsertionMode.allCases) { mode in
                 Text(mode.displayName).tag(mode)
@@ -764,12 +776,16 @@ struct SettingsView: View {
               .foregroundStyle(.secondary)
           }
           VStack(alignment: .leading, spacing: 8) {
-            settingsToggle(
-              "Restore clipboard after paste",
-              isOn: settingsBinding(\AppSettings.restoreClipboardAfterPaste),
-              tint: .brandLagoon
-            )
-            .speakTooltip("After Speak pastes your transcript, we put your original clipboard content back automatically.")
+            if DistributionChannel.current.supportsAccessibilityTextInsertion {
+              settingsToggle(
+                "Restore clipboard after paste",
+                isOn: settingsBinding(\AppSettings.restoreClipboardAfterPaste),
+                tint: .brandLagoon
+              )
+              .speakTooltip(
+                "After Speak pastes your transcript, we put your original clipboard content back automatically."
+              )
+            }
             settingsToggle(
               "Show HUD during sessions",
               isOn: settingsBinding(\AppSettings.showHUDDuringSessions),
@@ -4344,7 +4360,7 @@ struct SettingsView: View {
     LazyVStack(spacing: 20) {
       SettingsCard(title: "System permissions", systemImage: "lock.shield", tint: Color.red) {
         VStack(alignment: .leading, spacing: 12) {
-          ForEach(PermissionType.allCases) { permission in
+          ForEach(PermissionType.availablePermissions(for: DistributionChannel.current)) { permission in
             let status = environment.permissions.status(for: permission)
             VStack(alignment: .leading, spacing: 8) {
               HStack(spacing: 12) {
@@ -4382,6 +4398,12 @@ struct SettingsView: View {
         }
       }
       .speakTooltip("Review and refresh the macOS permissions Speak depends on.")
+    }
+    .task {
+      while !Task.isCancelled {
+        environment.permissions.refreshAll()
+        try? await Task.sleep(for: .seconds(1))
+      }
     }
   }
 

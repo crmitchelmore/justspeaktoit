@@ -59,7 +59,7 @@ final class CarbonKeyBackend {
     let selfPtr = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
 
     let status = InstallEventHandler(
-      GetEventDispatcherTarget(),
+      GetApplicationEventTarget(),
       { _, event, userData -> OSStatus in
         guard let userData, let event else { return OSStatus(eventNotHandledErr) }
         let backend = Unmanaged<CarbonKeyBackend>.fromOpaque(userData).takeUnretainedValue()
@@ -89,7 +89,7 @@ final class CarbonKeyBackend {
       UInt32(keyCode),
       modifiers.carbonFlags,
       hotKeyIDSpec,
-      GetEventDispatcherTarget(),
+      GetApplicationEventTarget(),
       0,
       &hotKeyRef
     )

@@ -80,6 +80,19 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     }
   }
 
+  nonisolated static func availableTextOutputMethods(
+    for channel: DistributionChannel
+  ) -> [TextOutputMethod] {
+    channel.supportsAccessibilityTextInsertion ? TextOutputMethod.allCases : [.clipboardOnly]
+  }
+
+  nonisolated static func normalizedTextOutputMethod(
+    _ method: TextOutputMethod,
+    for channel: DistributionChannel
+  ) -> TextOutputMethod {
+    availableTextOutputMethods(for: channel).contains(method) ? method : .clipboardOnly
+  }
+
   enum AccessibilityInsertionMode: String, CaseIterable, Identifiable {
     case insertAtCursor
     case replaceAll
@@ -444,7 +457,17 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   }
 
   @Published var textOutputMethod: TextOutputMethod {
-    didSet { store(textOutputMethod.rawValue, key: .textOutputMethod) }
+    didSet {
+      let normalized = Self.normalizedTextOutputMethod(
+        textOutputMethod,
+        for: DistributionChannel.current
+      )
+      guard normalized == textOutputMethod else {
+        textOutputMethod = normalized
+        return
+      }
+      store(textOutputMethod.rawValue, key: .textOutputMethod)
+    }
   }
 
   @Published var accessibilityInsertionMode: AccessibilityInsertionMode {
@@ -857,10 +880,12 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       defaults.object(forKey: DefaultsKey.postProcessingIncludeContextTags.rawValue) as? Bool ?? true
     postProcessingIncludeFinalInstruction =
       defaults.object(forKey: DefaultsKey.postProcessingIncludeFinalInstruction.rawValue) as? Bool ?? true
-    textOutputMethod =
+    textOutputMethod = Self.normalizedTextOutputMethod(
       TextOutputMethod(
         rawValue: defaults.string(forKey: DefaultsKey.textOutputMethod.rawValue)
-          ?? TextOutputMethod.clipboardOnly.rawValue) ?? .clipboardOnly
+          ?? TextOutputMethod.clipboardOnly.rawValue) ?? .clipboardOnly,
+      for: DistributionChannel.current
+    )
     accessibilityInsertionMode =
       AccessibilityInsertionMode(
         rawValue: defaults.string(forKey: DefaultsKey.accessibilityInsertionMode.rawValue)
@@ -899,7 +924,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       defaults.object(forKey: DefaultsKey.doubleTapWindow.rawValue) as? Double ?? 0.4
     if let hotKeyData = defaults.data(forKey: DefaultsKey.selectedHotKey.rawValue),
       let decoded = try? JSONDecoder().decode(HotKey.self, from: hotKeyData) {
-      selectedHotKey = decoded
+      selectedHotKey = decoded.isSupportedForGlobalMonitoring ? decoded : .fnKey
     } else {
       selectedHotKey = .fnKey
     }

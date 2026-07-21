@@ -1,6 +1,7 @@
 // swiftlint:disable file_length
 import AppKit
 import AVFoundation
+import SpeakCore
 import SpeakHotKeys
 import SwiftUI
 
@@ -125,7 +126,7 @@ final class OnboardingState: ObservableObject {
     
     func refreshPermissions() {
         permissionsGranted = []
-        for perm in [PermissionType.microphone, .accessibility, .inputMonitoring] {
+        for perm in PermissionType.availablePermissions(for: DistributionChannel.current) {
             // Force a fresh computation; cached statuses go stale when the user
             // toggles a permission in System Settings (the OS never notifies us).
             permissionsManager.refresh(perm)
@@ -137,7 +138,8 @@ final class OnboardingState: ObservableObject {
     
     var allPermissionsGranted: Bool {
         permissionsGranted.contains(.microphone) &&
-        permissionsGranted.contains(.accessibility)
+        (!DistributionChannel.current.supportsAccessibilityTextInsertion
+          || permissionsGranted.contains(.accessibility))
     }
     
     // swiftlint:disable:next cyclomatic_complexity function_body_length
@@ -543,25 +545,27 @@ struct PermissionsStepView: View {
                     }
                 )
                 
-                PermissionRow(
-                    type: .accessibility,
-                    title: "Accessibility",
-                    description: "To type text into other apps",
-                    isGranted: state.permissionsGranted.contains(.accessibility),
-                    onRequest: {
-                        accessibilityAttempted = true
-                        Task {
-                            _ = await state.permissionsManager.request(.accessibility)
-                            // Wait a moment then check if it worked
-                            try? await Task.sleep(nanoseconds: 1_000_000_000)
-                            state.refreshPermissions()
-                            // If still not granted after attempt, show helper
-                            if !state.permissionsGranted.contains(.accessibility) {
-                                showAccessibilityHelper = true
+                if DistributionChannel.current.supportsAccessibilityTextInsertion {
+                    PermissionRow(
+                        type: .accessibility,
+                        title: "Accessibility",
+                        description: "To type text into other apps",
+                        isGranted: state.permissionsGranted.contains(.accessibility),
+                        onRequest: {
+                            accessibilityAttempted = true
+                            Task {
+                                _ = await state.permissionsManager.request(.accessibility)
+                                // Wait a moment then check if it worked
+                                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                                state.refreshPermissions()
+                                // If still not granted after attempt, show helper
+                                if !state.permissionsGranted.contains(.accessibility) {
+                                    showAccessibilityHelper = true
+                                }
                             }
                         }
-                    }
-                )
+                    )
+                }
                 
                 // Show manual add helper if accessibility wasn't auto-added
                 if showAccessibilityHelper && !state.permissionsGranted.contains(.accessibility) {

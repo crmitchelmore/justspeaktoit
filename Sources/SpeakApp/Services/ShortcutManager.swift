@@ -230,6 +230,7 @@ final class ShortcutManager: ObservableObject {
     @Published private(set) var conflicts: [ShortcutConflict] = []
     @Published private(set) var isRecordingShortcut: Bool = false
     @Published private(set) var recordingAction: ShortcutAction?
+    @Published private(set) var recordingError: String?
 
     private var carbonHotKeys: [UInt32: EventHotKeyRef] = [:]
     private var carbonHotKeyActions: [UInt32: ShortcutAction] = [:]
@@ -340,6 +341,7 @@ final class ShortcutManager: ObservableObject {
         stopRecording()
         isRecordingShortcut = true
         recordingAction = action
+        recordingError = nil
 
         recordingMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
@@ -349,9 +351,25 @@ final class ShortcutManager: ObservableObject {
                 return nil
             }
 
+            let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
+
+            // Escape cancels without replacing the existing shortcut.
+            if event.keyCode == 53, modifiers.isEmpty {
+                self.stopRecording()
+                return nil
+            }
+
+            guard KeyCodeMapping.isSupportedCustomHotKey(
+                keyCode: event.keyCode,
+                hasModifiers: !modifiers.isEmpty
+            ) else {
+                self.recordingError = KeyCodeMapping.unsupportedSingleKeyMessage
+                return nil
+            }
+
             let newBinding = KeyBinding(
                 keyCode: event.keyCode,
-                modifiers: event.modifierFlags.intersection([.command, .shift, .option, .control]),
+                modifiers: modifiers,
                 isGlobal: action.isGlobalByDefault,
                 isEnabled: true
             )
@@ -366,6 +384,7 @@ final class ShortcutManager: ObservableObject {
     func stopRecording() {
         isRecordingShortcut = false
         recordingAction = nil
+        recordingError = nil
         if let monitor = recordingMonitor {
             NSEvent.removeMonitor(monitor)
             recordingMonitor = nil
@@ -431,7 +450,7 @@ final class ShortcutManager: ObservableObject {
                 UInt32(binding.keyCode),
                 carbonModifiers,
                 hotKeyID,
-                GetEventDispatcherTarget(),
+                GetApplicationEventTarget(),
                 0,
                 &hotKeyRef
             )
@@ -464,7 +483,7 @@ final class ShortcutManager: ObservableObject {
         )
         let selfPtr = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
         let status = InstallEventHandler(
-            GetEventDispatcherTarget(),
+            GetApplicationEventTarget(),
             { _, event, userData -> OSStatus in
                 guard let userData, let event else { return OSStatus(eventNotHandledErr) }
                 let manager = Unmanaged<ShortcutManager>.fromOpaque(userData).takeUnretainedValue()

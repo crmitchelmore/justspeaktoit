@@ -15,4 +15,21 @@ final class HotKeyMappingTests: XCTestCase {
         XCTAssertEqual(KeyCodeMapping.string(for: 64), "F17")
         XCTAssertEqual(KeyCodeMapping.string(for: 114), "Insert")
     }
+
+    func testCustomHotKeyValidation_rejectsOrdinaryUnmodifiedKey() {
+        XCTAssertFalse(KeyCodeMapping.isSupportedCustomHotKey(keyCode: 0, hasModifiers: false))
+    }
+
+    func testCustomHotKeyValidation_acceptsOrdinaryKeyWithModifier() {
+        XCTAssertTrue(KeyCodeMapping.isSupportedCustomHotKey(keyCode: 0, hasModifiers: true))
+    }
+
+    func testCustomHotKeyValidation_acceptsDedicatedExtendedKeyWithoutModifier() {
+        XCTAssertTrue(KeyCodeMapping.isSupportedCustomHotKey(keyCode: 105, hasModifiers: false))
+    }
+
+    func testHotKeySupport_rejectsOrdinaryUnmodifiedKey() {
+        let hotKey = HotKey.custom(keyCode: 0, modifiers: [])
+        XCTAssertFalse(hotKey.isSupportedForGlobalMonitoring)
+    }
 }

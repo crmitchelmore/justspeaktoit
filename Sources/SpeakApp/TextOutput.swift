@@ -27,6 +27,7 @@ Following this sequence allows another project to drop in the same smart Insert 
 import AppKit
 import ApplicationServices
 import Foundation
+import SpeakCore
 
 struct TextOutputResult {
   let method: HistoryTrigger.OutputMethod
@@ -68,6 +69,7 @@ struct AccessibilityTextOutput: TextOutputting {
   let appSettings: AppSettings
 
   func output(text: String) -> TextOutputResult {
+    permissionsManager.refresh(.accessibility)
     let status = permissionsManager.status(for: .accessibility)
     guard status.isGranted else {
       return TextOutputResult(
@@ -130,7 +132,8 @@ struct PasteTextOutput: TextOutputting {
 
   func output(text: String) -> TextOutputResult {
     let pasteboard = NSPasteboard.general
-    let restoreClipboard = appSettings.restoreClipboardAfterPaste
+    let canPasteIntoOtherApps = DistributionChannel.current.supportsAccessibilityTextInsertion
+    let restoreClipboard = canPasteIntoOtherApps && appSettings.restoreClipboardAfterPaste
     let previousString = restoreClipboard ? pasteboard.string(forType: .string) : nil
 
     pasteboard.clearContents()
@@ -138,7 +141,9 @@ struct PasteTextOutput: TextOutputting {
       return TextOutputResult(method: .none, error: TextOutputError.clipboardWriteFailed)
     }
 
-    simulatePasteShortcut()
+    if canPasteIntoOtherApps {
+      simulatePasteShortcut()
+    }
 
     if restoreClipboard {
       scheduleClipboardRestore(previousString, on: pasteboard)
@@ -236,6 +241,10 @@ struct SmartTextOutput: TextOutputting {
   }
 
   func output(text: String) -> TextOutputResult {
+    guard DistributionChannel.current.supportsAccessibilityTextInsertion else {
+      return clipboardOutput.output(text: text)
+    }
+
     switch appSettings.textOutputMethod {
     case .accessibilityOnly:
       return accessibilityOutput.output(text: text)
@@ -247,6 +256,10 @@ struct SmartTextOutput: TextOutputting {
         print("[SmartTextOutput] Skipping accessibility for problematic app, using clipboard")
         return clipboardOutput.output(text: text)
       }
+
+      // Permission grants can change while System Settings is frontmost. Re-read
+      // TCC before deciding whether direct insertion is available.
+      permissionsManager.refresh(.accessibility)
 
       // Only try accessibility if permission is granted AND there's a focused element
       if permissionsManager.status(for: .accessibility).isGranted,

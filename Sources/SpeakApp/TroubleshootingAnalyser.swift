@@ -79,18 +79,12 @@ struct HotkeyInfoCheck: TroubleshootingCheck {
           actions: [.navigate(.shortcuts)]
         )
       )
-    }
-    
-    // Custom shortcut troubleshooting
-    if case .custom = hotKey {
-      let accessibilityGranted = permissions.status(for: .accessibility).isGranted
-      let inputMonitoringGranted = permissions.status(for: .inputMonitoring).isGranted
-      if !accessibilityGranted || !inputMonitoringGranted {
+      if !permissions.status(for: .inputMonitoring).isGranted {
         items.append(
           TroubleshootingItem(
-            id: "hotkey-custom-permissions",
-            title: "Custom Shortcut Needs Permissions",
-            detail: "Custom hotkey detection requires both Accessibility and Input Monitoring permissions. Grant them in System Settings → Privacy & Security.",
+            id: "hotkey-fn-permission",
+            title: "Fn Shortcut Needs Input Monitoring",
+            detail: "Grant Input Monitoring so Speak can detect the Fn key while another app is active.",
             status: .issue,
             systemImage: "lock.shield",
             actions: [.navigate(.permissions)]

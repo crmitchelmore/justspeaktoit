@@ -21,6 +21,7 @@ final class DistributionChannelTests: XCTestCase {
         XCTAssertFalse(channel.supportsICloudSync)
         XCTAssertEqual(channel.apiKeyStorageMode, .localKeychainOnly)
         XCTAssertTrue(channel.supportsAutomaticAccessibilityPrompt)
+        XCTAssertTrue(channel.supportsAccessibilityTextInsertion)
         XCTAssertTrue(channel.allowsCrossChannelMessaging)
         XCTAssertFalse(channel.isSandboxed)
     }
@@ -41,6 +42,8 @@ final class DistributionChannelTests: XCTestCase {
         XCTAssertEqual(channel.apiKeyStorageMode, .encryptedCloudKit)
         XCTAssertFalse(channel.supportsAutomaticAccessibilityPrompt,
             "Sandboxed apps cannot auto-prompt for Accessibility/Input Monitoring")
+        XCTAssertFalse(channel.supportsAccessibilityTextInsertion,
+            "The App Store sandbox blocks AXUIElement access to other apps")
         XCTAssertFalse(channel.allowsCrossChannelMessaging,
             "App Store builds must not advertise other distribution channels")
         XCTAssertTrue(channel.isSandboxed)
@@ -54,6 +57,8 @@ final class DistributionChannelTests: XCTestCase {
             XCTAssertEqual(channel.supports(.externalLocalModelRuntime), channel.supportsExternalLocalModelRuntime)
             XCTAssertEqual(channel.supports(.automaticAccessibilityPrompt),
                            channel.supportsAutomaticAccessibilityPrompt)
+            XCTAssertEqual(channel.supports(.accessibilityTextInsertion),
+                           channel.supportsAccessibilityTextInsertion)
             XCTAssertEqual(channel.supports(.crossChannelMessaging),
                            channel.allowsCrossChannelMessaging)
             XCTAssertEqual(channel.supports(.encryptedCloudKitKeySync),

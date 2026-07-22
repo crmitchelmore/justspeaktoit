@@ -101,18 +101,76 @@ enum PermissionStatus: Equatable {
   }
 }
 
+enum PermissionRequestIssue: Equatable {
+  case timedOut
+
+  func guidance(for permission: PermissionType) -> String {
+    switch self {
+    case .timedOut:
+      return "macOS did not finish the \(permission.displayName) request. Open System Settings, "
+        + "choose a permission state, then refresh Speak."
+    }
+  }
+}
+
+private enum SpeechAuthorizationRequestOutcome {
+  case status(PermissionStatus)
+  case timedOut
+}
+
+private final class SpeechAuthorizationRequestGate: @unchecked Sendable {
+  private let lock = NSLock()
+  private var continuation: CheckedContinuation<SpeechAuthorizationRequestOutcome, Never>?
+  private var resolvedOutcome: SpeechAuthorizationRequestOutcome?
+
+  func install(_ continuation: CheckedContinuation<SpeechAuthorizationRequestOutcome, Never>) {
+    lock.lock()
+    if let resolvedOutcome {
+      lock.unlock()
+      continuation.resume(returning: resolvedOutcome)
+      return
+    }
+    self.continuation = continuation
+    lock.unlock()
+  }
+
+  func resolve(_ outcome: SpeechAuthorizationRequestOutcome) {
+    lock.lock()
+    guard resolvedOutcome == nil else {
+      lock.unlock()
+      return
+    }
+    resolvedOutcome = outcome
+    let pendingContinuation = continuation
+    continuation = nil
+    lock.unlock()
+    pendingContinuation?.resume(returning: outcome)
+  }
+}
+
 @MainActor
 final class PermissionsManager: ObservableObject {
+  typealias SpeechAuthorizationRequester = (@escaping (SFSpeechRecognizerAuthorizationStatus) -> Void) -> Void
+
   @Published private(set) var statuses: [PermissionType: PermissionStatus] = [:]
+  @Published private(set) var requestIssues: [PermissionType: PermissionRequestIssue] = [:]
   private let statusProvider: (PermissionType) -> PermissionStatus
+  private let speechAuthorizationRequester: SpeechAuthorizationRequester
+  private let speechAuthorizationTimeout: TimeInterval
   private let notificationCenter: NotificationCenter
   private var lifecycleObservers: [NSObjectProtocol] = []
 
   init(
     statusProvider: @escaping (PermissionType) -> PermissionStatus = PermissionsManager.systemStatus,
+    speechAuthorizationRequester: @escaping SpeechAuthorizationRequester = { callback in
+      SFSpeechRecognizer.requestAuthorization(callback)
+    },
+    speechAuthorizationTimeout: TimeInterval = 8,
     notificationCenter: NotificationCenter = .default
   ) {
     self.statusProvider = statusProvider
+    self.speechAuthorizationRequester = speechAuthorizationRequester
+    self.speechAuthorizationTimeout = speechAuthorizationTimeout
     self.notificationCenter = notificationCenter
     refreshAll()
     registerLifecycleObservers()
@@ -135,15 +193,24 @@ final class PermissionsManager: ObservableObject {
 
   func refreshAll() {
     PermissionType.allCases.forEach { type in
-      statuses[type] = computeStatus(for: type)
+      refresh(type)
     }
   }
 
   func refresh(_ type: PermissionType) {
-    statuses[type] = computeStatus(for: type)
+    let status = computeStatus(for: type)
+    statuses[type] = status
+    if status != .notDetermined {
+      requestIssues[type] = nil
+    }
+  }
+
+  func requestIssue(for type: PermissionType) -> PermissionRequestIssue? {
+    requestIssues[type]
   }
 
   func request(_ type: PermissionType) async -> PermissionStatus {
+    requestIssues[type] = nil
     let status: PermissionStatus
     switch type {
     case .microphone:
@@ -249,23 +316,43 @@ final class PermissionsManager: ObservableObject {
   }
 
   private func requestSpeechRecognition() async -> PermissionStatus {
-    await withCheckedContinuation { continuation in
-      SFSpeechRecognizer.requestAuthorization { status in
-        let mapped: PermissionStatus
-        switch status {
-        case .authorized:
-          mapped = .granted
-        case .notDetermined:
-          mapped = .notDetermined
-        case .denied:
-          mapped = .denied
-        case .restricted:
-          mapped = .restricted
-        @unknown default:
-          mapped = .restricted
-        }
-        continuation.resume(returning: mapped)
+    let gate = SpeechAuthorizationRequestGate()
+    let requester = speechAuthorizationRequester
+    let timeout = speechAuthorizationTimeout
+    let outcome = await withCheckedContinuation { continuation in
+      gate.install(continuation)
+      requester { status in
+        gate.resolve(.status(Self.mapSpeechAuthorizationStatus(status)))
       }
+      Task {
+        try? await Task.sleep(for: .seconds(timeout))
+        gate.resolve(.timedOut)
+      }
+    }
+
+    switch outcome {
+    case .status(let status):
+      return status
+    case .timedOut:
+      requestIssues[.speechRecognition] = .timedOut
+      return computeStatus(for: .speechRecognition)
+    }
+  }
+
+  private nonisolated static func mapSpeechAuthorizationStatus(
+    _ status: SFSpeechRecognizerAuthorizationStatus
+  ) -> PermissionStatus {
+    switch status {
+    case .authorized:
+      return .granted
+    case .notDetermined:
+      return .notDetermined
+    case .denied:
+      return .denied
+    case .restricted:
+      return .restricted
+    @unknown default:
+      return .restricted
     }
   }
 

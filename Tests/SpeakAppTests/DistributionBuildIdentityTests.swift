@@ -61,10 +61,14 @@ final class DistributionBuildIdentityTests: XCTestCase {
             encoding: .utf8
         )
 
-        XCTAssertEqual(workflow.components(separatedBy: "bash scripts/retry-staple.sh").count - 1, 2)
+        XCTAssertTrue(workflow.contains("bash scripts/retry-staple.sh \"$APP_PATH\""))
+        XCTAssertTrue(workflow.contains("bash scripts/retry-staple.sh \"$DMG_PATH\""))
         XCTAssertTrue(retryScript.contains("stapler staple"))
         XCTAssertTrue(retryScript.contains("stapler validate"))
         XCTAssertTrue(retryScript.contains("STAPLE_MAX_ATTEMPTS:-6"))
+        XCTAssertTrue(retryScript.contains("[[ ! -e \"$ARTIFACT_PATH\" ]]"))
+        XCTAssertTrue(retryScript.contains("STAPLE_MAX_ATTEMPTS must be a positive integer"))
+        XCTAssertTrue(retryScript.contains("RETRY_DELAY > 300"))
     }
 
     func testPlatformAppTargets_doNotCompileTheOtherPlatformsUI() throws {

@@ -51,16 +51,24 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertLessThan(testStep.lowerBound, signingStep.lowerBound)
     }
 
-    func testDirectMacRelease_retriesDelayedDMGNotarizationTickets() throws {
+    func testDirectMacRelease_retriesStaplingAcceptedNotarizationTickets() throws {
         let workflow = try String(
             contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/release-mac.yml"),
             encoding: .utf8
         )
+        let retryScript = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("scripts/retry-staple.sh"),
+            encoding: .utf8
+        )
 
-        XCTAssertTrue(workflow.contains("for ATTEMPT in {1..5}"))
-        XCTAssertTrue(workflow.contains("xcrun stapler staple \"$DMG_PATH\""))
-        XCTAssertTrue(workflow.contains("xcrun stapler validate \"$DMG_PATH\""))
-        XCTAssertTrue(workflow.contains("Notarization ticket not available yet; retrying in 15s"))
+        XCTAssertTrue(workflow.contains("bash scripts/retry-staple.sh \"$APP_PATH\""))
+        XCTAssertTrue(workflow.contains("bash scripts/retry-staple.sh \"$DMG_PATH\""))
+        XCTAssertTrue(retryScript.contains("stapler staple"))
+        XCTAssertTrue(retryScript.contains("stapler validate"))
+        XCTAssertTrue(retryScript.contains("STAPLE_MAX_ATTEMPTS:-6"))
+        XCTAssertTrue(retryScript.contains("[[ ! -e \"$ARTIFACT_PATH\" ]]"))
+        XCTAssertTrue(retryScript.contains("STAPLE_MAX_ATTEMPTS must be a positive integer"))
+        XCTAssertTrue(retryScript.contains("RETRY_DELAY > 300"))
     }
 
     func testPlatformAppTargets_doNotCompileTheOtherPlatformsUI() throws {

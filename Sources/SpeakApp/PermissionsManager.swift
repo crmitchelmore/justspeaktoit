@@ -324,7 +324,8 @@ final class PermissionsManager: ObservableObject {
       requester { status in
         gate.resolve(.status(Self.mapSpeechAuthorizationStatus(status)))
       }
-      DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+      Task {
+        try? await Task.sleep(for: .seconds(timeout))
         gate.resolve(.timedOut)
       }
     }

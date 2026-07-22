@@ -82,6 +82,28 @@ final class PermissionsManagerTests: XCTestCase {
     }
 
     @MainActor
+    func testSpeechRecognitionRequest_lateCallbackAfterTimeoutIsIgnored() async {
+        let manager = PermissionsManager(
+            statusProvider: { _ in .notDetermined },
+            speechAuthorizationRequester: { callback in
+                Task {
+                    try? await Task.sleep(for: .seconds(0.05))
+                    callback(.authorized)
+                }
+            },
+            speechAuthorizationTimeout: 0.01,
+            notificationCenter: NotificationCenter()
+        )
+
+        let result = await manager.request(.speechRecognition)
+
+        XCTAssertEqual(result, .notDetermined)
+        XCTAssertEqual(manager.requestIssue(for: .speechRecognition), .timedOut)
+        try? await Task.sleep(for: .seconds(0.1))
+        XCTAssertEqual(manager.requestIssue(for: .speechRecognition), .timedOut)
+    }
+
+    @MainActor
     func testRefresh_clearsTimedOutIssueAfterSystemStatusChanges() async {
         var systemStatus = PermissionStatus.notDetermined
         let manager = PermissionsManager(

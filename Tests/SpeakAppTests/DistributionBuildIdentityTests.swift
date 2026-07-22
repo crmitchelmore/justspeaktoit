@@ -39,6 +39,18 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertFalse(workflow.contains("Entitlements.application-identifier"))
     }
 
+    func testDirectMacRelease_runsKeychainTestsBeforeInstallingSigningKeychain() throws {
+        let workflow = try String(
+            contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/release-mac.yml"),
+            encoding: .utf8
+        )
+
+        let testStep = try XCTUnwrap(workflow.range(of: "- name: Run Tests (Release Config)"))
+        let signingStep = try XCTUnwrap(workflow.range(of: "- name: Import Code Signing Certificate"))
+
+        XCTAssertLessThan(testStep.lowerBound, signingStep.lowerBound)
+    }
+
     func testPlatformAppTargets_doNotCompileTheOtherPlatformsUI() throws {
         let manifest = try String(
             contentsOf: repositoryRoot.appendingPathComponent("Project.swift"),

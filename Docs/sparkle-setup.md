@@ -7,9 +7,10 @@ This document describes how to set up Sparkle auto-updates for Just Speak to It.
 The app uses [Sparkle](https://sparkle-project.org/) to provide automatic updates. When a new version is released:
 
 1. The release workflow generates a signed `appcast.xml`
-2. The appcast is uploaded to GitHub Releases and committed to `landing-page/appcast.xml`
-3. The app periodically checks the appcast for updates
-4. Users can also manually check via **Just Speak to It → Check for Updates…**
+2. The appcast is uploaded as an asset on the GitHub Release
+3. `https://justspeaktoit.com/appcast.xml` redirects to the latest non-prerelease GitHub asset
+4. The app periodically checks the appcast for updates
+5. Users can also manually check via **Just Speak to It → Check for Updates…**
 
 ## One-Time Setup (Required)
 
@@ -59,10 +60,14 @@ Replace `SPARKLE_PUBLIC_KEY_PLACEHOLDER` with your actual public key.
 - `scripts/generate-appcast.sh` - Generates signed appcast XML
 - The workflow signs the DMG with the private key
 - Uploads appcast.xml to GitHub Releases
-- Commits updated appcast to `landing-page/` for Cloudflare Pages
+- GitHub's latest-release URL makes the new appcast available without writing to protected `main`
 
 ### Appcast Location
-The appcast is hosted at `https://justspeaktoit.com/appcast.xml` via Cloudflare Pages.
+The app checks `https://justspeaktoit.com/appcast.xml`. Cloudflare Pages redirects that stable URL to:
+
+`https://github.com/crmitchelmore/justspeaktoit/releases/latest/download/appcast.xml`
+
+GitHub resolves `latest` to the newest non-draft, non-prerelease release, so test or prerelease tags do not replace the production feed.
 
 ## Testing
 
@@ -70,11 +75,12 @@ The appcast is hosted at `https://justspeaktoit.com/appcast.xml` via Cloudflare 
 2. Check **Just Speak to It → Check for Updates…** appears in menu
 3. The button should be enabled when not already checking
 
-To test the full flow:
+To test without changing the production feed:
 1. Set up the secrets as described above
-2. Create a test release tag (mac-vX.Y.Z)
-3. Verify the appcast.xml is generated and deployed
-4. Install an older version and verify it detects the update
+2. Publish the test artifact only as a draft or prerelease; do not use an ordinary `mac-v*` test release
+3. Verify the prerelease's direct `/releases/download/<tag>/appcast.xml` asset URL
+4. Reserve checks of `https://justspeaktoit.com/appcast.xml` for an intentional production release
+5. During that production release, verify the stable URL resolves to the intended release asset before testing an older app
 
 ## Troubleshooting
 
@@ -89,3 +95,5 @@ To test the full flow:
 ### Appcast not updating
 - Check the release workflow logs for errors
 - Verify the `SPARKLE_PRIVATE_KEY` secret is set
+- Verify the GitHub release is neither a draft nor a prerelease
+- Verify the exact `/appcast.xml` redirect is the first rule in `landing-page/_redirects`, before the `/index.html` rewrite

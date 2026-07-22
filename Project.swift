@@ -170,7 +170,7 @@ let project = Project(
                 // export exemption, so the app uses no *non-exempt* encryption.
                 "ITSAppUsesNonExemptEncryption": false,
                 "NSSupportsLiveActivities": true,
-                "UIBackgroundModes": ["audio"],
+                "UIBackgroundModes": ["audio", "remote-notification"],
                 "UIApplicationShortcutItems": [
                     [
                         "UIApplicationShortcutItemType": "com.justspeaktoit.ios.quickaction.transcribe",

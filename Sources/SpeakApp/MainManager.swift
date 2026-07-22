@@ -424,7 +424,7 @@ final class MainManager: ObservableObject {
       inputDeviceName: health.inputDeviceName,
       providerLabel: health.providerLabel,
       latencyTier: health.latencyTier.displayName,
-      transcriptionMode: appSettings.transcriptionMode.displayName,
+      transcriptionMode: appSettings.effectiveTranscriptionModeDisplayName,
       transcriptionModel: currentTranscriptionModelIdentifier(),
       postProcessingModel: appSettings.postProcessingModel,
       speedMode: appSettings.speedMode.displayName

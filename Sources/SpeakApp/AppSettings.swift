@@ -45,6 +45,31 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     }
   }
 
+  nonisolated static func effectiveTranscriptionModeDisplayName(
+    transcriptionMode: TranscriptionMode,
+    liveTranscriptionModel: String,
+    localTranscriptionMode: LocalTranscriptionMode
+  ) -> String {
+    switch transcriptionMode {
+    case .liveNative:
+      return ModelCatalog.isOnDeviceLiveTranscriptionModel(liveTranscriptionModel)
+        ? "Apple On-Device"
+        : "Remote Streaming"
+    case .batchRemote:
+      return "Remote Batch"
+    case .localModel:
+      return localTranscriptionMode.displayName
+    }
+  }
+
+  var effectiveTranscriptionModeDisplayName: String {
+    Self.effectiveTranscriptionModeDisplayName(
+      transcriptionMode: transcriptionMode,
+      liveTranscriptionModel: liveTranscriptionModel,
+      localTranscriptionMode: localTranscriptionMode
+    )
+  }
+
   enum LocalTranscriptionMode: String, CaseIterable, Identifiable {
     case batch
     case streaming

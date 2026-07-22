@@ -97,7 +97,7 @@ struct MainView: View {
     }
     ToolbarItem(placement: .status) {
       VStack(alignment: .trailing, spacing: 2) {
-        Text(environment.settings.transcriptionMode.displayName)
+        Text(environment.settings.effectiveTranscriptionModeDisplayName)
           .font(.caption)
           .foregroundStyle(.secondary)
         if let item = history.items.first {
@@ -116,7 +116,7 @@ struct MainView: View {
         Capsule()
           .strokeBorder(.secondary.opacity(0.3), lineWidth: 0.5)
       )
-      .accessibilityLabel("Current mode: \(environment.settings.transcriptionMode.displayName)")
+      .accessibilityLabel("Current mode: \(environment.settings.effectiveTranscriptionModeDisplayName)")
     }
   }
 

@@ -452,14 +452,7 @@ struct SettingsView: View {
   }
 
   private var overviewModeValue: String {
-    switch settings.transcriptionMode {
-    case .liveNative:
-      return "Remote Streaming"
-    case .batchRemote:
-      return "Remote Batch"
-    case .localModel:
-      return settings.localTranscriptionMode.displayName
-    }
+    settings.effectiveTranscriptionModeDisplayName
   }
 
   private var transcriptionLocationBinding: Binding<TranscriptionLocation> {

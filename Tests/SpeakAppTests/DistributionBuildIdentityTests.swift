@@ -91,6 +91,16 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertFalse(iosTarget.contains("Sparkle"))
     }
 
+    func testIOSApp_declaresRequiredBackgroundModes() throws {
+        let manifest = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("Project.swift"),
+            encoding: .utf8
+        )
+        let iosTarget = try targetBlock(named: "SpeakiOS", in: manifest)
+
+        XCTAssertTrue(iosTarget.contains("\"UIBackgroundModes\": [\"audio\", \"remote-notification\"]"))
+    }
+
     private func targetBlock(named name: String, in manifest: String) throws -> Substring {
         let marker = ".target(\n            name: \"\(name)\""
         let start = try XCTUnwrap(manifest.range(of: marker)?.lowerBound)

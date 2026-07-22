@@ -33,6 +33,38 @@ final class ActionButtonSettingsUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Save to History Only"].waitForExistence(timeout: 5))
     }
 
+    func testModelPickersExposeCredentialReadiness() {
+        app.buttons["Settings"].tap()
+
+        let locationPicker = app.segmentedControls["transcriptionLocationPicker"]
+        XCTAssertTrue(scrollUpUntilExists(locationPicker))
+
+        let localModelPicker = app.descendants(matching: .any)["appleOnDeviceModelPicker"]
+        XCTAssertTrue(localModelPicker.waitForExistence(timeout: 5))
+        localModelPicker.tap()
+
+        let noKeyStatus = app.descendants(matching: .any).matching(
+            NSPredicate(format: "label CONTAINS %@", "No API key required")
+        ).firstMatch
+        XCTAssertTrue(noKeyStatus.waitForExistence(timeout: 5))
+
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        locationPicker.buttons["Remote"].tap()
+
+        let remoteModelPicker = app.descendants(matching: .any)["remoteStreamingModelPicker"]
+        XCTAssertTrue(remoteModelPicker.waitForExistence(timeout: 5))
+        remoteModelPicker.tap()
+
+        let readyOrMissingStatus = app.descendants(matching: .any).matching(
+            NSPredicate(
+                format: "label CONTAINS %@ OR label CONTAINS %@",
+                "API key is set",
+                "API key is not set"
+            )
+        ).firstMatch
+        XCTAssertTrue(readyOrMissingStatus.waitForExistence(timeout: 5))
+    }
+
     private func scrollUpUntilExists(_ element: XCUIElement, maxSwipes: Int = 6) -> Bool {
         if element.waitForExistence(timeout: 1) {
             return true

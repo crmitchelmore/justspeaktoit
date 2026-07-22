@@ -373,6 +373,23 @@ public final class AppSettings: ObservableObject {
     public var hasAssemblyAIKey: Bool { !assemblyAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasGladiaKey: Bool { !gladiaAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
+    /// Identifiers currently available to model pickers. Because this is
+    /// derived from the published key values, readiness badges refresh as soon
+    /// as a key is saved, synced, or removed.
+    public var storedAPIKeyIdentifiers: Set<String> {
+        var identifiers: Set<String> = []
+        if hasDeepgramKey { identifiers.insert(Self.deepgramKeyID) }
+        if hasOpenRouterKey { identifiers.insert(Self.openRouterKeyID) }
+        if hasOpenAIKey { identifiers.insert(Self.openAIKeyID) }
+        if hasElevenLabsKey { identifiers.insert(Self.elevenLabsKeyID) }
+        if hasCartesiaKey { identifiers.insert(Self.cartesiaKeyID) }
+        if hasSonioxKey { identifiers.insert(Self.sonioxKeyID) }
+        if hasModulateKey { identifiers.insert(Self.modulateKeyID) }
+        if hasAssemblyAIKey { identifiers.insert(Self.assemblyAIKeyID) }
+        if hasGladiaKey { identifiers.insert(Self.gladiaKeyID) }
+        return identifiers
+    }
+
     public func reloadSyncedAPIKeys() async {
         syncedKeyReloadDepth += 1
         defer { syncedKeyReloadDepth -= 1 }
@@ -669,14 +686,28 @@ public struct SettingsView: View {
                     }
                 }
                 .pickerStyle(.segmented)
+                .accessibilityIdentifier("transcriptionLocationPicker")
 
                 if transcriptionLocationBinding.wrappedValue == .local {
                     Picker("Apple On-Device Model", selection: selectedModelBinding) {
                         ForEach(ModelCatalog.onDeviceLiveTranscription) { option in
-                            Text(option.displayName).tag(option.id)
+                            HStack {
+                                Text(option.displayName)
+                                Spacer()
+                                IOSModelCredentialStatusView(
+                                    availability: ModelCredentialResolver.availability(
+                                        for: option.id,
+                                        purpose: .liveTranscription,
+                                        storedAPIKeyIdentifiers: settings.storedAPIKeyIdentifiers
+                                    )
+                                )
+                            }
+                            .accessibilityElement(children: .combine)
+                            .tag(option.id)
                         }
                     }
                     .pickerStyle(.navigationLink)
+                    .accessibilityIdentifier("appleOnDeviceModelPicker")
 
                     Text("Uses Apple's built-in speech engine. Audio stays on this device.")
                         .font(.caption)
@@ -688,29 +719,56 @@ public struct SettingsView: View {
                         }
                     }
                     .pickerStyle(.segmented)
+                    .accessibilityIdentifier("remoteTranscriptionModePicker")
 
                     if settings.transcriptionMode == .streaming {
                         Picker("Remote Streaming Model", selection: selectedModelBinding) {
                             ForEach(LiveModelGroup.grouped(AppSettings.supportedLiveModels)) { group in
                                 Section(group.title) {
                                     ForEach(group.options) { option in
-                                        Text(option.displayName).tag(option.id)
+                                        HStack {
+                                            Text(option.displayName)
+                                            Spacer()
+                                            IOSModelCredentialStatusView(
+                                                availability: ModelCredentialResolver.availability(
+                                                    for: option.id,
+                                                    purpose: .liveTranscription,
+                                                    storedAPIKeyIdentifiers: settings.storedAPIKeyIdentifiers
+                                                )
+                                            )
+                                        }
+                                        .accessibilityElement(children: .combine)
+                                        .tag(option.id)
                                     }
                                 }
                             }
                         }
                         .pickerStyle(.navigationLink)
+                        .accessibilityIdentifier("remoteStreamingModelPicker")
                     } else {
                         Picker("Remote Batch Model", selection: $settings.batchTranscriptionModel) {
                             ForEach(BatchModelGroup.grouped(AppSettings.supportedBatchModels)) { group in
                                 Section(group.title) {
                                     ForEach(group.options) { option in
-                                        Text(ModelCatalog.friendlyName(for: option.id)).tag(option.id)
+                                        HStack {
+                                            Text(ModelCatalog.friendlyName(for: option.id))
+                                            Spacer()
+                                            IOSModelCredentialStatusView(
+                                                availability: ModelCredentialResolver.availability(
+                                                    for: option.id,
+                                                    purpose: .batchTranscription,
+                                                    storedAPIKeyIdentifiers: settings.storedAPIKeyIdentifiers
+                                                )
+                                            )
+                                        }
+                                        .accessibilityElement(children: .combine)
+                                        .tag(option.id)
                                     }
                                 }
                             }
                         }
                         .pickerStyle(.navigationLink)
+                        .accessibilityIdentifier("remoteBatchModelPicker")
                     }
 
                     Text(settings.transcriptionMode == .streaming
@@ -1211,6 +1269,14 @@ struct PostProcessingSettingsView: View {
                             }
 
                             Spacer()
+
+                            IOSModelCredentialStatusView(
+                                availability: ModelCredentialResolver.availability(
+                                    for: model.id,
+                                    purpose: .postProcessing,
+                                    storedAPIKeyIdentifiers: settings.storedAPIKeyIdentifiers
+                                )
+                            )
 
                             if settings.postProcessingModel == model.id {
                                 Image(systemName: "checkmark")

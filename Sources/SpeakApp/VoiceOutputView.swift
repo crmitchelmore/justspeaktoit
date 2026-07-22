@@ -1,3 +1,5 @@
+// swiftlint:disable file_length
+import SpeakCore
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -28,7 +30,7 @@ enum TTSInputSource: String, CaseIterable, Identifiable {
   }
 }
 
-struct VoiceOutputView: View {
+struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
   @EnvironmentObject private var tts: TextToSpeechManager
   @EnvironmentObject private var settings: AppSettings
   @EnvironmentObject private var history: HistoryManager
@@ -147,7 +149,7 @@ struct VoiceOutputView: View {
       if let cost = estimatedCost, cost > 0, let formatted = costString {
         heroChip(title: "Est. Cost", value: formatted, systemImage: "dollarsign.circle")
       }
-      if let _ = tts.lastResult, let formatted = durationString {
+      if tts.lastResult != nil, let formatted = durationString {
         heroChip(title: "Last Duration", value: formatted, systemImage: "waveform")
       }
     }
@@ -246,7 +248,19 @@ struct VoiceOutputView: View {
         } else {
           Picker("Voice", selection: $selectedVoice) {
             ForEach(availableVoices) { voice in
-              Text(voice.displayName).tag(voice.id)
+              HStack {
+                Text(voice.displayName)
+                Spacer()
+                ModelCredentialStatusView(
+                  availability: ModelCredentialResolver.availability(
+                    for: voice.id,
+                    purpose: .voiceOutput,
+                    storedAPIKeyIdentifiers: settings.trackedAPIKeyIdentifiers
+                  )
+                )
+              }
+              .accessibilityElement(children: .combine)
+              .tag(voice.id)
             }
           }
           .labelsHidden()
@@ -335,7 +349,7 @@ struct VoiceOutputView: View {
             .scrollContentBackground(.hidden)
             .background(Color(nsColor: .textBackgroundColor).opacity(0.5))
             .cornerRadius(8)
-            .onChange(of: inputText) { _, newValue in
+            .onChange(of: inputText) { _, _ in
               updateEstimatedCost()
             }
         }

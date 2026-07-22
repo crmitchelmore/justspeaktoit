@@ -6,7 +6,10 @@ import XCTest
 
 final class SecureStorageConcurrencyTests: XCTestCase {
     func testLegacyServicePayload_isCopiedToCanonicalService() async throws {
-        let suffix = UUID().uuidString
+        // Keep synthetic services close to production lengths. Older CI macOS
+        // Keychain implementations do not reliably round-trip the previous
+        // 67-72 character service names across separate storage instances.
+        let suffix = String(UUID().uuidString.prefix(8))
         let legacyService = "com.justspeaktoit.tests.legacy.\(suffix)"
         let canonicalService = "com.github.speakapp.tests.canonical.\(suffix)"
         defer {

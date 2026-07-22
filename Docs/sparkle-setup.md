@@ -75,12 +75,12 @@ GitHub resolves `latest` to the newest non-draft, non-prerelease release, so tes
 2. Check **Just Speak to It → Check for Updates…** appears in menu
 3. The button should be enabled when not already checking
 
-To test the full flow:
+To test without changing the production feed:
 1. Set up the secrets as described above
-2. Create a test release tag (mac-vX.Y.Z)
-3. Verify the release contains `appcast.xml`
-4. Verify `https://justspeaktoit.com/appcast.xml` resolves to that release asset
-5. Install an older version and verify it detects the update
+2. Publish the test artifact only as a draft or prerelease; do not use an ordinary `mac-v*` test release
+3. Verify the prerelease's direct `/releases/download/<tag>/appcast.xml` asset URL
+4. Reserve checks of `https://justspeaktoit.com/appcast.xml` for an intentional production release
+5. During that production release, verify the stable URL resolves to the intended release asset before testing an older app
 
 ## Troubleshooting
 
@@ -96,4 +96,4 @@ To test the full flow:
 - Check the release workflow logs for errors
 - Verify the `SPARKLE_PRIVATE_KEY` secret is set
 - Verify the GitHub release is neither a draft nor a prerelease
-- Verify the Cloudflare Pages `/appcast.xml` redirect is deployed before the SPA catch-all rule
+- Verify the exact `/appcast.xml` redirect is the first rule in `landing-page/_redirects`, before the `/index.html` rewrite

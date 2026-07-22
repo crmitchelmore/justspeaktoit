@@ -1,4 +1,5 @@
 // swiftlint:disable file_length
+import SpeakCore
 import SwiftUI
 import UniformTypeIdentifiers
 

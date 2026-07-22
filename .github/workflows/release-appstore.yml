@@ -122,12 +122,23 @@ jobs:
           fi
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           PROFILE_PATH="$HOME/Library/MobileDevice/Provisioning Profiles/mac-app-store.provisionprofile"
+          PROFILE_PLIST="$RUNNER_TEMP/mac-app-store-profile.plist"
           echo -n "$MAC_APP_STORE_PROFILE" | base64 --decode -o "$PROFILE_PATH"
-          MAC_PROFILE_UUID=$(security cms -D -i "$PROFILE_PATH" | plutil -extract UUID raw -)
-          MAC_PROFILE_NAME=$(security cms -D -i "$PROFILE_PATH" | plutil -extract Name raw -)
-          MAC_PROFILE_APP_ID=$(security cms -D -i "$PROFILE_PATH" | plutil -extract Entitlements.application-identifier raw -)
+          security cms -D -i "$PROFILE_PATH" > "$PROFILE_PLIST"
+          MAC_PROFILE_UUID=$(plutil -extract UUID raw "$PROFILE_PLIST")
+          MAC_PROFILE_NAME=$(plutil -extract Name raw "$PROFILE_PLIST")
+          MAC_PROFILE_APP_ID=$(/usr/libexec/PlistBuddy \
+            -c "Print :Entitlements:com.apple.application-identifier" \
+            "$PROFILE_PLIST")
           if [ "$MAC_PROFILE_APP_ID" != "$APPLE_TEAM_ID.$BUNDLE_ID" ]; then
             echo "::error::Provisioning profile is for '$MAC_PROFILE_APP_ID', expected '$APPLE_TEAM_ID.$BUNDLE_ID'"
+            exit 1
+          fi
+          if ! /usr/libexec/PlistBuddy \
+            -c "Print :Entitlements:com.apple.developer.icloud-container-identifiers" \
+            "$PROFILE_PLIST" | awk \
+              '{$1=$1} $0 == "iCloud.com.justspeaktoit" { found = 1 } END { exit found ? 0 : 1 }'; then
+            echo "::error::Provisioning profile does not allow the production iCloud container"
             exit 1
           fi
           echo "MAC_PROFILE_UUID=$MAC_PROFILE_UUID" >> "$GITHUB_ENV"

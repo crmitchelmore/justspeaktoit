@@ -31,7 +31,12 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(workflow.contains("<key>com.justspeaktoit.mac.appstore</key>"))
         XCTAssertFalse(workflow.contains("<key>com.justspeaktoit.mac</key>"))
         XCTAssertTrue(workflow.contains("APPLE_TEAM_ID.$BUNDLE_ID"))
-        XCTAssertTrue(workflow.contains("Entitlements.application-identifier"))
+        XCTAssertTrue(workflow.contains("com.apple.application-identifier"))
+        XCTAssertTrue(workflow.contains("com.apple.developer.icloud-container-identifiers"))
+        XCTAssertTrue(workflow.contains("iCloud.com.justspeaktoit"))
+        XCTAssertTrue(workflow.contains("$0 == \"iCloud.com.justspeaktoit\""))
+        XCTAssertFalse(workflow.contains("grep -Fq \"iCloud.com.justspeaktoit\""))
+        XCTAssertFalse(workflow.contains("Entitlements.application-identifier"))
     }
 
     func testPlatformAppTargets_doNotCompileTheOtherPlatformsUI() throws {

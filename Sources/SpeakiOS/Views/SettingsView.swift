@@ -151,8 +151,9 @@ public final class AppSettings: ObservableObject {
 
     private static let credentialStorage = SecureStorage(
         configuration: SecureStorageConfiguration(
-            service: "com.justspeaktoit.credentials",
-            masterAccount: "speak-app-secrets"
+            service: "com.github.speakapp.credentials",
+            masterAccount: "speak-app-secrets",
+            legacyServices: ["com.justspeaktoit.credentials"]
         )
     )
 
@@ -240,13 +241,14 @@ public final class AppSettings: ObservableObject {
 
     private init() { // swiftlint:disable:this function_body_length
         let selectedRaw = UserDefaults.standard.string(forKey: "selectedModel") ?? "apple/local/SFSpeechRecognizer"
-        // Normalise to canonical catalogue ids. Keep any id already in the
-        // shared catalogue; migrate legacy iOS-only ids (e.g. "deepgram/nova-3",
-        // "elevenlabs/scribe_v1") onto their catalogue equivalents so iOS and
-        // macOS select the same models.
-        let knownLiveIDs = Set(ModelCatalog.liveTranscription.map(\.id))
+        // Normalise to canonical catalogue ids. Keep only models that this iOS
+        // target can actually run; a previously stored macOS-only model falls
+        // back to Apple Speech instead of leaking into the iPhone picker.
+        let selectableLiveIDs = Set(
+            (ModelCatalog.onDeviceLiveTranscription + Self.supportedLiveModels).map(\.id)
+        )
         let selected: String
-        if knownLiveIDs.contains(selectedRaw) {
+        if selectableLiveIDs.contains(selectedRaw) {
             selected = selectedRaw
         } else if selectedRaw.hasPrefix("apple/") {
             selected = selectedRaw
@@ -480,6 +482,14 @@ public final class AppSettings: ObservableObject {
         "openai/gpt-4o-transcribe-diarize"
     ]
 
+    /// Remote streaming models with an implemented iOS recording path. Shared
+    /// catalogue entries that remain macOS-only are omitted rather than shown
+    /// disabled or silently routed to a different provider.
+    public static let supportedLiveModels: [ModelCatalog.Option] =
+        ModelCatalog.remoteLiveTranscription.filter { option in
+            LiveTranscriptionRouting.route(for: option.id)?.isSupportedOnIOS == true
+        }
+
     /// iOS currently supports OpenAI's transcription endpoint and OpenRouter's
     /// audio-capable batch models. Other catalogue entries remain shared with
     /// Mac but are hidden until their upload clients are available on iPhone.
@@ -538,28 +548,6 @@ public final class AppSettings: ObservableObject {
 }
 
 // MARK: - Settings View
-
-/// One row in the live-model picker: the model's display name plus, for models
-/// whose provider isn't wired up on iOS yet, a caption so users understand why
-/// selecting it falls back to Apple Speech.
-private struct LiveModelRow: View {
-    let option: ModelCatalog.Option
-
-    private var isSupported: Bool {
-        LiveTranscriptionRouting.route(for: option.id)?.isSupportedOnIOS ?? true
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(option.displayName)
-            if !isSupported {
-                Text("Coming to iPhone soon")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-}
 
 /// A provider-titled group of live-transcription models, so the picker can list
 /// a growing catalogue in tidy per-provider sections instead of one long list.
@@ -694,10 +682,10 @@ public struct SettingsView: View {
 
                     if settings.transcriptionMode == .streaming {
                         Picker("Remote Streaming Model", selection: selectedModelBinding) {
-                            ForEach(LiveModelGroup.grouped(ModelCatalog.remoteLiveTranscription)) { group in
+                            ForEach(LiveModelGroup.grouped(AppSettings.supportedLiveModels)) { group in
                                 Section(group.title) {
                                     ForEach(group.options) { option in
-                                        LiveModelRow(option: option).tag(option.id)
+                                        Text(option.displayName).tag(option.id)
                                     }
                                 }
                             }
@@ -721,18 +709,6 @@ public struct SettingsView: View {
                         : "Audio is uploaded after recording for a more complete transcript.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                }
-
-                if transcriptionLocationBinding.wrappedValue == .remote,
-                   settings.transcriptionMode == .streaming,
-                   let route = LiveTranscriptionRouting.route(for: settings.selectedModel),
-                   !route.isSupportedOnIOS {
-                    Label(
-                        "Not available on iPhone yet — recording falls back to Apple Speech.",
-                        systemImage: "exclamationmark.triangle"
-                    )
-                    .foregroundStyle(.orange)
-                    .font(.caption)
                 }
 
                 if transcriptionLocationBinding.wrappedValue == .remote,

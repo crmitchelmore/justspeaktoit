@@ -338,7 +338,8 @@ enum WireUp {
     let secureStorage = SecureAppStorage(
       permissionsManager: permissions,
       appSettings: settings,
-      keychainService: options.keychainServiceOverride ?? "com.justspeaktoit.credentials"
+      keychainService: options.keychainServiceOverride
+        ?? "com.github.speakapp.credentials"
     )
     let openRouter = OpenRouterAPIClient(secureStorage: secureStorage)
     let transcription = TranscriptionManager(

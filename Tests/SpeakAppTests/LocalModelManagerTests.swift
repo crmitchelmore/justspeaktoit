@@ -83,6 +83,7 @@ final class LocalModelManagerTests: XCTestCase {
         XCTAssertEqual(resolved.approximateSizeMB, 123)
     }
 
+    #if !APP_STORE
     func testStreamingRuntimeHint_identifiesSherpaModels() {
         XCTAssertEqual(
             LocalModelManager.streamingRuntimeHint(
@@ -203,6 +204,7 @@ final class LocalModelManagerTests: XCTestCase {
         XCTAssertTrue(models.allSatisfy { $0.filename.lowercased().hasSuffix(".gguf") })
         XCTAssertTrue(models.allSatisfy { ($0.approximateSizeMB ?? 0) > 0 })
     }
+    #endif
 
     func testLocalPostProcessingModelID_identifiesDownloadedModels() {
         XCTAssertTrue(

@@ -23,11 +23,10 @@ on:
 env:
   SCHEME: SpeakApp
   # Deliberately distinct from the direct/Sparkle app so both bundles and
-  # processes can coexist on one Mac. The App Store bundle identifier remains
-  # tied to the existing App Store Connect record.
+  # processes can coexist on one Mac and TestFlight opens the correct binary.
   PRODUCT_NAME: JustSpeakToItAppStore
   WORKSPACE: "Just Speak to It.xcworkspace"
-  BUNDLE_ID: com.justspeaktoit.mac
+  BUNDLE_ID: com.justspeaktoit.mac.appstore
   # Matches the existing Release iOS workflow convention. This is the ASC key ID,
   # not the private key; the private key must remain in APP_STORE_CONNECT_API_KEY.
   APP_STORE_CONNECT_KEY_ID: S747NJ9DZY
@@ -110,8 +109,13 @@ jobs:
 
       - name: Install Mac App Store Provisioning Profile
         env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           MAC_APP_STORE_PROFILE: ${{ secrets.MAC_APP_STORE_PROFILE }}
         run: |
+          if [ -z "$APPLE_TEAM_ID" ]; then
+            echo "::error::APPLE_TEAM_ID secret is required"
+            exit 1
+          fi
           if [ -z "$MAC_APP_STORE_PROFILE" ]; then
             echo "::error::MAC_APP_STORE_PROFILE secret is required"
             exit 1
@@ -121,6 +125,11 @@ jobs:
           echo -n "$MAC_APP_STORE_PROFILE" | base64 --decode -o "$PROFILE_PATH"
           MAC_PROFILE_UUID=$(security cms -D -i "$PROFILE_PATH" | plutil -extract UUID raw -)
           MAC_PROFILE_NAME=$(security cms -D -i "$PROFILE_PATH" | plutil -extract Name raw -)
+          MAC_PROFILE_APP_ID=$(security cms -D -i "$PROFILE_PATH" | plutil -extract Entitlements.application-identifier raw -)
+          if [ "$MAC_PROFILE_APP_ID" != "$APPLE_TEAM_ID.$BUNDLE_ID" ]; then
+            echo "::error::Provisioning profile is for '$MAC_PROFILE_APP_ID', expected '$APPLE_TEAM_ID.$BUNDLE_ID'"
+            exit 1
+          fi
           echo "MAC_PROFILE_UUID=$MAC_PROFILE_UUID" >> "$GITHUB_ENV"
           echo "MAC_PROFILE_NAME=$MAC_PROFILE_NAME" >> "$GITHUB_ENV"
 
@@ -285,7 +294,7 @@ jobs:
               <string>MAC_INSTALLER_IDENTITY_HASH_PLACEHOLDER</string>
               <key>provisioningProfiles</key>
               <dict>
-                  <key>com.justspeaktoit.mac</key>
+                  <key>com.justspeaktoit.mac.appstore</key>
                   <string>MAC_PROFILE_UUID_PLACEHOLDER</string>
               </dict>
               <key>uploadSymbols</key>

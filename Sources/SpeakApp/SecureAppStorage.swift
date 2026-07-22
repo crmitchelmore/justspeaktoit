@@ -67,7 +67,7 @@ actor SecureAppStorage {
     init(
         permissionsManager: PermissionsManager,
         appSettings: AppSettings,
-        keychainService: String = "com.justspeaktoit.credentials"
+        keychainService: String = "com.github.speakapp.credentials"
     ) {
         self.permissionsManager = permissionsManager
         self.appSettings = appSettings
@@ -79,6 +79,7 @@ actor SecureAppStorage {
         let configuration = SecureStorageConfiguration(
             service: keychainService,
             masterAccount: "speak-app-secrets",
+            legacyServices: ["com.justspeaktoit.credentials"],
             accessGroup: nil,
             synchronizable: false
         )

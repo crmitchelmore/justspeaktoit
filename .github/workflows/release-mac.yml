@@ -37,6 +37,23 @@ jobs:
         run: |
           brew install tuist
 
+      - name: Generate Xcode Project
+        run: |
+          tuist generate --no-open
+
+      - name: Resolve Swift Package Dependencies
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME"
+
+      - name: Run Tests (Release Config)
+        run: |
+          echo "Running tests in release configuration as release gate..."
+          swift test -c release
+
+      # Release tests exercise real Keychain migration. Run them before replacing
+      # the runner's Keychain search list with the temporary signing Keychain.
       - name: Import Code Signing Certificate
         env:
           APPLE_DEVELOPER_ID_APPLICATION: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION }}
@@ -70,21 +87,6 @@ jobs:
           mkdir -p ~/.appstoreconnect/private_keys
           echo "$APP_STORE_CONNECT_API_KEY" | base64 --decode > "$KEY_PATH"
           chmod 600 "$KEY_PATH"
-
-      - name: Generate Xcode Project
-        run: |
-          tuist generate --no-open
-
-      - name: Resolve Swift Package Dependencies
-        run: |
-          xcodebuild -resolvePackageDependencies \
-            -workspace "$WORKSPACE" \
-            -scheme "$SCHEME"
-
-      - name: Run Tests (Release Config)
-        run: |
-          echo "Running tests in release configuration as release gate..."
-          swift test -c release
 
       - name: Verify Entitlements for Developer ID
         run: |

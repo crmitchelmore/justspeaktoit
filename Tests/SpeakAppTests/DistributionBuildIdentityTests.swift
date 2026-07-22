@@ -33,4 +33,33 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(workflow.contains("APPLE_TEAM_ID.$BUNDLE_ID"))
         XCTAssertTrue(workflow.contains("Entitlements.application-identifier"))
     }
+
+    func testPlatformAppTargets_doNotCompileTheOtherPlatformsUI() throws {
+        let manifest = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("Project.swift"),
+            encoding: .utf8
+        )
+        let macTarget = try targetBlock(named: "SpeakApp", in: manifest)
+        let iosTarget = try targetBlock(named: "SpeakiOS", in: manifest)
+
+        XCTAssertTrue(macTarget.contains("sources: [\"Sources/SpeakApp/**\"]"))
+        XCTAssertFalse(macTarget.contains("SpeakiOSApp"))
+        XCTAssertFalse(macTarget.contains("SpeakiOSLib"))
+        XCTAssertFalse(macTarget.contains("JustSpeakToItWidgetExtension"))
+
+        XCTAssertTrue(iosTarget.contains("sources: [\"SpeakiOSApp/**\"]"))
+        XCTAssertTrue(iosTarget.contains(".package(product: \"SpeakiOSLib\")"))
+        XCTAssertFalse(iosTarget.contains("Sources/SpeakApp"))
+        XCTAssertFalse(iosTarget.contains("SpeakHotKeys"))
+        XCTAssertFalse(iosTarget.contains("Sparkle"))
+    }
+
+    private func targetBlock(named name: String, in manifest: String) throws -> Substring {
+        let marker = ".target(\n            name: \"\(name)\""
+        let start = try XCTUnwrap(manifest.range(of: marker)?.lowerBound)
+        let remainder = manifest[start...]
+        let nextTarget = remainder.dropFirst(marker.count).range(of: "\n        .target(")?.lowerBound
+        let end = nextTarget ?? manifest.endIndex
+        return manifest[start..<end]
+    }
 }

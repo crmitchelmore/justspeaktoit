@@ -56,6 +56,16 @@ final class LiveTranscriptionRoutingTests: XCTestCase {
         XCTAssertEqual(route?.provider, .apple)
         XCTAssertNil(route?.apiKeyIdentifier)
         XCTAssertEqual(route?.apiModelName, "apple/local/SFSpeechRecognizer")
+
+        let speechTranscriber = LiveTranscriptionRouting.route(
+            for: AppleLocalModels.speechTranscriberModelID
+        )
+        XCTAssertEqual(speechTranscriber?.provider, .apple)
+        XCTAssertNil(speechTranscriber?.apiKeyIdentifier)
+        XCTAssertEqual(
+            speechTranscriber?.apiModelName,
+            AppleLocalModels.speechTranscriberModelID
+        )
     }
 
     func testRoute_unknownOrMalformedID_returnsNil() {
@@ -72,6 +82,33 @@ final class LiveTranscriptionRoutingTests: XCTestCase {
 
         // Assert: every catalogue live model resolves to a route.
         XCTAssertEqual(routes.count, ModelCatalog.liveTranscription.count)
+    }
+
+    func testResolvedModelID_missingCloudKeyFallsBackToSharedOnDeviceDefault() {
+        XCTAssertEqual(
+            LiveTranscriptionRouting.resolvedModelID(
+                for: "deepgram/nova-3-streaming",
+                apiKey: "  "
+            ),
+            ModelCatalog.defaultOnDeviceLiveTranscriptionModel
+        )
+    }
+
+    func testResolvedModelID_preservesUsableAndOnDeviceModels() {
+        XCTAssertEqual(
+            LiveTranscriptionRouting.resolvedModelID(
+                for: "deepgram/nova-3-streaming",
+                apiKey: "configured"
+            ),
+            "deepgram/nova-3-streaming"
+        )
+        XCTAssertEqual(
+            LiveTranscriptionRouting.resolvedModelID(
+                for: AppleLocalModels.preferredSpeechModelID,
+                apiKey: nil
+            ),
+            AppleLocalModels.preferredSpeechModelID
+        )
     }
 
     // MARK: - iOS availability

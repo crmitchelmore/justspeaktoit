@@ -11,7 +11,7 @@ final class TranscriberCoordinator: ObservableObject {
     @Published private(set) var isRunning = false
     @Published private(set) var partialText = ""
     @Published private(set) var error: Error?
-    @Published private(set) var currentModel: String = "apple/local/SFSpeechRecognizer"
+    @Published private(set) var currentModel: String = AppleLocalModels.preferredSpeechModelID
     @Published private(set) var confidence: Double?
     @Published private(set) var wordCount: Int = 0
 
@@ -63,13 +63,12 @@ final class TranscriberCoordinator: ObservableObject {
         startTime = Date()
         sharedState.clear()
 
-        // Fall back to Apple Speech if the selected provider needs an API key we
-        // don't have (covers every cloud provider via the shared routing).
-        if settings.transcriptionMode == .streaming,
-           let route = LiveTranscriptionRouting.route(for: currentModel),
-           route.apiKeyIdentifier != nil,
-           settings.liveAPIKey(for: route).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            currentModel = "apple/local/SFSpeechRecognizer"
+        if settings.transcriptionMode == .streaming {
+            let route = LiveTranscriptionRouting.route(for: currentModel)
+            currentModel = LiveTranscriptionRouting.resolvedModelID(
+                for: currentModel,
+                apiKey: route.map { settings.liveAPIKey(for: $0) }
+            )
         }
 
         // Start Live Activity (if enabled)
@@ -186,6 +185,7 @@ final class TranscriberCoordinator: ObservableObject {
         } else {
             // Use Apple Speech
             let transcriber = iOSLiveTranscriber(audioSessionManager: audioSessionManager)
+            transcriber.modelID = currentModel
 
             transcriber.onPartialResult = { [weak self] text, isFinal in
                 self?.handlePartialResult(text: self?.appleTranscriber?.partialText ?? text, isFinal: isFinal)

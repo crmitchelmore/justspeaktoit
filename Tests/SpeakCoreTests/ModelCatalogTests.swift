@@ -123,6 +123,7 @@ final class ModelCatalogTests: XCTestCase {
 
     func testModelRouting_distinguishesAppleSpeechFromDownloadedLocal() {
         XCTAssertEqual(ModelRouting.family(for: "apple/local/SFSpeechRecognizer"), .appleSpeech)
+        XCTAssertEqual(ModelRouting.family(for: "apple/local/SpeechTranscriber"), .appleSpeech)
         XCTAssertEqual(ModelRouting.family(for: "local/whisperkit/tiny"), .downloadedLocal(engine: "whisperkit"))
     }
 
@@ -130,7 +131,7 @@ final class ModelCatalogTests: XCTestCase {
         let onDeviceIDs = Set(ModelCatalog.onDeviceLiveTranscription.map(\.id))
         let remoteIDs = Set(ModelCatalog.remoteLiveTranscription.map(\.id))
 
-        XCTAssertTrue(onDeviceIDs.contains("apple/local/SFSpeechRecognizer"))
+        XCTAssertTrue(onDeviceIDs.contains(AppleLocalModels.preferredSpeechModelID))
         XCTAssertTrue(onDeviceIDs.contains("apple/local/Dictation"))
         XCTAssertTrue(onDeviceIDs.allSatisfy(ModelCatalog.isOnDeviceLiveTranscriptionModel))
         XCTAssertTrue(remoteIDs.allSatisfy { !ModelCatalog.isOnDeviceLiveTranscriptionModel($0) })
@@ -144,6 +145,48 @@ final class ModelCatalogTests: XCTestCase {
         ))
         let remoteDefault = try XCTUnwrap(ModelCatalog.defaultRemoteLiveTranscriptionModel)
         XCTAssertFalse(ModelCatalog.isOnDeviceLiveTranscriptionModel(remoteDefault))
+    }
+
+    func testAppleSpeechCatalog_usesBestRuntimeAvailableModel() {
+        let liveIDs = Set(ModelCatalog.liveTranscription.map(\.id))
+        XCTAssertTrue(liveIDs.contains(AppleLocalModels.preferredSpeechModelID))
+
+        if AppleLocalModels.supportsSpeechTranscriber {
+            XCTAssertTrue(ModelCatalog.batchTranscription.contains {
+                $0.id == AppleLocalModels.speechTranscriberModelID
+            })
+            XCTAssertFalse(liveIDs.contains(AppleLocalModels.legacySpeechModelID))
+        } else {
+            XCTAssertFalse(ModelCatalog.batchTranscription.contains {
+                $0.id == AppleLocalModels.speechTranscriberModelID
+            })
+            XCTAssertFalse(liveIDs.contains(AppleLocalModels.speechTranscriberModelID))
+        }
+    }
+
+    func testAppleSpeechModelSelection_preservesLegacyFallback() {
+        XCTAssertEqual(
+            AppleLocalModels.preferredSpeechModelID(speechTranscriberAvailable: true),
+            AppleLocalModels.speechTranscriberModelID
+        )
+        XCTAssertEqual(
+            AppleLocalModels.preferredSpeechModelID(speechTranscriberAvailable: false),
+            AppleLocalModels.legacySpeechModelID
+        )
+        XCTAssertEqual(
+            ModelCatalog.normalizedLiveTranscriptionModel(AppleLocalModels.legacySpeechModelID),
+            AppleLocalModels.preferredSpeechModelID
+        )
+    }
+
+    func testAppleFoundationModelCatalog_matchesRuntimeAvailability() {
+        let isCatalogued = ModelCatalog.postProcessing.contains {
+            $0.id == AppleLocalModels.foundationModelID
+        }
+        XCTAssertEqual(isCatalogued, AppleLocalModels.supportsFoundationModels)
+        XCTAssertFalse(ModelCatalog.cloudPostProcessing.contains {
+            $0.id == AppleLocalModels.foundationModelID
+        })
     }
 
     func testModelRouting_treatsLocalCleanupAsPostProcessing() {
@@ -204,7 +247,10 @@ final class ModelCatalogTests: XCTestCase {
     func testCloudPostProcessing_isExactNonLocalProjection() {
         XCTAssertEqual(
             ModelCatalog.cloudPostProcessing,
-            ModelCatalog.postProcessing.filter { !$0.id.hasPrefix("local/post-processing/") }
+            ModelCatalog.postProcessing.filter {
+                !$0.id.hasPrefix("local/post-processing/")
+                    && $0.id != AppleLocalModels.foundationModelID
+            }
         )
     }
 

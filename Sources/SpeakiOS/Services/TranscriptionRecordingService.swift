@@ -74,13 +74,12 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
         sharedState.isRecording = true
         sharedState.recordingStartTime = startTime
 
-        // Fall back to Apple Speech if the selected provider needs an API key we
-        // don't have (covers every cloud provider via the shared routing).
-        if settings.transcriptionMode == .streaming,
-           let route = LiveTranscriptionRouting.route(for: currentModel),
-           route.apiKeyIdentifier != nil,
-           settings.liveAPIKey(for: route).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            currentModel = "apple/local/SFSpeechRecognizer"
+        if settings.transcriptionMode == .streaming {
+            let route = LiveTranscriptionRouting.route(for: currentModel)
+            currentModel = LiveTranscriptionRouting.resolvedModelID(
+                for: currentModel,
+                apiKey: route.map { settings.liveAPIKey(for: $0) }
+            )
         }
 
         // A Live Activity is required to record in the *background* via an
@@ -204,6 +203,7 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
                 try await transcriber.start()
             } else {
                 let transcriber = iOSLiveTranscriber(audioSessionManager: audioSessionManager)
+                transcriber.modelID = currentModel
 
                 transcriber.onPartialResult = { [weak self] text, _ in
                     Task { @MainActor in

@@ -51,6 +51,18 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertLessThan(testStep.lowerBound, signingStep.lowerBound)
     }
 
+    func testDirectMacRelease_retriesDelayedDMGNotarizationTickets() throws {
+        let workflow = try String(
+            contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/release-mac.yml"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(workflow.contains("for ATTEMPT in {1..5}"))
+        XCTAssertTrue(workflow.contains("xcrun stapler staple \"$DMG_PATH\""))
+        XCTAssertTrue(workflow.contains("xcrun stapler validate \"$DMG_PATH\""))
+        XCTAssertTrue(workflow.contains("Notarization ticket not available yet; retrying in 15s"))
+    }
+
     func testPlatformAppTargets_doNotCompileTheOtherPlatformsUI() throws {
         let manifest = try String(
             contentsOf: repositoryRoot.appendingPathComponent("Project.swift"),

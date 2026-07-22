@@ -64,6 +64,7 @@ extension ModelCatalog {
     private static let liveCapabilityRegistry: [String: LiveModelCapabilities] = [
         // Apple on-device — raw passthrough only.
         "apple/local/SFSpeechRecognizer": .default,
+        "apple/local/SpeechTranscriber": .default,
         "apple/local/Dictation": .default,
 
         // Streaming providers that emit incremental finals during the session.

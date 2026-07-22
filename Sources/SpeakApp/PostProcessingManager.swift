@@ -91,59 +91,12 @@ final class PostProcessingManager: ObservableObject {
       ? "inception/mercury"
       : settings.postProcessingModel
 
-    if Self.isBuiltInLocalPostProcessingModel(model) {
-      let cleaned = Self.processLocally(rawText)
-      return .success(
-        .init(
-          original: rawText,
-          processed: cleaned,
-          response: nil,
-          systemPrompt: "Local offline transcript cleanup",
-          promptPayload: nil
-        )
-      )
-    }
-
-    if Self.isDownloadedLocalPostProcessingModel(model) {
-      #if APP_STORE
-      let cleaned = Self.processLocally(rawText)
-      return .success(
-        .init(
-          original: rawText,
-          processed: cleaned,
-          response: nil,
-          systemPrompt: "Local offline transcript cleanup",
-          promptPayload: nil
-        )
-      )
-      #else
-      do {
-        let cleaned = try await LocalPostProcessingModelManager.shared.process(
-          modelID: model,
-          rawText: rawText,
-          systemPrompt: systemPrompt,
-          temperature: settings.postProcessingTemperature
-        )
-        let promptPayload = PostProcessingPromptPayload(
-          modelIdentifier: model,
-          customPrompt: customPromptForDebug(),
-          systemPrompt: LocalPostProcessingModelManager.localSystemPrompt(systemPrompt),
-          userPrompt: LocalPostProcessingModelManager.localUserPrompt(systemPrompt: systemPrompt, rawText: rawText)
-        )
-        return .success(
-          .init(
-            original: rawText,
-            processed: cleaned,
-            response: nil,
-            systemPrompt: systemPrompt,
-            promptPayload: promptPayload
-          )
-        )
-      } catch {
-        log.error("Local post-processing failed: \(error.localizedDescription, privacy: .public)")
-        return .failure(error)
-      }
-      #endif
+    if let localResult = await processWithLocalModelIfNeeded(
+      model: model,
+      rawText: rawText,
+      systemPrompt: systemPrompt
+    ) {
+      return localResult
     }
 
     let userMessage = """
@@ -220,6 +173,118 @@ final class PostProcessingManager: ObservableObject {
     }
   }
 
+  private func processWithLocalModelIfNeeded(
+    model: String,
+    rawText: String,
+    systemPrompt: String
+  ) async -> Result<PostProcessingOutcome, Error>? {
+    guard Self.isLocalPostProcessingModel(model) else { return nil }
+
+    if Self.isAppleFoundationModel(model) {
+      return await processWithAppleFoundationModel(
+        model: model,
+        rawText: rawText,
+        systemPrompt: systemPrompt
+      )
+    }
+
+    if Self.isBuiltInLocalPostProcessingModel(model) {
+      let cleaned = Self.processLocally(rawText)
+      return .success(
+        .init(
+          original: rawText,
+          processed: cleaned,
+          response: nil,
+          systemPrompt: "Local offline transcript cleanup",
+          promptPayload: nil
+        )
+      )
+    }
+
+    return await processWithDownloadedLocalModel(
+      model: model,
+      rawText: rawText,
+      systemPrompt: systemPrompt
+    )
+  }
+
+  private func processWithAppleFoundationModel(
+    model: String,
+    rawText: String,
+    systemPrompt: String
+  ) async -> Result<PostProcessingOutcome, Error> {
+    do {
+      let cleaned = try await AppleFoundationModelPolisher.process(
+        text: rawText,
+        systemPrompt: systemPrompt
+      )
+      let promptPayload = PostProcessingPromptPayload(
+        modelIdentifier: model,
+        customPrompt: customPromptForDebug(),
+        systemPrompt: systemPrompt,
+        userPrompt: rawText
+      )
+      return .success(
+        .init(
+          original: rawText,
+          processed: cleaned.isEmpty ? rawText : cleaned,
+          response: nil,
+          systemPrompt: systemPrompt,
+          promptPayload: promptPayload
+        )
+      )
+    } catch {
+      log.error("Apple Intelligence post-processing failed: \(error.localizedDescription, privacy: .public)")
+      return .failure(error)
+    }
+  }
+
+  private func processWithDownloadedLocalModel(
+    model: String,
+    rawText: String,
+    systemPrompt: String
+  ) async -> Result<PostProcessingOutcome, Error> {
+    #if APP_STORE
+    let cleaned = Self.processLocally(rawText)
+    return .success(
+      .init(
+        original: rawText,
+        processed: cleaned,
+        response: nil,
+        systemPrompt: "Local offline transcript cleanup",
+        promptPayload: nil
+      )
+    )
+    #else
+    do {
+      let cleaned = try await LocalPostProcessingModelManager.shared.process(
+        modelID: model,
+        rawText: rawText,
+        systemPrompt: systemPrompt,
+        temperature: settings.postProcessingTemperature
+      )
+      let promptPayload = PostProcessingPromptPayload(
+        modelIdentifier: model,
+        customPrompt: customPromptForDebug(),
+        systemPrompt: LocalPostProcessingModelManager.localSystemPrompt(systemPrompt),
+        userPrompt: LocalPostProcessingModelManager.localUserPrompt(systemPrompt: systemPrompt, rawText: rawText)
+      )
+      return .success(
+        .init(
+          original: rawText,
+          processed: cleaned,
+          response: nil,
+          systemPrompt: systemPrompt,
+          promptPayload: promptPayload
+        )
+      )
+    } catch {
+      log.error("Local post-processing failed: \(error.localizedDescription, privacy: .public)")
+      return .failure(error)
+    }
+    #endif
+  }
+
   func hasRequiredAPIKey() async -> Bool {
     let configuredModel = settings.postProcessingModel
       .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -242,7 +307,13 @@ final class PostProcessingManager: ObservableObject {
   }
 
   static func isLocalPostProcessingModel(_ model: String) -> Bool {
-    isBuiltInLocalPostProcessingModel(model) || isDownloadedLocalPostProcessingModel(model)
+    isAppleFoundationModel(model)
+      || isBuiltInLocalPostProcessingModel(model)
+      || isDownloadedLocalPostProcessingModel(model)
+  }
+
+  static func isAppleFoundationModel(_ model: String) -> Bool {
+    model.trimmingCharacters(in: .whitespacesAndNewlines) == AppleLocalModels.foundationModelID
   }
 
   static func isBuiltInLocalPostProcessingModel(_ model: String) -> Bool {

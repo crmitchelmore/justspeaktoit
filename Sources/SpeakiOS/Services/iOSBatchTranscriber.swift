@@ -83,6 +83,16 @@ private struct IOSBatchTranscriptionClient {
     let session: URLSession
 
     func transcribeFile(at url: URL, model: String, language: String?) async throws -> TranscriptionResult {
+        if model == AppleLocalModels.speechTranscriberModelID {
+            if #available(iOS 26.0, *) {
+                return try await AppleSpeechAnalyzerTranscriber.transcribeFile(
+                    at: url,
+                    localeIdentifier: language
+                )
+            }
+            throw AppleLocalModelError.speechTranscriberUnavailable
+        }
+
         let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedKey.isEmpty else { throw IOSBatchTranscriptionError.apiKeyMissing }
 

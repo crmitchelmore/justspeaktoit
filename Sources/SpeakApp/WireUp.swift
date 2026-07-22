@@ -499,7 +499,7 @@ enum WireUp {
     // Only configure if user hasn't explicitly set a preference
     // Check if it's still the default Apple value
     let currentModel = settings.liveTranscriptionModel
-    let isDefaultApple = currentModel == "apple/local/SFSpeechRecognizer"
+    let isDefaultApple = AppleLocalModels.isAppleSpeechModel(currentModel)
 
     // If user has already changed from default, respect their choice
     guard isDefaultApple else {
@@ -516,7 +516,7 @@ enum WireUp {
         print("[WireUp] Deepgram API key found, setting as default transcription provider")
       }
     } else {
-      print("[WireUp] No Deepgram API key found, using Apple SFSpeechRecognizer as default")
+      print("[WireUp] No Deepgram API key found, using Apple on-device transcription as default")
     }
   }
 }

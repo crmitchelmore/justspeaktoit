@@ -168,7 +168,7 @@ final class PermissionsManager: ObservableObject {
     return await request(type)
   }
 
-  func ensureKeychainAccess(forService service: String) async -> Bool {
+  nonisolated func ensureKeychainAccess(forService service: String) async -> Bool {
     // Attempt a scoped, non-destructive lookup within our service namespace. This avoids prompting
     // for unrelated keychain items while still surfacing permission failures.
     let query: [String: Any] = [

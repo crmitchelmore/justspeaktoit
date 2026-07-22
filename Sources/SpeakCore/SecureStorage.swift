@@ -100,6 +100,12 @@ public actor SecureStorage {
     
     private var cache: [String: String] = [:]
     private var didLoadFromKeychain = false
+    /// Coalesces the first Keychain read across concurrent startup callers.
+    ///
+    /// Actor methods are reentrant at `await` points. Without this shared task,
+    /// several services can all pass the `didLoadFromKeychain` check and enter
+    /// Security.framework at once while the app is launching.
+    private var cacheLoadTask: Task<Void, Error>?
 
     public init(
         configuration: SecureStorageConfiguration = .default,
@@ -182,6 +188,28 @@ public actor SecureStorage {
     // MARK: - Private Implementation
 
     private func ensureCacheLoaded() async throws {
+        if didLoadFromKeychain { return }
+
+        if let cacheLoadTask {
+            try await cacheLoadTask.value
+            return
+        }
+
+        let task = Task {
+            try await loadCacheFromKeychain()
+        }
+        cacheLoadTask = task
+
+        do {
+            try await task.value
+            cacheLoadTask = nil
+        } catch {
+            cacheLoadTask = nil
+            throw error
+        }
+    }
+
+    private func loadCacheFromKeychain() async throws {
         if didLoadFromKeychain { return }
 
         guard await permissionsChecker.ensureKeychainAccess(forService: configuration.service) else {
@@ -288,7 +316,6 @@ public actor SecureStorage {
         try writeCacheToKeychain()
         migrated.keys.forEach { deleteLegacySecret(identifier: $0) }
         cache = [:]
-        didLoadFromKeychain = false
     }
 
     private func fetchLegacyAccounts() throws -> [String] {

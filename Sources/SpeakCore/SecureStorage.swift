@@ -230,8 +230,8 @@ public actor SecureStorage {
 
         if status == errSecItemNotFound {
             if try migrateLegacyServicePayloadIfNeeded() {
-                didLoadFromKeychain = true
                 await registerCachedIdentifiers()
+                didLoadFromKeychain = true
                 return
             }
 
@@ -252,9 +252,8 @@ public actor SecureStorage {
         }
 
         cache = parse(payload: payload)
-        didLoadFromKeychain = true
-
         await registerCachedIdentifiers()
+        didLoadFromKeychain = true
     }
 
     private func registerCachedIdentifiers() async {

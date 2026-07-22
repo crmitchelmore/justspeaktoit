@@ -52,6 +52,14 @@ final class StatusBarController {
       }
       .store(in: &cancellables)
 
+    appSettings.$liveTranscriptionModel
+      .combineLatest(appSettings.$localTranscriptionMode)
+      .receive(on: RunLoop.main)
+      .sink { [weak self] _ in
+        self?.refresh()
+      }
+      .store(in: &cancellables)
+
     historyManager.$statistics
       .receive(on: RunLoop.main)
       .sink { [weak self] _ in

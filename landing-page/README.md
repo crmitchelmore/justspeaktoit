@@ -48,7 +48,7 @@ bun run dev
 - `index.html` - The complete landing page (single file, no build needed)
 - `serve.ts` - Bun development server
 - `wrangler.toml` - Cloudflare Pages configuration
-- `_redirects` - Redirect rules for SPA routing
+- `_redirects` - Routes the stable Sparkle feed URL to the latest GitHub release, then applies SPA routing
 
 ## Tech Stack
 

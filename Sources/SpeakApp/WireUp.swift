@@ -339,7 +339,7 @@ enum WireUp {
       permissionsManager: permissions,
       appSettings: settings,
       keychainService: options.keychainServiceOverride
-        ?? SecureAppStorage.defaultKeychainService(for: DistributionChannel.current)
+        ?? "com.github.speakapp.credentials"
     )
     let openRouter = OpenRouterAPIClient(secureStorage: secureStorage)
     let transcription = TranscriptionManager(

@@ -151,8 +151,9 @@ public final class AppSettings: ObservableObject {
 
     private static let credentialStorage = SecureStorage(
         configuration: SecureStorageConfiguration(
-            service: "com.justspeaktoit.credentials",
-            masterAccount: "speak-app-secrets"
+            service: "com.github.speakapp.credentials",
+            masterAccount: "speak-app-secrets",
+            legacyServices: ["com.justspeaktoit.credentials"]
         )
     )
 

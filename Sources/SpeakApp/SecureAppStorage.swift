@@ -60,15 +60,6 @@ extension AppSettings: APIKeyIdentifierRegistry {}
 /// macOS-specific wrapper around SpeakCore's SecureStorage.
 /// Maintains the existing API for backward compatibility.
 actor SecureAppStorage {
-    static func defaultKeychainService(for channel: DistributionChannel) -> String {
-        switch channel {
-        case .direct:
-            return "com.justspeaktoit.credentials"
-        case .appStore:
-            return "com.justspeaktoit.appstore.credentials"
-        }
-    }
-
     private let storage: SecureStorage
     private nonisolated let permissionsManager: PermissionsManager
     private nonisolated let appSettings: AppSettings
@@ -76,7 +67,7 @@ actor SecureAppStorage {
     init(
         permissionsManager: PermissionsManager,
         appSettings: AppSettings,
-        keychainService: String = "com.justspeaktoit.credentials"
+        keychainService: String = "com.github.speakapp.credentials"
     ) {
         self.permissionsManager = permissionsManager
         self.appSettings = appSettings
@@ -88,6 +79,7 @@ actor SecureAppStorage {
         let configuration = SecureStorageConfiguration(
             service: keychainService,
             masterAccount: "speak-app-secrets",
+            legacyServices: ["com.justspeaktoit.credentials"],
             accessGroup: nil,
             synchronizable: false
         )

@@ -58,6 +58,10 @@ public protocol APIKeyIdentifierRegistry: AnyObject {
 public struct SecureStorageConfiguration: Sendable {
     public let service: String
     public let masterAccount: String
+    /// Previous service names whose aggregate payload should be copied into the
+    /// canonical service on first access. Legacy items are retained so older app
+    /// versions can still roll back safely.
+    public let legacyServices: [String]
     /// Optional access group for keychain sharing between apps (e.g., "$(AppIdentifierPrefix)com.speak.shared")
     public let accessGroup: String?
     /// Whether to sync via iCloud Keychain (requires accessGroup)
@@ -66,11 +70,13 @@ public struct SecureStorageConfiguration: Sendable {
     public init(
         service: String = "com.github.speakapp.credentials",
         masterAccount: String = "speak-app-secrets",
+        legacyServices: [String] = [],
         accessGroup: String? = nil,
         synchronizable: Bool = false
     ) {
         self.service = service
         self.masterAccount = masterAccount
+        self.legacyServices = legacyServices
         self.accessGroup = accessGroup
         self.synchronizable = synchronizable
     }
@@ -223,6 +229,12 @@ public actor SecureStorage {
         var status = SecItemCopyMatching(query as CFDictionary, &item)
 
         if status == errSecItemNotFound {
+            if try migrateLegacyServicePayloadIfNeeded() {
+                didLoadFromKeychain = true
+                await registerCachedIdentifiers()
+                return
+            }
+
             try await migrateLegacySecretsIfNeeded()
             status = SecItemCopyMatching(query as CFDictionary, &item)
         }
@@ -242,12 +254,45 @@ public actor SecureStorage {
         cache = parse(payload: payload)
         didLoadFromKeychain = true
 
+        await registerCachedIdentifiers()
+    }
+
+    private func registerCachedIdentifiers() async {
         if let registry = identifierRegistry {
             let identifiers = Array(cache.keys)
             await MainActor.run {
                 identifiers.forEach { registry.registerAPIKeyIdentifier($0) }
             }
         }
+    }
+
+    private func migrateLegacyServicePayloadIfNeeded() throws -> Bool {
+        for legacyService in configuration.legacyServices
+        where legacyService != configuration.service {
+            var query = baseQuery()
+            query[kSecAttrService as String] = legacyService
+            query[kSecReturnData as String] = true
+
+            var item: CFTypeRef?
+            let status = SecItemCopyMatching(query as CFDictionary, &item)
+
+            if status == errSecItemNotFound {
+                continue
+            }
+
+            guard status == errSecSuccess,
+                  let data = item as? Data,
+                  let payload = String(data: data, encoding: .utf8)
+            else {
+                throw SecureStorageError.unexpectedStatus(status)
+            }
+
+            cache = parse(payload: payload)
+            try writeCacheToKeychain()
+            return true
+        }
+
+        return false
     }
 
     private func baseQuery() -> [String: Any] {

@@ -2,8 +2,18 @@ import Foundation
 import XCTest
 
 final class DistributionBuildIdentityTests: XCTestCase {
+    private var repositoryRoot: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+    }
+
     func testMacDistributionChannels_useDistinctBundleIdentifiers() throws {
-        let manifest = try String(contentsOfFile: "Project.swift", encoding: .utf8)
+        let manifest = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("Project.swift"),
+            encoding: .utf8
+        )
 
         XCTAssertTrue(manifest.contains("\"com.justspeaktoit.mac.appstore\""))
         XCTAssertTrue(manifest.contains("\"com.justspeaktoit.mac\""))
@@ -13,7 +23,7 @@ final class DistributionBuildIdentityTests: XCTestCase {
 
     func testMacAppStoreWorkflow_exportsTheAppStoreIdentifier() throws {
         let workflow = try String(
-            contentsOfFile: ".github/workflows/release-appstore.yml",
+            contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/release-appstore.yml"),
             encoding: .utf8
         )
 

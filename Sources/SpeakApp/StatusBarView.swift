@@ -89,7 +89,7 @@ final class StatusBarController {
     menu.addItem(headline)
 
     let modelItem = NSMenuItem()
-    modelItem.title = "Mode: \(appSettings.transcriptionMode.displayName)"
+    modelItem.title = "Mode: \(appSettings.effectiveTranscriptionModeDisplayName)"
     modelItem.isEnabled = false
     menu.addItem(modelItem)
 

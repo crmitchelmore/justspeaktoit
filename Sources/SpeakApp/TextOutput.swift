@@ -129,9 +129,23 @@ struct AccessibilityTextOutput: TextOutputting {
 struct PasteTextOutput: TextOutputting {
   let permissionsManager: PermissionsManager
   let appSettings: AppSettings
+  private let pasteboard: NSPasteboard
+
+  init(
+    permissionsManager: PermissionsManager,
+    appSettings: AppSettings,
+    pasteboard: NSPasteboard = .general
+  ) {
+    self.permissionsManager = permissionsManager
+    self.appSettings = appSettings
+    self.pasteboard = pasteboard
+  }
 
   func output(text: String) -> TextOutputResult {
-    let pasteboard = NSPasteboard.general
+    guard Self.hasDeliverableText(text) else {
+      return TextOutputResult(method: .none, error: nil)
+    }
+
     let canPasteIntoOtherApps = DistributionChannel.current.supportsAccessibilityTextInsertion
     let restoreClipboard = canPasteIntoOtherApps && appSettings.restoreClipboardAfterPaste
     let previousString = restoreClipboard ? pasteboard.string(forType: .string) : nil
@@ -150,6 +164,10 @@ struct PasteTextOutput: TextOutputting {
     }
 
     return TextOutputResult(method: .clipboard, error: nil)
+  }
+
+  static func hasDeliverableText(_ text: String) -> Bool {
+    !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 
   private func simulatePasteShortcut() {
@@ -229,7 +247,7 @@ struct SmartTextOutput: TextOutputting {
     "Alacritty",
     "kitty",
     "Warp",
-    "Terminal", // Some secure input issues
+    "Terminal" // Some secure input issues
   ]
 
   private var accessibilityOutput: AccessibilityTextOutput {

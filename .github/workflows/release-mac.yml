@@ -275,7 +275,7 @@ jobs:
           fi
           
           # Staple the notarization ticket
-          xcrun stapler staple "$APP_PATH"
+          bash scripts/retry-staple.sh "$APP_PATH"
 
       - name: Verify Entitlements (Post-Sign)
         run: |
@@ -307,23 +307,7 @@ jobs:
             --team-id "${{ secrets.APPLE_TEAM_ID }}" \
             --wait
           
-          # Accepted notarization tickets can take a short time to propagate to
-          # CloudKit. Retry stapling before treating the release as failed.
-          for ATTEMPT in {1..5}; do
-            if xcrun stapler staple "$DMG_PATH"; then
-              break
-            fi
-
-            if [ "$ATTEMPT" -eq 5 ]; then
-              echo "Failed to staple DMG after $ATTEMPT attempts"
-              exit 1
-            fi
-
-            echo "Notarization ticket not available yet; retrying in 15s..."
-            sleep 15
-          done
-
-          xcrun stapler validate "$DMG_PATH"
+          bash scripts/retry-staple.sh "$DMG_PATH"
           
           echo "DMG_PATH=$DMG_PATH" >> $GITHUB_ENV
 

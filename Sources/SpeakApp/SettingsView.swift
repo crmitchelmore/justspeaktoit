@@ -4537,6 +4537,10 @@ struct SettingsView: View {
                  let steps = permission.manualSetupSteps {
                 permissionManualSetupNote(for: permission, steps: steps)
               }
+
+              if let issue = environment.permissions.requestIssue(for: permission) {
+                channelAvailabilityNote(issue.guidance(for: permission))
+              }
             }
           }
 

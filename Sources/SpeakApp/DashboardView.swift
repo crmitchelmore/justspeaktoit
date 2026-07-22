@@ -289,12 +289,21 @@ struct DashboardView: View {
         .font(.subheadline)
         .foregroundStyle(.secondary)
 
-      Button(status.isGranted ? "Check" : "Request") {
-        requestingPermission = permission
-        Task { await request(permission) }
+      if let issue = environment.permissions.requestIssue(for: permission) {
+        Text(issue.guidance(for: permission))
+          .font(.caption)
+          .foregroundStyle(.orange)
+        Link("Open Settings", destination: permission.settingsURL)
+          .buttonStyle(.bordered)
+          .controlSize(.small)
+      } else {
+        Button(status.isGranted ? "Check" : "Request") {
+          requestingPermission = permission
+          Task { await request(permission) }
+        }
+        .controlSize(.small)
+        .speakTooltip(permission.guidanceText)
       }
-      .controlSize(.small)
-      .speakTooltip(permission.guidanceText)
     }
     .padding()
     .background(

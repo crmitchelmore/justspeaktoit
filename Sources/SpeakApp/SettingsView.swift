@@ -1554,7 +1554,9 @@ struct SettingsView: View {
               value: remoteTranscriptionModelBinding(
                 \AppSettings.liveTranscriptionModel,
                 options: ModelCatalog.remoteLiveTranscription
-              )
+              ),
+              credentialPurpose: .liveTranscription,
+              storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers)
             )
           }
         }
@@ -1594,7 +1596,9 @@ struct SettingsView: View {
               value: remoteTranscriptionModelBinding(
                 \AppSettings.batchTranscriptionModel,
                 options: ModelCatalog.batchTranscription
-              )
+              ),
+              credentialPurpose: .batchTranscription,
+              storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers)
             )
             if isCustomBatchTranscriptionModel {
               SettingsInlineInfo(
@@ -1641,6 +1645,8 @@ struct SettingsView: View {
                 \AppSettings.liveTranscriptionModel,
                 options: ModelCatalog.onDeviceLiveTranscription
               ),
+              credentialPurpose: .liveTranscription,
+              storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers),
               allowsCustom: false
             )
           }
@@ -1726,6 +1732,8 @@ struct SettingsView: View {
                   help: "Used for local-only transcription after recording stops.",
                   options: localTranscriptionOptions,
                   value: localTranscriptionModelBinding,
+                  credentialPurpose: .batchTranscription,
+                  storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers),
                   allowsCustom: false
                 )
               }
@@ -2897,7 +2905,19 @@ struct SettingsView: View {
           VStack(alignment: .leading, spacing: 8) {
             Picker("Voice", selection: settingsBinding(\AppSettings.defaultTTSVoice)) {
               ForEach(VoiceCatalog.allVoices) { voice in
-                Text(voice.displayName).tag(voice.id)
+                HStack {
+                  Text(voice.displayName)
+                  Spacer()
+                  ModelCredentialStatusView(
+                    availability: ModelCredentialResolver.availability(
+                      for: voice.id,
+                      purpose: .voiceOutput,
+                      storedAPIKeyIdentifiers: settings.trackedAPIKeyIdentifiers
+                    )
+                  )
+                }
+                .accessibilityElement(children: .combine)
+                .tag(voice.id)
               }
             }
             .pickerStyle(.menu)
@@ -3127,6 +3147,8 @@ struct SettingsView: View {
         """,
         options: cloudPostProcessingOptions,
         value: cloudPostProcessingModelBinding,
+        credentialPurpose: .postProcessing,
+        storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers),
         usesDetailedChooser: true
       )
 
@@ -3252,6 +3274,8 @@ struct SettingsView: View {
         help: "Used for local-only cleanup after transcription. Built-in rules need no runtime.",
         options: localPostProcessingOptions,
         value: localPostProcessingModelBinding,
+        credentialPurpose: .postProcessing,
+        storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers),
         allowsCustom: false
       )
       #else
@@ -3263,6 +3287,8 @@ struct SettingsView: View {
         """,
         options: localPostProcessingOptions,
         value: localPostProcessingModelBinding,
+        credentialPurpose: .postProcessing,
+        storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers),
         allowsCustom: false
       )
       #endif
@@ -5148,6 +5174,8 @@ private struct ModelPicker: View {
   let title: String
   let help: String?
   let options: [ModelCatalog.Option]
+  let credentialPurpose: ModelCredentialPurpose
+  let storedAPIKeyIdentifiers: Set<String>
   let usesDetailedChooser: Bool
   let allowsCustom: Bool
   @Binding var value: String
@@ -5227,6 +5255,8 @@ private struct ModelPicker: View {
   private struct ModelChooserSheet: View {
     let title: String
     let options: [ModelCatalog.Option]
+    let credentialPurpose: ModelCredentialPurpose
+    let storedAPIKeyIdentifiers: Set<String>
     @Binding var selection: String
 
     @Environment(\.dismiss) private var dismiss
@@ -5271,6 +5301,13 @@ private struct ModelPicker: View {
                       .font(.caption.monospacedDigit())
                       .foregroundStyle(.secondary)
                   }
+                  ModelCredentialStatusView(
+                    availability: ModelCredentialResolver.availability(
+                      for: option.id,
+                      purpose: credentialPurpose,
+                      storedAPIKeyIdentifiers: storedAPIKeyIdentifiers
+                    )
+                  )
                   ModelTagBadges(tags: option.tags, compact: true)
                   LatencyBadgeCompact(option: option)
                 }
@@ -5292,7 +5329,17 @@ private struct ModelPicker: View {
             selection = ModelCatalog.customOptionID
             dismiss()
           } label: {
-            Text("Custom…")
+            HStack {
+              Text("Custom…")
+              Spacer()
+              ModelCredentialStatusView(
+                availability: ModelCredentialResolver.availability(
+                  for: ModelCatalog.customOptionID,
+                  purpose: credentialPurpose,
+                  storedAPIKeyIdentifiers: storedAPIKeyIdentifiers
+                )
+              )
+            }
           }
           .buttonStyle(.plain)
         }
@@ -5348,12 +5395,16 @@ private struct ModelPicker: View {
     help: String? = nil,
     options: [ModelCatalog.Option],
     value: Binding<String>,
+    credentialPurpose: ModelCredentialPurpose,
+    storedAPIKeyIdentifiers: Set<String>,
     usesDetailedChooser: Bool = false,
     allowsCustom: Bool = true
   ) {
     self.title = title
     self.help = help
     self.options = options
+    self.credentialPurpose = credentialPurpose
+    self.storedAPIKeyIdentifiers = storedAPIKeyIdentifiers
     self.usesDetailedChooser = usesDetailedChooser
     self.allowsCustom = allowsCustom
     _value = value
@@ -5392,6 +5443,7 @@ private struct ModelPicker: View {
           HStack {
             Text(selectedOption?.displayName ?? (customValue.isEmpty ? "Custom…" : customValue))
             Spacer()
+            ModelCredentialStatusView(availability: selectedCredentialAvailability)
             if let option = selectedOption {
               ModelPricingBadges(option: option, compact: true)
               ModelTagBadges(tags: option.tags, compact: true)
@@ -5411,15 +5463,35 @@ private struct ModelPicker: View {
         )
         .speakTooltip(tooltipText)
         .sheet(isPresented: $isShowingChooser) {
-          ModelChooserSheet(title: title, options: options, selection: $selection)
+          ModelChooserSheet(
+            title: title,
+            options: options,
+            credentialPurpose: credentialPurpose,
+            storedAPIKeyIdentifiers: storedAPIKeyIdentifiers,
+            selection: $selection
+          )
         }
       } else {
         Picker(title, selection: $selection) {
           ForEach(options) { option in
-            Text(option.displayName).tag(option.id)
+            HStack {
+              Text(option.displayName)
+              Spacer()
+              ModelCredentialStatusView(availability: credentialAvailability(for: option.id))
+            }
+            .accessibilityElement(children: .combine)
+            .tag(option.id)
           }
           if allowsCustom {
-            Text("Custom…").tag(ModelCatalog.customOptionID)
+            HStack {
+              Text("Custom…")
+              Spacer()
+              ModelCredentialStatusView(
+                availability: credentialAvailability(for: ModelCatalog.customOptionID)
+              )
+            }
+            .accessibilityElement(children: .combine)
+            .tag(ModelCatalog.customOptionID)
           }
         }
         .pickerStyle(.menu)
@@ -5467,6 +5539,8 @@ private struct ModelPicker: View {
           Text(ModelCatalog.friendlyName(for: value))
             .font(.caption)
             .foregroundStyle(.secondary)
+          Spacer()
+          ModelCredentialStatusView(availability: selectedCredentialAvailability, showsText: true)
         }
       }
     }
@@ -5497,6 +5571,18 @@ private struct ModelPicker: View {
     options.first { option in
       option.id.caseInsensitiveCompare(selection) == .orderedSame
     }
+  }
+
+  private var selectedCredentialAvailability: ModelCredentialAvailability {
+    credentialAvailability(for: selection == ModelCatalog.customOptionID ? customValue : selection)
+  }
+
+  private func credentialAvailability(for modelIdentifier: String) -> ModelCredentialAvailability {
+    ModelCredentialResolver.availability(
+      for: modelIdentifier.isEmpty ? ModelCatalog.customOptionID : modelIdentifier,
+      purpose: credentialPurpose,
+      storedAPIKeyIdentifiers: storedAPIKeyIdentifiers
+    )
   }
 
   private var tooltipText: String {

@@ -429,6 +429,14 @@ public struct PostProcessingView: View {
                             }
                             
                             Spacer()
+
+                            IOSModelCredentialStatusView(
+                                availability: ModelCredentialResolver.availability(
+                                    for: model.id,
+                                    purpose: .postProcessing,
+                                    storedAPIKeyIdentifiers: settings.storedAPIKeyIdentifiers
+                                )
+                            )
                             
                             if settings.postProcessingModel == model.id {
                                 Image(systemName: "checkmark")

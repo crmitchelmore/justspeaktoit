@@ -102,13 +102,37 @@ public struct OpenClawSettingsView: View {
                             OpenClawSettings.voices(for: settings.ttsModel),
                             id: \.id
                         ) { voice in
-                            Text(voice.label).tag(voice.id)
+                            HStack {
+                                Text(voice.label)
+                                Spacer()
+                                IOSModelCredentialStatusView(
+                                    availability: ModelCredentialResolver.availability(
+                                        for: "deepgram/\(voice.id)",
+                                        purpose: .voiceOutput,
+                                        storedAPIKeyIdentifiers: appSettings.storedAPIKeyIdentifiers
+                                    )
+                                )
+                            }
+                            .accessibilityElement(children: .combine)
+                            .tag(voice.id)
                         }
                     }
 
                     Picker("Model", selection: $settings.ttsModel) {
                         ForEach(OpenClawSettings.availableModels, id: \.id) { mdl in
-                            Text(mdl.label).tag(mdl.id)
+                            HStack {
+                                Text(mdl.label)
+                                Spacer()
+                                IOSModelCredentialStatusView(
+                                    availability: ModelCredentialResolver.availability(
+                                        for: mdl.id,
+                                        purpose: .voiceOutput,
+                                        storedAPIKeyIdentifiers: appSettings.storedAPIKeyIdentifiers
+                                    )
+                                )
+                            }
+                            .accessibilityElement(children: .combine)
+                            .tag(mdl.id)
                         }
                     }
                     .onChange(of: settings.ttsModel) { _ in

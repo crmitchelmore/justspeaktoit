@@ -838,15 +838,16 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       "universal-streaming-multilingual",
       "assemblyai/universal-streaming",
       "assemblyai/universal-streaming-english",
-      "assemblyai/universal-streaming-multilingual"
+      "assemblyai/universal-streaming-multilingual",
+      "assemblyai/u3-rt-pro-streaming"
     ]
     let migratedLive: String
     if liveModel.hasPrefix("deepgram/") {
       migratedLive = "deepgram/nova-3-streaming"
     } else if legacyAssemblyAILiveIDs.contains(liveModel)
-      || (liveModel.hasPrefix("assemblyai/") && liveModel != "assemblyai/u3-rt-pro-streaming") {
-      // The 3 legacy AssemblyAI live IDs collapsed into u3-rt-pro-streaming.
-      migratedLive = "assemblyai/u3-rt-pro-streaming"
+      || (liveModel.hasPrefix("assemblyai/")
+        && liveModel != AssemblyAIModels.universal35ProStreamingID) {
+      migratedLive = AssemblyAIModels.universal35ProStreamingID
     } else {
       migratedLive = liveModel
     }

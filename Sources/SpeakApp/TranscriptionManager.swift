@@ -1746,7 +1746,6 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
   private var fullTranscript: String = ""
   private var currentTurnOrder: Int = -1
   private var finalSegmentIndexByTurnOrder: [Int: Int] = [:]
-  private let formatTurnsEnabled: Bool = true
   private var stopContinuation: CheckedContinuation<Void, Never>?
 
   init(
@@ -1810,8 +1809,9 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
       }
       targetFormat = outputFormat
 
-      // AssemblyAI streaming only supports keyterms_prompt — the preprocessing prompt
-      // is applied post-transcription by PostProcessingManager, not by the streaming API.
+      // Keep style/format instructions in PostProcessingManager. Universal-3.5
+      // supports contextual prompting, while this app currently sends only the
+      // user's explicit recognition keyterms to the streaming request.
       let keyterms = appSettings.assemblyAIKeyterms
         .split(separator: ",")
         .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -1882,15 +1882,8 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
       delegate?.liveTranscriber(self, didDetectUtteranceBoundary: utterance)
     }
 
-    if turn.end_of_turn {
-      if formatTurnsEnabled && !turn.turn_is_formatted {
-        // Unformatted end-of-turn: show as interim — formatted version is coming next
-        currentInterim = turn.transcript
-        rebuildDisplay()
-        return
-      }
-
-      // Definitive final (formatted if enabled, or unformatted if format_turns is off)
+    if turn.end_of_turn && turn.turn_is_formatted {
+      // Universal-3.5 Pro returns one formatted final for each end-of-turn.
       let segment = TranscriptionSegment(startTime: 0, endTime: 0, text: turn.transcript)
 
       if let existingIndex = finalSegmentIndexByTurnOrder[turn.turn_order],
@@ -1918,7 +1911,7 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
         continuation.resume()
       }
     } else {
-      // Ongoing turn — replace interim (AssemblyAI v3 sends the full running
+      // Ongoing turn — replace interim (AssemblyAI sends the full running
       // transcript text on every Turn frame, including non-final words).
       currentTurnOrder = turn.turn_order
       currentInterim = turn.transcript
@@ -2174,7 +2167,7 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
       segments: finalSegments,
       confidence: nil,
       duration: streamingDuration,
-      modelIdentifier: currentModel ?? "assemblyai/universal-streaming",
+      modelIdentifier: currentModel ?? AssemblyAIModels.universal35ProStreamingID,
       cost: nil,
       rawPayload: nil,
       debugInfo: nil

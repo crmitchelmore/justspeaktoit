@@ -24,10 +24,9 @@ public struct LiveModelCapabilities: Sendable, Hashable {
     /// recording, for the provider to deliver its final transcript.
     ///
     /// Most streaming providers (Deepgram, Soniox, ElevenLabs) finalise
-    /// during the session, so the budget is 0. AssemblyAI's Universal
-    /// Streaming v3 with `format_turns=true` only commits text on
-    /// end-of-turn and runs a server-side formatting pass over the whole
-    /// turn, so its budget is non-zero.
+    /// during the session, so the budget is 0. AssemblyAI Universal-3.5 Pro
+    /// commits one formatted transcript at end-of-turn, so its budget remains
+    /// non-zero to capture a ForceEndpoint response before teardown.
     public let postStopFinalizeBudget: TimeInterval
 
     public init(
@@ -100,12 +99,10 @@ extension ModelCatalog {
             supportedSpeedModes: [.instant, .livePolish]
         ),
 
-        // AssemblyAI Universal Streaming v3: incremental turns are emitted
-        // during the session, but the *formatted* final turn is produced
-        // server-side after end-of-turn. We therefore need a non-zero
-        // post-stop budget so the controller can wait for that formatted
-        // turn before tearing the socket down.
-        "assemblyai/u3-rt-pro-streaming": LiveModelCapabilities(
+        // AssemblyAI Universal-3.5 Pro Streaming emits incremental turns and
+        // one formatted final turn. Keep a non-zero post-stop budget so the
+        // controller can capture the ForceEndpoint response before teardown.
+        AssemblyAIModels.universal35ProStreamingID: LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish],
             postStopFinalizeBudget: 2.0
         ),

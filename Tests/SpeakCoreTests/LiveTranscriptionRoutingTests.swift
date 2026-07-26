@@ -132,7 +132,7 @@ final class LiveTranscriptionRoutingTests: XCTestCase {
             "cartesia/ink-2-streaming",
             "soniox/stt-rt-v5-streaming",
             "modulate/velma-2-stt-streaming",
-            "assemblyai/u3-rt-pro-streaming",
+            AssemblyAIModels.universal35ProStreamingID,
             "gladia/solaria-1-streaming"
         ]
 

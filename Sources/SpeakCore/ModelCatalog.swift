@@ -149,8 +149,9 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             description: "Real-time multilingual WebSocket transcription with diarization and signal detection.",
             estimatedLatencyMs: 220, latencyTier: .fast),
         Option(
-            id: "assemblyai/u3-rt-pro-streaming", displayName: "AssemblyAI Universal-3 Pro (Streaming)",
-            description: "AssemblyAI's u3-rt-pro real-time model. Multilingual with high English accuracy.",
+            id: AssemblyAIModels.universal35ProStreamingID,
+            displayName: "AssemblyAI Universal-3.5 Pro (Streaming)",
+            description: "AssemblyAI's flagship real-time model with native code switching across 18 languages.",
             estimatedLatencyMs: 250, latencyTier: .fast),
         Option(
             id: "soniox/stt-rt-v5-streaming",
@@ -258,11 +259,12 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             description: "High-throughput English batch transcription with automatic punctuation and capitalization.",
             estimatedLatencyMs: 700, latencyTier: .fast),
         Option(
-            id: "assemblyai/universal-3-pro", displayName: "AssemblyAI Universal-3 Pro",
-            description: "AssemblyAI's most accurate batch transcription model with speaker labels.",
+            id: AssemblyAIModels.universal35ProBatchID,
+            displayName: "AssemblyAI Universal-3.5 Pro",
+            description: "AssemblyAI's fastest, highest-accuracy batch model with 18-language code switching.",
             estimatedLatencyMs: 1500, latencyTier: .medium),
         Option(
-            id: "assemblyai/universal-2", displayName: "AssemblyAI Universal-2",
+            id: AssemblyAIModels.universal2BatchID, displayName: "AssemblyAI Universal-2",
             description: "Fast and reliable batch transcription from AssemblyAI.",
             estimatedLatencyMs: 1200, latencyTier: .medium),
         Option(
@@ -321,6 +323,9 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
     /// Unknown identifiers remain valid because the Mac supports custom OpenRouter batch models.
     public static func normalizedBatchTranscriptionModel(_ identifier: String?) -> String {
         let trimmed = identifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if AssemblyAIModels.legacyUniversal3BatchIDs.contains(trimmed) {
+            return AssemblyAIModels.universal35ProBatchID
+        }
         if trimmed == AppleLocalModels.speechTranscriberModelID,
            !AppleLocalModels.supportsSpeechTranscriber {
             return defaultBatchTranscriptionModel
@@ -604,6 +609,9 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
         let trimmed = identifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if AppleLocalModels.isAppleSpeechModel(trimmed) || trimmed.isEmpty {
             return AppleLocalModels.preferredSpeechModelID
+        }
+        if AssemblyAIModels.legacyUniversal3StreamingIDs.contains(trimmed) {
+            return AssemblyAIModels.universal35ProStreamingID
         }
         return trimmed
     }

@@ -242,8 +242,9 @@ public final class AppSettings: ObservableObject {
     }
 
     private init() { // swiftlint:disable:this function_body_length
-        let selectedRaw = UserDefaults.standard.string(forKey: "selectedModel")
+        let storedSelectedRaw = UserDefaults.standard.string(forKey: "selectedModel")
             ?? AppleLocalModels.preferredSpeechModelID
+        let selectedRaw = ModelCatalog.normalizedLiveTranscriptionModel(storedSelectedRaw)
         // Normalise to canonical catalogue ids. Keep only models that this iOS
         // target can actually run; a previously stored macOS-only model falls
         // back to Apple Speech instead of leaking into the iPhone picker.
@@ -252,7 +253,7 @@ public final class AppSettings: ObservableObject {
         )
         let selected: String
         if AppleLocalModels.isAppleSpeechModel(selectedRaw) {
-            selected = ModelCatalog.normalizedLiveTranscriptionModel(selectedRaw)
+            selected = selectedRaw
         } else if selectableLiveIDs.contains(selectedRaw) {
             selected = selectedRaw
         } else if selectedRaw.hasPrefix("apple/") {

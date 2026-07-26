@@ -11,18 +11,20 @@ final class AssemblyAIModelsTests: XCTestCase {
             keyterms: ["AssemblyAI", "Universal-3.5 Pro"]
         ))
         let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
-        let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value) })
+        let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).compactMap { item in
+            item.value.map { (item.name, $0) }
+        })
 
         XCTAssertEqual(url.host, AssemblyAIStreamingEndpoint.europe.rawValue)
-        XCTAssertEqual(query["speech_model"] ?? nil, AssemblyAIModels.universal35ProAPIName)
-        XCTAssertEqual(query["sample_rate"] ?? nil, "16000")
-        XCTAssertEqual(query["min_turn_silence"] ?? nil, "560")
+        XCTAssertEqual(query["speech_model"], AssemblyAIModels.universal35ProAPIName)
+        XCTAssertEqual(query["sample_rate"], "16000")
+        XCTAssertEqual(query["min_turn_silence"], "560")
         XCTAssertNil(query["format_turns"])
         XCTAssertNil(query["language_detection"])
         XCTAssertNil(query["language"])
         XCTAssertNil(query["end_of_turn_confidence_threshold"])
 
-        let keyterms = try XCTUnwrap(query["keyterms_prompt"] ?? nil)
+        let keyterms = try XCTUnwrap(query["keyterms_prompt"])
         let data = Data(keyterms.utf8)
         XCTAssertEqual(try JSONDecoder().decode([String].self, from: data), ["AssemblyAI", "Universal-3.5 Pro"])
     }

@@ -13,7 +13,7 @@ struct WAVFile {
         }
 
         var offset = 12
-        var format: (audioFormat: Int, channels: Int, sampleRate: Int, bitsPerSample: Int)?
+        var format: WAVFormat?
         var sampleData: Data?
         while offset + 8 <= data.count {
             let identifier = String(bytes: data[offset..<(offset + 4)], encoding: .ascii) ?? ""
@@ -22,7 +22,7 @@ struct WAVFile {
             let chunkEnd = min(chunkStart + chunkSize, data.count)
             guard chunkStart <= chunkEnd else { break }
             if identifier == "fmt ", chunkSize >= 16 {
-                format = (
+                format = WAVFormat(
                     audioFormat: Self.littleEndianUInt16(data, offset: chunkStart),
                     channels: Self.littleEndianUInt16(data, offset: chunkStart + 2),
                     sampleRate: Self.littleEndianUInt32(data, offset: chunkStart + 4),
@@ -68,6 +68,13 @@ struct WAVFile {
             | Int(data[offset + 2]) << 16
             | Int(data[offset + 3]) << 24
     }
+}
+
+private struct WAVFormat {
+    let audioFormat: Int
+    let channels: Int
+    let sampleRate: Int
+    let bitsPerSample: Int
 }
 
 enum WAVError: Error, LocalizedError {

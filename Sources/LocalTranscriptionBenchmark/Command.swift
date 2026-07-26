@@ -18,76 +18,13 @@ struct LocalTranscriptionBenchmarkCommand {
     }
 
     private static func run(_ arguments: RunArguments) async throws {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let corpus = try decoder.decode(
-            LocalTranscriptionBenchmarkCorpus.self,
-            from: Data(contentsOf: arguments.manifestURL)
-        )
-        try corpus.validate()
-
+        let corpus = try loadCorpus(from: arguments.manifestURL)
         let loadStart = ContinuousClock.now
-        let runner: LocalBenchmarkEngineRunner
-        switch arguments.engine {
-        case .whisperKit:
-            runner = try await WhisperKitBenchmarkRunner(model: arguments.model, modelRepo: arguments.modelRepo)
-        case .transcribeCpp:
-            runner = try TranscribeCppBenchmarkRunner(modelPath: arguments.model, backend: arguments.backend)
-        case .streaming, .unknown:
-            throw CLIError.invalidValue("Unsupported benchmark engine: \(arguments.engine.identifier)")
-        }
+        let runner = try await makeRunner(for: arguments)
         let coldLoadSeconds = durationSeconds(from: loadStart, to: ContinuousClock.now)
-
-        let manifestDirectory = arguments.manifestURL.deletingLastPathComponent()
-        let preparedCases = try corpus.cases.map { benchmarkCase -> (LocalTranscriptionBenchmarkCase, URL, WAVFile) in
-            let audioURL = URL(
-                fileURLWithPath: benchmarkCase.audioPath,
-                relativeTo: manifestDirectory
-            ).standardizedFileURL
-            return (benchmarkCase, audioURL, try WAVFile(url: audioURL))
-        }
-
-        for _ in 0..<arguments.warmupIterations {
-            for (benchmarkCase, audioURL, wav) in preparedCases {
-                _ = try await runner.transcribe(audioURL: audioURL, wav: wav, language: benchmarkCase.language)
-            }
-        }
-
-        var measurements: [LocalTranscriptionBenchmarkMeasurement] = []
-        var failures: [LocalTranscriptionBenchmarkFailure] = []
-        for iteration in 1...arguments.measuredIterations {
-            for (benchmarkCase, audioURL, wav) in preparedCases {
-                let resourcesBefore = ProcessResourceSnapshot.capture()
-                let start = ContinuousClock.now
-                do {
-                    let transcript = try await runner.transcribe(
-                        audioURL: audioURL,
-                        wav: wav,
-                        language: benchmarkCase.language
-                    )
-                    let wallSeconds = durationSeconds(from: start, to: ContinuousClock.now)
-                    let resources = ProcessResourceSnapshot.capture().delta(from: resourcesBefore)
-                    measurements.append(LocalTranscriptionBenchmarkMeasurement(
-                        caseID: benchmarkCase.id,
-                        iteration: iteration,
-                        tags: benchmarkCase.tags,
-                        referenceTranscript: benchmarkCase.referenceTranscript,
-                        transcript: transcript,
-                        audioSeconds: wav.durationSeconds,
-                        wallSeconds: wallSeconds,
-                        userCPUSeconds: resources.userCPUSeconds,
-                        systemCPUSeconds: resources.systemCPUSeconds,
-                        peakResidentMemoryMB: resources.peakResidentMemoryMB
-                    ))
-                } catch {
-                    failures.append(LocalTranscriptionBenchmarkFailure(
-                        caseID: benchmarkCase.id,
-                        iteration: iteration,
-                        message: error.localizedDescription
-                    ))
-                }
-            }
-        }
+        let preparedCases = try prepareCases(corpus, relativeTo: arguments.manifestURL)
+        try await warmUp(runner, cases: preparedCases, iterations: arguments.warmupIterations)
+        let results = await measure(runner, cases: preparedCases, iterations: arguments.measuredIterations)
 
         let report = LocalTranscriptionBenchmarkReport(
             engine: runner.engine,
@@ -99,12 +36,131 @@ struct LocalTranscriptionBenchmarkCommand {
             coldLoadSeconds: coldLoadSeconds,
             warmupIterations: arguments.warmupIterations,
             measuredIterations: arguments.measuredIterations,
-            measurements: measurements,
-            failures: failures
+            measurements: results.measurements,
+            failures: results.failures
         )
         try writeJSON(report, to: arguments.outputURL)
         printSummary(report.summary, label: runner.engine.identifier)
-        if !failures.isEmpty { throw BenchmarkRunError.caseFailures(failures.count) }
+        if !results.failures.isEmpty { throw BenchmarkRunError.caseFailures(results.failures.count) }
+    }
+
+    private static func loadCorpus(from url: URL) throws -> LocalTranscriptionBenchmarkCorpus {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let corpus = try decoder.decode(LocalTranscriptionBenchmarkCorpus.self, from: Data(contentsOf: url))
+        try corpus.validate()
+        return corpus
+    }
+
+    private static func makeRunner(for arguments: RunArguments) async throws -> LocalBenchmarkEngineRunner {
+        switch arguments.engine {
+        case .whisperKit:
+            return try await WhisperKitBenchmarkRunner(model: arguments.model, modelRepo: arguments.modelRepo)
+        case .transcribeCpp:
+            return try TranscribeCppBenchmarkRunner(modelPath: arguments.model, backend: arguments.backend)
+        case .streaming, .unknown:
+            throw CLIError.invalidValue("Unsupported benchmark engine: \(arguments.engine.identifier)")
+        }
+    }
+
+    private static func prepareCases(
+        _ corpus: LocalTranscriptionBenchmarkCorpus,
+        relativeTo manifestURL: URL
+    ) throws -> [PreparedBenchmarkCase] {
+        let manifestDirectory = manifestURL.deletingLastPathComponent()
+        return try corpus.cases.map { benchmarkCase in
+            let audioURL = URL(
+                fileURLWithPath: benchmarkCase.audioPath,
+                relativeTo: manifestDirectory
+            ).standardizedFileURL
+            return PreparedBenchmarkCase(
+                benchmarkCase: benchmarkCase,
+                audioURL: audioURL,
+                wav: try WAVFile(url: audioURL)
+            )
+        }
+    }
+
+    private static func warmUp(
+        _ runner: LocalBenchmarkEngineRunner,
+        cases: [PreparedBenchmarkCase],
+        iterations: Int
+    ) async throws {
+        for _ in 0..<iterations {
+            for prepared in cases {
+                _ = try await runner.transcribe(
+                    audioURL: prepared.audioURL,
+                    wav: prepared.wav,
+                    language: prepared.benchmarkCase.language
+                )
+            }
+        }
+    }
+
+    private static func measure(
+        _ runner: LocalBenchmarkEngineRunner,
+        cases: [PreparedBenchmarkCase],
+        iterations: Int
+    ) async -> BenchmarkResults {
+        var results = BenchmarkResults()
+        for iteration in 1...iterations {
+            for prepared in cases {
+                await measure(prepared, with: runner, iteration: iteration, results: &results)
+            }
+        }
+        return results
+    }
+
+    private static func measure(
+        _ prepared: PreparedBenchmarkCase,
+        with runner: LocalBenchmarkEngineRunner,
+        iteration: Int,
+        results: inout BenchmarkResults
+    ) async {
+        let resourcesBefore = ProcessResourceSnapshot.capture()
+        let start = ContinuousClock.now
+        do {
+            let transcript = try await runner.transcribe(
+                audioURL: prepared.audioURL,
+                wav: prepared.wav,
+                language: prepared.benchmarkCase.language
+            )
+            let resources = ProcessResourceSnapshot.capture().delta(from: resourcesBefore)
+            results.measurements.append(measurement(
+                for: prepared,
+                iteration: iteration,
+                transcript: transcript,
+                wallSeconds: durationSeconds(from: start, to: ContinuousClock.now),
+                resources: resources
+            ))
+        } catch {
+            results.failures.append(LocalTranscriptionBenchmarkFailure(
+                caseID: prepared.benchmarkCase.id,
+                iteration: iteration,
+                message: error.localizedDescription
+            ))
+        }
+    }
+
+    private static func measurement(
+        for prepared: PreparedBenchmarkCase,
+        iteration: Int,
+        transcript: String,
+        wallSeconds: Double,
+        resources: ProcessResourceSnapshot
+    ) -> LocalTranscriptionBenchmarkMeasurement {
+        LocalTranscriptionBenchmarkMeasurement(
+            caseID: prepared.benchmarkCase.id,
+            iteration: iteration,
+            tags: prepared.benchmarkCase.tags,
+            referenceTranscript: prepared.benchmarkCase.referenceTranscript,
+            transcript: transcript,
+            audioSeconds: prepared.wav.durationSeconds,
+            wallSeconds: wallSeconds,
+            userCPUSeconds: resources.userCPUSeconds,
+            systemCPUSeconds: resources.systemCPUSeconds,
+            peakResidentMemoryMB: resources.peakResidentMemoryMB
+        )
     }
 
     private static func compare(_ arguments: CompareArguments) throws {
@@ -162,6 +218,17 @@ struct LocalTranscriptionBenchmarkCommand {
     private static func percent(_ value: Double) -> String {
         String(format: "%.2f%%", value * 100)
     }
+}
+
+private struct PreparedBenchmarkCase {
+    let benchmarkCase: LocalTranscriptionBenchmarkCase
+    let audioURL: URL
+    let wav: WAVFile
+}
+
+private struct BenchmarkResults {
+    var measurements: [LocalTranscriptionBenchmarkMeasurement] = []
+    var failures: [LocalTranscriptionBenchmarkFailure] = []
 }
 
 enum BenchmarkRunError: Error, LocalizedError {

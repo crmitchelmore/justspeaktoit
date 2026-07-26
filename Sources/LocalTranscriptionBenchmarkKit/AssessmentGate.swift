@@ -96,92 +96,140 @@ public enum LocalTranscriptionAssessmentGate {
     ) -> LocalTranscriptionAssessmentDecision {
         let baselineSummary = baseline.summary
         let candidateSummary = candidate.summary
-        let wordErrorRegression = relativeRegression(
-            baseline: baselineSummary.wordErrorRate,
-            candidate: candidateSummary.wordErrorRate
-        )
-        let latencyImprovement = relativeImprovement(
-            baseline: baselineSummary.medianWallSeconds,
-            candidate: candidateSummary.medianWallSeconds
-        )
-        let memoryImprovement = relativeImprovement(
-            baseline: baselineSummary.peakResidentMemoryMB,
-            candidate: candidateSummary.peakResidentMemoryMB
-        )
-
-        var rejectionReasons: [String] = []
-        var missingEvidence: [String] = []
-
-        if wordErrorRegression > policy.maximumRelativeWordErrorRegression {
-            rejectionReasons.append("Candidate WER exceeds the allowed 5% relative regression.")
-        }
-        if baselineSummary.failureCount > 0 || candidateSummary.failureCount > 0 {
-            rejectionReasons.append("One or more benchmark cases failed.")
-        }
-
-        let hasPerformanceGain = latencyImprovement >= policy.minimumPerformanceImprovement
-            || memoryImprovement >= policy.minimumPerformanceImprovement
-        let hasCapabilityGain = !(
-            evidence.capabilityGain?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true
-        )
-        if !hasPerformanceGain && !hasCapabilityGain {
-            rejectionReasons.append("Candidate has neither a 20% performance gain nor a documented capability gain.")
-        }
-
-        let candidateTags = Set(candidateSummary.tagCoverage)
-        let missingTags = policy.requiredCorpusTags.filter { !candidateTags.contains($0) }
-        if !missingTags.isEmpty {
-            missingEvidence.append("Corpus is missing required tags: \(missingTags.joined(separator: ", ")).")
-        }
-        if Set(baseline.measurements.map(\.caseID)) != Set(candidate.measurements.map(\.caseID)) {
-            missingEvidence.append("Baseline and candidate did not run the same cases.")
-        }
-        if baseline.engine != .whisperKit {
-            missingEvidence.append("Baseline report must use WhisperKit.")
-        }
-        if candidate.engine != .transcribeCpp {
-            missingEvidence.append("Candidate report must use transcribe.cpp.")
-        }
-        if !evidence.directBuildPassed { missingEvidence.append("Direct macOS build is not verified.") }
-        if !evidence.appStoreBuildPassed { missingEvidence.append("Mac App Store build is not verified.") }
-        if !evidence.cancellationPassed { missingEvidence.append("Cancellation is not verified.") }
-        if !evidence.longRecordingPassed { missingEvidence.append("Long recordings are not verified.") }
-        if !evidence.silencePassed { missingEvidence.append("Silence handling is not verified.") }
-        if evidence.modelArtifacts.isEmpty || !evidence.modelArtifacts.allSatisfy(\.isComplete) {
-            missingEvidence.append("Every candidate model needs URL, SHA-256, size, and license evidence.")
-        }
-
-        let status: LocalTranscriptionAssessmentDecision.Status
-        let reasons: [String]
-        if !missingEvidence.isEmpty {
-            status = .insufficientEvidence
-            reasons = rejectionReasons + missingEvidence
-        } else if !rejectionReasons.isEmpty {
-            status = .reject
-            reasons = rejectionReasons
-        } else {
-            status = .proceed
-            reasons = ["Accuracy, performance or capability, reliability, distribution, and artifact gates passed."]
-        }
-
-        return LocalTranscriptionAssessmentDecision(
-            status: status,
+        let metrics = AssessmentMetrics(baseline: baselineSummary, candidate: candidateSummary)
+        let rejectionReasons = rejectionReasons(
             baseline: baselineSummary,
             candidate: candidateSummary,
-            relativeWordErrorRegression: wordErrorRegression,
-            latencyImprovement: latencyImprovement,
-            memoryImprovement: memoryImprovement,
-            reasons: reasons
+            evidence: evidence,
+            policy: policy,
+            metrics: metrics
+        )
+        let missingEvidence = corpusEvidenceReasons(
+            baseline: baseline,
+            candidate: candidate,
+            requiredTags: policy.requiredCorpusTags
+        ) + operationalEvidenceReasons(evidence)
+        let outcome = outcome(rejections: rejectionReasons, missingEvidence: missingEvidence)
+
+        return LocalTranscriptionAssessmentDecision(
+            status: outcome.status,
+            baseline: baselineSummary,
+            candidate: candidateSummary,
+            relativeWordErrorRegression: metrics.wordErrorRegression,
+            latencyImprovement: metrics.latencyImprovement,
+            memoryImprovement: metrics.memoryImprovement,
+            reasons: outcome.reasons
         )
     }
 
-    private static func relativeRegression(baseline: Double, candidate: Double) -> Double {
+    private static func rejectionReasons(
+        baseline: LocalTranscriptionBenchmarkSummary,
+        candidate: LocalTranscriptionBenchmarkSummary,
+        evidence: LocalTranscriptionAssessmentEvidence,
+        policy: LocalTranscriptionAssessmentPolicy,
+        metrics: AssessmentMetrics
+    ) -> [String] {
+        var reasons: [String] = []
+        if metrics.wordErrorRegression > policy.maximumRelativeWordErrorRegression {
+            reasons.append("Candidate WER exceeds the allowed 5% relative regression.")
+        }
+        if baseline.failureCount > 0 || candidate.failureCount > 0 {
+            reasons.append("One or more benchmark cases failed.")
+        }
+        let performanceGain = max(metrics.latencyImprovement, metrics.memoryImprovement)
+        let capabilityGain = evidence.capabilityGain?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if performanceGain < policy.minimumPerformanceImprovement && capabilityGain.isEmpty {
+            reasons.append("Candidate has neither a 20% performance gain nor a documented capability gain.")
+        }
+        return reasons
+    }
+
+    private static func corpusEvidenceReasons(
+        baseline: LocalTranscriptionBenchmarkReport,
+        candidate: LocalTranscriptionBenchmarkReport,
+        requiredTags: [String]
+    ) -> [String] {
+        var reasons: [String] = []
+        let candidateTags = Set(candidate.summary.tagCoverage)
+        let missingTags = requiredTags.filter { !candidateTags.contains($0) }
+        if !missingTags.isEmpty {
+            reasons.append("Corpus is missing required tags: \(missingTags.joined(separator: ", ")).")
+        }
+        if Set(baseline.measurements.map(\.caseID)) != Set(candidate.measurements.map(\.caseID)) {
+            reasons.append("Baseline and candidate did not run the same cases.")
+        }
+        if baseline.engine != .whisperKit { reasons.append("Baseline report must use WhisperKit.") }
+        if candidate.engine != .transcribeCpp { reasons.append("Candidate report must use transcribe.cpp.") }
+        return reasons
+    }
+
+    private static func operationalEvidenceReasons(
+        _ evidence: LocalTranscriptionAssessmentEvidence
+    ) -> [String] {
+        var reasons: [String] = []
+        if !evidence.directBuildPassed { reasons.append("Direct macOS build is not verified.") }
+        if !evidence.appStoreBuildPassed { reasons.append("Mac App Store build is not verified.") }
+        if !evidence.cancellationPassed { reasons.append("Cancellation is not verified.") }
+        if !evidence.longRecordingPassed { reasons.append("Long recordings are not verified.") }
+        if !evidence.silencePassed { reasons.append("Silence handling is not verified.") }
+        if evidence.modelArtifacts.isEmpty || !evidence.modelArtifacts.allSatisfy(\.isComplete) {
+            reasons.append("Every candidate model needs URL, SHA-256, size, and license evidence.")
+        }
+        return reasons
+    }
+
+    private static func outcome(
+        rejections: [String],
+        missingEvidence: [String]
+    ) -> AssessmentOutcome {
+        if !missingEvidence.isEmpty {
+            return AssessmentOutcome(status: .insufficientEvidence, reasons: rejections + missingEvidence)
+        }
+        if !rejections.isEmpty {
+            return AssessmentOutcome(status: .reject, reasons: rejections)
+        }
+        return AssessmentOutcome(
+            status: .proceed,
+            reasons: ["Accuracy, performance or capability, reliability, distribution, and artifact gates passed."]
+        )
+    }
+
+    fileprivate static func relativeRegression(baseline: Double, candidate: Double) -> Double {
         guard baseline > 0 else { return candidate > 0 ? 1 : 0 }
         return (candidate - baseline) / baseline
     }
 
-    private static func relativeImprovement(baseline: Double, candidate: Double) -> Double {
+    fileprivate static func relativeImprovement(baseline: Double, candidate: Double) -> Double {
         guard baseline > 0 else { return 0 }
         return (baseline - candidate) / baseline
     }
+}
+
+private struct AssessmentMetrics {
+    let wordErrorRegression: Double
+    let latencyImprovement: Double
+    let memoryImprovement: Double
+
+    init(
+        baseline: LocalTranscriptionBenchmarkSummary,
+        candidate: LocalTranscriptionBenchmarkSummary
+    ) {
+        wordErrorRegression = LocalTranscriptionAssessmentGate.relativeRegression(
+            baseline: baseline.wordErrorRate,
+            candidate: candidate.wordErrorRate
+        )
+        latencyImprovement = LocalTranscriptionAssessmentGate.relativeImprovement(
+            baseline: baseline.medianWallSeconds,
+            candidate: candidate.medianWallSeconds
+        )
+        memoryImprovement = LocalTranscriptionAssessmentGate.relativeImprovement(
+            baseline: baseline.peakResidentMemoryMB,
+            candidate: candidate.peakResidentMemoryMB
+        )
+    }
+}
+
+private struct AssessmentOutcome {
+    let status: LocalTranscriptionAssessmentDecision.Status
+    let reasons: [String]
 }

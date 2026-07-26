@@ -124,7 +124,26 @@ final class ModelCatalogTests: XCTestCase {
     func testModelRouting_distinguishesAppleSpeechFromDownloadedLocal() {
         XCTAssertEqual(ModelRouting.family(for: "apple/local/SFSpeechRecognizer"), .appleSpeech)
         XCTAssertEqual(ModelRouting.family(for: "apple/local/SpeechTranscriber"), .appleSpeech)
-        XCTAssertEqual(ModelRouting.family(for: "local/whisperkit/tiny"), .downloadedLocal(engine: "whisperkit"))
+        XCTAssertEqual(ModelRouting.family(for: "local/whisperkit/tiny"), .downloadedLocal(engine: .whisperKit))
+        XCTAssertEqual(
+            ModelRouting.family(for: "local/transcribe.cpp/whisper-large-v3-turbo"),
+            .downloadedLocal(engine: .transcribeCpp)
+        )
+    }
+
+    func testLocalTranscriptionEngine_preservesUnknownBoundaryValues() throws {
+        let engine = LocalTranscriptionEngine(identifier: "Future-Runtime")
+
+        XCTAssertEqual(engine, .unknown("future-runtime"))
+        XCTAssertEqual(engine.identifier, "future-runtime")
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                LocalTranscriptionEngine.self,
+                from: Data(#""transcribe-cpp""#.utf8)
+            ),
+            .transcribeCpp
+        )
+        XCTAssertEqual(String(data: try JSONEncoder().encode(engine), encoding: .utf8), #""future-runtime""#)
     }
 
     func testLiveTranscriptionPlacement_keepsAppleModelsOnlyOnDevice() {

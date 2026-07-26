@@ -2632,9 +2632,9 @@ struct SettingsView: View {
 
   private func localModelSizeLabel(for model: LocalTranscriptionModel) -> String {
     guard model.approximateSizeMB > 0 else {
-      return "\(model.engine.capitalized) · size confirmed during download"
+      return "\(model.engine.displayName) · size confirmed during download"
     }
-    return "\(model.engine.capitalized) · ~\(model.approximateSizeMB) MB"
+    return "\(model.engine.displayName) · ~\(model.approximateSizeMB) MB"
   }
 
   private func selectedLocalModelStatusIcon(for state: LocalModelManager.InstallState) -> String {

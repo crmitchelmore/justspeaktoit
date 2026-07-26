@@ -56,7 +56,7 @@ final class LocalModelManagerTests: XCTestCase {
             id: "local/whisperkit/huggingface/argmaxinc/whisperkit-coreml/openai-whisper-large-v3-turbo",
             displayName: "Whisper Large v3 Turbo from argmaxinc/whisperkit-coreml",
             modelName: "openai_whisper-large-v3_turbo_954MB",
-            engine: "whisperkit",
+            engine: .whisperKit,
             modelRepo: "argmaxinc/whisperkit-coreml",
             approximateSizeMB: 954,
             description: "Imported from Hugging Face.",

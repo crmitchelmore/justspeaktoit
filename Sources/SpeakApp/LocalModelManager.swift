@@ -191,7 +191,7 @@ final class LocalModelManager: ObservableObject {
       id: Self.huggingFaceModelID(repoID: repoID, modelName: resolvedModel.modelName),
       displayName: "\(resolvedModel.displayName) from \(repoID)",
       modelName: resolvedModel.modelName,
-      engine: "whisperkit",
+      engine: .whisperKit,
       modelRepo: repoID,
       approximateSizeMB: resolvedModel.approximateSizeMB,
       description: """
@@ -674,7 +674,7 @@ private struct ImportedModelRecord: Codable {
     id = model.id
     displayName = model.displayName
     modelName = model.modelName
-    engine = model.engine
+    engine = model.engine.identifier
     modelRepo = model.modelRepo
     approximateSizeMB = model.approximateSizeMB
     description = model.description
@@ -686,7 +686,7 @@ private struct ImportedModelRecord: Codable {
       id: id,
       displayName: displayName,
       modelName: modelName,
-      engine: engine,
+      engine: LocalTranscriptionEngine(identifier: engine),
       modelRepo: modelRepo,
       approximateSizeMB: approximateSizeMB,
       description: description,

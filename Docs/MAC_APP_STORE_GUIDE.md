@@ -236,14 +236,36 @@ xcrun altool --upload-app \
 4. Complete all required fields
 5. Click **Submit for Review**
 
-### Review Notes (if needed)
-```
-API keys are required to use the transcription features. 
-For testing, demo keys can be provided upon request.
+### App Review Information (required)
 
-The app requires Accessibility access for global keyboard shortcuts 
-and Microphone access for recording audio.
+Keep the following text in **App Review Information** for every macOS version. The
+`com.apple.security.network.server` entitlement is intentional: the optional,
+user-enabled **Send to Mac** feature starts an inbound Bonjour listener. Removing
+the entitlement while leaving that feature enabled breaks the feature in the App
+Sandbox.
+
 ```
+Just Speak to It uses the com.apple.security.network.server entitlement only for
+the optional, user-enabled "Send to Mac" feature.
+
+To verify:
+1. Open the macOS app and go to Settings > General > Send to Mac.
+2. Enable "Send to Mac". The app starts an Apple Network.framework NWListener,
+   advertises the Bonjour service _speaktransport._tcp, and displays a pairing code.
+3. In the iOS companion app, go to Settings > Send to Mac > Configure Mac
+   Connection, select the Mac, and enter the pairing code.
+4. The iOS app then opens the inbound TCP connection and can send transcript chunks
+   to the Mac.
+
+The listener is off by default and starts only after the user enables this setting.
+It is not a general-purpose web or FTP server. The app also declares
+com.apple.security.network.client separately for outbound transcription and
+post-processing provider connections.
+```
+
+If automated review flags the entitlement, reply in the Resolution Center with
+the same explanation and verification steps. Do not remove the entitlement unless
+the Send to Mac listener is also removed or gated out of the App Store build.
 
 ## Pre-Submission Checklist
 
@@ -259,6 +281,9 @@ and Microphone access for recording audio.
 - [ ] Tested on Apple Silicon and Intel
 - [ ] No crashes or major bugs
 - [ ] Sandbox entitlements minimal and justified
+- [ ] App Review Information explains and gives test steps for the Send to Mac
+      `com.apple.security.network.server` entitlement
+- [ ] The actual App Store-signed build starts Send to Mac from Settings > General
 
 ## Common Rejection Reasons
 

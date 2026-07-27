@@ -23,6 +23,7 @@ final class DistributionChannelTests: XCTestCase {
         XCTAssertTrue(channel.supportsAutomaticAccessibilityPrompt)
         XCTAssertTrue(channel.supportsAccessibilityTextInsertion)
         XCTAssertTrue(channel.allowsCrossChannelMessaging)
+        XCTAssertTrue(channel.supportsLocalNetworkTransport)
         XCTAssertFalse(channel.isSandboxed)
     }
 
@@ -46,6 +47,8 @@ final class DistributionChannelTests: XCTestCase {
             "The App Store sandbox blocks AXUIElement access to other apps")
         XCTAssertFalse(channel.allowsCrossChannelMessaging,
             "App Store builds must not advertise other distribution channels")
+        XCTAssertTrue(channel.supportsLocalNetworkTransport,
+            "The App Store build exposes the user-enabled Bonjour Send to Mac listener")
         XCTAssertTrue(channel.isSandboxed)
     }
 
@@ -63,6 +66,8 @@ final class DistributionChannelTests: XCTestCase {
                            channel.allowsCrossChannelMessaging)
             XCTAssertEqual(channel.supports(.encryptedCloudKitKeySync),
                            channel.supportsEncryptedCloudKitKeySync)
+            XCTAssertEqual(channel.supports(.localNetworkTransport),
+                           channel.supportsLocalNetworkTransport)
         }
     }
 

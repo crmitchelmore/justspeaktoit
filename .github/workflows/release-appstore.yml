@@ -260,6 +260,11 @@ jobs:
           expect_info_value CFBundleIdentifier "$BUNDLE_ID"
           expect_info_value CFBundleExecutable "$PRODUCT_NAME"
           expect_info_value CFBundleDisplayName "Just Speak to It (App Store)"
+          expect_info_value NSBonjourServices:0 "_speaktransport._tcp"
+          expect_info_value NSLocalNetworkUsageDescription \
+            "Just Speak to It uses your local network to connect iPhone and Mac for Send to Mac transcription transfer."
+
+          echo "::notice::network.server is required by Settings > General > Send to Mac, which starts an inbound Bonjour NWListener"
 
           if [ -d "$APP_PATH/Contents/Frameworks/Sparkle.framework" ]; then
             echo "::error::Sparkle.framework must not be embedded in the App Store build"

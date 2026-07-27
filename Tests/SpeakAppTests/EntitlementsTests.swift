@@ -154,7 +154,7 @@ final class AppStoreEntitlementsTests: XCTestCase {
     func testNetworkServerEntitlement_isPresent() {
         let value = entitlements["com.apple.security.network.server"] as? Bool
         XCTAssertEqual(value, true,
-            "Inbound network is required for the Bonjour Send to Mac listener")
+            "The user-enabled Send to Mac NWListener accepts inbound Bonjour connections")
     }
 
     // MARK: - Forbidden on App Store

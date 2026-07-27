@@ -46,6 +46,45 @@ final class AssessmentGateTests: XCTestCase {
         XCTAssertTrue(decision.reasons.contains { $0.contains("App Store") })
     }
 
+    func testGate_acceptsLatencyAndAccuracyGainDespiteMemoryTradeoff() {
+        let incompleteEvidence = LocalTranscriptionAssessmentEvidence(
+            directBuildPassed: true,
+            appStoreBuildPassed: true,
+            cancellationPassed: false,
+            longRecordingPassed: false,
+            silencePassed: true,
+            modelArtifacts: [LocalTranscriptionModelArtifactEvidence(
+                identifier: "parakeet-tdt-ctc-110m-q4",
+                url: "https://example.com/parakeet.gguf",
+                sha256: String(repeating: "a", count: 64),
+                sizeBytes: 89_989_600,
+                license: "CC-BY-4.0"
+            )]
+        )
+        let decision = LocalTranscriptionAssessmentGate.evaluate(
+            baseline: report(
+                engine: .whisperKit,
+                transcript: "one wrong three four",
+                wallSeconds: 0.074_615_291,
+                memoryMB: 110.4375
+            ),
+            candidate: report(
+                engine: .transcribeCpp,
+                wallSeconds: 0.044_989_875,
+                memoryMB: 324.875
+            ),
+            evidence: incompleteEvidence
+        )
+
+        XCTAssertEqual(decision.status, .insufficientEvidence)
+        XCTAssertEqual(decision.latencyImprovement, 0.397_042, accuracy: 0.000_001)
+        XCTAssertLessThan(decision.memoryImprovement, 0)
+        XCTAssertFalse(decision.reasons.contains { $0.contains("WER") })
+        XCTAssertFalse(decision.reasons.contains { $0.contains("performance gain") })
+        XCTAssertTrue(decision.reasons.contains { $0.contains("Cancellation") })
+        XCTAssertTrue(decision.reasons.contains { $0.contains("Long recordings") })
+    }
+
     private func report(
         engine: LocalTranscriptionEngine,
         transcript: String = "one two three four",

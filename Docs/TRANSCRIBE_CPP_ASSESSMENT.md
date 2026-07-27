@@ -45,6 +45,52 @@ distribution evidence; its correct outcome is `insufficient-evidence`, not adopt
 The candidate model was pinned to Hugging Face revision `6687f30c99641ee265df421e582354adbc8848fc`, had byte size
 `45981088`, and SHA-256 `325b9c7997cd1eff81ef709d55766565e71be696130cc3a3d444713798706834`.
 
+## Model-family follow-up
+
+The runtime claim is broader than a different Whisper implementation. The pinned release can also load Parakeet,
+Canary, Moonshine, SenseVoice, and streaming model families through the same C API. That creates useful opt-in
+possibilities, but it does not support replacing WhisperKit wholesale:
+
+- Parakeet TDT-CTC 110M is the strongest English candidate. Its 90 MB Q4 artifact is close to WhisperKit Tiny's
+  download size, emits timestamps, and is CC-BY-4.0.
+- Canary 180M Flash adds English, German, Spanish, and French transcription plus translation in a 139 MB Q4
+  artifact. It is a capability candidate, not a speed candidate.
+- Parakeet 0.6B v3 covers 25 European languages, but its smallest published artifact is 502 MB.
+- Nemotron 3.5 adds cache-aware streaming across 32 language-locales, but its smallest artifact is 473 MB and uses
+  OpenMDW-1.1.
+- SenseVoice Small covers Chinese, Cantonese, English, Japanese, and Korean, but has a 30-second input contract and
+  a non-standard model license.
+- Moonshine Tiny is compact, but the observed batch result below did not clear the gate and hallucinated on silence.
+
+### Public mini-corpus result
+
+On 2026-07-27 the harness ran the first 10 LibriSpeech `test-clean` and first 10 `test-other` cases from
+`openslr/librispeech_asr` revision `71cacbfb7e2354c4226d01e70d77d5fca3d04ba1`, plus the public
+`jobs-silence.wav` fixture. Each result used one warmup and three measured iterations in a fresh process on the
+same Apple M4 host:
+
+| Model | WER | Median warm time | Peak process RSS | Silence |
+| --- | ---: | ---: | ---: | --- |
+| WhisperKit Tiny | 9.98% | 75 ms | 110 MB | hallucinated text |
+| Parakeet TDT-CTC 110M Q4 | **3.56%** | **45 ms** | 325 MB | empty |
+| Moonshine Tiny Q8 | 8.31% | 64 ms | 132 MB | hallucinated text |
+| Canary 180M Flash Q4 | **2.14%** | 100 ms | 240 MB | hallucinated text |
+
+Against WhisperKit Tiny, Parakeet reduced relative WER by 64.3% and median latency by 39.7%, clearing the accuracy
+and latency gates. Peak RSS increased by 194%, so the improvement is not universal. A separate 142-second,
+420-word public-domain concatenation also completed without failures: Parakeet measured 4.04% WER and 1.747 seconds
+versus WhisperKit Tiny at 6.89% and 1.941 seconds, while Parakeet peaked at 1,017 MB RSS.
+
+The candidate artifact is pinned to Hugging Face revision
+`9d66d34f9e1594075c5dd72c90c0f4c321b29f21`, byte size `89989600`, SHA-256
+`486414fd90185a8c8a4ced7c123cfb133ff4f7958426c6b8bd9049946b56b448`, and CC-BY-4.0. Aggregate evidence is
+checked in at `Benchmarks/LocalTranscription/results/m4-model-families-2026-07-27.json`.
+
+**Recommendation:** retain WhisperKit as the default and multilingual fallback. Continue with a separate,
+opt-in English Parakeet adapter only after cancellation, noisy/accented speech, and both distribution builds are
+verified with the adapter linked. Do not pursue batch Moonshine Tiny. Canary remains a separate multilingual and
+translation capability experiment; its local latency and memory did not justify using it as the default.
+
 ## Corpus
 
 Copy `Benchmarks/LocalTranscription/corpus.example.json`, then add consented, human-verified 16 kHz mono 16-bit PCM

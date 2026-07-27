@@ -2684,28 +2684,26 @@ struct SettingsView: View {
     Group {
       SettingsCard(title: "Pre-processing", systemImage: "bolt.fill", tint: Color.mint) {
         VStack(alignment: .leading, spacing: 12) {
-          // AssemblyAI live streaming only supports keyterms prompting.
           Label(
-            "AssemblyAI streaming does not support custom instruction prompts."
-              + " Prompt-based pre-processing is disabled.",
+            "Universal-3.5 Pro supports contextual prompting, but this app currently sends keyterms only."
+              + " Formatting and style instructions remain in post-processing.",
             systemImage: "bolt.fill"
           )
           .font(.callout)
           .foregroundStyle(.mint)
 
           VStack(alignment: .leading, spacing: 6) {
-            Text("Supported in AssemblyAI live mode:")
+            Text("Used by the AssemblyAI live integration:")
               .font(.caption.weight(.semibold))
             Label("Keyterms prompting (up to 100 terms, each up to 50 characters)", systemImage: "checkmark.circle")
             Label("Dynamic keyterm updates during a session", systemImage: "checkmark.circle")
-            Label("Punctuation/casing output via format_turns responses", systemImage: "checkmark.circle")
+            Label("One automatically formatted final transcript per turn", systemImage: "checkmark.circle")
 
-            Text("Not supported by AssemblyAI streaming:")
+            Text("Available in the API but not configured here:")
               .font(.caption.weight(.semibold))
               .padding(.top, 4)
-            Label("Custom prompt or system instruction preloading", systemImage: "xmark.circle")
-            Label("Session-level formatting directives beyond format_turns", systemImage: "xmark.circle")
-            Text("Use non-AssemblyAI transcription models for custom prompt-guided cleanup.")
+            Label("Contextual prompt and agent context", systemImage: "info.circle")
+            Text("Use transcript post-processing for formatting or behavioral instructions.")
           }
           .font(.caption)
           .foregroundStyle(.secondary)
@@ -2716,7 +2714,7 @@ struct SettingsView: View {
           )
         }
       }
-      .speakTooltip("AssemblyAI live streaming supports keyterms only.")
+      .speakTooltip("The app sends AssemblyAI recognition keyterms; formatting prompts run after transcription.")
 
       SettingsCard(title: "Keyterms", systemImage: "textformat.abc", tint: Color.blue) {
         VStack(alignment: .leading, spacing: 8) {
@@ -2724,13 +2722,13 @@ struct SettingsView: View {
             .font(.caption)
             .foregroundStyle(.secondary)
           TextField(
-            "AssemblyAI, Universal-3 Pro, Keanu Reeves",
+            "AssemblyAI, Universal-3.5 Pro, Keanu Reeves",
             text: settingsBinding(\AppSettings.assemblyAIKeyterms)
           )
           .textFieldStyle(.roundedBorder)
         }
       }
-      .speakTooltip("Add domain-specific terms to improve transcription accuracy. Additional cost: $0.04/hour.")
+      .speakTooltip("Add domain-specific terms to improve Universal-3.5 Pro recognition accuracy.")
     }
   }
 

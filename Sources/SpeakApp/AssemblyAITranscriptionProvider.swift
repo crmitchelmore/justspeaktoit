@@ -10,13 +10,7 @@ import SpeakCore
 // swiftlint:disable type_body_length
 /// Handles real-time audio streaming to AssemblyAI's v3 WebSocket API.
 final class AssemblyAILiveTranscriber: @unchecked Sendable {
-  private enum EndpointHost: String {
-    case europe = "streaming.eu.assemblyai.com"
-    case global = "streaming.assemblyai.com"
-  }
-
-  private static let minimumTurnSilenceMs = "560"
-
+  private static let terminationTimeoutSeconds: Double = 3
   private let apiKey: String
   private let sampleRate: Int
   private var webSocketTask: URLSessionWebSocketTask?
@@ -35,10 +29,8 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
   private var isStopping: Bool = false
 
   private var keyterms: [String]
-  private let speechModel: String
-  private let languageDetectionEnabled: Bool
-  private let preferredEndpointHost: EndpointHost = .global
-  private var currentEndpointHost: EndpointHost = .global
+  private let preferredEndpointHost: AssemblyAIStreamingEndpoint = .europe
+  private var currentEndpointHost: AssemblyAIStreamingEndpoint = .europe
   private var hasAttemptedHostFallback: Bool = false
   private var sessionDidBegin: Bool = false
   /// Audio frames captured before `Begin` arrives. AssemblyAI's WebSocket
@@ -51,16 +43,12 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
     apiKey: String,
     sampleRate: Int = 16000,
     keyterms: [String] = [],
-    speechModel: String = "universal-streaming-english",
-    languageDetectionEnabled: Bool = false,
     session: URLSession? = nil,
     bufferPool: AudioBufferPool = AudioBufferPool(poolSize: 10, bufferSize: 4096)
   ) {
     self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
     self.sampleRate = sampleRate
     self.keyterms = keyterms
-    self.speechModel = speechModel
-    self.languageDetectionEnabled = languageDetectionEnabled
     self.bufferPool = bufferPool
     let delegate = AssemblyAIWebSocketDelegate()
     self.delegate = delegate
@@ -92,7 +80,7 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
     onTranscript: @escaping (AssemblyAITurnResponse) -> Void,
     onError: @escaping (Error) -> Void
   ) {
-    let endpointHost = withStateLock { () -> EndpointHost in
+    let endpointHost = withStateLock { () -> AssemblyAIStreamingEndpoint in
       isStopping = false
       self.onTranscript = onTranscript
       self.onError = onError
@@ -106,37 +94,13 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
     connectWebSocket(using: endpointHost)
   }
 
-  private func connectWebSocket(using host: EndpointHost) {
-    guard var urlComponents = makeWebSocketURL(for: host) else {
-      currentOnError()?(AssemblyAIError.invalidURL)
-      return
-    }
-    urlComponents.queryItems = [
-      URLQueryItem(name: "sample_rate", value: String(sampleRate)),
-      URLQueryItem(name: "encoding", value: "pcm_s16le"),
-      URLQueryItem(name: "format_turns", value: "true"),
-      URLQueryItem(name: "speech_model", value: speechModel),
-      URLQueryItem(name: "min_turn_silence", value: Self.minimumTurnSilenceMs),
-      // Auth via query token avoids intermittent URLSession WebSocket
-      // handshake failures observed when only the Authorization header is set.
-      URLQueryItem(name: "token", value: apiKey)
-    ]
-
-    // AssemblyAI streaming v3 expects keyterms_prompt as a single JSON-array
-    // query parameter (e.g. ?keyterms_prompt=["foo","bar"]), NOT as repeated
-    // params — sending repeated params triggers close code 3006 with
-    // "Invalid 'keyterms_prompt': Value error, Invalid JSON array".
-    let validTerms = Array(keyterms.filter { !$0.isEmpty && $0.count <= 50 }.prefix(100))
-    if !validTerms.isEmpty,
-       let jsonData = try? JSONSerialization.data(withJSONObject: validTerms),
-       let jsonString = String(data: jsonData, encoding: .utf8) {
-      urlComponents.queryItems?.append(URLQueryItem(name: "keyterms_prompt", value: jsonString))
-    }
-    if languageDetectionEnabled {
-      urlComponents.queryItems?.append(URLQueryItem(name: "language_detection", value: "true"))
-    }
-
-    guard let url = urlComponents.url else {
+  private func connectWebSocket(using host: AssemblyAIStreamingEndpoint) {
+    guard let url = AssemblyAIStreamingRequest.url(
+      endpoint: host,
+      apiKey: apiKey,
+      sampleRate: sampleRate,
+      keyterms: keyterms
+    ) else {
       currentOnError()?(AssemblyAIError.invalidURL)
       return
     }
@@ -182,10 +146,6 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
       task.cancel(with: .goingAway, reason: nil)
       self.currentOnError()?(AssemblyAIError.streamingFailed("Begin timeout"))
     }
-  }
-
-  private func makeWebSocketURL(for host: EndpointHost) -> URLComponents? {
-    URLComponents(string: "wss://\(host.rawValue)/v3/ws")
   }
 
   func sendAudio(_ audioData: Data) {
@@ -319,40 +279,35 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
 
     guard let task, task.state == .running else { return }
 
-    // Send ForceEndpoint to flush the current turn before terminating.
-    //
-    // NOTE: Previously this used a 2.0s sleep before sending Terminate, on the
-    // assumption that we needed to wait for the formatted final Turn response
-    // before tearing down the socket. That wait is already handled higher up
-    // by AssemblyAILiveController.stop() (its `stopContinuation` waits for the
-    // final Turn to be observed in handleTurn, with its own timeout). Holding
-    // the socket open here for an additional 2s just inflates the perceived
-    // "finalising" delay — particularly noticeable on long utterances where
-    // the server-side formatting pass already consumes most of the controller
-    // budget.
-    //
-    // We now send Terminate immediately after ForceEndpoint, with a small
-    // safety delay to give URLSession a moment to flush the ForceEndpoint
-    // frame onto the wire before we send Terminate / cancel the task. If this
-    // ever proves too aggressive (e.g. AssemblyAI starts dropping the
-    // ForceEndpoint when Terminate races it), increase `safetyDelay` or
-    // restore a longer wait.
-    let forceMsg = #"{"type":"ForceEndpoint"}"#
-    let safetyDelay: DispatchTimeInterval = .milliseconds(150)
-    task.send(.string(forceMsg)) { [weak self] _ in
-      DispatchQueue.global().asyncAfter(deadline: .now() + safetyDelay) {
-        let terminateMsg = #"{"type":"Terminate"}"#
-        task.send(.string(terminateMsg)) { _ in }
-        task.cancel(with: .normalClosure, reason: nil)
-        if let self {
-          self.withStateLock {
-            if self.webSocketTask === task {
-              self.webSocketTask = nil
-            }
-          }
-          self.logger.info("AssemblyAI WebSocket connection closed")
-        }
+    // Terminate flushes in-flight messages. Keep the socket open until the
+    // server's final Termination frame so the last transcript is not dropped.
+    let terminateMsg = #"{"type":"Terminate"}"#
+    task.send(.string(terminateMsg)) { [weak self] error in
+      guard let self else { return }
+      if error != nil {
+        self.completeTermination(for: task)
+        return
       }
+      self.scheduleTerminationTimeout(for: task)
+    }
+  }
+
+  private func scheduleTerminationTimeout(for task: URLSessionWebSocketTask) {
+    DispatchQueue.global().asyncAfter(deadline: .now() + Self.terminationTimeoutSeconds) { [weak self, weak task] in
+      guard let self, let task else { return }
+      self.completeTermination(for: task)
+    }
+  }
+
+  private func completeTermination(for task: URLSessionWebSocketTask) {
+    let shouldClose = withStateLock { () -> Bool in
+      guard webSocketTask === task else { return false }
+      webSocketTask = nil
+      return true
+    }
+    if shouldClose {
+      task.cancel(with: .normalClosure, reason: nil)
+      logger.info("AssemblyAI WebSocket connection closed")
     }
   }
 
@@ -393,7 +348,7 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
 
   private func retryWithFallbackEndpointIfNeeded(after error: Error) -> Bool {
     var taskToCancel: URLSessionWebSocketTask?
-    var fallback: EndpointHost = .global
+    var fallback: AssemblyAIStreamingEndpoint = .global
     let shouldRetry = withStateLock { () -> Bool in
       guard
         !isStopping,
@@ -441,8 +396,8 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
 
     do {
       let envelope = try JSONDecoder().decode(AssemblyAIStreamEnvelope.self, from: data)
-      // u3-rt-pro (api_version 2025-05-12) omits the "type" field on Turn messages.
-      // Treat any message without a type but with a turn_order as a Turn.
+      // Keep accepting the typeless Turn frames returned by older v3 model
+      // snapshots while Universal-3.5 Pro returns the documented `type` field.
       let resolvedType = envelope.type ?? (envelope.turn_order != nil ? "Turn" : "")
       switch resolvedType {
       case "Turn":
@@ -456,7 +411,9 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
         flushPreBeginAudio()
       case "Termination":
         logger.info("AssemblyAI session terminated by server")
-        withStateLock { isStopping = true }
+        if let task = currentWebSocketTask() {
+          completeTermination(for: task)
+        }
       case "SpeechStarted":
         break
       case "Error":
@@ -768,12 +725,12 @@ struct AssemblyAITranscriptionProvider: TranscriptionProvider {
   func supportedModels() -> [ModelCatalog.Option] {
     [
       ModelCatalog.Option(
-        id: "assemblyai/universal-3-pro",
-        displayName: "Universal-3 Pro",
-        description: "AssemblyAI's most powerful and accurate speech model."
+        id: AssemblyAIModels.universal35ProBatchID,
+        displayName: "Universal-3.5 Pro",
+        description: "AssemblyAI's fastest and most accurate batch speech model."
       ),
       ModelCatalog.Option(
-        id: "assemblyai/universal-2",
+        id: AssemblyAIModels.universal2BatchID,
         displayName: "Universal-2",
         description: "AssemblyAI's previous generation model. Fast and reliable."
       ),
@@ -784,11 +741,12 @@ struct AssemblyAITranscriptionProvider: TranscriptionProvider {
   func createLiveTranscriber(
     apiKey: String,
     sampleRate: Int = 16000,
-    model: String = "assemblyai/universal-streaming",
+    model: String = AssemblyAIModels.universal35ProStreamingID,
     keyterms: [String] = [],
     language: String? = nil
   ) -> AssemblyAILiveTranscriber {
-    let config = mapLiveSpeechModel(from: model, language: language)
+    _ = model
+    _ = language
     // Pass session: nil so AssemblyAILiveTranscriber builds its own dedicated
     // URLSession for the WebSocket; the REST `session` (URLSession.shared) has
     // shown intermittent ENOTCONN handshake failures for the wss upgrade.
@@ -796,8 +754,6 @@ struct AssemblyAITranscriptionProvider: TranscriptionProvider {
       apiKey: apiKey,
       sampleRate: sampleRate,
       keyterms: keyterms,
-      speechModel: config.speechModel,
-      languageDetectionEnabled: config.languageDetectionEnabled,
       session: nil,
       bufferPool: bufferPool
     )
@@ -805,28 +761,17 @@ struct AssemblyAITranscriptionProvider: TranscriptionProvider {
 
   // MARK: - Private Helpers
 
-  private func mapSpeechModels(from model: String) -> [String] {
+  func mapSpeechModels(from model: String) -> [String] {
     let name = model.split(separator: "/").last.map(String.init) ?? model
     let cleaned = name.replacingOccurrences(of: "-streaming", with: "")
     switch cleaned {
-    case "universal-3-pro":
-      return ["universal-3-pro"]
-    case "universal-2":
-      return ["universal-2"]
+    case AssemblyAIModels.universal35ProAPIName, "universal-3-pro":
+      return [AssemblyAIModels.universal35ProAPIName, AssemblyAIModels.universal2APIName]
+    case AssemblyAIModels.universal2APIName:
+      return [AssemblyAIModels.universal2APIName]
     default:
-      return ["universal-3-pro", "universal-2"]
+      return [AssemblyAIModels.universal35ProAPIName, AssemblyAIModels.universal2APIName]
     }
-  }
-
-  private func mapLiveSpeechModel(from model: String, language: String?) -> AssemblyAILiveSpeechModelConfig {
-    // The catalog now exposes only u3-rt-pro for live AssemblyAI. Older saved IDs
-    // (universal-streaming/-english/-multilingual) are migrated transparently to u3-rt-pro,
-    // which already handles English and multilingual content with high accuracy.
-    _ = language
-    return AssemblyAILiveSpeechModelConfig(
-      speechModel: "u3-rt-pro",
-      languageDetectionEnabled: false
-    )
   }
 
   private func extractLanguageCode(from locale: String) -> String {
@@ -864,11 +809,6 @@ private struct AssemblyAIStreamEnvelope: Decodable {
   let type: String?
   // swiftlint:disable:next identifier_name
   let turn_order: Int?
-}
-
-private struct AssemblyAILiveSpeechModelConfig {
-  let speechModel: String
-  let languageDetectionEnabled: Bool
 }
 
 struct AssemblyAITurnResponse: Decodable {

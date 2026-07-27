@@ -251,23 +251,24 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
 - Call `audioEngine.stop()` and `audioEngine.inputNode.removeTap(onBus: 0)` before throwing
 - Compare with existing cleanup paths in the same function to ensure consistency
 
-## AssemblyAI Universal Streaming
+## AssemblyAI Universal-3.5 Pro Streaming
 
 ### Turn message semantics
-- With `format_turns=true`, each turn produces TWO end-of-turn messages: unformatted then formatted. Only commit the formatted one.
-- `transcript` contains only finalised words (`word_is_final=true`). Non-final words appear only in the `words` array.
+- Do not send `format_turns`; Universal-3.5 Pro always formats its single end-of-turn message.
+- Commit a turn only when both `end_of_turn=true` and `turn_is_formatted=true`.
+- Partial `transcript` values are complete replacements for the current turn, not deltas.
 - Track `turn_order` to replace (not append) segments for the same turn.
 - Interim text uses replacement semantics — AssemblyAI sends the full turn text each time, not deltas.
 
 ### Pre-processing prompt
-- AssemblyAI streaming v3 does **not** support an arbitrary `prompt` parameter — only `keyterms_prompt`.
+- Universal-3.5 Pro supports contextual `prompt` plus `keyterms_prompt`; neither is a transcript formatting control.
 - `keyterms_prompt` entries are sourced from `assemblyAIKeyterms` (comma-separated, max 50 chars each, max 100 items).
-- The `postProcessingSystemPrompt` is applied post-transcription by `PostProcessingManager`, not by the streaming API.
+- The app currently sends keyterms only. `postProcessingSystemPrompt` remains post-transcription in `PostProcessingManager`.
 - When a pre-processing prompt is active, LLM post-processing is automatically skipped.
 
 ### Rollout preference
 - Prefer core live-transcription integration first; add advanced v3 controls only when a clear app need is confirmed.
-- Keep style control in post-processing (`postProcessingSystemPrompt`); streaming v3 supports `keyterms_prompt` only.
+- Keep style control in post-processing (`postProcessingSystemPrompt`); native `prompt` is for audio context.
 
 ### Connection reliability
 - Use EU host first (`streaming.eu.assemblyai.com`) and retry once on global host (`streaming.assemblyai.com`) only when failure occurs before `Begin`.

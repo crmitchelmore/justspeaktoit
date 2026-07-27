@@ -3,26 +3,19 @@ import os.log
 
 // MARK: - AssemblyAI Live Client (Cross-platform WebSocket)
 
-/// Cross-platform AssemblyAI Universal-Streaming v3 client.
+/// Cross-platform AssemblyAI Universal-3.5 Pro Streaming v3 client.
 ///
 /// Shared by macOS and iOS. AssemblyAI emits incremental `Turn` frames (each
-/// carrying the full running turn text) and, with `format_turns=true`, a
-/// second *formatted* end-of-turn frame. This client folds the controller-side
+/// carrying the full running turn text) and one formatted end-of-turn frame.
+/// This client folds the controller-side
 /// turn assembly in: finalised turns are tracked by `turn_order`, combined with
 /// the current interim, and emitted as a clean cumulative `(text, isFinal=false)`
 /// so it can drive the generic iOS transcriber (which captures the latest text).
 /// Conforms to ``StreamingTranscriptionClient``.
 public final class AssemblyAILiveClient: StreamingTranscriptionClient, @unchecked Sendable {
-    // swiftlint:disable:previous type_body_length
-    private enum Host: String {
-        case global = "streaming.assemblyai.com"
-        case europe = "streaming.eu.assemblyai.com"
-    }
-
     private static let beginTimeoutSeconds: Double = 8
+    private static let terminationTimeoutSeconds: Double = 3
     private static let preBeginByteLimit = 16_000 * 2 * 5 // 5s of 16kHz PCM16
-    private static let minTurnSilenceMs = "560"
-
     private let apiKey: String
     private let speechModel: String
     private let sampleRate: Int
@@ -36,18 +29,14 @@ public final class AssemblyAILiveClient: StreamingTranscriptionClient, @unchecke
     private var isStopping = false
     private var sessionDidBegin = false
     private var hasAttemptedHostFallback = false
-    private var currentHost: Host = .global
+    private var currentHost: AssemblyAIStreamingEndpoint = .global
     private var preBeginAudio: [Data] = []
 
-    // Turn assembly state.
-    private var finalTexts: [String] = []
-    private var finalIndexByTurnOrder: [Int: Int] = [:]
-    private var fullTranscript = ""
-    private var currentInterim = ""
+    private var transcriptAssembler = AssemblyAIStreamingTranscriptAssembler()
 
     public init(
         apiKey: String,
-        speechModel: String = "u3-rt-pro",
+        speechModel: String = AssemblyAIModels.universal35ProAPIName,
         sampleRate: Int = 16_000,
         session: URLSession? = nil
     ) {
@@ -74,10 +63,7 @@ public final class AssemblyAILiveClient: StreamingTranscriptionClient, @unchecke
             hasAttemptedHostFallback = false
             currentHost = .europe
             preBeginAudio = []
-            finalTexts = []
-            finalIndexByTurnOrder = [:]
-            fullTranscript = ""
-            currentInterim = ""
+            transcriptAssembler = AssemblyAIStreamingTranscriptAssembler()
             self.onTranscript = onTranscript
             self.onError = onError
         }
@@ -108,31 +94,45 @@ public final class AssemblyAILiveClient: StreamingTranscriptionClient, @unchecke
             return webSocketTask
         }
         guard let task, task.state == .running else { return }
-        // Flush the in-flight turn, then terminate after a brief safety delay.
-        task.send(.string(#"{"type":"ForceEndpoint"}"#)) { [weak self] _ in
-            DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(150)) {
-                task.send(.string(#"{"type":"Terminate"}"#)) { _ in }
-                task.cancel(with: .normalClosure, reason: nil)
-                self?.withStateLock {
-                    if self?.webSocketTask === task { self?.webSocketTask = nil }
-                }
+        // Terminate flushes in-flight audio. Keep receiving until the server's
+        // final Termination frame; closing here would silently discard it.
+        task.send(.string(#"{"type":"Terminate"}"#)) { [weak self] error in
+            guard let self else { return }
+            if error != nil {
+                self.completeTermination(for: task)
+                return
             }
+            self.scheduleTerminationTimeout(for: task)
+        }
+    }
+
+    private func scheduleTerminationTimeout(for task: URLSessionWebSocketTask) {
+        DispatchQueue.global().asyncAfter(deadline: .now() + Self.terminationTimeoutSeconds) { [weak self, weak task] in
+            guard let self, let task else { return }
+            self.completeTermination(for: task)
+        }
+    }
+
+    private func completeTermination(for task: URLSessionWebSocketTask) {
+        let shouldClose = withStateLock { () -> Bool in
+            guard webSocketTask === task else { return false }
+            webSocketTask = nil
+            return true
+        }
+        if shouldClose {
+            task.cancel(with: .normalClosure, reason: nil)
         }
     }
 
     // MARK: - Connection
 
-    private func connect(using host: Host) {
-        var components = URLComponents(string: "wss://\(host.rawValue)/v3/ws")
-        components?.queryItems = [
-            URLQueryItem(name: "sample_rate", value: String(sampleRate)),
-            URLQueryItem(name: "encoding", value: "pcm_s16le"),
-            URLQueryItem(name: "format_turns", value: "true"),
-            URLQueryItem(name: "speech_model", value: speechModel),
-            URLQueryItem(name: "min_turn_silence", value: Self.minTurnSilenceMs),
-            URLQueryItem(name: "token", value: apiKey)
-        ]
-        guard let url = components?.url else {
+    private func connect(using host: AssemblyAIStreamingEndpoint) {
+        guard let url = AssemblyAIStreamingRequest.url(
+            endpoint: host,
+            apiKey: apiKey,
+            sampleRate: sampleRate,
+            speechModel: speechModel
+        ) else {
             currentOnError()?(StreamingClientError.invalidURL)
             return
         }
@@ -216,7 +216,7 @@ public final class AssemblyAILiveClient: StreamingTranscriptionClient, @unchecke
 
     private func retryWithFallbackIfNeeded(after error: Error) -> Bool {
         var taskToCancel: URLSessionWebSocketTask?
-        var fallback: Host = .global
+        var fallback: AssemblyAIStreamingEndpoint = .global
         let shouldRetry = withStateLock { () -> Bool in
             guard !isStopping, !hasAttemptedHostFallback, !sessionDidBegin else { return false }
             hasAttemptedHostFallback = true
@@ -250,55 +250,26 @@ public final class AssemblyAILiveClient: StreamingTranscriptionClient, @unchecke
         let type = envelope.type ?? (envelope.turn_order != nil ? "Turn" : "")
         switch type {
         case "Turn":
-            if let turn = try? JSONDecoder().decode(AssemblyAITurn.self, from: data) {
+            if let turn = try? JSONDecoder().decode(AssemblyAIStreamingTurn.self, from: data) {
                 handleTurn(turn)
             }
         case "Begin":
             withStateLock { sessionDidBegin = true }
             flushPreBeginAudio()
         case "Termination":
-            withStateLock { isStopping = true }
+            if let task = currentWebSocketTask() {
+                completeTermination(for: task)
+            }
         default:
             break
         }
     }
 
-    private func handleTurn(_ turn: AssemblyAITurn) {
-        guard !turn.transcript.isEmpty || turn.end_of_turn else { return }
-
-        if turn.end_of_turn {
-            if !turn.turn_is_formatted {
-                // Unformatted end-of-turn: show as interim; formatted version follows.
-                withStateLock { currentInterim = turn.transcript }
-                emitDisplay()
-                return
-            }
-            withStateLock {
-                if let existing = finalIndexByTurnOrder[turn.turn_order], finalTexts.indices.contains(existing) {
-                    finalTexts[existing] = turn.transcript
-                    fullTranscript = finalTexts.joined(separator: " ")
-                } else {
-                    finalTexts.append(turn.transcript)
-                    finalIndexByTurnOrder[turn.turn_order] = finalTexts.count - 1
-                    fullTranscript = fullTranscript.isEmpty
-                        ? turn.transcript
-                        : fullTranscript + " " + turn.transcript
-                }
-                currentInterim = ""
-            }
-            emitDisplay()
-        } else {
-            withStateLock { currentInterim = turn.transcript }
-            emitDisplay()
-        }
-    }
-
-    private func emitDisplay() {
-        let display = withStateLock { () -> String in
-            fullTranscript.isEmpty ? currentInterim
-                : (currentInterim.isEmpty ? fullTranscript : fullTranscript + " " + currentInterim)
-        }
-        currentOnTranscript()?(display, false)
+    private func handleTurn(_ turn: AssemblyAIStreamingTurn) {
+        guard let update = withStateLock({ transcriptAssembler.consume(turn) }) else { return }
+        // This client emits a cumulative display string rather than per-turn
+        // deltas, so the generic iOS wrapper must replace its text in both cases.
+        currentOnTranscript()?(update.displayText, false)
     }
 
     private func shouldIgnoreSocketError(_ error: Error) -> Bool {
@@ -327,9 +298,46 @@ private struct AssemblyAIEnvelope: Decodable {
     let turn_order: Int? // swiftlint:disable:this identifier_name
 }
 
-private struct AssemblyAITurn: Decodable {
+struct AssemblyAIStreamingTurn: Decodable {
     let turn_order: Int // swiftlint:disable:this identifier_name
     let turn_is_formatted: Bool // swiftlint:disable:this identifier_name
     let end_of_turn: Bool // swiftlint:disable:this identifier_name
     let transcript: String
+}
+
+struct AssemblyAIStreamingTranscriptUpdate: Equatable {
+    let displayText: String
+    let finalizedTurn: Bool
+}
+
+struct AssemblyAIStreamingTranscriptAssembler {
+    private var finalTexts: [String] = []
+    private var finalIndexByTurnOrder: [Int: Int] = [:]
+    private var fullTranscript = ""
+    private var currentInterim = ""
+
+    mutating func consume(_ turn: AssemblyAIStreamingTurn) -> AssemblyAIStreamingTranscriptUpdate? {
+        guard !turn.transcript.isEmpty || turn.end_of_turn else { return nil }
+
+        let finalized = turn.end_of_turn && turn.turn_is_formatted
+        if finalized {
+            if let existing = finalIndexByTurnOrder[turn.turn_order], finalTexts.indices.contains(existing) {
+                finalTexts[existing] = turn.transcript
+                fullTranscript = finalTexts.joined(separator: " ")
+            } else {
+                finalTexts.append(turn.transcript)
+                finalIndexByTurnOrder[turn.turn_order] = finalTexts.count - 1
+                fullTranscript = fullTranscript.isEmpty
+                    ? turn.transcript
+                    : fullTranscript + " " + turn.transcript
+            }
+            currentInterim = ""
+        } else {
+            currentInterim = turn.transcript
+        }
+
+        let display = fullTranscript.isEmpty ? currentInterim
+            : (currentInterim.isEmpty ? fullTranscript : fullTranscript + " " + currentInterim)
+        return AssemblyAIStreamingTranscriptUpdate(displayText: display, finalizedTurn: finalized)
+    }
 }

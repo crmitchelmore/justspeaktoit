@@ -209,17 +209,24 @@ struct SideBarView: View {
   @ViewBuilder
   private func shortcutHint(for item: SidebarItem) -> some View {
     let binding = shortcutManager.binding(for: item.shortcutAction)
-    if !settings.visualDensity.isCompact,
-       settings.showSidebarShortcutHints,
+    if settings.showSidebarShortcutHints,
        binding.isEnabled {
       Text(binding.displayString)
-        .font(.caption2.monospaced())
+        .font(
+          settings.visualDensity.isCompact
+            ? .system(size: 9, weight: .medium, design: .monospaced)
+            : .caption2.monospaced()
+        )
         .foregroundStyle(.secondary)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2)
-        .background(Capsule().fill(Color.secondary.opacity(0.10)))
+        .padding(.horizontal, settings.visualDensity.isCompact ? 0 : 6)
+        .padding(.vertical, settings.visualDensity.isCompact ? 0 : 2)
+        .background {
+          if !settings.visualDensity.isCompact {
+            Capsule().fill(Color.secondary.opacity(0.10))
+          }
+        }
         .minimumScaleFactor(0.8)
-        .layoutPriority(-1)
+        .layoutPriority(settings.visualDensity.isCompact ? 4 : -1)
         .accessibilityHidden(true)
     }
   }

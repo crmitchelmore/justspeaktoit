@@ -200,6 +200,33 @@ struct SettingsView: View {
     case finished(APIKeyValidationResult)
   }
 
+  private struct APIKeyCardConfiguration {
+    let title: String
+    let tint: Color
+    let statusIcon: String
+    let statusTint: Color
+    let isStored: Bool
+    let descriptionText: String
+    let keyFieldLabel: String
+    let keyBinding: Binding<String>
+    let onSave: () -> Void
+    let onValidate: (() -> Void)?
+    let onRemove: (() -> Void)?
+    let isSaveDisabled: Bool
+    let isValidateDisabled: Bool
+    let isRemoveDisabled: Bool
+    let validationState: ValidationViewState
+    let saveButtonTitle: String
+    let saveTooltip: String
+    let validateButtonTitle: String
+    let validateTooltip: String
+    let removeButtonTitle: String
+    let removeTooltip: String
+    let link: URL?
+    let linkLabel: String?
+    let statusLabel: String
+  }
+
   private var isOpenRouterKeyStored: Bool {
     isAPIKeyStored(openRouterKeyIdentifier)
   }
@@ -856,7 +883,7 @@ struct SettingsView: View {
   }
 
   private var generalSettings: some View {
-    LazyVStack(spacing: settings.visualDensity.sectionSpacing) {
+    SpeakDensitySettingsSection(density: settings.visualDensity) {
       SettingsCard(title: "Appearance", systemImage: "paintpalette", tint: Color.brandAccent) {
         VStack(alignment: .leading, spacing: 12) {
           Text("Choose how Speak looks across light, dark, or system themes.")
@@ -1349,7 +1376,7 @@ struct SettingsView: View {
   }
 
   private var transcriptionSettings: some View {
-    LazyVStack(spacing: settings.visualDensity.sectionSpacing) {
+    SpeakDensitySettingsSection(density: settings.visualDensity) {
       SettingsCard(title: "Transcription mode", systemImage: "waveform", tint: Color.teal) {
         VStack(alignment: .leading, spacing: 12) {
           Picker("Where transcription runs", selection: transcriptionLocationBinding) {
@@ -2714,7 +2741,7 @@ struct SettingsView: View {
   }
 
   private var postProcessingSettings: some View {
-    LazyVStack(spacing: settings.visualDensity.sectionSpacing) {
+    SpeakDensitySettingsSection(density: settings.visualDensity) {
       if settings.isActiveAssemblyAILiveModel {
         preprocessingSettings
       } else {
@@ -2993,7 +3020,7 @@ struct SettingsView: View {
   }
 
   private var voiceOutputSettings: some View {
-    LazyVStack(spacing: settings.visualDensity.sectionSpacing) {
+    SpeakDensitySettingsSection(density: settings.visualDensity) {
       SettingsCard(title: "Default Voice", systemImage: "speaker.wave.3", tint: Color.brandLagoonDeep) {
         VStack(alignment: .leading, spacing: 12) {
           VStack(alignment: .leading, spacing: 8) {
@@ -3709,13 +3736,19 @@ struct SettingsView: View {
 
   private var apiKeySettings: some View {
     ScrollViewReader { proxy in
-      LazyVStack(spacing: settings.visualDensity.sectionSpacing) {
-        apiKeyListControls
+      VStack(spacing: settings.visualDensity.sectionSpacing) {
+        SpeakDensitySettingsSection(
+          density: settings.visualDensity,
+          compactMinimumWidth: 320,
+          maximumColumns: 2
+        ) {
+          apiKeyListControls
 
-        if DistributionChannel.current.supportsEncryptedCloudKitKeySync {
-          CloudKitKeySyncSettingsCard(secureStorage: environment.secureStorage)
-        } else {
-          LocalKeychainStorageCard()
+          if DistributionChannel.current.supportsEncryptedCloudKitKeySync {
+            CloudKitKeySyncSettingsCard(secureStorage: environment.secureStorage)
+          } else {
+            LocalKeychainStorageCard()
+          }
         }
 
         if visibleMacAPIKeyItems.isEmpty {
@@ -3726,9 +3759,14 @@ struct SettingsView: View {
           )
           .padding(.vertical, 24)
         } else {
-          ForEach(visibleMacAPIKeyItems) { item in
-            macAPIKeyView(for: item)
-              .id(item.id)
+          SpeakDensitySettingsSection(
+            density: settings.visualDensity,
+            compactMinimumWidth: 320
+          ) {
+            ForEach(visibleMacAPIKeyItems) { item in
+              macAPIKeyView(for: item)
+                .id(item.id)
+            }
           }
         }
       }
@@ -3754,32 +3792,64 @@ struct SettingsView: View {
 
   private var apiKeyListControls: some View {
     SettingsCard(title: "Find API Keys", systemImage: "magnifyingglass", tint: .brandAccent) {
-      VStack(alignment: .leading, spacing: settings.visualDensity == .compact ? 8 : 12) {
-        TextField("Search provider or category", text: $apiKeySearchText)
-          .textFieldStyle(.roundedBorder)
-          .accessibilityLabel("Search API keys")
+      if settings.visualDensity.isCompact {
+        ViewThatFits(in: .horizontal) {
+          HStack(spacing: settings.visualDensity.inlineSpacing) {
+            TextField("Search provider or category", text: $apiKeySearchText)
+              .textFieldStyle(.roundedBorder)
+              .frame(minWidth: 180)
+              .accessibilityLabel("Search API keys")
 
-        HStack(spacing: 12) {
-          Picker("Status", selection: $apiKeyStatusFilter) {
-            ForEach(APIKeyStatusFilter.allCases) { filter in
-              Text(filter.displayName).tag(filter)
-            }
+            apiKeyFilterControls
+              .fixedSize(horizontal: true, vertical: false)
           }
-          .pickerStyle(.menu)
 
-          Picker("Sort", selection: $apiKeySortOrder) {
-            ForEach(APIKeySortOrder.allCases) { order in
-              Text(order.displayName).tag(order)
-            }
+          VStack(alignment: .leading, spacing: settings.visualDensity.inlineSpacing) {
+            TextField("Search provider or category", text: $apiKeySearchText)
+              .textFieldStyle(.roundedBorder)
+              .accessibilityLabel("Search API keys")
+            apiKeyFilterControls
           }
-          .pickerStyle(.menu)
+        }
+      } else {
+        VStack(alignment: .leading, spacing: 12) {
+          TextField("Search provider or category", text: $apiKeySearchText)
+            .textFieldStyle(.roundedBorder)
+            .accessibilityLabel("Search API keys")
 
-          Spacer()
-          Text("\(visibleMacAPIKeyItems.count) of \(allMacAPIKeyItems.count)")
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(.secondary)
+          apiKeyFilterControls
         }
       }
+    }
+  }
+
+  private var apiKeyFilterControls: some View {
+    HStack(spacing: settings.visualDensity.inlineSpacing) {
+      Picker("Status", selection: $apiKeyStatusFilter) {
+        ForEach(APIKeyStatusFilter.allCases) { filter in
+          Text(filter.displayName).tag(filter)
+        }
+      }
+      .pickerStyle(.menu)
+
+      Picker("Sort", selection: $apiKeySortOrder) {
+        ForEach(APIKeySortOrder.allCases) { order in
+          Text(order.displayName).tag(order)
+        }
+      }
+      .pickerStyle(.menu)
+
+      Spacer(minLength: 0)
+      Text(
+        settings.visualDensity.isCompact
+          ? "\(visibleMacAPIKeyItems.count)/\(allMacAPIKeyItems.count)"
+          : "\(visibleMacAPIKeyItems.count) of \(allMacAPIKeyItems.count)"
+      )
+        .font(.caption.monospacedDigit())
+        .foregroundStyle(.secondary)
+        .accessibilityLabel(
+          "\(visibleMacAPIKeyItems.count) of \(allMacAPIKeyItems.count) API keys shown"
+        )
     }
   }
 
@@ -4000,73 +4070,223 @@ struct SettingsView: View {
     linkLabel: String?,
     statusLabel: String = "Status"
   ) -> some View {
-    SettingsCard(title: title, systemImage: systemImage, tint: tint) {
-      VStack(alignment: .leading, spacing: 14) {
-        HStack(alignment: .center, spacing: 12) {
-          Label(statusLabel, systemImage: statusIcon)
-            .foregroundStyle(isStored ? statusTint : Color.secondary)
-            .labelStyle(.titleAndIcon)
-          statusBadge(isStored: isStored, color: statusTint)
-        }
+    let configuration = APIKeyCardConfiguration(
+      title: title,
+      tint: tint,
+      statusIcon: statusIcon,
+      statusTint: statusTint,
+      isStored: isStored,
+      descriptionText: descriptionText,
+      keyFieldLabel: keyFieldLabel,
+      keyBinding: keyBinding,
+      onSave: onSave,
+      onValidate: onValidate,
+      onRemove: onRemove,
+      isSaveDisabled: isSaveDisabled,
+      isValidateDisabled: isValidateDisabled,
+      isRemoveDisabled: isRemoveDisabled,
+      validationState: validationState,
+      saveButtonTitle: saveButtonTitle,
+      saveTooltip: saveTooltip,
+      validateButtonTitle: validateButtonTitle,
+      validateTooltip: validateTooltip,
+      removeButtonTitle: removeButtonTitle,
+      removeTooltip: removeTooltip,
+      link: link,
+      linkLabel: linkLabel,
+      statusLabel: statusLabel
+    )
 
-        if let link, let linkLabel {
-          Link(destination: link) {
-            Label(linkLabel, systemImage: "arrow.up.forward.square")
-              .font(.caption)
-          }
-          .speakTooltip("Open \(title)'s site to create or manage your API key in your browser.")
-        }
-
-        SecureField(keyFieldLabel, text: keyBinding)
-          .textContentType(.password)
-          .privacySensitive()
-          .textFieldStyle(.roundedBorder)
-          .speakTooltip("Paste your \(title) key exactly as issued; Speak stores it securely in your Keychain.")
-
-        Text(descriptionText)
-          .font(.caption)
-          .foregroundStyle(.secondary)
-
-        HStack(spacing: 12) {
-          Button(action: onSave) {
-            if isValidationInFlight(validationState) {
-              ProgressView()
-                .controlSize(.small)
-            } else {
-              Label(saveButtonTitle, systemImage: "arrow.down.circle")
-            }
-          }
-          .disabled(isSaveDisabled)
-          .buttonStyle(.borderedProminent)
-          .tint(tint)
-          .speakTooltip(saveTooltip)
-
-          if let onValidate, isStored {
-            Button(action: onValidate) {
-              if isValidationInFlight(validationState) {
-                ProgressView()
-                  .controlSize(.small)
-              } else {
-                Label(validateButtonTitle, systemImage: "checkmark.shield")
-              }
-            }
-            .disabled(isValidateDisabled)
-            .buttonStyle(.bordered)
-            .speakTooltip(validateTooltip)
-          }
-
-          if let onRemove, isStored {
-            Button(removeButtonTitle, role: .destructive, action: onRemove)
-              .disabled(isRemoveDisabled)
-              .speakTooltip(removeTooltip)
-          }
-        }
-
-        validationStatusView(for: validationState)
-        validationDebugDetails(for: validationState)
+    return SettingsCard(title: title, systemImage: systemImage, tint: tint) {
+      if settings.visualDensity.isCompact {
+        compactAPIKeyCardBody(configuration)
+      } else {
+        regularAPIKeyCardBody(configuration)
       }
     }
     .speakTooltip(tooltip)
+  }
+
+  private func compactAPIKeyCardBody(_ configuration: APIKeyCardConfiguration) -> some View {
+    VStack(alignment: .leading, spacing: settings.visualDensity.cardContentSpacing) {
+      compactAPIKeyStatus(configuration)
+
+      HStack(spacing: settings.visualDensity.inlineSpacing) {
+        SecureField(configuration.keyFieldLabel, text: configuration.keyBinding)
+          .textContentType(.password)
+          .privacySensitive()
+          .textFieldStyle(.roundedBorder)
+          .speakTooltip("Paste the key exactly as issued; Speak stores it securely in your Keychain.")
+
+        compactAPIKeySaveButton(configuration)
+        compactAPIKeyValidateButton(configuration)
+        compactAPIKeyRemoveButton(configuration)
+      }
+
+      Text(configuration.descriptionText)
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+        .lineLimit(2)
+        .speakTooltip(configuration.descriptionText)
+
+      validationStatusView(for: configuration.validationState)
+      validationDebugDetails(for: configuration.validationState)
+    }
+  }
+
+  private func compactAPIKeyStatus(_ configuration: APIKeyCardConfiguration) -> some View {
+    HStack(spacing: settings.visualDensity.inlineSpacing) {
+      Label(
+        configuration.isStored ? "Saved" : "Not set",
+        systemImage: configuration.statusIcon
+      )
+      .font(.caption.weight(.semibold))
+      .foregroundStyle(
+        configuration.isStored ? configuration.statusTint : Color.secondary
+      )
+
+      if let link = configuration.link, let linkLabel = configuration.linkLabel {
+        Link(destination: link) {
+          Label(linkLabel, systemImage: "arrow.up.forward.square")
+            .labelStyle(.iconOnly)
+        }
+        .speakTooltip("Open \(configuration.title)'s site to manage your API key.")
+        .accessibilityLabel(linkLabel)
+      }
+
+      Spacer(minLength: 0)
+    }
+  }
+
+  private func compactAPIKeySaveButton(_ configuration: APIKeyCardConfiguration) -> some View {
+    Button(action: configuration.onSave) {
+      if isValidationInFlight(configuration.validationState) {
+        ProgressView()
+          .controlSize(.small)
+      } else {
+        Label(configuration.saveButtonTitle, systemImage: "arrow.down.circle")
+          .labelStyle(.iconOnly)
+      }
+    }
+    .disabled(configuration.isSaveDisabled)
+    .buttonStyle(.borderedProminent)
+    .tint(configuration.tint)
+    .speakTooltip(configuration.saveTooltip)
+    .accessibilityLabel(configuration.saveButtonTitle)
+  }
+
+  @ViewBuilder
+  private func compactAPIKeyValidateButton(_ configuration: APIKeyCardConfiguration) -> some View {
+    if let onValidate = configuration.onValidate, configuration.isStored {
+      Button(action: onValidate) {
+        if isValidationInFlight(configuration.validationState) {
+          ProgressView()
+            .controlSize(.small)
+        } else {
+          Label(configuration.validateButtonTitle, systemImage: "checkmark.shield")
+            .labelStyle(.iconOnly)
+        }
+      }
+      .disabled(configuration.isValidateDisabled)
+      .buttonStyle(.bordered)
+      .speakTooltip(configuration.validateTooltip)
+      .accessibilityLabel(configuration.validateButtonTitle)
+    }
+  }
+
+  @ViewBuilder
+  private func compactAPIKeyRemoveButton(_ configuration: APIKeyCardConfiguration) -> some View {
+    if let onRemove = configuration.onRemove, configuration.isStored {
+      Button(role: .destructive, action: onRemove) {
+        Label(configuration.removeButtonTitle, systemImage: "trash")
+          .labelStyle(.iconOnly)
+      }
+      .disabled(configuration.isRemoveDisabled)
+      .buttonStyle(.bordered)
+      .speakTooltip(configuration.removeTooltip)
+      .accessibilityLabel(configuration.removeButtonTitle)
+    }
+  }
+
+  private func regularAPIKeyCardBody(_ configuration: APIKeyCardConfiguration) -> some View {
+    VStack(alignment: .leading, spacing: 14) {
+      HStack(alignment: .center, spacing: 12) {
+        Label(configuration.statusLabel, systemImage: configuration.statusIcon)
+          .foregroundStyle(
+            configuration.isStored ? configuration.statusTint : Color.secondary
+          )
+          .labelStyle(.titleAndIcon)
+        statusBadge(isStored: configuration.isStored, color: configuration.statusTint)
+      }
+
+      if let link = configuration.link, let linkLabel = configuration.linkLabel {
+        Link(destination: link) {
+          Label(linkLabel, systemImage: "arrow.up.forward.square")
+            .font(.caption)
+        }
+        .speakTooltip("Open \(configuration.title)'s site to create or manage your API key.")
+      }
+
+      SecureField(configuration.keyFieldLabel, text: configuration.keyBinding)
+        .textContentType(.password)
+        .privacySensitive()
+        .textFieldStyle(.roundedBorder)
+        .speakTooltip("Paste the key exactly as issued; Speak stores it securely in your Keychain.")
+
+      Text(configuration.descriptionText)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+
+      HStack(spacing: 12) {
+        regularAPIKeySaveButton(configuration)
+        regularAPIKeyValidateButton(configuration)
+        regularAPIKeyRemoveButton(configuration)
+      }
+
+      validationStatusView(for: configuration.validationState)
+      validationDebugDetails(for: configuration.validationState)
+    }
+  }
+
+  private func regularAPIKeySaveButton(_ configuration: APIKeyCardConfiguration) -> some View {
+    Button(action: configuration.onSave) {
+      if isValidationInFlight(configuration.validationState) {
+        ProgressView()
+          .controlSize(.small)
+      } else {
+        Label(configuration.saveButtonTitle, systemImage: "arrow.down.circle")
+      }
+    }
+    .disabled(configuration.isSaveDisabled)
+    .buttonStyle(.borderedProminent)
+    .tint(configuration.tint)
+    .speakTooltip(configuration.saveTooltip)
+  }
+
+  @ViewBuilder
+  private func regularAPIKeyValidateButton(_ configuration: APIKeyCardConfiguration) -> some View {
+    if let onValidate = configuration.onValidate, configuration.isStored {
+      Button(action: onValidate) {
+        if isValidationInFlight(configuration.validationState) {
+          ProgressView()
+            .controlSize(.small)
+        } else {
+          Label(configuration.validateButtonTitle, systemImage: "checkmark.shield")
+        }
+      }
+      .disabled(configuration.isValidateDisabled)
+      .buttonStyle(.bordered)
+      .speakTooltip(configuration.validateTooltip)
+    }
+  }
+
+  @ViewBuilder
+  private func regularAPIKeyRemoveButton(_ configuration: APIKeyCardConfiguration) -> some View {
+    if let onRemove = configuration.onRemove, configuration.isStored {
+      Button(configuration.removeButtonTitle, role: .destructive, action: onRemove)
+        .disabled(configuration.isRemoveDisabled)
+        .speakTooltip(configuration.removeTooltip)
+    }
   }
 
   private struct CloudKitKeySyncSettingsCard: View {
@@ -4516,7 +4736,7 @@ struct SettingsView: View {
   }
 
   private var hotKeySettings: some View {
-    LazyVStack(spacing: settings.visualDensity.sectionSpacing) {
+    SpeakDensitySettingsSection(density: settings.visualDensity) {
       SettingsCard(title: "Trigger Key", systemImage: "keyboard", tint: Color.blue) {
         VStack(alignment: .leading, spacing: 12) {
           Text("Choose which key triggers recording.")
@@ -4601,7 +4821,7 @@ struct SettingsView: View {
   }
 
   private var permissionsSettings: some View {
-    LazyVStack(spacing: settings.visualDensity.sectionSpacing) {
+    SpeakDensitySettingsSection(density: settings.visualDensity) {
       SettingsCard(title: "System permissions", systemImage: "lock.shield", tint: Color.red) {
         VStack(alignment: .leading, spacing: 12) {
           ForEach(PermissionType.availablePermissions(for: DistributionChannel.current)) { permission in
@@ -4704,7 +4924,7 @@ struct SettingsView: View {
   }
 
   private var aboutSettings: some View {
-    LazyVStack(spacing: settings.visualDensity.sectionSpacing) {
+    SpeakDensitySettingsSection(density: settings.visualDensity) {
       SettingsCard(title: "Just Speak to It", systemImage: "info.circle", tint: Color.blue) {
         VStack(alignment: .leading, spacing: 16) {
           HStack(alignment: .top, spacing: 16) {

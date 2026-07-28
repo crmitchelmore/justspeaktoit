@@ -42,7 +42,7 @@ final class TranscriberCoordinator: ObservableObject {
             return "ElevenLabs"
         }
         if currentModel.hasPrefix("openai") {
-            return "OpenAI gpt-realtime-whisper"
+            return ModelCatalog.friendlyName(for: currentModel)
         }
         return "Apple Speech"
     }

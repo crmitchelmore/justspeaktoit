@@ -171,6 +171,13 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
                 + "ElevenLabs API key — the key must have speech-to-text (Scribe) access.",
             estimatedLatencyMs: 200, latencyTier: .fast),
         Option(
+            id: OpenAITranscriptionModels.gptLiveTranscribeStreamingCatalogID,
+            displayName: "OpenAI GPT Live Transcribe (Streaming)",
+            description: "OpenAI's recommended low-latency speech-to-text model with live transcript "
+                + "deltas and multilingual context hints. Reuses your OpenAI API key.",
+            latencyTier: .fast,
+            tags: [.fast, .leading]),
+        Option(
             id: "openai/gpt-realtime-whisper-streaming",
             displayName: "OpenAI GPT Realtime Whisper (Streaming)",
             description: "OpenAI's gpt-realtime-whisper — low-latency streaming transcription with "
@@ -193,6 +200,13 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
 
     public static let batchTranscription: [Option] = appleBatchTranscriptionOptions + [
         // Dedicated transcription providers (OpenAI, Rev.ai, etc.)
+        Option(
+            id: OpenAITranscriptionModels.gptTranscribeCatalogID,
+            displayName: "GPT Transcribe (OpenAI)",
+            description: "OpenAI's recommended high-accuracy model for recorded speech, with multilingual "
+                + "and domain-context support.",
+            latencyTier: .fast,
+            tags: [.quality, .leading]),
         Option(
             id: "openai/whisper-1", displayName: "Whisper (OpenAI)",
             description: "OpenAI's speech recognition model. Fast and accurate.",

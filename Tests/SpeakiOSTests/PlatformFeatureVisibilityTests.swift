@@ -20,6 +20,7 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
                 .allSatisfy { !visibleIDs.contains($0.id) }
         )
         XCTAssertFalse(visibleIDs.contains { $0.hasPrefix("speechmatics/") })
+        XCTAssertTrue(visibleIDs.contains(OpenAITranscriptionModels.gptLiveTranscribeStreamingCatalogID))
     }
 
     func testRemoteBatchPicker_omitsProvidersWithoutAnIOSUploadPath() {
@@ -28,6 +29,14 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
         })
 
         XCTAssertEqual(visibleProviders, ["google", "openai"])
+        XCTAssertTrue(
+            AppSettings.supportedBatchModels.contains {
+                $0.id == OpenAITranscriptionModels.gptTranscribeCatalogID
+            }
+        )
+        XCTAssertTrue(
+            AppSettings.openAIBatchModelIDs.contains(OpenAITranscriptionModels.gptTranscribeCatalogID)
+        )
     }
 }
 #endif

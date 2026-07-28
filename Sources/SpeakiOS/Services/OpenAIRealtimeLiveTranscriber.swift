@@ -67,7 +67,7 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
     // MARK: - Configuration
 
     public var language: String? = Locale.current.language.languageCode?.identifier
-    /// Catalogue id like `openai/gpt-realtime-whisper-streaming`. The
+    /// Catalogue id like `openai/gpt-live-transcribe-streaming`. The
     /// `-streaming` suffix is stripped before being sent to OpenAI.
     public var modelID: String = "gpt-realtime-whisper-streaming"
 
@@ -472,14 +472,7 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
     /// already-stripped `gpt-realtime-whisper-streaming`) to the OpenAI API
     /// model name `gpt-realtime-whisper`.
     static func realtimeModelName(from modelID: String) -> String {
-        var name = modelID
-        if name.hasPrefix("openai/") {
-            name = String(name.dropFirst("openai/".count))
-        }
-        if name.hasSuffix("-streaming") {
-            name = String(name.dropLast("-streaming".count))
-        }
-        return name
+        OpenAITranscriptionModels.apiModelName(from: modelID)
     }
 
     /// Normalises a BCP-47 locale identifier (e.g. "en-GB", "en_US") to the
@@ -512,7 +505,6 @@ public enum OpenAIRealtimeError: LocalizedError, Sendable {
 
 // MARK: - WebSocket client
 
-// swiftlint:disable type_body_length
 /// WebSocket client for the OpenAI Realtime API in transcription mode.
 /// Off-MainActor; `@unchecked Sendable` with `NSLock` state guarding,
 /// matching the macOS implementation.
@@ -616,27 +608,14 @@ final class OpenAIRealtimeWebSocketClient: @unchecked Sendable {
 
     private func sendSessionUpdate() {
         // turn_detection: null mirrors the macOS provider — push-to-talk
-        // semantics. Deltas may only arrive after we send commit.
-        var transcription: [String: Any] = [:]
-        transcription["model"] = model
-        if let language { transcription["language"] = language }
-
-        let payload: [String: Any] = [
-            // Unified GA shape for all transcription models. The legacy
-            // `transcription_session.update` event was removed during GA.
-            "type": "session.update",
-            "session": [
-                "type": "transcription",
-                "audio": [
-                    "input": [
-                        "format": ["type": "audio/pcm", "rate": sampleRate],
-                        "transcription": transcription,
-                        "noise_reduction": ["type": "near_field"],
-                        "turn_detection": NSNull()
-                    ]
-                ]
-            ]
-        ]
+        // semantics. The shared builder also selects `languages` for the new
+        // GPT transcription family and `language` for existing models.
+        let payload = OpenAITranscriptionModels.realtimeSessionUpdatePayload(
+            model: model,
+            language: language,
+            prompt: nil,
+            sampleRate: sampleRate
+        )
         sendJSON(payload)
     }
 
@@ -908,5 +887,4 @@ private final class WaitToken: @unchecked Sendable {
         }
     }
 }
-// swiftlint:enable type_body_length
 #endif

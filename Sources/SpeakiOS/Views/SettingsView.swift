@@ -501,12 +501,7 @@ public final class AppSettings: ObservableObject {
         return openRouterAPIKey
     }
 
-    public static let openAIBatchModelIDs: Set<String> = [
-        "openai/whisper-1",
-        "openai/gpt-4o-mini-transcribe",
-        "openai/gpt-4o-transcribe",
-        "openai/gpt-4o-transcribe-diarize"
-    ]
+    public static let openAIBatchModelIDs = OpenAITranscriptionModels.directBatchModelIDs
 
     /// Remote streaming models with an implemented iOS recording path. Shared
     /// catalogue entries that remain macOS-only are omitted rather than shown
@@ -1823,7 +1818,7 @@ struct PrivacyView: View {
                 FeatureRow(
                     icon: "waveform.badge.mic",
                     title: "OpenAI",
-                    description: "Audio streamed to OpenAI servers for transcription (gpt-realtime-whisper)."
+                    description: "Audio streamed to OpenAI servers using your selected transcription model."
                 )
             }
 
@@ -2272,7 +2267,7 @@ private struct IOSMissingTranscriptionAPIKeyAlert: Identifiable {
                     displayName: "OpenAI",
                     website: "https://platform.openai.com"
                 ),
-                modelName: "OpenAI gpt-realtime-whisper",
+                modelName: ModelCatalog.friendlyName(for: modelID),
                 hasKey: settings.hasOpenAIKey
             )
         } else {

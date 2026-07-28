@@ -41,11 +41,16 @@ final class LiveTranscriptionRoutingTests: XCTestCase {
         // Act
         let whisper = LiveTranscriptionRouting.route(for: "openai/gpt-realtime-whisper-streaming")
         let mini = LiveTranscriptionRouting.route(for: "openai/gpt-4o-mini-transcribe-streaming")
+        let live = LiveTranscriptionRouting.route(
+            for: OpenAITranscriptionModels.gptLiveTranscribeStreamingCatalogID
+        )
 
         // Assert
         XCTAssertEqual(whisper?.apiModelName, "gpt-realtime-whisper")
         XCTAssertEqual(whisper?.sampleRate, 24_000)
         XCTAssertEqual(mini?.apiModelName, "gpt-4o-mini-transcribe")
+        XCTAssertEqual(live?.apiModelName, OpenAITranscriptionModels.gptLiveTranscribeAPIName)
+        XCTAssertEqual(live?.sampleRate, 24_000)
     }
 
     func testRoute_apple_hasNoAPIKeyAndPreservesID() {

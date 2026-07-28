@@ -81,7 +81,7 @@ public enum ModelCredentialResolver {
         // These models use OpenAI's own audio transcription endpoint. Other
         // OpenAI-prefixed audio models in the batch catalogue are OpenRouter
         // models, so an identifier prefix alone is not sufficient here.
-        if openAIBatchModelIdentifiers.contains(modelIdentifier) {
+        if OpenAITranscriptionModels.directBatchModelIDs.contains(modelIdentifier) {
             return .apiKey(identifier: "openai.apiKey", providerName: "OpenAI")
         }
 
@@ -180,13 +180,6 @@ public enum ModelCredentialResolver {
         identifier: "openrouter.apiKey",
         providerName: "OpenRouter"
     )
-
-    private static let openAIBatchModelIdentifiers: Set<String> = [
-        "openai/whisper-1",
-        "openai/gpt-4o-mini-transcribe",
-        "openai/gpt-4o-transcribe",
-        "openai/gpt-4o-transcribe-diarize"
-    ]
 
     private static let directBatchProviderIdentifiers: Set<String> = [
         "assemblyai",

@@ -52,9 +52,15 @@ struct OpenAITranscriptionProvider: TranscriptionProvider {
     }
 
     if let language {
-      // OpenAI expects ISO-639-1 (2-letter code), not full locale (e.g., "en" not "en_GB")
-      let languageCode = extractLanguageCode(from: language)
-      body.appendFormField(named: "language", value: languageCode, boundary: boundary)
+        // OpenAI expects ISO-639-1 (2-letter code), not full locale (e.g., "en" not "en_GB").
+        // The new GPT Transcribe family accepts plural language hints while
+        // existing GPT-4o and Whisper models retain the singular field.
+        let languageCode = extractLanguageCode(from: language)
+        body.appendFormField(
+            named: OpenAITranscriptionModels.batchLanguageFieldName(for: modelName),
+            value: languageCode,
+            boundary: boundary
+        )
     }
 
     body.appendFileField(
@@ -124,28 +130,9 @@ struct OpenAITranscriptionProvider: TranscriptionProvider {
   }
 
   func supportedModels() -> [ModelCatalog.Option] {
-    [
-      ModelCatalog.Option(
-        id: "openai/whisper-1",
-        displayName: "Whisper",
-        description: "OpenAI's speech recognition model. Fast and accurate."
-      ),
-      ModelCatalog.Option(
-        id: "openai/gpt-4o-mini-transcribe",
-        displayName: "GPT-4o mini Transcribe",
-        description: "Fast, low-cost transcription model with improved accuracy vs Whisper-1."
-      ),
-      ModelCatalog.Option(
-        id: "openai/gpt-4o-transcribe",
-        displayName: "GPT-4o Transcribe",
-        description: "Flagship transcription model with strong accuracy on noisy, accented audio."
-      ),
-      ModelCatalog.Option(
-        id: "openai/gpt-4o-transcribe-diarize",
-        displayName: "GPT-4o Transcribe Diarize",
-        description: "Speaker-aware GPT-4o transcription model with diarized JSON segments."
-      )
-    ]
+    ModelCatalog.batchTranscription.filter {
+        OpenAITranscriptionModels.directBatchModelIDs.contains($0.id)
+    }
   }
 
   private func responseFormat(for modelName: String) -> String {

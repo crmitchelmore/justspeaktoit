@@ -50,7 +50,20 @@ public actor DefaultKeychainPermissions: KeychainPermissionsChecking {
 public protocol APIKeyIdentifierRegistry: AnyObject {
     func registerAPIKeyIdentifier(_ identifier: String)
     func removeAPIKeyIdentifier(_ identifier: String)
+    func reconcileAPIKeyIdentifiers(_ identifiers: [String])
     var trackedAPIKeyIdentifiers: [String] { get }
+}
+
+public extension APIKeyIdentifierRegistry {
+    func reconcileAPIKeyIdentifiers(_ identifiers: [String]) {
+        let canonicalIdentifiers = Set(identifiers)
+        trackedAPIKeyIdentifiers
+            .filter { !canonicalIdentifiers.contains($0) }
+            .forEach(removeAPIKeyIdentifier)
+        canonicalIdentifiers
+            .filter { !trackedAPIKeyIdentifiers.contains($0) }
+            .forEach(registerAPIKeyIdentifier)
+    }
 }
 
 // MARK: - Secure Storage Configuration
@@ -132,12 +145,25 @@ public actor SecureStorage {
             throw SecureStorageError.permissionDenied
         }
 
-        cache[identifier] = value
-        try writeCacheToKeychain()
+        let previousValue = cache.updateValue(value, forKey: identifier)
+        do {
+            try writeCacheToKeychain()
+        } catch {
+            if let previousValue {
+                cache[identifier] = previousValue
+            } else {
+                cache.removeValue(forKey: identifier)
+            }
+            throw error
+        }
 
         if let registry = identifierRegistry {
             await MainActor.run {
-                registry.registerAPIKeyIdentifier(identifier)
+                if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    registry.removeAPIKeyIdentifier(identifier)
+                } else {
+                    registry.registerAPIKeyIdentifier(identifier)
+                }
             }
         }
 
@@ -157,13 +183,19 @@ public actor SecureStorage {
     public func removeSecret(identifier: String) async throws {
         try await ensureCacheLoaded()
 
-        cache.removeValue(forKey: identifier)
-
         guard await permissionsChecker.ensureKeychainAccess(forService: configuration.service) else {
             throw SecureStorageError.permissionDenied
         }
 
-        try writeCacheToKeychain()
+        let previousValue = cache.removeValue(forKey: identifier)
+        do {
+            try writeCacheToKeychain()
+        } catch {
+            if let previousValue {
+                cache[identifier] = previousValue
+            }
+            throw error
+        }
 
         if let registry = identifierRegistry {
             await MainActor.run {
@@ -176,7 +208,7 @@ public actor SecureStorage {
 
     public func knownIdentifiers() async -> [String] {
         try? await ensureCacheLoaded()
-        return cache.keys.sorted()
+        return storedIdentifiers
     }
 
     public func hasSecret(identifier: String) async -> Bool {
@@ -189,6 +221,16 @@ public actor SecureStorage {
 
     public func preload() async {
         try? await ensureCacheLoaded()
+    }
+
+    @discardableResult
+    public func preloadAndReportSuccess() async -> Bool {
+        do {
+            try await ensureCacheLoaded()
+            return true
+        } catch {
+            return false
+        }
     }
 
     // MARK: - Private Implementation
@@ -230,7 +272,7 @@ public actor SecureStorage {
 
         if status == errSecItemNotFound {
             if try migrateLegacyServicePayloadIfNeeded() {
-                await registerCachedIdentifiers()
+                await reconcileCachedIdentifiers()
                 didLoadFromKeychain = true
                 return
             }
@@ -241,6 +283,7 @@ public actor SecureStorage {
 
         if status == errSecItemNotFound {
             cache = [:]
+            await reconcileCachedIdentifiers()
             didLoadFromKeychain = true
             return
         }
@@ -252,17 +295,24 @@ public actor SecureStorage {
         }
 
         cache = parse(payload: payload)
-        await registerCachedIdentifiers()
+        await reconcileCachedIdentifiers()
         didLoadFromKeychain = true
     }
 
-    private func registerCachedIdentifiers() async {
+    private func reconcileCachedIdentifiers() async {
         if let registry = identifierRegistry {
-            let identifiers = Array(cache.keys)
+            let identifiers = storedIdentifiers
             await MainActor.run {
-                identifiers.forEach { registry.registerAPIKeyIdentifier($0) }
+                registry.reconcileAPIKeyIdentifiers(identifiers)
             }
         }
+    }
+
+    private var storedIdentifiers: [String] {
+        cache.compactMap { identifier, value in
+            value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : identifier
+        }
+        .sorted()
     }
 
     private func migrateLegacyServicePayloadIfNeeded() throws -> Bool {
@@ -414,7 +464,10 @@ public actor SecureStorage {
         Self.logger.debug("configuration.accessGroup: \(self.configuration.accessGroup ?? "nil", privacy: .private)")
 
         if payload.isEmpty {
-            SecItemDelete(query as CFDictionary)
+            let deleteStatus = SecItemDelete(query as CFDictionary)
+            guard deleteStatus == errSecSuccess || deleteStatus == errSecItemNotFound else {
+                throw SecureStorageError.unexpectedStatus(deleteStatus)
+            }
             return
         }
 

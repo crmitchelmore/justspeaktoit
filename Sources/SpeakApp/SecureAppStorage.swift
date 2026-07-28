@@ -134,7 +134,8 @@ actor SecureAppStorage {
         await storage.hasSecret(identifier: identifier)
     }
 
-    func preloadTrackedSecrets() async {
-        await storage.preload()
+    @discardableResult
+    func preloadTrackedSecrets() async -> Bool {
+        await storage.preloadAndReportSuccess()
     }
 }

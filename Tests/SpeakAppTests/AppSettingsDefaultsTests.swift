@@ -77,6 +77,25 @@ final class AppSettingsDefaultsTests: XCTestCase {
         XCTAssertTrue(settings.showSidebarShortcutHints)
     }
 
+    @MainActor
+    func testReconcileAPIKeyIdentifiers_replacesStaleMetadataAndPersistsCanonicalSet() {
+        defaults.set(
+            ["openrouter.apiKey", "deepgram.apiKey", "assemblyai.apiKey"],
+            forKey: "trackedKeyIdentifiers"
+        )
+        let settings = AppSettings(defaults: defaults)
+
+        settings.reconcileAPIKeyIdentifiers([
+            "openai.apiKey",
+            "assemblyai.apiKey",
+            "openai.apiKey"
+        ])
+
+        let expected = ["assemblyai.apiKey", "openai.apiKey"]
+        XCTAssertEqual(settings.trackedAPIKeyIdentifiers, expected)
+        XCTAssertEqual(defaults.stringArray(forKey: "trackedKeyIdentifiers"), expected)
+    }
+
     // MARK: - Recording Settings
 
     @MainActor

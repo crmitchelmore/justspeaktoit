@@ -1079,13 +1079,17 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   }
 
   func registerAPIKeyIdentifier(_ identifier: String) {
-    if !trackedAPIKeyIdentifiers.contains(identifier) {
-      trackedAPIKeyIdentifiers.append(identifier)
-    }
+    reconcileAPIKeyIdentifiers(trackedAPIKeyIdentifiers + [identifier])
   }
 
   func removeAPIKeyIdentifier(_ identifier: String) {
-    trackedAPIKeyIdentifiers.removeAll { $0 == identifier }
+    reconcileAPIKeyIdentifiers(trackedAPIKeyIdentifiers.filter { $0 != identifier })
+  }
+
+  func reconcileAPIKeyIdentifiers(_ identifiers: [String]) {
+    let reconciled = Array(Set(identifiers)).sorted()
+    guard trackedAPIKeyIdentifiers != reconciled else { return }
+    trackedAPIKeyIdentifiers = reconciled
   }
 
   private func store<T>(_ value: T, key: DefaultsKey) {

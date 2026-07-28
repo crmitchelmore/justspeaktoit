@@ -107,6 +107,7 @@ struct SettingsView: View {
   @State private var apiKeySearchText = ""
   @State private var apiKeyStatusFilter: APIKeyStatusFilter = .all
   @State private var apiKeySortOrder: APIKeySortOrder = .name
+  @State private var didResolveAPIKeyStorage = false
   @State private var missingTranscriptionAPIKeyAlert: MissingLiveAPIKeyAlert?
   @State private var showSystemPromptPreview = false
   @State private var systemPromptPreview = ""
@@ -200,7 +201,37 @@ struct SettingsView: View {
   }
 
   private var isOpenRouterKeyStored: Bool {
-    settings.trackedAPIKeyIdentifiers.contains(openRouterKeyIdentifier)
+    isAPIKeyStored(openRouterKeyIdentifier)
+  }
+
+  private func isAPIKeyStored(_ identifier: String) -> Bool {
+    didResolveAPIKeyStorage && settings.trackedAPIKeyIdentifiers.contains(identifier)
+  }
+
+  private func resolveAPIKeyStorage() async {
+    let retryDelays: [Duration] = [
+      .milliseconds(250),
+      .milliseconds(500),
+      .seconds(1),
+      .seconds(2),
+      .seconds(5)
+    ]
+    var retryIndex = 0
+
+    while !Task.isCancelled {
+      if await environment.secureStorage.preloadTrackedSecrets() {
+        didResolveAPIKeyStorage = true
+        return
+      }
+
+      let retryDelay = retryDelays[min(retryIndex, retryDelays.count - 1)]
+      retryIndex = min(retryIndex + 1, retryDelays.count - 1)
+      do {
+        try await Task.sleep(for: retryDelay)
+      } catch {
+        return
+      }
+    }
   }
 
   private var isCloudPostProcessingModelSelected: Bool {
@@ -232,7 +263,7 @@ struct SettingsView: View {
             id: "transcription-\(provider.id)",
             title: provider.displayName,
             category: "Transcription",
-            isStored: settings.trackedAPIKeyIdentifiers.contains(provider.apiKeyIdentifier)
+            isStored: isAPIKeyStored(provider.apiKeyIdentifier)
           ),
           source: .transcription(provider)
         )
@@ -243,7 +274,7 @@ struct SettingsView: View {
           id: "tts-\(provider.id)",
           title: provider == .elevenlabs ? "ElevenLabs" : provider.displayName,
           category: provider == .elevenlabs ? "Transcription & Voice Output" : "Voice Output",
-          isStored: settings.trackedAPIKeyIdentifiers.contains(provider.apiKeyIdentifier)
+          isStored: isAPIKeyStored(provider.apiKeyIdentifier)
         ),
         source: .textToSpeech(provider)
       )
@@ -713,6 +744,7 @@ struct SettingsView: View {
     .task {
       transcriptionProviders = await TranscriptionProviderRegistry.shared.allProviders()
       syncAssemblyAIKeytermsFromPronunciation()
+      await resolveAPIKeyStorage()
     }
     .onChange(of: settings.liveTranscriptionModel) { _, newValue in
       let newIsAssembly = newValue.localizedCaseInsensitiveContains("assemblyai")
@@ -3732,7 +3764,7 @@ struct SettingsView: View {
   }
 
   private func providerAPIKeyCard(for provider: TranscriptionProviderMetadata) -> some View {
-    let isStored = settings.trackedAPIKeyIdentifiers.contains(provider.apiKeyIdentifier)
+    let isStored = isAPIKeyStored(provider.apiKeyIdentifier)
     let tintColor = colorFromString(provider.tintColor)
     let validationState = providerValidationStates[provider.id] ?? .idle
     let inFlight = isValidationInFlight(validationState)
@@ -3772,7 +3804,7 @@ struct SettingsView: View {
 
   // swiftlint:disable:next cyclomatic_complexity function_body_length
   private func ttsProviderAPIKeyCard(for provider: TTSProvider) -> some View {
-    let isStored = settings.trackedAPIKeyIdentifiers.contains(provider.apiKeyIdentifier)
+    let isStored = isAPIKeyStored(provider.apiKeyIdentifier)
     let validationState = ttsProviderValidationStates[provider.rawValue] ?? .idle
     let inFlight = isValidationInFlight(validationState)
     let saveDisabled = inFlight

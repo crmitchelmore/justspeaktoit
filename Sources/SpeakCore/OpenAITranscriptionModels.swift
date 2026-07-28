@@ -37,6 +37,7 @@ public enum OpenAITranscriptionModels {
             || belongs(apiModelName, to: gptLiveTranscribeAPIName)
     }
 
+    /// Returns the multipart field name used for this model's language hint.
     public static func batchLanguageFieldName(for apiModelName: String) -> String {
         usesLanguageHintsArray(apiModelName) ? "languages[]" : "language"
     }
@@ -80,6 +81,7 @@ public enum OpenAITranscriptionModels {
         ]
     }
 
+    /// Whether a Realtime transcription session accepts prompt-based context.
     public static func supportsRealtimePrompt(_ modelName: String) -> Bool {
         let normalised = apiModelName(from: modelName).lowercased()
         return belongs(normalised, to: gptTranscribeAPIName)

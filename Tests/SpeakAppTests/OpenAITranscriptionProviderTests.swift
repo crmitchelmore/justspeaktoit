@@ -5,60 +5,61 @@ import XCTest
 @testable import SpeakCore
 
 final class OpenAITranscriptionProviderTests: XCTestCase {
-  func testModelCatalogBatchTranscription_includesCurrentOpenAIModels() {
-    let ids = ModelCatalog.batchTranscription.map(\.id)
+    func testModelCatalogBatchTranscription_includesCurrentOpenAIModels() {
+        let ids = ModelCatalog.batchTranscription.map(\.id)
 
-    XCTAssertTrue(ids.contains(OpenAITranscriptionModels.gptTranscribeCatalogID))
-    XCTAssertTrue(ids.contains("openai/gpt-4o-transcribe-diarize"))
-  }
-
-  func testSupportedModels_includeOpenAITranscriptionFamily() {
-    let ids = OpenAITranscriptionProvider().supportedModels().map(\.id)
-
-    XCTAssertTrue(ids.contains("openai/whisper-1"))
-    XCTAssertTrue(ids.contains(OpenAITranscriptionModels.gptTranscribeCatalogID))
-    XCTAssertTrue(ids.contains("openai/gpt-4o-mini-transcribe"))
-    XCTAssertTrue(ids.contains("openai/gpt-4o-transcribe"))
-    XCTAssertTrue(ids.contains("openai/gpt-4o-transcribe-diarize"))
-  }
-
-  func testProviderRegistry_routesOpenAITranscriptionFamilyToOpenAIProvider() async {
-    for model in [
-      OpenAITranscriptionModels.gptTranscribeCatalogID,
-      "openai/gpt-4o-mini-transcribe",
-      "openai/gpt-4o-transcribe",
-      "openai/gpt-4o-transcribe-diarize"
-    ] {
-      let provider = await TranscriptionProviderRegistry.shared.provider(forModel: model)
-      XCTAssertEqual(provider?.metadata.id, "openai", "\(model) should route to OpenAI provider")
+        XCTAssertTrue(ids.contains(OpenAITranscriptionModels.gptTranscribeCatalogID))
+        XCTAssertTrue(ids.contains("openai/gpt-4o-transcribe-diarize"))
     }
-  }
 
-  func testTranscribeFileWithGPTTranscribe_usesJSONAndPluralLanguageHints() async throws {
-    let requestObserver = OpenAIRequestObserver()
-    OpenAIMockURLProtocol.requestHandler = { request in
-      await requestObserver.store(request: request)
-      return try Self.makeResponse(for: request, body: #"{"text":"hello world","languages":[{"code":"en"}]}"#)
+    func testSupportedModels_areCanonicalDirectOpenAIOptions() {
+        let expected = ModelCatalog.batchTranscription.filter {
+            OpenAITranscriptionModels.directBatchModelIDs.contains($0.id)
+        }
+
+        XCTAssertEqual(OpenAITranscriptionProvider().supportedModels(), expected)
     }
-    defer { OpenAIMockURLProtocol.requestHandler = nil }
 
-    let result = try await makeProvider().transcribeFile(
-      at: try makeAudioFile(),
-      apiKey: "test-openai-key",
-      model: OpenAITranscriptionModels.gptTranscribeCatalogID,
-      language: "en_GB"
-    )
+    func testProviderRegistry_routesOpenAITranscriptionFamilyToOpenAIProvider() async {
+        for model in [
+            OpenAITranscriptionModels.gptTranscribeCatalogID,
+            "openai/gpt-4o-mini-transcribe",
+            "openai/gpt-4o-transcribe",
+            "openai/gpt-4o-transcribe-diarize"
+        ] {
+            let provider = await TranscriptionProviderRegistry.shared.provider(forModel: model)
+            XCTAssertEqual(provider?.metadata.id, "openai", "\(model) should route to OpenAI provider")
+        }
+    }
 
-    let capturedBody = await requestObserver.capturedBodyString()
-    let body = try XCTUnwrap(capturedBody)
-    XCTAssertTrue(body.contains("gpt-transcribe"))
-    XCTAssertTrue(body.contains(#"name="response_format""#))
-    XCTAssertTrue(body.contains("\r\njson\r\n"))
-    XCTAssertTrue(body.contains(#"name="languages[]""#))
-    XCTAssertFalse(body.contains(#"name="language""#))
-    XCTAssertTrue(body.contains("\r\nen\r\n"))
-    XCTAssertEqual(result.text, "hello world")
-  }
+    func testTranscribeFileWithGPTTranscribe_usesJSONAndPluralLanguageHints() async throws {
+        let requestObserver = OpenAIRequestObserver()
+        OpenAIMockURLProtocol.requestHandler = { request in
+            await requestObserver.store(request: request)
+            return try Self.makeResponse(
+                for: request,
+                body: #"{"text":"hello world","languages":[{"code":"en"}]}"#
+            )
+        }
+        defer { OpenAIMockURLProtocol.requestHandler = nil }
+
+        let result = try await makeProvider().transcribeFile(
+            at: try makeAudioFile(),
+            apiKey: "test-openai-key",
+            model: OpenAITranscriptionModels.gptTranscribeCatalogID,
+            language: "en_GB"
+        )
+
+        let capturedBody = await requestObserver.capturedBodyString()
+        let body = try XCTUnwrap(capturedBody)
+        XCTAssertTrue(body.contains("gpt-transcribe"))
+        XCTAssertTrue(body.contains(#"name="response_format""#))
+        XCTAssertTrue(body.contains("\r\njson\r\n"))
+        XCTAssertTrue(body.contains(#"name="languages[]""#))
+        XCTAssertFalse(body.contains(#"name="language""#))
+        XCTAssertTrue(body.contains("\r\nen\r\n"))
+        XCTAssertEqual(result.text, "hello world")
+    }
 
   func testTranscribeFileWithGPT4oTranscribe_usesJSONResponseFormat() async throws {
     let requestObserver = OpenAIRequestObserver()

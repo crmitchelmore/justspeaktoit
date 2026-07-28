@@ -2,14 +2,13 @@
 import SwiftUI
 import SpeakCore
 
-// MARK: - OpenClaw Chat View
-
 /// Main voice chat interface for OpenClaw conversations.
 public struct OpenClawChatView: View {
     @StateObject private var coordinator = OpenClawChatCoordinator()
     @ObservedObject private var store = ConversationStore.shared
     @ObservedObject private var settings = OpenClawSettings.shared
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.appVisualDensity) private var density
     @State private var textInput = ""
     @State private var showingSettings = false
 
@@ -25,7 +24,7 @@ public struct OpenClawChatView: View {
             // Messages
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 12) {
+                    LazyVStack(alignment: .leading, spacing: density.isCompact ? density.cardContentSpacing : 12) {
                         if let conv = coordinator.currentConversation {
                             ForEach(coordinator.isBufferingForTTS
                                 ? Array(conv.messages.prefix(coordinator.messageCountBeforeResponse))
@@ -66,11 +65,11 @@ public struct OpenClawChatView: View {
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
                             }
-                            .padding(.horizontal)
+                            .padding(.horizontal, density.isCompact ? density.pagePadding : 16)
                             .id("processing")
                         }
                     }
-                    .padding()
+                    .padding(density.isCompact ? density.pagePadding : 16)
                 }
                 .onChange(of: coordinator.currentConversation?.messages.count) { _, _ in
                     withAnimation(.easeOut(duration: 0.2)) {
@@ -184,37 +183,40 @@ public struct OpenClawChatView: View {
             .frame(minHeight: 44)
 
             if settings.conversationModeEnabled {
-                Text("Tap the chat area to acknowledge")
-                    .font(.caption)
+                Label(
+                    density.isCompact ? "Tap chat to send" : "Tap the chat area to acknowledge",
+                    systemImage: "hand.tap"
+                )
+                    .font(density.isCompact ? .caption2 : .caption)
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.horizontal, density.isCompact ? 8 : 12)
+        .padding(.vertical, density.isCompact ? 0 : 10)
         .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: density.isCompact ? 10 : 14, style: .continuous)
                 .fill(Color(.secondarySystemBackground))
         )
-        .padding(.horizontal)
-        .padding(.top, 8)
+        .padding(.horizontal, density.isCompact ? 8 : 16)
+        .padding(.top, density.isCompact ? 4 : 8)
     }
 
     @ViewBuilder
     private var inputBar: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: density.isCompact ? 6 : 12) {
             // Text field
             TextField("Type a message…", text: $textInput, axis: .vertical)
                 .font(.body)
                 .lineLimit(1...5)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                .frame(minHeight: 50)
+                .padding(.horizontal, density.isCompact ? 8 : 14)
+                .padding(.vertical, density.isCompact ? 6 : 12)
+                .frame(minHeight: density.isCompact ? 48 : 50)
                 .background(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    RoundedRectangle(cornerRadius: density.isCompact ? 10 : 16, style: .continuous)
                         .fill(Color(.secondarySystemBackground))
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    RoundedRectangle(cornerRadius: density.isCompact ? 10 : 16, style: .continuous)
                         .strokeBorder(Color(.separator).opacity(0.28), lineWidth: 1)
                 )
                 .submitLabel(.send)
@@ -233,9 +235,9 @@ public struct OpenClawChatView: View {
                 }
             } label: {
                 Image(systemName: coordinator.isRecording ? "stop.circle.fill" : "mic.circle.fill")
-                    .font(.system(size: 32))
+                    .font(.system(size: density.isCompact ? 24 : 32))
                     .foregroundStyle(coordinator.isRecording ? .red : Color.accentColor)
-                    .frame(width: 52, height: 52)
+                    .frame(width: density.isCompact ? 44 : 52, height: density.isCompact ? 44 : 52)
             }
             .accessibilityLabel(coordinator.isRecording ? "Stop recording" : "Start voice input")
 
@@ -245,16 +247,16 @@ public struct OpenClawChatView: View {
                     sendTextIfNeeded()
                 } label: {
                     Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 32))
+                        .font(.system(size: density.isCompact ? 24 : 32))
                         .foregroundStyle(Color.accentColor)
-                        .frame(width: 52, height: 52)
+                        .frame(width: density.isCompact ? 44 : 52, height: density.isCompact ? 44 : 52)
                 }
                 .transition(.scale.combined(with: .opacity))
                 .accessibilityLabel("Send message")
             }
         }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
+        .padding(.horizontal, density.isCompact ? 8 : 16)
+        .padding(.vertical, density.isCompact ? 4 : 8)
         .background(.bar)
         .animation(.spring(response: 0.2), value: textInput.isEmpty)
     }
@@ -292,83 +294,6 @@ extension OpenClawChatView {
         textInput = ""
         Task {
             await coordinator.sendTextMessage(text)
-        }
-    }
-}
-
-// MARK: - Message Bubble
-
-struct MessageBubble: View {
-    let message: OpenClawClient.ChatMessage
-
-    var isUser: Bool { message.role == "user" }
-
-    var body: some View {
-        HStack {
-            if isUser { Spacer(minLength: 60) }
-
-            VStack(alignment: isUser ? .trailing : .leading, spacing: 4) {
-                Text(message.content)
-                    .font(.body)
-                    .foregroundStyle(isUser ? .white : .primary)
-                    .textSelection(.enabled)
-
-                Text(message.timestamp, style: .time)
-                    .font(.caption2)
-                    .foregroundStyle(isUser ? .white.opacity(0.7) : .secondary)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(
-                isUser ? Color.accentColor : Color(.systemGray5),
-                in: RoundedRectangle(cornerRadius: 18)
-            )
-
-            if !isUser { Spacer(minLength: 60) }
-        }
-    }
-}
-
-// MARK: - Recording Indicator
-
-struct RecordingIndicator: View {
-    let partialText: String
-    let showAcknowledgeHint: Bool
-    @State private var pulseScale: CGFloat = 1.0
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 12) {
-                Circle()
-                    .fill(.red)
-                    .frame(width: 12, height: 12)
-                    .scaleEffect(pulseScale)
-                    .animation(
-                        .easeInOut(duration: 0.8).repeatForever(autoreverses: true),
-                        value: pulseScale
-                    )
-
-                if partialText.isEmpty {
-                    Text("Listening…")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .italic()
-                } else {
-                    Text(partialText)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            if showAcknowledgeHint {
-                Text("Tap the chat area, use headset tap, or say your keyword to send.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-        }
-        .padding(.horizontal)
-        .onAppear {
-            pulseScale = 1.3
         }
     }
 }

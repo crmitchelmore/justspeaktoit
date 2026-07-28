@@ -219,6 +219,7 @@ enum PostProcessingError: LocalizedError {
 /// Full-screen post-processing view with editable text and model selection.
 public struct PostProcessingView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.appVisualDensity) private var density
     @StateObject private var processor = iOSPostProcessingManager.shared
     @ObservedObject private var settings = AppSettings.shared
     
@@ -239,25 +240,36 @@ public struct PostProcessingView: View {
             VStack(spacing: 0) {
                 // Input/Output area
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
+                    VStack(
+                        alignment: .leading,
+                        spacing: density.isCompact ? density.sectionSpacing : 16
+                    ) {
                         // Input section
-                        VStack(alignment: .leading, spacing: 8) {
+                        VStack(
+                            alignment: .leading,
+                            spacing: density.isCompact ? density.cardContentSpacing : 8
+                        ) {
                             Label("Input", systemImage: "text.alignleft")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             
                             TextEditor(text: $inputText)
                                 .font(.body)
-                                .frame(minHeight: 120)
-                                .padding(8)
+                                .frame(minHeight: density.isCompact ? 64 : 120)
+                                .padding(density.isCompact ? 4 : 8)
                                 .background(Color(.secondarySystemBackground))
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                                .clipShape(
+                                    RoundedRectangle(cornerRadius: density.isCompact ? 8 : 10)
+                                )
                                 .focused($isTextFieldFocused)
                         }
                         
                         // Output section (shows during/after processing)
                         if processor.isProcessing || !processor.streamingText.isEmpty || !processor.processedText.isEmpty {
-                            VStack(alignment: .leading, spacing: 8) {
+                            VStack(
+                                alignment: .leading,
+                                spacing: density.isCompact ? density.cardContentSpacing : 8
+                            ) {
                                 HStack {
                                     Label("Output", systemImage: "wand.and.stars")
                                         .font(.caption)
@@ -274,9 +286,11 @@ public struct PostProcessingView: View {
                                 Text(processor.isProcessing ? processor.streamingText : processor.processedText)
                                     .font(.body)
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(12)
+                                    .padding(density.isCompact ? 6 : 12)
                                     .background(Color(.tertiarySystemBackground))
-                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                                    .clipShape(
+                                        RoundedRectangle(cornerRadius: density.isCompact ? 8 : 10)
+                                    )
                                     .textSelection(.enabled)
                             }
                         }
@@ -288,13 +302,13 @@ public struct PostProcessingView: View {
                                 .foregroundStyle(.red)
                         }
                     }
-                    .padding()
+                    .padding(density.isCompact ? density.pagePadding : 16)
                 }
                 
                 Divider()
                 
                 // Model & Settings bar
-                VStack(spacing: 12) {
+                VStack(spacing: density.isCompact ? density.cardContentSpacing : 12) {
                     // Model selector
                     Button {
                         showingModelPicker = true
@@ -307,15 +321,18 @@ public struct PostProcessingView: View {
                             Image(systemName: "chevron.up.chevron.down")
                                 .font(.caption)
                         }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
+                        .padding(.horizontal, density.isCompact ? 8 : 12)
+                        .padding(.vertical, density.isCompact ? 0 : 10)
+                        .frame(minHeight: density.isCompact ? 44 : nil)
                         .background(Color(.secondarySystemBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .clipShape(
+                            RoundedRectangle(cornerRadius: density.isCompact ? 6 : 8)
+                        )
                     }
                     .buttonStyle(.plain)
                     
                     // Action buttons
-                    HStack(spacing: 12) {
+                    HStack(spacing: density.isCompact ? 6 : 12) {
                         // Prompt settings
                         Button {
                             showingPromptEditor = true
@@ -373,7 +390,7 @@ public struct PostProcessingView: View {
                             .foregroundStyle(.orange)
                     }
                 }
-                .padding()
+                .padding(density.isCompact ? density.pagePadding : 16)
                 .background(Color(.systemBackground))
             }
             .navigationTitle("Post-Process")
@@ -403,7 +420,9 @@ public struct PostProcessingView: View {
             }
         }
     }
-    
+}
+
+private extension PostProcessingView {
     private var modelDisplayName: String {
         ModelCatalog.friendlyName(for: settings.postProcessingModel)
     }
@@ -423,9 +442,11 @@ public struct PostProcessingView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(model.displayName)
                                     .foregroundStyle(.primary)
-                                Text(model.description ?? "")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                if !density.isCompact {
+                                    Text(model.description ?? "")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                             
                             Spacer()
@@ -468,11 +489,16 @@ public struct PostProcessingView: View {
                 Section {
                     TextEditor(text: $settings.postProcessingPrompt)
                         .font(.system(.body, design: .monospaced))
-                        .frame(minHeight: 200)
+                        .frame(minHeight: density.isCompact ? 100 : 200)
                 } header: {
                     Text("Custom System Prompt")
                 } footer: {
-                    Text("Leave empty to use the default prompt. The prompt instructs the AI how to clean up your transcription.")
+                    if !density.isCompact {
+                        Text(
+                            "Leave empty to use the default prompt. "
+                                + "The prompt instructs the AI how to clean up your transcription."
+                        )
+                    }
                 }
                 
                 Section {

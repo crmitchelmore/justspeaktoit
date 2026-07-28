@@ -34,6 +34,7 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
   @EnvironmentObject private var tts: TextToSpeechManager
   @EnvironmentObject private var settings: AppSettings
   @EnvironmentObject private var history: HistoryManager
+  @Environment(\.appVisualDensity) private var density
 
   @State private var inputSource: TTSInputSource = .manual
   @State private var inputText: String = ""
@@ -46,11 +47,11 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
 
   var body: some View {
     ScrollView {
-      VStack(alignment: .leading, spacing: 24) {
+      VStack(alignment: .leading, spacing: density.isCompact ? density.sectionSpacing : 24) {
         heroHeader
         contentSections
       }
-      .padding(24)
+      .padding(density.pagePadding)
       .frame(maxWidth: 1100, alignment: .center)
     }
     .background(
@@ -77,7 +78,82 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
     }
   }
 
+  @ViewBuilder
   private var heroHeader: some View {
+    if density.isCompact {
+      compactHeroHeader
+    } else {
+      normalHeroHeader
+    }
+  }
+
+  private var compactHeroHeader: some View {
+    HStack(spacing: density.groupSpacing) {
+      Label("Voice", systemImage: "speaker.wave.3")
+        .font(.subheadline.bold())
+      Spacer(minLength: 4)
+      compactVoiceMetric(
+        title: "Characters",
+        value: "\(inputText.count)",
+        systemImage: "textformat.abc"
+      )
+      if let estimatedCost, estimatedCost > 0 {
+        compactVoiceMetric(
+          title: "Estimated cost",
+          value: String(format: "$%.4f", NSDecimalNumber(decimal: estimatedCost).doubleValue),
+          systemImage: "dollarsign.circle"
+        )
+      }
+      if let result = tts.lastResult {
+        compactVoiceMetric(
+          title: "Last duration",
+          value: String(format: "%.1fs", result.duration),
+          systemImage: "waveform"
+        )
+      }
+      compactHeroAction
+    }
+    .padding(density.cardPadding)
+    .foregroundStyle(.white)
+    .background(
+      LinearGradient(
+        colors: [Color.green, Color.mint.opacity(0.8)],
+        startPoint: .leading,
+        endPoint: .trailing
+      ),
+      in: RoundedRectangle(cornerRadius: density.cardCornerRadius, style: .continuous)
+    )
+  }
+
+  private func compactVoiceMetric(
+    title: String,
+    value: String,
+    systemImage: String
+  ) -> some View {
+    Label(value, systemImage: systemImage)
+      .font(.caption2.weight(.semibold))
+      .lineLimit(1)
+      .accessibilityLabel("\(title): \(value)")
+  }
+
+  @ViewBuilder
+  private var compactHeroAction: some View {
+    if tts.isSynthesizing {
+      ProgressView()
+        .controlSize(.mini)
+    } else if tts.isPlaying {
+      Button {
+        tts.stop()
+      } label: {
+        Label("Stop", systemImage: "stop.fill")
+          .labelStyle(.iconOnly)
+      }
+      .buttonStyle(.borderless)
+      .accessibilityLabel("Stop voice output")
+    }
+  }
+
+  private var normalHeroHeader: some View {
     VStack(alignment: .leading, spacing: 18) {
       heroTitleRow
       heroStatsRow
@@ -178,8 +254,16 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
   }
 
   private var contentSections: some View {
-    LazyVStack(spacing: 24) {
-      LazyVGrid(columns: [GridItem(.adaptive(minimum: 340), spacing: 24)], spacing: 24) {
+    LazyVStack(spacing: density.isCompact ? density.sectionSpacing : 24) {
+      LazyVGrid(
+        columns: [
+          GridItem(
+            .adaptive(minimum: density.gridMinimumWidth),
+            spacing: density.isCompact ? density.sectionSpacing : 24
+          )
+        ],
+        spacing: density.isCompact ? density.sectionSpacing : 24
+      ) {
         inputSourceCard
         voiceSelectionCard
       }
@@ -194,7 +278,7 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
   }
 
   private var inputSourceCard: some View {
-    SettingsCard(title: "Input Source", systemImage: "arrow.down.doc", tint: .brandLagoon) {
+    SpeakDensityCard(title: "Input Source", systemImage: "arrow.down.doc", tint: .brandLagoon) {
       VStack(alignment: .leading, spacing: 12) {
         ViewThatFits(in: .horizontal) {
           Picker("Source", selection: $inputSource) {
@@ -235,7 +319,7 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
   }
 
   private var voiceSelectionCard: some View {
-    SettingsCard(title: "Voice", systemImage: "person.wave.2", tint: .brandAccent) {
+    SpeakDensityCard(title: "Voice", systemImage: "person.wave.2", tint: .brandAccent) {
       VStack(alignment: .leading, spacing: 12) {
         if availableVoices.isEmpty {
           HStack {
@@ -292,7 +376,7 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
   }
 
   private var synthesisControlsCard: some View {
-    SettingsCard(title: "Controls", systemImage: "slider.horizontal.3", tint: .green) {
+    SpeakDensityCard(title: "Controls", systemImage: "slider.horizontal.3", tint: .green) {
       VStack(alignment: .leading, spacing: 16) {
         VStack(alignment: .leading, spacing: 8) {
           HStack {
@@ -338,7 +422,7 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
   }
 
   private var textWorkspaceCard: some View {
-    SettingsCard(title: "Text", systemImage: "text.alignleft", tint: .orange) {
+    SpeakDensityCard(title: "Text", systemImage: "text.alignleft", tint: .orange) {
       VStack(alignment: .leading, spacing: 12) {
         if inputSource == .history {
           historyItemPicker
@@ -429,7 +513,7 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
   }
 
   private var resultCard: some View {
-    SettingsCard(title: "Result", systemImage: "checkmark.circle", tint: .green) {
+    SpeakDensityCard(title: "Result", systemImage: "checkmark.circle", tint: .green) {
       VStack(alignment: .leading, spacing: 12) {
         if let error = tts.lastError {
           HStack(alignment: .top, spacing: 12) {
@@ -654,41 +738,5 @@ struct SSMLHelperView: View {
       .buttonStyle(.borderless)
       .controlSize(.mini)
     }
-  }
-}
-
-// MARK: - Settings Card (reused from SettingsView pattern)
-
-private struct SettingsCard<Content: View>: View {
-  let title: String
-  let systemImage: String
-  let tint: Color
-  @ViewBuilder let content: Content
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 18) {
-      HStack(spacing: 14) {
-        ZStack {
-          RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .fill(tint.opacity(0.15))
-            .frame(width: 44, height: 44)
-          Image(systemName: systemImage)
-            .foregroundStyle(tint)
-            .font(.system(size: 20, weight: .semibold))
-        }
-        Text(title)
-          .font(.headline)
-        Spacer(minLength: 0)
-      }
-      content
-    }
-    .padding(24)
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-    .overlay(
-      RoundedRectangle(cornerRadius: 28, style: .continuous)
-        .stroke(tint.opacity(0.12), lineWidth: 1)
-    )
-    .shadow(color: tint.opacity(0.08), radius: 18, x: 0, y: 12)
   }
 }

@@ -1,9 +1,14 @@
+import SpeakCore
 import SwiftUI
 
+// The correction editor intentionally keeps its tightly coupled form sections
+// together so draft focus, validation, and preview state stay local.
+// swiftlint:disable file_length type_body_length
 struct PersonalCorrectionsView: View {
   @EnvironmentObject private var lexicon: PersonalLexiconService
   @EnvironmentObject private var autoCorrectionTracker: AutoCorrectionTracker
   @EnvironmentObject private var settings: AppSettings
+  @Environment(\.appVisualDensity) private var density
   @State private var draft = RuleDraft()
   @State private var alertMessage: String?
   @State private var showAdvancedOptions: Bool = false
@@ -19,7 +24,7 @@ struct PersonalCorrectionsView: View {
 
   var body: some View {
     ScrollView {
-      VStack(alignment: .leading, spacing: 28) {
+      VStack(alignment: .leading, spacing: density.isCompact ? density.sectionSpacing : 28) {
         hero
         autoCorrectionsSection
         postProcessingInfoBanner
@@ -27,7 +32,7 @@ struct PersonalCorrectionsView: View {
         existingRulesSection
         previewSection
       }
-      .padding(24)
+      .padding(density.pagePadding)
       .frame(maxWidth: 1100, alignment: .center)
     }
     .background(
@@ -43,77 +48,117 @@ struct PersonalCorrectionsView: View {
     }
   }
 
+  @ViewBuilder
   private var hero: some View {
-    VStack(alignment: .leading, spacing: 16) {
-      Text("Corrections")
-        .font(.largeTitle.bold())
-      Text(
-        "Teach Speak how your world sounds. Define preferred spellings and let the app correct transcripts when the context fits without leaking private names."
-      )
-      .font(.title3)
-      .foregroundStyle(.secondary)
-      HStack(spacing: 20) {
+    if density.isCompact {
+      HStack(spacing: density.groupSpacing) {
+        Label("Corrections", systemImage: "text.badge.checkmark")
+          .font(.subheadline.bold())
+        Spacer(minLength: 4)
         Label("Automatic when context matches", systemImage: "checkmark.seal.fill")
-          .labelStyle(.titleAndIcon)
+          .labelStyle(.iconOnly)
           .foregroundStyle(.green)
+          .speakTooltip("Automatic when context matches")
         Label("Manual rules stay as suggestions", systemImage: "hand.raised")
-          .labelStyle(.titleAndIcon)
+          .labelStyle(.iconOnly)
           .foregroundStyle(.orange)
+          .speakTooltip("Manual rules stay as suggestions")
       }
-      .font(.callout)
-    }
-    .padding(32)
-    .background(
-      LinearGradient(
-        colors: [Color.brandAccentWarm, Color.brandAccent.opacity(0.85)],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
+      .padding(density.cardPadding)
+      .foregroundStyle(.white)
+      .background(
+        LinearGradient(
+          colors: [Color.brandAccentWarm, Color.brandAccent.opacity(0.85)],
+          startPoint: .leading,
+          endPoint: .trailing
+        ),
+        in: RoundedRectangle(cornerRadius: density.cardCornerRadius, style: .continuous)
       )
-      .cornerRadius(32)
-      .shadow(color: Color.brandAccentWarm.opacity(0.28), radius: 24, x: 0, y: 12)
-    )
+    } else {
+      VStack(alignment: .leading, spacing: 16) {
+        Text("Corrections")
+          .font(.largeTitle.bold())
+        Text(
+          "Teach Speak how your world sounds. Define preferred spellings and let the app "
+            + "correct transcripts when the context fits without leaking private names."
+        )
+        .font(.title3)
+        .foregroundStyle(.secondary)
+        HStack(spacing: 20) {
+          Label("Automatic when context matches", systemImage: "checkmark.seal.fill")
+            .labelStyle(.titleAndIcon)
+            .foregroundStyle(.green)
+          Label("Manual rules stay as suggestions", systemImage: "hand.raised")
+            .labelStyle(.titleAndIcon)
+            .foregroundStyle(.orange)
+        }
+        .font(.callout)
+      }
+      .padding(32)
+      .background(
+        LinearGradient(
+          colors: [Color.brandAccentWarm, Color.brandAccent.opacity(0.85)],
+          startPoint: .topLeading,
+          endPoint: .bottomTrailing
+        )
+        .cornerRadius(32)
+        .shadow(color: Color.brandAccentWarm.opacity(0.28), radius: 24, x: 0, y: 12)
+      )
+    }
   }
 
   private var postProcessingInfoBanner: some View {
-    HStack(alignment: .top, spacing: 16) {
+    HStack(alignment: .top, spacing: density.groupSpacing) {
       Image(systemName: "info.circle.fill")
-        .font(.title2)
+        .font(density.isCompact ? .caption : .title2)
         .foregroundStyle(Color.brandLagoon)
-      VStack(alignment: .leading, spacing: 8) {
+      VStack(alignment: .leading, spacing: density.isCompact ? 1 : 8) {
         Text("How corrections work")
-          .font(.headline)
-        VStack(alignment: .leading, spacing: 6) {
-          HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "checkmark.circle.fill")
-              .foregroundStyle(.green)
-              .imageScale(.small)
-            Text("Corrections are always applied directly to transcripts based on your rules")
+          .font(density.isCompact ? .caption.weight(.semibold) : .headline)
+        if !density.isCompact {
+          VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 8) {
+              Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+                .imageScale(.small)
+              Text("Corrections are always applied directly to transcripts based on your rules")
+                .font(.callout)
+            }
+            HStack(alignment: .top, spacing: 8) {
+              Image(systemName: "sparkles")
+                .foregroundStyle(Color.brandAccent)
+                .imageScale(.small)
+              Text(
+                "When post-processing is enabled, your correction rules are also shared "
+                  + "with the LLM for enhanced context"
+              )
               .font(.callout)
-          }
-          HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "sparkles")
-              .foregroundStyle(Color.brandAccent)
-              .imageScale(.small)
-            Text("When post-processing is enabled, your correction rules are also shared with the LLM for enhanced context")
+            }
+            HStack(alignment: .top, spacing: 8) {
+              Image(systemName: "doc.plaintext")
+                .foregroundStyle(.orange)
+                .imageScale(.small)
+              Text(
+                "When post-processing is disabled, corrections still apply "
+                  + "but without LLM context enhancement"
+              )
               .font(.callout)
+            }
           }
-          HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "doc.plaintext")
-              .foregroundStyle(.orange)
-              .imageScale(.small)
-            Text("When post-processing is disabled, corrections still apply but without LLM context enhancement")
-              .font(.callout)
-          }
+        } else {
+          Text("Rules apply locally and can also guide post-processing.")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
         }
       }
     }
-    .padding(20)
+    .padding(density.isCompact ? density.cardPadding : 20)
     .background(
-      RoundedRectangle(cornerRadius: 16, style: .continuous)
+      RoundedRectangle(cornerRadius: density.isCompact ? 8 : 16, style: .continuous)
         .fill(Color.brandLagoon.opacity(0.08))
     )
     .overlay(
-      RoundedRectangle(cornerRadius: 16, style: .continuous)
+      RoundedRectangle(cornerRadius: density.isCompact ? 8 : 16, style: .continuous)
         .stroke(Color.brandLagoon.opacity(0.2), lineWidth: 1)
     )
   }
@@ -121,7 +166,7 @@ struct PersonalCorrectionsView: View {
   // MARK: - Auto-Corrections Section
 
   private var autoCorrectionsSection: some View {
-    VStack(alignment: .leading, spacing: 16) {
+    VStack(alignment: .leading, spacing: density.groupSpacing) {
       HStack {
         VStack(alignment: .leading, spacing: 4) {
           HStack(spacing: 8) {
@@ -140,7 +185,7 @@ struct PersonalCorrectionsView: View {
       }
 
       if settings.autoCorrectionsEnabled {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: density.inlineSpacing) {
           HStack {
             Text("Promotion threshold:")
               .font(.callout)
@@ -155,7 +200,7 @@ struct PersonalCorrectionsView: View {
           if !autoCorrectionTracker.candidates.isEmpty {
             Divider()
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: density.inlineSpacing) {
               HStack {
                 Text("Candidate Corrections")
                   .font(.subheadline.bold())
@@ -194,13 +239,13 @@ struct PersonalCorrectionsView: View {
         }
       }
     }
-    .padding(20)
+    .padding(density.isCompact ? density.cardPadding : 20)
     .background(
-      RoundedRectangle(cornerRadius: 16, style: .continuous)
+      RoundedRectangle(cornerRadius: density.isCompact ? 8 : 16, style: .continuous)
         .fill(Color.brandAccent.opacity(0.06))
     )
     .overlay(
-      RoundedRectangle(cornerRadius: 16, style: .continuous)
+      RoundedRectangle(cornerRadius: density.isCompact ? 8 : 16, style: .continuous)
         .stroke(Color.brandAccent.opacity(0.15), lineWidth: 1)
     )
   }
@@ -264,10 +309,10 @@ struct PersonalCorrectionsView: View {
   }
 
   private var editorCard: some View {
-    VStack(alignment: .leading, spacing: 20) {
+    VStack(alignment: .leading, spacing: density.sectionSpacing) {
       headerRow
 
-      VStack(alignment: .leading, spacing: 12) {
+      VStack(alignment: .leading, spacing: density.inlineSpacing) {
         LabeledContent("Correct spelling") {
           TextField("e.g. Susy", text: $draft.canonical)
             .textFieldStyle(.roundedBorder)
@@ -307,7 +352,7 @@ struct PersonalCorrectionsView: View {
         }
       }
 
-      HStack(spacing: 12) {
+      HStack(spacing: density.inlineSpacing) {
         Button(draft.isEditing ? "Update Rule" : "Add Rule", action: saveDraft)
           .buttonStyle(.borderedProminent)
           .disabled(!draft.isSavable)
@@ -321,42 +366,51 @@ struct PersonalCorrectionsView: View {
         Spacer()
       }
     }
-    .padding(28)
+    .padding(density.isCompact ? density.cardPadding : 28)
     .background(
-      RoundedRectangle(cornerRadius: 26, style: .continuous)
+      RoundedRectangle(
+        cornerRadius: density.isCompact ? density.cardCornerRadius : 26,
+        style: .continuous
+      )
         .fill(.ultraThinMaterial)
     )
     .overlay(
-      RoundedRectangle(cornerRadius: 26, style: .continuous)
+      RoundedRectangle(
+        cornerRadius: density.isCompact ? density.cardCornerRadius : 26,
+        style: .continuous
+      )
         .stroke(Color.brandAccentWarm.opacity(0.15), lineWidth: 1)
     )
   }
 
   private var headerRow: some View {
     HStack(alignment: .top) {
-      VStack(alignment: .leading, spacing: 6) {
+      VStack(alignment: .leading, spacing: density.isCompact ? 1 : 6) {
         Text(draft.isEditing ? "Edit correction" : "New correction")
-          .font(.title3.bold())
-        Text(
-          "Aliases support full words only. Automatic rules run when tags match; manual rules stay as review-only suggestions."
-        )
-        .foregroundStyle(.secondary)
-        .font(.footnote)
+          .font(density.isCompact ? .caption.weight(.semibold) : .title3.bold())
+        if !density.isCompact {
+          Text(
+            "Aliases support full words only. Automatic rules run when tags match; "
+              + "manual rules stay as review-only suggestions."
+          )
+          .foregroundStyle(.secondary)
+          .font(.footnote)
+        }
       }
       Spacer()
     }
   }
 
   private var existingRulesSection: some View {
-    VStack(alignment: .leading, spacing: 16) {
+    VStack(alignment: .leading, spacing: density.groupSpacing) {
       Text("Saved rules")
-        .font(.title3.bold())
+        .font(density.isCompact ? .caption.weight(.semibold) : .title3.bold())
       if lexicon.rules.isEmpty {
         Text("No corrections yet. Add your preferred spellings above.")
           .foregroundStyle(.secondary)
           .italic()
       } else {
-        LazyVStack(spacing: 16) {
+        LazyVStack(spacing: density.isCompact ? density.sectionSpacing : 16) {
           ForEach(lexicon.rules) { rule in
             ruleRow(rule)
           }
@@ -366,7 +420,7 @@ struct PersonalCorrectionsView: View {
   }
 
   private func ruleRow(_ rule: PersonalLexiconRule) -> some View {
-    VStack(alignment: .leading, spacing: 10) {
+    VStack(alignment: .leading, spacing: density.isCompact ? 4 : 10) {
       HStack(alignment: .top) {
         VStack(alignment: .leading, spacing: 4) {
           HStack(spacing: 6) {
@@ -427,9 +481,9 @@ struct PersonalCorrectionsView: View {
           .foregroundStyle(.tertiary)
       }
     }
-    .padding(20)
+    .padding(density.isCompact ? density.cardPadding : 20)
     .background(
-      RoundedRectangle(cornerRadius: 22, style: .continuous)
+      RoundedRectangle(cornerRadius: density.isCompact ? 8 : 22, style: .continuous)
         .fill(Color(nsColor: .controlBackgroundColor))
     )
   }
@@ -438,21 +492,21 @@ struct PersonalCorrectionsView: View {
     let context = PersonalLexiconContext(tags: draft.previewTags, destinationApplication: "Preview", recentTranscriptWindow: previewText)
     let preview = lexicon.apply(to: previewText, context: context)
 
-    return VStack(alignment: .leading, spacing: 16) {
+    return VStack(alignment: .leading, spacing: density.groupSpacing) {
       Text("Preview")
-        .font(.title3.bold())
+        .font(density.isCompact ? .caption.weight(.semibold) : .title3.bold())
       TextEditor(text: $previewText)
-        .frame(minHeight: 120)
-        .padding(12)
+        .frame(minHeight: density.isCompact ? 64 : 120)
+        .padding(density.isCompact ? 5 : 12)
         .background(
           RoundedRectangle(cornerRadius: 18, style: .continuous)
             .fill(Color(nsColor: .textBackgroundColor))
         )
-      VStack(alignment: .leading, spacing: 8) {
+      VStack(alignment: .leading, spacing: density.inlineSpacing) {
         Text("Transformed")
           .font(.caption.bold())
         Text(preview.transformedText)
-          .padding(12)
+          .padding(density.isCompact ? 5 : 12)
           .frame(maxWidth: .infinity, alignment: .leading)
           .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -480,9 +534,12 @@ struct PersonalCorrectionsView: View {
         }
       }
     }
-    .padding(24)
+    .padding(density.cardPadding)
     .background(
-      RoundedRectangle(cornerRadius: 24, style: .continuous)
+      RoundedRectangle(
+        cornerRadius: density.isCompact ? density.cardCornerRadius : 24,
+        style: .continuous
+      )
         .fill(.ultraThinMaterial)
     )
   }
@@ -597,7 +654,6 @@ private struct RuleDraft {
 
   var isEditing: Bool { id != nil }
 
-
   var canonicalDisplay: String {
     let trimmed = canonical.trimmingCharacters(in: .whitespacesAndNewlines)
     return trimmed.isEmpty ? "New correction" : trimmed
@@ -655,3 +711,4 @@ private func tokenize(_ text: String) -> [String] {
     .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
     .filter { !$0.isEmpty }
 }
+// swiftlint:enable file_length type_body_length

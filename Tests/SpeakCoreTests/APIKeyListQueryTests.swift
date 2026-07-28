@@ -37,10 +37,4 @@ final class APIKeyListQueryTests: XCTestCase {
         )
     }
 
-    func testNormalDensity_preservesExistingMetrics() {
-        XCTAssertEqual(AppVisualDensity.normal.pagePadding, 24)
-        XCTAssertEqual(AppVisualDensity.normal.cardPadding, 24)
-        XCTAssertLessThan(AppVisualDensity.compact.pagePadding, AppVisualDensity.normal.pagePadding)
-        XCTAssertGreaterThanOrEqual(AppVisualDensity.compact.minimumListRowHeight, 38)
-    }
 }

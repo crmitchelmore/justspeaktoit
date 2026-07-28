@@ -107,16 +107,16 @@ struct SideBarView: View {
 
   var body: some View {
     List {
-      Section("Speak") {
+      Section {
         ForEach([SidebarItem.dashboard, .history, .voiceOutput, .corrections, .troubleshooting]) { item in
           Button {
             selection = item
           } label: {
-            HStack(spacing: 12) {
+            HStack(spacing: settings.visualDensity.inlineSpacing) {
               Image(systemName: item.systemImage)
                 .foregroundStyle(item.color)
-                .imageScale(.medium)
-                .frame(width: 20)
+                .imageScale(settings.visualDensity.isCompact ? .small : .medium)
+                .frame(width: settings.visualDensity.isCompact ? 16 : 20)
               sidebarTitle(
                 item.title(isAssemblyAI: settings.isActiveAssemblyAILiveModel),
                 isSelected: selection == item
@@ -131,33 +131,35 @@ struct SideBarView: View {
           .buttonStyle(.plain)
           .focusable(true)
           .focusEffectDisabled()
-          .padding(.horizontal, 12)
-          .padding(.vertical, 8)
+          .padding(.horizontal, settings.visualDensity.isCompact ? 4 : 12)
+          .padding(.vertical, settings.visualDensity.isCompact ? 2 : 8)
           .background(
             selection == item
               ? RoundedRectangle(cornerRadius: 8)
                 .fill(item.color.opacity(0.15))
               : nil
           )
-          .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
+          .listRowInsets(sidebarInsets)
           .listRowBackground(Color.clear)
           .speakTooltip(item.helpMessage)
           .accessibilityLabel(item.title(isAssemblyAI: settings.isActiveAssemblyAILiveModel))
           .accessibilityHint(accessibilityHint(for: item))
         }
+      } header: {
+        sidebarSectionHeader("Speak")
       }
 
-      Section("Settings") {
+      Section {
         ForEach(SettingsTab.allCases) { tab in
           let item = SidebarItem.settings(tab)
           Button {
             selection = item
           } label: {
-            HStack(spacing: 12) {
+            HStack(spacing: settings.visualDensity.inlineSpacing) {
               Image(systemName: tab.systemImage)
                 .foregroundStyle(Color.brandAccentWarm)
-                .imageScale(.medium)
-                .frame(width: 20)
+                .imageScale(settings.visualDensity.isCompact ? .small : .medium)
+                .frame(width: settings.visualDensity.isCompact ? 16 : 20)
               sidebarTitle(tab.title(isAssemblyAI: settings.isActiveAssemblyAILiveModel), isSelected: selection == item)
               ViewThatFits(in: .horizontal) {
                 shortcutHint(for: item)
@@ -165,25 +167,27 @@ struct SideBarView: View {
               }
             }
             .contentShape(Rectangle())
-            .padding(.leading, 10)
+            .padding(.leading, settings.visualDensity.isCompact ? 0 : 10)
           }
           .buttonStyle(.plain)
           .focusable(true)
           .focusEffectDisabled()
-          .padding(.horizontal, 12)
-          .padding(.vertical, 8)
+          .padding(.horizontal, settings.visualDensity.isCompact ? 4 : 12)
+          .padding(.vertical, settings.visualDensity.isCompact ? 2 : 8)
           .background(
             selection == item
               ? RoundedRectangle(cornerRadius: 8)
                 .fill(Color.brandAccentWarm.opacity(0.15))
               : nil
           )
-          .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
+          .listRowInsets(sidebarInsets)
           .listRowBackground(Color.clear)
           .speakTooltip(item.helpMessage)
           .accessibilityLabel(item.title(isAssemblyAI: settings.isActiveAssemblyAILiveModel))
           .accessibilityHint(accessibilityHint(for: item))
         }
+      } header: {
+        sidebarSectionHeader("Settings")
       }
     }
     .listStyle(.sidebar)
@@ -192,9 +196,10 @@ struct SideBarView: View {
 
   private func sidebarTitle(_ title: String, isSelected: Bool) -> some View {
     Text(title)
+      .font(settings.visualDensity.isCompact ? .caption : .body)
       .fontWeight(isSelected ? .semibold : .regular)
       .foregroundStyle(.primary)
-      .lineLimit(nil)
+      .lineLimit(settings.visualDensity.isCompact ? 1 : nil)
       .multilineTextAlignment(.leading)
       .fixedSize(horizontal: false, vertical: true)
       .layoutPriority(3)
@@ -204,7 +209,9 @@ struct SideBarView: View {
   @ViewBuilder
   private func shortcutHint(for item: SidebarItem) -> some View {
     let binding = shortcutManager.binding(for: item.shortcutAction)
-    if settings.showSidebarShortcutHints && binding.isEnabled {
+    if !settings.visualDensity.isCompact,
+       settings.showSidebarShortcutHints,
+       binding.isEnabled {
       Text(binding.displayString)
         .font(.caption2.monospaced())
         .foregroundStyle(.secondary)
@@ -214,6 +221,29 @@ struct SideBarView: View {
         .minimumScaleFactor(0.8)
         .layoutPriority(-1)
         .accessibilityHidden(true)
+    }
+  }
+
+  private var sidebarInsets: EdgeInsets {
+    let inset: CGFloat = settings.visualDensity.isCompact ? 2 : 8
+    let verticalInset: CGFloat = settings.visualDensity.isCompact ? 1 : 2
+    return EdgeInsets(
+      top: verticalInset,
+      leading: inset,
+      bottom: verticalInset,
+      trailing: inset
+    )
+  }
+
+  @ViewBuilder
+  private func sidebarSectionHeader(_ title: String) -> some View {
+    if settings.visualDensity.isCompact {
+      Text(title)
+        .font(.caption2)
+        .fontWeight(.semibold)
+        .textCase(nil)
+    } else {
+      Text(title)
     }
   }
 

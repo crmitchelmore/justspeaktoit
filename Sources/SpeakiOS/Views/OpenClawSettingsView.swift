@@ -7,6 +7,7 @@ import SwiftUI
 public struct OpenClawSettingsView: View {
     @ObservedObject private var settings = OpenClawSettings.shared
     @ObservedObject private var appSettings = AppSettings.shared
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var tokenInput = ""
     @State private var urlInput = ""
     @State private var testState: OpenClawConnectionTester.Result = .idle
@@ -38,10 +39,12 @@ public struct OpenClawSettingsView: View {
                         testState = .idle
                     }
 
-                Text("Enter host:port for local connections or a Tailscale/public hostname. "
-                     + "The ws:// or wss:// prefix is added automatically.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if !usesInlineDensityLayout {
+                    Text("Enter host:port for local connections or a Tailscale/public hostname. "
+                         + "The ws:// or wss:// prefix is added automatically.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
                 SecureField("Gateway Token", text: $tokenInput)
                     .textContentType(.password)
@@ -149,11 +152,13 @@ public struct OpenClawSettingsView: View {
                         Slider(value: $settings.ttsSpeed, in: 0.5...2.0, step: 0.1)
                     }
 
-                    Text(
-                        "Requires a Deepgram API key in the main app settings."
-                    )
+                    if !usesInlineDensityLayout {
+                        Text(
+                            "Requires a Deepgram API key in the main app settings."
+                        )
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    }
 
                     Button {
                         Task { await testVoice() }
@@ -182,7 +187,7 @@ public struct OpenClawSettingsView: View {
                     Label("Summarise for Voice", systemImage: "text.quote")
                 }
 
-                if settings.summariseResponses {
+                if settings.summariseResponses && !usesInlineDensityLayout {
                     Text(
                         "Long responses will be summarised into concise voice-friendly text "
                             + "before speaking (requires OpenRouter API key)."
@@ -195,7 +200,7 @@ public struct OpenClawSettingsView: View {
                     Label("Prioritise Low Latency", systemImage: "hare")
                 }
 
-                if settings.lowLatencySpeech {
+                if settings.lowLatencySpeech && !usesInlineDensityLayout {
                     Text("Skips the extra summarisation step before speaking for faster responses.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -229,19 +234,28 @@ public struct OpenClawSettingsView: View {
                 }
             }
 
-            Section("How It Works") {
-                VStack(alignment: .leading, spacing: 8) {
-                    InfoStepRow(number: 1, text: "Tap the mic to record your voice message")
-                    InfoStepRow(number: 2, text: "Your speech is transcribed using your selected model")
-                    InfoStepRow(number: 3, text: "The text is sent to your OpenClaw agent")
-                    InfoStepRow(number: 4, text: "The response is spoken back to you")
-                    InfoStepRow(number: 5, text: "In conversation mode, listening can restart automatically")
+            if !usesInlineDensityLayout {
+                Section("How It Works") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        InfoStepRow(number: 1, text: "Tap the mic to record your voice message")
+                        InfoStepRow(number: 2, text: "Your speech is transcribed using your selected model")
+                        InfoStepRow(number: 3, text: "The text is sent to your OpenClaw agent")
+                        InfoStepRow(number: 4, text: "The response is spoken back to you")
+                        InfoStepRow(number: 5, text: "In conversation mode, listening can restart automatically")
+                    }
+                    .padding(.vertical, 4)
                 }
-                .padding(.vertical, 4)
             }
         }
+        .environment(\.defaultMinListRowHeight, appSettings.visualDensity.minimumListRowHeight)
+        .listSectionSpacing(appSettings.visualDensity.listSectionSpacing)
         .navigationTitle("OpenClaw Settings")
         .navigationBarTitleDisplayMode(.inline)
+        .controlSize(appSettings.visualDensity.isCompact ? .small : .regular)
+    }
+
+    private var usesInlineDensityLayout: Bool {
+        appSettings.visualDensity.prefersInlineLayout(dynamicTypeSize: dynamicTypeSize)
     }
 
     // MARK: - Connection Test

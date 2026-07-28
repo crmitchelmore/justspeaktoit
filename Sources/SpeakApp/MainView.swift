@@ -12,11 +12,16 @@ struct MainView: View {
   var body: some View {
     NavigationSplitView {
       SideBarView(selection: $selection)
-        .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 320)
+        .navigationSplitViewColumnWidth(
+          min: settings.visualDensity.isCompact ? 170 : 220,
+          ideal: settings.visualDensity.isCompact ? 188 : 240,
+          max: settings.visualDensity.isCompact ? 240 : 320
+        )
     } detail: {
       detailView
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(settings.visualDensity == .compact ? 8 : 16)
+        .padding(settings.visualDensity.isCompact ? 0 : 16)
+        .controlSize(settings.visualDensity.isCompact ? .small : .regular)
         .background(Color(nsColor: .windowBackgroundColor))
     }
     .frame(minWidth: 960, minHeight: 640)
@@ -79,44 +84,68 @@ struct MainView: View {
   private var toolbar: some ToolbarContent {
     ToolbarItem(placement: .primaryAction) {
       Button(action: environment.main.toggleRecordingFromUI) {
-        switch environment.main.state {
-        case .idle, .completed, .failed:
-          Label("Record", systemImage: "mic")
-        case .recording:
-          Label("Stop", systemImage: "stop.fill")
-            .foregroundStyle(.red)
-        case .processing:
-          ProgressView()
-        case .delivering:
-          ProgressView()
-        }
+        toolbarRecordLabel
       }
       .keyboardShortcut(.space, modifiers: [.command, .shift])
       .speakTooltip("Start or stop a recording from anywhere in Speak. We'll let you know when we're listening.")
       .accessibilityLabel(accessibilityLabelForRecordButton)
     }
     ToolbarItem(placement: .status) {
-      VStack(alignment: .trailing, spacing: 2) {
-        Text(environment.settings.effectiveTranscriptionModeDisplayName)
+      if settings.visualDensity.isCompact {
+        Image(systemName: "waveform.badge.magnifyingglass")
           .font(.caption)
           .foregroundStyle(.secondary)
-        if let item = history.items.first {
-          Text("Last: \(item.createdAt.formatted())")
-            .font(.caption2)
-            .foregroundStyle(.tertiary)
+          .accessibilityLabel(
+            "Current mode: \(environment.settings.effectiveTranscriptionModeDisplayName)"
+          )
+          .speakTooltip(environment.settings.effectiveTranscriptionModeDisplayName)
+      } else {
+        VStack(alignment: .trailing, spacing: 2) {
+          Text(environment.settings.effectiveTranscriptionModeDisplayName)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+          if let item = history.items.first {
+            Text("Last: \(item.createdAt.formatted())")
+              .font(.caption2)
+              .foregroundStyle(.tertiary)
+          }
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(
+          Capsule()
+            .fill(.ultraThinMaterial)
+        )
+        .overlay(
+          Capsule()
+            .strokeBorder(.secondary.opacity(0.3), lineWidth: 0.5)
+        )
+        .accessibilityLabel("Current mode: \(environment.settings.effectiveTranscriptionModeDisplayName)")
       }
-      .padding(.horizontal, 12)
-      .padding(.vertical, 6)
-      .background(
-        Capsule()
-          .fill(.ultraThinMaterial)
-      )
-      .overlay(
-        Capsule()
-          .strokeBorder(.secondary.opacity(0.3), lineWidth: 0.5)
-      )
-      .accessibilityLabel("Current mode: \(environment.settings.effectiveTranscriptionModeDisplayName)")
+    }
+  }
+
+  @ViewBuilder
+  private var toolbarRecordLabel: some View {
+    switch environment.main.state {
+    case .idle, .completed, .failed:
+      if settings.visualDensity.isCompact {
+        Label("Record", systemImage: "mic")
+          .labelStyle(.iconOnly)
+      } else {
+        Label("Record", systemImage: "mic")
+      }
+    case .recording:
+      if settings.visualDensity.isCompact {
+        Label("Stop", systemImage: "stop.fill")
+          .labelStyle(.iconOnly)
+          .foregroundStyle(.red)
+      } else {
+        Label("Stop", systemImage: "stop.fill")
+          .foregroundStyle(.red)
+      }
+    case .processing, .delivering:
+      ProgressView()
     }
   }
 

@@ -61,6 +61,7 @@ public extension APIKeyIdentifierRegistry {
             .filter { !canonicalIdentifiers.contains($0) }
             .forEach(removeAPIKeyIdentifier)
         canonicalIdentifiers
+            .sorted()
             .filter { !trackedAPIKeyIdentifiers.contains($0) }
             .forEach(registerAPIKeyIdentifier)
     }

@@ -208,6 +208,32 @@ struct SettingsView: View {
     didResolveAPIKeyStorage && settings.trackedAPIKeyIdentifiers.contains(identifier)
   }
 
+  private func resolveAPIKeyStorage() async {
+    let retryDelays: [Duration] = [
+      .milliseconds(250),
+      .milliseconds(500),
+      .seconds(1),
+      .seconds(2),
+      .seconds(5)
+    ]
+    var retryIndex = 0
+
+    while !Task.isCancelled {
+      if await environment.secureStorage.preloadTrackedSecrets() {
+        didResolveAPIKeyStorage = true
+        return
+      }
+
+      let retryDelay = retryDelays[min(retryIndex, retryDelays.count - 1)]
+      retryIndex = min(retryIndex + 1, retryDelays.count - 1)
+      do {
+        try await Task.sleep(for: retryDelay)
+      } catch {
+        return
+      }
+    }
+  }
+
   private var isCloudPostProcessingModelSelected: Bool {
     !PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel)
   }
@@ -716,9 +742,9 @@ struct SettingsView: View {
       LinearGradient(
         colors: [Color.brandAccentWarm.opacity(0.08), .clear], startPoint: .top, endPoint: .center))
     .task {
-      didResolveAPIKeyStorage = await environment.secureStorage.preloadTrackedSecrets()
       transcriptionProviders = await TranscriptionProviderRegistry.shared.allProviders()
       syncAssemblyAIKeytermsFromPronunciation()
+      await resolveAPIKeyStorage()
     }
     .onChange(of: settings.liveTranscriptionModel) { _, newValue in
       let newIsAssembly = newValue.localizedCaseInsensitiveContains("assemblyai")

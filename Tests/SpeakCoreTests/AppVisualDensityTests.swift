@@ -32,4 +32,30 @@ final class AppVisualDensityTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(AppVisualDensity.compact.minimumListRowHeight, 28)
         #endif
     }
+
+    func testAdaptiveColumnCount_usesWidthOnlyInCompactMode() {
+        XCTAssertEqual(
+            AppVisualDensity.normal.adaptiveColumnCount(availableWidth: 1_100),
+            1
+        )
+        XCTAssertEqual(
+            AppVisualDensity.compact.adaptiveColumnCount(availableWidth: 320),
+            1
+        )
+        XCTAssertEqual(
+            AppVisualDensity.compact.adaptiveColumnCount(availableWidth: 700),
+            2
+        )
+        XCTAssertEqual(
+            AppVisualDensity.compact.adaptiveColumnCount(availableWidth: 1_100),
+            3
+        )
+        XCTAssertEqual(
+            AppVisualDensity.compact.adaptiveColumnCount(
+                availableWidth: 2_000,
+                maximumColumns: 2
+            ),
+            2
+        )
+    }
 }

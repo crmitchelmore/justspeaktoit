@@ -90,16 +90,8 @@ struct MainView: View {
       .speakTooltip("Start or stop a recording from anywhere in Speak. We'll let you know when we're listening.")
       .accessibilityLabel(accessibilityLabelForRecordButton)
     }
-    ToolbarItem(placement: .status) {
-      if settings.visualDensity.isCompact {
-        Image(systemName: "waveform.badge.magnifyingglass")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          .accessibilityLabel(
-            "Current mode: \(environment.settings.effectiveTranscriptionModeDisplayName)"
-          )
-          .speakTooltip(environment.settings.effectiveTranscriptionModeDisplayName)
-      } else {
+    if !settings.visualDensity.isCompact {
+      ToolbarItem(placement: .status) {
         VStack(alignment: .trailing, spacing: 2) {
           Text(environment.settings.effectiveTranscriptionModeDisplayName)
             .font(.caption)

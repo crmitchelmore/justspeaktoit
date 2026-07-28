@@ -1,8 +1,13 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+// This view includes the dictionary editor and its import/export form.
+// swiftlint:disable file_length type_body_length
+
 /// View for managing the pronunciation dictionary.
 struct PronunciationDictionaryView: View {
+    @Environment(\.appVisualDensity) private var density
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @EnvironmentObject private var pronunciationManager: PronunciationManager
     @State private var searchText = ""
     @State private var selectedCategory: PronunciationEntry.Category?
@@ -94,58 +99,127 @@ struct PronunciationDictionaryView: View {
     // MARK: - Header
 
     private var headerView: some View {
-        VStack(spacing: 12) {
-            HStack {
-                Text("Pronunciation Dictionary")
-                    .font(.title2.bold())
-                Spacer()
-                HStack(spacing: 8) {
-                    Button {
-                        showingImportSheet = true
-                    } label: {
-                        Label("Import", systemImage: "square.and.arrow.down")
+        Group {
+            if density.prefersInlineLayout(dynamicTypeSize: dynamicTypeSize) {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: density.inlineSpacing) {
+                        compactHeaderTitle
+                        searchField
+                        compactHeaderActions
                     }
-                    .buttonStyle(.bordered)
 
-                    Button {
-                        showingExportSheet = true
-                    } label: {
-                        Label("Export", systemImage: "square.and.arrow.up")
+                    VStack(alignment: .leading, spacing: density.inlineSpacing) {
+                        HStack(spacing: density.inlineSpacing) {
+                            compactHeaderTitle
+                            Spacer(minLength: 0)
+                            compactHeaderActions
+                        }
+                        searchField
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(pronunciationManager.entries.isEmpty)
-
-                    Button {
-                        showingAddSheet = true
-                    } label: {
-                        Label("Add", systemImage: "plus")
+                }
+            } else {
+                VStack(spacing: 12) {
+                    HStack {
+                        Text("Pronunciation Dictionary")
+                            .font(.title2.bold())
+                        Spacer()
+                        regularHeaderActions
                     }
-                    .buttonStyle(.borderedProminent)
+                    searchField
                 }
             }
-
-            HStack {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
-                TextField("Search words or pronunciations...", text: $searchText)
-                    .textFieldStyle(.plain)
-                if !searchText.isEmpty {
-                    Button {
-                        searchText = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(8)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color(nsColor: .controlBackgroundColor))
-            )
         }
-        .padding()
+        .padding(density.isCompact ? 8 : 16)
+    }
+
+    private var compactHeaderTitle: some View {
+        Label("Dictionary", systemImage: "text.book.closed")
+            .font(.caption.weight(.semibold))
+            .fixedSize()
+    }
+
+    private var searchField: some View {
+        HStack {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Search words or pronunciations...", text: $searchText)
+                .textFieldStyle(.plain)
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(density.isCompact ? 5 : 8)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+    }
+
+    private var compactHeaderActions: some View {
+        HStack(spacing: density.inlineSpacing) {
+            Button {
+                showingImportSheet = true
+            } label: {
+                Label("Import", systemImage: "square.and.arrow.down")
+                    .labelStyle(.iconOnly)
+            }
+            .buttonStyle(.bordered)
+            .speakTooltip("Import pronunciation entries.")
+
+            Button {
+                showingExportSheet = true
+            } label: {
+                Label("Export", systemImage: "square.and.arrow.up")
+                    .labelStyle(.iconOnly)
+            }
+            .buttonStyle(.bordered)
+            .disabled(pronunciationManager.entries.isEmpty)
+            .speakTooltip("Export pronunciation entries.")
+
+            Button {
+                showingAddSheet = true
+            } label: {
+                Label("Add", systemImage: "plus")
+                    .labelStyle(.iconOnly)
+            }
+            .buttonStyle(.borderedProminent)
+            .speakTooltip("Add a pronunciation entry.")
+        }
+        .fixedSize()
+    }
+
+    private var regularHeaderActions: some View {
+        HStack(spacing: 8) {
+            Button {
+                showingImportSheet = true
+            } label: {
+                Label("Import", systemImage: "square.and.arrow.down")
+            }
+            .buttonStyle(.bordered)
+
+            Button {
+                showingExportSheet = true
+            } label: {
+                Label("Export", systemImage: "square.and.arrow.up")
+            }
+            .buttonStyle(.bordered)
+            .disabled(pronunciationManager.entries.isEmpty)
+
+            Button {
+                showingAddSheet = true
+            } label: {
+                Label("Add", systemImage: "plus")
+            }
+            .buttonStyle(.borderedProminent)
+        }
     }
 
     // MARK: - Category Tabs
@@ -175,8 +249,8 @@ struct PronunciationDictionaryView: View {
                     }
                 }
             }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
+            .padding(.horizontal, density.isCompact ? 8 : 16)
+            .padding(.vertical, density.isCompact ? 4 : 8)
         }
         .background(Color(nsColor: .windowBackgroundColor))
     }
@@ -184,7 +258,11 @@ struct PronunciationDictionaryView: View {
     // MARK: - Entries List
 
     private var entriesListView: some View {
-        List {
+        LazyVGrid(
+            columns: entryColumns,
+            alignment: .leading,
+            spacing: density.isCompact ? density.sectionSpacing : 8
+        ) {
             ForEach(filteredEntries) { entry in
                 PronunciationEntryRow(entry: entry)
                     .contentShape(Rectangle())
@@ -204,25 +282,23 @@ struct PronunciationDictionaryView: View {
                             Label("Delete", systemImage: "trash")
                         }
                     }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                        Button(role: .destructive) {
-                            pronunciationManager.deleteEntry(entry)
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
-                    }
-                    .swipeActions(edge: .leading) {
-                        Button {
-                            editingEntry = entry
-                        } label: {
-                            Label("Edit", systemImage: "pencil")
-                        }
-                        .tint(.accentColor)
-                    }
             }
         }
-        .listStyle(.inset)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, density.isCompact ? 8 : 16)
+        .padding(.bottom, density.isCompact ? 8 : 16)
+    }
+
+    private var entryColumns: [GridItem] {
+        if density.isCompact {
+            return [
+                GridItem(
+                    .adaptive(minimum: 260, maximum: 380),
+                    spacing: density.sectionSpacing,
+                    alignment: .top
+                )
+            ]
+        }
+        return [GridItem(.flexible(), alignment: .top)]
     }
 
     // MARK: - Empty State
@@ -265,7 +341,8 @@ struct PronunciationDictionaryView: View {
                 .buttonStyle(.bordered)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity)
+        .frame(minHeight: 260)
         .padding()
     }
 
@@ -301,9 +378,12 @@ struct PronunciationDictionaryView: View {
     }
 }
 
+// swiftlint:enable type_body_length
+
 // MARK: - Category Tab
 
 private struct CategoryTab: View {
+    @Environment(\.appVisualDensity) private var density
     let title: String
     let count: Int
     var systemImage: String?
@@ -318,18 +398,22 @@ private struct CategoryTab: View {
                         .imageScale(.small)
                 }
                 Text(title)
-                    .font(.subheadline.weight(isSelected ? .semibold : .regular))
+                    .font(
+                        density.isCompact
+                            ? .caption2.weight(isSelected ? .semibold : .regular)
+                            : .subheadline.weight(isSelected ? .semibold : .regular)
+                    )
                 Text("\(count)")
-                    .font(.caption)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
+                    .font(density.isCompact ? .caption2 : .caption)
+                    .padding(.horizontal, density.isCompact ? 4 : 6)
+                    .padding(.vertical, density.isCompact ? 1 : 2)
                     .background(
                         Capsule()
                             .fill(isSelected ? Color.white.opacity(0.2) : Color.secondary.opacity(0.15))
                     )
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
+            .padding(.horizontal, density.isCompact ? 7 : 12)
+            .padding(.vertical, density.isCompact ? 3 : 6)
             .background(
                 Capsule()
                     .fill(isSelected ? Color.accentColor : Color.clear)
@@ -343,14 +427,16 @@ private struct CategoryTab: View {
 // MARK: - Entry Row
 
 private struct PronunciationEntryRow: View {
+    @Environment(\.appVisualDensity) private var density
     let entry: PronunciationEntry
 
     var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
+        HStack(spacing: density.isCompact ? density.inlineSpacing : 12) {
+            VStack(alignment: .leading, spacing: density.isCompact ? 2 : 4) {
                 HStack(spacing: 8) {
                     Text(entry.word)
-                        .font(.headline)
+                        .font(density.isCompact ? .caption.weight(.semibold) : .headline)
+                        .lineLimit(1)
 
                     if entry.isRegex {
                         Text("REGEX")
@@ -382,8 +468,9 @@ private struct PronunciationEntryRow: View {
                         .imageScale(.small)
                         .foregroundStyle(.tertiary)
                     Text(entry.pronunciation)
-                        .font(.subheadline)
+                        .font(density.isCompact ? .caption2 : .subheadline)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
             }
 
@@ -405,7 +492,12 @@ private struct PronunciationEntryRow: View {
                 .imageScale(.small)
                 .foregroundStyle(.tertiary)
         }
-        .padding(.vertical, 4)
+        .padding(density.isCompact ? 7 : 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            Color(nsColor: .controlBackgroundColor).opacity(density.isCompact ? 0.7 : 1),
+            in: RoundedRectangle(cornerRadius: density.isCompact ? 8 : 10, style: .continuous)
+        )
     }
 }
 
@@ -622,3 +714,5 @@ struct PronunciationDocument: FileDocument {
         return FileWrapper(regularFileWithContents: data)
     }
 }
+
+// swiftlint:enable file_length

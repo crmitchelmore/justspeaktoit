@@ -31,6 +31,23 @@ public enum AppVisualDensity: String, CaseIterable, Identifiable, Sendable {
     public var gridMinimumWidth: CGFloat { isCompact ? 240 : 340 }
     public var chartHeight: CGFloat { isCompact ? 132 : 200 }
 
+    /// Returns the number of columns that can usefully fit in a settings canvas.
+    /// Normal mode deliberately remains single-column; compact mode turns spare
+    /// horizontal space into additional information density.
+    public func adaptiveColumnCount(
+        availableWidth: CGFloat,
+        minimumColumnWidth: CGFloat = 340,
+        maximumColumns: Int = 3
+    ) -> Int {
+        guard isCompact else { return 1 }
+
+        let safeMaximum = max(1, maximumColumns)
+        let safeMinimum = max(1, minimumColumnWidth)
+        let safeWidth = max(0, availableWidth)
+        let count = Int((safeWidth + sectionSpacing) / (safeMinimum + sectionSpacing))
+        return min(safeMaximum, max(1, count))
+    }
+
     public var minimumListRowHeight: CGFloat {
         #if os(iOS)
         // Compact iOS rows remove internal whitespace but retain Apple's

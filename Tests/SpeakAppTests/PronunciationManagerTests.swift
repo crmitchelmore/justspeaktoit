@@ -1,7 +1,6 @@
 import XCTest
 @testable import SpeakApp
 
-@MainActor
 final class PronunciationManagerTests: XCTestCase {
   private var suiteName = ""
   private var defaults: UserDefaults!
@@ -20,6 +19,7 @@ final class PronunciationManagerTests: XCTestCase {
     super.tearDown()
   }
 
+  @MainActor
   func testFreshStore_exposesAllDefaultEntries() {
     let manager = PronunciationManager(defaults: defaults)
 
@@ -27,12 +27,15 @@ final class PronunciationManagerTests: XCTestCase {
     XCTAssertFalse(manager.entries.isEmpty)
   }
 
+  @MainActor
   func testSearchAndCategoryFiltering_keepVisibleEntriesAvailable() {
     let manager = PronunciationManager(defaults: defaults)
+    let technicalEntries = manager.entries(for: .technical)
 
     XCTAssertTrue(manager.search("API").contains { $0.word == "API" })
+    XCTAssertFalse(technicalEntries.isEmpty)
     XCTAssertTrue(
-      manager.entries(for: .technical).allSatisfy {
+      technicalEntries.allSatisfy {
         $0.category == PronunciationEntry.Category.technical.rawValue
       }
     )

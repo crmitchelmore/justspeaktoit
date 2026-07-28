@@ -43,6 +43,8 @@ public enum AppVisualDensity: String, CaseIterable, Identifiable, Sendable {
 
         let safeMaximum = max(1, maximumColumns)
         let safeMinimum = max(1, minimumColumnWidth)
+        if availableWidth.isNaN { return 1 }
+        guard availableWidth.isFinite else { return safeMaximum }
         let safeWidth = max(0, availableWidth)
         let count = Int((safeWidth + sectionSpacing) / (safeMinimum + sectionSpacing))
         return min(safeMaximum, max(1, count))

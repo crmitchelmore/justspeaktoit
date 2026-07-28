@@ -6,7 +6,7 @@ struct ShortcutsSettingsView: View {
     @ObservedObject var shortcutManager: ShortcutManager
 
     var body: some View {
-        SpeakAdaptiveSettingsLayout(
+        SpeakDensitySettingsSection(
             density: density,
             compactMinimumWidth: 460,
             maximumColumns: 2
@@ -102,6 +102,7 @@ struct ShortcutsSettingsView: View {
                     .labelsHidden()
                     .toggleStyle(.switch)
                     .controlSize(.mini)
+                    .accessibilityLabel("Enable \(action.displayName) shortcut")
 
                     Text(action.displayName)
                         .font(.caption)
@@ -149,6 +150,7 @@ struct ShortcutsSettingsView: View {
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .controlSize(.small)
+                .accessibilityLabel("Enable \(action.displayName) shortcut")
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(action.displayName)

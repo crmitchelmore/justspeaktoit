@@ -57,5 +57,16 @@ final class AppVisualDensityTests: XCTestCase {
             ),
             2
         )
+        XCTAssertEqual(
+            AppVisualDensity.compact.adaptiveColumnCount(
+                availableWidth: .infinity,
+                maximumColumns: 2
+            ),
+            2
+        )
+        XCTAssertEqual(
+            AppVisualDensity.compact.adaptiveColumnCount(availableWidth: .nan),
+            1
+        )
     }
 }

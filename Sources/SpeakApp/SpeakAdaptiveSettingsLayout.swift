@@ -1,6 +1,43 @@
 import SpeakCore
 import SwiftUI
 
+/// Preserves lazy single-column rendering in normal density while opting
+/// compact density into the width-aware layout.
+struct SpeakDensitySettingsSection<Content: View>: View {
+  let density: AppVisualDensity
+  let compactMinimumWidth: CGFloat
+  let maximumColumns: Int
+  @ViewBuilder let content: Content
+
+  init(
+    density: AppVisualDensity,
+    compactMinimumWidth: CGFloat = 340,
+    maximumColumns: Int = 3,
+    @ViewBuilder content: () -> Content
+  ) {
+    self.density = density
+    self.compactMinimumWidth = compactMinimumWidth
+    self.maximumColumns = maximumColumns
+    self.content = content()
+  }
+
+  var body: some View {
+    if density.isCompact {
+      SpeakAdaptiveSettingsLayout(
+        density: density,
+        compactMinimumWidth: compactMinimumWidth,
+        maximumColumns: maximumColumns
+      ) {
+        content
+      }
+    } else {
+      LazyVStack(spacing: density.sectionSpacing) {
+        content
+      }
+    }
+  }
+}
+
 /// A single-column settings stack in normal mode and a balanced masonry grid
 /// in compact mode. Unlike `LazyVGrid`, shorter cards do not inherit the height
 /// of the tallest card in their row, so compact mode does not manufacture a
@@ -9,6 +46,11 @@ struct SpeakAdaptiveSettingsLayout: Layout {
   let density: AppVisualDensity
   let compactMinimumWidth: CGFloat
   let maximumColumns: Int
+
+  struct LayoutCache {
+    var width: CGFloat?
+    var measurement: Measurement?
+  }
 
   init(
     density: AppVisualDensity,
@@ -23,10 +65,12 @@ struct SpeakAdaptiveSettingsLayout: Layout {
   func sizeThatFits(
     proposal: ProposedViewSize,
     subviews: Subviews,
-    cache: inout ()
+    cache: inout LayoutCache
   ) -> CGSize {
     let width = resolvedWidth(for: proposal, subviews: subviews)
     let result = measure(width: width, subviews: subviews)
+    cache.width = width
+    cache.measurement = result
     return CGSize(width: width, height: result.height)
   }
 
@@ -34,9 +78,16 @@ struct SpeakAdaptiveSettingsLayout: Layout {
     in bounds: CGRect,
     proposal: ProposedViewSize,
     subviews: Subviews,
-    cache: inout ()
+    cache: inout LayoutCache
   ) {
-    let result = measure(width: bounds.width, subviews: subviews)
+    let result: Measurement
+    if cache.width == bounds.width, let cachedMeasurement = cache.measurement {
+      result = cachedMeasurement
+    } else {
+      result = measure(width: bounds.width, subviews: subviews)
+      cache.width = bounds.width
+      cache.measurement = result
+    }
 
     for (index, subview) in subviews.enumerated() {
       guard result.origins.indices.contains(index) else { continue }
@@ -49,6 +100,14 @@ struct SpeakAdaptiveSettingsLayout: Layout {
         proposal: ProposedViewSize(width: result.columnWidth, height: nil)
       )
     }
+  }
+
+  func makeCache(subviews: Subviews) -> LayoutCache {
+    LayoutCache()
+  }
+
+  func updateCache(_ cache: inout LayoutCache, subviews: Subviews) {
+    cache = LayoutCache()
   }
 
   private func resolvedWidth(for proposal: ProposedViewSize, subviews: Subviews) -> CGFloat {
@@ -106,7 +165,7 @@ struct SpeakAdaptiveSettingsLayout: Layout {
     }?.offset ?? 0
   }
 
-  private struct Measurement {
+  struct Measurement {
     let columnWidth: CGFloat
     let origins: [CGPoint]
     let height: CGFloat

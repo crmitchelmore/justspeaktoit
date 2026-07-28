@@ -156,7 +156,7 @@ struct PronunciationDictionaryView: View {
             }
         }
         .padding(density.isCompact ? 5 : 8)
-        .frame(maxWidth: .infinity)
+        .frame(minWidth: density.isCompact ? 220 : nil, maxWidth: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 8)
                 .fill(Color(nsColor: .controlBackgroundColor))
@@ -470,7 +470,7 @@ private struct PronunciationEntryRow: View {
                     Text(entry.pronunciation)
                         .font(density.isCompact ? .caption2 : .subheadline)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        .lineLimit(density.isCompact ? 1 : nil)
                 }
             }
 

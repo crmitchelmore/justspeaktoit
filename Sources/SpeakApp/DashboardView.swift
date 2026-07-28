@@ -7,6 +7,7 @@ struct DashboardView: View {
   @EnvironmentObject private var environment: AppEnvironment
   @EnvironmentObject private var history: HistoryManager
   @Environment(\.appVisualDensity) private var density
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @State private var requestingPermission: PermissionType?
 
   var body: some View {
@@ -28,7 +29,72 @@ struct DashboardView: View {
     )
   }
 
+  @ViewBuilder
   private var heroHeader: some View {
+    if density.prefersInlineLayout(dynamicTypeSize: dynamicTypeSize) {
+      compactHeroHeader
+    } else {
+      normalHeroHeader
+    }
+  }
+
+  private var compactHeroHeader: some View {
+    let stats = history.statistics
+    return VStack(alignment: .leading, spacing: 4) {
+      HStack(spacing: density.inlineSpacing) {
+        Label("Dashboard", systemImage: "sparkles.rectangle.stack")
+          .font(.subheadline.bold())
+          .lineLimit(1)
+
+        Spacer(minLength: 4)
+
+        compactHeroMetric(
+          value: "\(stats.totalSessions)",
+          systemImage: "record.circle",
+          accessibilityLabel: "Sessions"
+        )
+        compactHeroMetric(
+          value: formattedDuration(stats.cumulativeRecordingDuration),
+          systemImage: "timer",
+          accessibilityLabel: "Recording time"
+        )
+        compactHeroMetric(
+          value: formattedCurrency(stats.totalSpend),
+          systemImage: "creditcard",
+          accessibilityLabel: "Spend"
+        )
+
+        Button(action: environment.main.toggleRecordingFromUI) {
+          compactRecordButtonLabel
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.small)
+        .tint(environment.main.state == .recording ? .red : .accentColor)
+        .disabled(isBusy)
+        .keyboardShortcut(.space, modifiers: [.command])
+        .accessibilityLabel(buttonTitle)
+      }
+
+      if let preview = livePreviewText, !preview.isEmpty {
+        Label(preview, systemImage: "waveform")
+          .font(.caption.monospaced())
+          .lineLimit(1)
+          .foregroundStyle(.secondary)
+      }
+    }
+    .padding(density.cardPadding)
+    .foregroundStyle(.white)
+    .background(
+      LinearGradient(
+        colors: [Color.brandAccentDeep, Color.brandAccentWarm.opacity(0.9)],
+        startPoint: .leading,
+        endPoint: .trailing
+      ),
+      in: RoundedRectangle(cornerRadius: density.cardCornerRadius, style: .continuous)
+    )
+  }
+
+  private var normalHeroHeader: some View {
     let stats = history.statistics
     return VStack(alignment: .leading, spacing: 18) {
       HStack(alignment: .top, spacing: 20) {
@@ -114,10 +180,32 @@ struct DashboardView: View {
     .shadow(color: Color.brandAccent.opacity(0.35), radius: 24, x: 0, y: 16)
   }
 
+  private func compactHeroMetric(
+    value: String,
+    systemImage: String,
+    accessibilityLabel: String
+  ) -> some View {
+    Label(value, systemImage: systemImage)
+      .font(.caption2.weight(.semibold))
+      .lineLimit(1)
+      .accessibilityLabel("\(accessibilityLabel): \(value)")
+  }
+
+  @ViewBuilder
+  private var compactRecordButtonLabel: some View {
+    switch environment.main.state {
+    case .processing, .delivering:
+      ProgressView()
+        .controlSize(.mini)
+    default:
+      Image(systemName: buttonIcon)
+    }
+  }
+
   private var dashboardSections: some View {
     VStack(spacing: density.sectionSpacing) {
       LazyVGrid(
-        columns: [GridItem(.adaptive(minimum: 340), spacing: density.sectionSpacing)],
+        columns: [GridItem(.adaptive(minimum: density.gridMinimumWidth), spacing: density.sectionSpacing)],
         spacing: density.sectionSpacing
       ) {
         permissionsSection
@@ -129,7 +217,7 @@ struct DashboardView: View {
       dailyUsageChartSection
 
       LazyVGrid(
-        columns: [GridItem(.adaptive(minimum: 340), spacing: density.sectionSpacing)],
+        columns: [GridItem(.adaptive(minimum: density.gridMinimumWidth), spacing: density.sectionSpacing)],
         spacing: density.sectionSpacing
       ) {
         transcriptionModelChartSection
@@ -138,7 +226,7 @@ struct DashboardView: View {
 
       // TTS Charts
       LazyVGrid(
-        columns: [GridItem(.adaptive(minimum: 340), spacing: density.sectionSpacing)],
+        columns: [GridItem(.adaptive(minimum: density.gridMinimumWidth), spacing: density.sectionSpacing)],
         spacing: density.sectionSpacing
       ) {
         ttsUsageChartSection
@@ -262,7 +350,11 @@ struct DashboardView: View {
   private var permissionsSection: some View {
     DashboardCard(title: "Permissions", systemImage: "lock.shield", tint: Color.brandAccentWarm) {
       LazyVGrid(
-        columns: Array(repeating: GridItem(.flexible(), spacing: 16), count: 2), spacing: 16
+        columns: Array(
+          repeating: GridItem(.flexible(), spacing: density.groupSpacing),
+          count: 2
+        ),
+        spacing: density.groupSpacing
       ) {
         ForEach(PermissionType.availablePermissions(for: DistributionChannel.current)) { permission in
           permissionCard(for: permission)
@@ -274,7 +366,79 @@ struct DashboardView: View {
 
   private func permissionCard(for permission: PermissionType) -> some View {
     let status = environment.permissions.status(for: permission)
-    return VStack(alignment: .leading, spacing: 8) {
+    return Group {
+      if density.isCompact {
+        compactPermissionCard(for: permission, status: status)
+      } else {
+        regularPermissionCard(for: permission, status: status)
+      }
+    }
+    .speakTooltip(permission.guidanceText)
+  }
+
+  private func compactPermissionCard(
+    for permission: PermissionType,
+    status: PermissionStatus
+  ) -> some View {
+    HStack(spacing: density.inlineSpacing) {
+      Image(systemName: permission.systemIconName)
+        .frame(width: 16)
+      VStack(alignment: .leading, spacing: 0) {
+        Text(permission.displayName)
+          .font(.caption.weight(.semibold))
+          .lineLimit(1)
+        Text(statusDescription(status))
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+      }
+      Spacer(minLength: 2)
+      Circle()
+        .fill(statusColor(status))
+        .frame(width: 7, height: 7)
+      compactPermissionAction(for: permission, status: status)
+    }
+    .padding(6)
+    .background(
+      RoundedRectangle(cornerRadius: 8, style: .continuous)
+        .fill(.ultraThinMaterial)
+    )
+    .overlay(
+      RoundedRectangle(cornerRadius: 8, style: .continuous)
+        .stroke(statusColor(status).opacity(0.35), lineWidth: 1)
+    )
+  }
+
+  @ViewBuilder
+  private func compactPermissionAction(
+    for permission: PermissionType,
+    status: PermissionStatus
+  ) -> some View {
+    if environment.permissions.requestIssue(for: permission) != nil {
+      Link(destination: permission.settingsURL) {
+        Label("Open Settings", systemImage: "gear")
+          .labelStyle(.iconOnly)
+      }
+      .buttonStyle(.borderless)
+    } else {
+      Button {
+        requestingPermission = permission
+        Task { await request(permission) }
+      } label: {
+        Label(
+          status.isGranted ? "Check" : "Request",
+          systemImage: status.isGranted ? "arrow.clockwise" : "plus.circle"
+        )
+        .labelStyle(.iconOnly)
+      }
+      .buttonStyle(.borderless)
+    }
+  }
+
+  private func regularPermissionCard(
+    for permission: PermissionType,
+    status: PermissionStatus
+  ) -> some View {
+    VStack(alignment: .leading, spacing: 8) {
       HStack {
         Image(systemName: permission.systemIconName)
           .imageScale(.large)
@@ -314,7 +478,6 @@ struct DashboardView: View {
       RoundedRectangle(cornerRadius: 18, style: .continuous)
         .stroke(statusColor(status).opacity(0.4), lineWidth: 1)
     )
-    .speakTooltip(permission.guidanceText)
   }
 
   private func request(_ permission: PermissionType) async {
@@ -353,7 +516,15 @@ struct DashboardView: View {
   private var statisticsSection: some View {
     let stats = history.statistics
     return DashboardCard(title: "Insights", systemImage: "chart.xyaxis.line", tint: Color.brandAccentDeep) {
-      LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 16)], spacing: 16) {
+      LazyVGrid(
+        columns: [
+          GridItem(
+            .adaptive(minimum: density.isCompact ? 92 : 160),
+            spacing: density.groupSpacing
+          )
+        ],
+        spacing: density.groupSpacing
+      ) {
         statCard(title: "Sessions", value: "\(stats.totalSessions)")
         statCard(
           title: "Recording Time",
@@ -367,17 +538,19 @@ struct DashboardView: View {
   }
 
   private func statCard(title: String, value: String) -> some View {
-    VStack(alignment: .leading, spacing: 6) {
+    VStack(alignment: .leading, spacing: density.isCompact ? 1 : 6) {
       Text(title)
-        .font(.caption)
+        .font(density.isCompact ? .caption2 : .caption)
         .foregroundStyle(.secondary)
+        .lineLimit(1)
       Text(value)
-        .font(.title3.bold())
+        .font(density.isCompact ? .caption.bold() : .title3.bold())
+        .lineLimit(1)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
-    .padding(16)
+    .padding(density.isCompact ? 5 : 16)
     .background(
-      RoundedRectangle(cornerRadius: 20, style: .continuous)
+      RoundedRectangle(cornerRadius: density.isCompact ? 7 : 20, style: .continuous)
         .fill(Color.accentColor.opacity(0.08))
     )
   }
@@ -411,7 +584,7 @@ struct DashboardView: View {
   }
 
   private func recentItemView(_ item: HistoryItem) -> some View {
-    VStack(alignment: .leading, spacing: 8) {
+    VStack(alignment: .leading, spacing: density.isCompact ? 3 : 8) {
       HStack {
         Text(item.createdAt, style: .date)
         Text(item.createdAt, style: .time)
@@ -419,12 +592,12 @@ struct DashboardView: View {
         Spacer()
         Text(formattedDuration(item.recordingDuration))
       }
-      .font(.headline)
+      .font(density.isCompact ? .caption.weight(.semibold) : .headline)
 
       if let postProcessed = item.postProcessedTranscription ?? item.rawTranscription {
         Text(postProcessed)
-          .lineLimit(4)
-          .font(.body)
+          .lineLimit(density.isCompact ? 2 : 4)
+          .font(density.isCompact ? .caption : .body)
       }
 
       HStack {
@@ -435,12 +608,12 @@ struct DashboardView: View {
             .font(.subheadline)
         }
       }
-      .font(.subheadline)
+      .font(density.isCompact ? .caption2 : .subheadline)
       .foregroundStyle(.secondary)
     }
-    .padding()
+    .padding(density.isCompact ? 5 : 16)
     .background(
-      RoundedRectangle(cornerRadius: 20, style: .continuous)
+      RoundedRectangle(cornerRadius: density.isCompact ? 7 : 20, style: .continuous)
         .fill(.thinMaterial)
     )
   }
@@ -476,37 +649,37 @@ struct DashboardView: View {
 
   private var ttsUsageChartSection: some View {
     DashboardCard(title: "Voice Output Usage", systemImage: "speaker.wave.3", tint: Color.brandLagoonDeep) {
-      VStack(alignment: .leading, spacing: 12) {
+      VStack(alignment: .leading, spacing: density.inlineSpacing) {
         let totalCharacters = environment.tts.totalCharactersThisMonth()
         let totalCost = environment.tts.totalCostThisMonth()
 
         HStack {
           VStack(alignment: .leading, spacing: 4) {
             Text("Characters This Month")
-              .font(.caption)
+              .font(density.isCompact ? .caption2 : .caption)
               .foregroundStyle(.secondary)
             Text("\(totalCharacters)")
-              .font(.title2.bold())
+              .font(density.isCompact ? .caption.bold() : .title2.bold())
               .foregroundStyle(Color.brandLagoonDeep)
           }
           Spacer()
           VStack(alignment: .trailing, spacing: 4) {
             Text("Total Cost")
-              .font(.caption)
+              .font(density.isCompact ? .caption2 : .caption)
               .foregroundStyle(.secondary)
             Text("$\(totalCost, format: .number.precision(.fractionLength(2)))")
-              .font(.title2.bold())
+              .font(density.isCompact ? .caption.bold() : .title2.bold())
               .foregroundStyle(Color.brandLagoonDeep)
           }
         }
 
-        if totalCharacters > 0 {
+        if totalCharacters > 0, !density.isCompact {
           Text(
             "\(totalCharacters) characters synthesized this month"
           )
           .font(.caption)
           .foregroundStyle(.secondary)
-        } else {
+        } else if !density.isCompact {
           Text("No voice output generated yet this month")
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -523,27 +696,27 @@ struct DashboardView: View {
       let usage = environment.tts.usageByProvider(since: monthAgo)
 
       if usage.isEmpty {
-        VStack(spacing: 8) {
+        VStack(spacing: density.inlineSpacing) {
           Image(systemName: "speaker.wave.2.circle")
-            .font(.largeTitle)
+            .font(density.isCompact ? .title3 : .largeTitle)
             .foregroundStyle(.secondary)
           Text("No TTS usage yet")
-            .font(.subheadline)
+            .font(density.isCompact ? .caption : .subheadline)
             .foregroundStyle(.secondary)
         }
-        .frame(maxWidth: .infinity, minHeight: 120)
+        .frame(maxWidth: .infinity, minHeight: density.isCompact ? 44 : 120)
       } else {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: density.inlineSpacing) {
           ForEach(usage.sorted(by: { $0.value > $1.value }), id: \.key) { provider, count in
             HStack {
               Circle()
                 .fill(providerColor(provider))
-                .frame(width: 12, height: 12)
+                .frame(width: density.isCompact ? 7 : 12, height: density.isCompact ? 7 : 12)
               Text(provider.displayName)
-                .font(.subheadline)
+                .font(density.isCompact ? .caption : .subheadline)
               Spacer()
               Text("\(count) chars")
-                .font(.subheadline.monospacedDigit())
+                .font(density.isCompact ? .caption2.monospacedDigit() : .subheadline.monospacedDigit())
                 .foregroundStyle(.secondary)
             }
           }
@@ -571,6 +744,7 @@ private func formattedModels(_ identifiers: [String]) -> String {
 }
 
 private struct DashboardCard<Content: View>: View {
+  @Environment(\.appVisualDensity) private var density
   let title: String
   let systemImage: String
   let tint: Color
@@ -584,31 +758,46 @@ private struct DashboardCard<Content: View>: View {
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 18) {
-      HStack(spacing: 14) {
-        ZStack {
-          RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .fill(tint.opacity(0.15))
-            .frame(width: 44, height: 44)
+    VStack(alignment: .leading, spacing: density.cardContentSpacing) {
+      HStack(spacing: density.isCompact ? density.inlineSpacing : 14) {
+        if density.isCompact {
           Image(systemName: systemImage)
             .foregroundStyle(tint)
-            .font(.system(size: 20, weight: .semibold))
+            .font(.caption.weight(.semibold))
+            .frame(width: 16)
+        } else {
+          ZStack {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+              .fill(tint.opacity(0.15))
+              .frame(width: 44, height: 44)
+            Image(systemName: systemImage)
+              .foregroundStyle(tint)
+              .font(.system(size: 20, weight: .semibold))
+          }
         }
         Text(title)
-          .font(.headline)
+          .font(density.isCompact ? .caption.weight(.semibold) : .headline)
         Spacer(minLength: 0)
       }
 
       content
     }
-    .padding(24)
+    .padding(density.cardPadding)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+    .background(
+      .ultraThinMaterial,
+      in: RoundedRectangle(cornerRadius: density.cardCornerRadius, style: .continuous)
+    )
     .overlay(
-      RoundedRectangle(cornerRadius: 28, style: .continuous)
+      RoundedRectangle(cornerRadius: density.cardCornerRadius, style: .continuous)
         .stroke(tint.opacity(0.12), lineWidth: 1)
     )
-    .shadow(color: tint.opacity(0.08), radius: 18, x: 0, y: 12)
+    .shadow(
+      color: tint.opacity(density.isCompact ? 0 : 0.08),
+      radius: density.isCompact ? 0 : 18,
+      x: 0,
+      y: density.isCompact ? 0 : 12
+    )
   }
 }
 

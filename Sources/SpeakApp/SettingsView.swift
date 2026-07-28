@@ -334,7 +334,71 @@ struct SettingsView: View {
     return "Control which system-generated instructions are added to the downloaded local model prompt."
   }
 
+  @ViewBuilder
   private var overviewHeader: some View {
+    if settings.visualDensity.isCompact {
+      compactOverviewHeader
+    } else {
+      normalOverviewHeader
+    }
+  }
+
+  private var compactOverviewHeader: some View {
+    HStack(spacing: settings.visualDensity.groupSpacing) {
+      Label("Settings", systemImage: "slider.horizontal.3")
+        .font(.subheadline.bold())
+        .lineLimit(1)
+
+      Spacer(minLength: 4)
+
+      compactOverviewMetric(
+        title: "Mode",
+        value: overviewModeValue,
+        systemImage: "waveform"
+      )
+      compactOverviewMetric(
+        title: settings.isActiveAssemblyAILiveModel ? "Pre-processing" : "Post-processing",
+        value: overviewPostProcessingValue,
+        systemImage: "wand.and.stars"
+      )
+      compactOverviewMetric(
+        title: "Output",
+        value: settings.textOutputMethod.displayName,
+        systemImage: "text.alignleft"
+      )
+      compactOverviewMetric(
+        title: "OpenRouter Key",
+        value: isOpenRouterKeyStored ? "Stored" : "Missing",
+        systemImage: isOpenRouterKeyStored ? "checkmark.seal.fill" : "key.fill"
+      )
+    }
+    .padding(settings.visualDensity.cardPadding)
+    .foregroundStyle(.white)
+    .background(
+      LinearGradient(
+        colors: [Color.orange, Color.orange.opacity(0.72)],
+        startPoint: .leading,
+        endPoint: .trailing
+      ),
+      in: RoundedRectangle(
+        cornerRadius: settings.visualDensity.cardCornerRadius,
+        style: .continuous
+      )
+    )
+  }
+
+  private func compactOverviewMetric(
+    title: String,
+    value: String,
+    systemImage: String
+  ) -> some View {
+    Label(value, systemImage: systemImage)
+      .font(.caption2.weight(.semibold))
+      .lineLimit(1)
+      .accessibilityLabel("\(title): \(value)")
+  }
+
+  private var normalOverviewHeader: some View {
     VStack(alignment: .leading, spacing: 16) {
       HStack(alignment: .center) {
         Image(systemName: "sparkles.rectangle.stack")
@@ -731,13 +795,14 @@ struct SettingsView: View {
   var body: some View {
     let density = settings.visualDensity
     ScrollView {
-      VStack(alignment: .leading, spacing: density == .compact ? 16 : 28) {
+      VStack(alignment: .leading, spacing: density.isCompact ? density.sectionSpacing : 28) {
         overviewHeader
         tabContent
       }
       .padding(density.pagePadding)
       .frame(maxWidth: 1100, alignment: .center)
     }
+    .controlSize(density.isCompact ? .small : .regular)
     .background(
       LinearGradient(
         colors: [Color.brandAccentWarm.opacity(0.08), .clear], startPoint: .top, endPoint: .center))
@@ -792,7 +857,7 @@ struct SettingsView: View {
   }
 
   private var generalSettings: some View {
-    LazyVStack(spacing: 20) {
+    LazyVStack(spacing: settings.visualDensity.sectionSpacing) {
       SettingsCard(title: "Appearance", systemImage: "paintpalette", tint: Color.brandAccent) {
         VStack(alignment: .leading, spacing: 12) {
           Text("Choose how Speak looks across light, dark, or system themes.")
@@ -1285,7 +1350,7 @@ struct SettingsView: View {
   }
 
   private var transcriptionSettings: some View {
-    LazyVStack(spacing: 20) {
+    LazyVStack(spacing: settings.visualDensity.sectionSpacing) {
       SettingsCard(title: "Transcription mode", systemImage: "waveform", tint: Color.teal) {
         VStack(alignment: .leading, spacing: 12) {
           Picker("Where transcription runs", selection: transcriptionLocationBinding) {
@@ -2650,7 +2715,7 @@ struct SettingsView: View {
   }
 
   private var postProcessingSettings: some View {
-    LazyVStack(spacing: 20) {
+    LazyVStack(spacing: settings.visualDensity.sectionSpacing) {
       if settings.isActiveAssemblyAILiveModel {
         preprocessingSettings
       } else {
@@ -2929,7 +2994,7 @@ struct SettingsView: View {
   }
 
   private var voiceOutputSettings: some View {
-    LazyVStack(spacing: 20) {
+    LazyVStack(spacing: settings.visualDensity.sectionSpacing) {
       SettingsCard(title: "Default Voice", systemImage: "speaker.wave.3", tint: Color.brandLagoonDeep) {
         VStack(alignment: .leading, spacing: 12) {
           VStack(alignment: .leading, spacing: 8) {
@@ -4445,14 +4510,14 @@ struct SettingsView: View {
   }
 
   private var keyboardSettings: some View {
-    VStack(spacing: 20) {
+    VStack(spacing: settings.visualDensity.sectionSpacing) {
       hotKeySettings
       ShortcutsSettingsView(shortcutManager: environment.shortcuts)
     }
   }
 
   private var hotKeySettings: some View {
-    LazyVStack(spacing: 20) {
+    LazyVStack(spacing: settings.visualDensity.sectionSpacing) {
       SettingsCard(title: "Trigger Key", systemImage: "keyboard", tint: Color.blue) {
         VStack(alignment: .leading, spacing: 12) {
           Text("Choose which key triggers recording.")
@@ -4537,7 +4602,7 @@ struct SettingsView: View {
   }
 
   private var permissionsSettings: some View {
-    LazyVStack(spacing: 20) {
+    LazyVStack(spacing: settings.visualDensity.sectionSpacing) {
       SettingsCard(title: "System permissions", systemImage: "lock.shield", tint: Color.red) {
         VStack(alignment: .leading, spacing: 12) {
           ForEach(PermissionType.availablePermissions(for: DistributionChannel.current)) { permission in
@@ -4640,7 +4705,7 @@ struct SettingsView: View {
   }
 
   private var aboutSettings: some View {
-    LazyVStack(spacing: 20) {
+    LazyVStack(spacing: settings.visualDensity.sectionSpacing) {
       SettingsCard(title: "Just Speak to It", systemImage: "info.circle", tint: Color.blue) {
         VStack(alignment: .leading, spacing: 16) {
           HStack(alignment: .top, spacing: 16) {
@@ -5119,28 +5184,31 @@ private struct LocaleOption: Identifiable, Equatable {
 }
 
 private struct SettingsInlineInfo: View {
+  @Environment(\.appVisualDensity) private var density
   let title: String
   let message: String
   let systemImage: String
 
   var body: some View {
-    HStack(alignment: .top, spacing: 10) {
+    HStack(alignment: .top, spacing: density.isCompact ? density.inlineSpacing : 10) {
       Image(systemName: systemImage)
         .foregroundStyle(Color.brandLagoon)
-        .frame(width: 20)
-      VStack(alignment: .leading, spacing: 3) {
+        .frame(width: density.isCompact ? 14 : 20)
+      VStack(alignment: .leading, spacing: density.isCompact ? 1 : 3) {
         Text(title)
           .font(.caption.weight(.semibold))
         Text(message)
-          .font(.caption)
+          .font(density.isCompact ? .caption2 : .caption)
           .foregroundStyle(.secondary)
+          .lineLimit(density.isCompact ? 1 : nil)
       }
     }
-    .padding(12)
+    .padding(density.isCompact ? 6 : 12)
     .background(
-      RoundedRectangle(cornerRadius: 12, style: .continuous)
+      RoundedRectangle(cornerRadius: density.isCompact ? 7 : 12, style: .continuous)
         .fill(Color.brandLagoon.opacity(0.08))
     )
+    .speakTooltip(message)
   }
 }
 
@@ -5160,18 +5228,25 @@ private struct SettingsCard<Content: View>: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: density.cardContentSpacing) {
-      HStack(spacing: 14) {
-        ZStack {
-          RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .fill(tint.opacity(0.15))
-            .frame(width: 44, height: 44)
+      HStack(spacing: density.isCompact ? density.inlineSpacing : 14) {
+        if density.isCompact {
           Image(systemName: systemImage)
             .foregroundStyle(tint)
-            .font(.system(size: 20, weight: .semibold))
+            .font(.caption.weight(.semibold))
+            .frame(width: 16)
+        } else {
+          ZStack {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+              .fill(tint.opacity(0.15))
+              .frame(width: 44, height: 44)
+            Image(systemName: systemImage)
+              .foregroundStyle(tint)
+              .font(.system(size: 20, weight: .semibold))
+          }
         }
 
         Text(title)
-          .font(.headline)
+          .font(density.isCompact ? .caption.weight(.semibold) : .headline)
           .foregroundStyle(.primary)
         Spacer()
       }
@@ -5180,13 +5255,27 @@ private struct SettingsCard<Content: View>: View {
     }
     .padding(density.cardPadding)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+    .background(
+      .ultraThinMaterial,
+      in: RoundedRectangle(
+        cornerRadius: density.isCompact ? density.cardCornerRadius : 26,
+        style: .continuous
+      )
+    )
     .overlay(
-      RoundedRectangle(cornerRadius: 26, style: .continuous)
+      RoundedRectangle(
+        cornerRadius: density.isCompact ? density.cardCornerRadius : 26,
+        style: .continuous
+      )
         .stroke(tint.opacity(0.12), lineWidth: 1)
         .allowsHitTesting(false)
     )
-    .shadow(color: tint.opacity(0.08), radius: 18, x: 0, y: 12)
+    .shadow(
+      color: tint.opacity(density.isCompact ? 0 : 0.08),
+      radius: density.isCompact ? 0 : 18,
+      x: 0,
+      y: density.isCompact ? 0 : 12
+    )
   }
 }
 

@@ -660,6 +660,7 @@ public struct SettingsView: View {
     @StateObject private var settings = AppSettings.shared
     @Environment(\.openURL) private var openURL
     @Environment(\.openClawEnabled) private var openClawEnabled
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var showingAPIKeys = false
     @State private var missingTranscriptionAPIKeyAlert: IOSMissingTranscriptionAPIKeyAlert?
 
@@ -675,9 +676,14 @@ public struct SettingsView: View {
                 }
                 .pickerStyle(.segmented)
 
-                Text("Compact reduces whitespace across lists, forms, and cards while keeping controls easy to tap.")
+                if !settings.visualDensity.isCompact {
+                    Text(
+                        "Compact restructures screens around inline controls, shorter cards, "
+                            + "and grouped status rows while keeping controls easy to tap."
+                    )
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                }
             }
 
             Section("Transcription") {
@@ -710,9 +716,11 @@ public struct SettingsView: View {
                     .pickerStyle(.navigationLink)
                     .accessibilityIdentifier("appleOnDeviceModelPicker")
 
-                    Text("Uses Apple's built-in speech engine. Audio stays on this device.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if !settings.visualDensity.isCompact {
+                        Text("Uses Apple's built-in speech engine. Audio stays on this device.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 } else {
                     Picker("Remote Mode", selection: remoteTranscriptionModeBinding) {
                         ForEach(IOSRemoteTranscriptionMode.allCases) { mode in
@@ -772,11 +780,13 @@ public struct SettingsView: View {
                         .accessibilityIdentifier("remoteBatchModelPicker")
                     }
 
-                    Text(settings.transcriptionMode == .streaming
-                        ? "Text appears while audio is streamed to the selected provider."
-                        : "Audio is uploaded after recording for a more complete transcript.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if !settings.visualDensity.isCompact {
+                        Text(settings.transcriptionMode == .streaming
+                            ? "Text appears while audio is streamed to the selected provider."
+                            : "Audio is uploaded after recording for a more complete transcript.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 if transcriptionLocationBinding.wrappedValue == .remote,
@@ -818,7 +828,7 @@ public struct SettingsView: View {
                     Label("Auto-Start Recording", systemImage: "mic.badge.plus")
                 }
 
-                if settings.autoStartRecording {
+                if settings.autoStartRecording && !settings.visualDensity.isCompact {
                     Text("Recording starts automatically when you open the app.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -828,7 +838,7 @@ public struct SettingsView: View {
                     Label("Live Activities", systemImage: "platter.filled.bottom.iphone")
                 }
 
-                if settings.liveActivitiesEnabled {
+                if settings.liveActivitiesEnabled && !settings.visualDensity.isCompact {
                     Text("Shows transcription progress on Lock Screen and Dynamic Island.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -849,9 +859,14 @@ public struct SettingsView: View {
                 }
                 .accessibilityIdentifier("hardwareTriggerSettingsLink")
 
-                Text("Trigger transcription from the Action Button, Siri, Lock Screen, Control Center, or Back Tap.")
+                if !settings.visualDensity.isCompact {
+                    Text(
+                        "Trigger transcription from the Action Button, Siri, Lock Screen, "
+                            + "Control Center, or Back Tap."
+                    )
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                }
             }
 
             Section("Post-Processing") {
@@ -859,7 +874,7 @@ public struct SettingsView: View {
                     Label("Auto-Polish After Recording", systemImage: "wand.and.stars")
                 }
 
-                if settings.autoPostProcess {
+                if settings.autoPostProcess && !settings.visualDensity.isCompact {
                     Text("Automatically opens polish view after each recording.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -885,46 +900,39 @@ public struct SettingsView: View {
             }
 
             Section("API Keys") {
-                HStack {
-                    Label("Deepgram", systemImage: "waveform")
-                        .accessibilityLabel("Deepgram API Key")
-                    Spacer()
-                    Text(settings.hasDeepgramKey ? "Stored" : "Missing")
-                        .foregroundStyle(settings.hasDeepgramKey ? .green : .secondary)
-                }
-                .accessibilityElement(children: .combine)
+                if usesInlineDensityLayout {
+                    NavigationLink {
+                        APIKeysView(settings: settings)
+                    } label: {
+                        compactAPIKeySummary
+                    }
+                } else {
+                    apiKeyStatusRow(
+                        name: "Deepgram",
+                        systemImage: "waveform",
+                        isStored: settings.hasDeepgramKey
+                    )
+                    apiKeyStatusRow(
+                        name: "ElevenLabs",
+                        systemImage: "mic.and.signal.meter",
+                        isStored: settings.hasElevenLabsKey
+                    )
+                    apiKeyStatusRow(
+                        name: "OpenRouter",
+                        systemImage: "network",
+                        isStored: settings.hasOpenRouterKey
+                    )
+                    apiKeyStatusRow(
+                        name: "OpenAI",
+                        systemImage: "brain.head.profile",
+                        isStored: settings.hasOpenAIKey
+                    )
 
-                HStack {
-                    Label("ElevenLabs", systemImage: "mic.and.signal.meter")
-                        .accessibilityLabel("ElevenLabs API Key")
-                    Spacer()
-                    Text(settings.hasElevenLabsKey ? "Stored" : "Missing")
-                        .foregroundStyle(settings.hasElevenLabsKey ? .green : .secondary)
-                }
-                .accessibilityElement(children: .combine)
-
-                HStack {
-                    Label("OpenRouter", systemImage: "network")
-                        .accessibilityLabel("OpenRouter API Key")
-                    Spacer()
-                    Text(settings.hasOpenRouterKey ? "Stored" : "Missing")
-                        .foregroundStyle(settings.hasOpenRouterKey ? .green : .secondary)
-                }
-                .accessibilityElement(children: .combine)
-
-                HStack {
-                    Label("OpenAI", systemImage: "brain.head.profile")
-                        .accessibilityLabel("OpenAI API Key")
-                    Spacer()
-                    Text(settings.hasOpenAIKey ? "Stored" : "Missing")
-                        .foregroundStyle(settings.hasOpenAIKey ? .green : .secondary)
-                }
-                .accessibilityElement(children: .combine)
-
-                NavigationLink {
-                    APIKeysView(settings: settings)
-                } label: {
-                    Label("Manage Keys", systemImage: "key.viewfinder")
+                    NavigationLink {
+                        APIKeysView(settings: settings)
+                    } label: {
+                        Label("Manage Keys", systemImage: "key.viewfinder")
+                    }
                 }
             }
 
@@ -939,37 +947,11 @@ public struct SettingsView: View {
                     iCloudCloudKitAvailable: HistorySyncEngine.shared.state.isCloudAvailable
                 )
 
-                HStack {
-                    Label("Preferred Sync", systemImage: "arrow.triangle.branch")
-                    Spacer()
-                    Text(syncStatus.preferredBackend.displayName)
-                        .foregroundStyle(syncStatus.preferredBackend != .localOnly ? .green : .secondary)
+                if usesInlineDensityLayout {
+                    compactSyncStatus(syncStatus)
+                } else {
+                    syncStatusRows(syncStatus)
                 }
-                .accessibilityElement(children: .combine)
-
-                HStack {
-                    Label("iCloud Keychain", systemImage: "key.icloud")
-                    Spacer()
-                    Text(syncStatus.iCloudKeychainAvailable ? "Available" : "Local only")
-                        .foregroundStyle(syncStatus.iCloudKeychainAvailable ? .green : .secondary)
-                }
-                .accessibilityElement(children: .combine)
-
-                HStack {
-                    Label("iCloud Settings", systemImage: "icloud")
-                    Spacer()
-                    Text(syncStatus.iCloudKVStoreAvailable ? "Available" : "Local only")
-                        .foregroundStyle(syncStatus.iCloudKVStoreAvailable ? .green : .secondary)
-                }
-                .accessibilityElement(children: .combine)
-
-                HStack {
-                    Label("Bonjour Transport", systemImage: "network")
-                    Spacer()
-                    Text(syncStatus.transportAvailable ? "Ready" : "Unavailable")
-                        .foregroundStyle(syncStatus.transportAvailable ? .green : .secondary)
-                }
-                .accessibilityElement(children: .combine)
 
                 if let lastSync = syncStatus.lastSyncDate {
                     LabeledContent("Last Sync") {
@@ -991,11 +973,13 @@ public struct SettingsView: View {
                     Label("Import from QR Code", systemImage: "qrcode.viewfinder")
                 }
 
-                Text("Just Speak to It uses iCloud for settings and history when available. "
-                    + "If iCloud is unavailable, Bonjour Transport can send sessions to a paired Mac "
-                    + "on your local network; QR transfer remains available for manual setup.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if !settings.visualDensity.isCompact {
+                    Text("Just Speak to It uses iCloud for settings and history when available. "
+                        + "If iCloud is unavailable, Bonjour Transport can send sessions to a paired Mac "
+                        + "on your local network; QR transfer remains available for manual setup.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             if openClawEnabled {
@@ -1021,12 +1005,14 @@ public struct SettingsView: View {
                     Label("Saved Recordings", systemImage: "waveform.circle")
                 }
 
-                Text(
-                    "Audio is saved locally during transcription so you can "
-                        + "replay or re-transcribe if connectivity was lost."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                if !settings.visualDensity.isCompact {
+                    Text(
+                        "Audio is saved locally during transcription so you can "
+                            + "replay or re-transcribe if connectivity was lost."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
             }
 
             Section("Send to Mac") {
@@ -1051,7 +1037,7 @@ public struct SettingsView: View {
                     Label("Debug Logging", systemImage: "ant")
                 }
 
-                if SpeakLogger.isDebugMode {
+                if SpeakLogger.isDebugMode && !settings.visualDensity.isCompact {
                     Text("Debug mode logs additional details for troubleshooting.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -1059,28 +1045,32 @@ public struct SettingsView: View {
             }
 
             Section("About") {
-                LabeledContent("Version") {
-                    let ver = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
-                    let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
-                    Text("\(ver) (\(build))")
-                        .foregroundStyle(.secondary)
-                }
+                if usesInlineDensityLayout {
+                    compactBuildSummary
+                } else {
+                    LabeledContent("Version") {
+                        Text("\(appVersion) (\(appBuild))")
+                            .foregroundStyle(.secondary)
+                    }
 
-                LabeledContent("Commit") {
-                    Text(BuildInfo.gitCommitShort)
-                        .foregroundStyle(.secondary)
-                        .font(.system(.body, design: .monospaced))
-                }
+                    LabeledContent("Commit") {
+                        Text(BuildInfo.gitCommitShort)
+                            .foregroundStyle(.secondary)
+                            .font(.system(.body, design: .monospaced))
+                    }
 
-                LabeledContent("SpeakCore") {
-                    Text(SpeakCore.version)
-                        .foregroundStyle(.secondary)
+                    LabeledContent("SpeakCore") {
+                        Text(SpeakCore.version)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
         }
         .environment(\.defaultMinListRowHeight, settings.visualDensity.minimumListRowHeight)
         .listSectionSpacing(settings.visualDensity.listSectionSpacing)
         .navigationTitle("Settings")
+        .navigationBarTitleDisplayMode(usesInlineDensityLayout ? .inline : .automatic)
+        .controlSize(settings.visualDensity.isCompact ? .small : .regular)
         .navigationDestination(isPresented: $showingAPIKeys) {
             APIKeysView(settings: settings)
         }
@@ -1100,6 +1090,144 @@ public struct SettingsView: View {
 
     private var postProcessingModelName: String {
         ModelCatalog.friendlyName(for: settings.postProcessingModel)
+    }
+
+    private var usesInlineDensityLayout: Bool {
+        settings.visualDensity.prefersInlineLayout(dynamicTypeSize: dynamicTypeSize)
+    }
+
+    private var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+    }
+
+    private var appBuild: String {
+        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+    }
+
+    private var compactBuildSummary: some View {
+        HStack(spacing: settings.visualDensity.inlineSpacing) {
+            Label("\(appVersion) (\(appBuild))", systemImage: "app.badge")
+            Spacer()
+            Text(BuildInfo.gitCommitShort)
+                .font(.caption.monospaced())
+            Text("Core \(SpeakCore.version)")
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var compactAPIKeySummary: some View {
+        HStack(spacing: settings.visualDensity.inlineSpacing) {
+            Label("Manage Keys", systemImage: "key.viewfinder")
+            Spacer()
+            Text("\(storedAPIKeyCount)/4")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(storedAPIKeyCount == 4 ? .green : .secondary)
+        }
+        .accessibilityLabel("\(storedAPIKeyCount) of 4 API keys stored. Manage keys.")
+    }
+
+    private var storedAPIKeyCount: Int {
+        [
+            settings.hasDeepgramKey,
+            settings.hasElevenLabsKey,
+            settings.hasOpenRouterKey,
+            settings.hasOpenAIKey
+        ]
+        .filter { $0 }
+        .count
+    }
+
+    private func apiKeyStatusRow(name: String, systemImage: String, isStored: Bool) -> some View {
+        HStack {
+            Label(name, systemImage: systemImage)
+                .accessibilityLabel("\(name) API Key")
+            Spacer()
+            Text(isStored ? "Stored" : "Missing")
+                .foregroundStyle(isStored ? .green : .secondary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func compactSyncStatus(_ status: SyncStatus) -> some View {
+        HStack(spacing: settings.visualDensity.inlineSpacing) {
+            Label(status.preferredBackend.displayName, systemImage: "arrow.triangle.branch")
+                .lineLimit(1)
+            Spacer()
+            syncAvailabilityIcon(
+                "key.icloud",
+                available: status.iCloudKeychainAvailable,
+                label: "iCloud Keychain"
+            )
+            syncAvailabilityIcon(
+                "icloud",
+                available: status.iCloudKVStoreAvailable,
+                label: "iCloud Settings"
+            )
+            syncAvailabilityIcon(
+                "network",
+                available: status.transportAvailable,
+                label: "Bonjour Transport"
+            )
+        }
+        .font(.caption)
+    }
+
+    private func syncAvailabilityIcon(
+        _ systemImage: String,
+        available: Bool,
+        label: String
+    ) -> some View {
+        Image(systemName: available ? systemImage : "xmark.circle")
+            .foregroundStyle(available ? .green : .secondary)
+            .accessibilityLabel("\(label): \(available ? "available" : "unavailable")")
+    }
+
+    private func syncStatusRows(_ status: SyncStatus) -> some View {
+        Group {
+            HStack {
+                Label("Preferred Sync", systemImage: "arrow.triangle.branch")
+                Spacer()
+                Text(status.preferredBackend.displayName)
+                    .foregroundStyle(status.preferredBackend != .localOnly ? .green : .secondary)
+            }
+            .accessibilityElement(children: .combine)
+
+            syncStatusRow(
+                name: "iCloud Keychain",
+                systemImage: "key.icloud",
+                value: status.iCloudKeychainAvailable ? "Available" : "Local only",
+                isAvailable: status.iCloudKeychainAvailable
+            )
+            syncStatusRow(
+                name: "iCloud Settings",
+                systemImage: "icloud",
+                value: status.iCloudKVStoreAvailable ? "Available" : "Local only",
+                isAvailable: status.iCloudKVStoreAvailable
+            )
+            syncStatusRow(
+                name: "Bonjour Transport",
+                systemImage: "network",
+                value: status.transportAvailable ? "Ready" : "Unavailable",
+                isAvailable: status.transportAvailable
+            )
+        }
+    }
+
+    private func syncStatusRow(
+        name: String,
+        systemImage: String,
+        value: String,
+        isAvailable: Bool
+    ) -> some View {
+        HStack {
+            Label(name, systemImage: systemImage)
+            Spacer()
+            Text(value)
+                .foregroundStyle(isAvailable ? .green : .secondary)
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -1322,6 +1450,7 @@ struct PostProcessingSettingsView: View {
 // swiftlint:disable:next type_body_length
 struct APIKeysView: View {
     @ObservedObject var settings: AppSettings
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var deepgramKey = ""
     @State private var openRouterKey = ""
     @State private var openAIKey = ""
@@ -1404,6 +1533,12 @@ struct APIKeysView: View {
         .environment(\.defaultMinListRowHeight, settings.visualDensity.minimumListRowHeight)
         .listSectionSpacing(settings.visualDensity.listSectionSpacing)
         .navigationTitle("API Keys")
+        .navigationBarTitleDisplayMode(
+            settings.visualDensity.prefersInlineLayout(dynamicTypeSize: dynamicTypeSize)
+                ? .inline
+                : .automatic
+        )
+        .controlSize(settings.visualDensity.isCompact ? .small : .regular)
         .searchable(text: $searchText, prompt: "Provider or use")
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {

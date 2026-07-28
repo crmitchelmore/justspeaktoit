@@ -56,6 +56,7 @@ public struct RecordingsView: View {
         }
         .navigationTitle("Recordings")
         .environment(\.defaultMinListRowHeight, density.minimumListRowHeight)
+        .listSectionSpacing(density.listSectionSpacing)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { reload() }
         .onDisappear { stopPlayback() }
@@ -144,13 +145,14 @@ public struct RecordingsView: View {
 
 struct RecordingRow: View {
     @Environment(\.appVisualDensity) private var density
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let recording: RecordingInfo
     let isPlaying: Bool
     let onPlay: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: density.isCompact ? 6 : 12) {
             // Play/Stop button
             Button(action: onPlay) {
                 Image(
@@ -158,7 +160,7 @@ struct RecordingRow: View {
                         ? "stop.circle.fill"
                         : "play.circle.fill"
                 )
-                .font(.system(size: 32))
+                .font(.system(size: density.isCompact ? 24 : 32))
                 .foregroundStyle(
                     isPlaying ? .red : Color.accentColor
                 )
@@ -169,33 +171,56 @@ struct RecordingRow: View {
                 isPlaying ? "Stop playback" : "Play recording"
             )
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(recording.startedAt, style: .date)
-                    .font(.subheadline.weight(.medium))
-
-                HStack(spacing: 8) {
+            if usesInlineDensityLayout {
+                HStack(spacing: 4) {
+                    Text(recording.startedAt, format: .dateTime.month(.abbreviated).day())
+                        .fontWeight(.medium)
+                        .foregroundStyle(.primary)
                     Text(recording.startedAt, style: .time)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
                     Text("·")
                         .foregroundStyle(.tertiary)
-
                     Text(formattedDuration(recording.duration))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
                     Text("·")
                         .foregroundStyle(.tertiary)
-
                     Text(
                         ByteCountFormatter.string(
                             fromByteCount: recording.fileSize,
                             countStyle: .file
                         )
                     )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(recording.startedAt, style: .date)
+                        .font(.subheadline.weight(.medium))
+
+                    HStack(spacing: 8) {
+                        Text(recording.startedAt, style: .time)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Text("·")
+                            .foregroundStyle(.tertiary)
+
+                        Text(formattedDuration(recording.duration))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Text("·")
+                            .foregroundStyle(.tertiary)
+
+                        Text(
+                            ByteCountFormatter.string(
+                                fromByteCount: recording.fileSize,
+                                countStyle: .file
+                            )
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
                 }
             }
 
@@ -207,6 +232,11 @@ struct RecordingRow: View {
             }
         }
         .padding(.vertical, density.listRowVerticalPadding)
+        .frame(minHeight: density.minimumListRowHeight)
+    }
+
+    private var usesInlineDensityLayout: Bool {
+        density.prefersInlineLayout(dynamicTypeSize: dynamicTypeSize)
     }
 }
 

@@ -355,6 +355,7 @@ public struct ContentView: View {
     /// badge History when a recording landed while the app was away.
     @ObservedObject private var backgroundService = TranscriptionRecordingService.shared
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var showHistoryBadge = false
     /// Completion time of the background transcript we last surfaced, so we only
     /// surface a given session once and never clobber the user's in-app edits.
@@ -371,25 +372,25 @@ public struct ContentView: View {
                         ScrollView {
                             VStack(
                                 alignment: .leading,
-                                spacing: settings.visualDensity == .compact ? 8 : 12
+                                spacing: density.isCompact ? density.cardContentSpacing : 12
                             ) {
                                 if currentText.isEmpty {
                                     Text(backgroundService.isRunning
                                          ? "Recording via Action Button…"
                                          : "Tap the microphone to start transcription")
-                                        .font(.title3)
+                                        .font(density.isCompact ? .subheadline : .title3)
                                         .foregroundStyle(.secondary)
                                         .frame(maxWidth: .infinity, alignment: .center)
-                                        .padding(.top, 100)
+                                        .padding(.top, density.isCompact ? 24 : 100)
                                 } else {
                                     Text(currentText)
-                                        .font(.title3)
+                                        .font(density.isCompact ? .body : .title3)
                                         .foregroundStyle(.primary)
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                         .textSelection(.enabled)
                                 }
                             }
-                            .padding(settings.visualDensity == .compact ? 12 : 16)
+                            .padding(density.isCompact ? density.pagePadding : 16)
                             .id("transcript")
                         }
                         .onChange(of: coordinator.partialText) { _, _ in
@@ -408,7 +409,7 @@ public struct ContentView: View {
                         }
                     }
 
-                    Spacer(minLength: 120) // Space for floating controls
+                    Spacer(minLength: density.isCompact ? 72 : 120)
                 }
 
                 // Controls layer - floating glass controls
@@ -417,11 +418,12 @@ public struct ContentView: View {
 
                     // Floating control cluster with Liquid Glass
                     floatingControls
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, 30)
+                        .padding(.horizontal, density.isCompact ? 8 : 20)
+                        .padding(.bottom, density.isCompact ? 8 : 30)
                 }
             }
             .navigationTitle("Just Speak to It")
+            .navigationBarTitleDisplayMode(usesInlineDensityLayout ? .inline : .automatic)
             .toolbar {
                 // Status indicator in toolbar (system handles glass)
                 if coordinator.isRunning || backgroundService.isRunning {
@@ -444,7 +446,7 @@ public struct ContentView: View {
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 16) {
+                    HStack(spacing: density.isCompact ? 8 : 16) {
                         NavigationLink {
                             HistoryView()
                                 .onAppear { markHistorySeen() }
@@ -509,6 +511,7 @@ public struct ContentView: View {
         }
         .environment(\.appVisualDensity, settings.visualDensity)
         .environment(\.defaultMinListRowHeight, settings.visualDensity.minimumListRowHeight)
+        .controlSize(density.isCompact ? .small : .regular)
     }
 
     // MARK: - Floating Controls with Glass Effect
@@ -530,8 +533,8 @@ public struct ContentView: View {
     @available(iOS 26.0, *)
     @ViewBuilder
     private var floatingControlsGlass: some View {
-        GlassEffectContainer(spacing: 16) {
-            HStack(spacing: 16) {
+        GlassEffectContainer(spacing: density.isCompact ? 8 : 16) {
+            HStack(spacing: density.isCompact ? 8 : 16) {
                 // Primary action - Start/Stop
                 Button {
                     Task {
@@ -539,8 +542,8 @@ public struct ContentView: View {
                     }
                 } label: {
                     Image(systemName: isAnyRecording ? "stop.fill" : "mic.fill")
-                        .font(.system(size: 28))
-                        .frame(width: 64, height: 64)
+                        .font(.system(size: primarySymbolSize))
+                        .frame(width: primaryControlSize, height: primaryControlSize)
                 }
                 .buttonStyle(.glassProminent)
                 .tint(isAnyRecording ? .red : .brandAccent)
@@ -554,8 +557,8 @@ public struct ContentView: View {
                         showingPostProcessing = true
                     } label: {
                         Image(systemName: "wand.and.stars")
-                            .font(.system(size: 20))
-                            .frame(width: 48, height: 48)
+                            .font(.system(size: secondarySymbolSize))
+                            .frame(width: secondaryControlSize, height: secondaryControlSize)
                     }
                     .buttonStyle(.glass)
                     .tint(.purple)
@@ -568,8 +571,8 @@ public struct ContentView: View {
                         copyToClipboard()
                     } label: {
                         Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                            .font(.system(size: 20))
-                            .frame(width: 48, height: 48)
+                            .font(.system(size: secondarySymbolSize))
+                            .frame(width: secondaryControlSize, height: secondaryControlSize)
                     }
                     .buttonStyle(.glass)
                     .tint(.brandAccentWarm)
@@ -587,7 +590,7 @@ public struct ContentView: View {
 
     @ViewBuilder
     private var floatingControlsFallback: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: density.isCompact ? 8 : 16) {
             // Primary action - Start/Stop
             Button {
                 Task {
@@ -595,8 +598,8 @@ public struct ContentView: View {
                 }
             } label: {
                 Image(systemName: isAnyRecording ? "stop.fill" : "mic.fill")
-                    .font(.system(size: 28))
-                    .frame(width: 64, height: 64)
+                    .font(.system(size: primarySymbolSize))
+                    .frame(width: primaryControlSize, height: primaryControlSize)
             }
             .buttonStyle(.borderedProminent)
             .tint(isAnyRecording ? .red : .accentColor)
@@ -610,8 +613,8 @@ public struct ContentView: View {
                     showingPostProcessing = true
                 } label: {
                     Image(systemName: "wand.and.stars")
-                        .font(.system(size: 20))
-                        .frame(width: 48, height: 48)
+                        .font(.system(size: secondarySymbolSize))
+                        .frame(width: secondaryControlSize, height: secondaryControlSize)
                 }
                 .buttonStyle(.bordered)
                 .tint(.purple)
@@ -624,8 +627,8 @@ public struct ContentView: View {
                     copyToClipboard()
                 } label: {
                     Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                        .font(.system(size: 20))
-                        .frame(width: 48, height: 48)
+                        .font(.system(size: secondarySymbolSize))
+                        .frame(width: secondaryControlSize, height: secondaryControlSize)
                 }
                 .buttonStyle(.bordered)
                 .clipShape(Circle())
@@ -639,6 +642,30 @@ public struct ContentView: View {
     }
 
     // MARK: - Computed Properties
+
+    private var density: AppVisualDensity {
+        settings.visualDensity
+    }
+
+    private var usesInlineDensityLayout: Bool {
+        density.prefersInlineLayout(dynamicTypeSize: dynamicTypeSize)
+    }
+
+    private var primaryControlSize: CGFloat {
+        density.isCompact ? 48 : 64
+    }
+
+    private var secondaryControlSize: CGFloat {
+        density.isCompact ? 44 : 48
+    }
+
+    private var primarySymbolSize: CGFloat {
+        density.isCompact ? 20 : 28
+    }
+
+    private var secondarySymbolSize: CGFloat {
+        density.isCompact ? 16 : 20
+    }
 
     private var hasTextToShow: Bool {
         !currentText.isEmpty

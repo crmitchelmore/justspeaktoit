@@ -9,6 +9,7 @@ import UniformTypeIdentifiers
 struct HistoryView: View { // swiftlint:disable:this type_body_length
   @EnvironmentObject private var environment: AppEnvironment
   @Environment(\.appVisualDensity) private var density
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @State private var searchText: String = ""
   @State private var showErrorsOnly: Bool = false
   @State private var dateRangeEnabled: Bool = false
@@ -237,7 +238,149 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
   }
 
 
+  @ViewBuilder
   private var header: some View {
+    if density.prefersInlineLayout(dynamicTypeSize: dynamicTypeSize) {
+      compactHeader
+    } else {
+      normalHeader
+    }
+  }
+
+  private var compactHeader: some View {
+    VStack(alignment: .leading, spacing: 4) {
+      HStack(spacing: density.inlineSpacing) {
+        Label("History", systemImage: "clock.arrow.circlepath")
+          .font(.subheadline.bold())
+
+        HStack(spacing: 4) {
+          Image(systemName: "magnifyingglass")
+            .foregroundStyle(.secondary)
+          TextField("Search", text: $searchText)
+            .textFieldStyle(.plain)
+            .frame(minWidth: 120, idealWidth: 180, maxWidth: 240)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+
+        Toggle(isOn: $showErrorsOnly) {
+          Label("Errors only", systemImage: showErrorsOnly
+            ? "exclamationmark.triangle.fill"
+            : "exclamationmark.triangle")
+            .labelStyle(.iconOnly)
+        }
+        .toggleStyle(.button)
+        .controlSize(.small)
+        .speakTooltip("Show sessions with errors")
+
+        Toggle(isOn: $dateRangeEnabled) {
+          Label("Date range", systemImage: dateRangeEnabled ? "calendar.badge.checkmark" : "calendar")
+            .labelStyle(.iconOnly)
+        }
+        .toggleStyle(.button)
+        .controlSize(.small)
+        .speakTooltip("Filter by date range")
+
+        if dateRangeEnabled {
+          DatePicker("From", selection: $startDate, displayedComponents: .date)
+            .labelsHidden()
+            .datePickerStyle(.compact)
+          DatePicker("To", selection: $endDate, in: startDate..., displayedComponents: .date)
+            .labelsHidden()
+            .datePickerStyle(.compact)
+        }
+
+        if !availableModels.isEmpty {
+          Picker("Model", selection: $selectedModelFilter) {
+            Text("All Models").tag(String?.none)
+            Divider()
+            ForEach(availableModels, id: \.self) { model in
+              Text(ModelCatalog.friendlyName(for: model)).tag(String?.some(model))
+            }
+          }
+          .labelsHidden()
+          .pickerStyle(.menu)
+          .controlSize(.small)
+          .speakTooltip("Filter by model")
+        }
+
+        Spacer(minLength: 2)
+
+        if isImportingFiles {
+          ProgressView()
+            .controlSize(.mini)
+        }
+
+        Button {
+          showImportFiles = true
+        } label: {
+          Label("Import", systemImage: "square.and.arrow.down")
+            .labelStyle(.iconOnly)
+        }
+        .buttonStyle(.borderless)
+        .disabled(isClearingAll || isImportingFiles || environment.main.isBusy)
+        .speakTooltip("Import audio")
+
+        Button {
+          showClearAllConfirmation = true
+        } label: {
+          Label("Clear All", systemImage: "trash")
+            .labelStyle(.iconOnly)
+            .foregroundStyle(.red)
+        }
+        .buttonStyle(.borderless)
+        .disabled(historyItems.isEmpty || isClearingAll || isImportingFiles)
+        .speakTooltip("Clear all history")
+      }
+
+      HStack(spacing: density.groupSpacing) {
+        compactHistoryMetric(
+          title: "Sessions",
+          value: "\(historyStats.totalSessions)",
+          systemImage: "record.circle"
+        )
+        compactHistoryMetric(
+          title: "Errors",
+          value: "\(historyStats.sessionsWithErrors)",
+          systemImage: "exclamationmark.triangle"
+        )
+        compactHistoryMetric(
+          title: "Average",
+          value: formattedDuration(historyStats.averageSessionLength),
+          systemImage: "timer"
+        )
+        compactHistoryMetric(
+          title: "Spend",
+          value: formattedCurrency(historyStats.totalSpend),
+          systemImage: "creditcard"
+        )
+      }
+    }
+    .padding(density.cardPadding)
+    .foregroundStyle(.white)
+    .background(
+      LinearGradient(
+        colors: [Color.brandAccentDeep, Color.brandAccentWarm.opacity(0.9)],
+        startPoint: .leading,
+        endPoint: .trailing
+      ),
+      in: RoundedRectangle(cornerRadius: density.cardCornerRadius, style: .continuous)
+    )
+  }
+
+  private func compactHistoryMetric(
+    title: String,
+    value: String,
+    systemImage: String
+  ) -> some View {
+    Label(value, systemImage: systemImage)
+      .font(.caption2.weight(.semibold))
+      .lineLimit(1)
+      .accessibilityLabel("\(title): \(value)")
+  }
+
+  private var normalHeader: some View {
     VStack(alignment: .leading, spacing: 18) {
       VStack(alignment: .leading, spacing: 8) {
         Text("Session History")
@@ -357,49 +500,56 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
   }
 
   private var emptyState: some View {
-    VStack(spacing: 18) {
+    VStack(spacing: density.isCompact ? 6 : 18) {
       Image(systemName: "waveform")
-        .font(.system(size: 44, weight: .medium))
+        .font(.system(size: density.isCompact ? 22 : 44, weight: .medium))
         .foregroundStyle(Color.brandAccent)
       Text("No history yet")
-        .font(.title2.bold())
-      Text("Record a session to see transcripts, costs, and network activity appear here.")
-        .font(.callout)
-        .foregroundStyle(.secondary)
+        .font(density.isCompact ? .subheadline.bold() : .title2.bold())
+      if !density.isCompact {
+        Text("Record a session to see transcripts, costs, and network activity appear here.")
+          .font(.callout)
+          .foregroundStyle(.secondary)
+      }
       Button(action: environment.main.toggleRecordingFromUI) {
-        Label("Start a recording", systemImage: "mic.fill")
+        if density.isCompact {
+          Label("Start a recording", systemImage: "mic.fill")
+            .labelStyle(.iconOnly)
+        } else {
+          Label("Start a recording", systemImage: "mic.fill")
+        }
       }
       .buttonStyle(.borderedProminent)
       .disabled(environment.main.isBusy)
     }
     .frame(maxWidth: .infinity)
-    .padding(40)
+    .padding(density.isCompact ? 12 : 40)
     .background(
-      RoundedRectangle(cornerRadius: 28, style: .continuous)
+      RoundedRectangle(cornerRadius: density.cardCornerRadius, style: .continuous)
         .fill(.ultraThinMaterial)
     )
     .overlay(
-      RoundedRectangle(cornerRadius: 28, style: .continuous)
+      RoundedRectangle(cornerRadius: density.cardCornerRadius, style: .continuous)
         .stroke(Color.brandAccent.opacity(0.15), lineWidth: 1)
     )
   }
 
   private var skeletonLoadingView: some View {
-    VStack(spacing: 20) {
+    VStack(spacing: density.sectionSpacing) {
       // Stats header skeleton
       HistoryStatsSkeleton()
-        .padding(.bottom, 8)
+        .padding(.bottom, density.isCompact ? 0 : 8)
       
       // History items skeleton
       ForEach(0..<3, id: \.self) { _ in
         HistoryItemSkeleton()
-          .padding(16)
+          .padding(density.isCompact ? 6 : 16)
           .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
+            RoundedRectangle(cornerRadius: density.isCompact ? 8 : 20, style: .continuous)
               .fill(.ultraThinMaterial)
           )
           .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
+            RoundedRectangle(cornerRadius: density.isCompact ? 8 : 20, style: .continuous)
               .stroke(Color.brandAccent.opacity(0.1), lineWidth: 1)
           )
       }
@@ -451,6 +601,7 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
 
 private struct HistoryListRow: View { // swiftlint:disable:this type_body_length
   @EnvironmentObject private var environment: AppEnvironment
+  @Environment(\.appVisualDensity) private var density
   let item: HistoryItem
   @State private var isExpanded: Bool = false
   @State private var showNetworkDetails: Bool = false
@@ -505,19 +656,19 @@ private struct HistoryListRow: View { // swiftlint:disable:this type_body_length
   }
 
   private var rowContent: some View {
-    VStack(alignment: .leading, spacing: 20) {
+    VStack(alignment: .leading, spacing: density.isCompact ? 6 : 20) {
       Button {
         withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
           isExpanded.toggle()
         }
       } label: {
-        VStack(alignment: .leading, spacing: 12) {
-          HStack(alignment: .top, spacing: 16) {
+        VStack(alignment: .leading, spacing: density.isCompact ? 4 : 12) {
+          HStack(alignment: .top, spacing: density.groupSpacing) {
             ViewThatFits(in: .horizontal) {
-              HStack(spacing: 8) {
+              HStack(spacing: density.isCompact ? density.inlineSpacing : 8) {
                 badgeViews
               }
-              VStack(alignment: .leading, spacing: 8) {
+              VStack(alignment: .leading, spacing: density.isCompact ? density.inlineSpacing : 8) {
                 badgeViews
               }
             }
@@ -532,17 +683,20 @@ private struct HistoryListRow: View { // swiftlint:disable:this type_body_length
             .buttonStyle(.borderless)
             .speakTooltip("Delete this history item")
             Image(systemName: isExpanded ? "chevron.up.circle.fill" : "chevron.down.circle")
-              .imageScale(.large)
+              .imageScale(density.isCompact ? .medium : .large)
               .symbolRenderingMode(.palette)
               .foregroundStyle(Color.brandAccent, Color.brandAccentWarm.opacity(0.35))
           }
 
           if let transcript = bestTranscript {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
+            HStack(
+              alignment: .firstTextBaseline,
+              spacing: density.isCompact ? density.inlineSpacing : 10
+            ) {
               Text(previewText)
-                .font(.subheadline)
+                .font(density.isCompact ? .caption : .subheadline)
                 .foregroundStyle(.secondary)
-                .lineLimit(2)
+                .lineLimit(density.isCompact ? 1 : 2)
 
               Button {
                 copyToPasteboard(transcript)
@@ -555,15 +709,16 @@ private struct HistoryListRow: View { // swiftlint:disable:this type_body_length
             }
           } else {
             Text(previewText)
-              .font(.subheadline)
+              .font(density.isCompact ? .caption : .subheadline)
               .foregroundStyle(.secondary)
-              .lineLimit(2)
+              .lineLimit(density.isCompact ? 1 : 2)
           }
 
           if let models = modelsSummaryByPhase {
             Label(models, systemImage: "brain.head.profile")
-              .font(.caption)
+              .font(density.isCompact ? .caption2 : .caption)
               .foregroundStyle(.secondary)
+              .lineLimit(1)
           }
         }
         .contentShape(Rectangle())
@@ -575,26 +730,31 @@ private struct HistoryListRow: View { // swiftlint:disable:this type_body_length
         expandedContent
       }
     }
-    .padding(24)
+    .padding(density.cardPadding)
     .background(
-      RoundedRectangle(cornerRadius: 32, style: .continuous)
+      RoundedRectangle(cornerRadius: density.isCompact ? 10 : 32, style: .continuous)
         .fill(.ultraThinMaterial)
     )
     .overlay(
-      RoundedRectangle(cornerRadius: 32, style: .continuous)
+      RoundedRectangle(cornerRadius: density.isCompact ? 10 : 32, style: .continuous)
         .stroke(borderColor, lineWidth: 1)
     )
-    .shadow(color: borderColor.opacity(0.3), radius: 18, x: 0, y: 12)
+    .shadow(
+      color: borderColor.opacity(density.isCompact ? 0 : 0.3),
+      radius: density.isCompact ? 0 : 18,
+      x: 0,
+      y: density.isCompact ? 0 : 12
+    )
   }
 
   @ViewBuilder
   private var expandedContent: some View {
     Divider()
-      .padding(.vertical, 4)
+      .padding(.vertical, density.isCompact ? 0 : 4)
 
     ViewThatFits(in: .horizontal) {
-      HStack(alignment: .top, spacing: 28) {
-        VStack(alignment: .leading, spacing: 20) {
+      HStack(alignment: .top, spacing: density.isCompact ? 10 : 28) {
+        VStack(alignment: .leading, spacing: density.isCompact ? 8 : 20) {
           if !item.networkExchanges.isEmpty {
             networkSummaryButton
             if showNetworkDetails {
@@ -612,7 +772,7 @@ private struct HistoryListRow: View { // swiftlint:disable:this type_body_length
         }
         .frame(maxWidth: .infinity, alignment: .leading)
 
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: density.isCompact ? 8 : 20) {
           transcriptSection
 
           if !item.errors.isEmpty {
@@ -625,7 +785,7 @@ private struct HistoryListRow: View { // swiftlint:disable:this type_body_length
       }
       .frame(maxWidth: .infinity, alignment: .leading)
 
-      VStack(alignment: .leading, spacing: 20) {
+      VStack(alignment: .leading, spacing: density.isCompact ? 8 : 20) {
         if !item.networkExchanges.isEmpty {
           networkSummaryButton
           if showNetworkDetails {
@@ -739,7 +899,12 @@ private struct HistoryListRow: View { // swiftlint:disable:this type_body_length
   private var metaColumns: [GridItem] {
     [
       GridItem(
-        .adaptive(minimum: 160, maximum: 340), spacing: 10, alignment: .topLeading
+        .adaptive(
+          minimum: density.isCompact ? 120 : 160,
+          maximum: density.isCompact ? 240 : 340
+        ),
+        spacing: density.isCompact ? density.inlineSpacing : 10,
+        alignment: .topLeading
       )
     ]
   }
@@ -807,31 +972,49 @@ private struct HistoryListRow: View { // swiftlint:disable:this type_body_length
     value: String,
     tint: Color = .accentColor
   ) -> some View {
-    VStack(alignment: .leading, spacing: 6) {
-      HStack(spacing: 6) {
-        Image(systemName: icon)
-          .imageScale(.medium)
-        Text(title.uppercased())
-          .font(.caption2.weight(.semibold))
-      }
-      .foregroundStyle(tint)
+    Group {
+      if density.isCompact {
+        HStack(spacing: 3) {
+          Image(systemName: icon)
+            .imageScale(.small)
+          Text(value)
+            .font(.caption2.weight(.medium))
+            .lineLimit(1)
+        }
+        .foregroundStyle(tint)
+        .padding(.horizontal, 5)
+        .padding(.vertical, 2)
+        .background(tint.opacity(0.12), in: Capsule())
+      } else {
+        VStack(alignment: .leading, spacing: 6) {
+          HStack(spacing: 6) {
+            Image(systemName: icon)
+              .imageScale(.medium)
+            Text(title.uppercased())
+              .font(.caption2.weight(.semibold))
+          }
+          .foregroundStyle(tint)
 
-      Text(value)
-        .font(.footnote.weight(.medium))
-        .foregroundStyle(.primary)
-        .lineLimit(1)
-        .truncationMode(.tail)
+          Text(value)
+            .font(.footnote.weight(.medium))
+            .foregroundStyle(.primary)
+            .lineLimit(1)
+            .truncationMode(.tail)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+          RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(tint.opacity(0.12))
+        )
+        .overlay(
+          RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .stroke(tint.opacity(0.2), lineWidth: 1)
+        )
+      }
     }
-    .padding(.horizontal, 12)
-    .padding(.vertical, 8)
-    .background(
-      RoundedRectangle(cornerRadius: 12, style: .continuous)
-        .fill(tint.opacity(0.12))
-    )
-    .overlay(
-      RoundedRectangle(cornerRadius: 12, style: .continuous)
-        .stroke(tint.opacity(0.2), lineWidth: 1)
-    )
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel("\(title): \(value)")
   }
   private var promptDuration: TimeInterval? {
     let start =

@@ -7,6 +7,7 @@ import SpeakCore
 /// Shows a list of OpenClaw conversations with the ability to create new ones.
 public struct ConversationListView: View {
     @Environment(\.appVisualDensity) private var density
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ObservedObject private var store = ConversationStore.shared
     @ObservedObject private var settings = OpenClawSettings.shared
     @EnvironmentObject private var deepLinkRouter: DeepLinkRouter
@@ -26,10 +27,11 @@ public struct ConversationListView: View {
             }
         }
         .navigationTitle("OpenClaw")
+        .navigationBarTitleDisplayMode(usesInlineDensityLayout ? .inline : .automatic)
         .environment(\.defaultMinListRowHeight, density.minimumListRowHeight)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 12) {
+                HStack(spacing: density.isCompact ? 8 : 12) {
                     NavigationLink {
                         OpenClawSettingsView()
                     } label: {
@@ -58,6 +60,10 @@ public struct ConversationListView: View {
         } message: {
             Text("This will permanently delete all \(store.conversations.count) conversations.")
         }
+    }
+
+    private var usesInlineDensityLayout: Bool {
+        density.prefersInlineLayout(dynamicTypeSize: dynamicTypeSize)
     }
 
     // MARK: - States
@@ -128,9 +134,45 @@ public struct ConversationListView: View {
 
 struct ConversationRow: View {
     @Environment(\.appVisualDensity) private var density
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let conversation: OpenClawClient.Conversation
 
     var body: some View {
+        Group {
+            if usesInlineDensityLayout {
+                HStack(spacing: density.inlineSpacing) {
+                    Text(conversation.title)
+                        .font(.caption.weight(.semibold))
+                        .lineLimit(1)
+
+                    if let lastMessage = conversation.messages.last {
+                        Text(lastMessage.content)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .layoutPriority(-1)
+                    }
+
+                    Spacer(minLength: 4)
+
+                    Label("\(conversation.messages.count)", systemImage: "bubble.left")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+
+                    Text(conversation.updatedAt, style: .relative)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            } else {
+                regularContent
+            }
+        }
+        .padding(.vertical, density.listRowVerticalPadding)
+        .frame(minHeight: density.minimumListRowHeight)
+    }
+
+    private var regularContent: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(conversation.title)
@@ -157,7 +199,10 @@ struct ConversationRow: View {
                     .foregroundStyle(.tertiary)
             }
         }
-        .padding(.vertical, density.listRowVerticalPadding)
+    }
+
+    private var usesInlineDensityLayout: Bool {
+        density.prefersInlineLayout(dynamicTypeSize: dynamicTypeSize)
     }
 }
 

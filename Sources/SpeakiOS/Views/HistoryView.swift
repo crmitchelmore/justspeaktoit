@@ -8,6 +8,7 @@ import SpeakSync
 // swiftlint:disable:next type_body_length
 public struct HistoryView: View {
     @Environment(\.appVisualDensity) private var density
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @StateObject private var historyManager = iOSHistoryManager.shared
     @ObservedObject private var syncEngine = HistorySyncEngine.shared
     @State private var showingClearConfirmation = false
@@ -43,6 +44,7 @@ public struct HistoryView: View {
             }
         }
         .navigationTitle("History")
+        .navigationBarTitleDisplayMode(usesInlineDensityLayout ? .inline : .automatic)
         .environment(\.defaultMinListRowHeight, density.minimumListRowHeight)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
@@ -207,7 +209,7 @@ public struct HistoryView: View {
 
     private var statsHeader: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: density == .compact ? 14 : 24) {
+            HStack(spacing: density.isCompact ? 8 : 24) {
                 statBadge(value: "\(statistics.totalSessions)", label: "Sessions")
                 statBadge(value: formatDuration(statistics.averageSessionLength), label: "Average")
                 statBadge(value: formatDuration(statistics.cumulativeRecordingDuration), label: "Total Time")
@@ -217,18 +219,34 @@ public struct HistoryView: View {
             .padding(.horizontal, 4)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
+        .padding(.vertical, density.isCompact ? 0 : 8)
     }
 
+    @ViewBuilder
     private func statBadge(value: String, label: String) -> some View {
-        VStack(spacing: 4) {
-            Text(value)
-                .font(.title2.bold())
-                .foregroundStyle(.primary)
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        if usesInlineDensityLayout {
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                Text(value)
+                    .font(.caption.bold())
+                    .foregroundStyle(.primary)
+                Text(label)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        } else {
+            VStack(spacing: 4) {
+                Text(value)
+                    .font(.title2.bold())
+                    .foregroundStyle(.primary)
+                Text(label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
+    }
+
+    private var usesInlineDensityLayout: Bool {
+        density.prefersInlineLayout(dynamicTypeSize: dynamicTypeSize)
     }
 
     private var query: HistorySearchQuery {

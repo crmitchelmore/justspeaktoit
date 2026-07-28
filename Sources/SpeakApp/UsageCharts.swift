@@ -134,25 +134,36 @@ extension HistoryItem {
 // MARK: - Chart Views
 
 struct DailyRecordingsChart: View {
+  @Environment(\.appVisualDensity) private var density
   let data: [DailyUsageData]
   @State private var showDuration = false
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
+    VStack(alignment: .leading, spacing: density.inlineSpacing) {
       HStack {
-        Text(showDuration ? "Recording Time per Day" : "Recordings per Day")
-          .font(.headline)
+        if !density.isCompact {
+          Text(showDuration ? "Recording Time per Day" : "Recordings per Day")
+            .font(.headline)
+        }
         Spacer()
-        Toggle(showDuration ? "Duration" : "Count", isOn: $showDuration)
-          .toggleStyle(.switch)
-          .controlSize(.small)
+        if density.isCompact {
+          Toggle(showDuration ? "Duration" : "Count", isOn: $showDuration)
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            .labelsHidden()
+            .accessibilityLabel(showDuration ? "Show recording duration" : "Show recording count")
+        } else {
+          Toggle(showDuration ? "Duration" : "Count", isOn: $showDuration)
+            .toggleStyle(.switch)
+            .controlSize(.small)
+        }
       }
 
       if data.isEmpty {
         Text("No data for the last 30 days")
           .font(.callout)
           .foregroundStyle(.secondary)
-          .frame(height: 200)
+          .frame(height: density.chartHeight)
           .frame(maxWidth: .infinity)
       } else {
         Chart(data) { item in
@@ -175,10 +186,10 @@ struct DailyRecordingsChart: View {
             }
           }
         }
-        .frame(height: 200)
+        .frame(height: density.chartHeight)
       }
 
-      if !data.isEmpty {
+      if !data.isEmpty, !density.isCompact {
         Text(showDuration ? "Minutes per day" : "Number of recordings per day")
           .font(.caption)
           .foregroundStyle(.secondary)
@@ -188,27 +199,38 @@ struct DailyRecordingsChart: View {
 }
 
 struct ModelUsageChart: View {
+  @Environment(\.appVisualDensity) private var density
   let title: String
   let data: [ModelUsageData]
   let color: Color
   @State private var showSpend = false
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
+    VStack(alignment: .leading, spacing: density.inlineSpacing) {
       HStack {
-        Text(title)
-          .font(.headline)
+        if !density.isCompact {
+          Text(title)
+            .font(.headline)
+        }
         Spacer()
-        Toggle(showSpend ? "Spend" : "Count", isOn: $showSpend)
-          .toggleStyle(.switch)
-          .controlSize(.small)
+        if density.isCompact {
+          Toggle(showSpend ? "Spend" : "Count", isOn: $showSpend)
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            .labelsHidden()
+            .accessibilityLabel(showSpend ? "Show model spend" : "Show model usage count")
+        } else {
+          Toggle(showSpend ? "Spend" : "Count", isOn: $showSpend)
+            .toggleStyle(.switch)
+            .controlSize(.small)
+        }
       }
 
       if data.isEmpty {
         Text("No usage data available")
           .font(.callout)
           .foregroundStyle(.secondary)
-          .frame(height: 200)
+          .frame(height: density.chartHeight)
           .frame(maxWidth: .infinity)
       } else {
         Chart(data) { item in
@@ -221,10 +243,15 @@ struct ModelUsageChart: View {
         .chartXAxis {
           AxisMarks(position: .bottom)
         }
-        .frame(height: max(200, CGFloat(data.count * 40)))
+        .frame(
+          height: max(
+            density.chartHeight,
+            CGFloat(data.count * (density.isCompact ? 22 : 40))
+          )
+        )
       }
 
-      if !data.isEmpty {
+      if !data.isEmpty, !density.isCompact {
         Text(showSpend ? "Total spend by model (USD)" : "Number of uses per model")
           .font(.caption)
           .foregroundStyle(.secondary)

@@ -1,8 +1,9 @@
 import SwiftUI
 
 /// A user-selected presentation density shared by the macOS and iOS apps.
-/// Normal intentionally preserves the existing spacing; compact reduces
-/// whitespace without shrinking interactive controls below platform norms.
+/// Normal intentionally preserves the existing spacing. Compact is a distinct
+/// information-dense layout that removes decorative whitespace, favours inline
+/// presentation, and keeps touch targets at platform minimums.
 public enum AppVisualDensity: String, CaseIterable, Identifiable, Sendable {
     case normal
     case compact
@@ -16,13 +17,33 @@ public enum AppVisualDensity: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    public var sectionSpacing: CGFloat { self == .compact ? 12 : 20 }
-    public var pagePadding: CGFloat { self == .compact ? 14 : 24 }
-    public var cardPadding: CGFloat { self == .compact ? 15 : 24 }
-    public var cardContentSpacing: CGFloat { self == .compact ? 11 : 18 }
-    public var listRowVerticalPadding: CGFloat { self == .compact ? 1 : 4 }
-    public var minimumListRowHeight: CGFloat { self == .compact ? 38 : 44 }
-    public var listSectionSpacing: CGFloat { self == .compact ? 12 : 24 }
+    public var isCompact: Bool { self == .compact }
+
+    public var sectionSpacing: CGFloat { isCompact ? 6 : 20 }
+    public var pagePadding: CGFloat { isCompact ? 8 : 24 }
+    public var cardPadding: CGFloat { isCompact ? 8 : 24 }
+    public var cardContentSpacing: CGFloat { isCompact ? 6 : 18 }
+    public var inlineSpacing: CGFloat { isCompact ? 6 : 12 }
+    public var groupSpacing: CGFloat { isCompact ? 8 : 16 }
+    public var listRowVerticalPadding: CGFloat { isCompact ? 0 : 4 }
+    public var listSectionSpacing: CGFloat { isCompact ? 4 : 24 }
+    public var cardCornerRadius: CGFloat { isCompact ? 12 : 28 }
+    public var gridMinimumWidth: CGFloat { isCompact ? 240 : 340 }
+    public var chartHeight: CGFloat { isCompact ? 132 : 200 }
+
+    public var minimumListRowHeight: CGFloat {
+        #if os(iOS)
+        // Compact iOS rows remove internal whitespace but retain Apple's
+        // minimum comfortable touch target.
+        return 44
+        #else
+        return isCompact ? 30 : 44
+        #endif
+    }
+
+    public func prefersInlineLayout(dynamicTypeSize: DynamicTypeSize) -> Bool {
+        isCompact && !dynamicTypeSize.isAccessibilitySize
+    }
 }
 
 private struct AppVisualDensityKey: EnvironmentKey {

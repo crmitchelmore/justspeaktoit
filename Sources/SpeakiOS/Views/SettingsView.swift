@@ -676,7 +676,7 @@ public struct SettingsView: View {
                 }
                 .pickerStyle(.segmented)
 
-                if !settings.visualDensity.isCompact {
+                if !usesInlineDensityLayout {
                     Text(
                         "Compact restructures screens around inline controls, shorter cards, "
                             + "and grouped status rows while keeping controls easy to tap."
@@ -716,7 +716,7 @@ public struct SettingsView: View {
                     .pickerStyle(.navigationLink)
                     .accessibilityIdentifier("appleOnDeviceModelPicker")
 
-                    if !settings.visualDensity.isCompact {
+                    if !usesInlineDensityLayout {
                         Text("Uses Apple's built-in speech engine. Audio stays on this device.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -780,7 +780,7 @@ public struct SettingsView: View {
                         .accessibilityIdentifier("remoteBatchModelPicker")
                     }
 
-                    if !settings.visualDensity.isCompact {
+                    if !usesInlineDensityLayout {
                         Text(settings.transcriptionMode == .streaming
                             ? "Text appears while audio is streamed to the selected provider."
                             : "Audio is uploaded after recording for a more complete transcript.")
@@ -828,7 +828,7 @@ public struct SettingsView: View {
                     Label("Auto-Start Recording", systemImage: "mic.badge.plus")
                 }
 
-                if settings.autoStartRecording && !settings.visualDensity.isCompact {
+                if settings.autoStartRecording && !usesInlineDensityLayout {
                     Text("Recording starts automatically when you open the app.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -838,7 +838,7 @@ public struct SettingsView: View {
                     Label("Live Activities", systemImage: "platter.filled.bottom.iphone")
                 }
 
-                if settings.liveActivitiesEnabled && !settings.visualDensity.isCompact {
+                if settings.liveActivitiesEnabled && !usesInlineDensityLayout {
                     Text("Shows transcription progress on Lock Screen and Dynamic Island.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -859,7 +859,7 @@ public struct SettingsView: View {
                 }
                 .accessibilityIdentifier("hardwareTriggerSettingsLink")
 
-                if !settings.visualDensity.isCompact {
+                if !usesInlineDensityLayout {
                     Text(
                         "Trigger transcription from the Action Button, Siri, Lock Screen, "
                             + "Control Center, or Back Tap."
@@ -874,7 +874,7 @@ public struct SettingsView: View {
                     Label("Auto-Polish After Recording", systemImage: "wand.and.stars")
                 }
 
-                if settings.autoPostProcess && !settings.visualDensity.isCompact {
+                if settings.autoPostProcess && !usesInlineDensityLayout {
                     Text("Automatically opens polish view after each recording.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -973,7 +973,7 @@ public struct SettingsView: View {
                     Label("Import from QR Code", systemImage: "qrcode.viewfinder")
                 }
 
-                if !settings.visualDensity.isCompact {
+                if !usesInlineDensityLayout {
                     Text("Just Speak to It uses iCloud for settings and history when available. "
                         + "If iCloud is unavailable, Bonjour Transport can send sessions to a paired Mac "
                         + "on your local network; QR transfer remains available for manual setup.")
@@ -1005,7 +1005,7 @@ public struct SettingsView: View {
                     Label("Saved Recordings", systemImage: "waveform.circle")
                 }
 
-                if !settings.visualDensity.isCompact {
+                if !usesInlineDensityLayout {
                     Text(
                         "Audio is saved locally during transcription so you can "
                             + "replay or re-transcribe if connectivity was lost."
@@ -1037,7 +1037,7 @@ public struct SettingsView: View {
                     Label("Debug Logging", systemImage: "ant")
                 }
 
-                if SpeakLogger.isDebugMode && !settings.visualDensity.isCompact {
+                if SpeakLogger.isDebugMode && !usesInlineDensityLayout {
                     Text("Debug mode logs additional details for troubleshooting.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -1121,22 +1121,25 @@ public struct SettingsView: View {
         HStack(spacing: settings.visualDensity.inlineSpacing) {
             Label("Manage Keys", systemImage: "key.viewfinder")
             Spacer()
-            Text("\(storedAPIKeyCount)/4")
+            Text("\(storedAPIKeyCount)/\(managedAPIKeyCount)")
                 .font(.caption.monospacedDigit())
-                .foregroundStyle(storedAPIKeyCount == 4 ? .green : .secondary)
+                .foregroundStyle(storedAPIKeyCount == managedAPIKeyCount ? .green : .secondary)
         }
-        .accessibilityLabel("\(storedAPIKeyCount) of 4 API keys stored. Manage keys.")
+        .accessibilityLabel(
+            "\(storedAPIKeyCount) of \(managedAPIKeyCount) API keys stored. Manage keys."
+        )
     }
 
     private var storedAPIKeyCount: Int {
-        [
-            settings.hasDeepgramKey,
-            settings.hasElevenLabsKey,
-            settings.hasOpenRouterKey,
-            settings.hasOpenAIKey
-        ]
-        .filter { $0 }
-        .count
+        managedAPIKeyEntries.filter(\.isStored).count
+    }
+
+    private var managedAPIKeyCount: Int {
+        managedAPIKeyEntries.count
+    }
+
+    private var managedAPIKeyEntries: [APIKeyListEntry] {
+        APIKeysView.entries(for: settings)
     }
 
     private func apiKeyStatusRow(name: String, systemImage: String, isStored: Bool) -> some View {
@@ -1474,6 +1477,10 @@ struct APIKeysView: View {
     }
 
     private var allEntries: [APIKeyListEntry] {
+        Self.entries(for: settings)
+    }
+
+    fileprivate static func entries(for settings: AppSettings) -> [APIKeyListEntry] {
         [
             APIKeyListEntry(
                 id: "deepgram", title: "Deepgram", category: "Transcription", isStored: settings.hasDeepgramKey

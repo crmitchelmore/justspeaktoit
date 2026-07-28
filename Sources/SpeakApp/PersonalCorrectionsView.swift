@@ -58,9 +58,11 @@ struct PersonalCorrectionsView: View {
         Label("Automatic when context matches", systemImage: "checkmark.seal.fill")
           .labelStyle(.iconOnly)
           .foregroundStyle(.green)
+          .speakTooltip("Automatic when context matches")
         Label("Manual rules stay as suggestions", systemImage: "hand.raised")
           .labelStyle(.iconOnly)
           .foregroundStyle(.orange)
+          .speakTooltip("Manual rules stay as suggestions")
       }
       .padding(density.cardPadding)
       .foregroundStyle(.white)

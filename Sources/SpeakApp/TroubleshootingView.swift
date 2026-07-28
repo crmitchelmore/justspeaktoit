@@ -105,6 +105,7 @@ private struct TroubleshootingItemRow: View {
           .foregroundStyle(.secondary)
           .lineLimit(density.isCompact ? 1 : nil)
           .fixedSize(horizontal: false, vertical: !density.isCompact)
+          .speakTooltip(item.detail)
         actionButtons
       }
       Spacer()

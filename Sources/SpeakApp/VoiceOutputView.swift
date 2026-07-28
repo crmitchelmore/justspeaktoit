@@ -278,7 +278,7 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
   }
 
   private var inputSourceCard: some View {
-    SettingsCard(title: "Input Source", systemImage: "arrow.down.doc", tint: .brandLagoon) {
+    SpeakDensityCard(title: "Input Source", systemImage: "arrow.down.doc", tint: .brandLagoon) {
       VStack(alignment: .leading, spacing: 12) {
         ViewThatFits(in: .horizontal) {
           Picker("Source", selection: $inputSource) {
@@ -319,7 +319,7 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
   }
 
   private var voiceSelectionCard: some View {
-    SettingsCard(title: "Voice", systemImage: "person.wave.2", tint: .brandAccent) {
+    SpeakDensityCard(title: "Voice", systemImage: "person.wave.2", tint: .brandAccent) {
       VStack(alignment: .leading, spacing: 12) {
         if availableVoices.isEmpty {
           HStack {
@@ -376,7 +376,7 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
   }
 
   private var synthesisControlsCard: some View {
-    SettingsCard(title: "Controls", systemImage: "slider.horizontal.3", tint: .green) {
+    SpeakDensityCard(title: "Controls", systemImage: "slider.horizontal.3", tint: .green) {
       VStack(alignment: .leading, spacing: 16) {
         VStack(alignment: .leading, spacing: 8) {
           HStack {
@@ -422,7 +422,7 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
   }
 
   private var textWorkspaceCard: some View {
-    SettingsCard(title: "Text", systemImage: "text.alignleft", tint: .orange) {
+    SpeakDensityCard(title: "Text", systemImage: "text.alignleft", tint: .orange) {
       VStack(alignment: .leading, spacing: 12) {
         if inputSource == .history {
           historyItemPicker
@@ -513,7 +513,7 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
   }
 
   private var resultCard: some View {
-    SettingsCard(title: "Result", systemImage: "checkmark.circle", tint: .green) {
+    SpeakDensityCard(title: "Result", systemImage: "checkmark.circle", tint: .green) {
       VStack(alignment: .leading, spacing: 12) {
         if let error = tts.lastError {
           HStack(alignment: .top, spacing: 12) {
@@ -738,57 +738,5 @@ struct SSMLHelperView: View {
       .buttonStyle(.borderless)
       .controlSize(.mini)
     }
-  }
-}
-
-// MARK: - Settings Card (reused from SettingsView pattern)
-
-private struct SettingsCard<Content: View>: View {
-  @Environment(\.appVisualDensity) private var density
-  let title: String
-  let systemImage: String
-  let tint: Color
-  @ViewBuilder let content: Content
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: density.cardContentSpacing) {
-      HStack(spacing: density.isCompact ? density.inlineSpacing : 14) {
-        if density.isCompact {
-          Image(systemName: systemImage)
-            .foregroundStyle(tint)
-            .font(.caption.weight(.semibold))
-            .frame(width: 16)
-        } else {
-          ZStack {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-              .fill(tint.opacity(0.15))
-              .frame(width: 44, height: 44)
-            Image(systemName: systemImage)
-              .foregroundStyle(tint)
-              .font(.system(size: 20, weight: .semibold))
-          }
-        }
-        Text(title)
-          .font(density.isCompact ? .caption.weight(.semibold) : .headline)
-        Spacer(minLength: 0)
-      }
-      content
-    }
-    .padding(density.cardPadding)
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .background(
-      .ultraThinMaterial,
-      in: RoundedRectangle(cornerRadius: density.cardCornerRadius, style: .continuous)
-    )
-    .overlay(
-      RoundedRectangle(cornerRadius: density.cardCornerRadius, style: .continuous)
-        .stroke(tint.opacity(0.12), lineWidth: 1)
-    )
-    .shadow(
-      color: tint.opacity(density.isCompact ? 0 : 0.08),
-      radius: density.isCompact ? 0 : 18,
-      x: 0,
-      y: density.isCompact ? 0 : 12
-    )
   }
 }

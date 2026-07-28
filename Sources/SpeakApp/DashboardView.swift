@@ -367,7 +367,7 @@ struct DashboardView: View {
   private func permissionCard(for permission: PermissionType) -> some View {
     let status = environment.permissions.status(for: permission)
     return Group {
-      if density.isCompact {
+      if density.prefersInlineLayout(dynamicTypeSize: dynamicTypeSize) {
         compactPermissionCard(for: permission, status: status)
       } else {
         regularPermissionCard(for: permission, status: status)
@@ -744,7 +744,6 @@ private func formattedModels(_ identifiers: [String]) -> String {
 }
 
 private struct DashboardCard<Content: View>: View {
-  @Environment(\.appVisualDensity) private var density
   let title: String
   let systemImage: String
   let tint: Color
@@ -758,46 +757,9 @@ private struct DashboardCard<Content: View>: View {
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: density.cardContentSpacing) {
-      HStack(spacing: density.isCompact ? density.inlineSpacing : 14) {
-        if density.isCompact {
-          Image(systemName: systemImage)
-            .foregroundStyle(tint)
-            .font(.caption.weight(.semibold))
-            .frame(width: 16)
-        } else {
-          ZStack {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-              .fill(tint.opacity(0.15))
-              .frame(width: 44, height: 44)
-            Image(systemName: systemImage)
-              .foregroundStyle(tint)
-              .font(.system(size: 20, weight: .semibold))
-          }
-        }
-        Text(title)
-          .font(density.isCompact ? .caption.weight(.semibold) : .headline)
-        Spacer(minLength: 0)
-      }
-
+    SpeakDensityCard(title: title, systemImage: systemImage, tint: tint) {
       content
     }
-    .padding(density.cardPadding)
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .background(
-      .ultraThinMaterial,
-      in: RoundedRectangle(cornerRadius: density.cardCornerRadius, style: .continuous)
-    )
-    .overlay(
-      RoundedRectangle(cornerRadius: density.cardCornerRadius, style: .continuous)
-        .stroke(tint.opacity(0.12), lineWidth: 1)
-    )
-    .shadow(
-      color: tint.opacity(density.isCompact ? 0 : 0.08),
-      radius: density.isCompact ? 0 : 18,
-      x: 0,
-      y: density.isCompact ? 0 : 12
-    )
   }
 }
 

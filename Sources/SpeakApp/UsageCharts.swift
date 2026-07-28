@@ -146,17 +146,17 @@ struct DailyRecordingsChart: View {
             .font(.headline)
         }
         Spacer()
-        if density.isCompact {
-          Toggle(showDuration ? "Duration" : "Count", isOn: $showDuration)
-            .toggleStyle(.switch)
-            .controlSize(.small)
-            .labelsHidden()
-            .accessibilityLabel(showDuration ? "Show recording duration" : "Show recording count")
-        } else {
-          Toggle(showDuration ? "Duration" : "Count", isOn: $showDuration)
-            .toggleStyle(.switch)
-            .controlSize(.small)
-        }
+        Toggle(showDuration ? "Duration" : "Count", isOn: $showDuration)
+          .toggleStyle(.switch)
+          .controlSize(.small)
+          .modifier(
+            CompactChartToggleModifier(
+              isCompact: density.isCompact,
+              accessibilityLabel: showDuration
+                ? "Show recording duration"
+                : "Show recording count"
+            )
+          )
       }
 
       if data.isEmpty {
@@ -213,17 +213,17 @@ struct ModelUsageChart: View {
             .font(.headline)
         }
         Spacer()
-        if density.isCompact {
-          Toggle(showSpend ? "Spend" : "Count", isOn: $showSpend)
-            .toggleStyle(.switch)
-            .controlSize(.small)
-            .labelsHidden()
-            .accessibilityLabel(showSpend ? "Show model spend" : "Show model usage count")
-        } else {
-          Toggle(showSpend ? "Spend" : "Count", isOn: $showSpend)
-            .toggleStyle(.switch)
-            .controlSize(.small)
-        }
+        Toggle(showSpend ? "Spend" : "Count", isOn: $showSpend)
+          .toggleStyle(.switch)
+          .controlSize(.small)
+          .modifier(
+            CompactChartToggleModifier(
+              isCompact: density.isCompact,
+              accessibilityLabel: showSpend
+                ? "Show model spend"
+                : "Show model usage count"
+            )
+          )
       }
 
       if data.isEmpty {
@@ -256,6 +256,22 @@ struct ModelUsageChart: View {
           .font(.caption)
           .foregroundStyle(.secondary)
       }
+    }
+  }
+}
+
+private struct CompactChartToggleModifier: ViewModifier {
+  let isCompact: Bool
+  let accessibilityLabel: String
+
+  @ViewBuilder
+  func body(content: Content) -> some View {
+    if isCompact {
+      content
+        .labelsHidden()
+        .accessibilityLabel(accessibilityLabel)
+    } else {
+      content
     }
   }
 }

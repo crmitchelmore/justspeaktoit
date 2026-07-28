@@ -191,6 +191,7 @@ struct RecordingRow: View {
                     .lineLimit(1)
                 }
                 .font(.caption)
+                .lineLimit(1)
                 .foregroundStyle(.secondary)
             } else {
                 VStack(alignment: .leading, spacing: 4) {

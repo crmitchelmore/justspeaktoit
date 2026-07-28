@@ -802,7 +802,6 @@ struct SettingsView: View {
       .padding(density.pagePadding)
       .frame(maxWidth: 1100, alignment: .center)
     }
-    .controlSize(density.isCompact ? .small : .regular)
     .background(
       LinearGradient(
         colors: [Color.brandAccentWarm.opacity(0.08), .clear], startPoint: .top, endPoint: .center))
@@ -5213,7 +5212,6 @@ private struct SettingsInlineInfo: View {
 }
 
 private struct SettingsCard<Content: View>: View {
-  @Environment(\.appVisualDensity) private var density
   let title: String
   let systemImage: String
   let tint: Color
@@ -5227,55 +5225,15 @@ private struct SettingsCard<Content: View>: View {
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: density.cardContentSpacing) {
-      HStack(spacing: density.isCompact ? density.inlineSpacing : 14) {
-        if density.isCompact {
-          Image(systemName: systemImage)
-            .foregroundStyle(tint)
-            .font(.caption.weight(.semibold))
-            .frame(width: 16)
-        } else {
-          ZStack {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-              .fill(tint.opacity(0.15))
-              .frame(width: 44, height: 44)
-            Image(systemName: systemImage)
-              .foregroundStyle(tint)
-              .font(.system(size: 20, weight: .semibold))
-          }
-        }
-
-        Text(title)
-          .font(density.isCompact ? .caption.weight(.semibold) : .headline)
-          .foregroundStyle(.primary)
-        Spacer()
-      }
-
+    SpeakDensityCard(
+      title: title,
+      systemImage: systemImage,
+      tint: tint,
+      regularCornerRadius: 26,
+      regularSpacerMinLength: 8
+    ) {
       content
     }
-    .padding(density.cardPadding)
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .background(
-      .ultraThinMaterial,
-      in: RoundedRectangle(
-        cornerRadius: density.isCompact ? density.cardCornerRadius : 26,
-        style: .continuous
-      )
-    )
-    .overlay(
-      RoundedRectangle(
-        cornerRadius: density.isCompact ? density.cardCornerRadius : 26,
-        style: .continuous
-      )
-        .stroke(tint.opacity(0.12), lineWidth: 1)
-        .allowsHitTesting(false)
-    )
-    .shadow(
-      color: tint.opacity(density.isCompact ? 0 : 0.08),
-      radius: density.isCompact ? 0 : 18,
-      x: 0,
-      y: density.isCompact ? 0 : 12
-    )
   }
 }
 

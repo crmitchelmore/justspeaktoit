@@ -7,6 +7,7 @@ import SwiftUI
 public struct OpenClawSettingsView: View {
     @ObservedObject private var settings = OpenClawSettings.shared
     @ObservedObject private var appSettings = AppSettings.shared
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var tokenInput = ""
     @State private var urlInput = ""
     @State private var testState: OpenClawConnectionTester.Result = .idle
@@ -38,7 +39,7 @@ public struct OpenClawSettingsView: View {
                         testState = .idle
                     }
 
-                if !appSettings.visualDensity.isCompact {
+                if !usesInlineDensityLayout {
                     Text("Enter host:port for local connections or a Tailscale/public hostname. "
                          + "The ws:// or wss:// prefix is added automatically.")
                         .font(.caption)
@@ -151,7 +152,7 @@ public struct OpenClawSettingsView: View {
                         Slider(value: $settings.ttsSpeed, in: 0.5...2.0, step: 0.1)
                     }
 
-                    if !appSettings.visualDensity.isCompact {
+                    if !usesInlineDensityLayout {
                         Text(
                             "Requires a Deepgram API key in the main app settings."
                         )
@@ -186,7 +187,7 @@ public struct OpenClawSettingsView: View {
                     Label("Summarise for Voice", systemImage: "text.quote")
                 }
 
-                if settings.summariseResponses && !appSettings.visualDensity.isCompact {
+                if settings.summariseResponses && !usesInlineDensityLayout {
                     Text(
                         "Long responses will be summarised into concise voice-friendly text "
                             + "before speaking (requires OpenRouter API key)."
@@ -199,7 +200,7 @@ public struct OpenClawSettingsView: View {
                     Label("Prioritise Low Latency", systemImage: "hare")
                 }
 
-                if settings.lowLatencySpeech && !appSettings.visualDensity.isCompact {
+                if settings.lowLatencySpeech && !usesInlineDensityLayout {
                     Text("Skips the extra summarisation step before speaking for faster responses.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -233,7 +234,7 @@ public struct OpenClawSettingsView: View {
                 }
             }
 
-            if !appSettings.visualDensity.isCompact {
+            if !usesInlineDensityLayout {
                 Section("How It Works") {
                     VStack(alignment: .leading, spacing: 8) {
                         InfoStepRow(number: 1, text: "Tap the mic to record your voice message")
@@ -251,6 +252,10 @@ public struct OpenClawSettingsView: View {
         .navigationTitle("OpenClaw Settings")
         .navigationBarTitleDisplayMode(.inline)
         .controlSize(appSettings.visualDensity.isCompact ? .small : .regular)
+    }
+
+    private var usesInlineDensityLayout: Bool {
+        appSettings.visualDensity.prefersInlineLayout(dynamicTypeSize: dynamicTypeSize)
     }
 
     // MARK: - Connection Test

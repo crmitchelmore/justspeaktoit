@@ -182,9 +182,12 @@ public struct OpenClawChatView: View {
             .tint(.accentColor)
             .frame(minHeight: 44)
 
-            if settings.conversationModeEnabled && !density.isCompact {
-                Text("Tap the chat area to acknowledge")
-                    .font(.caption)
+            if settings.conversationModeEnabled {
+                Label(
+                    density.isCompact ? "Tap chat to send" : "Tap the chat area to acknowledge",
+                    systemImage: "hand.tap"
+                )
+                    .font(density.isCompact ? .caption2 : .caption)
                     .foregroundStyle(.secondary)
             }
         }
@@ -207,7 +210,7 @@ public struct OpenClawChatView: View {
                 .lineLimit(1...5)
                 .padding(.horizontal, density.isCompact ? 8 : 14)
                 .padding(.vertical, density.isCompact ? 6 : 12)
-                .frame(minHeight: density.isCompact ? 44 : 50)
+                .frame(minHeight: density.isCompact ? 48 : 50)
                 .background(
                     RoundedRectangle(cornerRadius: density.isCompact ? 10 : 16, style: .continuous)
                         .fill(Color(.secondarySystemBackground))
@@ -291,102 +294,6 @@ extension OpenClawChatView {
         textInput = ""
         Task {
             await coordinator.sendTextMessage(text)
-        }
-    }
-}
-
-// MARK: - Message Bubble
-
-struct MessageBubble: View {
-    @Environment(\.appVisualDensity) private var density
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    let message: OpenClawClient.ChatMessage
-
-    var isUser: Bool { message.role == "user" }
-
-    var body: some View {
-        HStack {
-            if isUser { Spacer(minLength: density.isCompact ? 20 : 60) }
-
-            Group {
-                if density.prefersInlineLayout(dynamicTypeSize: dynamicTypeSize) {
-                    HStack(alignment: .lastTextBaseline, spacing: density.inlineSpacing) {
-                        messageText
-                        timestampText
-                    }
-                } else {
-                    VStack(alignment: isUser ? .trailing : .leading, spacing: 4) {
-                        messageText
-                        timestampText
-                    }
-                }
-            }
-            .padding(.horizontal, density.isCompact ? 8 : 14)
-            .padding(.vertical, density.isCompact ? 4 : 10)
-            .background(
-                isUser ? Color.accentColor : Color(.systemGray5),
-                in: RoundedRectangle(cornerRadius: density.isCompact ? 10 : 18)
-            )
-
-            if !isUser { Spacer(minLength: density.isCompact ? 20 : 60) }
-        }
-    }
-
-    private var messageText: some View {
-        Text(message.content)
-            .font(density.isCompact ? .subheadline : .body)
-            .foregroundStyle(isUser ? .white : .primary)
-            .textSelection(.enabled)
-    }
-
-    private var timestampText: some View {
-        Text(message.timestamp, style: .time)
-            .font(.caption2)
-            .foregroundStyle(isUser ? .white.opacity(0.7) : .secondary)
-    }
-}
-
-// MARK: - Recording Indicator
-
-struct RecordingIndicator: View {
-    @Environment(\.appVisualDensity) private var density
-    let partialText: String
-    let showAcknowledgeHint: Bool
-    @State private var pulseScale: CGFloat = 1.0
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 12) {
-                Circle()
-                    .fill(.red)
-                    .frame(width: 12, height: 12)
-                    .scaleEffect(pulseScale)
-                    .animation(
-                        .easeInOut(duration: 0.8).repeatForever(autoreverses: true),
-                        value: pulseScale
-                    )
-
-                if partialText.isEmpty {
-                    Text("Listening…")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .italic()
-                } else {
-                    Text(partialText)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            if showAcknowledgeHint && !density.isCompact {
-                Text("Tap the chat area, use headset tap, or say your keyword to send.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-        }
-        .padding(.horizontal, density.isCompact ? density.pagePadding : 16)
-        .onAppear {
-            pulseScale = 1.3
         }
     }
 }

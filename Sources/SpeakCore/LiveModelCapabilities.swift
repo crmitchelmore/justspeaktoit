@@ -116,6 +116,13 @@ extension ModelCatalog {
             postStopFinalizeBudget: 0.5
         ),
 
+        // OpenAI's recommended live transcription model emits low-latency
+        // deltas and a completed event for each committed audio item.
+        OpenAITranscriptionModels.gptLiveTranscribeStreamingCatalogID: LiveModelCapabilities(
+            supportedSpeedModes: [.instant, .livePolish],
+            postStopFinalizeBudget: 0.5
+        ),
+
         // OpenAI gpt-4o-mini-transcribe / gpt-4o-transcribe over the
         // Realtime API: same WebSocket transport and event shape as
         // gpt-realtime-whisper, with the added benefit of supporting the

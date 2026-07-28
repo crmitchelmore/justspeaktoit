@@ -52,9 +52,15 @@ struct OpenAITranscriptionProvider: TranscriptionProvider {
     }
 
     if let language {
-      // OpenAI expects ISO-639-1 (2-letter code), not full locale (e.g., "en" not "en_GB")
+      // OpenAI expects ISO-639-1 (2-letter code), not full locale (e.g., "en" not "en_GB").
+      // The new GPT Transcribe family accepts plural language hints while
+      // existing GPT-4o and Whisper models retain the singular field.
       let languageCode = extractLanguageCode(from: language)
-      body.appendFormField(named: "language", value: languageCode, boundary: boundary)
+      body.appendFormField(
+        named: OpenAITranscriptionModels.batchLanguageFieldName(for: modelName),
+        value: languageCode,
+        boundary: boundary
+      )
     }
 
     body.appendFileField(
@@ -129,6 +135,11 @@ struct OpenAITranscriptionProvider: TranscriptionProvider {
         id: "openai/whisper-1",
         displayName: "Whisper",
         description: "OpenAI's speech recognition model. Fast and accurate."
+      ),
+      ModelCatalog.Option(
+        id: OpenAITranscriptionModels.gptTranscribeCatalogID,
+        displayName: "GPT Transcribe",
+        description: "Recommended high-accuracy model for recorded speech and multilingual audio."
       ),
       ModelCatalog.Option(
         id: "openai/gpt-4o-mini-transcribe",

@@ -101,9 +101,9 @@ final class OpenAIRealtimeLiveTranscriber: @unchecked Sendable {
       currentOnError()?(OpenAIRealtimeError.invalidURL)
       return
     }
-    // All GA transcription models — gpt-realtime-whisper, whisper-1,
-    // gpt-4o-transcribe, gpt-4o-mini-transcribe — use the same
-    // `?intent=transcription` URL with a unified `session.update` payload.
+    // All GA transcription models — including gpt-live-transcribe,
+    // gpt-realtime-whisper and the GPT-4o transcription family — use the
+    // same `?intent=transcription` URL with a unified `session.update` payload.
     // The legacy `?model=<name>` URL creates a realtime *conversation*
     // session and rejects transcription session.updates with
     // `invalid_parameter: Passing a transcription session update event to
@@ -242,33 +242,15 @@ final class OpenAIRealtimeLiveTranscriber: @unchecked Sendable {
     let task = withStateLock { webSocketTask }
     guard let task else { return }
 
-    var transcription: [String: Any] = ["model": model]
-    if let language, !language.isEmpty {
-      transcription["language"] = language
-    }
-    if let prompt, !prompt.isEmpty, OpenAIRealtimeLiveTranscriber.modelSupportsPrompt(model) {
-      transcription["prompt"] = prompt
-    }
-
-    let payload: [String: Any] = [
-      // Unified GA shape for all transcription models. The legacy
-      // `transcription_session.update` event was removed during GA.
-      // Transcription config nests under `session.audio.input.transcription`.
-      // `turn_detection: null` keeps the session push-to-talk so we control
-      // commit boundaries.
-      "type": "session.update",
-      "session": [
-        "type": "transcription",
-        "audio": [
-          "input": [
-            "format": ["type": "audio/pcm", "rate": sampleRate],
-            "transcription": transcription,
-            "noise_reduction": ["type": "near_field"],
-            "turn_detection": NSNull()
-          ]
-        ]
-      ]
-    ]
+    // Unified GA shape for all transcription models. The shared builder keeps
+    // macOS and iOS aligned while handling gpt-live-transcribe's plural
+    // `languages` field and the older models' singular `language` field.
+    let payload = OpenAITranscriptionModels.realtimeSessionUpdatePayload(
+      model: model,
+      language: language,
+      prompt: prompt,
+      sampleRate: sampleRate
+    )
 
     guard let data = try? JSONSerialization.data(withJSONObject: payload),
       let json = String(data: data, encoding: .utf8)
@@ -555,20 +537,7 @@ struct OpenAIRealtimeTranscriptionProvider {
   /// Translates an `openai/...-streaming` model id into the bare model name
   /// expected by the Realtime API.
   static func realtimeModelName(from catalogID: String) -> String {
-    let suffix = catalogID.split(separator: "/").last.map(String.init) ?? catalogID
-    return suffix.replacingOccurrences(of: "-streaming", with: "")
-  }
-}
-
-extension OpenAIRealtimeLiveTranscriber {
-  /// OpenAI Realtime only accepts `input_audio_transcription.prompt` for the
-  /// GPT-4o transcription models. `gpt-realtime-whisper` (Whisper-1) rejects
-  /// the parameter with `invalid_value`. Returning false here means the
-  /// provider silently drops the prompt for unsupported models rather than
-  /// failing the whole session.
-  static func modelSupportsPrompt(_ realtimeModel: String) -> Bool {
-    let name = realtimeModel.lowercased()
-    return name.hasPrefix("gpt-4o-transcribe") || name.hasPrefix("gpt-4o-mini-transcribe")
+    OpenAITranscriptionModels.apiModelName(from: catalogID)
   }
 }
 

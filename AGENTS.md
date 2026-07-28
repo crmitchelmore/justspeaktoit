@@ -295,7 +295,13 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
 - Keep macOS and iOS OpenAI Realtime wiring in sync when changing endpoint shape, event names, payload fields, or stop/finalisation sequencing.
 
 ### Prompt semantics
-- `gpt-4o-transcribe` and `gpt-4o-mini-transcribe` support the Realtime transcription `prompt`; `gpt-realtime-whisper` and `whisper-1` reject it.
+- `gpt-live-transcribe`, `gpt-transcribe`, `gpt-4o-transcribe`, and `gpt-4o-mini-transcribe`
+  support the Realtime transcription `prompt`; `gpt-realtime-whisper` and `whisper-1` reject it.
+- `gpt-live-transcribe` and `gpt-transcribe` use plural `languages` hints; existing
+  GPT-4o and Whisper integrations use the singular `language` field.
+- Use `gpt-live-transcribe` for low-latency live deltas and `gpt-transcribe` for
+  completed recordings. Although `gpt-transcribe` can run in Realtime after a
+  committed turn, do not present it as a live-delta model.
 - Treat the OpenAI transcription `prompt` as vocabulary/keyterm biasing, not a custom formatting or tone prompt. Keep tone/style changes in post-processing.
 
 ## Accessibility Text Insertion

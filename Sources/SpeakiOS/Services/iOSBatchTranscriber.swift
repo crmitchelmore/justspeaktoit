@@ -136,7 +136,11 @@ private struct IOSBatchTranscriptionClient {
             body.appendFormField(name: "chunking_strategy", value: "auto", boundary: boundary)
         }
         if let languageCode = language?.split(whereSeparator: { $0 == "_" || $0 == "-" }).first {
-            body.appendFormField(name: "language", value: String(languageCode), boundary: boundary)
+            body.appendFormField(
+                name: OpenAITranscriptionModels.batchLanguageFieldName(for: modelName),
+                value: String(languageCode),
+                boundary: boundary
+            )
         }
         body.appendFile(
             name: "file",

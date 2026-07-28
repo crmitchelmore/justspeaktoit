@@ -10,6 +10,13 @@ final class ModelCredentialResolverTests: XCTestCase {
             ),
             .apiKey(identifier: "deepgram.apiKey", providerName: "Deepgram")
         )
+        XCTAssertEqual(
+            ModelCredentialResolver.requirement(
+                for: OpenAITranscriptionModels.gptLiveTranscribeStreamingCatalogID,
+                purpose: .liveTranscription
+            ),
+            .apiKey(identifier: "openai.apiKey", providerName: "OpenAI")
+        )
     }
 
     func testAppleAndLocalModels_DoNotRequireCredential() {
@@ -30,6 +37,13 @@ final class ModelCredentialResolverTests: XCTestCase {
     }
 
     func testBatchModels_DistinguishOpenAIFromOpenRouter() {
+        XCTAssertEqual(
+            ModelCredentialResolver.requirement(
+                for: OpenAITranscriptionModels.gptTranscribeCatalogID,
+                purpose: .batchTranscription
+            ),
+            .apiKey(identifier: "openai.apiKey", providerName: "OpenAI")
+        )
         XCTAssertEqual(
             ModelCredentialResolver.requirement(
                 for: "openai/gpt-4o-transcribe",

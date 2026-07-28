@@ -19,6 +19,16 @@ final class OpenAIRealtimeProviderTests: XCTestCase {
         XCTAssertEqual(option.displayName, "OpenAI GPT Realtime Whisper (Streaming)")
     }
 
+    func testModelCatalog_includesGPTLiveTranscribeStreaming() throws {
+        let option = try XCTUnwrap(
+            ModelCatalog.liveTranscription.first {
+                $0.id == OpenAITranscriptionModels.gptLiveTranscribeStreamingCatalogID
+            }
+        )
+
+        XCTAssertEqual(option.displayName, "OpenAI GPT Live Transcribe (Streaming)")
+    }
+
     func testCapabilities_supportsInstantAndLivePolish() {
         let capabilities = ModelCatalog.liveCapabilities(for: "openai/gpt-realtime-whisper-streaming")
         XCTAssertTrue(capabilities.supportedSpeedModes.contains(.instant))
@@ -29,6 +39,17 @@ final class OpenAIRealtimeProviderTests: XCTestCase {
         let capabilities = ModelCatalog.liveCapabilities(for: "openai/gpt-realtime-whisper-streaming")
         // Per-segment .completed events arrive during the session, so the
         // post-stop wait should be much smaller than AssemblyAI's 2s.
+        XCTAssertGreaterThan(capabilities.postStopFinalizeBudget, 0)
+        XCTAssertLessThanOrEqual(capabilities.postStopFinalizeBudget, 1.0)
+    }
+
+    func testGPTLiveTranscribeCapabilities_supportLiveModesAndSmallFinalizeBudget() {
+        let capabilities = ModelCatalog.liveCapabilities(
+            for: OpenAITranscriptionModels.gptLiveTranscribeStreamingCatalogID
+        )
+
+        XCTAssertTrue(capabilities.supportedSpeedModes.contains(.instant))
+        XCTAssertTrue(capabilities.supportedSpeedModes.contains(.livePolish))
         XCTAssertGreaterThan(capabilities.postStopFinalizeBudget, 0)
         XCTAssertLessThanOrEqual(capabilities.postStopFinalizeBudget, 1.0)
     }
@@ -47,6 +68,14 @@ final class OpenAIRealtimeProviderTests: XCTestCase {
             from: "openai/gpt-realtime-whisper"
         )
         XCTAssertEqual(name, "gpt-realtime-whisper")
+    }
+
+    func testRealtimeModelName_mapsGPTLiveTranscribeCatalogID() {
+        let name = OpenAIRealtimeTranscriptionProvider.realtimeModelName(
+            from: OpenAITranscriptionModels.gptLiveTranscribeStreamingCatalogID
+        )
+
+        XCTAssertEqual(name, OpenAITranscriptionModels.gptLiveTranscribeAPIName)
     }
 
     // MARK: - Event parser

@@ -74,8 +74,8 @@ final class ActionButtonSettingsUITests: XCTestCase {
 
         XCTAssertTrue(app.navigationBars["Just Speak Keyboard"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["openKeyboardSettingsButton"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Why Full Access?"].exists)
-        XCTAssertTrue(app.staticTexts["Where It Won’t Appear"].exists)
+        XCTAssertTrue(scrollUpUntilExists(app.staticTexts["Why Full Access?"]))
+        XCTAssertTrue(scrollUpUntilExists(app.staticTexts["Where It Won’t Appear"]))
     }
 
     private func scrollUpUntilExists(_ element: XCUIElement, maxSwipes: Int = 6) -> Bool {

@@ -60,6 +60,7 @@ final class HistoryItemModelTests: XCTestCase {
         XCTAssertNil(item.postProcessedTranscription)
         XCTAssertNil(item.errorMessage)
         XCTAssertEqual(item.bestText, "hello")
+        XCTAssertEqual(item.updatedAt, item.createdAt)
     }
 }
 #endif

@@ -97,8 +97,7 @@ struct SyncStatusBanner: View {
     }
 
     private var syncFraction: CGFloat {
-        guard totalCount > 0 else { return 0 }
-        return CGFloat(syncedCount) / CGFloat(totalCount)
+        CGFloat(HistorySyncProgress.fraction(syncedCount: syncedCount, totalCount: totalCount))
     }
 
     private var syncSummary: String {
@@ -139,6 +138,14 @@ struct SyncStatusBanner: View {
             return .orange
         }
         return .green
+    }
+}
+
+enum HistorySyncProgress {
+    static func fraction(syncedCount: Int, totalCount: Int) -> Double {
+        guard totalCount > 0 else { return 0 }
+        let rawFraction = Double(syncedCount) / Double(totalCount)
+        return min(max(rawFraction, 0), 1)
     }
 }
 #endif

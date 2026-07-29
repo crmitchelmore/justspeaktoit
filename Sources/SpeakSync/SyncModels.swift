@@ -83,6 +83,10 @@ public final class SyncState: ObservableObject {
 public enum SyncError: LocalizedError {
     case cloudUnavailable
     case cloudKit(Error)
+    case delegateUnavailable
+    case invalidChangePage
+    case partialUploadFailure(Int)
+    case reconciliationIncomplete(Int)
     case encodingFailed
     case decodingFailed
 
@@ -92,6 +96,14 @@ public enum SyncError: LocalizedError {
             return "iCloud is not available. Please sign in to iCloud in Settings."
         case .cloudKit(let error):
             return "CloudKit error: \(error.localizedDescription)"
+        case .delegateUnavailable:
+            return "History sync is not ready yet"
+        case .invalidChangePage:
+            return "CloudKit returned another history page without a change token"
+        case .partialUploadFailure(let count):
+            return "Failed to upload \(count) history entr\(count == 1 ? "y" : "ies")"
+        case .reconciliationIncomplete(let count):
+            return "History reconciliation left \(count) entr\(count == 1 ? "y" : "ies") pending"
         case .encodingFailed:
             return "Failed to encode data for sync"
         case .decodingFailed:

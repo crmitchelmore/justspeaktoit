@@ -108,7 +108,7 @@ public enum LocalTranscriptionAssessmentGate {
             baseline: baseline,
             candidate: candidate,
             requiredTags: policy.requiredCorpusTags
-        ) + operationalEvidenceReasons(evidence)
+        ) + operationalEvidenceReasons(evidence, candidateModel: candidate.model)
         let outcome = outcome(rejections: rejectionReasons, missingEvidence: missingEvidence)
 
         return LocalTranscriptionAssessmentDecision(
@@ -131,7 +131,10 @@ public enum LocalTranscriptionAssessmentGate {
     ) -> [String] {
         var reasons: [String] = []
         if metrics.wordErrorRegression > policy.maximumRelativeWordErrorRegression {
-            reasons.append("Candidate WER exceeds the allowed 5% relative regression.")
+            reasons.append(
+                "Candidate WER exceeds the allowed "
+                    + "\(policy.maximumRelativeWordErrorRegression * 100)% relative regression."
+            )
         }
         if baseline.failureCount > 0 || candidate.failureCount > 0 {
             reasons.append("One or more benchmark cases failed.")
@@ -139,7 +142,10 @@ public enum LocalTranscriptionAssessmentGate {
         let performanceGain = max(metrics.latencyImprovement, metrics.memoryImprovement)
         let capabilityGain = evidence.capabilityGain?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if performanceGain < policy.minimumPerformanceImprovement && capabilityGain.isEmpty {
-            reasons.append("Candidate has neither a 20% performance gain nor a documented capability gain.")
+            reasons.append(
+                "Candidate has neither a \(policy.minimumPerformanceImprovement * 100)% "
+                    + "performance gain nor a documented capability gain."
+            )
         }
         return reasons
     }
@@ -155,7 +161,7 @@ public enum LocalTranscriptionAssessmentGate {
         if !missingTags.isEmpty {
             reasons.append("Corpus is missing required tags: \(missingTags.joined(separator: ", ")).")
         }
-        if Set(baseline.measurements.map(\.caseID)) != Set(candidate.measurements.map(\.caseID)) {
+        if corpusIdentity(baseline.measurements) != corpusIdentity(candidate.measurements) {
             reasons.append("Baseline and candidate did not run the same cases.")
         }
         if baseline.engine != .whisperKit { reasons.append("Baseline report must use WhisperKit.") }
@@ -164,7 +170,8 @@ public enum LocalTranscriptionAssessmentGate {
     }
 
     private static func operationalEvidenceReasons(
-        _ evidence: LocalTranscriptionAssessmentEvidence
+        _ evidence: LocalTranscriptionAssessmentEvidence,
+        candidateModel: String
     ) -> [String] {
         var reasons: [String] = []
         if !evidence.directBuildPassed { reasons.append("Direct macOS build is not verified.") }
@@ -172,10 +179,19 @@ public enum LocalTranscriptionAssessmentGate {
         if !evidence.cancellationPassed { reasons.append("Cancellation is not verified.") }
         if !evidence.longRecordingPassed { reasons.append("Long recordings are not verified.") }
         if !evidence.silencePassed { reasons.append("Silence handling is not verified.") }
-        if evidence.modelArtifacts.isEmpty || !evidence.modelArtifacts.allSatisfy(\.isComplete) {
-            reasons.append("Every candidate model needs URL, SHA-256, size, and license evidence.")
+        let matchingArtifact = evidence.modelArtifacts.first { $0.identifier == candidateModel }
+        if matchingArtifact?.isComplete != true {
+            reasons.append("The candidate model needs matching URL, SHA-256, size, and license evidence.")
         }
         return reasons
+    }
+
+    private static func corpusIdentity(
+        _ measurements: [LocalTranscriptionBenchmarkMeasurement]
+    ) -> [CorpusMeasurementIdentity] {
+        measurements.map(CorpusMeasurementIdentity.init).sorted {
+            ($0.caseID, $0.iteration) < ($1.caseID, $1.iteration)
+        }
     }
 
     private static func outcome(
@@ -202,6 +218,24 @@ public enum LocalTranscriptionAssessmentGate {
     fileprivate static func relativeImprovement(baseline: Double, candidate: Double) -> Double {
         guard baseline > 0 else { return 0 }
         return (baseline - candidate) / baseline
+    }
+}
+
+private struct CorpusMeasurementIdentity: Equatable {
+    let caseID: String
+    let iteration: Int
+    let tags: [String]
+    let language: String?
+    let referenceTranscript: String
+    let audioSeconds: Double
+
+    init(_ measurement: LocalTranscriptionBenchmarkMeasurement) {
+        caseID = measurement.caseID
+        iteration = measurement.iteration
+        tags = measurement.tags.sorted()
+        language = measurement.language
+        referenceTranscript = measurement.referenceTranscript
+        audioSeconds = measurement.audioSeconds
     }
 }
 

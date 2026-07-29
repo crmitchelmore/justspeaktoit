@@ -39,6 +39,17 @@ final class TranscriptErrorRateTests: XCTestCase {
         XCTAssertEqual(TranscriptErrorRate.aggregateWordErrorRate(measurements), 0.25)
     }
 
+    func testWordErrorRate_usesCharactersForLanguagesWithoutWordBoundaries() {
+        XCTAssertEqual(
+            TranscriptErrorRate.wordErrorRate(
+                reference: "你好世界",
+                hypothesis: "你好世",
+                language: "zh-CN"
+            ),
+            0.25
+        )
+    }
+
     private func measurement(
         reference: String,
         transcript: String

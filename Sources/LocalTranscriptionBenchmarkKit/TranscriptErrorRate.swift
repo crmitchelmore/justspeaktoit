@@ -2,8 +2,16 @@ import Foundation
 
 public enum TranscriptErrorRate {
     public static func wordErrorRate(reference: String, hypothesis: String) -> Double {
-        let referenceWords = normalizedWords(reference)
-        let hypothesisWords = normalizedWords(hypothesis)
+        wordErrorRate(reference: reference, hypothesis: hypothesis, language: nil)
+    }
+
+    public static func wordErrorRate(
+        reference: String,
+        hypothesis: String,
+        language: String?
+    ) -> Double {
+        let referenceWords = wordUnits(reference, language: language)
+        let hypothesisWords = wordUnits(hypothesis, language: language)
         return rate(reference: referenceWords, hypothesis: hypothesisWords)
     }
 
@@ -16,7 +24,25 @@ public enum TranscriptErrorRate {
     public static func aggregateWordErrorRate(
         _ measurements: [LocalTranscriptionBenchmarkMeasurement]
     ) -> Double {
-        aggregateRate(measurements, units: normalizedWords)
+        var edits = 0
+        var referenceCount = 0
+        for measurement in measurements {
+            let reference = wordUnits(
+                measurement.referenceTranscript,
+                language: measurement.language
+            )
+            edits += editDistance(
+                reference,
+                wordUnits(measurement.transcript, language: measurement.language)
+            )
+            referenceCount += reference.count
+        }
+        guard referenceCount > 0 else {
+            return measurements.allSatisfy {
+                wordUnits($0.transcript, language: $0.language).isEmpty
+            } ? 0 : 1
+        }
+        return Double(edits) / Double(referenceCount)
     }
 
     public static func aggregateCharacterErrorRate(
@@ -31,6 +57,17 @@ public enum TranscriptErrorRate {
 
     public static func normalizedCharacters(_ text: String) -> [Character] {
         Array(normalizedText(text).filter { !$0.isWhitespace })
+    }
+
+    private static func wordUnits(_ text: String, language: String?) -> [String] {
+        let code = language?
+            .split(whereSeparator: { $0 == "-" || $0 == "_" })
+            .first?
+            .lowercased()
+        if let code, ["zh", "ja", "ko", "th"].contains(code) {
+            return normalizedCharacters(text).map(String.init)
+        }
+        return normalizedWords(text)
     }
 
     private static func normalizedText(_ text: String) -> String {

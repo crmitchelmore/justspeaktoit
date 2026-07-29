@@ -31,6 +31,10 @@ enum ArgumentParser {
         let options = try parseOptions(Array(arguments.dropFirst()))
         switch command {
         case "run":
+            try validate(options: options, allowed: [
+                "engine", "model", "model-source", "repo", "backend",
+                "manifest", "output", "warmups", "iterations"
+            ])
             let engine = LocalTranscriptionEngine(identifier: try required("engine", in: options))
             guard engine == .whisperKit || engine == .transcribeCpp else {
                 throw CLIError.invalidValue("--engine must be whisperkit or transcribe.cpp")
@@ -49,6 +53,9 @@ enum ArgumentParser {
                 measuredIterations: iterations
             ))
         case "compare":
+            try validate(options: options, allowed: [
+                "baseline", "candidate", "evidence", "output"
+            ])
             return .compare(CompareArguments(
                 baselineURL: fileURL(try required("baseline", in: options)),
                 candidateURL: fileURL(try required("candidate", in: options)),
@@ -57,6 +64,12 @@ enum ArgumentParser {
             ))
         default:
             throw CLIError.invalidValue("Unknown command: \(command)")
+        }
+    }
+
+    private static func validate(options: [String: String], allowed: Set<String>) throws {
+        if let unsupported = options.keys.sorted().first(where: { !allowed.contains($0) }) {
+            throw CLIError.invalidValue("Unsupported option for this command: --\(unsupported)")
         }
     }
 

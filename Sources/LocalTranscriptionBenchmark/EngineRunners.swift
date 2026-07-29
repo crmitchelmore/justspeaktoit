@@ -1,6 +1,7 @@
 import CTranscribe
 import Foundation
 import SpeakCore
+import struct WhisperKit.DecodingOptions
 import class WhisperKit.WhisperKit
 import class WhisperKit.WhisperKitConfig
 
@@ -13,8 +14,8 @@ protocol LocalBenchmarkEngineRunner: AnyObject {
 
 final class WhisperKitBenchmarkRunner: LocalBenchmarkEngineRunner {
     let engine = LocalTranscriptionEngine.whisperKit
-    let runtimeVersion = "argmax-oss-swift (see Package.resolved)"
-    let runtimeCommit: String? = nil
+    let runtimeVersion = "argmax-oss-swift 0.18.0"
+    let runtimeCommit: String? = "e2adabbe7d98dc4d0ab9a5b75424ecc42a9cdbef"
     private let pipeline: WhisperKit
 
     init(model: String, modelRepo: String?) async throws {
@@ -27,7 +28,11 @@ final class WhisperKitBenchmarkRunner: LocalBenchmarkEngineRunner {
     }
 
     func transcribe(audioURL: URL, wav: WAVFile, language: String?) async throws -> String {
-        let results = try await pipeline.transcribe(audioPath: audioURL.path)
+        let decodeOptions = language.map { DecodingOptions(language: $0) }
+        let results = try await pipeline.transcribe(
+            audioPath: audioURL.path,
+            decodeOptions: decodeOptions
+        )
         return results.map(\.text).joined(separator: " ")
             .replacingOccurrences(of: "[BLANK_AUDIO]", with: "", options: .caseInsensitive)
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)

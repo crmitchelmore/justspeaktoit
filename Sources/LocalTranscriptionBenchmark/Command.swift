@@ -153,6 +153,7 @@ struct LocalTranscriptionBenchmarkCommand {
             caseID: prepared.benchmarkCase.id,
             iteration: iteration,
             tags: prepared.benchmarkCase.tags,
+            language: prepared.benchmarkCase.language,
             referenceTranscript: prepared.benchmarkCase.referenceTranscript,
             transcript: transcript,
             audioSeconds: prepared.wav.durationSeconds,

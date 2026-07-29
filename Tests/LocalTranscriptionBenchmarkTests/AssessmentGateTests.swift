@@ -85,11 +85,34 @@ final class AssessmentGateTests: XCTestCase {
         XCTAssertTrue(decision.reasons.contains { $0.contains("Long recordings") })
     }
 
+    func testGate_rejectsEvidenceForDifferentCandidateModel() {
+        let decision = LocalTranscriptionAssessmentGate.evaluate(
+            baseline: report(engine: .whisperKit),
+            candidate: report(engine: .transcribeCpp),
+            evidence: completeEvidence(artifactIdentifier: "different-model")
+        )
+
+        XCTAssertEqual(decision.status, .insufficientEvidence)
+        XCTAssertTrue(decision.reasons.contains { $0.contains("candidate model") })
+    }
+
+    func testGate_rejectsChangedCorpusContentWithSameCaseID() {
+        let decision = LocalTranscriptionAssessmentGate.evaluate(
+            baseline: report(engine: .whisperKit, referenceTranscript: "original words"),
+            candidate: report(engine: .transcribeCpp, referenceTranscript: "changed words"),
+            evidence: completeEvidence()
+        )
+
+        XCTAssertEqual(decision.status, .insufficientEvidence)
+        XCTAssertTrue(decision.reasons.contains { $0.contains("same cases") })
+    }
+
     private func report(
         engine: LocalTranscriptionEngine,
         transcript: String = "one two three four",
         wallSeconds: Double = 1,
         memoryMB: Double = 100,
+        referenceTranscript: String = "one two three four",
         tags: [String] = ["accent", "long", "multilingual", "noise", "silence"]
     ) -> LocalTranscriptionBenchmarkReport {
         LocalTranscriptionBenchmarkReport(
@@ -110,7 +133,7 @@ final class AssessmentGateTests: XCTestCase {
                 caseID: "case",
                 iteration: 1,
                 tags: tags,
-                referenceTranscript: "one two three four",
+                referenceTranscript: referenceTranscript,
                 transcript: transcript,
                 audioSeconds: 10,
                 wallSeconds: wallSeconds,
@@ -122,7 +145,9 @@ final class AssessmentGateTests: XCTestCase {
         )
     }
 
-    private func completeEvidence() -> LocalTranscriptionAssessmentEvidence {
+    private func completeEvidence(
+        artifactIdentifier: String = "test-model"
+    ) -> LocalTranscriptionAssessmentEvidence {
         LocalTranscriptionAssessmentEvidence(
             directBuildPassed: true,
             appStoreBuildPassed: true,
@@ -130,7 +155,7 @@ final class AssessmentGateTests: XCTestCase {
             longRecordingPassed: true,
             silencePassed: true,
             modelArtifacts: [LocalTranscriptionModelArtifactEvidence(
-                identifier: "candidate",
+                identifier: artifactIdentifier,
                 url: "https://example.com/model.gguf",
                 sha256: String(repeating: "a", count: 64),
                 sizeBytes: 1,

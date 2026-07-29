@@ -132,6 +132,7 @@ public struct LocalTranscriptionBenchmarkMeasurement: Codable, Equatable, Sendab
     public let caseID: String
     public let iteration: Int
     public let tags: [String]
+    public let language: String?
     public let referenceTranscript: String
     public let transcript: String
     public let audioSeconds: Double
@@ -144,6 +145,7 @@ public struct LocalTranscriptionBenchmarkMeasurement: Codable, Equatable, Sendab
         caseID: String,
         iteration: Int,
         tags: [String],
+        language: String? = nil,
         referenceTranscript: String,
         transcript: String,
         audioSeconds: Double,
@@ -155,6 +157,7 @@ public struct LocalTranscriptionBenchmarkMeasurement: Codable, Equatable, Sendab
         self.caseID = caseID
         self.iteration = iteration
         self.tags = tags
+        self.language = language
         self.referenceTranscript = referenceTranscript
         self.transcript = transcript
         self.audioSeconds = audioSeconds
@@ -170,7 +173,11 @@ public struct LocalTranscriptionBenchmarkMeasurement: Codable, Equatable, Sendab
     }
 
     public var wordErrorRate: Double {
-        TranscriptErrorRate.wordErrorRate(reference: referenceTranscript, hypothesis: transcript)
+        TranscriptErrorRate.wordErrorRate(
+            reference: referenceTranscript,
+            hypothesis: transcript,
+            language: language
+        )
     }
 
     public var characterErrorRate: Double {

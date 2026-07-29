@@ -19,8 +19,10 @@ struct WAVFile {
             let identifier = String(bytes: data[offset..<(offset + 4)], encoding: .ascii) ?? ""
             let chunkSize = Self.littleEndianUInt32(data, offset: offset + 4)
             let chunkStart = offset + 8
-            let chunkEnd = min(chunkStart + chunkSize, data.count)
-            guard chunkStart <= chunkEnd else { break }
+            guard chunkSize <= data.count - chunkStart else {
+                throw WAVError.invalidContainer(url.path)
+            }
+            let chunkEnd = chunkStart + chunkSize
             if identifier == "fmt ", chunkSize >= 16 {
                 format = WAVFormat(
                     audioFormat: Self.littleEndianUInt16(data, offset: chunkStart),
@@ -35,6 +37,9 @@ struct WAVFile {
         }
 
         guard let format, let sampleData else { throw WAVError.missingChunks(url.path) }
+        guard sampleData.count.isMultiple(of: 2) else {
+            throw WAVError.invalidContainer(url.path)
+        }
         guard format.audioFormat == 1,
               format.channels == 1,
               format.sampleRate == 16_000,

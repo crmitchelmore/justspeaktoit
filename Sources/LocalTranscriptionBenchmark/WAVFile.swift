@@ -4,6 +4,7 @@ struct WAVFile {
     let samples: [Float]
     let durationSeconds: Double
 
+    // swiftlint:disable:next function_body_length
     init(url: URL) throws {
         let data = try Data(contentsOf: url)
         guard data.count >= 12,

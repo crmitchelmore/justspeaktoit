@@ -9,6 +9,7 @@ import SpeakSync
 public struct iOSHistoryItem: Identifiable, Codable {
     public let id: UUID
     public let createdAt: Date
+    public let updatedAt: Date
     public let transcription: String
     /// Polished (post-processed) text, when the entry has been reprocessed.
     public let postProcessedTranscription: String?
@@ -23,6 +24,7 @@ public struct iOSHistoryItem: Identifiable, Codable {
     public init(
         id: UUID = UUID(),
         createdAt: Date = Date(),
+        updatedAt: Date? = nil,
         transcription: String,
         postProcessedTranscription: String? = nil,
         model: String,
@@ -33,6 +35,7 @@ public struct iOSHistoryItem: Identifiable, Codable {
     ) {
         self.id = id
         self.createdAt = createdAt
+        self.updatedAt = updatedAt ?? createdAt
         self.transcription = transcription
         self.postProcessedTranscription = postProcessedTranscription
         self.model = model
@@ -53,10 +56,11 @@ public struct iOSHistoryItem: Identifiable, Codable {
     }
 
     /// Returns a copy with the polished transcript set and any prior error cleared.
-    public func withPostProcessed(_ text: String) -> iOSHistoryItem {
+    public func withPostProcessed(_ text: String, updatedAt: Date = Date()) -> iOSHistoryItem {
         iOSHistoryItem(
             id: id,
             createdAt: createdAt,
+            updatedAt: updatedAt,
             transcription: transcription,
             postProcessedTranscription: text,
             model: model,
@@ -72,6 +76,7 @@ public struct iOSHistoryItem: Identifiable, Codable {
         iOSHistoryItem(
             id: id,
             createdAt: createdAt,
+            updatedAt: updatedAt,
             transcription: transcription,
             postProcessedTranscription: postProcessedTranscription,
             model: model,
@@ -93,7 +98,7 @@ public struct iOSHistoryItem: Identifiable, Codable {
             duration: duration,
             wordCount: wordCount,
             originPlatform: originPlatform,
-            updatedAt: createdAt
+            updatedAt: updatedAt
         )
     }
 
@@ -102,6 +107,7 @@ public struct iOSHistoryItem: Identifiable, Codable {
         iOSHistoryItem(
             id: entry.id,
             createdAt: entry.createdAt,
+            updatedAt: entry.updatedAt,
             transcription: entry.rawTranscription ?? entry.postProcessedText ?? "",
             postProcessedTranscription: entry.postProcessedText,
             model: entry.model,
@@ -109,6 +115,33 @@ public struct iOSHistoryItem: Identifiable, Codable {
             wordCount: entry.wordCount,
             originPlatform: entry.originPlatform
         )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case createdAt
+        case updatedAt
+        case transcription
+        case postProcessedTranscription
+        case model
+        case duration
+        case wordCount
+        case originPlatform
+        case errorMessage
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
+        transcription = try container.decode(String.self, forKey: .transcription)
+        postProcessedTranscription = try container.decodeIfPresent(String.self, forKey: .postProcessedTranscription)
+        model = try container.decode(String.self, forKey: .model)
+        duration = try container.decode(TimeInterval.self, forKey: .duration)
+        wordCount = try container.decode(Int.self, forKey: .wordCount)
+        originPlatform = try container.decodeIfPresent(String.self, forKey: .originPlatform) ?? "ios"
+        errorMessage = try container.decodeIfPresent(String.self, forKey: .errorMessage)
     }
 }
 

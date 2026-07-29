@@ -18,6 +18,7 @@ public final class iOSHistoryManager: ObservableObject {
     private let fileURL: URL
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
+    private let userDefaults: UserDefaults
 
     /// Whether CloudKit sync is wired up. Disabled in unit tests so persistence
     /// can be exercised in isolation.
@@ -29,20 +30,28 @@ public final class iOSHistoryManager: ObservableObject {
     private var hasLoadedFromDisk = false
 
     /// IDs of entries that have been synced to CloudKit.
-    private(set) var syncedIDs: Set<UUID> = []
-    private let syncedIDsKey = "speak.sync.syncedHistoryIDs"
+    @Published private(set) var syncedIDs: Set<UUID> = []
+    static let syncedIDsKey = "speak.sync.syncedHistoryIDs"
+
+    private var currentItemIDs: Set<UUID> {
+        Set(items.map(\.id))
+    }
+
+    private var reconciledSyncedIDs: Set<UUID> {
+        syncedIDs.intersection(currentItemIDs)
+    }
 
     /// Number of entries synced to CloudKit.
-    public var syncedCount: Int { syncedIDs.count }
+    public var syncedCount: Int { reconciledSyncedIDs.count }
 
     /// Number of entries not yet synced.
     public var unsyncedCount: Int {
-        items.filter { !syncedIDs.contains($0.id) }.count
+        items.count - syncedCount
     }
 
     /// Whether a specific item has been synced.
     public func isSynced(_ item: iOSHistoryItem) -> Bool {
-        syncedIDs.contains(item.id)
+        currentItemIDs.contains(item.id) && syncedIDs.contains(item.id)
     }
 
     private convenience init() {
@@ -52,16 +61,18 @@ public final class iOSHistoryManager: ObservableObject {
         )[0]
         self.init(
             fileURL: documentsURL.appendingPathComponent("transcription-history.json"),
-            syncEnabled: true
+            syncEnabled: true,
+            userDefaults: .standard
         )
     }
 
     /// Designated initializer. `fileURL` and `syncEnabled` are injectable so
     /// tests can exercise persistence against a temporary file without touching
     /// CloudKit.
-    init(fileURL: URL, syncEnabled: Bool) {
+    init(fileURL: URL, syncEnabled: Bool, userDefaults: UserDefaults = .standard) {
         self.fileURL = fileURL
         self.syncEnabled = syncEnabled
+        self.userDefaults = userDefaults
 
         encoder.dateEncodingStrategy = .iso8601
         decoder.dateDecodingStrategy = .iso8601
@@ -135,12 +146,12 @@ public final class iOSHistoryManager: ObservableObject {
         loadHistoryFromDiskIfNeeded()
         items.removeAll { $0.id == item.id }
         saveHistory()
+        syncedIDs.remove(item.id)
+        saveSyncedIDs()
 
         guard syncEnabled else { return }
         Task {
             try? await HistorySyncEngine.shared.delete(entryID: item.id)
-            syncedIDs.remove(item.id)
-            saveSyncedIDs()
         }
     }
 
@@ -150,14 +161,14 @@ public final class iOSHistoryManager: ObservableObject {
         let allIDs = items.map(\.id)
         items.removeAll()
         saveHistory()
+        syncedIDs.removeAll()
+        saveSyncedIDs()
 
         guard syncEnabled else { return }
         Task {
             for entryID in allIDs {
                 try? await HistorySyncEngine.shared.delete(entryID: entryID)
             }
-            syncedIDs.removeAll()
-            saveSyncedIDs()
         }
     }
 
@@ -256,6 +267,7 @@ public final class iOSHistoryManager: ObservableObject {
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             // Nothing to load — safe to start from an empty list.
             hasLoadedFromDisk = true
+            pruneStaleSyncedIDs()
             return
         }
 
@@ -267,6 +279,7 @@ public final class iOSHistoryManager: ObservableObject {
             // background recording) must be retried, never treated as "loaded"
             // and then clobbered by the next save.
             hasLoadedFromDisk = true
+            pruneStaleSyncedIDs()
         } catch {
             print("[iOSHistoryManager] Failed to load history: \(error)")
         }
@@ -290,8 +303,8 @@ public final class iOSHistoryManager: ObservableObject {
     // MARK: - Synced IDs Tracking
 
     private func loadSyncedIDs() {
-        if let strings = UserDefaults.standard.stringArray(
-            forKey: syncedIDsKey
+        if let strings = userDefaults.stringArray(
+            forKey: Self.syncedIDsKey
         ) {
             syncedIDs = Set(strings.compactMap { UUID(uuidString: $0) })
         }
@@ -299,7 +312,15 @@ public final class iOSHistoryManager: ObservableObject {
 
     private func saveSyncedIDs() {
         let strings = syncedIDs.map(\.uuidString)
-        UserDefaults.standard.set(strings, forKey: syncedIDsKey)
+        userDefaults.set(strings, forKey: Self.syncedIDsKey)
+    }
+
+    private func pruneStaleSyncedIDs() {
+        guard hasLoadedFromDisk else { return }
+        let reconciled = reconciledSyncedIDs
+        guard reconciled != syncedIDs else { return }
+        syncedIDs = reconciled
+        saveSyncedIDs()
     }
 }
 
@@ -307,13 +328,29 @@ public final class iOSHistoryManager: ObservableObject {
 
 extension iOSHistoryManager: HistorySyncDelegate {
     public func pendingEntries() -> [SyncableHistoryEntry] {
-        items
+        pruneStaleSyncedIDs()
+        return items
             .filter { !syncedIDs.contains($0.id) }
             .map { $0.toSyncable() }
     }
 
-    public func didReceiveRemoteEntry(_ entry: SyncableHistoryEntry) {
-        guard !items.contains(where: { $0.id == entry.id }) else {
+    public func didReceiveRemoteEntry(_ entry: SyncableHistoryEntry) async {
+        if let index = items.firstIndex(where: { $0.id == entry.id }) {
+            let local = items[index]
+            if entry.updatedAt > local.updatedAt {
+                items[index] = iOSHistoryItem.fromSyncable(entry)
+                items.sort { $0.createdAt > $1.createdAt }
+                saveHistory()
+                syncedIDs.insert(entry.id)
+            } else if entry.updatedAt == local.updatedAt {
+                // An already-present duplicate is an acknowledgement.
+                syncedIDs.insert(entry.id)
+            } else {
+                // The local entry is newer and must remain pending for upload.
+                syncedIDs.remove(entry.id)
+            }
+            pruneStaleSyncedIDs()
+            saveSyncedIDs()
             return
         }
 
@@ -325,10 +362,16 @@ extension iOSHistoryManager: HistorySyncDelegate {
         saveSyncedIDs()
     }
 
-    public func didDeleteRemoteEntry(id: UUID) {
+    public func didDeleteRemoteEntry(id: UUID) async {
         items.removeAll { $0.id == id }
         saveHistory()
         syncedIDs.remove(id)
+        saveSyncedIDs()
+    }
+
+    public func didAcknowledgeSyncedEntries(ids: Set<UUID>) async {
+        syncedIDs.formUnion(ids.intersection(currentItemIDs))
+        pruneStaleSyncedIDs()
         saveSyncedIDs()
     }
 }

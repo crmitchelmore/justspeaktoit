@@ -29,18 +29,20 @@ final class MacHistorySyncAdapter: HistorySyncDelegate {
     func uploadNewItem(_ item: HistoryItem) {
         Task {
             let entry = item.toSyncable()
-            try? await HistorySyncEngine.shared.upload(entry: entry)
-            syncedIDs.insert(item.id)
-            saveSyncedIDs()
+            do {
+                try await HistorySyncEngine.shared.upload(entry: entry)
+            } catch {
+                log.error("History upload failed: \(error.localizedDescription)")
+            }
         }
     }
 
     /// Delete an item from CloudKit when removed locally.
     func deleteItem(id: UUID) {
+        syncedIDs.remove(id)
+        saveSyncedIDs()
         Task {
             try? await HistorySyncEngine.shared.delete(entryID: id)
-            syncedIDs.remove(id)
-            saveSyncedIDs()
         }
     }
 
@@ -53,26 +55,35 @@ final class MacHistorySyncAdapter: HistorySyncDelegate {
             .map { $0.toSyncable() }
     }
 
-    func didReceiveRemoteEntry(_ entry: SyncableHistoryEntry) {
-        guard !historyManager.allItems.contains(where: { $0.id == entry.id })
-        else {
+    func didReceiveRemoteEntry(_ entry: SyncableHistoryEntry) async {
+        if let local = historyManager.allItems.first(where: { $0.id == entry.id }) {
+            if entry.updatedAt > local.updatedAt {
+                await historyManager.update(HistoryItem.fromSyncable(entry))
+                syncedIDs.insert(entry.id)
+            } else if entry.updatedAt == local.updatedAt {
+                syncedIDs.insert(entry.id)
+            } else {
+                syncedIDs.remove(entry.id)
+            }
+            saveSyncedIDs()
             return
         }
 
         let item = HistoryItem.fromSyncable(entry)
-        Task {
-            await historyManager.append(item)
-            syncedIDs.insert(entry.id)
-            saveSyncedIDs()
-        }
+        await historyManager.append(item)
+        syncedIDs.insert(entry.id)
+        saveSyncedIDs()
     }
 
-    func didDeleteRemoteEntry(id: UUID) {
-        Task {
-            await historyManager.remove(id: id)
-            syncedIDs.remove(id)
-            saveSyncedIDs()
-        }
+    func didDeleteRemoteEntry(id: UUID) async {
+        await historyManager.remove(id: id)
+        syncedIDs.remove(id)
+        saveSyncedIDs()
+    }
+
+    func didAcknowledgeSyncedEntries(ids: Set<UUID>) async {
+        syncedIDs.formUnion(ids)
+        saveSyncedIDs()
     }
 
     // MARK: - Synced IDs Tracking

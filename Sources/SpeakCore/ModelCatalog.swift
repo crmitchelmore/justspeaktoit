@@ -544,7 +544,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             id: "local/whisperkit/tiny",
             displayName: "WhisperKit Tiny",
             modelName: "tiny",
-            engine: "whisperkit",
+            engine: .whisperKit,
             approximateSizeMB: 75,
             description: "Small downloadable Core ML Whisper model for fast offline transcription testing.",
             tags: [.fast, .cheap]
@@ -553,7 +553,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             id: "local/whisperkit/base",
             displayName: "WhisperKit Base",
             modelName: "base",
-            engine: "whisperkit",
+            engine: .whisperKit,
             approximateSizeMB: 145,
             description: "Balanced downloaded Whisper model for private offline transcription.",
             tags: [.fast]
@@ -562,7 +562,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             id: "local/whisperkit/small",
             displayName: "WhisperKit Small",
             modelName: "small",
-            engine: "whisperkit",
+            engine: .whisperKit,
             approximateSizeMB: 465,
             description: "Higher quality local Whisper model for longer recordings on Apple silicon.",
             tags: [.quality]
@@ -571,7 +571,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             id: "local/whisperkit/large-v3-turbo",
             displayName: "WhisperKit Large v3 Turbo",
             modelName: "openai_whisper-large-v3-v20240930_turbo_632MB",
-            engine: "whisperkit",
+            engine: .whisperKit,
             approximateSizeMB: 632,
             description: "Whisper Large v3 Turbo — near-Large quality with ≈4× real-time speed on "
                 + "Apple silicon. Recommended for high-accuracy offline transcription.",
@@ -581,7 +581,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             id: "local/whisperkit/distil-large-v3",
             displayName: "WhisperKit Distil-Large v3",
             modelName: "distil-whisper_distil-large-v3_594MB",
-            engine: "whisperkit",
+            engine: .whisperKit,
             approximateSizeMB: 594,
             description: "Distilled Whisper Large v3 — English-optimised, faster and lighter than "
                 + "the full Large model with minimal accuracy loss.",
@@ -591,7 +591,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             id: "local/whisperkit/distil-large-v3-turbo",
             displayName: "WhisperKit Distil-Large v3 Turbo",
             modelName: "distil-whisper_distil-large-v3_turbo_600MB",
-            engine: "whisperkit",
+            engine: .whisperKit,
             approximateSizeMB: 600,
             description: "Distilled, turbo-optimised Whisper Large v3 — fastest high-quality "
                 + "English-only offline option on Apple silicon.",

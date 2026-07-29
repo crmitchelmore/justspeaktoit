@@ -1,0 +1,16 @@
+{
+  "appStoreBuildPassed" : false,
+  "cancellationPassed" : false,
+  "directBuildPassed" : false,
+  "longRecordingPassed" : false,
+  "modelArtifacts" : [
+    {
+      "identifier" : "whisper-large-v3-turbo-Q8_0",
+      "license" : "Apache-2.0",
+      "sha256" : "REPLACE_WITH_64_CHARACTER_SHA256",
+      "sizeBytes" : 0,
+      "url" : "https://huggingface.co/handy-computer/whisper-large-v3-turbo-gguf/resolve/PINNED_REVISION/whisper-large-v3-turbo-Q8_0.gguf"
+    }
+  ],
+  "silencePassed" : false
+}

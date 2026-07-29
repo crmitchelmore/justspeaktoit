@@ -1,0 +1,48 @@
+{
+  "cases" : [
+    {
+      "audioPath" : "audio/clean-short.wav",
+      "id" : "clean-short-en",
+      "language" : "en",
+      "referenceTranscript" : "Replace this text with the human-verified reference transcript.",
+      "tags" : [
+        "short"
+      ]
+    },
+    {
+      "audioPath" : "audio/noisy-accent.wav",
+      "id" : "noisy-accent-en",
+      "language" : "en",
+      "referenceTranscript" : "Replace this text with the human-verified reference transcript.",
+      "tags" : [
+        "accent",
+        "noise"
+      ]
+    },
+    {
+      "audioPath" : "audio/multilingual.wav",
+      "id" : "multilingual",
+      "referenceTranscript" : "Replace this text with the human-verified reference transcript.",
+      "tags" : [
+        "multilingual"
+      ]
+    },
+    {
+      "audioPath" : "audio/long.wav",
+      "id" : "long-recording",
+      "referenceTranscript" : "Replace this text with the human-verified reference transcript.",
+      "tags" : [
+        "long"
+      ]
+    },
+    {
+      "audioPath" : "audio/silence.wav",
+      "id" : "silence",
+      "referenceTranscript" : "",
+      "tags" : [
+        "silence"
+      ]
+    }
+  ],
+  "schemaVersion" : 1
+}

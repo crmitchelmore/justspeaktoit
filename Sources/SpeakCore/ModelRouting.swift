@@ -1,8 +1,53 @@
 import Foundation
 
+public enum LocalTranscriptionEngine: Hashable, Sendable {
+    case whisperKit
+    case transcribeCpp
+    case streaming
+    case unknown(String)
+
+    public init(identifier: String) {
+        switch identifier.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "whisperkit": self = .whisperKit
+        case "transcribe.cpp", "transcribe-cpp": self = .transcribeCpp
+        case "streaming": self = .streaming
+        case let identifier: self = .unknown(identifier)
+        }
+    }
+
+    public var identifier: String {
+        switch self {
+        case .whisperKit: return "whisperkit"
+        case .transcribeCpp: return "transcribe.cpp"
+        case .streaming: return "streaming"
+        case .unknown(let identifier): return identifier
+        }
+    }
+
+    public var displayName: String {
+        switch self {
+        case .whisperKit: return "WhisperKit"
+        case .transcribeCpp: return "transcribe.cpp"
+        case .streaming: return "Streaming"
+        case .unknown(let identifier): return identifier.capitalized
+        }
+    }
+}
+
+extension LocalTranscriptionEngine: Codable {
+    public init(from decoder: Decoder) throws {
+        self.init(identifier: try decoder.singleValueContainer().decode(String.self))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(identifier)
+    }
+}
+
 public enum TranscriptionModelFamily: Equatable, Sendable {
     case appleSpeech
-    case downloadedLocal(engine: String)
+    case downloadedLocal(engine: LocalTranscriptionEngine)
     case cloudStreaming(provider: String)
     case cloudBatch(provider: String)
     case postProcessing(provider: String)
@@ -17,8 +62,9 @@ public enum TranscriptionModelFamily: Equatable, Sendable {
         switch self {
         case .appleSpeech:
             return "apple"
-        case .downloadedLocal(let engine),
-             .cloudStreaming(let engine),
+        case .downloadedLocal(let engine):
+            return engine.identifier
+        case .cloudStreaming(let engine),
              .cloudBatch(let engine),
              .postProcessing(let engine):
             return engine
@@ -44,7 +90,11 @@ public enum ModelRouting {
             return .postProcessing(provider: provider)
         }
         if provider == "local" {
-            return .downloadedLocal(engine: components.dropFirst().first?.lowercased() ?? "unknown")
+            return .downloadedLocal(
+                engine: LocalTranscriptionEngine(
+                    identifier: components.dropFirst().first ?? "unknown"
+                )
+            )
         }
         if ModelCatalog.liveTranscription.contains(where: { $0.id == trimmed }) {
             return .cloudStreaming(provider: provider)
@@ -66,7 +116,7 @@ public struct LocalTranscriptionModel: Identifiable, Hashable, Sendable {
     public let id: String
     public let displayName: String
     public let modelName: String
-    public let engine: String
+    public let engine: LocalTranscriptionEngine
     public let modelRepo: String?
     public let approximateSizeMB: Int
     public let description: String
@@ -77,7 +127,7 @@ public struct LocalTranscriptionModel: Identifiable, Hashable, Sendable {
         id: String,
         displayName: String,
         modelName: String,
-        engine: String,
+        engine: LocalTranscriptionEngine,
         modelRepo: String? = nil,
         approximateSizeMB: Int,
         description: String,

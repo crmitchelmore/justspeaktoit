@@ -60,6 +60,15 @@ final class TranscriptionRecordingServiceTextTests: XCTestCase {
         )
     }
 
+    func testKeyboardHandoffDoesNotPublishTranscriptToLegacySharedState() {
+        XCTAssertNil(
+            TranscriptionRecordingService.legacySharedTranscript(
+                "Private keyboard transcript",
+                sharesCompletedTranscript: false
+            )
+        )
+    }
+
     @available(iOS 18, *)
     func testLiveActivityStopIntentKeepsAudioRecordingExecutionContext() {
         let intentType: any AudioRecordingIntent.Type = StopTranscriptionRecordingIntent.self

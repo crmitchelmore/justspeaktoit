@@ -12,6 +12,7 @@ public final class IOSBatchTranscriber {
     private let audioEngine = AVAudioEngine()
     private let audioRecorder = AudioRecordingPersistence()
     private let client: IOSBatchTranscriptionClient
+    private let retainRecording: Bool
     private var startTime: Date?
 
     public let model: String
@@ -20,10 +21,12 @@ public final class IOSBatchTranscriber {
         audioSessionManager: AudioSessionManager,
         model: String,
         apiKey: String,
+        retainRecording: Bool = true,
         session: URLSession = .shared
     ) {
         self.audioSessionManager = audioSessionManager
         self.model = model
+        self.retainRecording = retainRecording
         self.client = IOSBatchTranscriptionClient(apiKey: apiKey, session: session)
     }
 
@@ -61,6 +64,11 @@ public final class IOSBatchTranscriber {
         }
         audioSessionManager.deactivate()
         startTime = nil
+        defer {
+            if !retainRecording {
+                AudioRecordingPersistence.deleteRecording(at: recording.url)
+            }
+        }
         return try await client.transcribeFile(at: recording.url, model: model, language: language)
     }
 

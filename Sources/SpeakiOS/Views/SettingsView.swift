@@ -840,6 +840,26 @@ public struct SettingsView: View {
                 }
             }
 
+            Section("Just Speak Keyboard") {
+                NavigationLink {
+                    KeyboardSetupView()
+                } label: {
+                    HStack {
+                        Label("Set Up Keyboard", systemImage: "keyboard")
+                        Spacer()
+                        Text(keyboardStatusLabel)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .accessibilityIdentifier("keyboardSetupLink")
+
+                if !usesInlineDensityLayout {
+                    Text("Transcribe into other apps through a private handoff to Just Speak.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Section("Hardware Trigger") {
                 NavigationLink {
                     HardwareTriggerSettingsView(settings: settings)
@@ -1089,6 +1109,13 @@ public struct SettingsView: View {
 
     private var usesInlineDensityLayout: Bool {
         settings.visualDensity.prefersInlineLayout(dynamicTypeSize: dynamicTypeSize)
+    }
+
+    private var keyboardStatusLabel: String {
+        guard let observation = KeyboardHandoffStore.shared.extensionObservation() else {
+            return "Not observed"
+        }
+        return observation.hadFullAccess ? "Full Access on" : "Full Access off"
     }
 
     private var appVersion: String {

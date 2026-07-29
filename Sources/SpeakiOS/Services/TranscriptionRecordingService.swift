@@ -27,6 +27,7 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
     private var batchTranscriber: IOSBatchTranscriber?
     private var startTime: Date?
     private var currentModel: String = ""
+    private var sharesLiveTranscript = true
 
     static let polishingClipboardPlaceholder = "Polishing… please wait"
 
@@ -59,8 +60,10 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
     // MARK: - Public API
 
     /// Starts a headless recording session with Live Activity.
-    public func startRecording() async throws {
-        // swiftlint:disable:previous function_body_length
+    public func startRecording( // swiftlint:disable:this function_body_length
+        retainBatchRecording: Bool = true,
+        sharesLiveTranscript: Bool = true
+    ) async throws {
         guard !isRunning else { return }
 
         let settings = AppSettings.shared
@@ -70,6 +73,7 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
         partialText = ""
         wordCount = 0
         startTime = Date()
+        self.sharesLiveTranscript = sharesLiveTranscript
         sharedState.clear()
         sharedState.isRecording = true
         sharedState.recordingStartTime = startTime
@@ -106,7 +110,8 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
                 let transcriber = IOSBatchTranscriber(
                     audioSessionManager: audioSessionManager,
                     model: currentModel,
-                    apiKey: settings.batchAPIKey
+                    apiKey: settings.batchAPIKey,
+                    retainRecording: retainBatchRecording
                 )
                 batchTranscriber = transcriber
                 appleTranscriber = nil
@@ -233,6 +238,7 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
             appleTranscriber = nil
             sharedTranscriber = nil
             batchTranscriber = nil
+            self.sharesLiveTranscript = true
             sharedState.clearRecordingState()
             activityManager.endActivity()
             throw error
@@ -247,7 +253,10 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
     ///   were configurable. Hardware-trigger callers (Action Button, Siri,
     ///   Shortcuts) pass `AppSettings.shared.hardwareTriggerDestination`.
     @discardableResult
-    public func stopRecording(destination: HardwareTriggerDestination? = nil) async -> TranscriptionResult {
+    public func stopRecording(
+        destination: HardwareTriggerDestination? = nil,
+        saveToHistory: Bool = true
+    ) async -> TranscriptionResult {
         isRunning = false
         let duration = elapsedSeconds
 
@@ -276,12 +285,14 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
         partialText = text
         wordCount = text.split(whereSeparator: \.isWhitespace).count
 
-        // Record to history (always, regardless of destination).
-        let historyItem = iOSHistoryManager.shared.recordTranscription(
-            text: text,
-            model: currentModel,
-            duration: result.duration
-        )
+        // Keyboard handoffs opt out so transient dictation is not persisted.
+        let historyItem = saveToHistory
+            ? iOSHistoryManager.shared.recordTranscription(
+                text: text,
+                model: currentModel,
+                duration: result.duration
+            )
+            : nil
 
         // Resolve the destination. When nil (legacy callers), preserve the
         // pre-destination behaviour: clipboard + post-process if user opted in.
@@ -290,6 +301,7 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
 
         // Update shared state
         sharedState.clearRecordingState()
+        sharesLiveTranscript = true
 
         // Complete Live Activity with clipboard confirmation
         activityManager.completeActivity(finalWordCount: wordCount, duration: duration, keepPrimed: true)
@@ -332,6 +344,7 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
         appleTranscriber = nil
         sharedTranscriber = nil
         batchTranscriber = nil
+        sharesLiveTranscript = true
         isRunning = false
         startTime = nil
         partialText = ""
@@ -345,7 +358,9 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
     private func handlePartialResult(text: String) {
         partialText = text
         wordCount = text.split(separator: " ").count
-        sharedState.updateTranscript(text)
+        if sharesLiveTranscript {
+            sharedState.updateTranscript(text)
+        }
 
         activityManager.updateActivity(
             status: .listening,
@@ -417,6 +432,10 @@ extension TranscriptionRecordingService {
             return nil
         }
     }
+
+    static func legacySharedTranscript(_ transcript: String, sharesCompletedTranscript: Bool) -> String? {
+        sharesCompletedTranscript ? transcript : nil
+    }
 }
 
 private extension TranscriptionRecordingService {
@@ -485,7 +504,8 @@ private extension TranscriptionRecordingService {
     /// happens regardless of destination.
     func applyDestinationSideEffects(
         text: String,
-        destination: HardwareTriggerDestination
+        destination: HardwareTriggerDestination,
+        sharesCompletedTranscript: Bool? = nil
     ) async {
         guard !text.isEmpty else { return }
         if let clipboardText = Self.clipboardTextAtStop(
@@ -496,10 +516,15 @@ private extension TranscriptionRecordingService {
             await Self.writeClipboardReliably(clipboardText)
         }
 
-        // History-only intentionally leaves the pasteboard untouched. Every
-        // destination still publishes the completed transcript so the Live
+        // Keyboard handoffs keep their result solely in the nonce-scoped store.
+        // Other destinations publish the completed transcript so the Live
         // Activity and foreground handoff can surface it.
-        sharedState.lastCompletedTranscript = text
+        if let sharedTranscript = Self.legacySharedTranscript(
+            text,
+            sharesCompletedTranscript: sharesCompletedTranscript ?? sharesLiveTranscript
+        ) {
+            sharedState.lastCompletedTranscript = sharedTranscript
+        }
     }
 
     /// Pasteboard writes from a background AppIntent can race process

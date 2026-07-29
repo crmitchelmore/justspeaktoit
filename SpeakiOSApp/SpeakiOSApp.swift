@@ -76,6 +76,16 @@ struct SpeakiOSApp: App {
                 .onOpenURL { url in
                     deepLinkRouter.handle(url)
                 }
+                .task {
+                    #if DEBUG && targetEnvironment(simulator)
+                    guard ProcessInfo.processInfo.arguments.contains("--keyboard-handoff-demo"),
+                          deepLinkRouter.keyboardCaptureRequest == nil,
+                          let request = try? KeyboardHandoffStore.shared.createRequest() else {
+                        return
+                    }
+                    deepLinkRouter.keyboardCaptureRequest = KeyboardCaptureRequest(id: request.requestID)
+                    #endif
+                }
         }
     }
 }
@@ -99,8 +109,11 @@ struct MainTabView: View {
                     .tabItem {
                         Label("OpenClaw", systemImage: "bolt.horizontal.icloud.fill")
                     }
-                    .tag(1)
+                .tag(1)
             }
+        }
+        .fullScreenCover(item: $deepLinkRouter.keyboardCaptureRequest) { request in
+            KeyboardCaptureView(requestID: request.id)
         }
     }
 }

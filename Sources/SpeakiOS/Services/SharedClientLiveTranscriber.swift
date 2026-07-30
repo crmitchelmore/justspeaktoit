@@ -84,20 +84,28 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     }
 
     public func stop() async -> TranscriptionResult {
-        // `partialText` is the fullest view (finalised text plus any trailing
-        // non-final words); fall back to the accumulated finals if empty.
-        let text = partialText.isEmpty ? accumulatedText : partialText
         guard isRunning else {
+            let text = partialText.isEmpty ? accumulatedText : partialText
             return makeResult(text: text, duration: 0)
         }
 
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
-        client?.stop()
+        if let finalizingClient = client as? FinalizingStreamingTranscriptionClient {
+            if let finalTranscript = await finalizingClient.finishAndWait(),
+               finalText != finalTranscript {
+                handleTranscript(text: finalTranscript, isFinal: true)
+            }
+        } else {
+            client?.stop()
+        }
         client = nil
         isRunning = false
         audioSessionManager.deactivate()
 
+        // `partialText` is the fullest view (finalised text plus any trailing
+        // non-final words); fall back to the accumulated finals if empty.
+        let text = partialText.isEmpty ? accumulatedText : partialText
         let duration = startTime.map { Date().timeIntervalSince($0) } ?? 0
         let result = makeResult(text: text, duration: duration)
         SpeakLogger.logTranscription(
@@ -252,8 +260,13 @@ public final class SharedClientLiveTranscriber: ObservableObject {
 
     private func handleTranscript(text: String, isFinal: Bool) {
         if isFinal {
-            if !accumulatedText.isEmpty { accumulatedText += " " }
-            accumulatedText += text
+            if accumulatedText.isEmpty
+                || text == accumulatedText
+                || text.hasPrefix(accumulatedText + " ") {
+                accumulatedText = text
+            } else {
+                accumulatedText += " " + text
+            }
             finalText = accumulatedText
             partialText = accumulatedText
         } else {

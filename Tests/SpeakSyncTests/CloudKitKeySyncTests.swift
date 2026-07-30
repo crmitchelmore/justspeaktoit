@@ -4,6 +4,10 @@ import XCTest
 @testable import SpeakSync
 
 final class CloudKitKeySyncTests: XCTestCase {
+    func testSyncableIdentifiers_containsXAI() {
+        XCTAssertTrue(CloudKitKeySync.syncableIdentifiers.contains("xai.apiKey"))
+    }
+
     func testEncryptDecryptRoundTripWithCorrectPassphrase() throws {
         let salt = Data("stable-test-salt".utf8)
         let key = EncryptedSecretCrypto.deriveKey(passphrase: "correct horse battery staple", salt: salt)

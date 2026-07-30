@@ -98,6 +98,10 @@ extension ModelCatalog {
         "elevenlabs/scribe-v2-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish]
         ),
+        XAIVoiceModels.thinkFast2CatalogID: LiveModelCapabilities(
+            supportedSpeedModes: [.instant, .livePolish],
+            postStopFinalizeBudget: 3.0
+        ),
 
         // AssemblyAI Universal-3.5 Pro Streaming emits incremental turns and
         // one formatted final turn. Keep a non-zero post-stop budget so the

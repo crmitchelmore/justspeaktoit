@@ -32,19 +32,10 @@ final class TranscriberCoordinator: ObservableObject {
     }
 
     var modelDisplayName: String {
-        if batchTranscriber != nil {
-            return ModelCatalog.friendlyName(for: currentModel)
-        }
-        if currentModel.hasPrefix("deepgram") {
-            return "Deepgram"
-        }
-        if currentModel.hasPrefix("elevenlabs") {
-            return "ElevenLabs"
-        }
-        if currentModel.hasPrefix("openai") {
-            return ModelCatalog.friendlyName(for: currentModel)
-        }
-        return "Apple Speech"
+        ModelCatalog.transcriptionDisplayName(
+            for: currentModel,
+            isBatch: batchTranscriber != nil
+        )
     }
 
     private var elapsedSeconds: Int {

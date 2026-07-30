@@ -133,6 +133,10 @@ public final class AppSettings: ObservableObject {
         didSet { persistSecret(gladiaAPIKey, identifier: Self.gladiaKeyID) }
     }
 
+    @Published public var xAIAPIKey: String {
+        didSet { persistSecret(xAIAPIKey, identifier: Self.xAIKeyID) }
+    }
+
     // MARK: - Canonical secure storage for API keys (SpeakCore)
     //
     // Every API key is stored locally through SpeakCore's SecureStorage using the
@@ -148,6 +152,7 @@ public final class AppSettings: ObservableObject {
     static let modulateKeyID = "modulate.apiKey"
     static let assemblyAIKeyID = "assemblyai.apiKey"
     static let gladiaKeyID = "gladia.apiKey"
+    static let xAIKeyID = "xai.apiKey"
 
     private static let credentialStorage = SecureStorage(
         configuration: SecureStorageConfiguration(
@@ -310,6 +315,7 @@ public final class AppSettings: ObservableObject {
         self.modulateAPIKey = ""
         self.assemblyAIAPIKey = ""
         self.gladiaAPIKey = ""
+        self.xAIAPIKey = ""
         self.liveActivitiesEnabled = liveActivities
         self.visualDensity = density
         self.autoStartRecording = autoStart
@@ -373,6 +379,7 @@ public final class AppSettings: ObservableObject {
     public var hasModulateKey: Bool { !modulateAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasAssemblyAIKey: Bool { !assemblyAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasGladiaKey: Bool { !gladiaAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    public var hasXAIKey: Bool { !xAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     /// Identifiers currently available to model pickers. Because this is
     /// derived from the published key values, readiness badges refresh as soon
@@ -388,6 +395,7 @@ public final class AppSettings: ObservableObject {
         if hasModulateKey { identifiers.insert(Self.modulateKeyID) }
         if hasAssemblyAIKey { identifiers.insert(Self.assemblyAIKeyID) }
         if hasGladiaKey { identifiers.insert(Self.gladiaKeyID) }
+        if hasXAIKey { identifiers.insert(Self.xAIKeyID) }
         return identifiers
     }
 
@@ -429,6 +437,10 @@ public final class AppSettings: ObservableObject {
         gladiaAPIKey = await Self.syncedAPIKeyValue(
             identifier: Self.gladiaKeyID,
             currentValue: gladiaAPIKey
+        )
+        xAIAPIKey = await Self.syncedAPIKeyValue(
+            identifier: Self.xAIKeyID,
+            currentValue: xAIAPIKey
         )
     }
 
@@ -487,6 +499,7 @@ public final class AppSettings: ObservableObject {
         case Self.modulateKeyID: return modulateAPIKey
         case Self.assemblyAIKeyID: return assemblyAIAPIKey
         case Self.gladiaKeyID: return gladiaAPIKey
+        case Self.xAIKeyID: return xAIAPIKey
         default: return ""
         }
     }
@@ -1485,6 +1498,7 @@ struct APIKeysView: View {
     @State private var modulateKey = ""
     @State private var assemblyAIKey = ""
     @State private var gladiaKey = ""
+    @State private var xAIKey = ""
     @State private var isValidating = false
     @State private var validationMessage: String?
     @State private var showingValidation = false
@@ -1532,6 +1546,9 @@ struct APIKeysView: View {
             ),
             APIKeyListEntry(
                 id: "gladia", title: "Gladia", category: "Transcription", isStored: settings.hasGladiaKey
+            ),
+            APIKeyListEntry(
+                id: "xai", title: "xAI", category: "Transcription", isStored: settings.hasXAIKey
             )
         ]
     }
@@ -1605,6 +1622,7 @@ struct APIKeysView: View {
                             && modulateKey.isEmpty
                             && assemblyAIKey.isEmpty
                             && gladiaKey.isEmpty
+                            && xAIKey.isEmpty
                     )
                 }
             }
@@ -1680,6 +1698,10 @@ struct APIKeysView: View {
             return KeyPresentation(
                 title: "AssemblyAI", systemImage: "waveform.badge.plus", help: "Get your key from assemblyai.com."
             )
+        case "xai":
+            return KeyPresentation(
+                title: "xAI", systemImage: "waveform.badge.mic", help: "Get your key from console.x.ai."
+            )
         default:
             return KeyPresentation(
                 title: "Gladia", systemImage: "waveform.badge.exclamationmark", help: "Get your key from gladia.io."
@@ -1697,6 +1719,7 @@ struct APIKeysView: View {
         case "soniox": return $sonioxKey
         case "modulate": return $modulateKey
         case "assemblyai": return $assemblyAIKey
+        case "xai": return $xAIKey
         default: return $gladiaKey
         }
     }
@@ -1711,6 +1734,7 @@ struct APIKeysView: View {
         case "soniox": settings.sonioxAPIKey = ""
         case "modulate": settings.modulateAPIKey = ""
         case "assemblyai": settings.assemblyAIAPIKey = ""
+        case "xai": settings.xAIAPIKey = ""
         default: settings.gladiaAPIKey = ""
         }
     }
@@ -1800,6 +1824,13 @@ struct APIKeysView: View {
                 settings.gladiaAPIKey = gladiaKey
                 gladiaKey = ""
                 messages.append("✓ Gladia key saved")
+            }
+
+            // Save xAI key (validated when the realtime session connects)
+            if !xAIKey.isEmpty {
+                settings.xAIAPIKey = xAIKey
+                xAIKey = ""
+                messages.append("✓ xAI key saved")
             }
 
             isValidating = false

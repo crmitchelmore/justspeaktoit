@@ -3970,6 +3970,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   private var cartesiaController: CartesiaLiveController
   private var gladiaController: GladiaLiveController
   private var openAIRealtimeController: OpenAIRealtimeLiveController
+  private var sharedClientController: SharedClientLiveController
   #if !APP_STORE
   private var sherpaOnnxController: SherpaOnnxLiveController
   #endif
@@ -4054,6 +4055,11 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     )
     openAIRealtimeController = OpenAIRealtimeLiveController(
       appSettings: appSettings,
+      permissionsManager: permissionsManager,
+      audioDeviceManager: audioDeviceManager,
+      secureStorage: secureStorage
+    )
+    sharedClientController = SharedClientLiveController(
       permissionsManager: permissionsManager,
       audioDeviceManager: audioDeviceManager,
       secureStorage: secureStorage
@@ -4163,7 +4169,8 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       ("soniox/", sonioxController),
       ("speechmatics/", speechmaticsController),
       ("cartesia/", cartesiaController),
-      ("gladia/", gladiaController)
+      ("gladia/", gladiaController),
+      ("xai/", sharedClientController)
     ]
   }
 
@@ -4180,6 +4187,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       cartesiaController,
       gladiaController,
       openAIRealtimeController,
+      sharedClientController,
       unsupportedLocalLiveController
     ]
     #if !APP_STORE
@@ -4263,6 +4271,11 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     )
     openAIRealtimeController = OpenAIRealtimeLiveController(
       appSettings: appSettings,
+      permissionsManager: permissionsManager,
+      audioDeviceManager: audioDeviceManager,
+      secureStorage: secureStorage
+    )
+    sharedClientController = SharedClientLiveController(
       permissionsManager: permissionsManager,
       audioDeviceManager: audioDeviceManager,
       secureStorage: secureStorage

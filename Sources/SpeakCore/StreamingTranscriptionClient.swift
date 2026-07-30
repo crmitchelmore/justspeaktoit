@@ -32,6 +32,14 @@ public protocol StreamingTranscriptionClient: AnyObject {
     func stop()
 }
 
+/// Optional graceful-finalisation path for providers that only emit their
+/// definitive transcript after the input buffer is committed.
+public protocol FinalizingStreamingTranscriptionClient: StreamingTranscriptionClient {
+    /// Commits pending input, waits for the provider's final transcript (with
+    /// an implementation-defined timeout), then closes the connection.
+    func finishAndWait() async -> String?
+}
+
 // MARK: - Providers
 
 /// The set of live streaming transcription providers the app knows about.
@@ -50,6 +58,7 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
     case elevenlabs
     case openai
     case speechmatics
+    case xai
 
     /// Keychain identifier for this provider's API key, or `nil` for on-device
     /// providers that need no credential. Matches the identifiers used by both
@@ -68,8 +77,8 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
     /// PCM sample rate (Hz) the provider's streaming client expects.
     public var expectedSampleRate: Int {
         switch self {
-        case .openai:
-            // OpenAI's Realtime transcription API ingests 24 kHz PCM16.
+        case .openai, .xai:
+            // OpenAI and xAI's Realtime transcription APIs ingest 24 kHz PCM16.
             return 24_000
         default:
             return 16_000
@@ -83,7 +92,8 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
     /// iOS path so the two never drift.
     public var isSupportedOnIOS: Bool {
         switch self {
-        case .apple, .deepgram, .elevenlabs, .openai, .cartesia, .soniox, .modulate, .assemblyai, .gladia:
+        case .apple, .deepgram, .elevenlabs, .openai, .cartesia, .soniox, .modulate, .assemblyai,
+             .gladia, .xai:
             return true
         case .speechmatics:
             return false
@@ -104,6 +114,7 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
         case .elevenlabs: return "ElevenLabs"
         case .openai: return "OpenAI"
         case .speechmatics: return "Speechmatics"
+        case .xai: return "xAI"
         }
     }
 }
@@ -295,8 +306,23 @@ public enum LiveTranscriptionClientFactory {
                 language: language,
                 sampleRate: route.sampleRate
             )
+        case .xai:
+            return makeXAIClient(for: route, apiKey: apiKey, language: language)
         case .apple, .openai, .speechmatics:
             return nil
         }
+    }
+
+    private static func makeXAIClient(
+        for route: LiveTranscriptionRoute,
+        apiKey: String,
+        language: String?
+    ) -> XAILiveClient {
+        XAILiveClient(
+            apiKey: apiKey,
+            model: route.apiModelName,
+            language: language,
+            sampleRate: route.sampleRate
+        )
     }
 }

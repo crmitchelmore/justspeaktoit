@@ -21,6 +21,7 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
         )
         XCTAssertFalse(visibleIDs.contains { $0.hasPrefix("speechmatics/") })
         XCTAssertTrue(visibleIDs.contains(OpenAITranscriptionModels.gptLiveTranscribeStreamingCatalogID))
+        XCTAssertTrue(visibleIDs.contains(XAIVoiceModels.thinkFast2CatalogID))
     }
 
     func testRemoteBatchPicker_omitsProvidersWithoutAnIOSUploadPath() {

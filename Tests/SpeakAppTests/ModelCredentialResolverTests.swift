@@ -17,6 +17,13 @@ final class ModelCredentialResolverTests: XCTestCase {
             ),
             .apiKey(identifier: "openai.apiKey", providerName: "OpenAI")
         )
+        XCTAssertEqual(
+            ModelCredentialResolver.requirement(
+                for: XAIVoiceModels.thinkFast2CatalogID,
+                purpose: .liveTranscription
+            ),
+            .apiKey(identifier: "xai.apiKey", providerName: "xAI")
+        )
     }
 
     func testAppleAndLocalModels_DoNotRequireCredential() {

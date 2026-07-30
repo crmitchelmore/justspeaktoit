@@ -173,7 +173,8 @@ public enum ModelCredentialResolver {
         "openrouter": "OpenRouter",
         "revai": "Rev.ai",
         "soniox": "Soniox",
-        "speechmatics": "Speechmatics"
+        "speechmatics": "Speechmatics",
+        "xai": "xAI"
     ]
 
     private static let openRouterRequirement = ModelCredentialRequirement.apiKey(

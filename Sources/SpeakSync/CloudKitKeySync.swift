@@ -420,7 +420,8 @@ public final class CloudKitKeySync: ObservableObject {
         "assemblyai.apiKey",
         "gladia.apiKey",
         "modulate.apiKey",
-        "soniox.apiKey"
+        "soniox.apiKey",
+        "xai.apiKey"
     ]
 
     @Published public private(set) var status = CloudKitKeySyncStatus()

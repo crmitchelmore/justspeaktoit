@@ -171,6 +171,14 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
                 + "ElevenLabs API key — the key must have speech-to-text (Scribe) access.",
             estimatedLatencyMs: 200, latencyTier: .fast),
         Option(
+            id: XAIVoiceModels.thinkFast2CatalogID,
+            displayName: "Grok Voice Think Fast 2.0 (Streaming)",
+            description: "xAI's flagship realtime voice model, used in transcription-only mode "
+                + "with cumulative live captions and no assistant response.",
+            estimatedLatencyMs: 200,
+            latencyTier: .fast,
+            tags: [.fast, .leading]),
+        Option(
             id: OpenAITranscriptionModels.gptLiveTranscribeStreamingCatalogID,
             displayName: "OpenAI GPT Live Transcribe (Streaming)",
             description: "OpenAI's recommended low-latency speech-to-text model with live transcript "

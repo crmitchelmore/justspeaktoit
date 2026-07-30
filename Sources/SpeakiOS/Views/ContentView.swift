@@ -44,6 +44,10 @@ final class TranscriberCoordinator: ObservableObject {
         if currentModel.hasPrefix("openai") {
             return ModelCatalog.friendlyName(for: currentModel)
         }
+        if let route = LiveTranscriptionRouting.route(for: currentModel),
+           route.provider != .apple {
+            return ModelCatalog.friendlyName(for: currentModel)
+        }
         return "Apple Speech"
     }
 

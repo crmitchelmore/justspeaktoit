@@ -322,7 +322,7 @@ struct TranscriptionShortcuts: AppShortcutsProvider {
 /// Manages state shared between main app and extensions via App Group.
 public final class SharedTranscriptionState {
     public static let shared = SharedTranscriptionState()
-    public static let appGroupIdentifier = "group.com.justspeaktoit.ios"
+    public static let appGroupIdentifier = KeyboardHandoffStore.appGroupIdentifier
 
     private let defaults: UserDefaults?
 

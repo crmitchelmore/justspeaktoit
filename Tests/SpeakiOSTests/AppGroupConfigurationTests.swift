@@ -1,5 +1,6 @@
 #if os(iOS)
 import Foundation
+import SpeakCore
 import XCTest
 
 @testable import SpeakiOSLib
@@ -16,6 +17,13 @@ final class AppGroupConfigurationTests: XCTestCase {
         let entitledGroups = try appGroups(inResourceNamed: "JustSpeakToItWidgetExtension")
 
         XCTAssertTrue(entitledGroups.contains(SharedTranscriptionState.appGroupIdentifier))
+    }
+
+    func testKeyboardUsesSameEntitledAppGroup() throws {
+        let entitledGroups = try appGroups(inResourceNamed: "JustSpeakKeyboard")
+
+        XCTAssertEqual(KeyboardHandoffStore.appGroupIdentifier, SharedTranscriptionState.appGroupIdentifier)
+        XCTAssertTrue(entitledGroups.contains(KeyboardHandoffStore.appGroupIdentifier))
     }
 
     private func appGroups(inResourceNamed resourceName: String) throws -> [String] {

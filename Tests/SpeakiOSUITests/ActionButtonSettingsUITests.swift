@@ -65,6 +65,19 @@ final class ActionButtonSettingsUITests: XCTestCase {
         XCTAssertTrue(readyOrMissingStatus.waitForExistence(timeout: 5))
     }
 
+    func testKeyboardOnboardingExplainsSupportedSetup() {
+        app.buttons["Settings"].tap()
+
+        let keyboardSetupLink = app.buttons["keyboardSetupLink"]
+        XCTAssertTrue(scrollUpUntilExists(keyboardSetupLink))
+        keyboardSetupLink.tap()
+
+        XCTAssertTrue(app.navigationBars["Just Speak Keyboard"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["openKeyboardSettingsButton"].waitForExistence(timeout: 5))
+        XCTAssertTrue(scrollUpUntilExists(app.staticTexts["Why Full Access?"]))
+        XCTAssertTrue(scrollUpUntilExists(app.staticTexts["Where It Won’t Appear"]))
+    }
+
     private func scrollUpUntilExists(_ element: XCUIElement, maxSwipes: Int = 6) -> Bool {
         if element.waitForExistence(timeout: 1) {
             return true

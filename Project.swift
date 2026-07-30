@@ -12,6 +12,7 @@ let version: String = {
 
 let appProfileName = ProcessInfo.processInfo.environment["APP_PROFILE_NAME"]
 let widgetProfileName = ProcessInfo.processInfo.environment["WIDGET_PROFILE_NAME"]
+let keyboardProfileName = ProcessInfo.processInfo.environment["KEYBOARD_PROFILE_NAME"]
 let macAppStoreProfileName = ProcessInfo.processInfo.environment["TUIST_MAC_PROFILE_NAME"]
     ?? ProcessInfo.processInfo.environment["MAC_PROFILE_NAME"]
 
@@ -72,6 +73,13 @@ var iosWidgetSettings: [String: SettingValue] = [
     "MARKETING_VERSION": "\(version)"
 ]
 
+var iosKeyboardSettings: [String: SettingValue] = [
+    "APPLICATION_EXTENSION_API_ONLY": "YES",
+    "CURRENT_PROJECT_VERSION": "1",
+    "MARKETING_VERSION": "\(version)",
+    "SKIP_INSTALL": "YES"
+]
+
 func configureManualSigning(for settings: inout [String: SettingValue], profileName: String) {
     settings["PROVISIONING_PROFILE_SPECIFIER"] = .string(profileName)
     settings["CODE_SIGN_STYLE"] = "Manual"
@@ -84,6 +92,10 @@ if let appProfileName {
 
 if let widgetProfileName {
     configureManualSigning(for: &iosWidgetSettings, profileName: widgetProfileName)
+}
+
+if let keyboardProfileName {
+    configureManualSigning(for: &iosKeyboardSettings, profileName: keyboardProfileName)
 }
 
 if isAppStoreBuild {
@@ -197,9 +209,24 @@ let project = Project(
                 .package(product: "SpeakCore"),
                 .package(product: "SpeakiOSLib"),
                 .package(product: "SpeakSync"),
-                .target(name: "JustSpeakToItWidgetExtension")
+                .target(name: "JustSpeakToItWidgetExtension"),
+                .target(name: "JustSpeakKeyboard")
             ],
             settings: .settings(base: iosAppSettings)
+        ),
+        .target(
+            name: "JustSpeakKeyboard",
+            destinations: .iOS,
+            product: .appExtension,
+            bundleId: "com.justspeaktoit.ios.keyboard",
+            deploymentTargets: .iOS("17.0"),
+            infoPlist: .file(path: "JustSpeakKeyboard/Info.plist"),
+            sources: ["JustSpeakKeyboard/**/*.swift"],
+            entitlements: .file(path: "JustSpeakKeyboard/JustSpeakKeyboard.entitlements"),
+            dependencies: [
+                .package(product: "SpeakCore")
+            ],
+            settings: .settings(base: iosKeyboardSettings)
         ),
         .target(
             name: "JustSpeakToItWidgetExtension",
@@ -246,10 +273,12 @@ let project = Project(
             sources: ["Tests/SpeakiOSTests/**"],
             resources: [
                 "SpeakiOS.entitlements",
-                "JustSpeakToItWidgetExtension/JustSpeakToItWidgetExtension.entitlements"
+                "JustSpeakToItWidgetExtension/JustSpeakToItWidgetExtension.entitlements",
+                "JustSpeakKeyboard/JustSpeakKeyboard.entitlements"
             ],
             dependencies: [
                 .target(name: "SpeakiOS"),
+                .package(product: "SpeakCore"),
                 .package(product: "SpeakiOSLib")
             ]
         )

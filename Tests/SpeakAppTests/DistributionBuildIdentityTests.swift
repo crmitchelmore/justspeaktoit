@@ -83,12 +83,48 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertFalse(macTarget.contains("SpeakiOSApp"))
         XCTAssertFalse(macTarget.contains("SpeakiOSLib"))
         XCTAssertFalse(macTarget.contains("JustSpeakToItWidgetExtension"))
+        XCTAssertFalse(macTarget.contains("JustSpeakKeyboard"))
 
         XCTAssertTrue(iosTarget.contains("sources: [\"SpeakiOSApp/**\"]"))
         XCTAssertTrue(iosTarget.contains(".package(product: \"SpeakiOSLib\")"))
+        XCTAssertTrue(iosTarget.contains(".target(name: \"JustSpeakKeyboard\")"))
         XCTAssertFalse(iosTarget.contains("Sources/SpeakApp"))
         XCTAssertFalse(iosTarget.contains("SpeakHotKeys"))
         XCTAssertFalse(iosTarget.contains("Sparkle"))
+    }
+
+    func testIOSKeyboardTargetUsesPublicExtensionConfiguration() throws {
+        let manifest = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("Project.swift"),
+            encoding: .utf8
+        )
+        let keyboardTarget = try targetBlock(named: "JustSpeakKeyboard", in: manifest)
+        let infoPlist = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("JustSpeakKeyboard/Info.plist"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(keyboardTarget.contains("bundleId: \"com.justspeaktoit.ios.keyboard\""))
+        XCTAssertTrue(keyboardTarget.contains("product: .appExtension"))
+        XCTAssertTrue(keyboardTarget.contains("settings: .settings(base: iosKeyboardSettings)"))
+        XCTAssertTrue(manifest.contains("\"APPLICATION_EXTENSION_API_ONLY\": \"YES\""))
+        XCTAssertTrue(infoPlist.contains("com.apple.keyboard-service"))
+        XCTAssertTrue(infoPlist.contains("RequestsOpenAccess"))
+        XCTAssertTrue(infoPlist.contains("$(PRODUCT_MODULE_NAME).KeyboardViewController"))
+    }
+
+    func testIOSReleaseWorkflowSignsAndValidatesKeyboardExtension() throws {
+        let workflow = try String(
+            contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/release-ios.yml"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(workflow.contains("IOS_KEYBOARD_APPSTORE_PROFILE"))
+        XCTAssertTrue(workflow.contains("ios-keyboard-appstore.provisionprofile"))
+        XCTAssertTrue(workflow.contains("com.justspeaktoit.ios.keyboard"))
+        XCTAssertTrue(workflow.contains("KEYBOARD_PROFILE_UUID_PLACEHOLDER"))
+        XCTAssertTrue(workflow.contains("JustSpeakKeyboard.appex"))
+        XCTAssertTrue(workflow.contains("keyboard-entitlements.plist"))
     }
 
     func testIOSApp_declaresRequiredBackgroundModes() throws {

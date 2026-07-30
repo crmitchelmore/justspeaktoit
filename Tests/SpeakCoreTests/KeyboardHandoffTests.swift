@@ -1,0 +1,119 @@
+import XCTest
+
+@testable import SpeakCore
+
+final class KeyboardHandoffTests: XCTestCase {
+    private var suiteName: String!
+    private var defaults: UserDefaults!
+    private var store: KeyboardHandoffStore!
+
+    override func setUp() {
+        super.setUp()
+        suiteName = "KeyboardHandoffTests.\(UUID().uuidString)"
+        defaults = UserDefaults(suiteName: suiteName)
+        defaults.removePersistentDomain(forName: suiteName)
+        store = KeyboardHandoffStore(defaults: defaults)
+    }
+
+    override func tearDown() {
+        defaults.removePersistentDomain(forName: suiteName)
+        store = nil
+        defaults = nil
+        suiteName = nil
+        super.tearDown()
+    }
+
+    func testHandoffTransitionsToMatchingConsumableResult() throws {
+        let request = try store.createRequest()
+
+        XCTAssertEqual(try store.markRecording(requestID: request.requestID).phase, .recording)
+        XCTAssertEqual(try store.markTranscribing(requestID: request.requestID).phase, .transcribing)
+        XCTAssertEqual(
+            try store.complete(requestID: request.requestID, transcript: "  Insert this text.  ").phase,
+            .completed
+        )
+
+        XCTAssertEqual(store.consumeResult(requestID: request.requestID), "Insert this text.")
+        XCTAssertNil(store.activeRecord())
+    }
+
+    func testMismatchedNonceCannotReadOrClearResult() throws {
+        let request = try completedRequest(transcript: "Private result")
+        let wrongID = UUID()
+
+        XCTAssertNil(store.record(matching: wrongID))
+        XCTAssertNil(store.consumeResult(requestID: wrongID))
+        store.clear(requestID: wrongID)
+
+        XCTAssertEqual(store.record(matching: request.requestID)?.transcript, "Private result")
+    }
+
+    func testExpiredRequestBecomesTranscriptFreeTimeout() throws {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let request = try store.createRequest(now: now, lifetime: 1)
+
+        let expired = store.record(matching: request.requestID, now: now.addingTimeInterval(2))
+
+        XCTAssertEqual(expired?.phase, .failed)
+        XCTAssertEqual(expired?.failureCode, .timedOut)
+        XCTAssertNil(expired?.transcript)
+        XCTAssertNil(store.consumeResult(requestID: request.requestID, now: now.addingTimeInterval(2)))
+    }
+
+    func testCancelRemovesAnyTranscriptAndBlocksCompletion() throws {
+        let request = try store.createRequest()
+        try store.markRecording(requestID: request.requestID)
+        let cancelled = try store.cancel(requestID: request.requestID)
+
+        XCTAssertEqual(cancelled.phase, .cancelled)
+        XCTAssertNil(cancelled.transcript)
+        XCTAssertThrowsError(
+            try store.markTranscribing(requestID: request.requestID)
+        ) { error in
+            XCTAssertEqual(error as? KeyboardHandoffStoreError, .invalidTransition)
+        }
+    }
+
+    func testConsumerInsertsMatchingResultOnce() throws {
+        let request = try completedRequest(transcript: "One-time result")
+        let consumer = KeyboardHandoffConsumer(store: store)
+        var inserted: [String] = []
+
+        XCTAssertTrue(consumer.insertReadyResult(requestID: request.requestID) { inserted.append($0) })
+        XCTAssertEqual(inserted, ["One-time result"])
+        XCTAssertFalse(consumer.insertReadyResult(requestID: request.requestID) { inserted.append($0) })
+        XCTAssertEqual(inserted, ["One-time result"])
+    }
+
+    func testFullAccessPolicyGatesSharedHandoff() {
+        XCTAssertEqual(
+            KeyboardLaunchPolicy.blockReason(hasFullAccess: false, sharedContainerAvailable: true),
+            .fullAccessRequired
+        )
+        XCTAssertEqual(
+            KeyboardLaunchPolicy.blockReason(hasFullAccess: true, sharedContainerAvailable: false),
+            .sharedContainerUnavailable
+        )
+        XCTAssertNil(
+            KeyboardLaunchPolicy.blockReason(hasFullAccess: true, sharedContainerAvailable: true)
+        )
+    }
+
+    func testExtensionObservationStoresOnlyAccessMetadata() {
+        let now = Date(timeIntervalSince1970: 2_000)
+        store.recordExtensionObservation(hasFullAccess: true, now: now)
+
+        XCTAssertEqual(
+            store.extensionObservation(),
+            KeyboardExtensionObservation(lastSeenAt: now, hadFullAccess: true)
+        )
+        XCTAssertNil(store.activeRecord())
+    }
+
+    private func completedRequest(transcript: String) throws -> KeyboardHandoffRecord {
+        let request = try store.createRequest()
+        try store.markRecording(requestID: request.requestID)
+        try store.markTranscribing(requestID: request.requestID)
+        return try store.complete(requestID: request.requestID, transcript: transcript)
+    }
+}

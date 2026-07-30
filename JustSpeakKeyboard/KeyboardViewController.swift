@@ -1,0 +1,528 @@
+import SpeakCore
+import SwiftUI
+import UIKit
+
+// The controller and its compact SwiftUI surface live together so every
+// keyboard state and supported input-mode action remains auditable in one file.
+// swiftlint:disable file_length
+
+final class KeyboardViewController: UIInputViewController {
+    private let model = KeyboardViewModel()
+    private var host: UIHostingController<KeyboardRootView>?
+    private var heightConstraint: NSLayoutConstraint?
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .systemGroupedBackground
+
+        let root = KeyboardRootView(
+            model: model,
+            showsInputModeSwitch: needsInputModeSwitchKey,
+            openContainingApp: { [weak self] url in
+                self?.openContainingApp(url)
+            },
+            insertText: { [weak self] text in
+                self?.textDocumentProxy.insertText(text)
+            },
+            showInputModeList: { [weak self] button, event in
+                self?.handleInputModeList(from: button, with: event)
+            }
+        )
+        let host = UIHostingController(rootView: root)
+        host.view.backgroundColor = .clear
+        addChild(host)
+        view.addSubview(host.view)
+        host.view.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            host.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            host.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            host.view.topAnchor.constraint(equalTo: view.topAnchor),
+            host.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+        host.didMove(toParent: self)
+        self.host = host
+        updatePreferredHeight()
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        model.activate(hasFullAccess: hasFullAccess)
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        model.deactivate()
+        super.viewDidDisappear(animated)
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        updatePreferredHeight()
+    }
+
+    override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
+        super.viewWillTransition(to: size, with: coordinator)
+        coordinator.animate { [weak self] _ in
+            self?.updatePreferredHeight()
+        }
+    }
+
+    override func textDidChange(_ textInput: UITextInput?) {
+        super.textDidChange(textInput)
+        model.activate(hasFullAccess: hasFullAccess)
+    }
+
+    private func openContainingApp(_ url: URL) {
+        guard let extensionContext else {
+            model.appOpenCompleted(succeeded: false)
+            return
+        }
+        extensionContext.open(url) { [weak model] succeeded in
+            Task { @MainActor in
+                model?.appOpenCompleted(succeeded: succeeded)
+            }
+        }
+    }
+
+    private func updatePreferredHeight() {
+        let isLandscape = view.window?.windowScene?.interfaceOrientation.isLandscape
+            ?? (traitCollection.verticalSizeClass == .compact)
+        let isPad = traitCollection.userInterfaceIdiom == .pad
+        var height: CGFloat
+        if isLandscape {
+            height = isPad ? 220 : 205
+        } else {
+            height = isPad ? 280 : 260
+        }
+        if traitCollection.preferredContentSizeCategory.isAccessibilityCategory {
+            height += isPad ? 80 : 60
+        }
+
+        if let heightConstraint {
+            guard heightConstraint.constant != height else { return }
+            heightConstraint.constant = height
+            return
+        }
+        let constraint = view.heightAnchor.constraint(equalToConstant: height)
+        constraint.priority = .init(999)
+        constraint.isActive = true
+        heightConstraint = constraint
+    }
+}
+
+@MainActor
+final class KeyboardViewModel: ObservableObject {
+    enum Presentation: Equatable {
+        case idle
+        case openingApp
+        case recording
+        case transcribing
+        case inserted
+        case missingFullAccess
+        case unavailable
+        case cancelled
+        case error(KeyboardHandoffRecord.FailureCode)
+    }
+
+    @Published private(set) var presentation: Presentation = .idle
+    @Published private(set) var hasFullAccess = false
+
+    private let store: KeyboardHandoffStore
+    private let consumer: KeyboardHandoffConsumer
+    private var requestID: UUID?
+    private var pollTask: Task<Void, Never>?
+    private var insertText: ((String) -> Void)?
+
+    init(store: KeyboardHandoffStore = .shared) {
+        self.store = store
+        self.consumer = KeyboardHandoffConsumer(store: store)
+    }
+
+    func activate(hasFullAccess: Bool) {
+        self.hasFullAccess = hasFullAccess
+        store.recordExtensionObservation(hasFullAccess: hasFullAccess)
+
+        guard KeyboardLaunchPolicy.blockReason(
+            hasFullAccess: hasFullAccess,
+            sharedContainerAvailable: store.isAvailable
+        ) == nil else {
+            presentation = hasFullAccess ? .unavailable : .missingFullAccess
+            return
+        }
+
+        if requestID == nil {
+            requestID = store.activeRecord()?.requestID
+        }
+        refresh()
+        startPolling()
+    }
+
+    func deactivate() {
+        pollTask?.cancel()
+        pollTask = nil
+    }
+
+    func startHandoff(
+        openContainingApp: (URL) -> Void,
+        insertText: @escaping (String) -> Void
+    ) {
+        self.insertText = insertText
+        guard KeyboardLaunchPolicy.blockReason(
+            hasFullAccess: hasFullAccess,
+            sharedContainerAvailable: store.isAvailable
+        ) == nil else {
+            presentation = hasFullAccess ? .unavailable : .missingFullAccess
+            return
+        }
+
+        do {
+            let request = try store.createRequest()
+            requestID = request.requestID
+            presentation = .openingApp
+
+            var components = URLComponents()
+            components.scheme = "justspeaktoit"
+            components.host = "keyboard"
+            components.queryItems = [
+                URLQueryItem(name: "request", value: request.requestID.uuidString.lowercased())
+            ]
+            guard let url = components.url else {
+                _ = try? store.fail(requestID: request.requestID, code: .invalidRequest)
+                presentation = .error(.invalidRequest)
+                return
+            }
+            openContainingApp(url)
+        } catch {
+            presentation = .unavailable
+        }
+    }
+
+    func appOpenCompleted(succeeded: Bool) {
+        guard !succeeded, let requestID else { return }
+        _ = try? store.fail(requestID: requestID, code: .appUnavailable)
+        presentation = .error(.appUnavailable)
+    }
+
+    func cancel() {
+        guard let requestID else {
+            presentation = .idle
+            return
+        }
+        _ = try? store.cancel(requestID: requestID)
+        self.requestID = nil
+        presentation = .cancelled
+    }
+
+    func retry(
+        openContainingApp: (URL) -> Void,
+        insertText: @escaping (String) -> Void
+    ) {
+        if let requestID {
+            store.clear(requestID: requestID)
+        }
+        requestID = nil
+        startHandoff(openContainingApp: openContainingApp, insertText: insertText)
+    }
+
+    private func startPolling() {
+        guard pollTask == nil else { return }
+        pollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                self?.refresh()
+                try? await Task.sleep(for: .milliseconds(350))
+            }
+        }
+    }
+
+    // swiftlint:disable:next cyclomatic_complexity
+    private func refresh() {
+        guard hasFullAccess else {
+            presentation = .missingFullAccess
+            return
+        }
+        guard let requestID else {
+            if presentation != .inserted && presentation != .cancelled {
+                presentation = .idle
+            }
+            return
+        }
+        guard let record = store.record(matching: requestID) else {
+            presentation = .error(.timedOut)
+            self.requestID = nil
+            return
+        }
+
+        switch record.phase {
+        case .requested:
+            presentation = .openingApp
+        case .recording:
+            presentation = .recording
+        case .transcribing:
+            presentation = .transcribing
+        case .completed:
+            guard let insertText else {
+                presentation = .error(.unknown)
+                return
+            }
+            if consumer.insertReadyResult(requestID: requestID, insert: insertText) {
+                self.requestID = nil
+                presentation = .inserted
+            }
+        case .cancelled:
+            self.requestID = nil
+            presentation = .cancelled
+        case .failed:
+            self.requestID = nil
+            presentation = .error(record.failureCode ?? .unknown)
+        }
+    }
+}
+
+private struct KeyboardRootView: View {
+    @ObservedObject var model: KeyboardViewModel
+    let showsInputModeSwitch: Bool
+    let openContainingApp: (URL) -> Void
+    let insertText: (String) -> Void
+    let showInputModeList: (UIButton, UIEvent) -> Void
+
+    var body: some View {
+        GeometryReader { proxy in
+            VStack(spacing: 10) {
+                if proxy.size.width >= 620 {
+                    HStack(spacing: 22) {
+                        statusCopy
+                        Spacer(minLength: 12)
+                        primaryControl
+                    }
+                } else {
+                    statusCopy
+                    primaryControl
+                }
+
+                Spacer(minLength: 0)
+                bottomBar
+            }
+            .padding(.horizontal, proxy.size.width >= 620 ? 28 : 14)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(uiColor: .systemGroupedBackground))
+        }
+    }
+
+    private var statusCopy: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label(title, systemImage: statusSymbol)
+                .font(.headline)
+                .foregroundStyle(statusTint)
+                .accessibilityAddTraits(.isHeader)
+            Text(detail)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("keyboardStatusDetail")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var primaryControl: some View {
+        switch model.presentation {
+        case .idle, .inserted, .cancelled:
+            Button {
+                model.startHandoff(openContainingApp: openContainingApp, insertText: insertText)
+            } label: {
+                Label("Speak in Just Speak", systemImage: "mic.fill")
+                    .font(.headline)
+                    .frame(maxWidth: 330, minHeight: 52)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.blue)
+            .accessibilityIdentifier("keyboardTranscribeButton")
+
+        case .missingFullAccess:
+            Text("Enable Full Access in Settings to use secure handoff.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: 330, minHeight: 44)
+
+        case .openingApp, .recording, .transcribing:
+            HStack(spacing: 10) {
+                ProgressView()
+                Text(progressLabel)
+                    .font(.headline)
+            }
+            .frame(maxWidth: 330, minHeight: 52)
+            .accessibilityElement(children: .combine)
+
+        case .unavailable, .error:
+            Button {
+                model.retry(openContainingApp: openContainingApp, insertText: insertText)
+            } label: {
+                Label("Try Again", systemImage: "arrow.clockwise")
+                    .font(.headline)
+                    .frame(maxWidth: 330, minHeight: 48)
+            }
+            .buttonStyle(.borderedProminent)
+            .accessibilityIdentifier("keyboardRetryButton")
+        }
+    }
+
+    private var bottomBar: some View {
+        HStack {
+            if showsInputModeSwitch {
+                InputModeSwitchButton(action: showInputModeList)
+                    .frame(width: 48, height: 44)
+                    .accessibilityLabel("Next keyboard")
+                    .accessibilityHint("Touch and hold to choose another keyboard")
+            }
+
+            Text("Audio is captured only in Just Speak. Results are deleted after insertion.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+                .multilineTextAlignment(.center)
+
+            if canCancel {
+                Button("Cancel") {
+                    model.cancel()
+                }
+                .font(.subheadline.weight(.semibold))
+                .frame(minWidth: 48, minHeight: 44)
+                .accessibilityIdentifier("keyboardCancelButton")
+            } else {
+                Color.clear
+                    .frame(width: showsInputModeSwitch ? 48 : 0, height: 44)
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+
+    private var canCancel: Bool {
+        switch model.presentation {
+        case .openingApp, .recording, .transcribing:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private var title: String {
+        switch model.presentation {
+        case .idle: return "Ready to transcribe"
+        case .openingApp: return "Opening Just Speak"
+        case .recording: return "Recording in Just Speak"
+        case .transcribing: return "Finishing transcript"
+        case .inserted: return "Inserted"
+        case .missingFullAccess: return "Full Access is off"
+        case .unavailable: return "Just Speak is unavailable"
+        case .cancelled: return "Cancelled"
+        case .error: return "Couldn’t insert transcript"
+        }
+    }
+
+    private var detail: String {
+        switch model.presentation {
+        case .idle:
+            return "Opens the app for microphone capture, then inserts the matching result here."
+        case .openingApp:
+            return "Complete recording in the Just Speak app, then return here."
+        case .recording:
+            return "Speak in the app. This keyboard never receives microphone audio."
+        case .transcribing:
+            return "Your selected JustSpeakToIt model is producing the final text."
+        case .inserted:
+            return "The one-time result was inserted and removed from shared storage."
+        case .missingFullAccess:
+            return "Full Access is required for the App Group handoff. It never exposes surrounding text."
+        case .unavailable:
+            return "Open the Just Speak app once and check that the keyboard is enabled."
+        case .cancelled:
+            return "No transcript was inserted or retained."
+        case let .error(code):
+            return errorDetail(for: code)
+        }
+    }
+
+    private var statusSymbol: String {
+        switch model.presentation {
+        case .idle: return "waveform"
+        case .openingApp: return "arrow.up.forward.app"
+        case .recording: return "record.circle"
+        case .transcribing: return "ellipsis.bubble"
+        case .inserted: return "checkmark.circle.fill"
+        case .missingFullAccess: return "lock.trianglebadge.exclamationmark"
+        case .unavailable, .error: return "exclamationmark.triangle.fill"
+        case .cancelled: return "xmark.circle"
+        }
+    }
+
+    private var statusTint: Color {
+        switch model.presentation {
+        case .inserted: return .green
+        case .recording: return .red
+        case .missingFullAccess, .unavailable, .error: return .orange
+        default: return .primary
+        }
+    }
+
+    private var progressLabel: String {
+        switch model.presentation {
+        case .recording: return "Recording"
+        case .transcribing: return "Transcribing"
+        default: return "Opening App"
+        }
+    }
+
+    private func errorDetail(for code: KeyboardHandoffRecord.FailureCode) -> String {
+        switch code {
+        case .fullAccessRequired:
+            return "Turn on Full Access in Settings, then try again."
+        case .appUnavailable:
+            return "The containing app could not be opened. Open Just Speak manually and retry."
+        case .recordingUnavailable:
+            return "Recording could not start. Check microphone permission in Just Speak."
+        case .noSpeech:
+            return "No speech was detected. Nothing was inserted."
+        case .timedOut:
+            return "The one-time request expired. Nothing was inserted."
+        case .invalidRequest:
+            return "The request did not match the active keyboard session."
+        case .unknown:
+            return "The handoff ended safely without retaining a transcript."
+        }
+    }
+}
+
+private struct InputModeSwitchButton: UIViewRepresentable {
+    let action: (UIButton, UIEvent) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(action: action)
+    }
+
+    func makeUIView(context: Context) -> UIButton {
+        let button = UIButton(type: .system)
+        button.setImage(UIImage(systemName: "globe"), for: .normal)
+        button.tintColor = .label
+        button.accessibilityLabel = "Next keyboard"
+        button.addTarget(
+            context.coordinator,
+            action: #selector(Coordinator.handle(_:event:)),
+            for: .allTouchEvents
+        )
+        return button
+    }
+
+    func updateUIView(_ uiView: UIButton, context: Context) {}
+
+    final class Coordinator: NSObject {
+        let action: (UIButton, UIEvent) -> Void
+
+        init(action: @escaping (UIButton, UIEvent) -> Void) {
+            self.action = action
+        }
+
+        @objc func handle(_ sender: UIButton, event: UIEvent) {
+            action(sender, event)
+        }
+    }
+}

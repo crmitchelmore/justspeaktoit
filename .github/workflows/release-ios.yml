@@ -36,10 +36,12 @@ jobs:
 
       - name: Install iOS Signing Certificate & Profiles
         env:
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           IOS_DISTRIBUTION_P12: ${{ secrets.IOS_DISTRIBUTION_P12 }}
           IOS_DISTRIBUTION_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_PASSWORD }}
           IOS_APPSTORE_PROFILE: ${{ secrets.IOS_APPSTORE_PROFILE }}
           IOS_WIDGET_APPSTORE_PROFILE: ${{ secrets.IOS_WIDGET_APPSTORE_PROFILE }}
+          IOS_KEYBOARD_APPSTORE_PROFILE: ${{ secrets.IOS_KEYBOARD_APPSTORE_PROFILE }}
         run: |
           KEYCHAIN_PATH=$RUNNER_TEMP/ios-signing.keychain-db
           KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
@@ -51,8 +53,12 @@ jobs:
           if [ -n "$IOS_DISTRIBUTION_P12" ]; then
             CERT_PATH=$RUNNER_TEMP/ios-distribution.p12
             echo -n "$IOS_DISTRIBUTION_P12" | base64 --decode -o "$CERT_PATH"
+            CERT_PEM_PATH=$RUNNER_TEMP/ios-distribution.pem
+            openssl pkcs12 -in "$CERT_PATH" -clcerts -nokeys \
+              -passin "pass:$IOS_DISTRIBUTION_PASSWORD" -out "$CERT_PEM_PATH"
+            IOS_DISTRIBUTION_CERT_SERIAL=$(openssl x509 -in "$CERT_PEM_PATH" -noout -serial | cut -d= -f2)
             security import "$CERT_PATH" -P "$IOS_DISTRIBUTION_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
-            rm -f "$CERT_PATH"
+            rm -f "$CERT_PATH" "$CERT_PEM_PATH"
           fi
 
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
@@ -72,6 +78,21 @@ jobs:
             echo "WIDGET_PROFILE_UUID=$WIDGET_PROFILE_UUID" >> $GITHUB_ENV
             echo "WIDGET_PROFILE_NAME=$WIDGET_PROFILE_NAME" >> $GITHUB_ENV
           fi
+          KEYBOARD_PROFILE_PATH=~/Library/MobileDevice/Provisioning\ Profiles/ios-keyboard-appstore.provisionprofile
+          if [ -n "$IOS_KEYBOARD_APPSTORE_PROFILE" ]; then
+            echo -n "$IOS_KEYBOARD_APPSTORE_PROFILE" | base64 --decode -o "$KEYBOARD_PROFILE_PATH"
+          else
+            APP_STORE_CONNECT_KEY_PATH=~/.appstoreconnect/private_keys/AuthKey_${{ env.APP_STORE_CONNECT_KEY_ID }}.p8 \
+              ruby scripts/create-ios-app-store-profile.rb \
+                --bundle-id com.justspeaktoit.ios.keyboard \
+                --certificate-serial "$IOS_DISTRIBUTION_CERT_SERIAL" \
+                --profile-name "JustSpeakToIt Keyboard App Store" \
+                --output "$KEYBOARD_PROFILE_PATH"
+          fi
+          KEYBOARD_PROFILE_UUID=$(security cms -D -i "$KEYBOARD_PROFILE_PATH" | plutil -extract UUID raw -)
+          KEYBOARD_PROFILE_NAME=$(security cms -D -i "$KEYBOARD_PROFILE_PATH" | plutil -extract Name raw -)
+          echo "KEYBOARD_PROFILE_UUID=$KEYBOARD_PROFILE_UUID" >> $GITHUB_ENV
+          echo "KEYBOARD_PROFILE_NAME=$KEYBOARD_PROFILE_NAME" >> $GITHUB_ENV
 
       - name: Generate Xcode Project
         run: tuist generate --no-open
@@ -80,6 +101,7 @@ jobs:
         env:
           APP_PROFILE_NAME: ${{ env.APP_PROFILE_NAME }}
           WIDGET_PROFILE_NAME: ${{ env.WIDGET_PROFILE_NAME }}
+          KEYBOARD_PROFILE_NAME: ${{ env.KEYBOARD_PROFILE_NAME }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           python - <<'PY'
@@ -89,10 +111,11 @@ jobs:
 
           app_profile = os.environ.get("APP_PROFILE_NAME", "")
           widget_profile = os.environ.get("WIDGET_PROFILE_NAME", "")
+          keyboard_profile = os.environ.get("KEYBOARD_PROFILE_NAME", "")
           team_id = os.environ.get("APPLE_TEAM_ID", "")
 
-          if not app_profile or not widget_profile:
-              raise SystemExit("Missing app/widget provisioning profile names")
+          if not app_profile or not widget_profile or not keyboard_profile:
+              raise SystemExit("Missing app/widget/keyboard provisioning profile names")
 
           pbx_path = Path("Just Speak to It.xcodeproj/project.pbxproj")
           text = pbx_path.read_text()
@@ -129,6 +152,8 @@ jobs:
                   settings = match.group("settings")
                   if "PRODUCT_BUNDLE_IDENTIFIER = com.justspeaktoit.ios.JustSpeakToItWidgetExtension;" in settings:
                       settings = patch_release_block(settings, widget_profile)
+                  elif "PRODUCT_BUNDLE_IDENTIFIER = com.justspeaktoit.ios.keyboard;" in settings:
+                      settings = patch_release_block(settings, keyboard_profile)
                   elif "PRODUCT_BUNDLE_IDENTIFIER = com.justspeaktoit.ios;" in settings:
                       settings = patch_release_block(settings, app_profile)
                   return "{}{}{}".format(match.group("prefix"), settings, match.group("suffix"))
@@ -205,30 +230,41 @@ jobs:
         run: |
           APP_PATH="build/SpeakiOS.xcarchive/Products/Applications/JustSpeakToIt.app"
           WIDGET_PATH="$APP_PATH/PlugIns/JustSpeakToItWidgetExtension.appex"
+          KEYBOARD_PATH="$APP_PATH/PlugIns/JustSpeakKeyboard.appex"
 
           APP_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PATH/Info.plist")
           WIDGET_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$WIDGET_PATH/Info.plist")
+          KEYBOARD_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$KEYBOARD_PATH/Info.plist")
           APP_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PATH/Info.plist")
           WIDGET_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$WIDGET_PATH/Info.plist")
+          KEYBOARD_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$KEYBOARD_PATH/Info.plist")
 
           [ "$APP_VERSION" = "$VERSION" ] || { echo "App version mismatch: expected '$VERSION', got '$APP_VERSION'"; exit 1; }
           [ "$WIDGET_VERSION" = "$VERSION" ] || { echo "Widget version mismatch: expected '$VERSION', got '$WIDGET_VERSION'"; exit 1; }
+          [ "$KEYBOARD_VERSION" = "$VERSION" ] || { echo "Keyboard version mismatch: expected '$VERSION', got '$KEYBOARD_VERSION'"; exit 1; }
           [ "$APP_BUILD" = "$BUILD_NUMBER" ] || { echo "App build mismatch: expected '$BUILD_NUMBER', got '$APP_BUILD'"; exit 1; }
           [ "$WIDGET_BUILD" = "$BUILD_NUMBER" ] || { echo "Widget build mismatch: expected '$BUILD_NUMBER', got '$WIDGET_BUILD'"; exit 1; }
+          [ "$KEYBOARD_BUILD" = "$BUILD_NUMBER" ] || { echo "Keyboard build mismatch: expected '$BUILD_NUMBER', got '$KEYBOARD_BUILD'"; exit 1; }
 
           codesign -d --entitlements - --xml "$APP_PATH" > "$RUNNER_TEMP/app-entitlements.plist"
           codesign -d --entitlements - --xml "$WIDGET_PATH" > "$RUNNER_TEMP/widget-entitlements.plist"
+          codesign -d --entitlements - --xml "$KEYBOARD_PATH" > "$RUNNER_TEMP/keyboard-entitlements.plist"
           APP_GROUP=$(/usr/libexec/PlistBuddy \
             -c 'Print :com.apple.security.application-groups:0' \
             "$RUNNER_TEMP/app-entitlements.plist" 2>/dev/null || true)
           WIDGET_GROUP=$(/usr/libexec/PlistBuddy \
             -c 'Print :com.apple.security.application-groups:0' \
             "$RUNNER_TEMP/widget-entitlements.plist" 2>/dev/null || true)
+          KEYBOARD_GROUP=$(/usr/libexec/PlistBuddy \
+            -c 'Print :com.apple.security.application-groups:0' \
+            "$RUNNER_TEMP/keyboard-entitlements.plist" 2>/dev/null || true)
 
           [ "$APP_GROUP" = "group.com.justspeaktoit.ios" ] \
             || { echo "App group mismatch: expected 'group.com.justspeaktoit.ios', got '${APP_GROUP:-missing}'"; exit 1; }
           [ "$WIDGET_GROUP" = "group.com.justspeaktoit.ios" ] \
             || { echo "Widget group mismatch: expected 'group.com.justspeaktoit.ios', got '${WIDGET_GROUP:-missing}'"; exit 1; }
+          [ "$KEYBOARD_GROUP" = "group.com.justspeaktoit.ios" ] \
+            || { echo "Keyboard group mismatch: expected 'group.com.justspeaktoit.ios', got '${KEYBOARD_GROUP:-missing}'"; exit 1; }
 
       - name: Export IPA
         env:
@@ -237,6 +273,7 @@ jobs:
         run: |
           APP_PROFILE_UUID=$(security cms -D -i "$HOME/Library/MobileDevice/Provisioning Profiles/ios-appstore.provisionprofile" | plutil -extract UUID raw -)
           WIDGET_PROFILE_UUID=$(security cms -D -i "$HOME/Library/MobileDevice/Provisioning Profiles/ios-widget-appstore.provisionprofile" | plutil -extract UUID raw -)
+          KEYBOARD_PROFILE_UUID=$(security cms -D -i "$HOME/Library/MobileDevice/Provisioning Profiles/ios-keyboard-appstore.provisionprofile" | plutil -extract UUID raw -)
           cat > ExportOptions.plist << 'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -256,6 +293,8 @@ jobs:
                   <string>APP_PROFILE_UUID_PLACEHOLDER</string>
                   <key>com.justspeaktoit.ios.JustSpeakToItWidgetExtension</key>
                   <string>WIDGET_PROFILE_UUID_PLACEHOLDER</string>
+                  <key>com.justspeaktoit.ios.keyboard</key>
+                  <string>KEYBOARD_PROFILE_UUID_PLACEHOLDER</string>
               </dict>
               <key>uploadSymbols</key>
               <true/>
@@ -268,6 +307,7 @@ jobs:
           sed -i '' "s/APPLE_TEAM_ID_PLACEHOLDER/${APPLE_TEAM_ID}/g" ExportOptions.plist
           sed -i '' "s/APP_PROFILE_UUID_PLACEHOLDER/${APP_PROFILE_UUID}/g" ExportOptions.plist
           sed -i '' "s/WIDGET_PROFILE_UUID_PLACEHOLDER/${WIDGET_PROFILE_UUID}/g" ExportOptions.plist
+          sed -i '' "s/KEYBOARD_PROFILE_UUID_PLACEHOLDER/${KEYBOARD_PROFILE_UUID}/g" ExportOptions.plist
           
           xcodebuild -exportArchive \
             -archivePath build/SpeakiOS.xcarchive \

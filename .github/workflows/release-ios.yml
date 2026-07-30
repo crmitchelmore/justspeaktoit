@@ -36,6 +36,7 @@ jobs:
 
       - name: Install iOS Signing Certificate & Profiles
         env:
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           IOS_DISTRIBUTION_P12: ${{ secrets.IOS_DISTRIBUTION_P12 }}
           IOS_DISTRIBUTION_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_PASSWORD }}
           IOS_APPSTORE_PROFILE: ${{ secrets.IOS_APPSTORE_PROFILE }}
@@ -52,8 +53,12 @@ jobs:
           if [ -n "$IOS_DISTRIBUTION_P12" ]; then
             CERT_PATH=$RUNNER_TEMP/ios-distribution.p12
             echo -n "$IOS_DISTRIBUTION_P12" | base64 --decode -o "$CERT_PATH"
+            CERT_PEM_PATH=$RUNNER_TEMP/ios-distribution.pem
+            openssl pkcs12 -in "$CERT_PATH" -clcerts -nokeys \
+              -passin "pass:$IOS_DISTRIBUTION_PASSWORD" -out "$CERT_PEM_PATH"
+            IOS_DISTRIBUTION_CERT_SERIAL=$(openssl x509 -in "$CERT_PEM_PATH" -noout -serial | cut -d= -f2)
             security import "$CERT_PATH" -P "$IOS_DISTRIBUTION_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
-            rm -f "$CERT_PATH"
+            rm -f "$CERT_PATH" "$CERT_PEM_PATH"
           fi
 
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
@@ -73,14 +78,21 @@ jobs:
             echo "WIDGET_PROFILE_UUID=$WIDGET_PROFILE_UUID" >> $GITHUB_ENV
             echo "WIDGET_PROFILE_NAME=$WIDGET_PROFILE_NAME" >> $GITHUB_ENV
           fi
+          KEYBOARD_PROFILE_PATH=~/Library/MobileDevice/Provisioning\ Profiles/ios-keyboard-appstore.provisionprofile
           if [ -n "$IOS_KEYBOARD_APPSTORE_PROFILE" ]; then
-            KEYBOARD_PROFILE_PATH=~/Library/MobileDevice/Provisioning\ Profiles/ios-keyboard-appstore.provisionprofile
             echo -n "$IOS_KEYBOARD_APPSTORE_PROFILE" | base64 --decode -o "$KEYBOARD_PROFILE_PATH"
-            KEYBOARD_PROFILE_UUID=$(security cms -D -i "$KEYBOARD_PROFILE_PATH" | plutil -extract UUID raw -)
-            KEYBOARD_PROFILE_NAME=$(security cms -D -i "$KEYBOARD_PROFILE_PATH" | plutil -extract Name raw -)
-            echo "KEYBOARD_PROFILE_UUID=$KEYBOARD_PROFILE_UUID" >> $GITHUB_ENV
-            echo "KEYBOARD_PROFILE_NAME=$KEYBOARD_PROFILE_NAME" >> $GITHUB_ENV
+          else
+            APP_STORE_CONNECT_KEY_PATH=~/.appstoreconnect/private_keys/AuthKey_${{ env.APP_STORE_CONNECT_KEY_ID }}.p8 \
+              ruby scripts/create-ios-app-store-profile.rb \
+                --bundle-id com.justspeaktoit.ios.keyboard \
+                --certificate-serial "$IOS_DISTRIBUTION_CERT_SERIAL" \
+                --profile-name "JustSpeakToIt Keyboard App Store" \
+                --output "$KEYBOARD_PROFILE_PATH"
           fi
+          KEYBOARD_PROFILE_UUID=$(security cms -D -i "$KEYBOARD_PROFILE_PATH" | plutil -extract UUID raw -)
+          KEYBOARD_PROFILE_NAME=$(security cms -D -i "$KEYBOARD_PROFILE_PATH" | plutil -extract Name raw -)
+          echo "KEYBOARD_PROFILE_UUID=$KEYBOARD_PROFILE_UUID" >> $GITHUB_ENV
+          echo "KEYBOARD_PROFILE_NAME=$KEYBOARD_PROFILE_NAME" >> $GITHUB_ENV
 
       - name: Generate Xcode Project
         run: tuist generate --no-open

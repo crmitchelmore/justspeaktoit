@@ -703,6 +703,25 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
         return trimmed
     }
 
+    /// User-facing transcription label shared by the iOS recording surfaces.
+    public static func transcriptionDisplayName(
+        for identifier: String,
+        isBatch: Bool
+    ) -> String {
+        if isBatch { return friendlyName(for: identifier) }
+        guard let route = LiveTranscriptionRouting.route(for: identifier) else {
+            return "Apple Speech"
+        }
+        switch route.provider {
+        case .apple:
+            return "Apple Speech"
+        case .deepgram, .elevenlabs:
+            return route.provider.displayName
+        default:
+            return friendlyName(for: identifier)
+        }
+    }
+
     private static func friendlyLocalModelName(from identifier: String, prefixes: [String]) -> String {
         var working = identifier
         let lowercased = identifier.lowercased()

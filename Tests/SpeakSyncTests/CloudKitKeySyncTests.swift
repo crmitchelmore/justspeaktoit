@@ -4,7 +4,7 @@ import XCTest
 @testable import SpeakSync
 
 final class CloudKitKeySyncTests: XCTestCase {
-    func testSyncableIdentifiersIncludeXAI() {
+    func testSyncableIdentifiers_containsXAI() {
         XCTAssertTrue(CloudKitKeySync.syncableIdentifiers.contains("xai.apiKey"))
     }
 

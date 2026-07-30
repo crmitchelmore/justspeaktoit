@@ -260,8 +260,13 @@ public final class SharedClientLiveTranscriber: ObservableObject {
 
     private func handleTranscript(text: String, isFinal: Bool) {
         if isFinal {
-            if !accumulatedText.isEmpty { accumulatedText += " " }
-            accumulatedText += text
+            if accumulatedText.isEmpty
+                || text == accumulatedText
+                || text.hasPrefix(accumulatedText + " ") {
+                accumulatedText = text
+            } else {
+                accumulatedText += " " + text
+            }
             finalText = accumulatedText
             partialText = accumulatedText
         } else {

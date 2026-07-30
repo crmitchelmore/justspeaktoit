@@ -76,7 +76,7 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
         },
         onError: { [weak self] error in
           Task { @MainActor [weak self] in
-            guard let self, self.isRunning else { return }
+            guard let self else { return }
             self.delegate?.liveTranscriber(self, didFail: error)
           }
         }

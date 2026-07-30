@@ -10,7 +10,9 @@ final class XAILiveClientTests: XCTestCase {
         XCTAssertEqual(components.scheme, "wss")
         XCTAssertEqual(components.host, "api.x.ai")
         XCTAssertEqual(components.path, "/v1/realtime")
-        XCTAssertEqual(components.queryItems?.first?.value, XAIVoiceModels.thinkFast2APIName)
+        let modelItem = try XCTUnwrap(components.queryItems?.first { $0.name == "model" })
+        XCTAssertEqual(modelItem.name, "model")
+        XCTAssertEqual(modelItem.value, XAIVoiceModels.thinkFast2APIName)
     }
 
     func testSessionUpdate_usesManualTranscriptionOnlyMode() throws {
@@ -69,5 +71,12 @@ final class XAILiveClientTests: XCTestCase {
             apiKey: "test-key",
             language: "en-GB"
         ))
+    }
+
+    func testCapabilities_supportLivePolishAndFinalizationBudget() {
+        let capabilities = ModelCatalog.liveCapabilities(for: XAIVoiceModels.thinkFast2CatalogID)
+
+        XCTAssertTrue(capabilities.supportedSpeedModes.contains(.livePolish))
+        XCTAssertEqual(capabilities.postStopFinalizeBudget, 3.0)
     }
 }

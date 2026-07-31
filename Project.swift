@@ -112,9 +112,10 @@ var projectPackages: [Package] = [
     .remote(url: "https://github.com/argmaxinc/argmax-oss-swift.git", requirement: .upToNextMajor(from: "0.9.0"))
 ]
 if !isAppStoreBuild {
-    projectPackages.append(
+    projectPackages += [
+        .remote(url: "https://github.com/FluidInference/FluidAudio.git", requirement: .exact("0.15.5")),
         .remote(url: "https://github.com/sparkle-project/Sparkle.git", requirement: .upToNextMajor(from: "2.6.0"))
-    )
+    ]
 }
 
 var macAppDependencies: [TargetDependency] = [
@@ -125,7 +126,10 @@ var macAppDependencies: [TargetDependency] = [
     .package(product: "Sentry")
 ]
 if !isAppStoreBuild {
-    macAppDependencies.append(.package(product: "Sparkle"))
+    macAppDependencies += [
+        .package(product: "FluidAudio"),
+        .package(product: "Sparkle")
+    ]
 }
 
 let project = Project(

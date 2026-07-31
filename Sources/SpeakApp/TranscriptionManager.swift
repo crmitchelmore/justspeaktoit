@@ -284,10 +284,13 @@ final class TranscriptionManager: ObservableObject {
     #if APP_STORE
     let availableStreamingSourceIDs: Set<String> = []
     #else
-    let availableStreamingSourceIDs = Set(
+    var availableStreamingSourceIDs = Set(
       LocalModelManager.recommendedStreamingModelSources.map(\.id)
         + LocalModelManager.shared.streamingModelSources.map(\.id)
     )
+    if FluidAudioModelManager.supportsCurrentHardware {
+      availableStreamingSourceIDs.insert(FluidAudioParakeetModel.id)
+    }
     #endif
     return try Self.resolvedLiveTranscriptionModel(
       transcriptionMode: appSettings.transcriptionMode,
@@ -3972,6 +3975,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   private var openAIRealtimeController: OpenAIRealtimeLiveController
   private var sharedClientController: SharedClientLiveController
   #if !APP_STORE
+  private var fluidAudioController: FluidAudioParakeetLiveController
   private var sherpaOnnxController: SherpaOnnxLiveController
   #endif
   private var unsupportedLocalLiveController: UnsupportedLocalLiveTranscriber
@@ -4065,6 +4069,12 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       secureStorage: secureStorage
     )
     #if !APP_STORE
+    fluidAudioController = FluidAudioParakeetLiveController(
+      appSettings: appSettings,
+      permissionsManager: permissionsManager,
+      audioDeviceManager: audioDeviceManager,
+      modelManager: FluidAudioModelManager.shared
+    )
     sherpaOnnxController = SherpaOnnxLiveController(
       appSettings: appSettings,
       permissionsManager: permissionsManager,
@@ -4140,7 +4150,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     lastStopDate = nowProvider()
   }
 
-  private func controller(for model: String) -> any LiveTranscriptionController {
+  func controller(for model: String) -> any LiveTranscriptionController {
     if model == AppleLocalModels.speechTranscriberModelID {
       return speechAnalyzerController
     }
@@ -4152,6 +4162,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     // API. So any openai/* live model is handled by openAIRealtimeController.
     if model.hasPrefix("openai/") { return openAIRealtimeController }
     #if !APP_STORE
+    if FluidAudioParakeetModel.matches(model) { return fluidAudioController }
     if model.hasPrefix("local/streaming/") { return sherpaOnnxController }
     #else
     if model.hasPrefix("local/streaming/") { return unsupportedLocalLiveController }
@@ -4192,6 +4203,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     ]
     #if !APP_STORE
     controllers.insert(sherpaOnnxController, at: controllers.count - 1)
+    controllers.insert(fluidAudioController, at: controllers.count - 1)
     #endif
     let model = currentModel ?? appSettings.liveTranscriptionModel
     for controller in controllers {
@@ -4281,6 +4293,12 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       secureStorage: secureStorage
     )
     #if !APP_STORE
+    fluidAudioController = FluidAudioParakeetLiveController(
+      appSettings: appSettings,
+      permissionsManager: permissionsManager,
+      audioDeviceManager: audioDeviceManager,
+      modelManager: FluidAudioModelManager.shared
+    )
     sherpaOnnxController = SherpaOnnxLiveController(
       appSettings: appSettings,
       permissionsManager: permissionsManager,

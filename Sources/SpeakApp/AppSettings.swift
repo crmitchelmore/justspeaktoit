@@ -875,9 +875,15 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     let defaultLocalStreamingSource = ""
     let supportedLocalStreamingIDs: Set<String> = []
     #else
-    let defaultLocalStreamingSource = LocalModelManager.recommendedStreamingModelSources.first?.id ?? ""
+    let defaultLocalStreamingSource = FluidAudioModelManager.supportsCurrentHardware
+      ? FluidAudioParakeetModel.id
+      : LocalModelManager.recommendedStreamingModelSources.first?.id ?? ""
+    let fluidAudioStreamingIDs = FluidAudioModelManager.supportsCurrentHardware
+      ? [FluidAudioParakeetModel.id]
+      : []
     let supportedLocalStreamingIDs = Set(LocalModelManager.recommendedStreamingModelSources.map(\.id))
       .union(LocalModelManager.shared.streamingModelSources.map(\.id))
+      .union(fluidAudioStreamingIDs)
     #endif
     localStreamingModelSource =
       supportedLocalStreamingIDs.contains(storedLocalStreamingSource ?? "")

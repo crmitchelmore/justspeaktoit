@@ -124,9 +124,12 @@ final class AppSettingsDefaultsTests: XCTestCase {
 
     #if !APP_STORE
     @MainActor
-    func testLocalStreamingDefaults_toFluidAudioParakeet() {
+    func testLocalStreamingDefaults_matchHardwareSupport() {
         let settings = AppSettings(defaults: defaults)
-        XCTAssertEqual(settings.localStreamingModelSource, FluidAudioParakeetModel.id)
+        let expected = FluidAudioModelManager.supportsCurrentHardware
+          ? FluidAudioParakeetModel.id
+          : LocalModelManager.recommendedStreamingModelSources.first?.id ?? ""
+        XCTAssertEqual(settings.localStreamingModelSource, expected)
     }
     #endif
 

@@ -284,10 +284,13 @@ final class TranscriptionManager: ObservableObject {
     #if APP_STORE
     let availableStreamingSourceIDs: Set<String> = []
     #else
-    let availableStreamingSourceIDs = Set(
+    var availableStreamingSourceIDs = Set(
       LocalModelManager.recommendedStreamingModelSources.map(\.id)
         + LocalModelManager.shared.streamingModelSources.map(\.id)
-    ).union([FluidAudioParakeetModel.id])
+    )
+    if FluidAudioModelManager.supportsCurrentHardware {
+      availableStreamingSourceIDs.insert(FluidAudioParakeetModel.id)
+    }
     #endif
     return try Self.resolvedLiveTranscriptionModel(
       transcriptionMode: appSettings.transcriptionMode,
@@ -4147,7 +4150,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     lastStopDate = nowProvider()
   }
 
-  private func controller(for model: String) -> any LiveTranscriptionController {
+  func controller(for model: String) -> any LiveTranscriptionController {
     if model == AppleLocalModels.speechTranscriberModelID {
       return speechAnalyzerController
     }

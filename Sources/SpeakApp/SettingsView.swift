@@ -2290,7 +2290,13 @@ struct SettingsView: View {
               Button("Delete") {
                 fluidAudioModels.delete()
                 if settings.localStreamingModelSource == FluidAudioParakeetModel.id {
-                  settings.localTranscriptionMode = .batch
+                  if let fallback = firstInstalledStreamingSourceID(excluding: FluidAudioParakeetModel.id) {
+                    settings.localStreamingModelSource = fallback
+                  } else {
+                    settings.localStreamingModelSource =
+                      LocalModelManager.recommendedStreamingModelSources.first?.id ?? ""
+                    settings.localTranscriptionMode = .batch
+                  }
                 }
               }
             case .installing:

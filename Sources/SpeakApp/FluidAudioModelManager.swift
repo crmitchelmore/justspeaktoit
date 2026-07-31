@@ -120,11 +120,16 @@ final class FluidAudioModelManager: ObservableObject {
       installState = .installed
     } catch {
       logger.error("FluidAudio model installation failed: \(error.localizedDescription, privacy: .public)")
+      removePartialModelAfterFailedInstall()
       installState = .failed(error.localizedDescription)
     }
   }
 
   func delete() {
+    guard installState != .installing else {
+      logger.notice("Ignoring FluidAudio model deletion while installation is in progress")
+      return
+    }
     do {
       if fileManager.fileExists(atPath: modelDirectory.path) {
         try fileManager.removeItem(at: modelDirectory)
@@ -155,6 +160,16 @@ final class FluidAudioModelManager: ObservableObject {
       configuration: Self.modelConfiguration()
     )
     return manager
+  }
+
+  private func removePartialModelAfterFailedInstall() {
+    guard fileManager.fileExists(atPath: modelDirectory.path) else { return }
+    do {
+      try fileManager.removeItem(at: modelDirectory)
+      downloadProgress = 0
+    } catch {
+      logger.error("Failed to remove partial FluidAudio model: \(error.localizedDescription, privacy: .public)")
+    }
   }
 
   private var modelDirectory: URL {

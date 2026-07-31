@@ -29,16 +29,26 @@ final class TranscriptionManagerRoutingTests: XCTestCase {
   }
 
   #if !APP_STORE
-  func testResolvedLiveTranscriptionModel_returnsFluidAudioParakeetSource() throws {
-    let model = try TranscriptionManager.resolvedLiveTranscriptionModel(
-      transcriptionMode: .localModel,
-      localTranscriptionMode: .streaming,
-      localStreamingModelSource: FluidAudioParakeetModel.id,
-      liveTranscriptionModel: "apple/local/SFSpeechRecognizer",
-      availableStreamingSourceIDs: [FluidAudioParakeetModel.id]
+  @MainActor
+  func testSwitchingLiveTranscriber_routesFluidAudioParakeetToDedicatedController() {
+    let settings = AppSettings()
+    let permissions = PermissionsManager()
+    let audioDevices = AudioInputDeviceManager(appSettings: settings)
+    let secureStorage = SecureAppStorage(
+      permissionsManager: permissions,
+      appSettings: settings,
+      keychainService: "com.justspeaktoit.tests.fluidaudio.routing.\(UUID().uuidString)"
+    )
+    let transcriber = SwitchingLiveTranscriber(
+      appSettings: settings,
+      permissionsManager: permissions,
+      audioDeviceManager: audioDevices,
+      secureStorage: secureStorage
     )
 
-    XCTAssertEqual(model, FluidAudioParakeetModel.id)
+    XCTAssertTrue(
+      transcriber.controller(for: FluidAudioParakeetModel.id) is FluidAudioParakeetLiveController
+    )
   }
   #endif
 

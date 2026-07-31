@@ -1,4 +1,5 @@
 #if !APP_STORE
+import FluidAudio
 import Foundation
 import XCTest
 
@@ -23,6 +24,14 @@ final class FluidAudioModelManagerTests: XCTestCase {
 
   func testRefresh_reportsInstalledOnlyWhenEveryArtifactExists() throws {
     let manager = FluidAudioModelManager(modelsDirectory: temporaryDirectory)
+    XCTAssertEqual(manager.installState, .notInstalled)
+
+    try createModelArtifacts()
+    try FileManager.default.removeItem(
+      at: modelDirectory.appendingPathComponent(ModelNames.ParakeetEOU.decoderFile)
+    )
+    manager.refresh()
+
     XCTAssertEqual(manager.installState, .notInstalled)
 
     try createModelArtifacts()
@@ -53,24 +62,19 @@ final class FluidAudioModelManagerTests: XCTestCase {
   }
 
   private var modelDirectory: URL {
-    temporaryDirectory
-      .appendingPathComponent("parakeet-eou-streaming", isDirectory: true)
-      .appendingPathComponent("160ms", isDirectory: true)
+    temporaryDirectory.appendingPathComponent(Repo.parakeetEou160.folderName, isDirectory: true)
   }
 
   private func createModelArtifacts() throws {
     try FileManager.default.createDirectory(at: modelDirectory, withIntermediateDirectories: true)
-    for artifact in [
-      "streaming_encoder.mlmodelc",
-      "decoder.mlmodelc",
-      "joint_decision.mlmodelc"
-    ] {
-      try FileManager.default.createDirectory(
-        at: modelDirectory.appendingPathComponent(artifact, isDirectory: true),
-        withIntermediateDirectories: true
-      )
+    for artifact in ModelNames.ParakeetEOU.requiredModels {
+      let artifactURL = modelDirectory.appendingPathComponent(artifact)
+      if artifact.hasSuffix(".mlmodelc") {
+        try FileManager.default.createDirectory(at: artifactURL, withIntermediateDirectories: true)
+      } else {
+        try Data("{}".utf8).write(to: artifactURL)
+      }
     }
-    try Data("{}".utf8).write(to: modelDirectory.appendingPathComponent("vocab.json"))
   }
 }
 #endif

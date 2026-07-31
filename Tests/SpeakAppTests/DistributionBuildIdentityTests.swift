@@ -122,9 +122,18 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(workflow.contains("IOS_KEYBOARD_APPSTORE_PROFILE"))
         XCTAssertTrue(workflow.contains("ios-keyboard-appstore.provisionprofile"))
         XCTAssertTrue(workflow.contains("com.justspeaktoit.ios.keyboard"))
+        XCTAssertTrue(workflow.contains("--capability APP_GROUPS"))
         XCTAssertTrue(workflow.contains("KEYBOARD_PROFILE_UUID_PLACEHOLDER"))
         XCTAssertTrue(workflow.contains("JustSpeakKeyboard.appex"))
         XCTAssertTrue(workflow.contains("keyboard-entitlements.plist"))
+
+        let profileBootstrap = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("scripts/create-ios-app-store-profile.rb"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(profileBootstrap.contains("path: \"/v1/bundleIds\""))
+        XCTAssertTrue(profileBootstrap.contains("path: \"/v1/bundleIdCapabilities\""))
+        XCTAssertTrue(profileBootstrap.contains("capabilityType: capability_type"))
     }
 
     func testIOSApp_declaresRequiredBackgroundModes() throws {

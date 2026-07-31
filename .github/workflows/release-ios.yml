@@ -85,6 +85,8 @@ jobs:
             APP_STORE_CONNECT_KEY_PATH=~/.appstoreconnect/private_keys/AuthKey_${{ env.APP_STORE_CONNECT_KEY_ID }}.p8 \
               ruby scripts/create-ios-app-store-profile.rb \
                 --bundle-id com.justspeaktoit.ios.keyboard \
+                --bundle-name "JustSpeakToIt Keyboard" \
+                --capability APP_GROUPS \
                 --certificate-serial "$IOS_DISTRIBUTION_CERT_SERIAL" \
                 --profile-name "JustSpeakToIt Keyboard App Store" \
                 --output "$KEYBOARD_PROFILE_PATH"

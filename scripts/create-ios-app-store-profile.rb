@@ -99,7 +99,7 @@ unless options[:capabilities].empty?
   capabilities = fetch_collection(
     api_base: options[:api_base],
     token: token,
-    path: "/v1/bundleIds/#{bundle_resource_id}/bundleIdCapabilities?limit=200"
+    path: "/v1/bundleIds/#{bundle_resource_id}/bundleIdCapabilities"
   )
   enabled_capabilities = capabilities.map { |capability| capability.dig("attributes", "capabilityType") }.compact
 

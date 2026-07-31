@@ -132,6 +132,8 @@ final class DistributionBuildIdentityTests: XCTestCase {
             encoding: .utf8
         )
         XCTAssertTrue(profileBootstrap.contains("path: \"/v1/bundleIds\""))
+        XCTAssertTrue(profileBootstrap.contains("/bundleIdCapabilities\""))
+        XCTAssertFalse(profileBootstrap.contains("/bundleIdCapabilities?limit="))
         XCTAssertTrue(profileBootstrap.contains("path: \"/v1/bundleIdCapabilities\""))
         XCTAssertTrue(profileBootstrap.contains("capabilityType: capability_type"))
     }

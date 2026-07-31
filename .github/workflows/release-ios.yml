@@ -183,7 +183,8 @@ jobs:
             echo "::error::iOS release version is required. Check App Store Connect and enter the intended iOS version; VERSION is not authoritative for TestFlight."
             exit 1
           fi
-          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          VERSION_PATTERN='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          if [[ ! "$VERSION" =~ $VERSION_PATTERN ]]; then
             echo "::error::iOS release version must be semantic version text such as 2.29.2 (without a leading v)."
             exit 1
           fi
@@ -274,6 +275,9 @@ jobs:
           KEYBOARD_GROUP=$(/usr/libexec/PlistBuddy \
             -c 'Print :com.apple.security.application-groups:0' \
             "$RUNNER_TEMP/keyboard-entitlements.plist" 2>/dev/null || true)
+          APP_ICLOUD_CONTAINER=$(/usr/libexec/PlistBuddy \
+            -c 'Print :com.apple.developer.icloud-container-identifiers:0' \
+            "$RUNNER_TEMP/app-entitlements.plist" 2>/dev/null || true)
 
           [ "$APP_GROUP" = "group.com.justspeaktoit.ios" ] \
             || { echo "App group mismatch: expected 'group.com.justspeaktoit.ios', got '${APP_GROUP:-missing}'"; exit 1; }
@@ -281,6 +285,8 @@ jobs:
             || { echo "Widget group mismatch: expected 'group.com.justspeaktoit.ios', got '${WIDGET_GROUP:-missing}'"; exit 1; }
           [ "$KEYBOARD_GROUP" = "group.com.justspeaktoit.ios" ] \
             || { echo "Keyboard group mismatch: expected 'group.com.justspeaktoit.ios', got '${KEYBOARD_GROUP:-missing}'"; exit 1; }
+          [ "$APP_ICLOUD_CONTAINER" = "iCloud.com.justspeaktoit.ios" ] \
+            || { echo "iCloud container mismatch: expected 'iCloud.com.justspeaktoit.ios', got '${APP_ICLOUD_CONTAINER:-missing}'"; exit 1; }
 
       - name: Export IPA
         env:

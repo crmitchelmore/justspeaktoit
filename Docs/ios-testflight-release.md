@@ -23,7 +23,7 @@ Do not commit certificates, private keys, decoded profiles, or their base64 cont
    - signing certificate and three profiles install successfully;
    - the keyboard profile authorizes `group.com.justspeaktoit.ios`;
    - the app, widget, and keyboard archive with the requested version and build;
-   - all three archived products retain the shared App Group entitlement;
+   - all three archived products retain the shared App Group entitlement, and the app retains `iCloud.com.justspeaktoit.ios`;
    - export and upload to App Store Connect succeed.
 5. Wait for Apple processing to finish. Confirm the exact version and build are visible in App Store Connect and assign the build to the intended internal TestFlight group.
 6. Update the app from TestFlight on a physical iPhone. Confirm the installed version/build, enable the keyboard, and run the device checks below.

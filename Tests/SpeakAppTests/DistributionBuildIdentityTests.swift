@@ -132,6 +132,9 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(workflow.contains("KEYBOARD_PROFILE_UUID_PLACEHOLDER"))
         XCTAssertTrue(workflow.contains("JustSpeakKeyboard.appex"))
         XCTAssertTrue(workflow.contains("keyboard-entitlements.plist"))
+        XCTAssertTrue(workflow.contains("APP_ICLOUD_CONTAINER"))
+        XCTAssertTrue(workflow.contains("iCloud container mismatch"))
+        XCTAssertTrue(workflow.contains("iCloud.com.justspeaktoit.ios"))
 
         let profileBootstrap = try String(
             contentsOf: repositoryRoot.appendingPathComponent("scripts/create-ios-app-store-profile.rb"),
@@ -152,11 +155,36 @@ final class DistributionBuildIdentityTests: XCTestCase {
             encoding: .utf8
         )
 
-        XCTAssertTrue(workflow.contains("required: true"))
-        XCTAssertTrue(workflow.contains("INPUT_VERSION: ${{ inputs.version }}"))
-        XCTAssertTrue(workflow.contains("iOS release version is required"))
-        XCTAssertTrue(workflow.contains("VERSION is not authoritative for TestFlight"))
-        XCTAssertTrue(workflow.contains("must be semantic version text"))
+        let versionInputStart = try XCTUnwrap(workflow.range(of: "      version:\n")?.lowerBound)
+        let buildInputStart = try XCTUnwrap(workflow.range(of: "      build_number:\n")?.lowerBound)
+        let versionInput = workflow[versionInputStart..<buildInputStart]
+        XCTAssertTrue(versionInput.contains("required: true"))
+        XCTAssertTrue(versionInput.contains("type: string"))
+
+        let validationStart = try XCTUnwrap(workflow.range(of: "      - name: Determine Version\n")?.lowerBound)
+        let buildNumberStart = try XCTUnwrap(workflow.range(of: "      - name: Determine Build Number\n")?.lowerBound)
+        let validation = workflow[validationStart..<buildNumberStart]
+        XCTAssertTrue(validation.contains("INPUT_VERSION: ${{ inputs.version }}"))
+        XCTAssertTrue(validation.contains("iOS release version is required"))
+        XCTAssertTrue(validation.contains("VERSION is not authoritative for TestFlight"))
+        XCTAssertTrue(validation.contains("must be semantic version text"))
+
+        let patternPrefix = "VERSION_PATTERN='"
+        let patternStart = try XCTUnwrap(validation.range(of: patternPrefix)?.upperBound)
+        let patternEnd = try XCTUnwrap(validation[patternStart...].firstIndex(of: "'"))
+        let pattern = String(validation[patternStart..<patternEnd])
+        let regex = try NSRegularExpression(pattern: pattern)
+        func isAccepted(_ value: String) -> Bool {
+            let range = NSRange(value.startIndex..<value.endIndex, in: value)
+            return regex.firstMatch(in: value, range: range)?.range == range
+        }
+        XCTAssertTrue(isAccepted("2.29.2"))
+        XCTAssertTrue(isAccepted("0.0.0"))
+        XCTAssertFalse(isAccepted(""))
+        XCTAssertFalse(isAccepted("01.2.3"))
+        XCTAssertFalse(isAccepted("2.00.3"))
+        XCTAssertFalse(isAccepted("v2.29.2"))
+        XCTAssertFalse(isAccepted("2.29"))
         XCTAssertFalse(workflow.contains("leave empty to use VERSION file"))
         XCTAssertFalse(workflow.contains("VERSION=$(cat VERSION)"))
     }

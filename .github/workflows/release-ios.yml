@@ -4,8 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version number (leave empty to use VERSION file)'
-        required: false
+        description: 'Required iOS version, e.g. 2.29.2. For manual releases, check App Store Connect first.'
+        required: true
+        type: string
       build_number:
         description: 'Build number (auto-increments if empty)'
         required: false
@@ -174,11 +175,17 @@ jobs:
 
       - name: Determine Version
         id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            VERSION="${{ github.event.inputs.version }}"
-          else
-            VERSION=$(cat VERSION)
+          VERSION=$(printf '%s' "$INPUT_VERSION" | xargs)
+          if [ -z "$VERSION" ]; then
+            echo "::error::iOS release version is required. Check App Store Connect and enter the intended iOS version; VERSION is not authoritative for TestFlight."
+            exit 1
+          fi
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::iOS release version must be semantic version text such as 2.29.2 (without a leading v)."
+            exit 1
           fi
           COMMIT_SHA="${{ github.sha }}"
           SHORT_SHA="${COMMIT_SHA:0:7}"

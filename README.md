@@ -84,7 +84,7 @@ open "Just Speak to It.xcworkspace"
 
 ## Versioning
 
-`VERSION` stores the semantic version and `BUILD` tracks the monotonically increasing build number. `scripts/version.sh` keeps them in sync and updates `Config/AppInfo.plist` when present.
+`VERSION` is a repository hint and `BUILD` tracks the monotonically increasing build number. `scripts/version.sh` keeps them in sync and updates `Config/AppInfo.plist` when present. For TestFlight, the release workflow requires an explicit iOS version; check App Store Connect rather than relying on `VERSION`. See [the iOS TestFlight release runbook](Docs/ios-testflight-release.md).
 
 Examples:
 

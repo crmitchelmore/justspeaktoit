@@ -146,6 +146,21 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertFalse(profileBootstrap.contains("profiles.each do |stale_profile|"))
     }
 
+    func testIOSReleaseWorkflowRequiresAnExplicitSemanticVersion() throws {
+        let workflow = try String(
+            contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/release-ios.yml"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(workflow.contains("required: true"))
+        XCTAssertTrue(workflow.contains("INPUT_VERSION: ${{ inputs.version }}"))
+        XCTAssertTrue(workflow.contains("iOS release version is required"))
+        XCTAssertTrue(workflow.contains("VERSION is not authoritative for TestFlight"))
+        XCTAssertTrue(workflow.contains("must be semantic version text"))
+        XCTAssertFalse(workflow.contains("leave empty to use VERSION file"))
+        XCTAssertFalse(workflow.contains("VERSION=$(cat VERSION)"))
+    }
+
     func testIOSApp_declaresRequiredBackgroundModes() throws {
         let manifest = try String(
             contentsOf: repositoryRoot.appendingPathComponent("Project.swift"),

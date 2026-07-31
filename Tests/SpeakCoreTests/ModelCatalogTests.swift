@@ -2,6 +2,7 @@ import XCTest
 
 @testable import SpeakCore
 
+// swiftlint:disable:next type_body_length
 final class ModelCatalogTests: XCTestCase {
 
     // MARK: - LatencyTier Ordering

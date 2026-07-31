@@ -40,6 +40,12 @@ final class ModelCatalogTests: XCTestCase {
 
     func testFriendlyName_downloadedLocalModels_returnsSpecificName() {
         XCTAssertEqual(
+            ModelCatalog.friendlyName(
+                for: "local/streaming/fluidaudio/parakeet-realtime-eou-120m"
+            ),
+            "Parakeet Realtime EOU 120M"
+        )
+        XCTAssertEqual(
             ModelCatalog.friendlyName(for: "local/post-processing/qwen3-0.6b-q4"),
             "Qwen3 0.6B Q4"
         )

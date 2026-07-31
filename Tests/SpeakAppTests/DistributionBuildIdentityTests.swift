@@ -125,6 +125,8 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(workflow.contains("--capability APP_GROUPS"))
         XCTAssertTrue(workflow.contains("--recreate"))
         XCTAssertTrue(workflow.contains("Keyboard provisioning profile does not authorize group.com.justspeaktoit.ios"))
+        XCTAssertTrue(workflow.contains(".Entitlements[\"com.apple.security.application-groups\"]"))
+        XCTAssertFalse(workflow.contains("Entitlements.com.apple.security.application-groups.0"))
         XCTAssertTrue(workflow.contains("KEYBOARD_PROFILE_UUID_PLACEHOLDER"))
         XCTAssertTrue(workflow.contains("JustSpeakKeyboard.appex"))
         XCTAssertTrue(workflow.contains("keyboard-entitlements.plist"))

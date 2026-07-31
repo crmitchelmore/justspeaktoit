@@ -38,13 +38,14 @@ Manual releases are still possible by creating and pushing a `mac-v*` tag direct
 
 ### iOS Release Process
 
-1. iOS uses **manual workflow dispatch** (not tag-triggered)
-2. Go to Actions → "Release iOS (TestFlight)" → Run workflow
-3. Enter version number (check App Store Connect for current version)
+1. The macOS auto-release workflow dispatches an iOS TestFlight build with the same new version when it creates a release.
+2. For an iOS-only release, go to Actions → "Release iOS (TestFlight)" → Run workflow.
+3. Check App Store Connect for the current iOS version, then enter the intended semantic version explicitly. Never infer it from `VERSION`.
+4. Follow [`Docs/ios-testflight-release.md`](Docs/ios-testflight-release.md) for signing repair, upload, tester assignment, and physical-device verification.
 
 ### VERSION File
 
-The `VERSION` file is a **hint** used as fallback when no tag is present. It does NOT control the release version - the **tag determines the version**. Keep it updated but always verify against actual releases.
+The `VERSION` file is a **hint** used as fallback when no macOS tag is present. It does NOT control an iOS TestFlight release. Keep it updated, but verify macOS against actual tags and iOS against App Store Connect.
 
 ### Post-Release Support
 
@@ -362,8 +363,9 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
 - App Store Connect Issuer ID: stored in secure notes (do not commit)
 - App Store Connect API key: store base64 in `.env` as `APP_STORE_CONNECT_API_KEY` (do not commit)
 - iOS distribution cert: store base64 in `.env` as `IOS_DISTRIBUTION_P12` (password in `.env` as `IOS_DISTRIBUTION_PASSWORD`)
-- GitHub secrets used by CI: `APP_STORE_CONNECT_API_KEY`, `APP_STORE_CONNECT_ISSUER_ID`, `APPLE_TEAM_ID`, `IOS_DISTRIBUTION_P12`, `IOS_DISTRIBUTION_PASSWORD`, `IOS_APPSTORE_PROFILE`, `IOS_WIDGET_APPSTORE_PROFILE`
+- GitHub secrets used by CI: `APP_STORE_CONNECT_API_KEY`, `APP_STORE_CONNECT_ISSUER_ID`, `APPLE_TEAM_ID`, `IOS_DISTRIBUTION_P12`, `IOS_DISTRIBUTION_PASSWORD`, `IOS_APPSTORE_PROFILE`, `IOS_WIDGET_APPSTORE_PROFILE`; `IOS_KEYBOARD_APPSTORE_PROFILE` is optional when the workflow can reuse or create a valid portal profile
 - Required entitlements: App Group `group.com.justspeaktoit.ios` and iCloud container `iCloud.com.justspeaktoit.ios`
+- The keyboard extension accepts `IOS_KEYBOARD_APPSTORE_PROFILE` when set and otherwise uses the validated portal-profile fallback; see [`Docs/ios-testflight-release.md`](Docs/ios-testflight-release.md) before changing portal capabilities or regenerating profiles.
 - Never commit private keys or provisioning profile contents.
 
 ## Sentry Error Monitoring

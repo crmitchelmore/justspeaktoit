@@ -668,6 +668,9 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
 
         let lowercased = trimmed.lowercased()
         if lowercased.hasPrefix("local/") {
+            if lowercased == "local/streaming/fluidaudio/parakeet-realtime-eou-120m" {
+                return "Parakeet Realtime EOU 120M"
+            }
             if lowercased == "local/post-processing/rules" {
                 return "Local Cleanup (Offline)"
             }

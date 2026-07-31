@@ -743,7 +743,10 @@ final class MainManager: ObservableObject {
         var didRecordLiveExchange = false
         #if !APP_STORE
         if result.modelIdentifier.hasPrefix("local/streaming/") {
-          let localURL = URL(string: "local://sherpa-onnx")!
+          let localRuntime = FluidAudioParakeetModel.matches(result.modelIdentifier)
+            ? "fluidaudio"
+            : "sherpa-onnx"
+          let localURL = URL(string: "local://\(localRuntime)")!
             .appendingPathComponent(result.modelIdentifier)
           session.networkExchanges.append(
             HistoryNetworkExchange(
@@ -1432,8 +1435,7 @@ final class MainManager: ObservableObject {
   }
 
   private func ensureBatchAPIKeyAvailable(for session: ActiveSession, message: String) async
-    -> Bool
-  {
+    -> Bool {
     guard await transcriptionManager.hasValidBatchAPIKey() else {
       await handleMissingAPIKey(
         session,
@@ -1446,8 +1448,7 @@ final class MainManager: ObservableObject {
   }
 
   private func ensurePostProcessingAPIKeyAvailable(for session: ActiveSession, message: String)
-    async -> Bool
-  {
+    async -> Bool {
     guard await postProcessingManager.hasRequiredAPIKey() else {
       await handleMissingAPIKey(session, phase: .postProcessing, message: message)
       return false
@@ -1731,8 +1732,7 @@ final class MainManager: ObservableObject {
 // swiftlint:enable type_body_length
 extension MainManager {
   fileprivate func makeRecordingSummary(from url: URL, fallbackDuration: TimeInterval)
-    -> RecordingSummary
-  {
+    -> RecordingSummary {
     let attributes = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
     let fileSize = (attributes[.size] as? NSNumber)?.int64Value ?? 0
     let duration = (try? AVAudioPlayer(contentsOf: url).duration) ?? fallbackDuration

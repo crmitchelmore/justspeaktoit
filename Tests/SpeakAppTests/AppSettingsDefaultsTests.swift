@@ -122,6 +122,14 @@ final class AppSettingsDefaultsTests: XCTestCase {
         XCTAssertEqual(settings.recordingSoundVolume, 0.7, accuracy: 0.001)
     }
 
+    #if !APP_STORE
+    @MainActor
+    func testLocalStreamingDefaults_toFluidAudioParakeet() {
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertEqual(settings.localStreamingModelSource, FluidAudioParakeetModel.id)
+    }
+    #endif
+
     @MainActor
     func testRecordingDefaults_hotKeyActivationStyleIsHoldAndDoubleTap() {
         let settings = AppSettings(defaults: defaults)

@@ -28,6 +28,20 @@ final class TranscriptionManagerRoutingTests: XCTestCase {
     XCTAssertEqual(model, sourceID)
   }
 
+  #if !APP_STORE
+  func testResolvedLiveTranscriptionModel_returnsFluidAudioParakeetSource() throws {
+    let model = try TranscriptionManager.resolvedLiveTranscriptionModel(
+      transcriptionMode: .localModel,
+      localTranscriptionMode: .streaming,
+      localStreamingModelSource: FluidAudioParakeetModel.id,
+      liveTranscriptionModel: "apple/local/SFSpeechRecognizer",
+      availableStreamingSourceIDs: [FluidAudioParakeetModel.id]
+    )
+
+    XCTAssertEqual(model, FluidAudioParakeetModel.id)
+  }
+  #endif
+
   func testResolvedLiveTranscriptionModel_rejectsInvalidLocalStreamingSource() {
     XCTAssertThrowsError(
       try TranscriptionManager.resolvedLiveTranscriptionModel(

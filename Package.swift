@@ -24,7 +24,11 @@ let package = Package(
         .package(url: "https://github.com/nicklockwood/SwiftFormat.git", from: "0.53.6"),
         .package(url: "https://github.com/sparkle-project/Sparkle.git", from: "2.6.0"),
         .package(url: "https://github.com/getsentry/sentry-cocoa.git", from: "9.3.0"),
-        .package(url: "https://github.com/argmaxinc/argmax-oss-swift.git", from: "0.9.0")
+        .package(url: "https://github.com/argmaxinc/argmax-oss-swift.git", from: "0.9.0"),
+        .package(
+            url: "https://github.com/FluidInference/FluidAudio.git",
+            exact: "0.15.5"
+        )
     ],
     targets: [
         .binaryTarget(
@@ -57,6 +61,7 @@ let package = Package(
                 "SpeakCore",
                 "SpeakSync",
                 "SpeakHotKeys",
+                .product(name: "FluidAudio", package: "FluidAudio"),
                 .product(name: "WhisperKit", package: "argmax-oss-swift"),
                 .product(name: "Sparkle", package: "Sparkle"),
                 .product(name: "Sentry", package: "sentry-cocoa")

@@ -156,14 +156,16 @@ profiles = fetch_collection(
 )
 
 profile = profiles.find { |candidate| candidate.dig("attributes", "profileState") == "ACTIVE" }
-if profile && options[:recreate]
-  request(
-    api_base: options[:api_base],
-    token: token,
-    method: Net::HTTP::Delete,
-    path: "/v1/profiles/#{profile.fetch('id')}"
-  )
-  puts "Deleted stale provisioning profile #{profile_name}"
+if options[:recreate]
+  profiles.each do |stale_profile|
+    request(
+      api_base: options[:api_base],
+      token: token,
+      method: Net::HTTP::Delete,
+      path: "/v1/profiles/#{stale_profile.fetch('id')}"
+    )
+    puts "Deleted stale provisioning profile #{profile_name} (#{stale_profile.fetch('id')})"
+  end
   profile = nil
 end
 

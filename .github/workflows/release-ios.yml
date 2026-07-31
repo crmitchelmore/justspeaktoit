@@ -89,7 +89,6 @@ jobs:
                 --capability APP_GROUPS \
                 --certificate-serial "$IOS_DISTRIBUTION_CERT_SERIAL" \
                 --profile-name "JustSpeakToIt Keyboard App Store" \
-                --recreate \
                 --output "$KEYBOARD_PROFILE_PATH"
           fi
           security cms -D -i "$KEYBOARD_PROFILE_PATH" \

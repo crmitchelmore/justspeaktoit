@@ -10,6 +10,7 @@ require "uri"
 options = {
   api_base: "https://api.appstoreconnect.apple.com",
   capabilities: [],
+  recreate: false,
 }
 
 OptionParser.new do |parser|
@@ -18,6 +19,7 @@ OptionParser.new do |parser|
   parser.on("--capability TYPE") { |value| options[:capabilities] << value }
   parser.on("--certificate-serial SERIAL") { |value| options[:certificate_serial] = value }
   parser.on("--profile-name NAME") { |value| options[:profile_name] = value }
+  parser.on("--recreate") { options[:recreate] = true }
   parser.on("--output PATH") { |value| options[:output] = value }
 end.parse!
 
@@ -154,6 +156,17 @@ profiles = fetch_collection(
 )
 
 profile = profiles.find { |candidate| candidate.dig("attributes", "profileState") == "ACTIVE" }
+if profile && options[:recreate]
+  request(
+    api_base: options[:api_base],
+    token: token,
+    method: Net::HTTP::Delete,
+    path: "/v1/profiles/#{profile.fetch('id')}"
+  )
+  puts "Deleted stale provisioning profile #{profile_name}"
+  profile = nil
+end
+
 unless profile
   create_body = {
     data: {

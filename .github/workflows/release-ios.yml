@@ -89,8 +89,15 @@ jobs:
                 --capability APP_GROUPS \
                 --certificate-serial "$IOS_DISTRIBUTION_CERT_SERIAL" \
                 --profile-name "JustSpeakToIt Keyboard App Store" \
+                --recreate \
                 --output "$KEYBOARD_PROFILE_PATH"
           fi
+          KEYBOARD_APP_GROUP=$(security cms -D -i "$KEYBOARD_PROFILE_PATH" \
+            | plutil -extract Entitlements.com.apple.security.application-groups.0 raw - 2>/dev/null || true)
+          [ "$KEYBOARD_APP_GROUP" = "group.com.justspeaktoit.ios" ] || {
+            echo "::error::Keyboard provisioning profile does not authorize group.com.justspeaktoit.ios. Associate that App Group with com.justspeaktoit.ios.keyboard in the Apple Developer portal, then rerun this workflow."
+            exit 1
+          }
           KEYBOARD_PROFILE_UUID=$(security cms -D -i "$KEYBOARD_PROFILE_PATH" | plutil -extract UUID raw -)
           KEYBOARD_PROFILE_NAME=$(security cms -D -i "$KEYBOARD_PROFILE_PATH" | plutil -extract Name raw -)
           echo "KEYBOARD_PROFILE_UUID=$KEYBOARD_PROFILE_UUID" >> $GITHUB_ENV

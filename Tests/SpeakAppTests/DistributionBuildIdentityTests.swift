@@ -123,6 +123,8 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(workflow.contains("ios-keyboard-appstore.provisionprofile"))
         XCTAssertTrue(workflow.contains("com.justspeaktoit.ios.keyboard"))
         XCTAssertTrue(workflow.contains("--capability APP_GROUPS"))
+        XCTAssertTrue(workflow.contains("--recreate"))
+        XCTAssertTrue(workflow.contains("Keyboard provisioning profile does not authorize group.com.justspeaktoit.ios"))
         XCTAssertTrue(workflow.contains("KEYBOARD_PROFILE_UUID_PLACEHOLDER"))
         XCTAssertTrue(workflow.contains("JustSpeakKeyboard.appex"))
         XCTAssertTrue(workflow.contains("keyboard-entitlements.plist"))
@@ -136,6 +138,7 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertFalse(profileBootstrap.contains("/bundleIdCapabilities?limit="))
         XCTAssertTrue(profileBootstrap.contains("path: \"/v1/bundleIdCapabilities\""))
         XCTAssertTrue(profileBootstrap.contains("capabilityType: capability_type"))
+        XCTAssertTrue(profileBootstrap.contains("method: Net::HTTP::Delete"))
     }
 
     func testIOSApp_declaresRequiredBackgroundModes() throws {

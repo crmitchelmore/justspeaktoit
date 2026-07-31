@@ -142,9 +142,8 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertFalse(profileBootstrap.contains("/bundleIdCapabilities?limit="))
         XCTAssertTrue(profileBootstrap.contains("path: \"/v1/bundleIdCapabilities\""))
         XCTAssertTrue(profileBootstrap.contains("capabilityType: capability_type"))
-        XCTAssertTrue(profileBootstrap.contains("method: Net::HTTP::Delete"))
-        XCTAssertTrue(profileBootstrap.contains("profiles.each do |stale_profile|"))
-        XCTAssertTrue(profileBootstrap.contains("path: \"/v1/profiles/#{stale_profile.fetch('id')}\""))
+        XCTAssertFalse(profileBootstrap.contains("method: Net::HTTP::Delete"))
+        XCTAssertFalse(profileBootstrap.contains("profiles.each do |stale_profile|"))
     }
 
     func testIOSApp_declaresRequiredBackgroundModes() throws {

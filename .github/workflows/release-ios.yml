@@ -93,9 +93,8 @@ jobs:
           fi
           KEYBOARD_PROFILE_PLIST=$RUNNER_TEMP/ios-keyboard-appstore.plist
           security cms -D -i "$KEYBOARD_PROFILE_PATH" > "$KEYBOARD_PROFILE_PLIST"
-          plutil -extract Entitlements json -o - "$KEYBOARD_PROFILE_PLIST" \
-            | jq -e '.["com.apple.security.application-groups"] | index("group.com.justspeaktoit.ios") != null' \
-              >/dev/null || {
+          plutil -extract Entitlements xml1 -o - "$KEYBOARD_PROFILE_PLIST" \
+            | grep -Fq '<string>group.com.justspeaktoit.ios</string>' || {
             echo "::error::Keyboard provisioning profile does not authorize group.com.justspeaktoit.ios. Associate that App Group with com.justspeaktoit.ios.keyboard in the Apple Developer portal, then rerun this workflow."
             exit 1
           }

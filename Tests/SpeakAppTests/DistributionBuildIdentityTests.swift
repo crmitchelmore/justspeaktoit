@@ -122,9 +122,28 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(workflow.contains("IOS_KEYBOARD_APPSTORE_PROFILE"))
         XCTAssertTrue(workflow.contains("ios-keyboard-appstore.provisionprofile"))
         XCTAssertTrue(workflow.contains("com.justspeaktoit.ios.keyboard"))
+        XCTAssertTrue(workflow.contains("--capability APP_GROUPS"))
+        XCTAssertFalse(workflow.contains("--recreate"))
+        XCTAssertTrue(workflow.contains("Keyboard provisioning profile does not authorize group.com.justspeaktoit.ios"))
+        XCTAssertTrue(workflow.contains("ios-keyboard-appstore.plist"))
+        XCTAssertTrue(workflow.contains("plutil -extract Entitlements xml1"))
+        XCTAssertTrue(workflow.contains("<string>group.com.justspeaktoit.ios</string>"))
+        XCTAssertFalse(workflow.contains("Entitlements.com.apple.security.application-groups.0"))
         XCTAssertTrue(workflow.contains("KEYBOARD_PROFILE_UUID_PLACEHOLDER"))
         XCTAssertTrue(workflow.contains("JustSpeakKeyboard.appex"))
         XCTAssertTrue(workflow.contains("keyboard-entitlements.plist"))
+
+        let profileBootstrap = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("scripts/create-ios-app-store-profile.rb"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(profileBootstrap.contains("path: \"/v1/bundleIds\""))
+        XCTAssertTrue(profileBootstrap.contains("/bundleIdCapabilities\""))
+        XCTAssertFalse(profileBootstrap.contains("/bundleIdCapabilities?limit="))
+        XCTAssertTrue(profileBootstrap.contains("path: \"/v1/bundleIdCapabilities\""))
+        XCTAssertTrue(profileBootstrap.contains("capabilityType: capability_type"))
+        XCTAssertFalse(profileBootstrap.contains("method: Net::HTTP::Delete"))
+        XCTAssertFalse(profileBootstrap.contains("profiles.each do |stale_profile|"))
     }
 
     func testIOSApp_declaresRequiredBackgroundModes() throws {

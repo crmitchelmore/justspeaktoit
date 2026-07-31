@@ -9,10 +9,13 @@ require "uri"
 
 options = {
   api_base: "https://api.appstoreconnect.apple.com",
+  capabilities: [],
 }
 
 OptionParser.new do |parser|
   parser.on("--bundle-id IDENTIFIER") { |value| options[:bundle_id] = value }
+  parser.on("--bundle-name NAME") { |value| options[:bundle_name] = value }
+  parser.on("--capability TYPE") { |value| options[:capabilities] << value }
   parser.on("--certificate-serial SERIAL") { |value| options[:certificate_serial] = value }
   parser.on("--profile-name NAME") { |value| options[:profile_name] = value }
   parser.on("--output PATH") { |value| options[:output] = value }
@@ -63,8 +66,72 @@ bundle_ids = fetch_collection(
   token: token,
   path: "/v1/bundleIds?filter%5Bidentifier%5D=#{escaped_bundle_id}"
 )
-abort("No registered bundle ID found for #{options[:bundle_id]}") unless bundle_ids.length == 1
-bundle_resource_id = bundle_ids.first.fetch("id")
+abort("Multiple registered bundle IDs found for #{options[:bundle_id]}") if bundle_ids.length > 1
+
+bundle = bundle_ids.first
+unless bundle
+  bundle_name = options[:bundle_name] || options[:bundle_id]
+  create_body = {
+    data: {
+      type: "bundleIds",
+      attributes: {
+        identifier: options[:bundle_id],
+        name: bundle_name,
+        platform: "IOS",
+      },
+    },
+  }
+  response = request(
+    api_base: options[:api_base],
+    token: token,
+    method: Net::HTTP::Post,
+    path: "/v1/bundleIds",
+    body: create_body
+  )
+  bundle = JSON.parse(response.body).fetch("data")
+  puts "Registered bundle ID #{options[:bundle_id]}"
+else
+  puts "Reusing bundle ID #{options[:bundle_id]}"
+end
+bundle_resource_id = bundle.fetch("id")
+
+unless options[:capabilities].empty?
+  capabilities = fetch_collection(
+    api_base: options[:api_base],
+    token: token,
+    path: "/v1/bundleIds/#{bundle_resource_id}/bundleIdCapabilities"
+  )
+  enabled_capabilities = capabilities.map { |capability| capability.dig("attributes", "capabilityType") }.compact
+
+  options[:capabilities].uniq.each do |capability_type|
+    if enabled_capabilities.include?(capability_type)
+      puts "Reusing #{capability_type} capability for #{options[:bundle_id]}"
+      next
+    end
+
+    create_body = {
+      data: {
+        type: "bundleIdCapabilities",
+        attributes: {
+          capabilityType: capability_type,
+        },
+        relationships: {
+          bundleId: {
+            data: { type: "bundleIds", id: bundle_resource_id },
+          },
+        },
+      },
+    }
+    request(
+      api_base: options[:api_base],
+      token: token,
+      method: Net::HTTP::Post,
+      path: "/v1/bundleIdCapabilities",
+      body: create_body
+    )
+    puts "Enabled #{capability_type} capability for #{options[:bundle_id]}"
+  end
+end
 
 serial = options[:certificate_serial].delete(":").upcase.sub(/^0+/, "")
 certificates = fetch_collection(
@@ -87,6 +154,7 @@ profiles = fetch_collection(
 )
 
 profile = profiles.find { |candidate| candidate.dig("attributes", "profileState") == "ACTIVE" }
+
 unless profile
   create_body = {
     data: {

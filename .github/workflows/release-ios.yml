@@ -85,10 +85,19 @@ jobs:
             APP_STORE_CONNECT_KEY_PATH=~/.appstoreconnect/private_keys/AuthKey_${{ env.APP_STORE_CONNECT_KEY_ID }}.p8 \
               ruby scripts/create-ios-app-store-profile.rb \
                 --bundle-id com.justspeaktoit.ios.keyboard \
+                --bundle-name "JustSpeakToIt Keyboard" \
+                --capability APP_GROUPS \
                 --certificate-serial "$IOS_DISTRIBUTION_CERT_SERIAL" \
                 --profile-name "JustSpeakToIt Keyboard App Store" \
                 --output "$KEYBOARD_PROFILE_PATH"
           fi
+          KEYBOARD_PROFILE_PLIST=$RUNNER_TEMP/ios-keyboard-appstore.plist
+          security cms -D -i "$KEYBOARD_PROFILE_PATH" > "$KEYBOARD_PROFILE_PLIST"
+          plutil -extract Entitlements xml1 -o - "$KEYBOARD_PROFILE_PLIST" \
+            | grep -Fq '<string>group.com.justspeaktoit.ios</string>' || {
+            echo "::error::Keyboard provisioning profile does not authorize group.com.justspeaktoit.ios. Associate that App Group with com.justspeaktoit.ios.keyboard in the Apple Developer portal, then rerun this workflow."
+            exit 1
+          }
           KEYBOARD_PROFILE_UUID=$(security cms -D -i "$KEYBOARD_PROFILE_PATH" | plutil -extract UUID raw -)
           KEYBOARD_PROFILE_NAME=$(security cms -D -i "$KEYBOARD_PROFILE_PATH" | plutil -extract Name raw -)
           echo "KEYBOARD_PROFILE_UUID=$KEYBOARD_PROFILE_UUID" >> $GITHUB_ENV

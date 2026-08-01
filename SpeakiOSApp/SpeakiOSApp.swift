@@ -66,6 +66,7 @@ final class SpeakiOSAppDelegate: NSObject, UIApplicationDelegate {
 struct SpeakiOSApp: App {
     @UIApplicationDelegateAdaptor(SpeakiOSAppDelegate.self) private var appDelegate
     @ObservedObject private var deepLinkRouter = DeepLinkRouter.shared
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
@@ -78,15 +79,29 @@ struct SpeakiOSApp: App {
                 }
                 .task {
                     #if DEBUG && targetEnvironment(simulator)
-                    guard ProcessInfo.processInfo.arguments.contains("--keyboard-handoff-demo"),
-                          deepLinkRouter.keyboardCaptureRequest == nil,
-                          let request = try? KeyboardHandoffStore.shared.createRequest() else {
-                        return
+                    if ProcessInfo.processInfo.arguments.contains("--keyboard-handoff-demo"),
+                       deepLinkRouter.keyboardCaptureRequest == nil {
+                        _ = try? KeyboardHandoffStore.shared.createRequest()
                     }
-                    deepLinkRouter.keyboardCaptureRequest = KeyboardCaptureRequest(id: request.requestID)
                     #endif
+                    resumePendingKeyboardCapture()
+                }
+                .onChange(of: scenePhase) { _, newPhase in
+                    guard newPhase == .active else { return }
+                    resumePendingKeyboardCapture()
                 }
         }
+    }
+
+    private func resumePendingKeyboardCapture() {
+        guard deepLinkRouter.keyboardCaptureRequest == nil,
+              let requestID = KeyboardLaunchPolicy.pendingCaptureRequestID(
+                  from: KeyboardHandoffStore.shared.activeRecord()
+              ) else {
+            return
+        }
+        deepLinkRouter.selectedTab = 0
+        deepLinkRouter.keyboardCaptureRequest = KeyboardCaptureRequest(id: requestID)
     }
 }
 

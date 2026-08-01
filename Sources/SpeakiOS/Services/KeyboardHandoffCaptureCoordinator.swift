@@ -84,7 +84,7 @@ public final class KeyboardHandoffCaptureCoordinator: ObservableObject {
         message = "Finishing with your selected transcription model…"
         let result = await recordingService.stopRecording(
             destination: .historyOnly,
-            saveToHistory: false
+            saveToHistory: true
         )
         let transcript = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !transcript.isEmpty else {

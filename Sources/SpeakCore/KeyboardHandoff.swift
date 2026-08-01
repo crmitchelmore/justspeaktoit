@@ -3,8 +3,9 @@ import Foundation
 /// The only App Group payload used by the custom keyboard handoff.
 ///
 /// Audio, API keys, surrounding text, and intermediate transcripts are never
-/// written here. The final transcript exists only until the matching keyboard
-/// consumes it or the short result timeout expires.
+/// written here. The App Group copy of the final transcript exists only until
+/// the matching keyboard consumes it or the short result timeout expires.
+/// History persistence happens separately inside the containing app.
 public struct KeyboardHandoffRecord: Codable, Equatable, Sendable {
     public static let schemaVersion = 1
 
@@ -349,6 +350,33 @@ public enum KeyboardLaunchPolicy {
             return .sharedContainerUnavailable
         }
         return nil
+    }
+
+    /// A manually opened containing app should resume only a fresh request
+    /// that has not started recording yet.
+    public static func pendingCaptureRequestID(
+        from record: KeyboardHandoffRecord?
+    ) -> UUID? {
+        guard let record, record.phase == .requested else { return nil }
+        return record.requestID
+    }
+}
+
+public enum KeyboardCorrectionPlan {
+    /// Returns the number of user-perceived characters that can be deleted to
+    /// undo the last insertion, but only while that exact text still precedes
+    /// the cursor. This avoids deleting host-app text after the user edits or
+    /// moves the insertion point.
+    public static func undoDeletionCount(
+        insertedText: String,
+        documentContextBeforeInput: String?
+    ) -> Int? {
+        guard !insertedText.isEmpty,
+              let documentContextBeforeInput,
+              documentContextBeforeInput.hasSuffix(insertedText) else {
+            return nil
+        }
+        return insertedText.count
     }
 }
 

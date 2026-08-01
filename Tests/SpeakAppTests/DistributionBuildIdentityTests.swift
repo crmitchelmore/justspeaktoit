@@ -113,6 +113,25 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(infoPlist.contains("$(PRODUCT_MODULE_NAME).KeyboardViewController"))
     }
 
+    func testIOSKeyboardUsesManualSupportedHandoffAndRetainsHistory() throws {
+        let keyboard = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("JustSpeakKeyboard/KeyboardViewController.swift"),
+            encoding: .utf8
+        )
+        let captureCoordinator = try String(
+            contentsOf: repositoryRoot.appendingPathComponent(
+                "Sources/SpeakiOS/Services/KeyboardHandoffCaptureCoordinator.swift"
+            ),
+            encoding: .utf8
+        )
+
+        XCTAssertFalse(keyboard.contains("extensionContext.open"))
+        XCTAssertTrue(keyboard.contains("Open Just Speak manually"))
+        XCTAssertTrue(keyboard.contains("transcripts remain in History"))
+        XCTAssertFalse(keyboard.contains("Results are deleted after insertion"))
+        XCTAssertTrue(captureCoordinator.contains("saveToHistory: true"))
+    }
+
     func testIOSReleaseWorkflowSignsAndValidatesKeyboardExtension() throws {
         let workflow = try String(
             contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/release-ios.yml"),

@@ -96,7 +96,7 @@ public struct KeyboardCaptureView: View {
                 .font(.headline)
             Text(
                 "The keyboard cannot access the microphone. Just Speak records here with your selected model, "
-                    + "shares one nonce-matched final result, and deletes it after insertion or timeout."
+                    + "saves the completed transcript to History, and clears the temporary handoff after insertion or timeout."
             )
             .font(.subheadline)
             .foregroundStyle(.secondary)

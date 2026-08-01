@@ -122,16 +122,14 @@ final class AppSettingsDefaultsTests: XCTestCase {
         XCTAssertEqual(settings.recordingSoundVolume, 0.7, accuracy: 0.001)
     }
 
-    #if !APP_STORE
     @MainActor
     func testLocalStreamingDefaults_matchHardwareSupport() {
         let settings = AppSettings(defaults: defaults)
         let expected = FluidAudioModelManager.supportsCurrentHardware
           ? FluidAudioParakeetModel.id
-          : LocalModelManager.recommendedStreamingModelSources.first?.id ?? ""
+          : WhisperKitStreamingModel.id(for: LocalModelManager.shared.availableModels[0])
         XCTAssertEqual(settings.localStreamingModelSource, expected)
     }
-    #endif
 
     @MainActor
     func testRecordingDefaults_hotKeyActivationStyleIsHoldAndDoubleTap() {

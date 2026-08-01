@@ -554,8 +554,9 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             modelName: "tiny",
             engine: .whisperKit,
             approximateSizeMB: 75,
-            description: "Small downloadable Core ML Whisper model for fast offline transcription testing.",
-            tags: [.fast, .cheap]
+            description: "Small downloadable Core ML Whisper model for fast batch or live transcription testing.",
+            tags: [.fast, .cheap],
+            supportsLiveStreaming: true
         ),
         LocalTranscriptionModel(
             id: "local/whisperkit/base",
@@ -563,8 +564,9 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             modelName: "base",
             engine: .whisperKit,
             approximateSizeMB: 145,
-            description: "Balanced downloaded Whisper model for private offline transcription.",
-            tags: [.fast]
+            description: "Balanced downloaded Whisper model for private batch or live transcription.",
+            tags: [.fast],
+            supportsLiveStreaming: true
         ),
         LocalTranscriptionModel(
             id: "local/whisperkit/small",
@@ -572,8 +574,9 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             modelName: "small",
             engine: .whisperKit,
             approximateSizeMB: 465,
-            description: "Higher quality local Whisper model for longer recordings on Apple silicon.",
-            tags: [.quality]
+            description: "Higher quality local Whisper model for batch and live transcription on Apple silicon.",
+            tags: [.quality],
+            supportsLiveStreaming: true
         ),
         LocalTranscriptionModel(
             id: "local/whisperkit/large-v3-turbo",
@@ -582,8 +585,9 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             engine: .whisperKit,
             approximateSizeMB: 632,
             description: "Whisper Large v3 Turbo — near-Large quality with ≈4× real-time speed on "
-                + "Apple silicon. Recommended for high-accuracy offline transcription.",
-            tags: [.quality, .fast]
+                + "Apple silicon. Recommended for high-accuracy batch or live transcription.",
+            tags: [.quality, .fast],
+            supportsLiveStreaming: true
         ),
         LocalTranscriptionModel(
             id: "local/whisperkit/distil-large-v3",
@@ -593,7 +597,8 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             approximateSizeMB: 594,
             description: "Distilled Whisper Large v3 — English-optimised, faster and lighter than "
                 + "the full Large model with minimal accuracy loss.",
-            tags: [.fast, .quality]
+            tags: [.fast, .quality],
+            supportsLiveStreaming: true
         ),
         LocalTranscriptionModel(
             id: "local/whisperkit/distil-large-v3-turbo",
@@ -602,8 +607,9 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             engine: .whisperKit,
             approximateSizeMB: 600,
             description: "Distilled, turbo-optimised Whisper Large v3 — fastest high-quality "
-                + "English-only offline option on Apple silicon.",
-            tags: [.fast, .quality]
+                + "English-only batch or live option on Apple silicon.",
+            tags: [.fast, .quality],
+            supportsLiveStreaming: true
         )
     ]
 

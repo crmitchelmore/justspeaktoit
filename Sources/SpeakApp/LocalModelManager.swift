@@ -304,6 +304,16 @@ final class LocalModelManager: ObservableObject {
     )
   }
 
+  func makeReadyPipeline(modelID: String) async throws -> WhisperKit {
+    guard let model = model(for: modelID) else {
+      throw LocalModelError.unknownModel(modelID)
+    }
+    guard isInstalled(model.id) else {
+      throw LocalModelError.notInstalled(model.displayName)
+    }
+    return try await pipeline(for: model)
+  }
+
   private func pipeline(for model: LocalTranscriptionModel) async throws -> WhisperKit {
     if let existing = activePipelines[model.id] {
       return existing

@@ -77,6 +77,8 @@ public enum ChannelFeature: String, Sendable, CaseIterable {
     case selfUpdate
     /// Downloaded Core ML model data used by a runtime already bundled in the app.
     case downloadedCoreMLModels
+    /// Live transcription performed by a bundled, in-process Core ML runtime.
+    case inProcessLocalStreaming
     /// External runtimes (llama.cpp / sherpa-onnx) that install or spawn executable
     /// code and therefore cannot be offered in the App Store sandbox.
     case externalLocalModelRuntime
@@ -115,7 +117,7 @@ public extension DistributionChannel {
             // iOS and Mac App Store builds carry the managed iCloud entitlements.
             // Direct Mac keeps API keys solely in its local Keychain vault.
             return self == .appStore
-        case .downloadedCoreMLModels, .localNetworkTransport:
+        case .downloadedCoreMLModels, .inProcessLocalStreaming, .localNetworkTransport:
             return true
         }
     }
@@ -125,6 +127,9 @@ public extension DistributionChannel {
 
     /// Downloadable WhisperKit/Core ML model data (both channels).
     var supportsDownloadedCoreMLModels: Bool { supports(.downloadedCoreMLModels) }
+
+    /// In-process local streaming through bundled Core ML runtimes (both channels).
+    var supportsInProcessLocalStreaming: Bool { supports(.inProcessLocalStreaming) }
 
     /// Installable executable local runtimes such as sherpa-onnx and llama.cpp (direct only).
     var supportsExternalLocalModelRuntime: Bool { supports(.externalLocalModelRuntime) }

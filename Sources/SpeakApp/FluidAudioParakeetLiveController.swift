@@ -1,4 +1,3 @@
-#if !APP_STORE
 @preconcurrency import AVFoundation
 import FluidAudio
 import Foundation
@@ -371,4 +370,3 @@ private final class FluidAudioBufferPump: @unchecked Sendable {
     return copy
   }
 }
-#endif

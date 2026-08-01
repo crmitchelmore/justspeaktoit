@@ -16,6 +16,7 @@ final class DistributionChannelTests: XCTestCase {
         // Act & Assert
         XCTAssertTrue(channel.supportsSelfUpdate)
         XCTAssertTrue(channel.supportsDownloadedCoreMLModels)
+        XCTAssertTrue(channel.supportsInProcessLocalStreaming)
         XCTAssertTrue(channel.supportsExternalLocalModelRuntime)
         XCTAssertFalse(channel.supportsEncryptedCloudKitKeySync)
         XCTAssertFalse(channel.supportsICloudSync)
@@ -36,6 +37,8 @@ final class DistributionChannelTests: XCTestCase {
             "App Store builds update through the store, not Sparkle")
         XCTAssertTrue(channel.supportsDownloadedCoreMLModels,
             "WhisperKit/Core ML model data can run through the bundled in-process runtime")
+        XCTAssertTrue(channel.supportsInProcessLocalStreaming,
+            "Bundled Core ML streaming runtimes are compatible with the App Store sandbox")
         XCTAssertFalse(channel.supportsExternalLocalModelRuntime,
             "Executable local-model runtimes cannot run in the App Store sandbox")
         XCTAssertTrue(channel.supportsEncryptedCloudKitKeySync)
@@ -57,6 +60,7 @@ final class DistributionChannelTests: XCTestCase {
         for channel in DistributionChannel.allCases {
             XCTAssertEqual(channel.supports(.selfUpdate), channel.supportsSelfUpdate)
             XCTAssertEqual(channel.supports(.downloadedCoreMLModels), channel.supportsDownloadedCoreMLModels)
+            XCTAssertEqual(channel.supports(.inProcessLocalStreaming), channel.supportsInProcessLocalStreaming)
             XCTAssertEqual(channel.supports(.externalLocalModelRuntime), channel.supportsExternalLocalModelRuntime)
             XCTAssertEqual(channel.supports(.automaticAccessibilityPrompt),
                            channel.supportsAutomaticAccessibilityPrompt)

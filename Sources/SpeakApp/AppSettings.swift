@@ -387,12 +387,10 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
 
   @Published var localTranscriptionMode: LocalTranscriptionMode {
     didSet {
-      #if APP_STORE
-      if !DistributionChannel.current.supportsExternalLocalModelRuntime, localTranscriptionMode == .streaming {
+      if !DistributionChannel.current.supportsInProcessLocalStreaming, localTranscriptionMode == .streaming {
         localTranscriptionMode = .batch
         return
       }
-      #endif
       store(localTranscriptionMode.rawValue, key: .localTranscriptionMode)
     }
   }
@@ -863,27 +861,24 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       rawValue: defaults.string(forKey: DefaultsKey.localTranscriptionMode.rawValue)
         ?? LocalTranscriptionMode.batch.rawValue
     ) ?? .batch
-    #if APP_STORE
-    localTranscriptionMode = DistributionChannel.current.supportsExternalLocalModelRuntime
+    localTranscriptionMode = DistributionChannel.current.supportsInProcessLocalStreaming
       ? loadedLocalTranscriptionMode
       : .batch
-    #else
-    localTranscriptionMode = loadedLocalTranscriptionMode
-    #endif
     let storedLocalStreamingSource = defaults.string(forKey: DefaultsKey.localStreamingModelSource.rawValue)
-    #if APP_STORE
-    let defaultLocalStreamingSource = ""
-    let supportedLocalStreamingIDs: Set<String> = []
-    #else
+    let whisperKitStreamingIDs = LocalModelManager.shared.availableModels
+      .filter(\.supportsLiveStreaming)
+      .map(WhisperKitStreamingModel.id(for:))
     let defaultLocalStreamingSource = FluidAudioModelManager.supportsCurrentHardware
       ? FluidAudioParakeetModel.id
-      : LocalModelManager.recommendedStreamingModelSources.first?.id ?? ""
+      : whisperKitStreamingIDs.first ?? ""
     let fluidAudioStreamingIDs = FluidAudioModelManager.supportsCurrentHardware
       ? [FluidAudioParakeetModel.id]
       : []
-    let supportedLocalStreamingIDs = Set(LocalModelManager.recommendedStreamingModelSources.map(\.id))
-      .union(LocalModelManager.shared.streamingModelSources.map(\.id))
+    var supportedLocalStreamingIDs = Set(whisperKitStreamingIDs)
       .union(fluidAudioStreamingIDs)
+    #if !APP_STORE
+    supportedLocalStreamingIDs.formUnion(LocalModelManager.recommendedStreamingModelSources.map(\.id))
+    supportedLocalStreamingIDs.formUnion(LocalModelManager.shared.streamingModelSources.map(\.id))
     #endif
     localStreamingModelSource =
       supportedLocalStreamingIDs.contains(storedLocalStreamingSource ?? "")

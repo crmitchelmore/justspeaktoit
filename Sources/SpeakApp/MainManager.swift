@@ -37,12 +37,8 @@ final class MainManager: ObservableObject {
   }
 
   private var isStreamingTranscriptionMode: Bool {
-    #if APP_STORE
-    appSettings.transcriptionMode == .liveNative
-    #else
     appSettings.transcriptionMode == .liveNative
       || (appSettings.transcriptionMode == .localModel && appSettings.localTranscriptionMode == .streaming)
-    #endif
   }
 
   private var cachedRetryData: RetryData?
@@ -363,13 +359,9 @@ final class MainManager: ObservableObject {
     case .batchRemote:
       activeModel = appSettings.batchTranscriptionModel
     case .localModel:
-      #if APP_STORE
-      activeModel = appSettings.localTranscriptionModel
-      #else
       activeModel = appSettings.localTranscriptionMode == .streaming
         ? appSettings.localStreamingModelSource
         : appSettings.localTranscriptionModel
-      #endif
     }
     let providerLabel = captureHealthProviderLabel(for: activeModel)
     let latencyTier = ModelCatalog.allOptions.first(where: { $0.id == activeModel })?.latencyTier ?? .medium
@@ -390,13 +382,9 @@ final class MainManager: ObservableObject {
     case .batchRemote:
       return appSettings.batchTranscriptionModel
     case .localModel:
-      #if APP_STORE
-      return appSettings.localTranscriptionModel
-      #else
       return appSettings.localTranscriptionMode == .streaming
         ? appSettings.localStreamingModelSource
         : appSettings.localTranscriptionModel
-      #endif
     }
   }
 
@@ -443,13 +431,22 @@ final class MainManager: ObservableObject {
     guard appSettings.transcriptionMode == .localModel else {
       return ModelCatalog.friendlyName(for: modelID)
     }
-    #if !APP_STORE
     if appSettings.localTranscriptionMode == .streaming {
+      if let batchModelID = WhisperKitStreamingModel.batchModelID(from: modelID),
+        let model = LocalModelManager.shared.model(for: batchModelID) {
+        return shortLocalModelDisplayName(model.displayName) + " (Streaming)"
+      }
+      if FluidAudioParakeetModel.matches(modelID) {
+        return FluidAudioParakeetModel.displayName
+      }
+      #if !APP_STORE
       let source = LocalModelManager.shared.streamingModelSources.first { $0.id == modelID }
         ?? LocalModelManager.recommendedStreamingModelSources.first { $0.id == modelID }
       return source?.modelName ?? "Local Streaming"
+      #else
+      return "Local Streaming"
+      #endif
     }
-    #endif
     guard let localModel = LocalModelManager.shared.model(for: modelID) else {
       return ModelCatalog.friendlyName(for: modelID)
     }
@@ -741,11 +738,19 @@ final class MainManager: ObservableObject {
         // Log network exchange for live transcription
         let durationStr = String(format: "%.1f", result.duration)
         var didRecordLiveExchange = false
-        #if !APP_STORE
         if result.modelIdentifier.hasPrefix("local/streaming/") {
-          let localRuntime = FluidAudioParakeetModel.matches(result.modelIdentifier)
-            ? "fluidaudio"
-            : "sherpa-onnx"
+          let localRuntime: String
+          if FluidAudioParakeetModel.matches(result.modelIdentifier) {
+            localRuntime = "fluidaudio"
+          } else if WhisperKitStreamingModel.matches(result.modelIdentifier) {
+            localRuntime = "whisperkit"
+          } else {
+            #if APP_STORE
+            localRuntime = "unknown-local"
+            #else
+            localRuntime = "sherpa-onnx"
+            #endif
+          }
           let localURL = URL(string: "local://\(localRuntime)")!
             .appendingPathComponent(result.modelIdentifier)
           session.networkExchanges.append(
@@ -764,7 +769,6 @@ final class MainManager: ObservableObject {
           )
           didRecordLiveExchange = true
         }
-        #endif
         if !didRecordLiveExchange, result.modelIdentifier.contains("deepgram") {
           session.networkExchanges.append(
             HistoryNetworkExchange(

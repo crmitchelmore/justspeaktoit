@@ -35,7 +35,7 @@ if ProcessInfo.processInfo.environment["SHOW_OPENCLAW_TAB"] != nil {
 // two flavours: Developer ID / direct download (default) and Mac App Store. Generate
 // with `TUIST_APP_STORE=1 tuist generate` to produce a sandboxed App Store build: it
 // defines the `APP_STORE` Swift active compilation condition (gates Sparkle self-update
-// and the downloaded local-model runtimes — see Sources/SpeakCore/DistributionChannel.swift)
+// and external executable model runtimes — see Sources/SpeakCore/DistributionChannel.swift)
 // and selects the sandboxed entitlements file.
 //
 // NOTE: the env var MUST be `TUIST_`-prefixed. Tuist only forwards environment variables
@@ -109,11 +109,11 @@ if isAppStoreBuild {
 var projectPackages: [Package] = [
     .package(path: .relativeToRoot(".")),
     .remote(url: "https://github.com/getsentry/sentry-cocoa.git", requirement: .upToNextMajor(from: "9.3.0")),
-    .remote(url: "https://github.com/argmaxinc/argmax-oss-swift.git", requirement: .upToNextMajor(from: "0.9.0"))
+    .remote(url: "https://github.com/argmaxinc/argmax-oss-swift.git", requirement: .upToNextMajor(from: "0.9.0")),
+    .remote(url: "https://github.com/FluidInference/FluidAudio.git", requirement: .exact("0.15.5"))
 ]
 if !isAppStoreBuild {
     projectPackages += [
-        .remote(url: "https://github.com/FluidInference/FluidAudio.git", requirement: .exact("0.15.5")),
         .remote(url: "https://github.com/sparkle-project/Sparkle.git", requirement: .upToNextMajor(from: "2.6.0"))
     ]
 }
@@ -123,11 +123,11 @@ var macAppDependencies: [TargetDependency] = [
     .package(product: "SpeakSync"),
     .package(product: "SpeakHotKeys"),
     .package(product: "WhisperKit"),
+    .package(product: "FluidAudio"),
     .package(product: "Sentry")
 ]
 if !isAppStoreBuild {
     macAppDependencies += [
-        .package(product: "FluidAudio"),
         .package(product: "Sparkle")
     ]
 }

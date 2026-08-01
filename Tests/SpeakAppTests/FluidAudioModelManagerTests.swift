@@ -1,4 +1,3 @@
-#if !APP_STORE
 import FluidAudio
 import Foundation
 import XCTest
@@ -77,4 +76,3 @@ final class FluidAudioModelManagerTests: XCTestCase {
     }
   }
 }
-#endif

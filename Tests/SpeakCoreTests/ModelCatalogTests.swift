@@ -124,7 +124,15 @@ final class ModelCatalogTests: XCTestCase {
         for model in ModelCatalog.localTranscription {
             XCTAssertTrue(model.id.hasPrefix("local/"), "\(model.id) should use the downloaded local namespace")
             XCTAssertFalse(model.id.hasPrefix("apple/local/"), "\(model.id) should not be grouped with Apple Speech")
-            XCTAssertFalse(model.supportsLiveStreaming, "\(model.id) should be explicit about offline-only support")
+        }
+    }
+
+    func testWhisperKitLocalTranscription_advertisesLiveStreamingSupport() {
+        let whisperKitModels = ModelCatalog.localTranscription.filter { $0.engine == .whisperKit }
+
+        XCTAssertFalse(whisperKitModels.isEmpty)
+        for model in whisperKitModels {
+            XCTAssertTrue(model.supportsLiveStreaming, "\(model.id) should advertise its in-process live path")
         }
     }
 

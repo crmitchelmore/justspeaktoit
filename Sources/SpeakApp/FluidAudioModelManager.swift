@@ -1,4 +1,3 @@
-#if !APP_STORE
 @preconcurrency import CoreML
 import FluidAudio
 import Foundation
@@ -189,4 +188,3 @@ final class FluidAudioModelManager: ObservableObject {
     return configuration
   }
 }
-#endif

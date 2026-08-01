@@ -24,6 +24,7 @@ enum TranscriptionManagerError: LocalizedError, Equatable {
   case permissionsMissing
   case microphonePermissionMissing
   case localLiveStreamingUnsupported
+  case localLiveStreamingStartupTimedOut
   case invalidLocalStreamingSource(String)
   case noUsableAudioInput
 
@@ -40,7 +41,10 @@ enum TranscriptionManagerError: LocalizedError, Equatable {
     case .microphonePermissionMissing:
       return "Microphone permission is missing. Grant microphone access in System Settings and try again."
     case .localLiveStreamingUnsupported:
-      return "Downloaded local models are offline-only in this prerelease. Use Local Batch after recording."
+      return "The selected downloaded model does not support Local Streaming. Choose another model or use Local Batch."
+    case .localLiveStreamingStartupTimedOut:
+      return "The local streaming model did not start receiving microphone audio in time. " +
+        "Try reconnecting the input device."
     case .invalidLocalStreamingSource(let sourceID):
       return "Local streaming source is not available: \(sourceID). " +
         "Choose or download a local streaming model in Settings."
@@ -281,16 +285,18 @@ final class TranscriptionManager: ObservableObject {
   }
 
   private func liveTranscriptionModelForCurrentMode() throws -> String {
-    #if APP_STORE
-    let availableStreamingSourceIDs: Set<String> = []
-    #else
     var availableStreamingSourceIDs = Set(
-      LocalModelManager.recommendedStreamingModelSources.map(\.id)
-        + LocalModelManager.shared.streamingModelSources.map(\.id)
+      LocalModelManager.shared.availableModels
+        .filter(\.supportsLiveStreaming)
+        .filter { LocalModelManager.shared.isInstalled($0.id) }
+        .map(WhisperKitStreamingModel.id(for:))
     )
     if FluidAudioModelManager.supportsCurrentHardware {
       availableStreamingSourceIDs.insert(FluidAudioParakeetModel.id)
     }
+    #if !APP_STORE
+    availableStreamingSourceIDs.formUnion(LocalModelManager.recommendedStreamingModelSources.map(\.id))
+    availableStreamingSourceIDs.formUnion(LocalModelManager.shared.streamingModelSources.map(\.id))
     #endif
     return try Self.resolvedLiveTranscriptionModel(
       transcriptionMode: appSettings.transcriptionMode,
@@ -308,11 +314,6 @@ final class TranscriptionManager: ObservableObject {
     liveTranscriptionModel: String,
     availableStreamingSourceIDs: Set<String>
   ) throws -> String {
-    #if APP_STORE
-    if transcriptionMode == .localModel, localTranscriptionMode == .streaming {
-      return liveTranscriptionModel
-    }
-    #endif
     guard transcriptionMode == .localModel, localTranscriptionMode == .streaming else {
       return liveTranscriptionModel
     }
@@ -3974,8 +3975,9 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   private var gladiaController: GladiaLiveController
   private var openAIRealtimeController: OpenAIRealtimeLiveController
   private var sharedClientController: SharedClientLiveController
-  #if !APP_STORE
   private var fluidAudioController: FluidAudioParakeetLiveController
+  private var whisperKitController: WhisperKitLiveController
+  #if !APP_STORE
   private var sherpaOnnxController: SherpaOnnxLiveController
   #endif
   private var unsupportedLocalLiveController: UnsupportedLocalLiveTranscriber
@@ -4068,13 +4070,18 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       audioDeviceManager: audioDeviceManager,
       secureStorage: secureStorage
     )
-    #if !APP_STORE
     fluidAudioController = FluidAudioParakeetLiveController(
       appSettings: appSettings,
       permissionsManager: permissionsManager,
       audioDeviceManager: audioDeviceManager,
       modelManager: FluidAudioModelManager.shared
     )
+    whisperKitController = WhisperKitLiveController(
+      permissionsManager: permissionsManager,
+      audioDeviceManager: audioDeviceManager,
+      modelManager: LocalModelManager.shared
+    )
+    #if !APP_STORE
     sherpaOnnxController = SherpaOnnxLiveController(
       appSettings: appSettings,
       permissionsManager: permissionsManager,
@@ -4161,8 +4168,9 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     // OpenAI's only live transcription transport is the Realtime WebSocket
     // API. So any openai/* live model is handled by openAIRealtimeController.
     if model.hasPrefix("openai/") { return openAIRealtimeController }
-    #if !APP_STORE
     if FluidAudioParakeetModel.matches(model) { return fluidAudioController }
+    if WhisperKitStreamingModel.matches(model) { return whisperKitController }
+    #if !APP_STORE
     if model.hasPrefix("local/streaming/") { return sherpaOnnxController }
     #else
     if model.hasPrefix("local/streaming/") { return unsupportedLocalLiveController }
@@ -4201,9 +4209,10 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       sharedClientController,
       unsupportedLocalLiveController
     ]
+    controllers.insert(whisperKitController, at: controllers.count - 1)
+    controllers.insert(fluidAudioController, at: controllers.count - 1)
     #if !APP_STORE
     controllers.insert(sherpaOnnxController, at: controllers.count - 1)
-    controllers.insert(fluidAudioController, at: controllers.count - 1)
     #endif
     let model = currentModel ?? appSettings.liveTranscriptionModel
     for controller in controllers {
@@ -4292,13 +4301,18 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       audioDeviceManager: audioDeviceManager,
       secureStorage: secureStorage
     )
-    #if !APP_STORE
     fluidAudioController = FluidAudioParakeetLiveController(
       appSettings: appSettings,
       permissionsManager: permissionsManager,
       audioDeviceManager: audioDeviceManager,
       modelManager: FluidAudioModelManager.shared
     )
+    whisperKitController = WhisperKitLiveController(
+      permissionsManager: permissionsManager,
+      audioDeviceManager: audioDeviceManager,
+      modelManager: LocalModelManager.shared
+    )
+    #if !APP_STORE
     sherpaOnnxController = SherpaOnnxLiveController(
       appSettings: appSettings,
       permissionsManager: permissionsManager,

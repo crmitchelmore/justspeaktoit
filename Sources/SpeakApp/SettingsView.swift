@@ -70,8 +70,8 @@ struct SettingsView: View {
   @EnvironmentObject private var audioDevices: AudioInputDeviceManager
   @ObservedObject private var updaterManager = UpdaterManager.shared
   @ObservedObject private var localModels = LocalModelManager.shared
-  #if !APP_STORE
   @ObservedObject private var fluidAudioModels = FluidAudioModelManager.shared
+  #if !APP_STORE
   @ObservedObject private var sherpaRuntime = SherpaOnnxRuntimeManager.shared
   #endif
   @ObservedObject private var localPostProcessingModels = LocalPostProcessingModelManager.shared
@@ -177,7 +177,7 @@ struct SettingsView: View {
   }
 
   private let orderedLocalTranscriptionModes: [AppSettings.LocalTranscriptionMode] = {
-    DistributionChannel.current.supportsExternalLocalModelRuntime ? [.streaming, .batch] : [.batch]
+    DistributionChannel.current.supportsInProcessLocalStreaming ? [.streaming, .batch] : [.batch]
   }()
   private let orderedRemoteTranscriptionModes: [RemoteTranscriptionMode] = [.streaming, .batch]
 
@@ -1406,7 +1406,7 @@ struct SettingsView: View {
             .accessibilityLabel("Local transcription source picker")
 
             if settings.transcriptionMode == .localModel {
-              if DistributionChannel.current.supportsExternalLocalModelRuntime {
+              if DistributionChannel.current.supportsInProcessLocalStreaming {
                 Picker(
                   "Downloaded transcription type",
                   selection: settingsBinding(\AppSettings.localTranscriptionMode)
@@ -1832,15 +1832,11 @@ struct SettingsView: View {
               selectedLocalModelCallout
             }
 
-            #if APP_STORE
-            huggingFaceModelImport
-            #else
             if settings.localTranscriptionMode == .batch {
               huggingFaceModelImport
             } else {
               localStreamingStatus
             }
-            #endif
 
             if settings.localTranscriptionMode == .batch {
               if localTranscriptionOptions.isEmpty {
@@ -1963,18 +1959,6 @@ struct SettingsView: View {
         title: "Choose Local mode",
         detail: "This switches recordings away from cloud providers."
       )
-      #if APP_STORE
-      localModelStep(
-        number: "2",
-        title: "Download a local batch model",
-        detail: "WhisperKit/Core ML models run locally after recording stops."
-      )
-      localModelStep(
-        number: "3",
-        title: "Record normally",
-        detail: "Speak transcribes after recording stops, offline on this Mac."
-      )
-      #else
       localModelStep(
         number: "2",
         title: settings.localTranscriptionMode == .batch
@@ -1982,16 +1966,15 @@ struct SettingsView: View {
           : "Download a local streaming model",
         detail: settings.localTranscriptionMode == .batch
           ? "WhisperKit/Core ML models run locally after recording stops."
-          : "Parakeet runs in-process with FluidAudio/Core ML; sherpa-onnx models remain available as alternatives."
+          : "Choose Parakeet or an installed WhisperKit model; both run in-process with Core ML."
       )
       localModelStep(
         number: "3",
         title: "Record normally",
         detail: settings.localTranscriptionMode == .batch
           ? "Speak transcribes after recording stops, offline on this Mac."
-          : "Once a compatible streaming runtime is connected, Speak will stream partial text locally."
+          : "Speak streams partial text locally while you record."
       )
-      #endif
     }
     .padding(12)
     .background(
@@ -2002,7 +1985,8 @@ struct SettingsView: View {
 
   private var localRuntimeUnavailableNote: some View {
     channelAvailabilityNote(
-      "Downloaded local runtimes are not available in this build. Local Batch and built-in cleanup remain available."
+      "External executable runtimes are unavailable in this build. "
+        + "Bundled Parakeet and WhisperKit/Core ML streaming remain available."
     )
   }
 
@@ -2093,7 +2077,6 @@ struct SettingsView: View {
     )
   }
 
-  #if !APP_STORE
   private var localStreamingStatus: some View {
     VStack(alignment: .leading, spacing: 12) {
       HStack(alignment: .top, spacing: 10) {
@@ -2106,8 +2089,7 @@ struct SettingsView: View {
           Text(
             """
             These are local-only streaming candidates, not cloud providers. \
-            Parakeet runs in-process with FluidAudio/Core ML. Optional sherpa-onnx models \
-            use a separately installed local runtime.
+            Parakeet and WhisperKit run in-process with bundled Core ML runtimes.
             """
           )
           .font(.caption)
@@ -2124,10 +2106,13 @@ struct SettingsView: View {
 
       fluidAudioStreamingRow
 
+      whisperKitStreamingRows
+
+      #if !APP_STORE
       localStreamingRuntimeControls
 
       localStreamingSetupSection(
-        title: "2. Add an optional sherpa-onnx model",
+        title: "3. Add an optional sherpa-onnx model",
         subtitle: "Pick one of the compatible external-runtime models we know how to download and run locally.",
         systemImage: "checklist",
         tint: .orange
@@ -2158,7 +2143,7 @@ struct SettingsView: View {
       }
 
       localStreamingSetupSection(
-        title: "3. Browse for more local streaming models",
+        title: "4. Browse for more local streaming models",
         subtitle: """
         Open Hugging Face search for sherpa-onnx streaming ASR models. \
         Only compatible sources can be added here.
@@ -2174,7 +2159,7 @@ struct SettingsView: View {
       }
 
       localStreamingSetupSection(
-        title: "4. Add a source manually",
+        title: "5. Add a source manually",
         subtitle: """
         Use this when you already know the Hugging Face repo and model name. \
         The model still stays local-only.
@@ -2224,6 +2209,7 @@ struct SettingsView: View {
           }
         }
       }
+      #endif
     }
     .padding(12)
     .background(
@@ -2293,8 +2279,7 @@ struct SettingsView: View {
                   if let fallback = firstInstalledStreamingSourceID(excluding: FluidAudioParakeetModel.id) {
                     settings.localStreamingModelSource = fallback
                   } else {
-                    settings.localStreamingModelSource =
-                      LocalModelManager.recommendedStreamingModelSources.first?.id ?? ""
+                    settings.localStreamingModelSource = ""
                     settings.localTranscriptionMode = .batch
                   }
                 }
@@ -2332,6 +2317,83 @@ struct SettingsView: View {
     }
   }
 
+  private var whisperKitStreamingRows: some View {
+    localStreamingSetupSection(
+      title: "2. WhisperKit streaming",
+      subtitle: "Use any downloaded WhisperKit/Core ML model for multilingual live transcription.",
+      systemImage: "waveform",
+      tint: .blue
+    ) {
+      VStack(spacing: 10) {
+        ForEach(localStreamingModels) { model in
+          whisperKitStreamingRow(model)
+        }
+      }
+    }
+  }
+
+  // swiftlint:disable:next function_body_length
+  private func whisperKitStreamingRow(_ model: LocalTranscriptionModel) -> some View {
+    let state = localModels.installState(for: model.id)
+    let streamingID = WhisperKitStreamingModel.id(for: model)
+    let isSelected = state == .installed && settings.localStreamingModelSource == streamingID
+    return localModelRowContainer(isSelected: isSelected, tint: .blue) {
+      HStack(alignment: .top, spacing: 12) {
+        Image(systemName: localModelIcon(for: state))
+          .foregroundStyle(localModelTint(for: state))
+          .frame(width: 24)
+        VStack(alignment: .leading, spacing: 4) {
+          HStack(spacing: 8) {
+            Text(model.displayName)
+              .font(.subheadline.weight(.semibold))
+            if isSelected {
+              localModelBadge("Selected", tint: .blue)
+            }
+            localModelBadge("Streaming", tint: .blue)
+          }
+          Text(model.description)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+          Text("WhisperKit / Core ML · \(localModelSizeLabel(for: model))")
+            .font(.caption2.monospacedDigit())
+            .foregroundStyle(.tertiary)
+        }
+        Spacer()
+        VStack(alignment: .trailing, spacing: 8) {
+          switch state {
+          case .installed:
+            if isSelected {
+              selectedModelBadge(tint: .blue)
+            } else {
+              Button("Use") {
+                settings.localStreamingModelSource = streamingID
+              }
+            }
+            Button("Delete") {
+              localModels.delete(model)
+              if isSelected {
+                if let fallback = firstInstalledStreamingSourceID(excluding: streamingID) {
+                  settings.localStreamingModelSource = fallback
+                } else {
+                  settings.localStreamingModelSource = ""
+                  settings.localTranscriptionMode = .batch
+                }
+              }
+            }
+          case .installing:
+            ProgressView()
+              .controlSize(.small)
+          case .notInstalled, .failed:
+            Button("Download") {
+              Task { await localModels.install(model) }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  #if !APP_STORE
   // swiftlint:disable:next function_body_length
   private func localStreamingSourceRow(_ source: LocalStreamingModelSource) -> some View {
     let state = sherpaRuntime.modelStates[source.id] ?? .notInstalled
@@ -2415,6 +2477,8 @@ struct SettingsView: View {
     }
   }
 
+  #endif
+
   private func localStreamingSetupSection<Content: View>(
     title: String,
     subtitle: String,
@@ -2448,6 +2512,7 @@ struct SettingsView: View {
     )
   }
 
+  #if !APP_STORE
   private var localStreamingRuntimeControls: some View {
     HStack(alignment: .center, spacing: 10) {
       Image(systemName: sherpaRuntimeIcon)
@@ -2719,16 +2784,26 @@ struct SettingsView: View {
       streamingHuggingFaceImportError = error.localizedDescription
     }
   }
+  #endif
 
   private func firstInstalledStreamingSourceID(excluding excludedID: String? = nil) -> String? {
     if FluidAudioParakeetModel.id != excludedID, fluidAudioModels.installState == .installed {
       return FluidAudioParakeetModel.id
     }
+    if let whisperKitModel = localStreamingModels.first(where: {
+      let streamingID = WhisperKitStreamingModel.id(for: $0)
+      return streamingID != excludedID && localModels.isInstalled($0.id)
+    }) {
+      return WhisperKitStreamingModel.id(for: whisperKitModel)
+    }
+    #if !APP_STORE
     return localModels.streamingModelSources.first {
       $0.id != excludedID && (sherpaRuntime.modelStates[$0.id] ?? .notInstalled) == .installed
     }?.id
+    #else
+    return nil
+    #endif
   }
-  #endif
 
   private func firstInstalledLocalTranscriptionModelID(excluding excludedID: String? = nil) -> String? {
     localModels.availableModels.first {

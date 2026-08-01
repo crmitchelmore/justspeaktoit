@@ -52,6 +52,11 @@ final class TranscriptionManagerRoutingTests: XCTestCase {
 
   @MainActor
   func testSwitchingLiveTranscriber_routesWhisperKitStreamingToDedicatedController() {
+    XCTAssertEqual(
+      WhisperKitStreamingModel.id(forBatchModelID: "local/whisperkit/tiny"),
+      "local/streaming/whisperkit/tiny"
+    )
+
     let settings = AppSettings()
     let permissions = PermissionsManager()
     let audioDevices = AudioInputDeviceManager(appSettings: settings)

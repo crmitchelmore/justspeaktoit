@@ -24,6 +24,7 @@ enum TranscriptionManagerError: LocalizedError, Equatable {
   case permissionsMissing
   case microphonePermissionMissing
   case localLiveStreamingUnsupported
+  case localLiveStreamingStartupTimedOut
   case invalidLocalStreamingSource(String)
   case noUsableAudioInput
 
@@ -40,7 +41,10 @@ enum TranscriptionManagerError: LocalizedError, Equatable {
     case .microphonePermissionMissing:
       return "Microphone permission is missing. Grant microphone access in System Settings and try again."
     case .localLiveStreamingUnsupported:
-      return "Downloaded local models are offline-only in this prerelease. Use Local Batch after recording."
+      return "The selected downloaded model does not support Local Streaming. Choose another model or use Local Batch."
+    case .localLiveStreamingStartupTimedOut:
+      return "The local streaming model did not start receiving microphone audio in time. " +
+        "Try reconnecting the input device."
     case .invalidLocalStreamingSource(let sourceID):
       return "Local streaming source is not available: \(sourceID). " +
         "Choose or download a local streaming model in Settings."
@@ -284,6 +288,7 @@ final class TranscriptionManager: ObservableObject {
     var availableStreamingSourceIDs = Set(
       LocalModelManager.shared.availableModels
         .filter(\.supportsLiveStreaming)
+        .filter { LocalModelManager.shared.isInstalled($0.id) }
         .map(WhisperKitStreamingModel.id(for:))
     )
     if FluidAudioModelManager.supportsCurrentHardware {

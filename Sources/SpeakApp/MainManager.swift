@@ -745,7 +745,11 @@ final class MainManager: ObservableObject {
           } else if WhisperKitStreamingModel.matches(result.modelIdentifier) {
             localRuntime = "whisperkit"
           } else {
+            #if APP_STORE
+            localRuntime = "unknown-local"
+            #else
             localRuntime = "sherpa-onnx"
+            #endif
           }
           let localURL = URL(string: "local://\(localRuntime)")!
             .appendingPathComponent(result.modelIdentifier)

@@ -1406,7 +1406,7 @@ struct SettingsView: View {
             .accessibilityLabel("Local transcription source picker")
 
             if settings.transcriptionMode == .localModel {
-              if DistributionChannel.current.supportsExternalLocalModelRuntime {
+              if DistributionChannel.current.supportsInProcessLocalStreaming {
                 Picker(
                   "Downloaded transcription type",
                   selection: settingsBinding(\AppSettings.localTranscriptionMode)
@@ -2112,7 +2112,7 @@ struct SettingsView: View {
       localStreamingRuntimeControls
 
       localStreamingSetupSection(
-        title: "2. Add an optional sherpa-onnx model",
+        title: "3. Add an optional sherpa-onnx model",
         subtitle: "Pick one of the compatible external-runtime models we know how to download and run locally.",
         systemImage: "checklist",
         tint: .orange
@@ -2143,7 +2143,7 @@ struct SettingsView: View {
       }
 
       localStreamingSetupSection(
-        title: "3. Browse for more local streaming models",
+        title: "4. Browse for more local streaming models",
         subtitle: """
         Open Hugging Face search for sherpa-onnx streaming ASR models. \
         Only compatible sources can be added here.
@@ -2159,7 +2159,7 @@ struct SettingsView: View {
       }
 
       localStreamingSetupSection(
-        title: "4. Add a source manually",
+        title: "5. Add a source manually",
         subtitle: """
         Use this when you already know the Hugging Face repo and model name. \
         The model still stays local-only.
@@ -2375,6 +2375,7 @@ struct SettingsView: View {
                 if let fallback = firstInstalledStreamingSourceID(excluding: streamingID) {
                   settings.localStreamingModelSource = fallback
                 } else {
+                  settings.localStreamingModelSource = ""
                   settings.localTranscriptionMode = .batch
                 }
               }

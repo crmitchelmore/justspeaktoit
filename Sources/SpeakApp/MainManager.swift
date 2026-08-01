@@ -621,6 +621,7 @@ final class MainManager: ObservableObject {
 
     let gesture = trigger.historyGesture
     let session = ActiveSession(gesture: gesture, hotKeyDescription: appSettings.selectedHotKey.displayString)
+    session.outputTarget = TextOutputTarget.capture()
     session.diagnosticContext = makeHistoryDiagnosticContext()
     activeSession = session
     state = .recording
@@ -642,7 +643,7 @@ final class MainManager: ObservableObject {
 
     // Start live text insertion if enabled
     if liveInsertionEnabled {
-      liveTextInserter.begin()
+      liveTextInserter.begin(target: session.outputTarget)
       if !liveTextInserter.isActive {
         logger.warning("Live text insertion failed to start - will use standard delivery")
       }
@@ -993,7 +994,7 @@ final class MainManager: ObservableObject {
         session.outputMethod = .accessibility
       case .deferred:
         let output = SmartTextOutput(permissionsManager: permissionsManager, appSettings: appSettings)
-        let outputResult = output.output(text: finalText)
+        let outputResult = output.output(text: finalText, target: session.outputTarget)
         session.outputMethod = outputResult.method
 
         if let error = outputResult.error {
@@ -1036,8 +1037,9 @@ final class MainManager: ObservableObject {
       }
 
       // Start monitoring for user corrections (auto-corrections feature)
-      let focusedElement = getFocusedElement()
-      let appName = NSWorkspace.shared.frontmostApplication?.localizedName
+      let focusedElement = session.outputTarget?.focusedElement ?? getFocusedElement()
+      let appName = session.outputTarget?.applicationName
+        ?? NSWorkspace.shared.frontmostApplication?.localizedName
       autoCorrectionTracker.startMonitoring(insertedText: finalText, element: focusedElement, app: appName)
 
       session.outputDelivered = Date()
@@ -1086,6 +1088,7 @@ final class MainManager: ObservableObject {
     hudManager.beginPostProcessing()
 
     let session = ActiveSession(gesture: .uiButton, hotKeyDescription: appSettings.selectedHotKey.displayString)
+    session.outputTarget = TextOutputTarget.capture()
     session.diagnosticContext = makeHistoryDiagnosticContext()
     activeSession = session
     session.transcriptionResult = retryData.transcriptionResult
@@ -1161,7 +1164,7 @@ final class MainManager: ObservableObject {
       state = .delivering
       hudManager.beginDelivering()
       let output = SmartTextOutput(permissionsManager: permissionsManager, appSettings: appSettings)
-      let outputResult = output.output(text: finalText)
+      let outputResult = output.output(text: finalText, target: session.outputTarget)
       session.outputMethod = outputResult.method
       session.outputDelivered = Date()
 
@@ -1183,7 +1186,8 @@ final class MainManager: ObservableObject {
         session.events.append(
           HistoryEvent(kind: .outputDelivered, description: "Retry output delivered successfully")
         )
-        let appName = NSWorkspace.shared.frontmostApplication?.localizedName
+        let appName = session.outputTarget?.applicationName
+          ?? NSWorkspace.shared.frontmostApplication?.localizedName
         session.destination = appName
         let historyItem = session.buildHistoryItem(finalText: finalText)
         await historyManager.append(historyItem)
@@ -1797,6 +1801,7 @@ private final class ActiveSession {
   var personalCorrections: PersonalLexiconHistorySummary?
   var lexiconContext: PersonalLexiconContext = .empty
   var diagnosticContext: HistoryDiagnosticContext?
+  var outputTarget: TextOutputTarget?
 
   init(gesture: HistoryTrigger.HotKeyGesture, hotKeyDescription: String) {
     self.gesture = gesture

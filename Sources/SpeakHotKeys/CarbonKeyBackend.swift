@@ -23,13 +23,14 @@ final class CarbonKeyBackend {
   private let hotKeySignature: UInt32 = 0x5348_4B00  // "SHK\0"
   private let hotKeyID: UInt32 = 1
 
-  func start(keyCode: UInt16, modifiers: HotKey.ModifierSet) {
+  @discardableResult
+  func start(keyCode: UInt16, modifiers: HotKey.ModifierSet) -> Bool {
     stop()
     currentKeyCode = keyCode
     currentModifiers = modifiers
 
     installEventHandler()
-    registerHotKey(keyCode: keyCode, modifiers: modifiers)
+    return registerHotKey(keyCode: keyCode, modifiers: modifiers)
   }
 
   func stop() {
@@ -83,7 +84,7 @@ final class CarbonKeyBackend {
     }
   }
 
-  private func registerHotKey(keyCode: UInt16, modifiers: HotKey.ModifierSet) {
+  private func registerHotKey(keyCode: UInt16, modifiers: HotKey.ModifierSet) -> Bool {
     let hotKeyIDSpec = EventHotKeyID(signature: hotKeySignature, id: hotKeyID)
     let status = RegisterEventHotKey(
       UInt32(keyCode),
@@ -96,8 +97,10 @@ final class CarbonKeyBackend {
 
     if status != noErr {
       log.error("Failed to register Carbon hotkey (keyCode=\(keyCode)): \(status)")
+      return false
     } else {
       log.info("Registered Carbon hotkey: keyCode=\(keyCode), modifiers=\(modifiers.rawValue)")
+      return true
     }
   }
 

@@ -1,4 +1,5 @@
 import AppKit
+import CoreGraphics
 import Foundation
 import SpeakHotKeys
 import os.log
@@ -36,12 +37,34 @@ struct ShortcutListenerToken: Hashable {
 	fileprivate let shortcut: KeyboardShortcut
 }
 
+enum HotKeyMonitoringState: Equatable {
+	case stopped
+	case active
+	case inputMonitoringRequired
+	case registrationFailed
+
+	var displayName: String {
+		switch self {
+		case .stopped:
+			return "Stopped"
+		case .active:
+			return "Active"
+		case .inputMonitoringRequired:
+			return "Needs Input Monitoring"
+		case .registrationFailed:
+			return "Reconnect Required"
+		}
+	}
+}
+
 /// Thin wrapper over `HotKeyEngine` that preserves the existing app-level API.
 ///
 /// Manages permissions, keyboard shortcuts (⌘R, Escape), and delegates
 /// gesture detection to the SpeakHotKeys library engine.
 @MainActor
 final class HotKeyManager: ObservableObject {
+	@Published private(set) var monitoringState: HotKeyMonitoringState = .stopped
+
 	private let permissionsManager: PermissionsManager
 	private let appSettings: AppSettings
 	private let log = Logger(subsystem: "com.github.speakapp", category: "HotKeyManager")
@@ -53,7 +76,10 @@ final class HotKeyManager: ObservableObject {
 	private var globalMonitor: Any?
 	private var localMonitor: Any?
 	private var lifecycleObservers: [NSObjectProtocol] = []
+	private var workspaceLifecycleObservers: [NSObjectProtocol] = []
 	private var wasMonitoringBeforeRecording = false
+	private var monitoringRequested = false
+	private var recoveryTask: Task<Void, Never>?
 
 	init(permissionsManager: PermissionsManager, appSettings: AppSettings) {
 		self.permissionsManager = permissionsManager
@@ -68,20 +94,41 @@ final class HotKeyManager: ObservableObject {
 	}
 
 	deinit {
+		recoveryTask?.cancel()
 		for observer in lifecycleObservers {
 			NotificationCenter.default.removeObserver(observer)
+		}
+		for observer in workspaceLifecycleObservers {
+			NSWorkspace.shared.notificationCenter.removeObserver(observer)
 		}
 	}
 
 	func startMonitoring() {
-		guard !engine.isMonitoring else { return }
+		monitoringRequested = true
+		installMonitoring(requestPermission: true)
+	}
 
-		Task { [weak self] in
-			guard let self else { return }
-			for permission in [PermissionType.inputMonitoring] {
-				let status = await MainActor.run { self.permissionsManager.status(for: permission) }
-				if !status.isGranted {
-					_ = await self.permissionsManager.request(permission)
+	private func installMonitoring(requestPermission: Bool) {
+		guard !engine.isMonitoring, globalMonitor == nil, localMonitor == nil else {
+			refreshMonitoringState()
+			return
+		}
+
+		if requestPermission {
+			Task { [weak self] in
+				guard let self else { return }
+				for permission in [PermissionType.inputMonitoring] {
+					let status = await MainActor.run { self.permissionsManager.status(for: permission) }
+					if !status.isGranted {
+						_ = await self.permissionsManager.request(permission)
+					}
+				}
+				await MainActor.run {
+					if self.appSettings.selectedHotKey == .fnKey {
+						self.reconnectMonitoring()
+					} else {
+						self.refreshMonitoringState()
+					}
 				}
 			}
 		}
@@ -106,9 +153,16 @@ final class HotKeyManager: ObservableObject {
 			)
 		)
 		engine.start(for: hotKey)
+		refreshMonitoringState()
 	}
 
 	func stopMonitoring() {
+		monitoringRequested = false
+		tearDownMonitoring()
+		monitoringState = .stopped
+	}
+
+	private func tearDownMonitoring() {
 		if let globalMonitor {
 			NSEvent.removeMonitor(globalMonitor)
 			self.globalMonitor = nil
@@ -118,6 +172,15 @@ final class HotKeyManager: ObservableObject {
 			self.localMonitor = nil
 		}
 		engine.stop()
+	}
+
+	func reconnectMonitoring() {
+		guard monitoringRequested else {
+			startMonitoring()
+			return
+		}
+		tearDownMonitoring()
+		installMonitoring(requestPermission: false)
 	}
 
 	func pauseForHotKeyRecording() {
@@ -133,9 +196,9 @@ final class HotKeyManager: ObservableObject {
 
 	/// Restart monitoring with the current hotkey from settings.
 	func restartWithCurrentHotKey() {
-		let wasMonitoring = engine.isMonitoring
+		let shouldRestart = monitoringRequested
 		engine.stop()
-		if wasMonitoring {
+		if shouldRestart {
 			let hotKey = appSettings.selectedHotKey
 			engine.updateConfiguration(
 				HotKeyConfiguration(
@@ -144,6 +207,34 @@ final class HotKeyManager: ObservableObject {
 				)
 			)
 			engine.start(for: hotKey)
+			refreshMonitoringState()
+		}
+	}
+
+	private func refreshMonitoringState() {
+		guard monitoringRequested else {
+			monitoringState = .stopped
+			return
+		}
+		guard engine.isMonitoring else {
+			monitoringState = .registrationFailed
+			return
+		}
+		if appSettings.selectedHotKey == .fnKey, !CGPreflightListenEventAccess() {
+			monitoringState = .inputMonitoringRequired
+		} else {
+			monitoringState = .active
+		}
+	}
+
+	private func scheduleRecovery(reason: String) {
+		guard monitoringRequested else { return }
+		recoveryTask?.cancel()
+		recoveryTask = Task { @MainActor [weak self] in
+			try? await Task.sleep(for: .milliseconds(500))
+			guard !Task.isCancelled, let self, self.monitoringRequested else { return }
+			self.log.info("Rearming global hotkey after \(reason, privacy: .public)")
+			self.reconnectMonitoring()
 		}
 	}
 
@@ -151,7 +242,6 @@ final class HotKeyManager: ObservableObject {
 	func register(gesture: HotKeyGesture, handler: @escaping () -> Void) -> HotKeyListenerToken {
 		engine.register(gesture: gesture, handler: handler)
 	}
-
 	func unregister(_ token: HotKeyListenerToken) {
 		engine.unregister(token)
 	}
@@ -199,6 +289,33 @@ final class HotKeyManager: ObservableObject {
 			center.addObserver(forName: .speakHotKeyDidChange, object: nil, queue: .main) { [weak self] _ in
 				Task { @MainActor in
 					self?.resumeAfterHotKeyRecording()
+				}
+			},
+			center.addObserver(
+				forName: NSApplication.didBecomeActiveNotification,
+				object: nil,
+				queue: .main
+			) { [weak self] _ in
+				Task { @MainActor in
+					self?.scheduleRecovery(reason: "app activation")
+				}
+			}
+		]
+
+		let workspaceCenter = NSWorkspace.shared.notificationCenter
+		workspaceLifecycleObservers = [
+			workspaceCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+				Task { @MainActor in
+					self?.scheduleRecovery(reason: "system wake")
+				}
+			},
+			workspaceCenter.addObserver(
+				forName: NSWorkspace.sessionDidBecomeActiveNotification,
+				object: nil,
+				queue: .main
+			) { [weak self] _ in
+				Task { @MainActor in
+					self?.scheduleRecovery(reason: "session unlock")
 				}
 			}
 		]

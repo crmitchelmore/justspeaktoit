@@ -39,4 +39,45 @@ final class TextOutputTests: XCTestCase {
   func testHasDeliverableText_transcript_ReturnsTrue() {
     XCTAssertTrue(PasteTextOutput.hasDeliverableText("Foreground recording works."))
   }
+
+  @MainActor
+  func testEventDestination_capturedRunningProcess_TargetsThatProcess() {
+    let target = TextOutputTarget(
+      processIdentifier: ProcessInfo.processInfo.processIdentifier,
+      applicationName: "Tests",
+      bundleIdentifier: nil,
+      focusedElement: nil
+    )
+
+    XCTAssertEqual(
+      PasteTextOutput.eventDestination(for: target),
+      .process(ProcessInfo.processInfo.processIdentifier)
+    )
+  }
+
+  @MainActor
+  func testEventDestination_terminatedTarget_DoesNotPasteIntoCurrentApp() {
+    let target = TextOutputTarget(
+      processIdentifier: pid_t.max,
+      applicationName: "Terminated",
+      bundleIdentifier: nil,
+      focusedElement: nil
+    )
+
+    XCTAssertEqual(PasteTextOutput.eventDestination(for: target), .none)
+  }
+
+  @MainActor
+  func testEventDestination_withoutCapturedTarget_UsesSystemEventStream() {
+    XCTAssertEqual(PasteTextOutput.eventDestination(for: nil), .system)
+  }
+
+  func testHotKeyMonitoringState_displayNames_AreActionable() {
+    XCTAssertEqual(HotKeyMonitoringState.active.displayName, "Active")
+    XCTAssertEqual(
+      HotKeyMonitoringState.inputMonitoringRequired.displayName,
+      "Needs Input Monitoring"
+    )
+    XCTAssertEqual(HotKeyMonitoringState.registrationFailed.displayName, "Reconnect Required")
+  }
 }

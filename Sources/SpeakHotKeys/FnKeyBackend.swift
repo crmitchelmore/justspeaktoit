@@ -26,8 +26,9 @@ final class FnKeyBackend {
   private var eventTapRunLoopSource: CFRunLoopSource?
   private var fnIsPressed = false
 
-  func start() {
-    guard globalMonitor == nil else { return }
+  @discardableResult
+  func start() -> Bool {
+    guard globalMonitor == nil else { return true }
 
     globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.flagsChanged, .keyDown, .keyUp]) {
       [weak self] event in
@@ -40,6 +41,7 @@ final class FnKeyBackend {
     }
 
     startEventTap()
+    return eventTap != nil || globalMonitor != nil || localMonitor != nil
   }
 
   func stop() {

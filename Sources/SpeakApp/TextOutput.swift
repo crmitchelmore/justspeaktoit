@@ -15,8 +15,10 @@ This guide explains how to integrate an "Insert" action that prefers Accessibili
 - File: `Sources/PasteDelayApp/TextInjector.swift:29`
 - Ensure `InjectionError` covers `emptyPayload`, `accessibilityDenied`, `noFocusedElement`, and `valueNotSettable`.
 // @Implement: This implementation should use the clipboard to paste text into the focused app. It should restore the previous pasteboard value (if the app setting output to clipboard is false) It should respect any relevant settings from app settings
+// swiftlint:disable file_length
 import AppKit
 import ApplicationServices
+import Darwin
 import Foundation
 - Restore the clipboard after pasteboard-based injection to avoid surprising users.
 - Document fallback behaviour prominently in user-facing copy so expectations stay aligned.
@@ -24,8 +26,10 @@ import Foundation
 Following this sequence allows another project to drop in the same smart Insert capability with minimal guesswork.
  */
 
+// swiftlint:disable file_length
 import AppKit
 import ApplicationServices
+import Darwin
 import Foundation
 import SpeakCore
 
@@ -34,9 +38,61 @@ struct TextOutputResult {
   let error: Error?
 }
 
+/// The app and text control that owned keyboard focus when a transcription session began.
+/// Keeping this target avoids delivering into an unrelated app if focus changes while the
+/// recording is transcribed or post-processed.
+struct TextOutputTarget {
+  let processIdentifier: pid_t?
+  let applicationName: String?
+  let bundleIdentifier: String?
+  let focusedElement: AXUIElement?
+
+  static func capture() -> TextOutputTarget {
+    let application = NSWorkspace.shared.frontmostApplication
+    guard DistributionChannel.current.supportsAccessibilityTextInsertion else {
+      return TextOutputTarget(
+        processIdentifier: application?.processIdentifier,
+        applicationName: application?.localizedName,
+        bundleIdentifier: application?.bundleIdentifier,
+        focusedElement: nil
+      )
+    }
+    let systemWideElement = AXUIElementCreateSystemWide()
+    var rawFocused: CFTypeRef?
+    let copyStatus = AXUIElementCopyAttributeValue(
+      systemWideElement,
+      kAXFocusedUIElementAttribute as CFString,
+      &rawFocused
+    )
+    let focusedElement: AXUIElement?
+    if copyStatus == .success, let rawFocused {
+      focusedElement = unsafeBitCast(rawFocused, to: AXUIElement.self)
+    } else {
+      focusedElement = nil
+    }
+    return TextOutputTarget(
+      processIdentifier: application?.processIdentifier,
+      applicationName: application?.localizedName,
+      bundleIdentifier: application?.bundleIdentifier,
+      focusedElement: focusedElement
+    )
+  }
+
+  var isApplicationRunning: Bool {
+    guard let processIdentifier else { return false }
+    return Darwin.kill(processIdentifier, 0) == 0 || errno == EPERM
+  }
+}
+
 @MainActor
 protocol TextOutputting {
-  func output(text: String) -> TextOutputResult
+  func output(text: String, target: TextOutputTarget?) -> TextOutputResult
+}
+
+extension TextOutputting {
+  func output(text: String) -> TextOutputResult {
+    output(text: text, target: .capture())
+  }
 }
 
 enum TextOutputError: LocalizedError {
@@ -68,7 +124,7 @@ struct AccessibilityTextOutput: TextOutputting {
   let permissionsManager: PermissionsManager
   let appSettings: AppSettings
 
-  func output(text: String) -> TextOutputResult {
+  func output(text: String, target: TextOutputTarget?) -> TextOutputResult {
     permissionsManager.refresh(.accessibility)
     let status = permissionsManager.status(for: .accessibility)
     guard status.isGranted else {
@@ -78,18 +134,12 @@ struct AccessibilityTextOutput: TextOutputting {
       )
     }
 
-    let systemWideElement = AXUIElementCreateSystemWide()
-    var rawFocused: CFTypeRef?
-    let copyStatus = AXUIElementCopyAttributeValue(
-      systemWideElement, kAXFocusedUIElementAttribute as CFString, &rawFocused)
-    guard copyStatus == .success, let rawFocused else {
+    guard let focusedElement = target?.focusedElement ?? Self.currentFocusedElement() else {
       return TextOutputResult(
         method: .none,
         error: TextOutputError.unableToFindFocusedElement
       )
     }
-
-    let focusedElement = unsafeBitCast(rawFocused, to: AXUIElement.self)
 
     switch appSettings.accessibilityInsertionMode {
     case .insertAtCursor:
@@ -122,11 +172,29 @@ struct AccessibilityTextOutput: TextOutputting {
       return TextOutputResult(method: .accessibility, error: nil)
     }
   }
+
+  private static func currentFocusedElement() -> AXUIElement? {
+    let systemWideElement = AXUIElementCreateSystemWide()
+    var rawFocused: CFTypeRef?
+    let copyStatus = AXUIElementCopyAttributeValue(
+      systemWideElement,
+      kAXFocusedUIElementAttribute as CFString,
+      &rawFocused
+    )
+    guard copyStatus == .success, let rawFocused else { return nil }
+    return unsafeBitCast(rawFocused, to: AXUIElement.self)
+  }
 }
 
 // @Implement: This implementation should use the clipboard to paste text into the focused app. It should restore the previous pasteboard value (if the app setting output to clipboard is false) It should respect any relevant settings from app settings
 @MainActor
 struct PasteTextOutput: TextOutputting {
+  enum EventDestination: Equatable {
+    case process(pid_t)
+    case system
+    case none
+  }
+
   let permissionsManager: PermissionsManager
   let appSettings: AppSettings
   private let pasteboard: NSPasteboard
@@ -141,7 +209,7 @@ struct PasteTextOutput: TextOutputting {
     self.pasteboard = pasteboard
   }
 
-  func output(text: String) -> TextOutputResult {
+  func output(text: String, target: TextOutputTarget?) -> TextOutputResult {
     guard Self.hasDeliverableText(text) else {
       return TextOutputResult(method: .none, error: nil)
     }
@@ -156,7 +224,7 @@ struct PasteTextOutput: TextOutputting {
     }
 
     if canPasteIntoOtherApps {
-      simulatePasteShortcut()
+      simulatePasteShortcut(target: target)
     }
 
     if restoreClipboard {
@@ -170,19 +238,38 @@ struct PasteTextOutput: TextOutputting {
     !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 
-  private func simulatePasteShortcut() {
+  private func simulatePasteShortcut(target: TextOutputTarget?) {
     guard let source = CGEventSource(stateID: .combinedSessionState) else { return }
     let vKey: CGKeyCode = 9
 
     if let keyDown = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: true) {
       keyDown.flags = .maskCommand
-      keyDown.post(tap: .cghidEventTap)
+      post(keyDown, target: target)
     }
 
     if let keyUp = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: false) {
       keyUp.flags = .maskCommand
-      keyUp.post(tap: .cghidEventTap)
+      post(keyUp, target: target)
     }
+  }
+
+  private func post(_ event: CGEvent, target: TextOutputTarget?) {
+    switch Self.eventDestination(for: target) {
+    case .process(let processIdentifier):
+      event.postToPid(processIdentifier)
+    case .system:
+      event.post(tap: .cghidEventTap)
+    case .none:
+      break
+    }
+  }
+
+  static func eventDestination(for target: TextOutputTarget?) -> EventDestination {
+    guard let target else { return .system }
+    guard target.isApplicationRunning, let processIdentifier = target.processIdentifier else {
+      return .none
+    }
+    return .process(processIdentifier)
   }
 
   private func scheduleClipboardRestore(_ previousString: String?, on pasteboard: NSPasteboard) {
@@ -258,21 +345,21 @@ struct SmartTextOutput: TextOutputting {
     PasteTextOutput(permissionsManager: permissionsManager, appSettings: appSettings)
   }
 
-  func output(text: String) -> TextOutputResult {
+  func output(text: String, target: TextOutputTarget?) -> TextOutputResult {
     guard DistributionChannel.current.supportsAccessibilityTextInsertion else {
-      return clipboardOutput.output(text: text)
+      return clipboardOutput.output(text: text, target: target)
     }
 
     switch appSettings.textOutputMethod {
     case .accessibilityOnly:
-      return accessibilityOutput.output(text: text)
+      return accessibilityOutput.output(text: text, target: target)
     case .clipboardOnly:
-      return clipboardOutput.output(text: text)
+      return clipboardOutput.output(text: text, target: target)
     case .smart:
       // Skip accessibility for known problematic apps
-      if isCurrentAppProblematic() {
+      if isProblematic(target: target) {
         print("[SmartTextOutput] Skipping accessibility for problematic app, using clipboard")
-        return clipboardOutput.output(text: text)
+        return clipboardOutput.output(text: text, target: target)
       }
 
       // Permission grants can change while System Settings is frontmost. Re-read
@@ -281,7 +368,7 @@ struct SmartTextOutput: TextOutputting {
 
       // Only try accessibility if permission is granted AND there's a focused element
       if permissionsManager.status(for: .accessibility).isGranted,
-         let focusedElement = getFocusedElement() {
+         let focusedElement = target?.focusedElement ?? getFocusedElement() {
 
         // Log element info for debugging
         logFocusedElementInfo(focusedElement)
@@ -292,11 +379,11 @@ struct SmartTextOutput: TextOutputting {
           focusedElement, kAXValueAttribute as CFString, &settable)
         guard isSettable == .success && settable.boolValue else {
           print("[SmartTextOutput] Value attribute not settable, falling back to clipboard")
-          return clipboardOutput.output(text: text)
+          return clipboardOutput.output(text: text, target: target)
         }
 
         // Try accessibility insertion
-        let result = accessibilityOutput.output(text: text)
+        let result = accessibilityOutput.output(text: text, target: target)
         if result.error == nil {
           // Verify the text was actually inserted by re-reading the value
           if verifyTextInserted(text: text, element: focusedElement) {
@@ -306,15 +393,14 @@ struct SmartTextOutput: TextOutputting {
           }
         }
       }
-      return clipboardOutput.output(text: text)
+      return clipboardOutput.output(text: text, target: target)
     }
   }
 
-  private func isCurrentAppProblematic() -> Bool {
-    guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
-      return false
-    }
-    let appName = frontmostApp.localizedName ?? ""
+  private func isProblematic(target: TextOutputTarget?) -> Bool {
+    let appName = target?.applicationName
+      ?? NSWorkspace.shared.frontmostApplication?.localizedName
+      ?? ""
     return Self.problematicApps.contains(appName)
   }
 

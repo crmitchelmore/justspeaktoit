@@ -254,7 +254,8 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
     @discardableResult
     public func stopRecording(
         destination: HardwareTriggerDestination? = nil,
-        saveToHistory: Bool = true
+        saveToHistory: Bool = true,
+        primedActivityMessage: String = "Ready for the Action Button"
     ) async -> TranscriptionResult {
         isRunning = false
         let duration = elapsedSeconds
@@ -303,7 +304,12 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
         sharesLiveTranscript = true
 
         // Complete Live Activity with clipboard confirmation
-        activityManager.completeActivity(finalWordCount: wordCount, duration: duration, keepPrimed: true)
+        activityManager.completeActivity(
+            finalWordCount: wordCount,
+            duration: duration,
+            keepPrimed: true,
+            primedMessage: primedActivityMessage
+        )
 
         // Kick off background post-processing if the chosen destination + user
         // settings call for it. The polished clipboard write must also survive

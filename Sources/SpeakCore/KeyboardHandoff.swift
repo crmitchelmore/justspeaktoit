@@ -12,6 +12,7 @@ public struct KeyboardHandoffRecord: Codable, Equatable, Sendable {
     public enum Phase: String, Codable, Equatable, Hashable, Sendable {
         case requested
         case recording
+        case finishRequested
         case transcribing
         case completed
         case cancelled
@@ -163,8 +164,19 @@ public final class KeyboardHandoffStore {
     public func markTranscribing(requestID: UUID, now: Date = Date()) throws -> KeyboardHandoffRecord {
         try transition(
             requestID: requestID,
-            allowedFrom: [.recording],
+            allowedFrom: [.recording, .finishRequested],
             to: .transcribing,
+            now: now,
+            lifetime: Self.transcriptionLifetime
+        )
+    }
+
+    @discardableResult
+    public func requestFinish(requestID: UUID, now: Date = Date()) throws -> KeyboardHandoffRecord {
+        try transition(
+            requestID: requestID,
+            allowedFrom: [.recording],
+            to: .finishRequested,
             now: now,
             lifetime: Self.transcriptionLifetime
         )
@@ -192,7 +204,7 @@ public final class KeyboardHandoffStore {
     public func cancel(requestID: UUID, now: Date = Date()) throws -> KeyboardHandoffRecord {
         try transition(
             requestID: requestID,
-            allowedFrom: [.requested, .recording, .transcribing],
+            allowedFrom: [.requested, .recording, .finishRequested, .transcribing],
             to: .cancelled,
             now: now,
             lifetime: Self.resultLifetime
@@ -207,7 +219,7 @@ public final class KeyboardHandoffStore {
     ) throws -> KeyboardHandoffRecord {
         try transition(
             requestID: requestID,
-            allowedFrom: [.requested, .recording, .transcribing],
+            allowedFrom: [.requested, .recording, .finishRequested, .transcribing],
             to: .failed,
             failureCode: code,
             now: now,

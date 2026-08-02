@@ -6,6 +6,7 @@ final class KeyboardHandoffTests: XCTestCase {
     private var suiteName: String!
     private var defaults: UserDefaults!
     private var store: KeyboardHandoffStore!
+    private var quickStore: KeyboardQuickDictationStore!
 
     override func setUp() {
         super.setUp()
@@ -13,11 +14,13 @@ final class KeyboardHandoffTests: XCTestCase {
         defaults = UserDefaults(suiteName: suiteName)
         defaults.removePersistentDomain(forName: suiteName)
         store = KeyboardHandoffStore(defaults: defaults)
+        quickStore = KeyboardQuickDictationStore(defaults: defaults)
     }
 
     override func tearDown() {
         defaults.removePersistentDomain(forName: suiteName)
         store = nil
+        quickStore = nil
         defaults = nil
         suiteName = nil
         super.tearDown()
@@ -35,6 +38,41 @@ final class KeyboardHandoffTests: XCTestCase {
 
         XCTAssertEqual(store.consumeResult(requestID: request.requestID), "Insert this text.")
         XCTAssertNil(store.activeRecord())
+    }
+
+    func testKeyboardCanRequestFinishBeforeContainingAppTranscribes() throws {
+        let request = try store.createRequest()
+        try store.markRecording(requestID: request.requestID)
+
+        XCTAssertEqual(try store.requestFinish(requestID: request.requestID).phase, .finishRequested)
+        XCTAssertEqual(try store.markTranscribing(requestID: request.requestID).phase, .transcribing)
+    }
+
+    func testQuickDictationRequiresFreshHeartbeatInsideReadinessWindow() {
+        let now = Date(timeIntervalSince1970: 4_000)
+        let session = quickStore.start(now: now, duration: 300)
+
+        XCTAssertEqual(session?.phase, .ready)
+        XCTAssertNotNil(quickStore.activeSession(now: now.addingTimeInterval(3)))
+        XCTAssertNil(
+            quickStore.activeSession(
+                now: now.addingTimeInterval(KeyboardQuickDictationStore.heartbeatLifetime + 1)
+            )
+        )
+    }
+
+    func testQuickDictationRecordingCanFinishAfterReadinessWindowExpires() {
+        let now = Date(timeIntervalSince1970: 5_000)
+        _ = quickStore.start(now: now, duration: 1)
+        let recording = quickStore.heartbeat(phase: .recording, now: now.addingTimeInterval(0.5))
+
+        XCTAssertEqual(recording?.phase, .recording)
+        XCTAssertNotNil(quickStore.activeSession(now: now.addingTimeInterval(2)))
+        XCTAssertEqual(
+            quickStore.heartbeat(phase: .ready, now: now.addingTimeInterval(2))?.phase,
+            .ready
+        )
+        XCTAssertNil(quickStore.activeSession(now: now.addingTimeInterval(2)))
     }
 
     func testMismatchedNonceCannotReadOrClearResult() throws {

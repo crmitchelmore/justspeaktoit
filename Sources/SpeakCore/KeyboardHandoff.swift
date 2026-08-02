@@ -1,88 +1,5 @@
 import Foundation
 
-/// The only App Group payload used by the custom keyboard handoff.
-///
-/// Audio, API keys, surrounding text, and intermediate transcripts are never
-/// written here. The App Group copy of the final transcript exists only until
-/// the matching keyboard consumes it or the short result timeout expires.
-/// History persistence happens separately inside the containing app.
-public struct KeyboardHandoffRecord: Codable, Equatable, Sendable {
-    public static let schemaVersion = 1
-
-    public enum Phase: String, Codable, Equatable, Hashable, Sendable {
-        case requested
-        case recording
-        case finishRequested
-        case transcribing
-        case completed
-        case cancelled
-        case failed
-    }
-
-    public enum FailureCode: String, Codable, Equatable, Sendable {
-        case fullAccessRequired
-        case appUnavailable
-        case recordingUnavailable
-        case noSpeech
-        case timedOut
-        case invalidRequest
-        case unknown
-    }
-
-    public let schemaVersion: Int
-    public let requestID: UUID
-    public let createdAt: Date
-    public let updatedAt: Date
-    public let expiresAt: Date
-    public let phase: Phase
-    public let transcript: String?
-    public let failureCode: FailureCode?
-
-    public init(
-        schemaVersion: Int = Self.schemaVersion,
-        requestID: UUID,
-        createdAt: Date,
-        updatedAt: Date,
-        expiresAt: Date,
-        phase: Phase,
-        transcript: String? = nil,
-        failureCode: FailureCode? = nil
-    ) {
-        self.schemaVersion = schemaVersion
-        self.requestID = requestID
-        self.createdAt = createdAt
-        self.updatedAt = updatedAt
-        self.expiresAt = expiresAt
-        self.phase = phase
-        self.transcript = transcript
-        self.failureCode = failureCode
-    }
-}
-
-public struct KeyboardExtensionObservation: Codable, Equatable, Sendable {
-    public let schemaVersion: Int
-    public let lastSeenAt: Date
-    public let hadFullAccess: Bool
-
-    public init(
-        schemaVersion: Int = KeyboardHandoffRecord.schemaVersion,
-        lastSeenAt: Date,
-        hadFullAccess: Bool
-    ) {
-        self.schemaVersion = schemaVersion
-        self.lastSeenAt = lastSeenAt
-        self.hadFullAccess = hadFullAccess
-    }
-}
-
-public enum KeyboardHandoffStoreError: Error, Equatable {
-    case unavailable
-    case noActiveRequest
-    case mismatchedRequest
-    case invalidTransition
-    case invalidTranscript
-}
-
 /// A deliberately small, extension-safe store backed by the shared App Group.
 ///
 /// The entire handoff is a single encoded value so readers never combine fields
@@ -95,8 +12,8 @@ public final class KeyboardHandoffStore {
     public static let transcriptionLifetime: TimeInterval = 90
     public static let resultLifetime: TimeInterval = 60
 
-    private static let recordKey = "keyboardHandoff.record.v1"
-    private static let observationKey = "keyboardHandoff.extensionObservation.v1"
+    private static let recordKey = "keyboardHandoff.record.v2"
+    private static let observationKey = "keyboardHandoff.extensionObservation.v2"
 
     private let defaults: UserDefaults?
     private let encoder = JSONEncoder()
@@ -120,6 +37,7 @@ public final class KeyboardHandoffStore {
     @discardableResult
     public func createRequest(
         id: UUID = UUID(),
+        targetDocumentIdentifier: UUID? = nil,
         now: Date = Date(),
         lifetime: TimeInterval = requestLifetime
     ) throws -> KeyboardHandoffRecord {
@@ -129,7 +47,8 @@ public final class KeyboardHandoffStore {
             createdAt: now,
             updatedAt: now,
             expiresAt: now.addingTimeInterval(lifetime),
-            phase: .requested
+            phase: .requested,
+            targetDocumentIdentifier: targetDocumentIdentifier
         )
         try write(record)
         return record
@@ -182,6 +101,37 @@ public final class KeyboardHandoffStore {
         )
     }
 
+    /// Publishes only the current request's live text. It is replaced on each
+    /// update, never appended, and is removed when the request ends.
+    @discardableResult
+    public func updateInterim(
+        requestID: UUID,
+        transcript: String,
+        now: Date = Date()
+    ) throws -> KeyboardHandoffRecord {
+        try lock.withLock {
+            guard defaults != nil else { throw KeyboardHandoffStoreError.unavailable }
+            guard let stored = readUnlocked() else { throw KeyboardHandoffStoreError.noActiveRequest }
+            guard stored.requestID == requestID else { throw KeyboardHandoffStoreError.mismatchedRequest }
+            guard let current = normalizeExpiryUnlocked(stored, now: now),
+                  current.phase == .recording else {
+                throw KeyboardHandoffStoreError.invalidTransition
+            }
+            let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+            let updated = KeyboardHandoffRecord(
+                requestID: current.requestID,
+                createdAt: current.createdAt,
+                updatedAt: now,
+                expiresAt: now.addingTimeInterval(Self.requestLifetime),
+                phase: current.phase,
+                targetDocumentIdentifier: current.targetDocumentIdentifier,
+                interimTranscript: trimmed.isEmpty ? nil : trimmed
+            )
+            try writeUnlocked(updated)
+            return updated
+        }
+    }
+
     @discardableResult
     public func complete(
         requestID: UUID,
@@ -228,12 +178,18 @@ public final class KeyboardHandoffStore {
     }
 
     /// Returns and then promptly removes only the matching, unexpired result.
-    public func consumeResult(requestID: UUID, now: Date = Date()) -> String? {
+    public func consumeResult(
+        requestID: UUID,
+        documentIdentifier: UUID? = nil,
+        now: Date = Date()
+    ) -> String? {
         lock.withLock {
             guard let stored = readUnlocked(),
                   stored.requestID == requestID,
                   let record = normalizeExpiryUnlocked(stored, now: now),
                   record.phase == .completed,
+                  record.targetDocumentIdentifier == nil
+                    || record.targetDocumentIdentifier == documentIdentifier,
                   let transcript = record.transcript,
                   !transcript.isEmpty else {
                 return nil
@@ -266,8 +222,10 @@ public final class KeyboardHandoffStore {
         guard let data = defaults?.data(forKey: Self.observationKey) else { return nil }
         return try? decoder.decode(KeyboardExtensionObservation.self, from: data)
     }
+}
 
-    private func transition(
+private extension KeyboardHandoffStore {
+    func transition(
         requestID: UUID,
         allowedFrom: Set<KeyboardHandoffRecord.Phase>,
         to phase: KeyboardHandoffRecord.Phase,
@@ -291,6 +249,10 @@ public final class KeyboardHandoffStore {
                 updatedAt: now,
                 expiresAt: now.addingTimeInterval(lifetime),
                 phase: phase,
+                targetDocumentIdentifier: current.targetDocumentIdentifier,
+                interimTranscript: phase == .recording || phase == .finishRequested || phase == .transcribing
+                    ? current.interimTranscript
+                    : nil,
                 transcript: transcript,
                 failureCode: failureCode
             )
@@ -299,19 +261,19 @@ public final class KeyboardHandoffStore {
         }
     }
 
-    private func write(_ record: KeyboardHandoffRecord) throws {
+    func write(_ record: KeyboardHandoffRecord) throws {
         try lock.withLock {
             try writeUnlocked(record)
         }
     }
 
-    private func writeUnlocked(_ record: KeyboardHandoffRecord) throws {
+    func writeUnlocked(_ record: KeyboardHandoffRecord) throws {
         guard let defaults else { throw KeyboardHandoffStoreError.unavailable }
         defaults.set(try encoder.encode(record), forKey: Self.recordKey)
         defaults.synchronize()
     }
 
-    private func readUnlocked() -> KeyboardHandoffRecord? {
+    func readUnlocked() -> KeyboardHandoffRecord? {
         guard let data = defaults?.data(forKey: Self.recordKey),
               let record = try? decoder.decode(KeyboardHandoffRecord.self, from: data),
               record.schemaVersion == KeyboardHandoffRecord.schemaVersion else {
@@ -320,7 +282,7 @@ public final class KeyboardHandoffStore {
         return record
     }
 
-    private func normalizeExpiryUnlocked(
+    func normalizeExpiryUnlocked(
         _ record: KeyboardHandoffRecord,
         now: Date
     ) -> KeyboardHandoffRecord? {
@@ -338,6 +300,7 @@ public final class KeyboardHandoffStore {
             updatedAt: now,
             expiresAt: now.addingTimeInterval(Self.resultLifetime),
             phase: .failed,
+            targetDocumentIdentifier: record.targetDocumentIdentifier,
             failureCode: .timedOut
         )
         try? writeUnlocked(timedOut)
@@ -363,15 +326,6 @@ public enum KeyboardLaunchPolicy {
         }
         return nil
     }
-
-    /// A manually opened containing app should resume only a fresh request
-    /// that has not started recording yet.
-    public static func pendingCaptureRequestID(
-        from record: KeyboardHandoffRecord?
-    ) -> UUID? {
-        guard let record, record.phase == .requested else { return nil }
-        return record.requestID
-    }
 }
 
 public struct KeyboardHandoffConsumer {
@@ -385,10 +339,15 @@ public struct KeyboardHandoffConsumer {
     @discardableResult
     public func insertReadyResult(
         requestID: UUID,
+        documentIdentifier: UUID? = nil,
         now: Date = Date(),
         insert: (String) -> Void
     ) -> Bool {
-        guard let transcript = store.consumeResult(requestID: requestID, now: now) else {
+        guard let transcript = store.consumeResult(
+            requestID: requestID,
+            documentIdentifier: documentIdentifier,
+            now: now
+        ) else {
             return false
         }
         insert(transcript)

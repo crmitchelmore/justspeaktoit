@@ -1,7 +1,7 @@
 # iOS Custom Keyboard MVP Verification
 
-For the prepared background-microphone architecture and its additional device
-matrix, also follow [iOS Keyboard Quick Dictation](ios-keyboard-quick-dictation.md).
+For the always-ready background-microphone architecture and its additional
+device matrix, also follow [iOS Keyboard Instant Dictation](ios-keyboard-instant-dictation.md).
 
 ## Scope and architecture
 
@@ -13,34 +13,37 @@ control uses `UIInputViewController.handleInputModeList(from:with:)` so a user
 can return to a system keyboard for full typing.
 
 Apple does not allow a custom keyboard extension to access the microphone. The
-primary prepared-session handoff is therefore:
+primary Instant Dictation handoff is therefore:
 
-1. The user explicitly starts a five-minute Quick Dictation session in Just
-   Speak, then returns to the original text field. Idle audio buffers are
-   discarded locally while the system microphone indicator remains visible.
-2. The keyboard creates a short-lived, nonce-scoped request in
-   `group.com.justspeaktoit.ios` and posts a payload-free Darwin notification.
+1. The user explicitly enables Instant Dictation once in Just Speak. The app
+   keeps a recording-capable audio session ready until the user turns it off or
+   iOS interrupts/terminates it. Idle buffers are discarded locally while the
+   system microphone indicator remains visible.
+2. Opening the keyboard starts automatically by creating a short-lived,
+   nonce-scoped request bound to `UITextDocumentProxy.documentIdentifier` in
+   `group.com.justspeaktoit.ios`, then posts a payload-free Darwin notification.
 3. The already-running containing app validates the nonce and records through
    the existing
    `TranscriptionRecordingService` using the selected local or remote model.
-4. The user finishes from the keyboard. The app saves the completed transcript
-   to History and writes one temporary
+4. Throttled interim text appears inside the keyboard. The user finishes from
+   the keyboard; the app saves the completed transcript to History and writes one temporary
    final transcript to the matching versioned App Group record.
 5. The keyboard inserts the matching result with
    `textDocumentProxy.insertText` and deletes the App Group copy. History
    remains available in Just Speak.
 
-If the containing app has been suspended, force-quit, interrupted, or the
-prepared session expired, the heartbeat becomes stale and the keyboard asks the
-user to open Just Speak. Custom keyboard extensions are not one of the iOS
+If the containing app has been force-quit, interrupted, terminated, or the
+phone restarted, the heartbeat becomes stale and the keyboard asks the user to
+open Just Speak once to reconnect. Custom keyboard extensions are not one of the iOS
 extension points for which Apple documents `NSExtensionContext.open` support,
 so the keyboard must not claim it can cold-launch the containing app.
 
 Requests expire after three minutes, transcription finalisation after 90
-seconds, and completed App Group results after 60 seconds. A mismatched nonce
-can neither read nor clear another request. Keyboard-originated dictation does
-not write to the clipboard, does not publish partial text through the legacy
-App Group keys, and deletes temporary batch audio after transcription.
+seconds, and completed App Group results after 60 seconds. A mismatched nonce or
+document identifier can neither read nor clear another request. Keyboard-originated
+dictation does not write to the clipboard; its nonce-scoped interim text is
+replacement-only and expires with the request. Temporary batch audio is deleted
+after transcription.
 
 ## Correction UX decision
 
@@ -94,16 +97,10 @@ runtime. When the system permits it, open Settings and follow General ›
 Keyboard › Keyboards › Add New Keyboard, then select Just Speak. Do not modify
 Simulator preference files directly.
 
-For a deterministic containing-app capture screen, launch the Debug app with:
-
-```text
---keyboard-handoff-demo
-JUSTSPEAKTOIT_SIMULATOR_TRANSCRIPT=Simulator keyboard result
-```
-
-Open the app with a pending demo request, tap **Finish & Transcribe**, and
-confirm the screen reaches **Ready to Insert**.
-The nonce, transcript, API keys, and surrounding text must not appear in logs.
+The old containing-app capture screen and `justspeaktoit://keyboard` deep link
+have been removed. A simulator run must not navigate away from the host text
+field to service a keyboard request. The nonce, transcript, API keys, and
+surrounding text must not appear in logs.
 
 ## Physical-device matrix
 
@@ -136,10 +133,11 @@ inspect or transmit surrounding text.
 2. Disable network connectivity.
 3. Open Notes or another standard text editor and focus a normal text field.
 4. Hold the globe key and choose Just Speak.
-5. Open Just Speak once, enable the five-minute Quick Dictation session, then
-   return to the focused Notes field and choose the Just Speak keyboard.
-6. Tap **Speak** and confirm recording starts while Notes remains visible.
-7. Speak, tap **Finish & Transcribe** in the keyboard, and confirm the matching
+5. Open Just Speak once, enable Instant Dictation, then return to the focused
+   Notes field and choose the Just Speak keyboard.
+6. Confirm recording starts automatically while Notes remains visible and live
+   words appear in the keyboard without touching the host field.
+7. Speak, tap **Stop & Insert** in the keyboard, and confirm the matching
    text is inserted once at the cursor or over the current selection without an
    app switch.
 8. Confirm the completed transcript is present in Just Speak History while the
@@ -149,15 +147,16 @@ inspect or transmit surrounding text.
 10. Verify safe undo succeeds immediately after insertion but refuses to delete
     text if the cursor moved or the host text changed.
 
-After the prepared session expires or the containing app is terminated, confirm
-the keyboard truthfully asks the user to open Just Speak and prepare a new one.
+After the containing app is force-quit, interrupted, terminated, or the phone
+restarts, confirm the keyboard truthfully asks the user to open Just Speak once
+to reconnect.
 
 ### Cloud-model happy path
 
 Repeat the happy path with a configured remote streaming model and then a
 remote batch model. Confirm:
 
-- the selected model name appears in the capture screen;
+- the resulting History item identifies the selected model;
 - missing credentials or network failures produce a generic safe error;
 - no API key, provider response body, transcript, nonce, or surrounding text is
   emitted to device logs;
@@ -169,8 +168,8 @@ remote batch model. Confirm:
 
 1. Cancel from the keyboard before completing the handoff. Confirm nothing is
    inserted and a newer request still works.
-2. Cancel while recording in the app. Confirm recording stops, partial audio is
-   deleted, and the keyboard reports cancellation.
+2. Switch away from the keyboard while recording. Confirm recording stops,
+   temporary state is cleared, and returning to the keyboard starts a fresh request.
 3. Leave the flow open beyond its timeout. Confirm a timeout state, no
    insertion, and a successful retry with a fresh nonce.
 4. Force-quit Just Speak during recording and confirm a retry does not consume
@@ -198,10 +197,11 @@ labels, Switch Control targets, and touch targets of at least 44 points.
 - The extension contains no microphone permission or audio APIs.
 - The containing app's existing microphone and speech usage descriptions apply
   when capture begins.
-- Only a schema version, request UUID, timestamps, phase, safe failure enum, and
-  final transcript are shared. The App Group transcript is removed on insertion
-  or timeout; the containing app's History record is not.
+- Only a schema version, request UUID, document identifier, timestamps, phase,
+  safe failure enum, throttled interim text, and final transcript are shared.
+  App Group text is removed on insertion, cancellation, or timeout; the
+  containing app's History record is not.
 - No private settings URL, responder-chain URL workaround, Apple keyboard asset,
   copied Apple keyboard layout, or unsupported containing-app launch is used.
-- App Review notes should describe the manual open/return steps and the
-  secure-field, phone-pad, and host-app restrictions exactly as users see them.
+- App Review notes should describe the one-time enable/reconnect boundary and
+  the secure-field, phone-pad, and host-app restrictions exactly as users see them.

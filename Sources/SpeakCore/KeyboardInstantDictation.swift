@@ -1,15 +1,17 @@
 import CoreFoundation
 import Foundation
 
-/// A short, explicitly-started window in which the containing iOS app is
-/// alive and ready to service microphone commands from the keyboard.
+/// A user-enabled readiness session in which the containing iOS app stays
+/// alive and can service microphone commands from the keyboard immediately.
 ///
 /// The keyboard never records audio. It only reads this liveness record and
 /// writes nonce-scoped handoff commands. The containing app refreshes the
 /// heartbeat while its foreground-started audio session is alive, preventing a
-/// stale `expiresAt` value from making the keyboard promise a microphone that
-/// iOS has already suspended.
-public struct KeyboardQuickDictationSession: Codable, Equatable, Sendable {
+/// stale preference from making the keyboard promise a microphone that iOS has
+/// already suspended. The heartbeat, rather than a fixed timer, is the source
+/// of truth: Instant Dictation remains ready until the user turns it off, the
+/// app is terminated, or iOS interrupts the audio session.
+public struct KeyboardInstantDictationSession: Codable, Equatable, Sendable {
     public static let schemaVersion = 1
 
     public enum Phase: String, Codable, Equatable, Sendable {
@@ -19,33 +21,31 @@ public struct KeyboardQuickDictationSession: Codable, Equatable, Sendable {
 
     public let schemaVersion: Int
     public let startedAt: Date
-    public let expiresAt: Date
     public let lastHeartbeatAt: Date
     public let phase: Phase
 
     public init(
         schemaVersion: Int = Self.schemaVersion,
         startedAt: Date,
-        expiresAt: Date,
         lastHeartbeatAt: Date,
         phase: Phase
     ) {
         self.schemaVersion = schemaVersion
         self.startedAt = startedAt
-        self.expiresAt = expiresAt
         self.lastHeartbeatAt = lastHeartbeatAt
         self.phase = phase
     }
 }
 
-/// App Group-backed liveness state for the containing app's prepared audio
-/// session. Audio and transcript content never enter this store.
-public final class KeyboardQuickDictationStore {
-    public static let shared = KeyboardQuickDictationStore()
-    public static let defaultDuration: TimeInterval = 5 * 60
+/// App Group-backed preference and liveness state for the containing app's
+/// Instant Dictation audio session. Audio and transcript content never enter
+/// this store.
+public final class KeyboardInstantDictationStore {
+    public static let shared = KeyboardInstantDictationStore()
     public static let heartbeatLifetime: TimeInterval = 4
 
-    private static let sessionKey = "keyboardQuickDictation.session.v1"
+    private static let sessionKey = "keyboardInstantDictation.session.v1"
+    private static let enabledKey = "keyboardInstantDictation.enabled.v1"
 
     private let defaults: UserDefaults?
     private let encoder = JSONEncoder()
@@ -60,16 +60,26 @@ public final class KeyboardQuickDictationStore {
         self.defaults = defaults
     }
 
+    public var isEnabled: Bool {
+        defaults?.bool(forKey: Self.enabledKey) ?? false
+    }
+
+    public func setEnabled(_ enabled: Bool) {
+        guard let defaults else { return }
+        defaults.set(enabled, forKey: Self.enabledKey)
+        if !enabled {
+            lock.withLock {
+                clearUnlocked()
+            }
+        }
+        defaults.synchronize()
+    }
+
     @discardableResult
-    public func start(
-        now: Date = Date(),
-        duration: TimeInterval = defaultDuration
-    ) -> KeyboardQuickDictationSession? {
+    public func start(now: Date = Date()) -> KeyboardInstantDictationSession? {
         lock.withLock {
-            guard duration > 0 else { return nil }
-            let session = KeyboardQuickDictationSession(
+            let session = KeyboardInstantDictationSession(
                 startedAt: now,
-                expiresAt: now.addingTimeInterval(duration),
                 lastHeartbeatAt: now,
                 phase: .ready
             )
@@ -79,18 +89,16 @@ public final class KeyboardQuickDictationStore {
 
     @discardableResult
     public func heartbeat(
-        phase: KeyboardQuickDictationSession.Phase? = nil,
+        phase: KeyboardInstantDictationSession.Phase? = nil,
         now: Date = Date()
-    ) -> KeyboardQuickDictationSession? {
+    ) -> KeyboardInstantDictationSession? {
         lock.withLock {
-            guard let current = readUnlocked(),
-                  current.phase == .recording || current.expiresAt > now else {
+            guard let current = readUnlocked() else {
                 clearUnlocked()
                 return nil
             }
-            let updated = KeyboardQuickDictationSession(
+            let updated = KeyboardInstantDictationSession(
                 startedAt: current.startedAt,
-                expiresAt: current.expiresAt,
                 lastHeartbeatAt: now,
                 phase: phase ?? current.phase
             )
@@ -101,12 +109,11 @@ public final class KeyboardQuickDictationStore {
     public func activeSession(
         now: Date = Date(),
         clearingStaleRecord: Bool = false
-    ) -> KeyboardQuickDictationSession? {
+    ) -> KeyboardInstantDictationSession? {
         lock.withLock {
             guard let session = readUnlocked() else { return nil }
             let heartbeatIsFresh = now.timeIntervalSince(session.lastHeartbeatAt) <= Self.heartbeatLifetime
-            let readinessWindowIsOpen = session.phase == .recording || session.expiresAt > now
-            guard heartbeatIsFresh, readinessWindowIsOpen else {
+            guard heartbeatIsFresh else {
                 if clearingStaleRecord {
                     clearUnlocked()
                 }
@@ -122,17 +129,17 @@ public final class KeyboardQuickDictationStore {
         }
     }
 
-    private func writeUnlocked(_ session: KeyboardQuickDictationSession) -> Bool {
+    private func writeUnlocked(_ session: KeyboardInstantDictationSession) -> Bool {
         guard let defaults, let data = try? encoder.encode(session) else { return false }
         defaults.set(data, forKey: Self.sessionKey)
         defaults.synchronize()
         return true
     }
 
-    private func readUnlocked() -> KeyboardQuickDictationSession? {
+    private func readUnlocked() -> KeyboardInstantDictationSession? {
         guard let data = defaults?.data(forKey: Self.sessionKey),
-              let session = try? decoder.decode(KeyboardQuickDictationSession.self, from: data),
-              session.schemaVersion == KeyboardQuickDictationSession.schemaVersion else {
+              let session = try? decoder.decode(KeyboardInstantDictationSession.self, from: data),
+              session.schemaVersion == KeyboardInstantDictationSession.schemaVersion else {
             return nil
         }
         return session

@@ -52,7 +52,13 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        model.activate(hasFullAccess: hasFullAccess)
+        model.activate(
+            hasFullAccess: hasFullAccess,
+            documentIdentifier: textDocumentProxy.documentIdentifier,
+            insertText: { [weak self] text in
+                self?.textDocumentProxy.insertText(text)
+            }
+        )
         updateDocumentContext()
     }
 
@@ -75,17 +81,20 @@ final class KeyboardViewController: UIInputViewController {
 
     override func textDidChange(_ textInput: UITextInput?) {
         super.textDidChange(textInput)
-        model.activate(hasFullAccess: hasFullAccess)
-        updateDocumentContext()
+        updateDocumentContext(selectionChanged: false)
     }
 
     override func selectionDidChange(_ textInput: UITextInput?) {
         super.selectionDidChange(textInput)
-        updateDocumentContext()
+        updateDocumentContext(selectionChanged: true)
     }
 
-    private func updateDocumentContext() {
-        model.updateDocumentContext(selectedText: textDocumentProxy.selectedText)
+    private func updateDocumentContext(selectionChanged: Bool = false) {
+        model.updateDocumentContext(
+            documentIdentifier: textDocumentProxy.documentIdentifier,
+            selectedText: textDocumentProxy.selectedText,
+            selectionChanged: selectionChanged
+        )
     }
 
     private func undoLastInsertion(_ text: String) -> Bool {
@@ -140,18 +149,21 @@ final class KeyboardViewModel: ObservableObject {
         case missingFullAccess
         case unavailable
         case cancelled
+        case targetChanged
         case error(KeyboardHandoffRecord.FailureCode)
     }
 
     @Published private(set) var presentation: Presentation = .idle
     @Published private(set) var hasFullAccess = false
     @Published private(set) var hasSelectedText = false
-    @Published private(set) var quickSessionExpiresAt: Date?
+    @Published private(set) var isInstantReady = false
+    @Published private(set) var liveTranscript = ""
 
     private let store: KeyboardHandoffStore
-    private let quickSessionStore: KeyboardQuickDictationStore
+    private let instantSessionStore: KeyboardInstantDictationStore
     private let consumer: KeyboardHandoffConsumer
     private var requestID: UUID?
+    private var currentDocumentIdentifier: UUID?
     private var pollTask: Task<Void, Never>?
     private var insertText: ((String) -> Void)?
     private var lastInsertedText: String?
@@ -162,15 +174,21 @@ final class KeyboardViewModel: ObservableObject {
 
     init(
         store: KeyboardHandoffStore = .shared,
-        quickSessionStore: KeyboardQuickDictationStore = .shared
+        instantSessionStore: KeyboardInstantDictationStore = .shared
     ) {
         self.store = store
-        self.quickSessionStore = quickSessionStore
+        self.instantSessionStore = instantSessionStore
         self.consumer = KeyboardHandoffConsumer(store: store)
     }
 
-    func activate(hasFullAccess: Bool) {
+    func activate(
+        hasFullAccess: Bool,
+        documentIdentifier: UUID,
+        insertText: @escaping (String) -> Void
+    ) {
         self.hasFullAccess = hasFullAccess
+        self.currentDocumentIdentifier = documentIdentifier
+        self.insertText = insertText
         store.recordExtensionObservation(hasFullAccess: hasFullAccess)
 
         guard KeyboardLaunchPolicy.blockReason(
@@ -184,18 +202,53 @@ final class KeyboardViewModel: ObservableObject {
         if requestID == nil {
             requestID = store.activeRecord()?.requestID
         }
-        refreshQuickSession()
+        refreshInstantSession()
         refresh()
         startPolling()
+        if requestID == nil, isInstantReady, presentation != .inserted {
+            startHandoff(insertText: insertText)
+        } else if requestID == nil, !isInstantReady {
+            presentation = .waitingForApp
+        }
     }
 
     func deactivate() {
+        if let requestID,
+           let phase = store.record(matching: requestID)?.phase,
+           phase == .requested || phase == .recording || phase == .finishRequested || phase == .transcribing {
+            _ = try? store.cancel(requestID: requestID)
+            KeyboardHandoffSignal.postRequestChanged()
+            self.requestID = nil
+        }
         pollTask?.cancel()
         pollTask = nil
+        liveTranscript = ""
+        lastInsertedText = nil
+        presentation = .idle
     }
 
-    func updateDocumentContext(selectedText: String?) {
+    func updateDocumentContext(
+        documentIdentifier: UUID,
+        selectedText: String?,
+        selectionChanged: Bool
+    ) {
+        currentDocumentIdentifier = documentIdentifier
         hasSelectedText = !(selectedText ?? "").isEmpty
+
+        guard let requestID,
+              let record = store.record(matching: requestID),
+              record.phase == .requested
+                || record.phase == .recording
+                || record.phase == .finishRequested
+                || record.phase == .transcribing,
+              selectionChanged || record.targetDocumentIdentifier != documentIdentifier else {
+            return
+        }
+        _ = try? store.cancel(requestID: requestID)
+        KeyboardHandoffSignal.postRequestChanged()
+        self.requestID = nil
+        liveTranscript = ""
+        presentation = .targetChanged
     }
 
     func startHandoff(insertText: @escaping (String) -> Void) {
@@ -209,9 +262,16 @@ final class KeyboardViewModel: ObservableObject {
         }
 
         do {
-            let request = try store.createRequest()
+            guard isInstantReady, let currentDocumentIdentifier else {
+                presentation = .waitingForApp
+                return
+            }
+            let request = try store.createRequest(
+                targetDocumentIdentifier: currentDocumentIdentifier
+            )
             requestID = request.requestID
-            presentation = quickSessionExpiresAt == nil ? .waitingForApp : .starting
+            liveTranscript = ""
+            presentation = .starting
             KeyboardHandoffSignal.postRequestChanged()
         } catch {
             presentation = .unavailable
@@ -226,6 +286,7 @@ final class KeyboardViewModel: ObservableObject {
         _ = try? store.cancel(requestID: requestID)
         KeyboardHandoffSignal.postRequestChanged()
         self.requestID = nil
+        liveTranscript = ""
         presentation = .cancelled
     }
 
@@ -259,21 +320,30 @@ final class KeyboardViewModel: ObservableObject {
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 self?.refresh()
-                try? await Task.sleep(for: .milliseconds(350))
+                try? await Task.sleep(for: .milliseconds(120))
             }
         }
     }
 
     // swiftlint:disable:next cyclomatic_complexity
     private func refresh() {
-        refreshQuickSession()
+        refreshInstantSession()
         guard hasFullAccess else {
             presentation = .missingFullAccess
             return
         }
         guard let requestID else {
-            if presentation != .inserted && presentation != .undone && presentation != .cancelled {
-                presentation = .idle
+            if isInstantReady,
+               presentation == .waitingForApp,
+               let insertText {
+                startHandoff(insertText: insertText)
+                return
+            }
+            if presentation != .inserted
+                && presentation != .undone
+                && presentation != .cancelled
+                && presentation != .targetChanged {
+                presentation = isInstantReady ? .idle : .waitingForApp
             }
             return
         }
@@ -282,10 +352,22 @@ final class KeyboardViewModel: ObservableObject {
             self.requestID = nil
             return
         }
+        liveTranscript = record.interimTranscript ?? ""
+
+        if let target = record.targetDocumentIdentifier,
+           target != currentDocumentIdentifier {
+            if record.phase != .completed {
+                _ = try? store.cancel(requestID: requestID)
+                KeyboardHandoffSignal.postRequestChanged()
+                self.requestID = nil
+            }
+            presentation = .targetChanged
+            return
+        }
 
         switch record.phase {
         case .requested:
-            presentation = quickSessionExpiresAt == nil ? .waitingForApp : .starting
+            presentation = isInstantReady ? .starting : .waitingForApp
         case .recording:
             presentation = .recording
         case .finishRequested:
@@ -297,9 +379,14 @@ final class KeyboardViewModel: ObservableObject {
                 presentation = .error(.unknown)
                 return
             }
-            if consumer.insertReadyResult(requestID: requestID, insert: insertText) {
+            if consumer.insertReadyResult(
+                requestID: requestID,
+                documentIdentifier: currentDocumentIdentifier,
+                insert: insertText
+            ) {
                 lastInsertedText = record.transcript
                 self.requestID = nil
+                liveTranscript = ""
                 presentation = .inserted
             }
         case .cancelled:
@@ -311,8 +398,8 @@ final class KeyboardViewModel: ObservableObject {
         }
     }
 
-    private func refreshQuickSession() {
-        quickSessionExpiresAt = quickSessionStore.activeSession()?.expiresAt
+    private func refreshInstantSession() {
+        isInstantReady = instantSessionStore.activeSession() != nil
     }
 }
 
@@ -330,12 +417,20 @@ private struct KeyboardRootView: View {
             VStack(spacing: 10) {
                 if proxy.size.width >= 620 {
                     HStack(spacing: 22) {
-                        statusCopy
+                        VStack(spacing: 8) {
+                            statusCopy
+                            if showsLiveTranscript {
+                                liveTranscript
+                            }
+                        }
                         Spacer(minLength: 12)
                         primaryControl
                     }
                 } else {
                     statusCopy
+                    if showsLiveTranscript {
+                        liveTranscript
+                    }
                     primaryControl
                 }
 
@@ -351,6 +446,18 @@ private struct KeyboardRootView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(uiColor: .systemGroupedBackground))
         }
+    }
+
+    private var liveTranscript: some View {
+        Text(model.liveTranscript.isEmpty ? "Listening…" : model.liveTranscript)
+            .font(.body.weight(model.liveTranscript.isEmpty ? .regular : .medium))
+            .foregroundStyle(model.liveTranscript.isEmpty ? .secondary : .primary)
+            .frame(maxWidth: .infinity, minHeight: 54, alignment: .topLeading)
+            .lineLimit(3)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(.background.opacity(0.72), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .accessibilityIdentifier("keyboardLiveTranscript")
     }
 
     private var statusCopy: some View {
@@ -392,14 +499,14 @@ private struct KeyboardRootView: View {
         case .starting:
             HStack(spacing: 10) {
                 ProgressView()
-                Text("Starting microphone")
+                Text("Starting transcription")
                     .font(.headline)
             }
             .frame(maxWidth: 330, minHeight: 52)
             .accessibilityElement(children: .combine)
 
         case .waitingForApp:
-            Label("Open Just Speak manually", systemImage: "arrow.up.forward.app")
+            Label("Open Just Speak once", systemImage: "arrow.up.forward.app")
                 .font(.headline)
                 .frame(maxWidth: 330, minHeight: 52)
                 .accessibilityIdentifier("keyboardOpenAppInstruction")
@@ -408,7 +515,7 @@ private struct KeyboardRootView: View {
             Button {
                 model.finish()
             } label: {
-                Label("Finish & Transcribe", systemImage: "stop.fill")
+                Label("Stop & Insert", systemImage: "stop.fill")
                     .font(.headline)
                     .frame(maxWidth: 330, minHeight: 52)
             }
@@ -425,7 +532,7 @@ private struct KeyboardRootView: View {
             .frame(maxWidth: 330, minHeight: 52)
             .accessibilityElement(children: .combine)
 
-        case .unavailable, .error:
+        case .unavailable, .targetChanged, .error:
             Button {
                 model.retry(insertText: insertText)
             } label: {
@@ -497,7 +604,7 @@ private struct KeyboardRootView: View {
                     .accessibilityHint("Touch and hold to choose another keyboard")
             }
 
-            Text("Audio stays in Just Speak. Temporary handoff clears; transcripts remain in History.")
+            Text("Audio stays in Just Speak. Live handoff text clears; completed transcripts remain in History.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity)
@@ -520,7 +627,7 @@ private struct KeyboardRootView: View {
 
     private var canCancel: Bool {
         switch model.presentation {
-        case .starting, .waitingForApp, .recording, .transcribing:
+        case .starting, .recording, .transcribing:
             return true
         default:
             return false
@@ -529,7 +636,7 @@ private struct KeyboardRootView: View {
 
     private var showsCorrectionControls: Bool {
         switch model.presentation {
-        case .idle, .inserted, .undone, .cancelled:
+        case .idle, .inserted, .undone, .cancelled, .targetChanged:
             return true
         default:
             return false
@@ -544,18 +651,16 @@ private struct KeyboardRootView: View {
         case .inserted:
             return "Speak Again"
         default:
-            return model.quickSessionExpiresAt == nil ? "Prepare Quick Dictation" : "Speak"
+            return "Speak"
         }
     }
 
     private var title: String {
         switch model.presentation {
         case .idle:
-            return model.quickSessionExpiresAt == nil
-                ? "Quick Dictation needs preparation"
-                : "Quick Dictation ready"
+            return "Instant Dictation ready"
         case .starting: return "Starting in the keyboard"
-        case .waitingForApp: return "Open Just Speak"
+        case .waitingForApp: return "Reconnect Instant Dictation"
         case .recording: return "Recording in Just Speak"
         case .transcribing: return "Finishing transcript"
         case .inserted: return "Inserted"
@@ -563,6 +668,7 @@ private struct KeyboardRootView: View {
         case .missingFullAccess: return "Full Access is off"
         case .unavailable: return "Just Speak is unavailable"
         case .cancelled: return "Cancelled"
+        case .targetChanged: return "Text field changed"
         case .error: return "Couldn’t insert transcript"
         }
     }
@@ -571,17 +677,13 @@ private struct KeyboardRootView: View {
         switch model.presentation {
         case .idle:
             if model.hasSelectedText {
-                return model.quickSessionExpiresAt == nil
-                    ? "The next transcript replaces the selection. Open Just Speak once to start a five-minute session."
-                    : "The next transcript replaces the selection without leaving this app."
+                return "The next transcript replaces the selection without leaving this app."
             }
-            return model.quickSessionExpiresAt == nil
-                ? "Open Just Speak once to start a private five-minute microphone session."
-                : "Tap Speak and stay here. Idle audio is discarded until you start."
+            return "Listening starts automatically whenever this keyboard appears."
         case .starting:
-            return "Stay here. Just Speak is starting the microphone in the background."
+            return "Stay here. Just Speak is connecting your selected transcription model."
         case .waitingForApp:
-            return "Open Just Speak from the Home Screen or App Switcher and enable Quick Dictation."
+            return "Open Just Speak after installation, restart, or force quit. Instant Dictation reconnects automatically."
         case .recording:
             return "Speak now, then finish here. The containing app owns the microphone."
         case .transcribing:
@@ -596,6 +698,8 @@ private struct KeyboardRootView: View {
             return "Open the Just Speak app once and check that the keyboard is enabled."
         case .cancelled:
             return "No transcript was inserted."
+        case .targetChanged:
+            return "Recording stopped so text can’t be inserted into a different app or field. Focus the intended field and retry."
         case let .error(code):
             return errorDetail(for: code)
         }
@@ -613,6 +717,7 @@ private struct KeyboardRootView: View {
         case .missingFullAccess: return "lock.trianglebadge.exclamationmark"
         case .unavailable, .error: return "exclamationmark.triangle.fill"
         case .cancelled: return "xmark.circle"
+        case .targetChanged: return "scope"
         }
     }
 
@@ -620,14 +725,14 @@ private struct KeyboardRootView: View {
         switch model.presentation {
         case .inserted, .undone: return .green
         case .recording: return .red
-        case .missingFullAccess, .unavailable, .error: return .orange
+        case .missingFullAccess, .unavailable, .targetChanged, .error: return .orange
         default: return .primary
         }
     }
 
     private var progressLabel: String {
         switch model.presentation {
-        case .transcribing: return "Transcribing"
+        case .transcribing: return "Finishing & inserting"
         default: return "Waiting"
         }
     }
@@ -646,8 +751,19 @@ private struct KeyboardRootView: View {
             return "The one-time request expired. Nothing was inserted."
         case .invalidRequest:
             return "The request did not match the active keyboard session."
+        case .targetChanged:
+            return "The destination changed, so nothing was inserted. Focus the intended field and retry."
         case .unknown:
             return "The temporary handoff ended safely. Completed recordings remain in History."
+        }
+    }
+
+    private var showsLiveTranscript: Bool {
+        switch model.presentation {
+        case .recording, .transcribing:
+            return true
+        default:
+            return false
         }
     }
 }

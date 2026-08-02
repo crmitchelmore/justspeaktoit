@@ -668,6 +668,7 @@ public struct SettingsView: View {
     @StateObject private var settings = AppSettings.shared
     @Environment(\.openURL) private var openURL
     @Environment(\.openClawEnabled) private var openClawEnabled
+    @Environment(\.iOSKeyboardEnabled) private var iOSKeyboardEnabled
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var showingAPIKeys = false
     @State private var missingTranscriptionAPIKeyAlert: IOSMissingTranscriptionAPIKeyAlert?
@@ -853,23 +854,25 @@ public struct SettingsView: View {
                 }
             }
 
-            Section("Just Speak Keyboard") {
-                NavigationLink {
-                    KeyboardSetupView()
-                } label: {
-                    HStack {
-                        Label("Set Up Keyboard", systemImage: "keyboard")
-                        Spacer()
-                        Text(keyboardStatusLabel)
+            if iOSKeyboardEnabled {
+                Section("Just Speak Keyboard") {
+                    NavigationLink {
+                        KeyboardSetupView()
+                    } label: {
+                        HStack {
+                            Label("Set Up Keyboard", systemImage: "keyboard")
+                            Spacer()
+                            Text(keyboardStatusLabel)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .accessibilityIdentifier("keyboardSetupLink")
+
+                    if !usesInlineDensityLayout {
+                        Text("Transcribe into other apps through a private handoff to Just Speak.")
+                            .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                }
-                .accessibilityIdentifier("keyboardSetupLink")
-
-                if !usesInlineDensityLayout {
-                    Text("Transcribe into other apps through a private handoff to Just Speak.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
             }
 

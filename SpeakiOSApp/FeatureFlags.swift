@@ -11,6 +11,18 @@ import Foundation
 /// (see `Project.swift`, which maps the env var to the
 /// `SHOW_OPENCLAW_TAB` compilation condition).
 enum FeatureFlags {
+    /// Whether the custom keyboard extension and its app-owned readiness flow
+    /// are enabled. Defaults to `false`; `Project.swift` includes the extension
+    /// and defines `IOS_KEYBOARD_FEATURE` only when generated with
+    /// `TUIST_IOS_KEYBOARD=1`.
+    static var iOSKeyboardEnabled: Bool {
+        #if IOS_KEYBOARD_FEATURE
+        true
+        #else
+        false
+        #endif
+    }
+
     /// Whether the OpenClaw tab is shown in the main tab bar. Defaults to
     /// `false` (hidden) so App Store builds ship without it; set the
     /// `SHOW_OPENCLAW_TAB` build condition to bring the tab back (e.g. for

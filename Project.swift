@@ -22,13 +22,31 @@ var iosAppSettings: [String: SettingValue] = [
     "MARKETING_VERSION": "\(version)"
 ]
 
-// Build-time feature flag: the OpenClaw tab is hidden by default (App Store
-// builds ship without it). Generate the project with `SHOW_OPENCLAW_TAB=1
-// tuist generate` to bring the tab back for internal testing. Gated in code via
-// the `SHOW_OPENCLAW_TAB` Swift active compilation condition (see
-// SpeakiOSApp/FeatureFlags.swift).
+// Build-time feature flags for iOS. Both features are hidden by default.
+// `TUIST_IOS_KEYBOARD=1 tuist generate` is the only way to include the custom
+// keyboard extension in the generated project and host app. The matching Swift
+// condition gates app activation and setup UI (see SpeakiOSApp/FeatureFlags.swift).
+let iosKeyboardFlag = (ProcessInfo.processInfo.environment["TUIST_IOS_KEYBOARD"] ?? "").lowercased()
+let isIOSKeyboardEnabled = ["1", "true", "yes"].contains(iosKeyboardFlag)
+var iosActiveCompilationConditions: [String] = []
+var iosTestSettings: [String: SettingValue] = [:]
+var iosTestResourceElements: [ResourceFileElement] = [
+    "SpeakiOS.entitlements",
+    "JustSpeakToItWidgetExtension/JustSpeakToItWidgetExtension.entitlements"
+]
+
 if ProcessInfo.processInfo.environment["SHOW_OPENCLAW_TAB"] != nil {
-    iosAppSettings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] = "$(inherited) SHOW_OPENCLAW_TAB"
+    iosActiveCompilationConditions.append("SHOW_OPENCLAW_TAB")
+}
+if isIOSKeyboardEnabled {
+    iosActiveCompilationConditions.append("IOS_KEYBOARD_FEATURE")
+    iosTestSettings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] = "$(inherited) IOS_KEYBOARD_FEATURE"
+    iosTestResourceElements.append("JustSpeakKeyboard/JustSpeakKeyboard.entitlements")
+}
+if !iosActiveCompilationConditions.isEmpty {
+    iosAppSettings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] = .string(
+        "$(inherited) \(iosActiveCompilationConditions.joined(separator: " "))"
+    )
 }
 
 // Distribution channel selection for macOS. The app compiles from one codebase into
@@ -213,11 +231,11 @@ let project = Project(
                 .package(product: "SpeakCore"),
                 .package(product: "SpeakiOSLib"),
                 .package(product: "SpeakSync"),
-                .target(name: "JustSpeakToItWidgetExtension"),
-                .target(name: "JustSpeakKeyboard")
-            ],
+                .target(name: "JustSpeakToItWidgetExtension")
+            ] + (isIOSKeyboardEnabled ? [.target(name: "JustSpeakKeyboard")] : []),
             settings: .settings(base: iosAppSettings)
-        ),
+        )
+    ] + (isIOSKeyboardEnabled ? [
         .target(
             name: "JustSpeakKeyboard",
             destinations: .iOS,
@@ -231,7 +249,8 @@ let project = Project(
                 .package(product: "SpeakCore")
             ],
             settings: .settings(base: iosKeyboardSettings)
-        ),
+        )
+    ] : []) + [
         .target(
             name: "JustSpeakToItWidgetExtension",
             destinations: .iOS,
@@ -266,7 +285,8 @@ let project = Project(
             sources: ["Tests/SpeakiOSUITests/**"],
             dependencies: [
                 .target(name: "SpeakiOS")
-            ]
+            ],
+            settings: .settings(base: iosTestSettings)
         ),
         .target(
             name: "SpeakiOSTests",
@@ -275,16 +295,13 @@ let project = Project(
             bundleId: "com.justspeaktoit.ios.tests",
             deploymentTargets: .iOS("17.0"),
             sources: ["Tests/SpeakiOSTests/**"],
-            resources: [
-                "SpeakiOS.entitlements",
-                "JustSpeakToItWidgetExtension/JustSpeakToItWidgetExtension.entitlements",
-                "JustSpeakKeyboard/JustSpeakKeyboard.entitlements"
-            ],
+            resources: .resources(iosTestResourceElements),
             dependencies: [
                 .target(name: "SpeakiOS"),
                 .package(product: "SpeakCore"),
                 .package(product: "SpeakiOSLib")
-            ]
+            ],
+            settings: .settings(base: iosTestSettings)
         )
     ]
 )

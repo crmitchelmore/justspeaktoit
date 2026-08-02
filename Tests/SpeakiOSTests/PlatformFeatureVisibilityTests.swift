@@ -1,11 +1,16 @@
 #if os(iOS)
 import SpeakCore
+import SwiftUI
 import XCTest
 
 @testable import SpeakiOSLib
 
 @MainActor
 final class PlatformFeatureVisibilityTests: XCTestCase {
+    func testKeyboardFeatureEnvironmentDefaultsOff() {
+        XCTAssertFalse(EnvironmentValues().iOSKeyboardEnabled)
+    }
+
     func testRemoteLivePicker_omitsProvidersWithoutAnIOSImplementation() {
         let visibleModels = AppSettings.supportedLiveModels
         let visibleIDs = Set(visibleModels.map(\.id))

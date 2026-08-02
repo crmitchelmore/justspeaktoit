@@ -110,6 +110,41 @@ final class KeyboardHandoffTests: XCTestCase {
         XCTAssertNil(store.activeRecord())
     }
 
+    func testOnlyRequestedHandoffResumesWhenContainingAppOpens() throws {
+        let request = try store.createRequest()
+
+        XCTAssertEqual(
+            KeyboardLaunchPolicy.pendingCaptureRequestID(from: store.activeRecord()),
+            request.requestID
+        )
+
+        try store.markRecording(requestID: request.requestID)
+        XCTAssertNil(KeyboardLaunchPolicy.pendingCaptureRequestID(from: store.activeRecord()))
+        XCTAssertNil(KeyboardLaunchPolicy.pendingCaptureRequestID(from: nil))
+    }
+
+    func testUndoPlanRequiresExactInsertedSuffix() {
+        XCTAssertEqual(
+            KeyboardCorrectionPlan.undoDeletionCount(
+                insertedText: "Correct this 👋",
+                documentContextBeforeInput: "Prefix. Correct this 👋"
+            ),
+            14
+        )
+        XCTAssertNil(
+            KeyboardCorrectionPlan.undoDeletionCount(
+                insertedText: "Correct this 👋",
+                documentContextBeforeInput: "Correct this changed"
+            )
+        )
+        XCTAssertNil(
+            KeyboardCorrectionPlan.undoDeletionCount(
+                insertedText: "",
+                documentContextBeforeInput: "Prefix"
+            )
+        )
+    }
+
     private func completedRequest(transcript: String) throws -> KeyboardHandoffRecord {
         let request = try store.createRequest()
         try store.markRecording(requestID: request.requestID)

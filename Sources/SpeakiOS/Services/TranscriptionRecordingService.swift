@@ -284,7 +284,7 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
         partialText = text
         wordCount = text.split(whereSeparator: \.isWhitespace).count
 
-        // Keyboard handoffs opt out so transient dictation is not persisted.
+        // Specialized callers may opt out when their result is intentionally transient.
         let historyItem = saveToHistory
             ? iOSHistoryManager.shared.recordTranscription(
                 text: text,

@@ -166,7 +166,8 @@ public struct KeyboardSetupView: View {
     }
 
     private var quickDictationStatus: String {
-        guard let session = quickDictation.session else { return "Not enabled" }
+        guard let session = quickDictation.session,
+              quickDictation.isReady || quickDictation.isRecording else { return "Not enabled" }
         if session.phase == .recording { return "Recording" }
         return "Ready until \(session.expiresAt.formatted(date: .omitted, time: .shortened))"
     }

@@ -136,13 +136,12 @@ inspect or transmit surrounding text.
 2. Disable network connectivity.
 3. Open Notes or another standard text editor and focus a normal text field.
 4. Hold the globe key and choose Just Speak.
-5. Tap **Prepare Transcription**, then manually open Just Speak from the Home
-   Screen or App Switcher. Confirm the pending capture opens and requests
-   microphone/speech permission only there.
-6. Speak, tap **Finish & Transcribe**, and wait for **Ready to Insert**.
-7. Return to Notes using the app switcher or Back gesture where available,
-   choose Just Speak again if iOS changed keyboards, and confirm the text is
-   inserted once at the cursor or over the current selection.
+5. Open Just Speak once, enable the five-minute Quick Dictation session, then
+   return to the focused Notes field and choose the Just Speak keyboard.
+6. Tap **Speak** and confirm recording starts while Notes remains visible.
+7. Speak, tap **Finish & Transcribe** in the keyboard, and confirm the matching
+   text is inserted once at the cursor or over the current selection without an
+   app switch.
 8. Confirm the completed transcript is present in Just Speak History while the
    temporary App Group result cannot be inserted again.
 9. Select a word in Notes, choose **Replace Selection by Voice**, complete a
@@ -150,8 +149,8 @@ inspect or transmit surrounding text.
 10. Verify safe undo succeeds immediately after insertion but refuses to delete
     text if the cursor moved or the host text changed.
 
-iOS does not provide a public API that returns an extension directly to the
-originating third-party app, so the UI truthfully asks the user to return.
+After the prepared session expires or the containing app is terminated, confirm
+the keyboard truthfully asks the user to open Just Speak and prepare a new one.
 
 ### Cloud-model happy path
 

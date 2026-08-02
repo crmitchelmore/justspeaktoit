@@ -98,13 +98,18 @@ public final class KeyboardQuickDictationStore {
         }
     }
 
-    public func activeSession(now: Date = Date()) -> KeyboardQuickDictationSession? {
+    public func activeSession(
+        now: Date = Date(),
+        clearingStaleRecord: Bool = false
+    ) -> KeyboardQuickDictationSession? {
         lock.withLock {
             guard let session = readUnlocked() else { return nil }
             let heartbeatIsFresh = now.timeIntervalSince(session.lastHeartbeatAt) <= Self.heartbeatLifetime
             let readinessWindowIsOpen = session.phase == .recording || session.expiresAt > now
             guard heartbeatIsFresh, readinessWindowIsOpen else {
-                clearUnlocked()
+                if clearingStaleRecord {
+                    clearUnlocked()
+                }
                 return nil
             }
             return session
@@ -194,13 +199,5 @@ public final class KeyboardHandoffSignalObservation: @unchecked Sendable {
             CFNotificationName(name),
             nil
         )
-    }
-}
-
-extension NSLock {
-    func withLock<T>(_ operation: () throws -> T) rethrows -> T {
-        lock()
-        defer { unlock() }
-        return try operation()
     }
 }

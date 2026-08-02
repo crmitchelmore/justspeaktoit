@@ -32,7 +32,7 @@ public final class KeyboardQuickDictationCoordinator: ObservableObject {
     private init() {}
 
     public var isReady: Bool {
-        session?.phase == .ready && sessionStore.activeSession() != nil
+        session?.phase == .ready && sessionStore.activeSession(clearingStaleRecord: true) != nil
     }
 
     public var isRecording: Bool {
@@ -46,7 +46,7 @@ public final class KeyboardQuickDictationCoordinator: ObservableObject {
                 self?.handleRequestChange()
             }
         }
-        session = sessionStore.activeSession()
+        session = sessionStore.activeSession(clearingStaleRecord: true)
     }
 
     /// Starts a bounded session only from the foreground, after an explicit
@@ -118,9 +118,8 @@ public final class KeyboardQuickDictationCoordinator: ObservableObject {
             while !Task.isCancelled {
                 guard let self else { return }
                 guard let updated = self.sessionStore.heartbeat() else {
-                    if !self.recordingService.isRunning {
-                        self.endSession()
-                    }
+                    self.errorMessage = "Quick Dictation ended because its session state was unavailable."
+                    self.endSession()
                     return
                 }
                 guard updated.phase == .recording || self.readinessAudio.isRunning else {
@@ -136,7 +135,7 @@ public final class KeyboardQuickDictationCoordinator: ObservableObject {
 
     private func handleRequestChange() {
         guard requestTask == nil else { return }
-        guard sessionStore.activeSession() != nil,
+        guard sessionStore.activeSession(clearingStaleRecord: true) != nil,
               let record = handoffStore.activeRecord() else { return }
 
         switch record.phase {
@@ -224,7 +223,8 @@ public final class KeyboardQuickDictationCoordinator: ObservableObject {
     }
 
     private func resumeReadinessAfterRequest() async {
-        guard let current = sessionStore.activeSession(), current.expiresAt > Date() else {
+        guard let current = sessionStore.activeSession(clearingStaleRecord: true),
+              current.expiresAt > Date() else {
             endSession()
             return
         }
@@ -264,6 +264,7 @@ private final class KeyboardReadinessAudioSession {
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
         guard format.channelCount > 0 else {
+            stop(deactivateAudioSession: true)
             throw KeyboardReadinessAudioError.noInput
         }
         if !tapInstalled {
@@ -273,7 +274,12 @@ private final class KeyboardReadinessAudioSession {
             tapInstalled = true
         }
         engine.prepare()
-        try engine.start()
+        do {
+            try engine.start()
+        } catch {
+            stop(deactivateAudioSession: true)
+            throw error
+        }
     }
 
     func stop(deactivateAudioSession: Bool) {

@@ -138,9 +138,10 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(keyboard.contains("transcripts remain in History"))
         XCTAssertFalse(keyboard.contains("Results are deleted after insertion"))
         XCTAssertTrue(captureCoordinator.contains("saveToHistory: true"))
-        XCTAssertTrue(quickCoordinator.contains("Idle buffers are discarded immediately"))
+        XCTAssertTrue(quickCoordinator.contains("input.installTap"))
+        XCTAssertFalse(quickCoordinator.contains(".write("))
+        XCTAssertFalse(quickCoordinator.contains(".upload("))
         XCTAssertTrue(quickCoordinator.contains("saveToHistory: true"))
-        XCTAssertFalse(quickCoordinator.contains("extensionContext.open"))
     }
 
     func testIOSReleaseWorkflowSignsAndValidatesKeyboardExtension() throws {

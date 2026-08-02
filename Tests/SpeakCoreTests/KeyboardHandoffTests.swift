@@ -59,6 +59,20 @@ final class KeyboardHandoffTests: XCTestCase {
                 now: now.addingTimeInterval(KeyboardQuickDictationStore.heartbeatLifetime + 1)
             )
         )
+        XCTAssertNotNil(
+            quickStore.heartbeat(
+                now: now.addingTimeInterval(KeyboardQuickDictationStore.heartbeatLifetime + 1)
+            )
+        )
+    }
+
+    func testQuickDictationOwnerCanClearStaleSession() {
+        let now = Date(timeIntervalSince1970: 4_500)
+        _ = quickStore.start(now: now, duration: 300)
+        let staleTime = now.addingTimeInterval(KeyboardQuickDictationStore.heartbeatLifetime + 1)
+
+        XCTAssertNil(quickStore.activeSession(now: staleTime, clearingStaleRecord: true))
+        XCTAssertNil(quickStore.heartbeat(now: staleTime))
     }
 
     func testQuickDictationRecordingCanFinishAfterReadinessWindowExpires() {

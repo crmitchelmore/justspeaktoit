@@ -550,7 +550,10 @@ private struct KeyboardRootView: View {
 
     private var title: String {
         switch model.presentation {
-        case .idle: return model.quickSessionExpiresAt == nil ? "Quick Dictation needs preparation" : "Quick Dictation ready"
+        case .idle:
+            return model.quickSessionExpiresAt == nil
+                ? "Quick Dictation needs preparation"
+                : "Quick Dictation ready"
         case .starting: return "Starting in the keyboard"
         case .waitingForApp: return "Open Just Speak"
         case .recording: return "Recording in Just Speak"
@@ -624,7 +627,6 @@ private struct KeyboardRootView: View {
 
     private var progressLabel: String {
         switch model.presentation {
-        case .recording: return "Recording"
         case .transcribing: return "Transcribing"
         default: return "Waiting"
         }

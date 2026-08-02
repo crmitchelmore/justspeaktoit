@@ -1,32 +1,34 @@
 #if os(iOS)
 import AVFoundation
+import Combine
 import Foundation
 import SpeakCore
 import UIKit
 
-/// Owns the containing app's foreground-started, time-limited microphone
-/// session that makes keyboard-only start/stop commands possible while the app
-/// remains alive in the background.
+/// Owns the containing app's foreground-started Instant Dictation microphone
+/// session. Once the user enables it, the session remains ready until they turn
+/// it off, iOS interrupts it, or the app is terminated.
 ///
 /// Idle buffers are discarded immediately. They are never persisted, sent to a
 /// transcription provider, or placed in the App Group. Actual transcription
 /// starts only after the keyboard creates a nonce-scoped handoff request.
 @MainActor
-public final class KeyboardQuickDictationCoordinator: ObservableObject {
-    public static let shared = KeyboardQuickDictationCoordinator()
+public final class KeyboardInstantDictationCoordinator: ObservableObject {
+    public static let shared = KeyboardInstantDictationCoordinator()
 
-    @Published public private(set) var session: KeyboardQuickDictationSession?
+    @Published public private(set) var session: KeyboardInstantDictationSession?
     @Published public private(set) var errorMessage: String?
 
-    private let sessionStore = KeyboardQuickDictationStore.shared
+    private let sessionStore = KeyboardInstantDictationStore.shared
     private let handoffStore = KeyboardHandoffStore.shared
     private let recordingService = TranscriptionRecordingService.shared
     private let readinessAudio = KeyboardReadinessAudioSession()
-    private let activityManager = TranscriptionActivityManager.shared
 
     private var signalObservation: KeyboardHandoffSignalObservation?
+    private var partialTranscriptObservation: AnyCancellable?
     private var heartbeatTask: Task<Void, Never>?
     private var requestTask: Task<Void, Never>?
+    private var startTask: Task<Void, Never>?
     private var activeRequestID: UUID?
 
     private init() {}
@@ -35,33 +37,56 @@ public final class KeyboardQuickDictationCoordinator: ObservableObject {
         session?.phase == .ready && sessionStore.activeSession(clearingStaleRecord: true) != nil
     }
 
+    public var isEnabled: Bool {
+        sessionStore.isEnabled
+    }
+
     public var isRecording: Bool {
         session?.phase == .recording
     }
 
     public func activate() {
-        guard signalObservation == nil else { return }
-        signalObservation = KeyboardHandoffSignal.observeRequestChanges { [weak self] in
-            Task { @MainActor in
-                self?.handleRequestChange()
-            }
-        }
+        ensureSignalObservation()
         session = sessionStore.activeSession(clearingStaleRecord: true)
+        guard sessionStore.isEnabled,
+              UIApplication.shared.applicationState == .active,
+              startTask == nil else { return }
+        startTask = Task { [weak self] in
+            await self?.startSession()
+            self?.startTask = nil
+        }
     }
 
-    /// Starts a bounded session only from the foreground, after an explicit
-    /// user action. This is the supported boundary: a keyboard extension cannot
-    /// cold-start microphone capture after iOS has suspended the app.
-    public func startSession(duration: TimeInterval = KeyboardQuickDictationStore.defaultDuration) async {
-        activate()
+    private func ensureSignalObservation() {
+        if signalObservation == nil {
+            signalObservation = KeyboardHandoffSignal.observeRequestChanges { [weak self] in
+                Task { @MainActor in
+                    self?.handleRequestChange()
+                }
+            }
+        }
+    }
+
+    /// Enables Instant Dictation from the foreground. The first call is an
+    /// explicit consent boundary; the preference then survives future app
+    /// launches so readiness restarts automatically whenever the app opens.
+    public func startSession() async {
+        ensureSignalObservation()
         errorMessage = nil
 
+        if readinessAudio.isRunning,
+           let active = sessionStore.activeSession(clearingStaleRecord: true) {
+            sessionStore.setEnabled(true)
+            session = active
+            return
+        }
+
         guard UIApplication.shared.applicationState == .active else {
-            errorMessage = "Open Just Speak to start Quick Dictation."
+            errorMessage = "Open Just Speak once to reconnect Instant Dictation."
             return
         }
         guard !recordingService.isRunning else {
-            errorMessage = "Finish the current recording before starting Quick Dictation."
+            errorMessage = "Finish the current recording before enabling Instant Dictation."
             return
         }
 
@@ -71,32 +96,35 @@ public final class KeyboardQuickDictationCoordinator: ObservableObject {
             hasMicrophonePermission = await audioSessionManager.requestMicrophonePermission()
         }
         guard hasMicrophonePermission else {
-            errorMessage = "Microphone access is required for Quick Dictation."
+            errorMessage = "Microphone access is required for Instant Dictation."
             return
         }
 
         do {
             try readinessAudio.start()
-            guard let started = sessionStore.start(duration: duration) else {
+            guard let started = sessionStore.start() else {
                 readinessAudio.stop(deactivateAudioSession: true)
-                errorMessage = "Quick Dictation could not access the shared keyboard container."
+                errorMessage = "Instant Dictation could not access the shared keyboard container."
                 return
             }
+            sessionStore.setEnabled(true)
             session = started
-            _ = activityManager.startActivity(provider: "Keyboard Quick Dictation")
             startHeartbeat()
             handleRequestChange()
         } catch {
             readinessAudio.stop(deactivateAudioSession: true)
             sessionStore.end()
             session = nil
-            errorMessage = "Quick Dictation could not start the microphone: \(error.localizedDescription)"
+            errorMessage = "Instant Dictation could not start the microphone: \(error.localizedDescription)"
         }
     }
 
-    public func endSession() {
+    public func endSession(disable: Bool = true) {
+        startTask?.cancel()
+        startTask = nil
         requestTask?.cancel()
         requestTask = nil
+        partialTranscriptObservation = nil
         if recordingService.isRunning {
             recordingService.cancelRecording()
         }
@@ -108,8 +136,10 @@ public final class KeyboardQuickDictationCoordinator: ObservableObject {
         heartbeatTask = nil
         readinessAudio.stop(deactivateAudioSession: true)
         sessionStore.end()
+        if disable {
+            sessionStore.setEnabled(false)
+        }
         session = nil
-        activityManager.endActivity()
     }
 
     private func startHeartbeat() {
@@ -118,13 +148,13 @@ public final class KeyboardQuickDictationCoordinator: ObservableObject {
             while !Task.isCancelled {
                 guard let self else { return }
                 guard let updated = self.sessionStore.heartbeat() else {
-                    self.errorMessage = "Quick Dictation ended because its session state was unavailable."
-                    self.endSession()
+                    self.errorMessage = "Instant Dictation disconnected because its session state was unavailable."
+                    self.endSession(disable: false)
                     return
                 }
                 guard updated.phase == .recording || self.readinessAudio.isRunning else {
-                    self.errorMessage = "Quick Dictation ended after an audio interruption."
-                    self.endSession()
+                    self.errorMessage = "Instant Dictation disconnected after an audio interruption."
+                    self.endSession(disable: false)
                     return
                 }
                 self.session = updated
@@ -164,18 +194,25 @@ public final class KeyboardQuickDictationCoordinator: ObservableObject {
             return
         }
 
+        // Mark the audio mode transition before stopping the readiness engine.
+        // Provider setup can take longer than one heartbeat; without this the
+        // liveness loop would mistake a healthy engine swap for interruption.
+        activeRequestID = requestID
+        session = sessionStore.heartbeat(phase: .recording)
         readinessAudio.stop(deactivateAudioSession: false)
         do {
             try await recordingService.startRecording(
                 retainBatchRecording: false,
-                sharesLiveTranscript: false
+                sharesLiveTranscript: false,
+                requiresLiveActivity: false
             )
             try handoffStore.markRecording(requestID: requestID)
-            activeRequestID = requestID
-            session = sessionStore.heartbeat(phase: .recording)
+            observePartialTranscript(for: requestID)
         } catch {
+            partialTranscriptObservation = nil
             recordingService.cancelRecording()
             _ = try? handoffStore.fail(requestID: requestID, code: .recordingUnavailable)
+            activeRequestID = nil
             await resumeReadinessAfterRequest()
         }
     }
@@ -186,6 +223,11 @@ public final class KeyboardQuickDictationCoordinator: ObservableObject {
             return
         }
 
+        partialTranscriptObservation = nil
+        _ = try? handoffStore.updateInterim(
+            requestID: requestID,
+            transcript: recordingService.partialText
+        )
         do {
             try handoffStore.markTranscribing(requestID: requestID)
         } catch {
@@ -213,6 +255,7 @@ public final class KeyboardQuickDictationCoordinator: ObservableObject {
 
     private func cancelRecording(for requestID: UUID) {
         guard activeRequestID == requestID else { return }
+        partialTranscriptObservation = nil
         if recordingService.isRunning {
             recordingService.cancelRecording()
         }
@@ -223,25 +266,36 @@ public final class KeyboardQuickDictationCoordinator: ObservableObject {
     }
 
     private func resumeReadinessAfterRequest() async {
-        guard let current = sessionStore.activeSession(clearingStaleRecord: true),
-              current.expiresAt > Date() else {
-            endSession()
+        guard sessionStore.isEnabled else {
+            endSession(disable: true)
             return
         }
         do {
             try readinessAudio.start()
             session = sessionStore.heartbeat(phase: .ready)
-            _ = activityManager.startActivity(provider: "Keyboard Quick Dictation")
         } catch {
-            errorMessage = "Quick Dictation ended because the microphone could not be reactivated."
-            endSession()
+            errorMessage = "Instant Dictation disconnected because the microphone could not be reactivated."
+            endSession(disable: false)
         }
+    }
+
+    private func observePartialTranscript(for requestID: UUID) {
+        partialTranscriptObservation = recordingService.$partialText
+            .removeDuplicates()
+            .throttle(for: .milliseconds(120), scheduler: RunLoop.main, latest: true)
+            .sink { [weak self] text in
+                guard self?.activeRequestID == requestID else { return }
+                _ = try? self?.handoffStore.updateInterim(
+                    requestID: requestID,
+                    transcript: text
+                )
+            }
     }
 }
 
 /// Holds an explicit foreground-started recording session open while discarding
-/// idle buffers. This keeps iOS from suspending the containing app during the
-/// user's short Quick Dictation window without sending or saving idle audio.
+/// idle buffers. This keeps iOS from suspending the containing app while
+/// Instant Dictation is enabled, without sending or saving idle audio.
 @MainActor
 private final class KeyboardReadinessAudioSession {
     private let engine = AVAudioEngine()

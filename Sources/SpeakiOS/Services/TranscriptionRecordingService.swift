@@ -61,7 +61,8 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
     /// Starts a headless recording session with Live Activity.
     public func startRecording( // swiftlint:disable:this function_body_length
         retainBatchRecording: Bool = true,
-        sharesLiveTranscript: Bool = true
+        sharesLiveTranscript: Bool = true,
+        requiresLiveActivity: Bool = true
     ) async throws {
         guard !isRunning else { return }
 
@@ -89,8 +90,11 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
         // AudioRecordingIntent — without one the AppIntents system-policy check
         // asserts (EXC_BREAKPOINT). In the foreground a Live Activity is optional,
         // so only enforce this when the app isn't active.
-        let activityStarted = activityManager.startActivity(provider: modelDisplayName)
-        if !activityStarted && UIApplication.shared.applicationState != .active {
+        let appIsActive = UIApplication.shared.applicationState == .active
+        let activityStarted = (requiresLiveActivity || appIsActive)
+            ? activityManager.startActivity(provider: modelDisplayName)
+            : false
+        if requiresLiveActivity && !activityStarted && !appIsActive {
             startTime = nil
             sharedState.clearRecordingState()
             throw iOSTranscriptionError.liveActivityUnavailable

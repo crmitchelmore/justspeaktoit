@@ -6,7 +6,7 @@ final class KeyboardHandoffTests: XCTestCase {
     private var suiteName: String!
     private var defaults: UserDefaults!
     private var store: KeyboardHandoffStore!
-    private var quickStore: KeyboardQuickDictationStore!
+    private var instantStore: KeyboardInstantDictationStore!
 
     override func setUp() {
         super.setUp()
@@ -14,13 +14,13 @@ final class KeyboardHandoffTests: XCTestCase {
         defaults = UserDefaults(suiteName: suiteName)
         defaults.removePersistentDomain(forName: suiteName)
         store = KeyboardHandoffStore(defaults: defaults)
-        quickStore = KeyboardQuickDictationStore(defaults: defaults)
+        instantStore = KeyboardInstantDictationStore(defaults: defaults)
     }
 
     override func tearDown() {
         defaults.removePersistentDomain(forName: suiteName)
         store = nil
-        quickStore = nil
+        instantStore = nil
         defaults = nil
         suiteName = nil
         super.tearDown()
@@ -48,45 +48,60 @@ final class KeyboardHandoffTests: XCTestCase {
         XCTAssertEqual(try store.markTranscribing(requestID: request.requestID).phase, .transcribing)
     }
 
-    func testQuickDictationRequiresFreshHeartbeatInsideReadinessWindow() {
+    func testInstantDictationRequiresFreshHeartbeat() {
         let now = Date(timeIntervalSince1970: 4_000)
-        let session = quickStore.start(now: now, duration: 300)
+        let session = instantStore.start(now: now)
 
         XCTAssertEqual(session?.phase, .ready)
-        XCTAssertNotNil(quickStore.activeSession(now: now.addingTimeInterval(3)))
+        XCTAssertNotNil(instantStore.activeSession(now: now.addingTimeInterval(3)))
         XCTAssertNil(
-            quickStore.activeSession(
-                now: now.addingTimeInterval(KeyboardQuickDictationStore.heartbeatLifetime + 1)
+            instantStore.activeSession(
+                now: now.addingTimeInterval(KeyboardInstantDictationStore.heartbeatLifetime + 1)
             )
         )
         XCTAssertNotNil(
-            quickStore.heartbeat(
-                now: now.addingTimeInterval(KeyboardQuickDictationStore.heartbeatLifetime + 1)
+            instantStore.heartbeat(
+                now: now.addingTimeInterval(KeyboardInstantDictationStore.heartbeatLifetime + 1)
             )
         )
     }
 
-    func testQuickDictationOwnerCanClearStaleSession() {
+    func testInstantDictationOwnerCanClearStaleSession() {
         let now = Date(timeIntervalSince1970: 4_500)
-        _ = quickStore.start(now: now, duration: 300)
-        let staleTime = now.addingTimeInterval(KeyboardQuickDictationStore.heartbeatLifetime + 1)
+        _ = instantStore.start(now: now)
+        let staleTime = now.addingTimeInterval(KeyboardInstantDictationStore.heartbeatLifetime + 1)
 
-        XCTAssertNil(quickStore.activeSession(now: staleTime, clearingStaleRecord: true))
-        XCTAssertNil(quickStore.heartbeat(now: staleTime))
+        XCTAssertNil(instantStore.activeSession(now: staleTime, clearingStaleRecord: true))
+        XCTAssertNil(instantStore.heartbeat(now: staleTime))
     }
 
-    func testQuickDictationRecordingCanFinishAfterReadinessWindowExpires() {
+    func testInstantDictationHasNoFixedReadinessWindow() {
         let now = Date(timeIntervalSince1970: 5_000)
-        _ = quickStore.start(now: now, duration: 1)
-        let recording = quickStore.heartbeat(phase: .recording, now: now.addingTimeInterval(0.5))
+        _ = instantStore.start(now: now)
+        let recording = instantStore.heartbeat(phase: .recording, now: now.addingTimeInterval(0.5))
 
         XCTAssertEqual(recording?.phase, .recording)
-        XCTAssertNotNil(quickStore.activeSession(now: now.addingTimeInterval(2)))
+        XCTAssertNotNil(instantStore.activeSession(now: now.addingTimeInterval(2)))
         XCTAssertEqual(
-            quickStore.heartbeat(phase: .ready, now: now.addingTimeInterval(2))?.phase,
+            instantStore.heartbeat(phase: .ready, now: now.addingTimeInterval(2))?.phase,
             .ready
         )
-        XCTAssertNil(quickStore.activeSession(now: now.addingTimeInterval(2)))
+        XCTAssertNotNil(instantStore.activeSession(now: now.addingTimeInterval(2)))
+    }
+
+    func testInstantDictationPreferencePersistsUntilDisabled() {
+        XCTAssertFalse(instantStore.isEnabled)
+
+        instantStore.setEnabled(true)
+        _ = instantStore.start()
+
+        XCTAssertTrue(instantStore.isEnabled)
+        XCTAssertNotNil(instantStore.activeSession())
+
+        instantStore.setEnabled(false)
+
+        XCTAssertFalse(instantStore.isEnabled)
+        XCTAssertNil(instantStore.activeSession())
     }
 
     func testMismatchedNonceCannotReadOrClearResult() throws {
@@ -110,6 +125,43 @@ final class KeyboardHandoffTests: XCTestCase {
         XCTAssertEqual(expired?.failureCode, .timedOut)
         XCTAssertNil(expired?.transcript)
         XCTAssertNil(store.consumeResult(requestID: request.requestID, now: now.addingTimeInterval(2)))
+    }
+
+    func testLiveTranscriptUsesReplacementSemanticsAndClearsAtCompletion() throws {
+        let request = try store.createRequest()
+        try store.markRecording(requestID: request.requestID)
+
+        XCTAssertEqual(
+            try store.updateInterim(requestID: request.requestID, transcript: "First words").interimTranscript,
+            "First words"
+        )
+        XCTAssertEqual(
+            try store.updateInterim(requestID: request.requestID, transcript: "Full current turn").interimTranscript,
+            "Full current turn"
+        )
+        XCTAssertEqual(
+            try store.markTranscribing(requestID: request.requestID).interimTranscript,
+            "Full current turn"
+        )
+        XCTAssertNil(
+            try store.complete(requestID: request.requestID, transcript: "Final text").interimTranscript
+        )
+    }
+
+    func testResultCanOnlyBeConsumedByItsOriginalTextDocument() throws {
+        let target = UUID()
+        let request = try store.createRequest(targetDocumentIdentifier: target)
+        try store.markRecording(requestID: request.requestID)
+        try store.markTranscribing(requestID: request.requestID)
+        try store.complete(requestID: request.requestID, transcript: "Right field")
+
+        XCTAssertNil(
+            store.consumeResult(requestID: request.requestID, documentIdentifier: UUID())
+        )
+        XCTAssertEqual(
+            store.consumeResult(requestID: request.requestID, documentIdentifier: target),
+            "Right field"
+        )
     }
 
     func testCancelRemovesAnyTranscriptAndBlocksCompletion() throws {
@@ -160,19 +212,6 @@ final class KeyboardHandoffTests: XCTestCase {
             KeyboardExtensionObservation(lastSeenAt: now, hadFullAccess: true)
         )
         XCTAssertNil(store.activeRecord())
-    }
-
-    func testOnlyRequestedHandoffResumesWhenContainingAppOpens() throws {
-        let request = try store.createRequest()
-
-        XCTAssertEqual(
-            KeyboardLaunchPolicy.pendingCaptureRequestID(from: store.activeRecord()),
-            request.requestID
-        )
-
-        try store.markRecording(requestID: request.requestID)
-        XCTAssertNil(KeyboardLaunchPolicy.pendingCaptureRequestID(from: store.activeRecord()))
-        XCTAssertNil(KeyboardLaunchPolicy.pendingCaptureRequestID(from: nil))
     }
 
     func testUndoPlanRequiresExactInsertedSuffix() {

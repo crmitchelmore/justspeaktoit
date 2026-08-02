@@ -304,12 +304,7 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
         sharesLiveTranscript = true
 
         // Complete Live Activity with clipboard confirmation
-        activityManager.completeActivity(
-            finalWordCount: wordCount,
-            duration: duration,
-            keepPrimed: true,
-            primedMessage: primedActivityMessage
-        )
+        completeRecordingActivity(duration: duration, primedMessage: primedActivityMessage)
 
         // Kick off background post-processing if the chosen destination + user
         // settings call for it. The polished clipboard write must also survive
@@ -333,6 +328,15 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
         }
 
         return result
+    }
+
+    private func completeRecordingActivity(duration: Int, primedMessage: String) {
+        activityManager.completeActivity(
+            finalWordCount: wordCount,
+            duration: duration,
+            keepPrimed: true,
+            primedMessage: primedMessage
+        )
     }
 
     /// Cancels recording without saving.

@@ -65,7 +65,7 @@ public final class KeyboardQuickDictationStore {
         now: Date = Date(),
         duration: TimeInterval = defaultDuration
     ) -> KeyboardQuickDictationSession? {
-        lock.withKeyboardQuickDictationLock {
+        lock.withLock {
             guard duration > 0 else { return nil }
             let session = KeyboardQuickDictationSession(
                 startedAt: now,
@@ -82,7 +82,7 @@ public final class KeyboardQuickDictationStore {
         phase: KeyboardQuickDictationSession.Phase? = nil,
         now: Date = Date()
     ) -> KeyboardQuickDictationSession? {
-        lock.withKeyboardQuickDictationLock {
+        lock.withLock {
             guard let current = readUnlocked(),
                   current.phase == .recording || current.expiresAt > now else {
                 clearUnlocked()
@@ -99,7 +99,7 @@ public final class KeyboardQuickDictationStore {
     }
 
     public func activeSession(now: Date = Date()) -> KeyboardQuickDictationSession? {
-        lock.withKeyboardQuickDictationLock {
+        lock.withLock {
             guard let session = readUnlocked() else { return nil }
             let heartbeatIsFresh = now.timeIntervalSince(session.lastHeartbeatAt) <= Self.heartbeatLifetime
             let readinessWindowIsOpen = session.phase == .recording || session.expiresAt > now
@@ -112,7 +112,7 @@ public final class KeyboardQuickDictationStore {
     }
 
     public func end() {
-        lock.withKeyboardQuickDictationLock {
+        lock.withLock {
             clearUnlocked()
         }
     }
@@ -197,10 +197,10 @@ public final class KeyboardHandoffSignalObservation: @unchecked Sendable {
     }
 }
 
-private extension NSLock {
-    func withKeyboardQuickDictationLock<T>(_ operation: () -> T) -> T {
+extension NSLock {
+    func withLock<T>(_ operation: () throws -> T) rethrows -> T {
         lock()
         defer { unlock() }
-        return operation()
+        return try operation()
     }
 }

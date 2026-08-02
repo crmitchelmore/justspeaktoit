@@ -1,95 +1,5 @@
 import Foundation
 
-/// The only App Group payload used by the custom keyboard handoff.
-///
-/// Audio, API keys, and surrounding text are never written here. A throttled
-/// interim transcript lets the keyboard show live feedback; the final copy
-/// exists only until the matching keyboard consumes it or the short result
-/// timeout expires. History persistence happens separately inside the app.
-public struct KeyboardHandoffRecord: Codable, Equatable, Sendable {
-    public static let schemaVersion = 2
-
-    public enum Phase: String, Codable, Equatable, Hashable, Sendable {
-        case requested
-        case recording
-        case finishRequested
-        case transcribing
-        case completed
-        case cancelled
-        case failed
-    }
-
-    public enum FailureCode: String, Codable, Equatable, Sendable {
-        case fullAccessRequired
-        case appUnavailable
-        case recordingUnavailable
-        case noSpeech
-        case timedOut
-        case invalidRequest
-        case targetChanged
-        case unknown
-    }
-
-    public let schemaVersion: Int
-    public let requestID: UUID
-    public let createdAt: Date
-    public let updatedAt: Date
-    public let expiresAt: Date
-    public let phase: Phase
-    public let targetDocumentIdentifier: UUID?
-    public let interimTranscript: String?
-    public let transcript: String?
-    public let failureCode: FailureCode?
-
-    public init(
-        schemaVersion: Int = Self.schemaVersion,
-        requestID: UUID,
-        createdAt: Date,
-        updatedAt: Date,
-        expiresAt: Date,
-        phase: Phase,
-        targetDocumentIdentifier: UUID? = nil,
-        interimTranscript: String? = nil,
-        transcript: String? = nil,
-        failureCode: FailureCode? = nil
-    ) {
-        self.schemaVersion = schemaVersion
-        self.requestID = requestID
-        self.createdAt = createdAt
-        self.updatedAt = updatedAt
-        self.expiresAt = expiresAt
-        self.phase = phase
-        self.targetDocumentIdentifier = targetDocumentIdentifier
-        self.interimTranscript = interimTranscript
-        self.transcript = transcript
-        self.failureCode = failureCode
-    }
-}
-
-public struct KeyboardExtensionObservation: Codable, Equatable, Sendable {
-    public let schemaVersion: Int
-    public let lastSeenAt: Date
-    public let hadFullAccess: Bool
-
-    public init(
-        schemaVersion: Int = KeyboardHandoffRecord.schemaVersion,
-        lastSeenAt: Date,
-        hadFullAccess: Bool
-    ) {
-        self.schemaVersion = schemaVersion
-        self.lastSeenAt = lastSeenAt
-        self.hadFullAccess = hadFullAccess
-    }
-}
-
-public enum KeyboardHandoffStoreError: Error, Equatable {
-    case unavailable
-    case noActiveRequest
-    case mismatchedRequest
-    case invalidTransition
-    case invalidTranscript
-}
-
 /// A deliberately small, extension-safe store backed by the shared App Group.
 ///
 /// The entire handoff is a single encoded value so readers never combine fields
@@ -312,8 +222,10 @@ public final class KeyboardHandoffStore {
         guard let data = defaults?.data(forKey: Self.observationKey) else { return nil }
         return try? decoder.decode(KeyboardExtensionObservation.self, from: data)
     }
+}
 
-    private func transition(
+private extension KeyboardHandoffStore {
+    func transition(
         requestID: UUID,
         allowedFrom: Set<KeyboardHandoffRecord.Phase>,
         to phase: KeyboardHandoffRecord.Phase,
@@ -349,19 +261,19 @@ public final class KeyboardHandoffStore {
         }
     }
 
-    private func write(_ record: KeyboardHandoffRecord) throws {
+    func write(_ record: KeyboardHandoffRecord) throws {
         try lock.withLock {
             try writeUnlocked(record)
         }
     }
 
-    private func writeUnlocked(_ record: KeyboardHandoffRecord) throws {
+    func writeUnlocked(_ record: KeyboardHandoffRecord) throws {
         guard let defaults else { throw KeyboardHandoffStoreError.unavailable }
         defaults.set(try encoder.encode(record), forKey: Self.recordKey)
         defaults.synchronize()
     }
 
-    private func readUnlocked() -> KeyboardHandoffRecord? {
+    func readUnlocked() -> KeyboardHandoffRecord? {
         guard let data = defaults?.data(forKey: Self.recordKey),
               let record = try? decoder.decode(KeyboardHandoffRecord.self, from: data),
               record.schemaVersion == KeyboardHandoffRecord.schemaVersion else {
@@ -370,7 +282,7 @@ public final class KeyboardHandoffStore {
         return record
     }
 
-    private func normalizeExpiryUnlocked(
+    func normalizeExpiryUnlocked(
         _ record: KeyboardHandoffRecord,
         now: Date
     ) -> KeyboardHandoffRecord? {

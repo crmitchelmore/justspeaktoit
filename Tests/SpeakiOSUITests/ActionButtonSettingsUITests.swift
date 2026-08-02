@@ -65,6 +65,7 @@ final class ActionButtonSettingsUITests: XCTestCase {
         XCTAssertTrue(readyOrMissingStatus.waitForExistence(timeout: 5))
     }
 
+    #if IOS_KEYBOARD_FEATURE
     func testKeyboardOnboardingExplainsSupportedSetup() {
         app.buttons["Settings"].tap()
 
@@ -77,6 +78,13 @@ final class ActionButtonSettingsUITests: XCTestCase {
         XCTAssertTrue(scrollUpUntilExists(app.staticTexts["Why Full Access?"]))
         XCTAssertTrue(scrollUpUntilExists(app.staticTexts["Where It Won’t Appear"]))
     }
+    #else
+    func testKeyboardOnboardingIsHiddenWhenFeatureIsDisabled() {
+        app.buttons["Settings"].tap()
+
+        XCTAssertFalse(scrollUpUntilExists(app.buttons["keyboardSetupLink"]))
+    }
+    #endif
 
     private func scrollUpUntilExists(_ element: XCUIElement, maxSwipes: Int = 6) -> Bool {
         if element.waitForExistence(timeout: 1) {

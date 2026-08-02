@@ -1,5 +1,12 @@
 # iOS Keyboard Instant Dictation
 
+> **Shipping status:** disabled. Default local, CI, archive, and TestFlight
+> builds do not include the custom keyboard extension or expose its setup UI.
+> Internal development requires `TUIST_IOS_KEYBOARD=1 tuist generate`; a manual
+> TestFlight run additionally requires the off-by-default `include_keyboard`
+> input. Do not enable either flag until the physical-device release matrix and
+> product-quality review pass.
+
 ## Product decision
 
 Just Speak uses an explicitly enabled, foreground-started **Instant Dictation**

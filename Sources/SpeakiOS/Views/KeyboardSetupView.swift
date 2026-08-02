@@ -7,6 +7,7 @@ public struct KeyboardSetupView: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
     @State private var observation: KeyboardExtensionObservation?
+    @ObservedObject private var quickDictation = KeyboardQuickDictationCoordinator.shared
 
     public init() {}
 
@@ -77,13 +78,55 @@ public struct KeyboardSetupView: View {
                 .foregroundStyle(.secondary)
             }
 
+            Section("Quick Dictation") {
+                statusRow(
+                    title: "Keyboard microphone",
+                    isReady: quickDictation.isReady || quickDictation.isRecording,
+                    readyText: quickDictationStatus
+                )
+
+                Button {
+                    if quickDictation.session == nil {
+                        Task {
+                            await quickDictation.startSession()
+                        }
+                    } else {
+                        quickDictation.endSession()
+                    }
+                } label: {
+                    Label(
+                        quickDictation.session == nil ? "Enable for 5 Minutes" : "End Quick Dictation",
+                        systemImage: quickDictation.session == nil ? "mic.badge.plus" : "stop.circle"
+                    )
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(quickDictation.session == nil ? .accentColor : .red)
+                .accessibilityIdentifier("keyboardQuickDictationButton")
+
+                Text(
+                    "Start once, return to your text field, then use Speak and Finish directly in the keyboard. "
+                        + "The orange microphone indicator stays visible during this short session. "
+                        + "Idle audio is discarded immediately on device and is never saved or sent."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                if let errorMessage = quickDictation.errorMessage {
+                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            }
+
             Section("Why Full Access?") {
-                Label("Open the Just Speak app for microphone capture", systemImage: "arrow.up.forward.app")
+                Label("Control a prepared microphone session from the keyboard", systemImage: "mic.fill")
                 Label("Exchange one nonce-scoped result through the App Group", systemImage: "lock.shield")
                 Label("Use cloud transcription only when your selected model requires it", systemImage: "network")
                 Text(
-                    "The keyboard itself cannot use the microphone. It does not read, persist, "
-                        + "or transmit surrounding text, and shared results expire quickly."
+                    "iOS does not give keyboard extensions microphone access. Just Speak owns the explicit, "
+                        + "time-limited audio session while the keyboard sends only nonce-scoped commands. "
+                        + "It does not read, persist, or transmit surrounding text."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -97,8 +140,8 @@ public struct KeyboardSetupView: View {
 
             Section("What to Expect") {
                 Text(
-                    "Tap Speak in the keyboard, record in Just Speak, finish transcription, "
-                        + "then return to the original app. Just Speak inserts only the matching result."
+                    "Enable Quick Dictation here once, return to the original app, then start and finish "
+                        + "future dictations inside the keyboard until the five-minute session expires."
                 )
                 Text(
                     "Local Apple Speech can work offline after its language resources are available. "
@@ -120,6 +163,13 @@ public struct KeyboardSetupView: View {
     private var fullAccessStatus: String {
         guard let observation else { return "Open the keyboard to check" }
         return observation.hadFullAccess ? "Observed on" : "Observed off"
+    }
+
+    private var quickDictationStatus: String {
+        guard let session = quickDictation.session,
+              quickDictation.isReady || quickDictation.isRecording else { return "Not enabled" }
+        if session.phase == .recording { return "Recording" }
+        return "Ready until \(session.expiresAt.formatted(date: .omitted, time: .shortened))"
     }
 
     private func setupStep(number: Int, title: String, detail: String) -> some View {

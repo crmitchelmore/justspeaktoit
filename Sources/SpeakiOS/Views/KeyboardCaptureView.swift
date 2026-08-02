@@ -5,6 +5,7 @@ import SwiftUI
 public struct KeyboardCaptureView: View {
     @StateObject private var coordinator: KeyboardHandoffCaptureCoordinator
     @ObservedObject private var settings = AppSettings.shared
+    @ObservedObject private var quickDictation = KeyboardQuickDictationCoordinator.shared
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -145,15 +146,37 @@ public struct KeyboardCaptureView: View {
                 .accessibilityIdentifier("keyboardTranscribingProgress")
 
         case .ready:
-            Button {
-                dismiss()
-            } label: {
-                Label("Done", systemImage: "checkmark")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity, minHeight: 54)
+            VStack(spacing: 12) {
+                Button {
+                    dismiss()
+                } label: {
+                    Label("Done", systemImage: "checkmark")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity, minHeight: 54)
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("keyboardResultReadyButton")
+
+                if !quickDictation.isReady {
+                    Button {
+                        Task {
+                            await quickDictation.startSession()
+                        }
+                    } label: {
+                        Label("Keep Keyboard Ready for 5 Minutes", systemImage: "keyboard.badge.ellipsis")
+                            .frame(maxWidth: .infinity, minHeight: 48)
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("enableQuickDictationAfterHandoffButton")
+                }
+
+                if let error = quickDictation.errorMessage {
+                    Text(error)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .multilineTextAlignment(.center)
+                }
             }
-            .buttonStyle(.borderedProminent)
-            .accessibilityIdentifier("keyboardResultReadyButton")
 
         case .cancelled, .error:
             Button("Return to Just Speak") {

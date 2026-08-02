@@ -1,5 +1,8 @@
 # iOS Custom Keyboard MVP Verification
 
+For the prepared background-microphone architecture and its additional device
+matrix, also follow [iOS Keyboard Quick Dictation](ios-keyboard-quick-dictation.md).
+
 ## Scope and architecture
 
 The Just Speak keyboard is intentionally transcription-first. It does not
@@ -10,22 +13,28 @@ control uses `UIInputViewController.handleInputModeList(from:with:)` so a user
 can return to a system keyboard for full typing.
 
 Apple does not allow a custom keyboard extension to access the microphone. The
-supported handoff is therefore:
+primary prepared-session handoff is therefore:
 
-1. The keyboard creates a short-lived, nonce-scoped request in
-   `group.com.justspeaktoit.ios`.
-2. The user opens Just Speak from the Home Screen or App Switcher. Custom
-   keyboard extensions are not one of the iOS extension points for which Apple
-   documents `NSExtensionContext.open` support, so the keyboard must not claim
-   it can launch the containing app automatically.
-3. When the containing app becomes active, it detects the pending nonce,
-   validates it, and records through the existing
+1. The user explicitly starts a five-minute Quick Dictation session in Just
+   Speak, then returns to the original text field. Idle audio buffers are
+   discarded locally while the system microphone indicator remains visible.
+2. The keyboard creates a short-lived, nonce-scoped request in
+   `group.com.justspeaktoit.ios` and posts a payload-free Darwin notification.
+3. The already-running containing app validates the nonce and records through
+   the existing
    `TranscriptionRecordingService` using the selected local or remote model.
-4. The app saves the completed transcript to History and writes one temporary
+4. The user finishes from the keyboard. The app saves the completed transcript
+   to History and writes one temporary
    final transcript to the matching versioned App Group record.
-5. After the user returns to the originating app, the keyboard inserts the
-   matching result with `textDocumentProxy.insertText` and deletes the App
-   Group copy. History remains available in Just Speak.
+5. The keyboard inserts the matching result with
+   `textDocumentProxy.insertText` and deletes the App Group copy. History
+   remains available in Just Speak.
+
+If the containing app has been suspended, force-quit, interrupted, or the
+prepared session expired, the heartbeat becomes stale and the keyboard asks the
+user to open Just Speak. Custom keyboard extensions are not one of the iOS
+extension points for which Apple documents `NSExtensionContext.open` support,
+so the keyboard must not claim it can cold-launch the containing app.
 
 Requests expire after three minutes, transcription finalisation after 90
 seconds, and completed App Group results after 60 seconds. A mismatched nonce
@@ -127,13 +136,12 @@ inspect or transmit surrounding text.
 2. Disable network connectivity.
 3. Open Notes or another standard text editor and focus a normal text field.
 4. Hold the globe key and choose Just Speak.
-5. Tap **Prepare Transcription**, then manually open Just Speak from the Home
-   Screen or App Switcher. Confirm the pending capture opens and requests
-   microphone/speech permission only there.
-6. Speak, tap **Finish & Transcribe**, and wait for **Ready to Insert**.
-7. Return to Notes using the app switcher or Back gesture where available,
-   choose Just Speak again if iOS changed keyboards, and confirm the text is
-   inserted once at the cursor or over the current selection.
+5. Open Just Speak once, enable the five-minute Quick Dictation session, then
+   return to the focused Notes field and choose the Just Speak keyboard.
+6. Tap **Speak** and confirm recording starts while Notes remains visible.
+7. Speak, tap **Finish & Transcribe** in the keyboard, and confirm the matching
+   text is inserted once at the cursor or over the current selection without an
+   app switch.
 8. Confirm the completed transcript is present in Just Speak History while the
    temporary App Group result cannot be inserted again.
 9. Select a word in Notes, choose **Replace Selection by Voice**, complete a
@@ -141,8 +149,8 @@ inspect or transmit surrounding text.
 10. Verify safe undo succeeds immediately after insertion but refuses to delete
     text if the cursor moved or the host text changed.
 
-iOS does not provide a public API that returns an extension directly to the
-originating third-party app, so the UI truthfully asks the user to return.
+After the prepared session expires or the containing app is terminated, confirm
+the keyboard truthfully asks the user to open Just Speak and prepare a new one.
 
 ### Cloud-model happy path
 

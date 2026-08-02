@@ -113,35 +113,32 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(infoPlist.contains("$(PRODUCT_MODULE_NAME).KeyboardViewController"))
     }
 
-    func testIOSKeyboardUsesSupportedPreparedSessionAndRetainsHistory() throws {
+    func testIOSKeyboardUsesInstantSessionLivePreviewAndRetainsHistory() throws {
         let keyboard = try String(
             contentsOf: repositoryRoot.appendingPathComponent("JustSpeakKeyboard/KeyboardViewController.swift"),
             encoding: .utf8
         )
-        let captureCoordinator = try String(
+        let instantCoordinator = try String(
             contentsOf: repositoryRoot.appendingPathComponent(
-                "Sources/SpeakiOS/Services/KeyboardHandoffCaptureCoordinator.swift"
-            ),
-            encoding: .utf8
-        )
-        let quickCoordinator = try String(
-            contentsOf: repositoryRoot.appendingPathComponent(
-                "Sources/SpeakiOS/Services/KeyboardQuickDictationCoordinator.swift"
+                "Sources/SpeakiOS/Services/KeyboardInstantDictationCoordinator.swift"
             ),
             encoding: .utf8
         )
 
         XCTAssertFalse(keyboard.contains("extensionContext.open"))
-        XCTAssertTrue(keyboard.contains("Open Just Speak manually"))
+        XCTAssertTrue(keyboard.contains("if requestID == nil, isInstantReady"))
+        XCTAssertTrue(keyboard.contains("Open Just Speak once"))
         XCTAssertTrue(keyboard.contains("KeyboardHandoffSignal.postRequestChanged"))
-        XCTAssertTrue(keyboard.contains("Finish & Transcribe"))
-        XCTAssertTrue(keyboard.contains("transcripts remain in History"))
+        XCTAssertTrue(keyboard.contains("Stop & Insert"))
+        XCTAssertTrue(keyboard.contains("keyboardLiveTranscript"))
+        XCTAssertTrue(keyboard.contains("completed transcripts remain in History"))
         XCTAssertFalse(keyboard.contains("Results are deleted after insertion"))
-        XCTAssertTrue(captureCoordinator.contains("saveToHistory: true"))
-        XCTAssertTrue(quickCoordinator.contains("input.installTap"))
-        XCTAssertFalse(quickCoordinator.contains(".write("))
-        XCTAssertFalse(quickCoordinator.contains(".upload("))
-        XCTAssertTrue(quickCoordinator.contains("saveToHistory: true"))
+        XCTAssertTrue(instantCoordinator.contains("input.installTap"))
+        XCTAssertTrue(instantCoordinator.contains("requiresLiveActivity: false"))
+        XCTAssertTrue(instantCoordinator.contains("updateInterim"))
+        XCTAssertFalse(instantCoordinator.contains(".write("))
+        XCTAssertFalse(instantCoordinator.contains(".upload("))
+        XCTAssertTrue(instantCoordinator.contains("saveToHistory: true"))
     }
 
     func testIOSReleaseWorkflowSignsAndValidatesKeyboardExtension() throws {

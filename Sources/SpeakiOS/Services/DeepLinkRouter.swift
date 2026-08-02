@@ -1,6 +1,5 @@
 #if os(iOS)
 import Foundation
-import SpeakCore
 import SwiftUI
 
 // MARK: - Deep Link Router
@@ -10,7 +9,6 @@ import SwiftUI
 ///   justspeaktoit://openclaw                     → OpenClaw tab
 ///   justspeaktoit://openclaw/conversation/<id>   → specific conversation
 ///   justspeaktoit://transcribe                   → Transcribe tab
-///   justspeaktoit://keyboard?request=<uuid>       → validated keyboard capture
 @MainActor
 public final class DeepLinkRouter: ObservableObject {
     public static let shared = DeepLinkRouter()
@@ -21,14 +19,7 @@ public final class DeepLinkRouter: ObservableObject {
     /// When set, navigates to this conversation in the OpenClaw tab.
     @Published public var pendingConversationId: String?
 
-    /// A validated keyboard request that the containing app should record for.
-    @Published public var keyboardCaptureRequest: KeyboardCaptureRequest?
-
-    private let keyboardStore: KeyboardHandoffStore
-
-    public init(keyboardStore: KeyboardHandoffStore = .shared) {
-        self.keyboardStore = keyboardStore
-    }
+    public init() {}
 
     /// Handles an incoming deep link URL. Returns `true` if handled.
     @discardableResult
@@ -53,18 +44,6 @@ public final class DeepLinkRouter: ObservableObject {
             pendingConversationId = nil
             return true
 
-        case "keyboard":
-            guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-                  let requestValue = components.queryItems?.first(where: { $0.name == "request" })?.value,
-                  let requestID = UUID(uuidString: requestValue),
-                  keyboardStore.record(matching: requestID)?.phase == .requested else {
-                return false
-            }
-            selectedTab = 0
-            pendingConversationId = nil
-            keyboardCaptureRequest = KeyboardCaptureRequest(id: requestID)
-            return true
-
         default:
             return false
         }
@@ -75,14 +54,6 @@ public final class DeepLinkRouter: ObservableObject {
         let cid = pendingConversationId
         pendingConversationId = nil
         return cid
-    }
-}
-
-public struct KeyboardCaptureRequest: Identifiable, Equatable {
-    public let id: UUID
-
-    public init(id: UUID) {
-        self.id = id
     }
 }
 #endif

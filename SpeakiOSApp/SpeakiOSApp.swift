@@ -66,7 +66,7 @@ final class SpeakiOSAppDelegate: NSObject, UIApplicationDelegate {
 struct SpeakiOSApp: App {
     @UIApplicationDelegateAdaptor(SpeakiOSAppDelegate.self) private var appDelegate
     @ObservedObject private var deepLinkRouter = DeepLinkRouter.shared
-    @ObservedObject private var keyboardQuickDictation = KeyboardQuickDictationCoordinator.shared
+    @ObservedObject private var keyboardInstantDictation = KeyboardInstantDictationCoordinator.shared
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
@@ -79,31 +79,13 @@ struct SpeakiOSApp: App {
                     deepLinkRouter.handle(url)
                 }
                 .task {
-                    keyboardQuickDictation.activate()
-                    #if DEBUG && targetEnvironment(simulator)
-                    if ProcessInfo.processInfo.arguments.contains("--keyboard-handoff-demo"),
-                       deepLinkRouter.keyboardCaptureRequest == nil {
-                        _ = try? KeyboardHandoffStore.shared.createRequest()
-                    }
-                    #endif
-                    resumePendingKeyboardCapture()
+                    keyboardInstantDictation.activate()
                 }
                 .onChange(of: scenePhase) { _, newPhase in
                     guard newPhase == .active else { return }
-                    resumePendingKeyboardCapture()
+                    keyboardInstantDictation.activate()
                 }
         }
-    }
-
-    private func resumePendingKeyboardCapture() {
-        guard deepLinkRouter.keyboardCaptureRequest == nil,
-              let requestID = KeyboardLaunchPolicy.pendingCaptureRequestID(
-                  from: KeyboardHandoffStore.shared.activeRecord()
-              ) else {
-            return
-        }
-        deepLinkRouter.selectedTab = 0
-        deepLinkRouter.keyboardCaptureRequest = KeyboardCaptureRequest(id: requestID)
     }
 }
 
@@ -128,9 +110,6 @@ struct MainTabView: View {
                     }
                 .tag(1)
             }
-        }
-        .fullScreenCover(item: $deepLinkRouter.keyboardCaptureRequest) { request in
-            KeyboardCaptureView(requestID: request.id)
         }
     }
 }

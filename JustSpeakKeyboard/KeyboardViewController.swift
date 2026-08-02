@@ -18,11 +18,17 @@ final class KeyboardViewController: UIInputViewController {
         let root = KeyboardRootView(
             model: model,
             showsInputModeSwitch: needsInputModeSwitchKey,
-            openContainingApp: { [weak self] url in
-                self?.openContainingApp(url)
-            },
             insertText: { [weak self] text in
                 self?.textDocumentProxy.insertText(text)
+            },
+            deleteBackward: { [weak self] in
+                self?.textDocumentProxy.deleteBackward()
+            },
+            adjustCursor: { [weak self] offset in
+                self?.textDocumentProxy.adjustTextPosition(byCharacterOffset: offset)
+            },
+            undoLastInsertion: { [weak self] text in
+                self?.undoLastInsertion(text) ?? false
             },
             showInputModeList: { [weak self] button, event in
                 self?.handleInputModeList(from: button, with: event)
@@ -47,6 +53,7 @@ final class KeyboardViewController: UIInputViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         model.activate(hasFullAccess: hasFullAccess)
+        updateDocumentContext()
     }
 
     override func viewDidDisappear(_ animated: Bool) {
@@ -69,18 +76,29 @@ final class KeyboardViewController: UIInputViewController {
     override func textDidChange(_ textInput: UITextInput?) {
         super.textDidChange(textInput)
         model.activate(hasFullAccess: hasFullAccess)
+        updateDocumentContext()
     }
 
-    private func openContainingApp(_ url: URL) {
-        guard let extensionContext else {
-            model.appOpenCompleted(succeeded: false)
-            return
+    override func selectionDidChange(_ textInput: UITextInput?) {
+        super.selectionDidChange(textInput)
+        updateDocumentContext()
+    }
+
+    private func updateDocumentContext() {
+        model.updateDocumentContext(selectedText: textDocumentProxy.selectedText)
+    }
+
+    private func undoLastInsertion(_ text: String) -> Bool {
+        guard let count = KeyboardCorrectionPlan.undoDeletionCount(
+            insertedText: text,
+            documentContextBeforeInput: textDocumentProxy.documentContextBeforeInput
+        ) else {
+            return false
         }
-        extensionContext.open(url) { [weak model] succeeded in
-            Task { @MainActor in
-                model?.appOpenCompleted(succeeded: succeeded)
-            }
+        for _ in 0..<count {
+            textDocumentProxy.deleteBackward()
         }
+        return true
     }
 
     private func updatePreferredHeight() {
@@ -89,9 +107,9 @@ final class KeyboardViewController: UIInputViewController {
         let isPad = traitCollection.userInterfaceIdiom == .pad
         var height: CGFloat
         if isLandscape {
-            height = isPad ? 220 : 205
+            height = isPad ? 250 : 235
         } else {
-            height = isPad ? 280 : 260
+            height = isPad ? 320 : 300
         }
         if traitCollection.preferredContentSizeCategory.isAccessibilityCategory {
             height += isPad ? 80 : 60
@@ -113,10 +131,11 @@ final class KeyboardViewController: UIInputViewController {
 final class KeyboardViewModel: ObservableObject {
     enum Presentation: Equatable {
         case idle
-        case openingApp
+        case waitingForApp
         case recording
         case transcribing
         case inserted
+        case undone
         case missingFullAccess
         case unavailable
         case cancelled
@@ -125,12 +144,18 @@ final class KeyboardViewModel: ObservableObject {
 
     @Published private(set) var presentation: Presentation = .idle
     @Published private(set) var hasFullAccess = false
+    @Published private(set) var hasSelectedText = false
 
     private let store: KeyboardHandoffStore
     private let consumer: KeyboardHandoffConsumer
     private var requestID: UUID?
     private var pollTask: Task<Void, Never>?
     private var insertText: ((String) -> Void)?
+    private var lastInsertedText: String?
+
+    var canUndoLastInsertion: Bool {
+        lastInsertedText != nil
+    }
 
     init(store: KeyboardHandoffStore = .shared) {
         self.store = store
@@ -161,10 +186,11 @@ final class KeyboardViewModel: ObservableObject {
         pollTask = nil
     }
 
-    func startHandoff(
-        openContainingApp: (URL) -> Void,
-        insertText: @escaping (String) -> Void
-    ) {
+    func updateDocumentContext(selectedText: String?) {
+        hasSelectedText = !(selectedText ?? "").isEmpty
+    }
+
+    func startHandoff(insertText: @escaping (String) -> Void) {
         self.insertText = insertText
         guard KeyboardLaunchPolicy.blockReason(
             hasFullAccess: hasFullAccess,
@@ -177,29 +203,10 @@ final class KeyboardViewModel: ObservableObject {
         do {
             let request = try store.createRequest()
             requestID = request.requestID
-            presentation = .openingApp
-
-            var components = URLComponents()
-            components.scheme = "justspeaktoit"
-            components.host = "keyboard"
-            components.queryItems = [
-                URLQueryItem(name: "request", value: request.requestID.uuidString.lowercased())
-            ]
-            guard let url = components.url else {
-                _ = try? store.fail(requestID: request.requestID, code: .invalidRequest)
-                presentation = .error(.invalidRequest)
-                return
-            }
-            openContainingApp(url)
+            presentation = .waitingForApp
         } catch {
             presentation = .unavailable
         }
-    }
-
-    func appOpenCompleted(succeeded: Bool) {
-        guard !succeeded, let requestID else { return }
-        _ = try? store.fail(requestID: requestID, code: .appUnavailable)
-        presentation = .error(.appUnavailable)
     }
 
     func cancel() {
@@ -212,15 +219,18 @@ final class KeyboardViewModel: ObservableObject {
         presentation = .cancelled
     }
 
-    func retry(
-        openContainingApp: (URL) -> Void,
-        insertText: @escaping (String) -> Void
-    ) {
+    func retry(insertText: @escaping (String) -> Void) {
         if let requestID {
             store.clear(requestID: requestID)
         }
         requestID = nil
-        startHandoff(openContainingApp: openContainingApp, insertText: insertText)
+        startHandoff(insertText: insertText)
+    }
+
+    func undoLastInsertion(perform: (String) -> Bool) {
+        guard let lastInsertedText, perform(lastInsertedText) else { return }
+        self.lastInsertedText = nil
+        presentation = .undone
     }
 
     private func startPolling() {
@@ -240,7 +250,7 @@ final class KeyboardViewModel: ObservableObject {
             return
         }
         guard let requestID else {
-            if presentation != .inserted && presentation != .cancelled {
+            if presentation != .inserted && presentation != .undone && presentation != .cancelled {
                 presentation = .idle
             }
             return
@@ -253,7 +263,7 @@ final class KeyboardViewModel: ObservableObject {
 
         switch record.phase {
         case .requested:
-            presentation = .openingApp
+            presentation = .waitingForApp
         case .recording:
             presentation = .recording
         case .transcribing:
@@ -264,6 +274,7 @@ final class KeyboardViewModel: ObservableObject {
                 return
             }
             if consumer.insertReadyResult(requestID: requestID, insert: insertText) {
+                lastInsertedText = record.transcript
                 self.requestID = nil
                 presentation = .inserted
             }
@@ -280,8 +291,10 @@ final class KeyboardViewModel: ObservableObject {
 private struct KeyboardRootView: View {
     @ObservedObject var model: KeyboardViewModel
     let showsInputModeSwitch: Bool
-    let openContainingApp: (URL) -> Void
     let insertText: (String) -> Void
+    let deleteBackward: () -> Void
+    let adjustCursor: (Int) -> Void
+    let undoLastInsertion: (String) -> Bool
     let showInputModeList: (UIButton, UIEvent) -> Void
 
     var body: some View {
@@ -296,6 +309,10 @@ private struct KeyboardRootView: View {
                 } else {
                     statusCopy
                     primaryControl
+                }
+
+                if showsCorrectionControls {
+                    correctionControls
                 }
 
                 Spacer(minLength: 0)
@@ -326,11 +343,11 @@ private struct KeyboardRootView: View {
     @ViewBuilder
     private var primaryControl: some View {
         switch model.presentation {
-        case .idle, .inserted, .cancelled:
+        case .idle, .inserted, .undone, .cancelled:
             Button {
-                model.startHandoff(openContainingApp: openContainingApp, insertText: insertText)
+                model.startHandoff(insertText: insertText)
             } label: {
-                Label("Speak in Just Speak", systemImage: "mic.fill")
+                Label(primaryButtonTitle, systemImage: "mic.fill")
                     .font(.headline)
                     .frame(maxWidth: 330, minHeight: 52)
             }
@@ -344,7 +361,13 @@ private struct KeyboardRootView: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: 330, minHeight: 44)
 
-        case .openingApp, .recording, .transcribing:
+        case .waitingForApp:
+            Label("Open Just Speak manually", systemImage: "arrow.up.forward.app")
+                .font(.headline)
+                .frame(maxWidth: 330, minHeight: 52)
+                .accessibilityIdentifier("keyboardOpenAppInstruction")
+
+        case .recording, .transcribing:
             HStack(spacing: 10) {
                 ProgressView()
                 Text(progressLabel)
@@ -355,7 +378,7 @@ private struct KeyboardRootView: View {
 
         case .unavailable, .error:
             Button {
-                model.retry(openContainingApp: openContainingApp, insertText: insertText)
+                model.retry(insertText: insertText)
             } label: {
                 Label("Try Again", systemImage: "arrow.clockwise")
                     .font(.headline)
@@ -364,6 +387,56 @@ private struct KeyboardRootView: View {
             .buttonStyle(.borderedProminent)
             .accessibilityIdentifier("keyboardRetryButton")
         }
+    }
+
+    private var correctionControls: some View {
+        HStack(spacing: 8) {
+            if model.canUndoLastInsertion {
+                Button {
+                    model.undoLastInsertion(perform: undoLastInsertion)
+                } label: {
+                    Label("Undo", systemImage: "arrow.uturn.backward")
+                        .labelStyle(.iconOnly)
+                        .frame(minWidth: 44, minHeight: 44)
+                }
+                .accessibilityLabel("Undo last transcript insertion")
+                .accessibilityIdentifier("keyboardUndoInsertionButton")
+            }
+
+            Button {
+                adjustCursor(-1)
+            } label: {
+                Image(systemName: "arrow.left")
+                    .frame(minWidth: 44, minHeight: 44)
+            }
+            .accessibilityLabel("Move cursor left")
+
+            Button {
+                insertText(" ")
+            } label: {
+                Text("Space")
+                    .frame(maxWidth: .infinity, minHeight: 44)
+            }
+            .accessibilityIdentifier("keyboardSpaceButton")
+
+            Button {
+                adjustCursor(1)
+            } label: {
+                Image(systemName: "arrow.right")
+                    .frame(minWidth: 44, minHeight: 44)
+            }
+            .accessibilityLabel("Move cursor right")
+
+            Button {
+                deleteBackward()
+            } label: {
+                Image(systemName: "delete.left")
+                    .frame(minWidth: 44, minHeight: 44)
+            }
+            .accessibilityLabel("Delete backward")
+            .accessibilityIdentifier("keyboardDeleteButton")
+        }
+        .buttonStyle(.bordered)
     }
 
     private var bottomBar: some View {
@@ -375,7 +448,7 @@ private struct KeyboardRootView: View {
                     .accessibilityHint("Touch and hold to choose another keyboard")
             }
 
-            Text("Audio is captured only in Just Speak. Results are deleted after insertion.")
+            Text("Audio stays in Just Speak. Temporary handoff clears; transcripts remain in History.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity)
@@ -398,20 +471,42 @@ private struct KeyboardRootView: View {
 
     private var canCancel: Bool {
         switch model.presentation {
-        case .openingApp, .recording, .transcribing:
+        case .waitingForApp, .recording, .transcribing:
             return true
         default:
             return false
         }
     }
 
+    private var showsCorrectionControls: Bool {
+        switch model.presentation {
+        case .idle, .inserted, .undone, .cancelled:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private var primaryButtonTitle: String {
+        if model.hasSelectedText {
+            return "Replace Selection by Voice"
+        }
+        switch model.presentation {
+        case .inserted:
+            return "Speak Again"
+        default:
+            return "Prepare Transcription"
+        }
+    }
+
     private var title: String {
         switch model.presentation {
         case .idle: return "Ready to transcribe"
-        case .openingApp: return "Opening Just Speak"
+        case .waitingForApp: return "Open Just Speak"
         case .recording: return "Recording in Just Speak"
         case .transcribing: return "Finishing transcript"
         case .inserted: return "Inserted"
+        case .undone: return "Insertion removed"
         case .missingFullAccess: return "Full Access is off"
         case .unavailable: return "Just Speak is unavailable"
         case .cancelled: return "Cancelled"
@@ -422,21 +517,26 @@ private struct KeyboardRootView: View {
     private var detail: String {
         switch model.presentation {
         case .idle:
-            return "Opens the app for microphone capture, then inserts the matching result here."
-        case .openingApp:
-            return "Complete recording in the Just Speak app, then return here."
+            if model.hasSelectedText {
+                return "The next transcript replaces the selected text. Open Just Speak manually when prompted."
+            }
+            return "Prepare a private request, then open Just Speak manually to record."
+        case .waitingForApp:
+            return "Open Just Speak from the Home Screen or App Switcher. Recording starts there."
         case .recording:
             return "Speak in the app. This keyboard never receives microphone audio."
         case .transcribing:
             return "Your selected JustSpeakToIt model is producing the final text."
         case .inserted:
-            return "The one-time result was inserted and removed from shared storage."
+            return "Saved in Just Speak History. Select text above to dictate a replacement, or use the correction row."
+        case .undone:
+            return "The inserted copy was removed. The completed transcript remains in Just Speak History."
         case .missingFullAccess:
             return "Full Access is required for the App Group handoff. It never exposes surrounding text."
         case .unavailable:
             return "Open the Just Speak app once and check that the keyboard is enabled."
         case .cancelled:
-            return "No transcript was inserted or retained."
+            return "No transcript was inserted."
         case let .error(code):
             return errorDetail(for: code)
         }
@@ -445,10 +545,11 @@ private struct KeyboardRootView: View {
     private var statusSymbol: String {
         switch model.presentation {
         case .idle: return "waveform"
-        case .openingApp: return "arrow.up.forward.app"
+        case .waitingForApp: return "arrow.up.forward.app"
         case .recording: return "record.circle"
         case .transcribing: return "ellipsis.bubble"
         case .inserted: return "checkmark.circle.fill"
+        case .undone: return "arrow.uturn.backward.circle.fill"
         case .missingFullAccess: return "lock.trianglebadge.exclamationmark"
         case .unavailable, .error: return "exclamationmark.triangle.fill"
         case .cancelled: return "xmark.circle"
@@ -457,7 +558,7 @@ private struct KeyboardRootView: View {
 
     private var statusTint: Color {
         switch model.presentation {
-        case .inserted: return .green
+        case .inserted, .undone: return .green
         case .recording: return .red
         case .missingFullAccess, .unavailable, .error: return .orange
         default: return .primary
@@ -468,7 +569,7 @@ private struct KeyboardRootView: View {
         switch model.presentation {
         case .recording: return "Recording"
         case .transcribing: return "Transcribing"
-        default: return "Opening App"
+        default: return "Waiting"
         }
     }
 
@@ -477,7 +578,7 @@ private struct KeyboardRootView: View {
         case .fullAccessRequired:
             return "Turn on Full Access in Settings, then try again."
         case .appUnavailable:
-            return "The containing app could not be opened. Open Just Speak manually and retry."
+            return "Open Just Speak manually from the Home Screen or App Switcher, then retry."
         case .recordingUnavailable:
             return "Recording could not start. Check microphone permission in Just Speak."
         case .noSpeech:
@@ -487,7 +588,7 @@ private struct KeyboardRootView: View {
         case .invalidRequest:
             return "The request did not match the active keyboard session."
         case .unknown:
-            return "The handoff ended safely without retaining a transcript."
+            return "The temporary handoff ended safely. Completed recordings remain in History."
         }
     }
 }

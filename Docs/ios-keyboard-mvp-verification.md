@@ -3,28 +3,61 @@
 ## Scope and architecture
 
 The Just Speak keyboard is intentionally transcription-first. It does not
-implement ordinary typing, autocorrection, or an Apple-keyboard clone. The
-globe control uses `UIInputViewController.handleInputModeList(from:with:)` so a
-user can return to a system keyboard for typing.
+implement autocorrection or attempt an Apple-keyboard clone. It provides a
+small correction row (safe undo, cursor movement, space, and backspace), and a
+selected range can be replaced by the next voice transcription. The globe
+control uses `UIInputViewController.handleInputModeList(from:with:)` so a user
+can return to a system keyboard for full typing.
 
 Apple does not allow a custom keyboard extension to access the microphone. The
 supported handoff is therefore:
 
 1. The keyboard creates a short-lived, nonce-scoped request in
    `group.com.justspeaktoit.ios`.
-2. The keyboard opens `justspeaktoit://keyboard?request=<uuid>` through its
-   extension context.
-3. The containing app validates the nonce and records through the existing
+2. The user opens Just Speak from the Home Screen or App Switcher. Custom
+   keyboard extensions are not one of the iOS extension points for which Apple
+   documents `NSExtensionContext.open` support, so the keyboard must not claim
+   it can launch the containing app automatically.
+3. When the containing app becomes active, it detects the pending nonce,
+   validates it, and records through the existing
    `TranscriptionRecordingService` using the selected local or remote model.
-4. The app writes one final transcript to the matching versioned record.
+4. The app saves the completed transcript to History and writes one temporary
+   final transcript to the matching versioned App Group record.
 5. After the user returns to the originating app, the keyboard inserts the
-   matching result with `textDocumentProxy.insertText` and deletes it.
+   matching result with `textDocumentProxy.insertText` and deletes the App
+   Group copy. History remains available in Just Speak.
 
 Requests expire after three minutes, transcription finalisation after 90
-seconds, and completed results after 60 seconds. A mismatched nonce can neither
-read nor clear another request. Keyboard-originated dictation does not write to
-History or the clipboard, does not publish partial text through the legacy App
-Group keys, and deletes temporary batch audio after transcription.
+seconds, and completed App Group results after 60 seconds. A mismatched nonce
+can neither read nor clear another request. Keyboard-originated dictation does
+not write to the clipboard, does not publish partial text through the legacy
+App Group keys, and deletes temporary batch audio after transcription.
+
+## Correction UX decision
+
+Do not build a full QWERTY keyboard until product evidence justifies owning the
+complete typing experience. Apple requires custom keyboards to handle field
+traits, compact and regular widths, rotation, iPad layouts, input-mode
+switching, text context, and accessibility. Wispr Flow's public iOS notes also
+show the ongoing surface area of a production QWERTY keyboard: capitalization,
+autocorrect, shift/caps lock, double-space punctuation, multi-touch ordering,
+hit targets between keys, and language behavior.
+
+The supported Just Speak correction path is deliberately smaller:
+
+- select mistaken host-app text and choose **Replace Selection by Voice**;
+- undo the most recent insertion only when the exact inserted suffix still
+  precedes the cursor;
+- move the cursor, insert a space, or delete backward without changing
+  keyboards;
+- use the globe key for arbitrary character typing with Apple's keyboard.
+
+Primary references:
+
+- [Creating a custom keyboard](https://developer.apple.com/documentation/uikit/creating-a-custom-keyboard)
+- [Handling text interactions in custom keyboards](https://developer.apple.com/documentation/uikit/handling-text-interactions-in-custom-keyboards)
+- [`NSExtensionContext.open`](https://developer.apple.com/documentation/foundation/nsextensioncontext/open(_:completionhandler:))
+- [Wispr Flow iPhone keyboard notes](https://docs.wisprflow.ai/articles/7453988911-set-up-the-flow-keyboard-on-iphone)
 
 ## Simulator verification
 
@@ -59,7 +92,8 @@ For a deterministic containing-app capture screen, launch the Debug app with:
 JUSTSPEAKTOIT_SIMULATOR_TRANSCRIPT=Simulator keyboard result
 ```
 
-Tap **Finish & Transcribe** and confirm the screen reaches **Ready to Insert**.
+Open the app with a pending demo request, tap **Finish & Transcribe**, and
+confirm the screen reaches **Ready to Insert**.
 The nonce, transcript, API keys, and surrounding text must not appear in logs.
 
 ## Physical-device matrix
@@ -93,13 +127,19 @@ inspect or transmit surrounding text.
 2. Disable network connectivity.
 3. Open Notes or another standard text editor and focus a normal text field.
 4. Hold the globe key and choose Just Speak.
-5. Tap **Speak in Just Speak**. Confirm the containing app opens and requests
+5. Tap **Prepare Transcription**, then manually open Just Speak from the Home
+   Screen or App Switcher. Confirm the pending capture opens and requests
    microphone/speech permission only there.
 6. Speak, tap **Finish & Transcribe**, and wait for **Ready to Insert**.
 7. Return to Notes using the app switcher or Back gesture where available,
    choose Just Speak again if iOS changed keyboards, and confirm the text is
    inserted once at the cursor or over the current selection.
-8. Reopen the keyboard and confirm the result is not inserted again.
+8. Confirm the completed transcript is present in Just Speak History while the
+   temporary App Group result cannot be inserted again.
+9. Select a word in Notes, choose **Replace Selection by Voice**, complete a
+   second handoff, and confirm the selected word is replaced.
+10. Verify safe undo succeeds immediately after insertion but refuses to delete
+    text if the cursor moved or the host text changed.
 
 iOS does not provide a public API that returns an extension directly to the
 originating third-party app, so the UI truthfully asks the user to return.
@@ -114,8 +154,8 @@ remote batch model. Confirm:
 - no API key, provider response body, transcript, nonce, or surrounding text is
   emitted to device logs;
 - batch audio is removed after success and after cancellation/failure;
-- the final result is inserted once and expires if the user waits over 60
-  seconds before returning.
+- the temporary result is inserted once and expires if the user waits over 60
+  seconds before returning; the History entry remains.
 
 ### Cancellation and recovery
 
@@ -151,9 +191,9 @@ labels, Switch Control targets, and touch targets of at least 44 points.
 - The containing app's existing microphone and speech usage descriptions apply
   when capture begins.
 - Only a schema version, request UUID, timestamps, phase, safe failure enum, and
-  final transcript are shared. The final transcript is removed on insertion or
-  timeout.
+  final transcript are shared. The App Group transcript is removed on insertion
+  or timeout; the containing app's History record is not.
 - No private settings URL, responder-chain URL workaround, Apple keyboard asset,
-  or copied Apple keyboard layout is used.
-- App Review notes should describe the manual return-to-origin step and the
+  copied Apple keyboard layout, or unsupported containing-app launch is used.
+- App Review notes should describe the manual open/return steps and the
   secure-field, phone-pad, and host-app restrictions exactly as users see them.

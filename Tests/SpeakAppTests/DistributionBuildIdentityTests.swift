@@ -113,7 +113,7 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(infoPlist.contains("$(PRODUCT_MODULE_NAME).KeyboardViewController"))
     }
 
-    func testIOSKeyboardUsesManualSupportedHandoffAndRetainsHistory() throws {
+    func testIOSKeyboardUsesSupportedPreparedSessionAndRetainsHistory() throws {
         let keyboard = try String(
             contentsOf: repositoryRoot.appendingPathComponent("JustSpeakKeyboard/KeyboardViewController.swift"),
             encoding: .utf8
@@ -124,12 +124,24 @@ final class DistributionBuildIdentityTests: XCTestCase {
             ),
             encoding: .utf8
         )
+        let quickCoordinator = try String(
+            contentsOf: repositoryRoot.appendingPathComponent(
+                "Sources/SpeakiOS/Services/KeyboardQuickDictationCoordinator.swift"
+            ),
+            encoding: .utf8
+        )
 
         XCTAssertFalse(keyboard.contains("extensionContext.open"))
         XCTAssertTrue(keyboard.contains("Open Just Speak manually"))
+        XCTAssertTrue(keyboard.contains("KeyboardHandoffSignal.postRequestChanged"))
+        XCTAssertTrue(keyboard.contains("Finish & Transcribe"))
         XCTAssertTrue(keyboard.contains("transcripts remain in History"))
         XCTAssertFalse(keyboard.contains("Results are deleted after insertion"))
         XCTAssertTrue(captureCoordinator.contains("saveToHistory: true"))
+        XCTAssertTrue(quickCoordinator.contains("input.installTap"))
+        XCTAssertFalse(quickCoordinator.contains(".write("))
+        XCTAssertFalse(quickCoordinator.contains(".upload("))
+        XCTAssertTrue(quickCoordinator.contains("saveToHistory: true"))
     }
 
     func testIOSReleaseWorkflowSignsAndValidatesKeyboardExtension() throws {

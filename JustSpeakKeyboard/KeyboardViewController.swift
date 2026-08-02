@@ -131,6 +131,7 @@ final class KeyboardViewController: UIInputViewController {
 final class KeyboardViewModel: ObservableObject {
     enum Presentation: Equatable {
         case idle
+        case starting
         case waitingForApp
         case recording
         case transcribing
@@ -145,8 +146,10 @@ final class KeyboardViewModel: ObservableObject {
     @Published private(set) var presentation: Presentation = .idle
     @Published private(set) var hasFullAccess = false
     @Published private(set) var hasSelectedText = false
+    @Published private(set) var quickSessionExpiresAt: Date?
 
     private let store: KeyboardHandoffStore
+    private let quickSessionStore: KeyboardQuickDictationStore
     private let consumer: KeyboardHandoffConsumer
     private var requestID: UUID?
     private var pollTask: Task<Void, Never>?
@@ -157,8 +160,12 @@ final class KeyboardViewModel: ObservableObject {
         lastInsertedText != nil
     }
 
-    init(store: KeyboardHandoffStore = .shared) {
+    init(
+        store: KeyboardHandoffStore = .shared,
+        quickSessionStore: KeyboardQuickDictationStore = .shared
+    ) {
         self.store = store
+        self.quickSessionStore = quickSessionStore
         self.consumer = KeyboardHandoffConsumer(store: store)
     }
 
@@ -177,6 +184,7 @@ final class KeyboardViewModel: ObservableObject {
         if requestID == nil {
             requestID = store.activeRecord()?.requestID
         }
+        refreshQuickSession()
         refresh()
         startPolling()
     }
@@ -203,7 +211,8 @@ final class KeyboardViewModel: ObservableObject {
         do {
             let request = try store.createRequest()
             requestID = request.requestID
-            presentation = .waitingForApp
+            presentation = quickSessionExpiresAt == nil ? .waitingForApp : .starting
+            KeyboardHandoffSignal.postRequestChanged()
         } catch {
             presentation = .unavailable
         }
@@ -215,8 +224,20 @@ final class KeyboardViewModel: ObservableObject {
             return
         }
         _ = try? store.cancel(requestID: requestID)
+        KeyboardHandoffSignal.postRequestChanged()
         self.requestID = nil
         presentation = .cancelled
+    }
+
+    func finish() {
+        guard let requestID else { return }
+        do {
+            try store.requestFinish(requestID: requestID)
+            presentation = .transcribing
+            KeyboardHandoffSignal.postRequestChanged()
+        } catch {
+            presentation = .error(.invalidRequest)
+        }
     }
 
     func retry(insertText: @escaping (String) -> Void) {
@@ -245,6 +266,7 @@ final class KeyboardViewModel: ObservableObject {
 
     // swiftlint:disable:next cyclomatic_complexity
     private func refresh() {
+        refreshQuickSession()
         guard hasFullAccess else {
             presentation = .missingFullAccess
             return
@@ -263,9 +285,11 @@ final class KeyboardViewModel: ObservableObject {
 
         switch record.phase {
         case .requested:
-            presentation = .waitingForApp
+            presentation = quickSessionExpiresAt == nil ? .waitingForApp : .starting
         case .recording:
             presentation = .recording
+        case .finishRequested:
+            presentation = .transcribing
         case .transcribing:
             presentation = .transcribing
         case .completed:
@@ -285,6 +309,10 @@ final class KeyboardViewModel: ObservableObject {
             self.requestID = nil
             presentation = .error(record.failureCode ?? .unknown)
         }
+    }
+
+    private func refreshQuickSession() {
+        quickSessionExpiresAt = quickSessionStore.activeSession()?.expiresAt
     }
 }
 
@@ -361,13 +389,34 @@ private struct KeyboardRootView: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: 330, minHeight: 44)
 
+        case .starting:
+            HStack(spacing: 10) {
+                ProgressView()
+                Text("Starting microphone")
+                    .font(.headline)
+            }
+            .frame(maxWidth: 330, minHeight: 52)
+            .accessibilityElement(children: .combine)
+
         case .waitingForApp:
             Label("Open Just Speak manually", systemImage: "arrow.up.forward.app")
                 .font(.headline)
                 .frame(maxWidth: 330, minHeight: 52)
                 .accessibilityIdentifier("keyboardOpenAppInstruction")
 
-        case .recording, .transcribing:
+        case .recording:
+            Button {
+                model.finish()
+            } label: {
+                Label("Finish & Transcribe", systemImage: "stop.fill")
+                    .font(.headline)
+                    .frame(maxWidth: 330, minHeight: 52)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.red)
+            .accessibilityIdentifier("keyboardFinishRecordingButton")
+
+        case .transcribing:
             HStack(spacing: 10) {
                 ProgressView()
                 Text(progressLabel)
@@ -471,7 +520,7 @@ private struct KeyboardRootView: View {
 
     private var canCancel: Bool {
         switch model.presentation {
-        case .waitingForApp, .recording, .transcribing:
+        case .starting, .waitingForApp, .recording, .transcribing:
             return true
         default:
             return false
@@ -495,13 +544,17 @@ private struct KeyboardRootView: View {
         case .inserted:
             return "Speak Again"
         default:
-            return "Prepare Transcription"
+            return model.quickSessionExpiresAt == nil ? "Prepare Quick Dictation" : "Speak"
         }
     }
 
     private var title: String {
         switch model.presentation {
-        case .idle: return "Ready to transcribe"
+        case .idle:
+            return model.quickSessionExpiresAt == nil
+                ? "Quick Dictation needs preparation"
+                : "Quick Dictation ready"
+        case .starting: return "Starting in the keyboard"
         case .waitingForApp: return "Open Just Speak"
         case .recording: return "Recording in Just Speak"
         case .transcribing: return "Finishing transcript"
@@ -518,13 +571,19 @@ private struct KeyboardRootView: View {
         switch model.presentation {
         case .idle:
             if model.hasSelectedText {
-                return "The next transcript replaces the selected text. Open Just Speak manually when prompted."
+                return model.quickSessionExpiresAt == nil
+                    ? "The next transcript replaces the selection. Open Just Speak once to start a five-minute session."
+                    : "The next transcript replaces the selection without leaving this app."
             }
-            return "Prepare a private request, then open Just Speak manually to record."
+            return model.quickSessionExpiresAt == nil
+                ? "Open Just Speak once to start a private five-minute microphone session."
+                : "Tap Speak and stay here. Idle audio is discarded until you start."
+        case .starting:
+            return "Stay here. Just Speak is starting the microphone in the background."
         case .waitingForApp:
-            return "Open Just Speak from the Home Screen or App Switcher. Recording starts there."
+            return "Open Just Speak from the Home Screen or App Switcher and enable Quick Dictation."
         case .recording:
-            return "Speak in the app. This keyboard never receives microphone audio."
+            return "Speak now, then finish here. The containing app owns the microphone."
         case .transcribing:
             return "Your selected JustSpeakToIt model is producing the final text."
         case .inserted:
@@ -545,6 +604,7 @@ private struct KeyboardRootView: View {
     private var statusSymbol: String {
         switch model.presentation {
         case .idle: return "waveform"
+        case .starting: return "mic.badge.plus"
         case .waitingForApp: return "arrow.up.forward.app"
         case .recording: return "record.circle"
         case .transcribing: return "ellipsis.bubble"
@@ -567,7 +627,6 @@ private struct KeyboardRootView: View {
 
     private var progressLabel: String {
         switch model.presentation {
-        case .recording: return "Recording"
         case .transcribing: return "Transcribing"
         default: return "Waiting"
         }

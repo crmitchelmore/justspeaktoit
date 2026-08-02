@@ -177,7 +177,12 @@ public final class TranscriptionActivityManager: ObservableObject {
 
     /// Marks the activity as completed. Headless recordings keep it primed so
     /// the next Action Button invocation can start entirely in the background.
-    public func completeActivity(finalWordCount: Int, duration: Int, keepPrimed: Bool = false) {
+    public func completeActivity(
+        finalWordCount: Int,
+        duration: Int,
+        keepPrimed: Bool = false,
+        primedMessage: String = "Ready for the Action Button"
+    ) {
         guard let activity = currentActivity else { return }
 
         let finalState = TranscriptionActivityAttributes.ContentState(
@@ -195,7 +200,7 @@ public final class TranscriptionActivityManager: ObservableObject {
                 guard !Task.isCancelled, activity.activityState == .active else { return }
                 let idleState = TranscriptionActivityAttributes.ContentState(
                     status: .idle,
-                    lastSnippet: "Ready for the Action Button",
+                    lastSnippet: primedMessage,
                     provider: finalState.provider
                 )
                 await activity.update(.init(state: idleState, staleDate: nil))

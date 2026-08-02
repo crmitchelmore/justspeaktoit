@@ -66,6 +66,7 @@ final class SpeakiOSAppDelegate: NSObject, UIApplicationDelegate {
 struct SpeakiOSApp: App {
     @UIApplicationDelegateAdaptor(SpeakiOSAppDelegate.self) private var appDelegate
     @ObservedObject private var deepLinkRouter = DeepLinkRouter.shared
+    @ObservedObject private var keyboardQuickDictation = KeyboardQuickDictationCoordinator.shared
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
@@ -78,6 +79,7 @@ struct SpeakiOSApp: App {
                     deepLinkRouter.handle(url)
                 }
                 .task {
+                    keyboardQuickDictation.activate()
                     #if DEBUG && targetEnvironment(simulator)
                     if ProcessInfo.processInfo.arguments.contains("--keyboard-handoff-demo"),
                        deepLinkRouter.keyboardCaptureRequest == nil {

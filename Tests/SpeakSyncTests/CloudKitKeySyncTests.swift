@@ -1,8 +1,14 @@
 import CloudKit
 import CryptoKit
+import SpeakCore
 import XCTest
 @testable import SpeakSync
 
+// The behavioral scenarios share one deterministic harness so their race ordering stays explicit.
+// swiftlint:disable file_length
+
+@MainActor
+// swiftlint:disable:next type_body_length
 final class CloudKitKeySyncTests: XCTestCase {
     func testSyncableIdentifiers_containsXAI() {
         XCTAssertTrue(CloudKitKeySync.syncableIdentifiers.contains("xai.apiKey"))
@@ -102,5 +108,493 @@ final class CloudKitKeySyncTests: XCTestCase {
             derived.map { String(format: "%02x", $0) }.joined(),
             "c5e478d59288c841aa530db6845c4c8d962893a001ce4e11a4963873aa98134a"
         )
+    }
+
+    func testRepeatedLocalChangesCoalesceIntoOneUpload() async throws {
+        let harness = makeHarness()
+        let isAvailable = await harness.sync.isAvailable()
+        XCTAssertTrue(isAvailable)
+        let firstDate = Date(timeIntervalSince1970: 1_720_100_001)
+        let secondDate = Date(timeIntervalSince1970: 1_720_100_002)
+        await harness.secrets.set("latest", identifier: "openai.apiKey")
+
+        postLocalChange(harness, identifier: "openai.apiKey", updatedAt: firstDate)
+        try await eventually { await harness.sleeper.waiterCount == 1 }
+        postLocalChange(harness, identifier: "openai.apiKey", updatedAt: secondDate)
+        await harness.sleeper.resumeNext()
+        try await eventually { await harness.sleeper.waiterCount == 1 }
+        await harness.sleeper.resumeNext()
+
+        try await eventually { harness.cloud.savedRecords.count == 1 }
+        let saved = try XCTUnwrap(EncryptedSecretRecordMapper.secret(from: harness.cloud.savedRecords[0]))
+        XCTAssertEqual(saved.updatedAt, secondDate)
+        XCTAssertEqual(try EncryptedSecretCrypto.decryptSecret(saved, key: harness.key), "latest")
+        let journalKey = pendingKey("openai.apiKey")
+        try await eventually { harness.defaults.data(forKey: journalKey) == nil }
+        XCTAssertNil(harness.defaults.data(forKey: journalKey))
+    }
+
+    func testFailedDeletionRemainsJournaledAndRetries() async throws {
+        let harness = makeHarness()
+        let isAvailable = await harness.sync.isAvailable()
+        XCTAssertTrue(isAvailable)
+        harness.cloud.saveFailuresRemaining = 1
+        let updatedAt = Date(timeIntervalSince1970: 1_720_100_003)
+
+        postLocalChange(
+            harness,
+            identifier: "deepgram.apiKey",
+            operation: "remove",
+            updatedAt: updatedAt
+        )
+        try await eventually { await harness.sleeper.waiterCount == 1 }
+        await harness.sleeper.resumeNext()
+        try await eventually { harness.cloud.saveAttempts == 1 }
+        XCTAssertNotNil(harness.defaults.data(forKey: pendingKey("deepgram.apiKey")))
+
+        try await eventually { await harness.sleeper.waiterCount == 1 }
+        await harness.sleeper.resumeNext()
+        try await eventually { await harness.sleeper.waiterCount == 1 }
+        await harness.sleeper.resumeNext()
+
+        try await eventually { harness.cloud.savedRecords.count == 1 }
+        let saved = try XCTUnwrap(EncryptedSecretRecordMapper.secret(from: harness.cloud.savedRecords[0]))
+        XCTAssertTrue(saved.isDeleted)
+        XCTAssertEqual(saved.updatedAt, updatedAt)
+        let journalKey = pendingKey("deepgram.apiKey")
+        try await eventually { harness.defaults.data(forKey: journalKey) == nil }
+        XCTAssertNil(harness.defaults.data(forKey: journalKey))
+    }
+
+    func testFailedUpdateRemainsJournaledAndRetries() async throws {
+        let harness = makeHarness()
+        let isAvailable = await harness.sync.isAvailable()
+        XCTAssertTrue(isAvailable)
+        harness.cloud.saveFailuresRemaining = 1
+        await harness.secrets.set("retry-value", identifier: "openai.apiKey")
+
+        postLocalChange(
+            harness,
+            identifier: "openai.apiKey",
+            updatedAt: Date(timeIntervalSince1970: 1_720_100_003.5)
+        )
+        try await eventually { await harness.sleeper.waiterCount == 1 }
+        await harness.sleeper.resumeNext()
+        try await eventually { harness.cloud.saveAttempts == 1 }
+        let journalKey = pendingKey("openai.apiKey")
+        XCTAssertNotNil(harness.defaults.data(forKey: journalKey))
+
+        try await eventually { await harness.sleeper.waiterCount == 1 }
+        await harness.sleeper.resumeNext()
+        try await eventually { await harness.sleeper.waiterCount == 1 }
+        await harness.sleeper.resumeNext()
+
+        try await eventually { harness.cloud.savedRecords.count == 1 }
+        let saved = try XCTUnwrap(EncryptedSecretRecordMapper.secret(from: harness.cloud.savedRecords[0]))
+        XCTAssertFalse(saved.isDeleted)
+        XCTAssertEqual(try EncryptedSecretCrypto.decryptSecret(saved, key: harness.key), "retry-value")
+        try await eventually { harness.defaults.data(forKey: journalKey) == nil }
+    }
+
+    func testNewerMutationSurvivesOlderUploadCompletion() async throws {
+        let harness = makeHarness()
+        let isAvailable = await harness.sync.isAvailable()
+        XCTAssertTrue(isAvailable)
+        let saveGate = TestGate()
+        harness.cloud.saveGate = saveGate
+        await harness.secrets.set("first", identifier: "openai.apiKey")
+        let firstDate = Date(timeIntervalSince1970: 1_720_100_004)
+        let secondDate = Date(timeIntervalSince1970: 1_720_100_005)
+
+        postLocalChange(harness, identifier: "openai.apiKey", updatedAt: firstDate)
+        try await eventually { await harness.sleeper.waiterCount == 1 }
+        await harness.sleeper.resumeNext()
+        try await eventually { await saveGate.waiterCount == 1 }
+
+        await harness.secrets.set("second", identifier: "openai.apiKey")
+        postLocalChange(harness, identifier: "openai.apiKey", updatedAt: secondDate)
+        await saveGate.open()
+        try await eventually { await harness.sleeper.waiterCount == 1 }
+        XCTAssertNotNil(harness.defaults.data(forKey: pendingKey("openai.apiKey")))
+        harness.cloud.saveGate = nil
+        await harness.sleeper.resumeNext()
+
+        try await eventually { harness.cloud.savedRecords.count == 2 }
+        let saved = try XCTUnwrap(EncryptedSecretRecordMapper.secret(from: harness.cloud.savedRecords[1]))
+        XCTAssertEqual(saved.updatedAt, secondDate)
+        XCTAssertEqual(try EncryptedSecretCrypto.decryptSecret(saved, key: harness.key), "second")
+        let journalKey = pendingKey("openai.apiKey")
+        try await eventually { harness.defaults.data(forKey: journalKey) == nil }
+        XCTAssertNil(harness.defaults.data(forKey: journalKey))
+    }
+
+    func testRemoteApplyFailureDoesNotAdvanceChangeToken() async throws {
+        let harness = makeHarness()
+        let oldToken = Data("old-token".utf8)
+        let newToken = Data("new-token".utf8)
+        harness.defaults.set(oldToken, forKey: "speak.keysync.serverChangeToken")
+        await harness.secrets.failNextStore()
+        harness.cloud.fetchResults = [.success(KeySyncFetchResult(
+            records: [try remoteRecord(
+                identifier: "openai.apiKey",
+                value: "remote",
+                updatedAt: Date(timeIntervalSince1970: 1_720_100_006),
+                key: harness.key
+            )],
+            deletedIDs: [],
+            serverChangeTokenData: newToken,
+            moreComing: false
+        ))]
+
+        await XCTAssertThrowsErrorAsync { try await harness.sync.syncNow() }
+        XCTAssertEqual(harness.defaults.data(forKey: "speak.keysync.serverChangeToken"), oldToken)
+    }
+
+    func testExpiredChangeTokenRetriesExactlyOnceWithoutToken() async throws {
+        let harness = makeHarness()
+        let oldToken = Data("expired-token".utf8)
+        let newToken = Data("replacement-token".utf8)
+        harness.defaults.set(oldToken, forKey: "speak.keysync.serverChangeToken")
+        harness.cloud.fetchResults = [
+            .failure(CKError(.changeTokenExpired)),
+            .success(KeySyncFetchResult(
+                records: [],
+                deletedIDs: [],
+                serverChangeTokenData: newToken,
+                moreComing: false
+            ))
+        ]
+
+        try await harness.sync.syncNow()
+
+        XCTAssertEqual(harness.cloud.fetchTokens, [oldToken, nil])
+        XCTAssertEqual(harness.defaults.data(forKey: "speak.keysync.serverChangeToken"), newToken)
+    }
+
+    func testDisableCancelsInFlightFetchBeforeWritesOrTokenCommit() async throws {
+        let harness = makeHarness()
+        let fetchGate = TestGate()
+        harness.cloud.fetchGate = fetchGate
+        let token = Data("must-not-commit".utf8)
+        harness.cloud.fetchResults = [.success(KeySyncFetchResult(
+            records: [try remoteRecord(
+                identifier: "openai.apiKey",
+                value: "remote",
+                updatedAt: Date(timeIntervalSince1970: 1_720_100_007),
+                key: harness.key
+            )],
+            deletedIDs: [],
+            serverChangeTokenData: token,
+            moreComing: false
+        ))]
+
+        let syncTask = Task { try await harness.sync.syncNow() }
+        try await eventually { await fetchGate.waiterCount == 1 }
+        let disableTask = Task { await harness.sync.disable() }
+        await fetchGate.open()
+        _ = try? await syncTask.value
+        await disableTask.value
+
+        XCTAssertFalse(harness.defaults.bool(forKey: "speak.keysync.enabled"))
+        XCTAssertNil(harness.defaults.data(forKey: "speak.keysync.serverChangeToken"))
+        let storedValue = try? await harness.secrets.secret(identifier: "openai.apiKey")
+        XCTAssertNil(storedValue)
+    }
+
+    func testAccountChangeClearsAccountStateAndCancelsInFlightSync() async throws {
+        let harness = makeHarness(accountName: "first-account")
+        let fetchGate = TestGate()
+        harness.cloud.fetchGate = fetchGate
+        harness.cloud.fetchResults = [.success(KeySyncFetchResult(
+            records: [],
+            deletedIDs: [],
+            serverChangeTokenData: Data("stale-token".utf8),
+            moreComing: false
+        ))]
+        harness.defaults.set(Data("pending".utf8), forKey: pendingKey("openai.apiKey"))
+
+        let syncTask = Task { try await harness.sync.syncNow() }
+        try await eventually { await fetchGate.waiterCount == 1 }
+        harness.cloud.accountName = "second-account"
+        harness.notifications.post(name: .CKAccountChanged, object: nil)
+        await fetchGate.open()
+        _ = try? await syncTask.value
+
+        try await eventually {
+            harness.defaults.string(forKey: "speak.keysync.accountIdentifier")
+                == accountFingerprint("second-account")
+        }
+        XCTAssertFalse(harness.defaults.bool(forKey: "speak.keysync.enabled"))
+        XCTAssertNil(harness.defaults.data(forKey: pendingKey("openai.apiKey")))
+        XCTAssertNil(harness.defaults.data(forKey: "speak.keysync.serverChangeToken"))
+    }
+
+    func testNewerRemoteSecretSupersedesPendingLocalMutation() async throws {
+        let harness = makeHarness()
+        let localDate = Date(timeIntervalSince1970: 1_720_100_008)
+        let remoteDate = Date(timeIntervalSince1970: 1_720_100_009)
+        let mutation = PendingKeySyncMutation(
+            operationID: UUID(),
+            identifier: "openai.apiKey",
+            updatedAt: localDate,
+            kind: .update
+        )
+        harness.defaults.set(try JSONEncoder().encode(mutation), forKey: pendingKey("openai.apiKey"))
+        await harness.secrets.set("local", identifier: "openai.apiKey")
+        harness.cloud.fetchResults = [.success(KeySyncFetchResult(
+            records: [try remoteRecord(
+                identifier: "openai.apiKey",
+                value: "remote",
+                updatedAt: remoteDate,
+                key: harness.key
+            )],
+            deletedIDs: [],
+            serverChangeTokenData: Data("new-token".utf8),
+            moreComing: false
+        ))]
+
+        try await harness.sync.syncNow()
+
+        let storedValue = try await harness.secrets.secret(identifier: "openai.apiKey")
+        XCTAssertEqual(storedValue, "remote")
+        XCTAssertTrue(harness.cloud.savedRecords.isEmpty)
+        XCTAssertNil(harness.defaults.data(forKey: pendingKey("openai.apiKey")))
+    }
+}
+
+private extension CloudKitKeySyncTests {
+    struct Harness {
+        let sync: CloudKitKeySync
+        let secrets: MemorySecretStorage
+        let state: MemorySecretStorage
+        let defaults: UserDefaults
+        let notifications: NotificationCenter
+        let cloud: FakeKeySyncCloud
+        let sleeper: TestSleeper
+        let key: SymmetricKey
+    }
+
+    func makeHarness(accountName: String = "test-account") -> Harness {
+        let suiteName = "CloudKitKeySyncTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        defaults.set(true, forKey: "speak.keysync.enabled")
+        defaults.set(accountFingerprint(accountName), forKey: "speak.keysync.accountIdentifier")
+        let notifications = NotificationCenter()
+        let cloud = FakeKeySyncCloud(accountName: accountName)
+        let sleeper = TestSleeper()
+        let secrets = MemorySecretStorage()
+        let state = MemorySecretStorage()
+        let key = SymmetricKey(data: Data(repeating: 7, count: 32))
+        let dependencies = CloudKitKeySyncDependencies(
+            defaults: defaults,
+            notificationCenter: notifications,
+            now: { Date(timeIntervalSince1970: 1_720_199_999) },
+            sleep: { try await sleeper.sleep($0) },
+            hasCloudKitEntitlement: { true },
+            privateDatabase: { cloud.database },
+            accountStatus: { .available },
+            accountRecordName: { cloud.accountName },
+            setupInfrastructure: { _ in },
+            fetchRecord: { id, _ in cloud.records[id.recordName] },
+            saveRecord: { record, _ in try await cloud.save(record) },
+            fetchChanges: { _, token in try await cloud.fetch(token: token) }
+        )
+        let sync = CloudKitKeySync(
+            secureStorage: secrets,
+            stateStorage: state,
+            dependencies: dependencies,
+            isConfigured: true,
+            symmetricKey: key
+        )
+        return Harness(
+            sync: sync,
+            secrets: secrets,
+            state: state,
+            defaults: defaults,
+            notifications: notifications,
+            cloud: cloud,
+            sleeper: sleeper,
+            key: key
+        )
+    }
+
+    func postLocalChange(
+        _ harness: Harness,
+        identifier: String,
+        operation: String = "store",
+        updatedAt: Date
+    ) {
+        harness.notifications.post(
+            name: SecureStorage.didChangeSecretNotification,
+            object: nil,
+            userInfo: [
+                SecureStorage.NotificationUserInfoKey.identifier: identifier,
+                SecureStorage.NotificationUserInfoKey.operation: operation,
+                SecureStorage.NotificationUserInfoKey.updatedAt: updatedAt
+            ]
+        )
+    }
+
+    func pendingKey(_ identifier: String) -> String {
+        "speak.keysync.pending.\(identifier)"
+    }
+
+    func remoteRecord(
+        identifier: String,
+        value: String,
+        updatedAt: Date,
+        key: SymmetricKey
+    ) throws -> CKRecord {
+        EncryptedSecretRecordMapper.record(from: try EncryptedSecretCrypto.encryptSecret(
+            identifier: identifier,
+            value: value,
+            updatedAt: updatedAt,
+            key: key
+        ))
+    }
+
+    func eventually(
+        attempts: Int = 2_000,
+        condition: @escaping @MainActor () async -> Bool
+    ) async throws {
+        for _ in 0..<attempts {
+            if await condition() { return }
+            await Task.yield()
+        }
+        XCTFail("Condition was not satisfied")
+        throw TestFailure.timedOut
+    }
+}
+
+private enum TestFailure: Error {
+    case injected
+    case timedOut
+}
+
+private actor MemorySecretStorage: CloudKitKeySyncSecretStoring {
+    private var values: [String: String] = [:]
+    private var shouldFailNextStore = false
+
+    func set(_ value: String, identifier: String) {
+        values[identifier] = value
+    }
+
+    func failNextStore() {
+        shouldFailNextStore = true
+    }
+
+    func storeSecret(_ value: String, identifier: String) async throws {
+        if shouldFailNextStore {
+            shouldFailNextStore = false
+            throw TestFailure.injected
+        }
+        values[identifier] = value
+    }
+
+    func secret(identifier: String) async throws -> String {
+        guard let value = values[identifier] else { throw SecureStorageError.valueNotFound }
+        return value
+    }
+
+    func removeSecret(identifier: String) async throws {
+        values[identifier] = nil
+    }
+}
+
+@MainActor
+private final class FakeKeySyncCloud {
+    let database = CloudKitKeySyncDatabase(live: nil)
+    var accountName: String
+    var records: [String: CKRecord] = [:]
+    var fetchResults: [Result<KeySyncFetchResult, Error>] = []
+    var fetchTokens: [Data?] = []
+    var savedRecords: [CKRecord] = []
+    var saveAttempts = 0
+    var saveFailuresRemaining = 0
+    var saveGate: TestGate?
+    var fetchGate: TestGate?
+
+    init(accountName: String) {
+        self.accountName = accountName
+    }
+
+    func save(_ record: CKRecord) async throws -> CKRecord {
+        saveAttempts += 1
+        if let saveGate { await saveGate.wait() }
+        if saveFailuresRemaining > 0 {
+            saveFailuresRemaining -= 1
+            throw TestFailure.injected
+        }
+        savedRecords.append(record)
+        records[record.recordID.recordName] = record
+        return record
+    }
+
+    func fetch(token: Data?) async throws -> KeySyncFetchResult {
+        fetchTokens.append(token)
+        if let fetchGate { await fetchGate.wait() }
+        guard !fetchResults.isEmpty else {
+            return KeySyncFetchResult(
+                records: [],
+                deletedIDs: [],
+                serverChangeTokenData: token,
+                moreComing: false
+            )
+        }
+        return try fetchResults.removeFirst().get()
+    }
+}
+
+private actor TestGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    var waiterCount: Int { waiters.count }
+
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func open() {
+        isOpen = true
+        let pending = waiters
+        waiters.removeAll()
+        pending.forEach { $0.resume() }
+    }
+}
+
+private actor TestSleeper {
+    private var waiters: [CheckedContinuation<Void, Error>] = []
+
+    var waiterCount: Int { waiters.count }
+
+    func sleep(_ nanoseconds: UInt64) async throws {
+        try await withCheckedThrowingContinuation { waiters.append($0) }
+    }
+
+    func resumeNext() {
+        guard !waiters.isEmpty else { return }
+        waiters.removeFirst().resume()
+    }
+}
+
+private func accountFingerprint(_ accountName: String) -> String {
+    SHA256.hash(data: Data(accountName.utf8))
+        .map { String(format: "%02x", $0) }
+        .joined()
+}
+
+private func XCTAssertThrowsErrorAsync(
+    _ expression: () async throws -> Void,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) async {
+    do {
+        try await expression()
+        XCTFail("Expected expression to throw", file: file, line: line)
+    } catch {
+        // Expected.
     }
 }

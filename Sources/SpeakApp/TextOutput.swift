@@ -36,6 +36,18 @@ struct TextOutputResult {
   let error: Error?
 }
 
+private func currentSystemFocusedElement() -> AXUIElement? {
+  let systemWideElement = AXUIElementCreateSystemWide()
+  var rawFocused: CFTypeRef?
+  let copyStatus = AXUIElementCopyAttributeValue(
+    systemWideElement,
+    kAXFocusedUIElementAttribute as CFString,
+    &rawFocused
+  )
+  guard copyStatus == .success, let rawFocused else { return nil }
+  return unsafeBitCast(rawFocused, to: AXUIElement.self)
+}
+
 /// The app and text control that owned keyboard focus when a transcription session began.
 /// Keeping this target avoids delivering into an unrelated app if focus changes while the
 /// recording is transcribed or post-processed.
@@ -57,25 +69,12 @@ struct TextOutputTarget {
         focusedElement: nil
       )
     }
-    let systemWideElement = AXUIElementCreateSystemWide()
-    var rawFocused: CFTypeRef?
-    let copyStatus = AXUIElementCopyAttributeValue(
-      systemWideElement,
-      kAXFocusedUIElementAttribute as CFString,
-      &rawFocused
-    )
-    let focusedElement: AXUIElement?
-    if copyStatus == .success, let rawFocused {
-      focusedElement = unsafeBitCast(rawFocused, to: AXUIElement.self)
-    } else {
-      focusedElement = nil
-    }
     return TextOutputTarget(
       processIdentifier: application?.processIdentifier,
       applicationName: application?.localizedName,
       bundleIdentifier: application?.bundleIdentifier,
       applicationLaunchDate: application?.launchDate,
-      focusedElement: focusedElement
+      focusedElement: currentSystemFocusedElement()
     )
   }
 
@@ -153,7 +152,14 @@ struct AccessibilityTextOutput: TextOutputting {
       )
     }
 
-    guard let focusedElement = target?.focusedElement ?? Self.currentFocusedElement() else {
+    if let target, !target.isApplicationRunning {
+      return TextOutputResult(
+        method: .none,
+        error: TextOutputError.targetApplicationUnavailable
+      )
+    }
+
+    guard let focusedElement = target?.focusedElement ?? currentSystemFocusedElement() else {
       return TextOutputResult(
         method: .none,
         error: TextOutputError.unableToFindFocusedElement
@@ -192,17 +198,6 @@ struct AccessibilityTextOutput: TextOutputting {
     }
   }
 
-  private static func currentFocusedElement() -> AXUIElement? {
-    let systemWideElement = AXUIElementCreateSystemWide()
-    var rawFocused: CFTypeRef?
-    let copyStatus = AXUIElementCopyAttributeValue(
-      systemWideElement,
-      kAXFocusedUIElementAttribute as CFString,
-      &rawFocused
-    )
-    guard copyStatus == .success, let rawFocused else { return nil }
-    return unsafeBitCast(rawFocused, to: AXUIElement.self)
-  }
 }
 
 // @Implement: This implementation should use the clipboard to paste text into the focused app. It should restore the previous pasteboard value (if the app setting output to clipboard is false) It should respect any relevant settings from app settings
@@ -385,6 +380,9 @@ struct SmartTextOutput: TextOutputting {
     case .clipboardOnly:
       return clipboardOutput.output(text: text, target: target)
     case .smart:
+      if let target, !target.isApplicationRunning {
+        return clipboardOutput.output(text: text, target: target)
+      }
       // Skip accessibility for known problematic apps
       if isProblematic(target: target) {
         print("[SmartTextOutput] Skipping accessibility for problematic app, using clipboard")
@@ -397,7 +395,7 @@ struct SmartTextOutput: TextOutputting {
 
       // Only try accessibility if permission is granted AND there's a focused element
       if permissionsManager.status(for: .accessibility).isGranted,
-         let focusedElement = target?.focusedElement ?? getFocusedElement() {
+         let focusedElement = target?.focusedElement ?? currentSystemFocusedElement() {
 
         // Log element info for debugging
         logFocusedElementInfo(focusedElement)
@@ -431,17 +429,6 @@ struct SmartTextOutput: TextOutputting {
       ?? NSWorkspace.shared.frontmostApplication?.localizedName
       ?? ""
     return Self.problematicApps.contains(appName)
-  }
-
-  private func getFocusedElement() -> AXUIElement? {
-    let systemWideElement = AXUIElementCreateSystemWide()
-    var rawFocused: CFTypeRef?
-    let copyStatus = AXUIElementCopyAttributeValue(
-      systemWideElement, kAXFocusedUIElementAttribute as CFString, &rawFocused)
-    guard copyStatus == .success, let rawFocused else {
-      return nil
-    }
-    return unsafeBitCast(rawFocused, to: AXUIElement.self)
   }
 
   /// Verify that the text was actually inserted into the focused element.

@@ -80,6 +80,7 @@ final class HotKeyManager: ObservableObject {
 	private var wasMonitoringBeforeRecording = false
 	private var monitoringRequested = false
 	private var recoveryTask: Task<Void, Never>?
+	private var permissionRequestTask: Task<Void, Never>?
 
 	init(permissionsManager: PermissionsManager, appSettings: AppSettings) {
 		self.permissionsManager = permissionsManager
@@ -95,6 +96,7 @@ final class HotKeyManager: ObservableObject {
 
 	deinit {
 		recoveryTask?.cancel()
+		permissionRequestTask?.cancel()
 		for observer in lifecycleObservers {
 			NotificationCenter.default.removeObserver(observer)
 		}
@@ -115,15 +117,18 @@ final class HotKeyManager: ObservableObject {
 		}
 
 		if requestPermission {
-			Task { [weak self] in
+			permissionRequestTask?.cancel()
+			permissionRequestTask = Task { [weak self] in
 				guard let self else { return }
 				for permission in [PermissionType.inputMonitoring] {
 					let status = await MainActor.run { self.permissionsManager.status(for: permission) }
 					if !status.isGranted {
 						_ = await self.permissionsManager.request(permission)
 					}
+					guard !Task.isCancelled else { return }
 				}
 				await MainActor.run {
+					guard !Task.isCancelled, self.monitoringRequested else { return }
 					if self.appSettings.selectedHotKey == .fnKey {
 						self.reconnectMonitoring()
 					} else {
@@ -157,6 +162,8 @@ final class HotKeyManager: ObservableObject {
 	}
 
 	func stopMonitoring() {
+		permissionRequestTask?.cancel()
+		permissionRequestTask = nil
 		monitoringRequested = false
 		tearDownMonitoring()
 		monitoringState = .stopped

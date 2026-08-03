@@ -117,6 +117,7 @@ struct SettingsView: View {
   @State private var huggingFaceRepoID: String = "argmaxinc/whisperkit-coreml"
   @State private var huggingFaceModelName: String = "tiny"
   @State private var huggingFaceImportError: String?
+  @State private var isLocalTranscriptionAdvancedExpanded = false
   #if !APP_STORE
   @State private var streamingHuggingFaceRepoID: String =
     "csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26"
@@ -174,6 +175,13 @@ struct SettingsView: View {
       case .downloaded: return "Downloaded Model"
       }
     }
+  }
+
+  private enum StarterPresetInstallState: Equatable {
+    case notInstalled
+    case installing
+    case installed
+    case failed(String)
   }
 
   private let orderedLocalTranscriptionModes: [AppSettings.LocalTranscriptionMode] = {
@@ -1805,65 +1813,91 @@ struct SettingsView: View {
             )
 
             Text(
-              {
-                #if APP_STORE
-                return """
-                Downloaded transcription is separate from Apple Speech and cloud providers. \
-                WhisperKit/Core ML model data runs in-process and is supported in this App Store build.
-                """
-                #else
-                return """
-                Downloaded transcription is separate from Apple Speech and cloud providers. \
-                Local Batch uses in-process WhisperKit/Core ML model data. Local Streaming can use \
-                in-process FluidAudio/Core ML or an optional external sherpa-onnx runtime.
-                """
-                #endif
-              }()
+              "Choose a ready-made setup below. Speak will select the right local mode "
+                + "and download everything it needs."
             )
             .font(.caption)
             .foregroundStyle(.secondary)
 
-            if !DistributionChannel.current.supportsExternalLocalModelRuntime {
-              localRuntimeUnavailableNote
-            }
+            localModelStarterSetup
 
-            localModelQuickStart
-            if settings.localTranscriptionMode == .batch {
-              selectedLocalModelCallout
-            }
-
-            if settings.localTranscriptionMode == .batch {
-              huggingFaceModelImport
-            } else {
-              localStreamingStatus
-            }
-
-            if settings.localTranscriptionMode == .batch {
-              if localTranscriptionOptions.isEmpty {
-                Label(
-                  "Download a local batch model before selecting it for recording.",
-                  systemImage: "arrow.down.circle"
+            DisclosureGroup(isExpanded: $isLocalTranscriptionAdvancedExpanded) {
+              VStack(alignment: .leading, spacing: 16) {
+                Text(
+                  {
+                    #if APP_STORE
+                    return """
+                    Downloaded transcription is separate from Apple Speech and cloud providers. \
+                    WhisperKit/Core ML model data runs in-process and is supported in this App Store build.
+                    """
+                    #else
+                    return """
+                    Downloaded transcription is separate from Apple Speech and cloud providers. \
+                    Local Batch uses in-process WhisperKit/Core ML model data. Local Streaming can use \
+                    in-process FluidAudio/Core ML or an optional external sherpa-onnx runtime.
+                    """
+                    #endif
+                  }()
                 )
-                  .font(.caption)
-                  .foregroundStyle(.orange)
-              } else {
-                ModelPicker(
-                  title: "Local Batch Model",
-                  help: "Used for local-only transcription after recording stops.",
-                  options: localTranscriptionOptions,
-                  value: localTranscriptionModelBinding,
-                  credentialPurpose: .batchTranscription,
-                  storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers),
-                  allowsCustom: false
-                )
-              }
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
-              VStack(spacing: 10) {
-                ForEach(localTranscriptionModels) { model in
-                  localModelRow(model)
+                if !DistributionChannel.current.supportsExternalLocalModelRuntime {
+                  localRuntimeUnavailableNote
+                }
+
+                localModelQuickStart
+                if settings.localTranscriptionMode == .batch {
+                  selectedLocalModelCallout
+                  huggingFaceModelImport
+                } else {
+                  localStreamingStatus
+                }
+
+                if settings.localTranscriptionMode == .batch {
+                  if localTranscriptionOptions.isEmpty {
+                    Label(
+                      "Download a local batch model before selecting it for recording.",
+                      systemImage: "arrow.down.circle"
+                    )
+                      .font(.caption)
+                      .foregroundStyle(.orange)
+                  } else {
+                    ModelPicker(
+                      title: "Local Batch Model",
+                      help: "Used for local-only transcription after recording stops.",
+                      options: localTranscriptionOptions,
+                      value: localTranscriptionModelBinding,
+                      credentialPurpose: .batchTranscription,
+                      storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers),
+                      allowsCustom: false
+                    )
+                  }
+
+                  VStack(spacing: 10) {
+                    ForEach(localTranscriptionModels) { model in
+                      localModelRow(model)
+                    }
+                  }
                 }
               }
+              .padding(.top, 12)
+            } label: {
+              Label("Advanced model configuration", systemImage: "slider.horizontal.3")
+                .font(.subheadline.weight(.semibold))
             }
+            .padding(12)
+            .background(
+              RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.65))
+            )
+            .overlay(
+              RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.secondary.opacity(0.16), lineWidth: 1)
+            )
+            .speakTooltip(
+              "Show every downloaded model, custom Hugging Face sources, runtime controls, and manual selection."
+            )
           }
         }
         .speakTooltip("Download and manage private local transcription models.")
@@ -1872,6 +1906,209 @@ struct SettingsView: View {
       if settings.hasSelectedModulateModel {
         modulateFeatureSettings
       }
+    }
+  }
+
+  private var localModelStarterSetup: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      HStack(alignment: .top, spacing: 10) {
+        Image(systemName: "wand.and.stars")
+          .foregroundStyle(Color.green)
+          .frame(width: 24)
+        VStack(alignment: .leading, spacing: 3) {
+          Text(settings.localTranscriptionMode == .streaming ? "Quick streaming setup" : "Quick batch setup")
+            .font(.subheadline.weight(.semibold))
+          Text(
+            settings.localTranscriptionMode == .streaming
+              ? "Choose fast English streaming or high-quality multilingual streaming."
+              : "Use the recommended high-quality model after each recording finishes."
+          )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+      }
+
+      VStack(spacing: 10) {
+        ForEach(localStarterPresets) { preset in
+          localStarterPresetRow(preset)
+        }
+      }
+    }
+    .padding(12)
+    .background(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .fill(Color.green.opacity(0.08))
+    )
+    .overlay(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .stroke(Color.green.opacity(0.2), lineWidth: 1)
+    )
+  }
+
+  private func localStarterPresetRow(_ preset: LocalTranscriptionStarterPreset) -> some View {
+    let state = starterPresetInstallState(for: preset)
+    let isSelected = isStarterPresetSelected(preset)
+    return localModelRowContainer(isSelected: isSelected, tint: .green) {
+      HStack(alignment: .top, spacing: 12) {
+        Image(systemName: starterPresetIcon(for: preset))
+          .foregroundStyle(Color.green)
+          .frame(width: 24)
+
+        VStack(alignment: .leading, spacing: 4) {
+          HStack(spacing: 8) {
+            Text(preset.displayName)
+              .font(.subheadline.weight(.semibold))
+            localModelBadge(preset.recommendation, tint: .green)
+            if isSelected {
+              localModelBadge("Selected", tint: .blue)
+            }
+          }
+          Text(preset.detail)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+          Text("\(preset.runtime) · ~\(preset.approximateSizeMB) MB")
+            .font(.caption2.monospacedDigit())
+            .foregroundStyle(.tertiary)
+          Text(starterPresetStatusText(for: state, isSelected: isSelected))
+            .font(.caption2)
+            .foregroundStyle(starterPresetStatusTint(for: state))
+        }
+
+        Spacer()
+
+        VStack(alignment: .trailing, spacing: 8) {
+          if state == .installing {
+            starterPresetProgress(for: preset)
+          } else {
+            Button(starterPresetActionTitle(for: state, isSelected: isSelected)) {
+              configureAndDownload(preset)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(state == .installed && isSelected)
+          }
+        }
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func starterPresetProgress(for preset: LocalTranscriptionStarterPreset) -> some View {
+    switch preset.engine {
+    case .parakeet:
+      ProgressView(value: fluidAudioModels.downloadProgress)
+        .frame(width: 90)
+      Text("\(Int(fluidAudioModels.downloadProgress * 100))%")
+        .font(.caption2.monospacedDigit())
+        .foregroundStyle(.secondary)
+    case .whisperKit:
+      ProgressView()
+        .controlSize(.small)
+      Text("Configuring")
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+    }
+  }
+
+  private var localStarterPresets: [LocalTranscriptionStarterPreset] {
+    LocalTranscriptionStarterPreset.recommended(
+      for: settings.localTranscriptionMode,
+      availableModels: localTranscriptionModels,
+      supportsParakeet: FluidAudioModelManager.supportsCurrentHardware
+    )
+  }
+
+  private func starterPresetInstallState(
+    for preset: LocalTranscriptionStarterPreset
+  ) -> StarterPresetInstallState {
+    switch preset.engine {
+    case .parakeet:
+      switch fluidAudioModels.installState {
+      case .notInstalled: return .notInstalled
+      case .installing: return .installing
+      case .installed: return .installed
+      case .failed(let message): return .failed(message)
+      }
+    case .whisperKit(let model):
+      switch localModels.installState(for: model.id) {
+      case .notInstalled: return .notInstalled
+      case .installing: return .installing
+      case .installed: return .installed
+      case .failed(let message): return .failed(message)
+      }
+    }
+  }
+
+  private func isStarterPresetSelected(_ preset: LocalTranscriptionStarterPreset) -> Bool {
+    guard settings.transcriptionMode == .localModel,
+      settings.localTranscriptionMode == preset.mode
+    else { return false }
+
+    switch preset.engine {
+    case .parakeet:
+      return settings.localStreamingModelSource == FluidAudioParakeetModel.id
+    case .whisperKit(let model):
+      if preset.mode == .streaming {
+        return settings.localStreamingModelSource == WhisperKitStreamingModel.id(for: model)
+      }
+      return settings.localTranscriptionModel == model.id
+    }
+  }
+
+  private func configureAndDownload(_ preset: LocalTranscriptionStarterPreset) {
+    settings.transcriptionMode = .localModel
+    settings.localTranscriptionMode = preset.mode
+
+    switch preset.engine {
+    case .parakeet:
+      settings.localStreamingModelSource = FluidAudioParakeetModel.id
+      guard fluidAudioModels.installState != .installed else { return }
+      Task { await fluidAudioModels.install() }
+    case .whisperKit(let model):
+      settings.localTranscriptionModel = model.id
+      if preset.mode == .streaming {
+        settings.localStreamingModelSource = WhisperKitStreamingModel.id(for: model)
+      }
+      guard !localModels.isInstalled(model.id) else { return }
+      Task { await localModels.install(model) }
+    }
+  }
+
+  private func starterPresetIcon(for preset: LocalTranscriptionStarterPreset) -> String {
+    switch preset.engine {
+    case .parakeet: return "waveform.badge.mic"
+    case .whisperKit: return preset.mode == .streaming ? "waveform" : "doc.text.magnifyingglass"
+    }
+  }
+
+  private func starterPresetActionTitle(
+    for state: StarterPresetInstallState,
+    isSelected: Bool
+  ) -> String {
+    switch state {
+    case .installed: return isSelected ? "Configured" : "Use This Setup"
+    case .installing: return "Configuring"
+    case .notInstalled, .failed: return "Configure and Download"
+    }
+  }
+
+  private func starterPresetStatusText(
+    for state: StarterPresetInstallState,
+    isSelected: Bool
+  ) -> String {
+    switch state {
+    case .installed: return isSelected ? "Configured and ready" : "Downloaded and ready to select"
+    case .installing: return "Downloading and preparing the model"
+    case .notInstalled: return "Not downloaded"
+    case .failed(let message): return "Download failed: \(message)"
+    }
+  }
+
+  private func starterPresetStatusTint(for state: StarterPresetInstallState) -> Color {
+    switch state {
+    case .installed: return .green
+    case .installing: return .orange
+    case .notInstalled: return .secondary
+    case .failed: return .red
     }
   }
 
@@ -2028,7 +2265,7 @@ struct SettingsView: View {
           Text(
             """
             Browse WhisperKit/Core ML model repos, then paste the Hugging Face repo ID and model variant here. \
-            WhisperKit models are offline batch models in this prerelease; live local streaming is not enabled yet.
+            Compatible WhisperKit models can be used for either local batch or local streaming.
             """
           )
           .font(.caption)

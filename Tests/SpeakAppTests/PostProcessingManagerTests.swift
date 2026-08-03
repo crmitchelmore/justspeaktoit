@@ -80,22 +80,20 @@ final class PostProcessingManagerTests: XCTestCase {
     XCTAssertEqual(client.sendChatCallCount, 0)
   }
 
-  func testLocalPostProcessingSystemPromptMarksUserInstructionsAuthoritative() {
+  func testLocalPostProcessingUsesSharedPolicyAndJSONTranscriptPayload() {
     let systemPrompt = LocalPostProcessingModelManager.localSystemPrompt(
-      "Put a full stop after each word."
+      TranscriptCleanupPolicy.systemPrompt()
     )
     let userPrompt = LocalPostProcessingModelManager.localUserPrompt(
       systemPrompt: "Put a full stop after each word.",
       rawText: "hello world"
     )
 
-    XCTAssertTrue(systemPrompt.contains("instructions are authoritative"))
-    XCTAssertTrue(systemPrompt.contains("formatting-only instructions"))
-    XCTAssertTrue(systemPrompt.contains("do not emit <think> tags"))
-    XCTAssertTrue(systemPrompt.contains("Put a full stop after each word."))
-    XCTAssertTrue(systemPrompt.contains("<instructions>\nPut a full stop after each word.\n</instructions>"))
+    XCTAssertTrue(systemPrompt.hasPrefix(TranscriptCleanupPolicy.baseSystemPrompt))
+    XCTAssertTrue(systemPrompt.contains("never enter thinking mode"))
     XCTAssertFalse(userPrompt.contains("Put a full stop after each word."))
-    XCTAssertTrue(userPrompt.contains("<raw_transcript>\nhello world\n</raw_transcript>"))
+    XCTAssertTrue(userPrompt.contains("\"transcript\":\"hello world\""))
+    XCTAssertFalse(userPrompt.contains("<raw_transcript>"))
   }
 
   func testLocalPostProcessingSanitizesThinkingTags() {
@@ -120,7 +118,6 @@ final class PostProcessingManagerTests: XCTestCase {
     let client = SpyChatClient(responseText: "Cleaned by cloud")
     let settings = makeSettings()
     settings.postProcessingModel = ModelCatalog.defaultPostProcessingModel
-    settings.postProcessingSystemPrompt = "Put a full stop after each word."
     let manager = PostProcessingManager(
       client: client,
       settings: settings,
@@ -138,22 +135,19 @@ final class PostProcessingManagerTests: XCTestCase {
     XCTAssertNotNil(outcome.response)
     let promptPayload = try XCTUnwrap(outcome.promptPayload)
     XCTAssertEqual(promptPayload.modelIdentifier, ModelCatalog.defaultPostProcessingModel)
-    XCTAssertEqual(promptPayload.customPrompt, "Put a full stop after each word.")
-    XCTAssertFalse(promptPayload.systemPrompt.isEmpty)
-    XCTAssertTrue(
-      promptPayload.systemPrompt.contains("Always output using English.\n\nPut a full stop after each word.")
-    )
-    XCTAssertTrue(promptPayload.systemPrompt.contains("Put a full stop after each word."))
-    XCTAssertTrue(promptPayload.userPrompt.contains("<raw_transcript>\nhello world\n</raw_transcript>"))
+    XCTAssertNil(promptPayload.customPrompt)
+    XCTAssertTrue(promptPayload.systemPrompt.hasPrefix(TranscriptCleanupPolicy.baseSystemPrompt))
+    XCTAssertTrue(promptPayload.systemPrompt.contains("Output language context: use English"))
+    XCTAssertTrue(promptPayload.userPrompt.contains("\"transcript\":\"hello world\""))
+    XCTAssertFalse(promptPayload.userPrompt.contains("<raw_transcript>"))
     XCTAssertEqual(client.sendChatCallCount, 1)
   }
 
-  func testHistoryPromptPayloadSeparatesGeneratedLanguageInstructionFromCustomPrompt() async throws {
+  func testHistoryPromptPayloadUsesGeneratedLanguageInstruction() async throws {
     let client = SpyChatClient(responseText: "Cleaned by cloud")
     let settings = makeSettings()
     settings.postProcessingModel = ModelCatalog.defaultPostProcessingModel
     settings.postProcessingOutputLanguage = "ENGB"
-    settings.postProcessingSystemPrompt = "Keep every sentence short."
     let manager = PostProcessingManager(
       client: client,
       settings: settings,
@@ -168,11 +162,18 @@ final class PostProcessingManagerTests: XCTestCase {
 
     let outcome = try result.get()
     let promptPayload = try XCTUnwrap(outcome.promptPayload)
-    XCTAssertEqual(promptPayload.customPrompt, "Keep every sentence short.")
+    XCTAssertNil(promptPayload.customPrompt)
     XCTAssertTrue(
-      promptPayload.systemPrompt.contains("Always output using British English.\n\nKeep every sentence short.")
+      promptPayload.systemPrompt.contains("Output language context: use British English")
     )
-    XCTAssertFalse(promptPayload.systemPrompt.contains("British English. Keep every sentence short."))
+    XCTAssertTrue(promptPayload.systemPrompt.hasSuffix("Return only the cleaned transcript text."))
+  }
+
+  func testMacDefaultPrompt_IsTheSharedCleanupPolicy() {
+    XCTAssertEqual(
+      PostProcessingManager.defaultPrompt,
+      TranscriptCleanupPolicy.baseSystemPrompt
+    )
   }
 
   private func makeSettings() -> AppSettings {

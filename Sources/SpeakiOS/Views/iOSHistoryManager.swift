@@ -197,7 +197,6 @@ public final class iOSHistoryManager: ObservableObject {
             let polished = try await iOSPostProcessingManager.shared.polish(
                 text: item.transcription,
                 model: settings.postProcessingModel,
-                prompt: settings.postProcessingPrompt,
                 apiKey: settings.openRouterAPIKey
             )
             setPostProcessed(polished, for: item.id)

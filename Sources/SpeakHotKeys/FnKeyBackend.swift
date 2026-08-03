@@ -41,7 +41,7 @@ final class FnKeyBackend {
     }
 
     startEventTap()
-    return eventTap != nil || globalMonitor != nil || localMonitor != nil
+    return eventTap != nil || globalMonitor != nil
   }
 
   func stop() {

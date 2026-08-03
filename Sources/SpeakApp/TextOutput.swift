@@ -18,7 +18,6 @@ This guide explains how to integrate an "Insert" action that prefers Accessibili
 // swiftlint:disable file_length
 import AppKit
 import ApplicationServices
-import Darwin
 import Foundation
 - Restore the clipboard after pasteboard-based injection to avoid surprising users.
 - Document fallback behaviour prominently in user-facing copy so expectations stay aligned.
@@ -29,7 +28,6 @@ Following this sequence allows another project to drop in the same smart Insert 
 // swiftlint:disable file_length
 import AppKit
 import ApplicationServices
-import Darwin
 import Foundation
 import SpeakCore
 
@@ -45,6 +43,7 @@ struct TextOutputTarget {
   let processIdentifier: pid_t?
   let applicationName: String?
   let bundleIdentifier: String?
+  let applicationLaunchDate: Date?
   let focusedElement: AXUIElement?
 
   static func capture() -> TextOutputTarget {
@@ -54,6 +53,7 @@ struct TextOutputTarget {
         processIdentifier: application?.processIdentifier,
         applicationName: application?.localizedName,
         bundleIdentifier: application?.bundleIdentifier,
+        applicationLaunchDate: application?.launchDate,
         focusedElement: nil
       )
     }
@@ -74,13 +74,26 @@ struct TextOutputTarget {
       processIdentifier: application?.processIdentifier,
       applicationName: application?.localizedName,
       bundleIdentifier: application?.bundleIdentifier,
+      applicationLaunchDate: application?.launchDate,
       focusedElement: focusedElement
     )
   }
 
   var isApplicationRunning: Bool {
-    guard let processIdentifier else { return false }
-    return Darwin.kill(processIdentifier, 0) == 0 || errno == EPERM
+    guard
+      let processIdentifier,
+      let application = NSRunningApplication(processIdentifier: processIdentifier),
+      !application.isTerminated
+    else {
+      return false
+    }
+    if let bundleIdentifier, application.bundleIdentifier != bundleIdentifier {
+      return false
+    }
+    if let applicationLaunchDate, application.launchDate != applicationLaunchDate {
+      return false
+    }
+    return true
   }
 }
 
@@ -101,6 +114,8 @@ enum TextOutputError: LocalizedError {
   case unableToSetValue(AXError)
   case unableToVerifyInsertion
   case clipboardWriteFailed
+  case targetApplicationUnavailable
+  case pasteShortcutUnavailable
 
   var errorDescription: String? {
     switch self {
@@ -114,6 +129,10 @@ enum TextOutputError: LocalizedError {
       return "Unable to verify that text was inserted into the focused field."
     case .clipboardWriteFailed:
       return "Failed to write to the clipboard."
+    case .targetApplicationUnavailable:
+      return "The original app is no longer available. The transcript was kept on the clipboard."
+    case .pasteShortcutUnavailable:
+      return "Unable to paste into the original app. The transcript was kept on the clipboard."
     }
   }
 }
@@ -224,7 +243,16 @@ struct PasteTextOutput: TextOutputting {
     }
 
     if canPasteIntoOtherApps {
-      simulatePasteShortcut(target: target)
+      let destination = Self.eventDestination(for: target)
+      guard destination != .none else {
+        return TextOutputResult(
+          method: .clipboard,
+          error: TextOutputError.targetApplicationUnavailable
+        )
+      }
+      guard simulatePasteShortcut(destination: destination) else {
+        return TextOutputResult(method: .clipboard, error: TextOutputError.pasteShortcutUnavailable)
+      }
     }
 
     if restoreClipboard {
@@ -238,23 +266,24 @@ struct PasteTextOutput: TextOutputting {
     !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 
-  private func simulatePasteShortcut(target: TextOutputTarget?) {
-    guard let source = CGEventSource(stateID: .combinedSessionState) else { return }
-    let vKey: CGKeyCode = 9
-
-    if let keyDown = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: true) {
-      keyDown.flags = .maskCommand
-      post(keyDown, target: target)
+  private func simulatePasteShortcut(destination: EventDestination) -> Bool {
+    guard
+      let source = CGEventSource(stateID: .combinedSessionState),
+      let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true),
+      let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false)
+    else {
+      return false
     }
 
-    if let keyUp = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: false) {
-      keyUp.flags = .maskCommand
-      post(keyUp, target: target)
-    }
+    keyDown.flags = .maskCommand
+    post(keyDown, destination: destination)
+    keyUp.flags = .maskCommand
+    post(keyUp, destination: destination)
+    return true
   }
 
-  private func post(_ event: CGEvent, target: TextOutputTarget?) {
-    switch Self.eventDestination(for: target) {
+  private func post(_ event: CGEvent, destination: EventDestination) {
+    switch destination {
     case .process(let processIdentifier):
       event.postToPid(processIdentifier)
     case .system:

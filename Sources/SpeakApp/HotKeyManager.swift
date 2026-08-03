@@ -216,15 +216,15 @@ final class HotKeyManager: ObservableObject {
 			monitoringState = .stopped
 			return
 		}
+		if appSettings.selectedHotKey == .fnKey, !CGPreflightListenEventAccess() {
+			monitoringState = .inputMonitoringRequired
+			return
+		}
 		guard engine.isMonitoring else {
 			monitoringState = .registrationFailed
 			return
 		}
-		if appSettings.selectedHotKey == .fnKey, !CGPreflightListenEventAccess() {
-			monitoringState = .inputMonitoringRequired
-		} else {
-			monitoringState = .active
-		}
+		monitoringState = .active
 	}
 
 	private func scheduleRecovery(reason: String) {

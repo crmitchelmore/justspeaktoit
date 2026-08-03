@@ -29,8 +29,12 @@ final class CarbonKeyBackend {
     currentKeyCode = keyCode
     currentModifiers = modifiers
 
-    installEventHandler()
-    return registerHotKey(keyCode: keyCode, modifiers: modifiers)
+    guard installEventHandler() else { return false }
+    let didRegister = registerHotKey(keyCode: keyCode, modifiers: modifiers)
+    if !didRegister {
+      removeEventHandler()
+    }
+    return didRegister
   }
 
   func stop() {
@@ -49,8 +53,8 @@ final class CarbonKeyBackend {
 
   // MARK: - Carbon Event Handler
 
-  private func installEventHandler() {
-    guard eventHandler == nil else { return }
+  private func installEventHandler() -> Bool {
+    guard eventHandler == nil else { return true }
 
     var eventTypes = [
       EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed)),
@@ -74,7 +78,9 @@ final class CarbonKeyBackend {
 
     if status != noErr {
       log.error("Failed to install Carbon event handler: \(status)")
+      return false
     }
+    return true
   }
 
   private func removeEventHandler() {

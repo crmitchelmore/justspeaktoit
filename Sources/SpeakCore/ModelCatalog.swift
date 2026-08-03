@@ -586,7 +586,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             approximateSizeMB: 632,
             description: "Whisper Large v3 Turbo — near-Large quality with ≈4× real-time speed on "
                 + "Apple silicon. Recommended for high-accuracy batch or live transcription.",
-            tags: [.quality, .fast],
+            tags: [.quality, .fast, .leading],
             supportsLiveStreaming: true
         ),
         LocalTranscriptionModel(

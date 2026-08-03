@@ -1,6 +1,7 @@
 import Foundation
 import XCTest
 
+// swiftlint:disable:next type_body_length
 final class DistributionBuildIdentityTests: XCTestCase {
     private var repositoryRoot: URL {
         URL(fileURLWithPath: #filePath)
@@ -87,7 +88,11 @@ final class DistributionBuildIdentityTests: XCTestCase {
 
         XCTAssertTrue(iosTarget.contains("sources: [\"SpeakiOSApp/**\"]"))
         XCTAssertTrue(iosTarget.contains(".package(product: \"SpeakiOSLib\")"))
-        XCTAssertTrue(iosTarget.contains(".target(name: \"JustSpeakKeyboard\")"))
+        XCTAssertTrue(
+            iosTarget.contains(
+                "] + (isIOSKeyboardEnabled ? [.target(name: \"JustSpeakKeyboard\")] : [])"
+            )
+        )
         XCTAssertFalse(iosTarget.contains("Sources/SpeakApp"))
         XCTAssertFalse(iosTarget.contains("SpeakHotKeys"))
         XCTAssertFalse(iosTarget.contains("Sparkle"))
@@ -111,6 +116,41 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(infoPlist.contains("com.apple.keyboard-service"))
         XCTAssertTrue(infoPlist.contains("RequestsOpenAccess"))
         XCTAssertTrue(infoPlist.contains("$(PRODUCT_MODULE_NAME).KeyboardViewController"))
+    }
+
+    func testIOSKeyboardIsAnExplicitOffByDefaultBuildFeature() throws {
+        let manifest = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("Project.swift"),
+            encoding: .utf8
+        )
+        let featureFlags = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("SpeakiOSApp/FeatureFlags.swift"),
+            encoding: .utf8
+        )
+        let app = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("SpeakiOSApp/SpeakiOSApp.swift"),
+            encoding: .utf8
+        )
+        let settings = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("Sources/SpeakiOS/Views/SettingsView.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(manifest.contains("environment[\"TUIST_IOS_KEYBOARD\"] ?? \"\""))
+        XCTAssertTrue(manifest.contains("let isIOSKeyboardEnabled = [\"1\", \"true\", \"yes\"]"))
+        XCTAssertTrue(manifest.contains("isIOSKeyboardEnabled ? ["))
+        XCTAssertTrue(manifest.contains("iosActiveCompilationConditions.append(\"IOS_KEYBOARD_FEATURE\")"))
+        XCTAssertTrue(manifest.contains("settings: .settings(base: iosTestSettings)"))
+        XCTAssertTrue(
+            manifest.contains(
+                "iosTestResourceElements.append(\"JustSpeakKeyboard/JustSpeakKeyboard.entitlements\")"
+            )
+        )
+        XCTAssertTrue(featureFlags.contains("#if IOS_KEYBOARD_FEATURE"))
+        XCTAssertTrue(featureFlags.contains("static var iOSKeyboardEnabled: Bool"))
+        XCTAssertTrue(app.contains("guard FeatureFlags.iOSKeyboardEnabled else"))
+        XCTAssertTrue(app.contains("KeyboardInstantDictationStore.shared.setEnabled(false)"))
+        XCTAssertTrue(settings.contains("if iOSKeyboardEnabled"))
     }
 
     func testIOSKeyboardUsesInstantSessionLivePreviewAndRetainsHistory() throws {
@@ -157,12 +197,25 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(workflow.contains("plutil -extract Entitlements xml1"))
         XCTAssertTrue(workflow.contains("<string>group.com.justspeaktoit.ios</string>"))
         XCTAssertFalse(workflow.contains("Entitlements.com.apple.security.application-groups.0"))
-        XCTAssertTrue(workflow.contains("KEYBOARD_PROFILE_UUID_PLACEHOLDER"))
+        XCTAssertFalse(workflow.contains("KEYBOARD_PROFILE_UUID_PLACEHOLDER"))
+        XCTAssertTrue(
+            workflow.contains(
+                "Add :provisioningProfiles:com.justspeaktoit.ios.keyboard string $KEYBOARD_PROFILE_UUID"
+            )
+        )
         XCTAssertTrue(workflow.contains("JustSpeakKeyboard.appex"))
         XCTAssertTrue(workflow.contains("keyboard-entitlements.plist"))
         XCTAssertTrue(workflow.contains("APP_ICLOUD_CONTAINER"))
         XCTAssertTrue(workflow.contains("iCloud container mismatch"))
         XCTAssertTrue(workflow.contains("iCloud.com.justspeaktoit.ios"))
+        XCTAssertTrue(workflow.contains("TUIST_IOS_KEYBOARD: ${{ inputs.include_keyboard && '1' || '0' }}"))
+        XCTAssertTrue(workflow.contains("Keyboard feature is off, but JustSpeakKeyboard.appex was embedded"))
+
+        let keyboardInputStart = try XCTUnwrap(workflow.range(of: "      include_keyboard:\n")?.lowerBound)
+        let environmentStart = try XCTUnwrap(workflow.range(of: "\nenv:\n")?.lowerBound)
+        let keyboardInput = workflow[keyboardInputStart..<environmentStart]
+        XCTAssertTrue(keyboardInput.contains("default: false"))
+        XCTAssertTrue(keyboardInput.contains("type: boolean"))
 
         let profileBootstrap = try String(
             contentsOf: repositoryRoot.appendingPathComponent("scripts/create-ios-app-store-profile.rb"),

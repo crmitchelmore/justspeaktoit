@@ -19,12 +19,14 @@ final class AppGroupConfigurationTests: XCTestCase {
         XCTAssertTrue(entitledGroups.contains(SharedTranscriptionState.appGroupIdentifier))
     }
 
+    #if IOS_KEYBOARD_FEATURE
     func testKeyboardUsesSameEntitledAppGroup() throws {
         let entitledGroups = try appGroups(inResourceNamed: "JustSpeakKeyboard")
 
         XCTAssertEqual(KeyboardHandoffStore.appGroupIdentifier, SharedTranscriptionState.appGroupIdentifier)
         XCTAssertTrue(entitledGroups.contains(KeyboardHandoffStore.appGroupIdentifier))
     }
+    #endif
 
     private func appGroups(inResourceNamed resourceName: String) throws -> [String] {
         let entitlementsURL = try XCTUnwrap(

@@ -75,14 +75,19 @@ struct SpeakiOSApp: App {
                 .tint(.brandAccent)
                 .environmentObject(deepLinkRouter)
                 .environment(\.openClawEnabled, FeatureFlags.openClawTabEnabled)
+                .environment(\.iOSKeyboardEnabled, FeatureFlags.iOSKeyboardEnabled)
                 .onOpenURL { url in
                     deepLinkRouter.handle(url)
                 }
                 .task {
+                    guard FeatureFlags.iOSKeyboardEnabled else {
+                        KeyboardInstantDictationStore.shared.setEnabled(false)
+                        return
+                    }
                     keyboardInstantDictation.activate()
                 }
                 .onChange(of: scenePhase) { _, newPhase in
-                    guard newPhase == .active else { return }
+                    guard FeatureFlags.iOSKeyboardEnabled, newPhase == .active else { return }
                     keyboardInstantDictation.activate()
                 }
         }

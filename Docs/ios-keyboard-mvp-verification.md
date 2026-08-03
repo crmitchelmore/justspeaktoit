@@ -1,5 +1,9 @@
 # iOS Custom Keyboard MVP Verification
 
+The keyboard is currently an internal, off-by-default feature. Generate with
+`TUIST_IOS_KEYBOARD=1 tuist generate` before running this matrix. A normal
+project generation or TestFlight release must omit `JustSpeakKeyboard.appex`.
+
 For the always-ready background-microphone architecture and its additional
 device matrix, also follow [iOS Keyboard Instant Dictation](ios-keyboard-instant-dictation.md).
 

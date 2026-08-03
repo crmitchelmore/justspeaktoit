@@ -277,22 +277,3 @@ private struct OpenAITranscriptionResponse: Decodable {
     return raw
   }
 }
-
-// MARK: - Error Types
-
-enum TranscriptionProviderError: LocalizedError {
-  case invalidResponse
-  case httpError(Int, String)
-  case apiKeyMissing
-
-  var errorDescription: String? {
-    switch self {
-    case .invalidResponse:
-      return "The server returned an invalid response."
-    case .httpError(let code, let body):
-      return "Server responded with status \(code): \(body)"
-    case .apiKeyMissing:
-      return "API key is required but not provided."
-    }
-  }
-}

@@ -155,9 +155,10 @@ struct MistralTranscriptionProvider: TranscriptionProvider {
           contentsOf: Data(Self.formField(named: "language", value: language, boundary: boundary).utf8)
         )
       }
+      let escapedFilename = Self.escapedMultipartFilename(sourceURL.lastPathComponent)
       let fileHeader =
         "--\(boundary)\r\n"
-        + "Content-Disposition: form-data; name=\"file\"; filename=\"\(sourceURL.lastPathComponent)\"\r\n"
+        + "Content-Disposition: form-data; name=\"file\"; filename=\"\(escapedFilename)\"\r\n"
         + "Content-Type: audio/m4a\r\n\r\n"
       try output.write(contentsOf: Data(fileHeader.utf8))
 
@@ -185,6 +186,14 @@ struct MistralTranscriptionProvider: TranscriptionProvider {
       + "Content-Disposition: form-data; name=\"\(name)\"\r\n"
       + "\r\n"
       + "\(value)\r\n"
+  }
+
+  private nonisolated static func escapedMultipartFilename(_ filename: String) -> String {
+    filename
+      .replacingOccurrences(of: "\r", with: "")
+      .replacingOccurrences(of: "\n", with: "")
+      .replacingOccurrences(of: "\\", with: "\\\\")
+      .replacingOccurrences(of: "\"", with: "\\\"")
   }
 
   private func buildTranscriptionResult(

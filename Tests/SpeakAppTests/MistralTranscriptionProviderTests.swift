@@ -91,6 +91,25 @@ final class MistralTranscriptionProviderTests: XCTestCase {
     XCTAssertTrue(bodyText.hasSuffix("\r\n--TestBoundary--\r\n"))
   }
 
+  func testMultipartUploadBody_escapesFilenameAndRemovesHeaderBreaks() throws {
+    let audioURL = try makeAudioFile(filename: "audio\"\\\r\nX-Evil: true.m4a")
+    let directory = try makeTemporaryDirectory()
+    let bodyURL = try MistralTranscriptionProvider.makeMultipartUploadBody(
+      sourceURL: audioURL,
+      destinationDirectory: directory,
+      boundary: "TestBoundary",
+      model: "voxtral-mini-latest",
+      language: nil
+    )
+    defer { try? FileManager.default.removeItem(at: bodyURL) }
+
+    let body = try Data(contentsOf: bodyURL)
+    let bodyText = try XCTUnwrap(String(data: body, encoding: .utf8))
+
+    XCTAssertTrue(bodyText.contains(#"filename="audio\"\\X-Evil: true.m4a""#))
+    XCTAssertFalse(bodyText.contains("\r\nX-Evil: true.m4a"))
+  }
+
   func testTranscribeFile_removesMultipartFileAfterSuccessfulUpload() async throws {
     let directory = try makeTemporaryDirectory()
     MistralMockURLProtocol.requestHandler = { request in
@@ -235,26 +254,14 @@ final class MistralTranscriptionProviderTests: XCTestCase {
     XCTAssertEqual(result.outcome, .failure(message: "API key is empty"))
   }
 
-  private func makeProvider(
-    multipartDirectory: URL = FileManager.default.temporaryDirectory
-  ) -> MistralTranscriptionProvider {
-    MistralTranscriptionProvider(
-      session: makeMockSession(),
-      multipartDirectory: multipartDirectory
-    )
-  }
-
-  private func makeMockSession() -> URLSession {
-    let configuration = URLSessionConfiguration.ephemeral
-    configuration.protocolClasses = [MistralMockURLProtocol.self]
-    return URLSession(configuration: configuration)
-  }
-
-  private func makeAudioFile(contents: Data = Data("fake-audio".utf8)) throws -> URL {
+  private func makeAudioFile(
+    contents: Data = Data("fake-audio".utf8),
+    filename: String = "mistral-transcription-\(UUID().uuidString).m4a"
+  ) throws -> URL {
     let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let directory = root.appendingPathComponent(".build/test-audio", isDirectory: true)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    let url = directory.appendingPathComponent("mistral-transcription-\(UUID().uuidString).m4a")
+    let url = directory.appendingPathComponent(filename)
     try contents.write(to: url)
     addTeardownBlock {
       try? FileManager.default.removeItem(at: url)
@@ -281,6 +288,17 @@ final class MistralTranscriptionProviderTests: XCTestCase {
     )!
     return (response, Data(body.utf8))
   }
+}
+
+private func makeProvider(
+  multipartDirectory: URL = FileManager.default.temporaryDirectory
+) -> MistralTranscriptionProvider {
+  let configuration = URLSessionConfiguration.ephemeral
+  configuration.protocolClasses = [MistralMockURLProtocol.self]
+  return MistralTranscriptionProvider(
+    session: URLSession(configuration: configuration),
+    multipartDirectory: multipartDirectory
+  )
 }
 
 private actor MistralRequestObserver {

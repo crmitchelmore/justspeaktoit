@@ -54,25 +54,80 @@ final class MistralTranscriptionProviderTests: XCTestCase {
     )
 
     let capturedRequest = await requestObserver.capturedRequest()
-    let capturedBody = await requestObserver.capturedBodyString()
     let request = try XCTUnwrap(capturedRequest)
-    let body = try XCTUnwrap(capturedBody)
 
     XCTAssertEqual(request.httpMethod, "POST")
     XCTAssertEqual(request.url?.absoluteString, "https://api.mistral.ai/v1/audio/transcriptions")
     XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-mistral-key")
     let contentType = request.value(forHTTPHeaderField: "Content-Type")
     XCTAssertTrue(contentType?.hasPrefix("multipart/form-data; boundary=") == true)
-    XCTAssertTrue(body.contains(#"name="model""#))
-    XCTAssertTrue(body.contains("\r\nvoxtral-mini-latest\r\n"))
-    XCTAssertFalse(body.contains("\r\nmistral/voxtral-mini-latest\r\n"))
-    XCTAssertTrue(body.contains(#"name="language""#))
-    XCTAssertTrue(body.contains("\r\nen\r\n"))
-    XCTAssertTrue(body.contains(#"name="file"; filename=""#))
-    XCTAssertFalse(body.contains("response_format"))
     XCTAssertEqual(result.text, "hello world")
     XCTAssertEqual(result.duration, 1.25)
     XCTAssertEqual(result.modelIdentifier, "mistral/voxtral-mini-latest")
+  }
+
+  func testMultipartUploadBody_preservesFieldsAndStreamsAudioBytesToDisk() throws {
+    let audioURL = try makeAudioFile(contents: Data([0x00, 0x01, 0xFE, 0xFF]))
+    let directory = try makeTemporaryDirectory()
+    let bodyURL = try MistralTranscriptionProvider.makeMultipartUploadBody(
+      sourceURL: audioURL,
+      destinationDirectory: directory,
+      boundary: "TestBoundary",
+      model: "voxtral-mini-latest",
+      language: "en"
+    )
+    defer { try? FileManager.default.removeItem(at: bodyURL) }
+
+    let body = try Data(contentsOf: bodyURL)
+    let bodyText = try XCTUnwrap(String(data: body, encoding: .isoLatin1))
+
+    XCTAssertTrue(bodyText.contains(#"name="model""#))
+    XCTAssertTrue(bodyText.contains("\r\nvoxtral-mini-latest\r\n"))
+    XCTAssertTrue(bodyText.contains(#"name="language""#))
+    XCTAssertTrue(bodyText.contains("\r\nen\r\n"))
+    XCTAssertTrue(bodyText.contains(#"name="file"; filename=""#))
+    XCTAssertTrue(bodyText.contains("Content-Type: audio/m4a"))
+    XCTAssertTrue(bodyText.contains("\u{0}\u{1}þÿ"))
+    XCTAssertTrue(bodyText.hasSuffix("\r\n--TestBoundary--\r\n"))
+  }
+
+  func testTranscribeFile_removesMultipartFileAfterSuccessfulUpload() async throws {
+    let directory = try makeTemporaryDirectory()
+    MistralMockURLProtocol.requestHandler = { request in
+      try Self.makeResponse(for: request, body: #"{"text":"hello","duration":1}"#)
+    }
+    defer { MistralMockURLProtocol.requestHandler = nil }
+
+    _ = try await makeProvider(multipartDirectory: directory).transcribeFile(
+      at: try makeAudioFile(),
+      apiKey: "test-mistral-key",
+      model: "mistral/voxtral-mini-latest",
+      language: nil
+    )
+
+    XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), [])
+  }
+
+  func testTranscribeFile_removesMultipartFileAfterFailedUpload() async throws {
+    let directory = try makeTemporaryDirectory()
+    MistralMockURLProtocol.requestHandler = { _ in
+      throw URLError(.cannotConnectToHost)
+    }
+    defer { MistralMockURLProtocol.requestHandler = nil }
+
+    do {
+      _ = try await makeProvider(multipartDirectory: directory).transcribeFile(
+        at: try makeAudioFile(),
+        apiKey: "test-mistral-key",
+        model: "mistral/voxtral-mini-latest",
+        language: nil
+      )
+      XCTFail("Expected the upload to fail")
+    } catch {
+      XCTAssertEqual((error as? URLError)?.code, .cannotConnectToHost)
+    }
+
+    XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), [])
   }
 
   func testTranscribeFile_mapsSegments() async throws {
@@ -180,8 +235,13 @@ final class MistralTranscriptionProviderTests: XCTestCase {
     XCTAssertEqual(result.outcome, .failure(message: "API key is empty"))
   }
 
-  private func makeProvider() -> MistralTranscriptionProvider {
-    MistralTranscriptionProvider(session: makeMockSession())
+  private func makeProvider(
+    multipartDirectory: URL = FileManager.default.temporaryDirectory
+  ) -> MistralTranscriptionProvider {
+    MistralTranscriptionProvider(
+      session: makeMockSession(),
+      multipartDirectory: multipartDirectory
+    )
   }
 
   private func makeMockSession() -> URLSession {
@@ -190,16 +250,26 @@ final class MistralTranscriptionProviderTests: XCTestCase {
     return URLSession(configuration: configuration)
   }
 
-  private func makeAudioFile() throws -> URL {
+  private func makeAudioFile(contents: Data = Data("fake-audio".utf8)) throws -> URL {
     let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let directory = root.appendingPathComponent(".build/test-audio", isDirectory: true)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     let url = directory.appendingPathComponent("mistral-transcription-\(UUID().uuidString).m4a")
-    try Data("fake-audio".utf8).write(to: url)
+    try contents.write(to: url)
     addTeardownBlock {
       try? FileManager.default.removeItem(at: url)
     }
     return url
+  }
+
+  private func makeTemporaryDirectory() throws -> URL {
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("mistral-tests-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    addTeardownBlock {
+      try? FileManager.default.removeItem(at: directory)
+    }
+    return directory
   }
 
   private static func makeResponse(for request: URLRequest, body: String) throws -> (HTTPURLResponse, Data) {
@@ -215,38 +285,15 @@ final class MistralTranscriptionProviderTests: XCTestCase {
 
 private actor MistralRequestObserver {
   private var request: URLRequest?
-  private var body: Data?
 
   func store(request: URLRequest) {
     self.request = request
-    body = request.httpBody ?? readBody(from: request.httpBodyStream)
   }
 
   func capturedRequest() -> URLRequest? {
     request
   }
 
-  func capturedBodyString() -> String? {
-    body.flatMap { String(data: $0, encoding: .utf8) }
-  }
-
-  private func readBody(from stream: InputStream?) -> Data? {
-    guard let stream else { return nil }
-    stream.open()
-    defer { stream.close() }
-
-    var data = Data()
-    let bufferSize = 4096
-    let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
-    defer { buffer.deallocate() }
-
-    while stream.hasBytesAvailable {
-      let readCount = stream.read(buffer, maxLength: bufferSize)
-      if readCount <= 0 { break }
-      data.append(buffer, count: readCount)
-    }
-    return data.isEmpty ? nil : data
-  }
 }
 
 private final class MistralMockURLProtocol: URLProtocol {

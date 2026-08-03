@@ -2,6 +2,7 @@
 import AVFoundation
 import Foundation
 import os.log
+import SpeakCore
 
 /// Deepgram Aura TTS client for iOS.
 /// Converts text to speech using Deepgram's Aura API.
@@ -20,8 +21,9 @@ public final class DeepgramTTSClient: ObservableObject {
 
     // MARK: - Configuration
 
-    public var model: String = "aura-2"
-    public var voice: String = "asteria"
+    public var model: String = DeepgramTTSCatalog.defaultModel.id
+    public var voice: String =
+        DeepgramTTSCatalog.defaultVoice(for: DeepgramTTSCatalog.defaultModel).id
     public var speed: Double = 1.0
 
     // MARK: - Init
@@ -51,8 +53,10 @@ public final class DeepgramTTSClient: ObservableObject {
             throw DeepgramTTSError.missingAPIKey
         }
 
-        // Deepgram model format: aura-2-{voice}-en or aura-{voice}-en
-        let modelParam = "\(model)-\(voice)-en"
+        let modelParam = DeepgramTTSCatalog.resolvedSelection(
+            modelID: model,
+            voiceID: voice
+        ).voice.id
         let url = URL(string: "https://api.deepgram.com/v1/speak?model=\(modelParam)")!
 
         var request = URLRequest(url: url)

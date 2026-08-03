@@ -356,7 +356,7 @@ public enum AppleFoundationModelPolisher {
             }
             let session = LanguageModelSession(instructions: systemPrompt)
             let response = try await session.respond(
-                to: "Clean this raw transcript and return only the cleaned text:\n\n\(text)"
+                to: TranscriptCleanupPolicy.userMessage(transcript: text)
             )
             return response.content.trimmingCharacters(in: .whitespacesAndNewlines)
         }

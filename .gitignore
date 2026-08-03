@@ -2,6 +2,8 @@
 .swiftpm/
 DerivedData/
 Derived/
+cache/
+.package.resolved
 .DS_Store
 xcuserdata/
 logs/

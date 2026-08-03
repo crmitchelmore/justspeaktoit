@@ -494,16 +494,27 @@ struct VoiceCatalog {
 
   private static func deepgramTraits(for voice: DeepgramTTSVoice) -> [TTSVoice.VoiceTrait] {
     let gender: TTSVoice.VoiceTrait = voice.gender == .female ? .female : .male
-    let accent: TTSVoice.VoiceTrait
-    switch voice.accent {
-    case .american: accent = .american
-    case .australian: accent = .australian
-    case .british: accent = .british
-    case .filipino: accent = .filipino
-    case .irish: accent = .irish
-    }
+    return [gender, deepgramAccent(voice.accent), deepgramStyle(voice.style), .lowLatency]
+  }
 
-    let style = TTSVoice.VoiceTrait(rawValue: voice.style.rawValue) ?? .professional
-    return [gender, accent, style, .lowLatency]
+  private static func deepgramAccent(_ accent: DeepgramTTSVoiceAccent) -> TTSVoice.VoiceTrait {
+    switch accent {
+    case .american: .american
+    case .australian: .australian
+    case .british: .british
+    case .filipino: .filipino
+    case .irish: .irish
+    }
+  }
+
+  private static func deepgramStyle(_ style: DeepgramTTSVoiceStyle) -> TTSVoice.VoiceTrait {
+    switch style {
+    case .casual: .casual
+    case .clear: .clear
+    case .deep: .deep
+    case .energetic: .energetic
+    case .professional: .professional
+    case .warm: .warm
+    }
   }
 }

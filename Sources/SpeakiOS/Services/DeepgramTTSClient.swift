@@ -22,7 +22,8 @@ public final class DeepgramTTSClient: ObservableObject {
     // MARK: - Configuration
 
     public var model: String = DeepgramTTSCatalog.defaultModel.id
-    public var voice: String = DeepgramTTSCatalog.defaultVoice(for: .aura2).id
+    public var voice: String =
+        DeepgramTTSCatalog.defaultVoice(for: DeepgramTTSCatalog.defaultModel).id
     public var speed: Double = 1.0
 
     // MARK: - Init

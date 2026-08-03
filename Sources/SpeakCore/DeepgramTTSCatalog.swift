@@ -112,32 +112,35 @@ public enum DeepgramTTSCatalog {
         modelID: String?,
         voiceID: String?
     ) -> DeepgramTTSSelection {
-        let normalizedVoiceID = voiceID.map(normalizedVoiceID)
-        let exactVoice = normalizedVoiceID.flatMap { normalizedID in
+        let requestedVoiceID = voiceID.map(normalizedVoiceID)
+        let exactVoice = requestedVoiceID.flatMap { normalizedID in
             voices.first { $0.id == normalizedID }
         }
-        let model = model(forLegacyID: modelID) ?? exactVoice?.model ?? defaultModel
+        let resolvedModel = model(forLegacyID: modelID) ?? exactVoice?.model ?? defaultModel
 
-        if let exactVoice, exactVoice.model == model {
-            return DeepgramTTSSelection(model: model, voice: exactVoice)
+        if let exactVoice, exactVoice.model == resolvedModel {
+            return DeepgramTTSSelection(model: resolvedModel, voice: exactVoice)
         }
 
         let legacyName = exactVoice?.name.lowercased()
-            ?? normalizedVoiceID?.lowercased()
+            ?? requestedVoiceID?.lowercased()
         if let legacyName,
-           let compatibleVoice = voices(for: model).first(where: {
+           let compatibleVoice = voices(for: resolvedModel).first(where: {
                $0.name.lowercased() == legacyName
            }) {
-            return DeepgramTTSSelection(model: model, voice: compatibleVoice)
+            return DeepgramTTSSelection(model: resolvedModel, voice: compatibleVoice)
         }
 
-        return DeepgramTTSSelection(model: model, voice: defaultVoice(for: model))
+        return DeepgramTTSSelection(
+            model: resolvedModel,
+            voice: defaultVoice(for: resolvedModel)
+        )
     }
 
     private static func normalizedVoiceID(_ id: String) -> String {
-        id.trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-            .replacingOccurrences(of: "deepgram/", with: "")
+        let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard trimmed.hasPrefix("deepgram/") else { return trimmed }
+        return String(trimmed.dropFirst("deepgram/".count))
     }
 
     // English voice metadata verified against Deepgram's Aura voice catalogue.

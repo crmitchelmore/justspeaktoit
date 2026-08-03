@@ -56,6 +56,21 @@ final class DeepgramTTSCatalogTests: XCTestCase {
         XCTAssertEqual(selection.voice.id, "aura-zeus-en")
     }
 
+    func testMissingOrBlankSelection_ResolvesToCatalogueDefaults() {
+        for voiceID in [nil, "", "   "] as [String?] {
+            let selection = DeepgramTTSCatalog.resolvedSelection(
+                modelID: nil,
+                voiceID: voiceID
+            )
+
+            XCTAssertEqual(selection.model, DeepgramTTSCatalog.defaultModel)
+            XCTAssertEqual(
+                selection.voice,
+                DeepgramTTSCatalog.defaultVoice(for: DeepgramTTSCatalog.defaultModel)
+            )
+        }
+    }
+
     func testIncompatibleVoice_MigratesByNameThenFallsBackSafely() {
         let migratedByName = DeepgramTTSCatalog.resolvedSelection(
             modelID: "aura-2",

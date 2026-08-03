@@ -13,13 +13,16 @@ struct MistralTranscriptionProvider: TranscriptionProvider {
 
   private let baseURL: URL
   private let session: URLSession
+  private let multipartDirectory: URL
 
   init(
     session: URLSession = .shared,
-    baseURL: URL = URL(string: "https://api.mistral.ai/v1")!
+    baseURL: URL = URL(string: "https://api.mistral.ai/v1")!,
+    multipartDirectory: URL = FileManager.default.temporaryDirectory
   ) {
     self.session = session
     self.baseURL = baseURL
+    self.multipartDirectory = multipartDirectory
   }
 
   func transcribeFile(
@@ -41,25 +44,17 @@ struct MistralTranscriptionProvider: TranscriptionProvider {
     request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
     request.setValue("Bearer \(trimmedKey)", forHTTPHeaderField: "Authorization")
 
-    let audioData = try Data(contentsOf: url)
-    var body = Data()
-
     let modelName = modelID(from: model)
-    body.appendFormField(named: "model", value: modelName, boundary: boundary)
-    if let languageCode = languageCode(from: language) {
-      body.appendFormField(named: "language", value: languageCode, boundary: boundary)
-    }
-    body.appendFileField(
-      named: "file",
-      filename: url.lastPathComponent,
-      mimeType: "audio/m4a",
-      fileData: audioData,
-      boundary: boundary
+    let uploadBodyURL = try Self.makeMultipartUploadBody(
+      sourceURL: url,
+      destinationDirectory: multipartDirectory,
+      boundary: boundary,
+      model: modelName,
+      language: languageCode(from: language)
     )
-    body.appendString("--\(boundary)--\r\n")
-    request.httpBody = body
+    defer { try? FileManager.default.removeItem(at: uploadBodyURL) }
 
-    let (data, response) = try await session.data(for: request)
+    let (data, response) = try await session.upload(for: request, fromFile: uploadBodyURL)
     guard let http = response as? HTTPURLResponse else {
       throw TranscriptionProviderError.invalidResponse
     }
@@ -131,6 +126,74 @@ struct MistralTranscriptionProvider: TranscriptionProvider {
       .replacingOccurrences(of: "_", with: "-")
     guard let code = normalized.split(separator: "-").first, !code.isEmpty else { return nil }
     return String(code).lowercased()
+  }
+
+  nonisolated static func makeMultipartUploadBody(
+    sourceURL: URL,
+    destinationDirectory: URL,
+    boundary: String,
+    model: String,
+    language: String?
+  ) throws -> URL {
+    let destinationURL = destinationDirectory
+      .appendingPathComponent("mistral-upload-\(UUID().uuidString).multipart")
+    try FileManager.default.createDirectory(
+      at: destinationDirectory,
+      withIntermediateDirectories: true
+    )
+
+    do {
+      guard FileManager.default.createFile(atPath: destinationURL.path, contents: nil) else {
+        throw CocoaError(.fileWriteUnknown)
+      }
+      let output = try FileHandle(forWritingTo: destinationURL)
+      defer { try? output.close() }
+
+      try output.write(contentsOf: Data(Self.formField(named: "model", value: model, boundary: boundary).utf8))
+      if let language {
+        try output.write(
+          contentsOf: Data(Self.formField(named: "language", value: language, boundary: boundary).utf8)
+        )
+      }
+      let escapedFilename = Self.escapedMultipartFilename(sourceURL.lastPathComponent)
+      let fileHeader =
+        "--\(boundary)\r\n"
+        + "Content-Disposition: form-data; name=\"file\"; filename=\"\(escapedFilename)\"\r\n"
+        + "Content-Type: audio/m4a\r\n\r\n"
+      try output.write(contentsOf: Data(fileHeader.utf8))
+
+      let input = try FileHandle(forReadingFrom: sourceURL)
+      defer { try? input.close() }
+      while true {
+        let chunk = try input.read(upToCount: 1024 * 1024) ?? Data()
+        guard !chunk.isEmpty else { break }
+        try output.write(contentsOf: chunk)
+      }
+      try output.write(contentsOf: Data("\r\n--\(boundary)--\r\n".utf8))
+      return destinationURL
+    } catch {
+      try? FileManager.default.removeItem(at: destinationURL)
+      throw error
+    }
+  }
+
+  private nonisolated static func formField(
+    named name: String,
+    value: String,
+    boundary: String
+  ) -> String {
+    "--\(boundary)\r\n"
+      + "Content-Disposition: form-data; name=\"\(name)\"\r\n"
+      + "\r\n"
+      + "\(value)\r\n"
+  }
+
+  private nonisolated static func escapedMultipartFilename(_ filename: String) -> String {
+    filename
+      .replacingOccurrences(of: "\r", with: "")
+      .replacingOccurrences(of: "\n", with: "")
+      .replacingOccurrences(of: "\\", with: "\\\\")
+      .replacingOccurrences(of: "\"", with: "\\\"")
   }
 
   private func buildTranscriptionResult(

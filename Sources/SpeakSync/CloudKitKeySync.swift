@@ -75,6 +75,7 @@ public enum CloudKitKeySyncError: LocalizedError, Equatable {
     case incorrectPassphrase
     case encryptionFailed
     case malformedRecord
+    case invalidChangeToken
     case passphraseTooShort(minimumLength: Int)
     case randomGenerationFailed
     case notConfigured
@@ -91,6 +92,8 @@ public enum CloudKitKeySyncError: LocalizedError, Equatable {
             return "Failed to encrypt or decrypt the API key."
         case .malformedRecord:
             return "CloudKit returned an invalid encrypted key record."
+        case .invalidChangeToken:
+            return "CloudKit returned an invalid synchronization token."
         case .passphraseTooShort(let minimumLength):
             return "Use an API-key sync passphrase with at least \(minimumLength) characters."
         case .randomGenerationFailed:
@@ -449,22 +452,24 @@ private final class KeySyncFetchAccumulator: @unchecked Sendable {
         let snapshot = lock.withLock {
             (
                 errors.first,
-                KeySyncFetchResult(
-                    records: records,
-                    deletedIDs: deletedIDs,
-                    serverChangeTokenData: serverChangeToken.flatMap(Self.archive),
-                    moreComing: moreComing
-                )
+                records,
+                deletedIDs,
+                serverChangeToken,
+                moreComing
             )
         }
         if let error = snapshot.0 {
             throw error
         }
-        return snapshot.1
-    }
-
-    private static func archive(_ token: CKServerChangeToken) -> Data? {
-        try? NSKeyedArchiver.archivedData(withRootObject: token, requiringSecureCoding: true)
+        let tokenData = try snapshot.3.map {
+            try NSKeyedArchiver.archivedData(withRootObject: $0, requiringSecureCoding: true)
+        }
+        return KeySyncFetchResult(
+            records: snapshot.1,
+            deletedIDs: snapshot.2,
+            serverChangeTokenData: tokenData,
+            moreComing: snapshot.4
+        )
     }
 }
 
@@ -488,11 +493,11 @@ public final class CloudKitKeySync: ObservableObject {
 
     @Published public private(set) var status = CloudKitKeySyncStatus()
 
-    private static let enabledKey = "speak.keysync.enabled"
-    private static let syncTokenKey = "speak.keysync.serverChangeToken"
+    static let enabledKey = "speak.keysync.enabled"
+    static let syncTokenKey = "speak.keysync.serverChangeToken"
     private static let subscriptionCreatedKey = "speak.keysync.subscriptionCreated"
     private static let zoneCreatedKey = "speak.keysync.zoneCreated"
-    private static let accountIdentifierKey = "speak.keysync.accountIdentifier"
+    static let accountIdentifierKey = "speak.keysync.accountIdentifier"
     private static let pendingMutationPrefix = "speak.keysync.pending."
     private static let localDerivedKeyIdentifier = "cloudkitKeySync.derivedKey"
     private static let localUpdatedPrefix = "speak.keysync.localUpdatedAt."
@@ -943,7 +948,7 @@ public final class CloudKitKeySync: ObservableObject {
         dependencies.defaults.removeObject(forKey: Self.pendingMutationKey(identifier: mutation.identifier))
     }
 
-    private static func pendingMutationKey(identifier: String) -> String {
+    static func pendingMutationKey(identifier: String) -> String {
         pendingMutationPrefix + identifier
     }
 
@@ -1180,14 +1185,30 @@ public final class CloudKitKeySync: ObservableObject {
         }
     }
 
-    // swiftlint:disable:next cyclomatic_complexity
     private func fetchAndApplyRemoteChanges(
         database: CloudKitKeySyncDatabase,
         key: SymmetricKey,
         changeToken: Data?,
         generation: UInt64
     ) async throws {
-        let result = try await executeFetchOperation(database: database, changeToken: changeToken)
+        var nextChangeToken = changeToken
+        while true {
+            let result = try await executeFetchOperation(database: database, changeToken: nextChangeToken)
+            try await applyFetchedChanges(result, key: key, generation: generation)
+            guard result.moreComing else { return }
+            guard let token = result.serverChangeTokenData else {
+                throw CloudKitKeySyncError.invalidChangeToken
+            }
+            nextChangeToken = token
+        }
+    }
+
+    // swiftlint:disable:next cyclomatic_complexity
+    private func applyFetchedChanges(
+        _ result: KeySyncFetchResult,
+        key: SymmetricKey,
+        generation: UInt64
+    ) async throws {
         try ensureSyncIsActive(generation: generation)
         var firstError: Error?
 
@@ -1377,7 +1398,7 @@ public final class CloudKitKeySync: ObservableObject {
         return .uploaded
     }
 
-    // swiftlint:disable:next function_body_length
+    // swiftlint:disable:next function_body_length cyclomatic_complexity
     private func executeFetchOperation(
         database: CloudKitKeySyncDatabase,
         changeToken: Data?
@@ -1390,10 +1411,15 @@ public final class CloudKitKeySync: ObservableObject {
         }
         let config = CKFetchRecordZoneChangesOperation.ZoneConfiguration()
         if let changeToken {
-            config.previousServerChangeToken = try? NSKeyedUnarchiver.unarchivedObject(
-                ofClass: CKServerChangeToken.self,
-                from: changeToken
-            )
+            do {
+                config.previousServerChangeToken = try NSKeyedUnarchiver.unarchivedObject(
+                    ofClass: CKServerChangeToken.self,
+                    from: changeToken
+                )
+            } catch {
+                log.error("Discarding unreadable CloudKit change token: \(error.localizedDescription)")
+                clearChangeToken()
+            }
         }
         let operation = CKFetchRecordZoneChangesOperation(
             recordZoneIDs: [SyncConfiguration.zoneID],

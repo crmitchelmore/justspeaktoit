@@ -274,11 +274,9 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     case postProcessingEnabled
     case postProcessingModel
     case postProcessingTemperature
-    case postProcessingSystemPrompt
     case postProcessingOutputLanguage
     case postProcessingIncludeLexiconDirectives
     case postProcessingIncludeContextTags
-    case postProcessingIncludeFinalInstruction
     case textOutputMethod
     case restoreClipboard
     case showHUD
@@ -440,10 +438,6 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     didSet { store(postProcessingTemperature, key: .postProcessingTemperature) }
   }
 
-  @Published var postProcessingSystemPrompt: String {
-    didSet { store(postProcessingSystemPrompt, key: .postProcessingSystemPrompt) }
-  }
-
   @Published var assemblyAIKeyterms: String {
     didSet { store(assemblyAIKeyterms, key: .assemblyAIKeyterms) }
   }
@@ -478,10 +472,6 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
 
   @Published var postProcessingIncludeContextTags: Bool {
     didSet { store(postProcessingIncludeContextTags, key: .postProcessingIncludeContextTags) }
-  }
-
-  @Published var postProcessingIncludeFinalInstruction: Bool {
-    didSet { store(postProcessingIncludeFinalInstruction, key: .postProcessingIncludeFinalInstruction) }
   }
 
   @Published var textOutputMethod: TextOutputMethod {
@@ -894,9 +884,6 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     )
     postProcessingTemperature =
       defaults.object(forKey: DefaultsKey.postProcessingTemperature.rawValue) as? Double ?? 0.2
-    postProcessingSystemPrompt =
-      defaults.string(forKey: DefaultsKey.postProcessingSystemPrompt.rawValue)
-      ?? "You are a transcription assistant. Clean up the text, fix punctuation, and respect speaker turns."
     assemblyAIKeyterms =
       defaults.string(forKey: DefaultsKey.assemblyAIKeyterms.rawValue) ?? ""
     assemblyAIIgnoredPronunciationTerms =
@@ -915,8 +902,6 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       defaults.object(forKey: DefaultsKey.postProcessingIncludeLexiconDirectives.rawValue) as? Bool ?? true
     postProcessingIncludeContextTags =
       defaults.object(forKey: DefaultsKey.postProcessingIncludeContextTags.rawValue) as? Bool ?? true
-    postProcessingIncludeFinalInstruction =
-      defaults.object(forKey: DefaultsKey.postProcessingIncludeFinalInstruction.rawValue) as? Bool ?? true
     textOutputMethod = Self.normalizedTextOutputMethod(
       TextOutputMethod(
         rawValue: defaults.string(forKey: DefaultsKey.textOutputMethod.rawValue)

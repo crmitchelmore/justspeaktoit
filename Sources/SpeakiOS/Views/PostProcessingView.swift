@@ -24,7 +24,6 @@ public final class iOSPostProcessingManager: ObservableObject {
     public func process(
         text: String,
         model: String,
-        prompt: String,
         apiKey: String
     ) async {
         guard !text.isEmpty else { return }
@@ -44,7 +43,7 @@ public final class iOSPostProcessingManager: ObservableObject {
         
         streamTask = Task {
             do {
-                let effectivePrompt = prompt.isEmpty ? AppSettings.defaultPostProcessingPrompt : prompt
+                let effectivePrompt = Self.effectiveSystemPrompt()
 
                 if usesAppleModel {
                     streamingText = try await AppleFoundationModelPolisher.process(
@@ -55,7 +54,7 @@ public final class iOSPostProcessingManager: ObservableObject {
                     // Use streaming for real-time updates
                     for try await chunk in sendChatStreaming(
                         systemPrompt: effectivePrompt,
-                        userMessage: text,
+                        userMessage: TranscriptCleanupPolicy.userMessage(transcript: text),
                         model: model,
                         apiKey: apiKey
                     ) {
@@ -89,11 +88,10 @@ public final class iOSPostProcessingManager: ObservableObject {
     public func polish(
         text: String,
         model: String,
-        prompt: String,
         apiKey: String
     ) async throws -> String {
         guard !text.isEmpty else { return text }
-        let effectivePrompt = prompt.isEmpty ? AppSettings.defaultPostProcessingPrompt : prompt
+        let effectivePrompt = Self.effectiveSystemPrompt()
         if model == AppleLocalModels.foundationModelID {
             return try await AppleFoundationModelPolisher.process(
                 text: text,
@@ -105,7 +103,7 @@ public final class iOSPostProcessingManager: ObservableObject {
         var result = ""
         for try await chunk in sendChatStreaming(
             systemPrompt: effectivePrompt,
-            userMessage: text,
+            userMessage: TranscriptCleanupPolicy.userMessage(transcript: text),
             model: model,
             apiKey: apiKey
         ) {
@@ -113,6 +111,10 @@ public final class iOSPostProcessingManager: ObservableObject {
             result += chunk
         }
         return result
+    }
+
+    nonisolated static func effectiveSystemPrompt() -> String {
+        TranscriptCleanupPolicy.systemPrompt()
     }
     
     // MARK: - OpenRouter API
@@ -225,7 +227,6 @@ public struct PostProcessingView: View {
     
     @State private var inputText: String
     @State private var showingModelPicker = false
-    @State private var showingPromptEditor = false
     @FocusState private var isTextFieldFocused: Bool
     
     private let onComplete: (String) -> Void
@@ -333,15 +334,6 @@ public struct PostProcessingView: View {
                     
                     // Action buttons
                     HStack(spacing: density.isCompact ? 6 : 12) {
-                        // Prompt settings
-                        Button {
-                            showingPromptEditor = true
-                        } label: {
-                            Image(systemName: "slider.horizontal.3")
-                                .frame(width: 44, height: 44)
-                        }
-                        .buttonStyle(.bordered)
-                        
                         // Process button
                         Button {
                             Task {
@@ -349,7 +341,6 @@ public struct PostProcessingView: View {
                                 await processor.process(
                                     text: inputText,
                                     model: settings.postProcessingModel,
-                                    prompt: settings.postProcessingPrompt,
                                     apiKey: settings.openRouterAPIKey
                                 )
                             }
@@ -415,9 +406,6 @@ public struct PostProcessingView: View {
             .sheet(isPresented: $showingModelPicker) {
                 modelPickerSheet
             }
-            .sheet(isPresented: $showingPromptEditor) {
-                promptEditorSheet
-            }
         }
     }
 }
@@ -480,51 +468,6 @@ private extension PostProcessingView {
         .presentationDetents([.medium])
     }
     
-    // MARK: - Prompt Editor Sheet
-    
-    @ViewBuilder
-    private var promptEditorSheet: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    TextEditor(text: $settings.postProcessingPrompt)
-                        .font(.system(.body, design: .monospaced))
-                        .frame(minHeight: density.isCompact ? 100 : 200)
-                } header: {
-                    Text("Custom System Prompt")
-                } footer: {
-                    if !density.isCompact {
-                        Text(
-                            "Leave empty to use the default prompt. "
-                                + "The prompt instructs the AI how to clean up your transcription."
-                        )
-                    }
-                }
-                
-                Section {
-                    Button("Reset to Default") {
-                        settings.postProcessingPrompt = ""
-                    }
-                    .foregroundStyle(.red)
-                }
-                
-                Section("Default Prompt Preview") {
-                    Text(AppSettings.defaultPostProcessingPrompt)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .navigationTitle("Prompt Settings")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
-                        showingPromptEditor = false
-                    }
-                }
-            }
-        }
-    }
 }
 
 #Preview {

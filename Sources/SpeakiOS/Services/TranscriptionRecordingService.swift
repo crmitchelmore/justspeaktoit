@@ -277,7 +277,6 @@ public final class TranscriptionRecordingService: ObservableObject {
             let polished = try await processor.polish(
                 text: text,
                 model: settings.postProcessingModel,
-                prompt: settings.postProcessingPrompt,
                 apiKey: settings.openRouterAPIKey
             )
             guard !polished.isEmpty else { throw PostProcessingError.emptyResult }

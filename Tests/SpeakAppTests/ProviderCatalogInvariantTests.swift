@@ -8,7 +8,7 @@ import XCTest
 /// the pickers read the catalogue while routing reads each provider's
 /// `supportedModels()`, so a model declared by a provider but missing from the
 /// catalogue (or vice versa) silently breaks one of the two.
-final class TranscriptionProviderCatalogInvariantTests: XCTestCase {
+final class ProviderCatalogInvariantTests: XCTestCase {
   func testAllProviderSupportedModels_areSubsetOfModelCatalog() async {
     let registry = TranscriptionProviderRegistry.shared
     let catalogIDs = Set(

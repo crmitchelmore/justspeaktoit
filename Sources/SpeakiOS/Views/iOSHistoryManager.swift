@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 #if os(iOS)
 import Foundation
 import SpeakSync

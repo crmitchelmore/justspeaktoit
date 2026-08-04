@@ -68,10 +68,13 @@ if SpeakLogger.isDebugMode {
 Existing configuration in `SentryManager.swift` provides defense-in-depth:
 
 ```swift
-options.sendDefaultPII = false  // Line 55
+options.sendDefaultPii = false
 ```
 
-With transcript content removed from logs, no sensitive data can reach Sentry.
+With transcript content removed from logs and default PII collection disabled,
+ordinary diagnostic events should not contain user speech. New Sentry context and
+breadcrumbs must still be reviewed so free-form user content cannot be added by
+another path.
 
 ## Verification
 

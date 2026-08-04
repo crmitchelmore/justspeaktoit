@@ -76,13 +76,7 @@ struct RevAITranscriptionProvider: TranscriptionProvider {
   }
 
   func supportedModels() -> [ModelCatalog.Option] {
-    [
-      ModelCatalog.Option(
-        id: "revai/default",
-        displayName: "Rev.ai",
-        description: "Rev.ai's speech recognition. High accuracy with speaker identification."
-      )
-    ]
+    ModelCatalog.batchTranscriptionOptions(forProvider: metadata.id)
   }
 
   // MARK: - Private Methods

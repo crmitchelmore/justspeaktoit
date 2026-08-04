@@ -272,6 +272,18 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             description: "Third-party streaming/batch model.",
             estimatedLatencyMs: 500, latencyTier: .fast),
         Option(
+            id: "deepgram/nova", displayName: "Deepgram Nova",
+            description: "Deepgram's previous generation model. Fast and reliable.",
+            latencyTier: .fast),
+        Option(
+            id: "deepgram/enhanced", displayName: "Deepgram Enhanced",
+            description: "Optimized for specific use cases like phone calls and meetings.",
+            latencyTier: .medium),
+        Option(
+            id: "deepgram/base", displayName: "Deepgram Base",
+            description: "Deepgram's base model. Good balance of speed and accuracy.",
+            latencyTier: .medium),
+        Option(
             id: "modulate/velma-2-stt-batch", displayName: "Modulate Velma-2 Batch",
             description: "Multilingual batch transcription with diarization, emotion, accent, and PII/PHI options.",
             estimatedLatencyMs: 1200, latencyTier: .medium),
@@ -301,6 +313,29 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
     ]
 
     public static let defaultBatchTranscriptionModel = "google/gemini-2.0-flash-001"
+
+    /// Batch catalogue options owned by a provider, matched by the `provider/`
+    /// prefix on the model identifier. Transcription providers derive their
+    /// `supportedModels()` from these helpers so the catalogue stays the single
+    /// source of truth for both the model pickers and provider routing.
+    ///
+    /// Note: OpenAI cannot use a prefix match because `openai/`-prefixed
+    /// OpenRouter models share the batch catalogue; it filters by
+    /// `OpenAITranscriptionModels.directBatchModelIDs` instead.
+    public static func batchTranscriptionOptions(forProvider providerID: String) -> [Option] {
+        options(in: batchTranscription, forProvider: providerID)
+    }
+
+    /// Live catalogue options owned by a provider. See
+    /// `batchTranscriptionOptions(forProvider:)`.
+    public static func liveTranscriptionOptions(forProvider providerID: String) -> [Option] {
+        options(in: liveTranscription, forProvider: providerID)
+    }
+
+    private static func options(in options: [Option], forProvider providerID: String) -> [Option] {
+        let prefix = providerID.lowercased() + "/"
+        return options.filter { $0.id.lowercased().hasPrefix(prefix) }
+    }
 
     private static let appleLiveTranscriptionOptions: [Option] = {
         if AppleLocalModels.supportsSpeechTranscriber {

@@ -95,13 +95,7 @@ struct SpeechmaticsTranscriptionProvider: TranscriptionProvider {
   }
 
   func supportedModels() -> [ModelCatalog.Option] {
-    [
-      ModelCatalog.Option(
-        id: "speechmatics/enhanced-streaming",
-        displayName: "Speechmatics Enhanced (Streaming)",
-        description: "Speechmatics realtime WebSocket transcription with partial and final results."
-      )
-    ]
+    ModelCatalog.liveTranscriptionOptions(forProvider: metadata.id)
   }
 
   func createLiveTranscriber(

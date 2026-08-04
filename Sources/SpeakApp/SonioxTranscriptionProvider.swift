@@ -156,18 +156,8 @@ struct SonioxTranscriptionProvider: TranscriptionProvider {
     func requiresAPIKey(for model: String) -> Bool { true }
 
     func supportedModels() -> [ModelCatalog.Option] {
-        [
-            ModelCatalog.Option(
-                id: "soniox/stt-rt-v5-streaming",
-                displayName: "Soniox Real-time v5",
-                description: "Soniox v5 real-time streaming transcription."
-            ),
-            ModelCatalog.Option(
-                id: "soniox/stt-async-v5",
-                displayName: "Soniox Async v5",
-                description: "Soniox v5 asynchronous batch transcription with speaker and language metadata."
-            )
-        ]
+        ModelCatalog.liveTranscriptionOptions(forProvider: metadata.id)
+            + ModelCatalog.batchTranscriptionOptions(forProvider: metadata.id)
     }
 
     private func uploadFile(at url: URL, apiKey: String) async throws -> SonioxFile {

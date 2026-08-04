@@ -38,12 +38,6 @@ struct GroqTranscriptionProvider: TranscriptionProvider {
   }
 
   func supportedModels() -> [ModelCatalog.Option] {
-    [
-      ModelCatalog.Option(
-        id: "groq/whisper-large-v3-turbo",
-        displayName: "Whisper Large v3 Turbo",
-        description: "Fast Groq-hosted Whisper transcription with a free tier."
-      )
-    ]
+    ModelCatalog.batchTranscriptionOptions(forProvider: metadata.id)
   }
 }

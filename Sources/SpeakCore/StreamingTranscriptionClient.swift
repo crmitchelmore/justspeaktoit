@@ -117,6 +117,28 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
         case .xai: return "xAI"
         }
     }
+
+    /// Sign-up/console page where the user can create this provider's API
+    /// key, or `nil` for on-device providers. Both platforms' "API key
+    /// required" alerts derive their "Get API Key" link from this so the
+    /// provider metadata never drifts between Mac and iPhone.
+    public var apiKeyURL: URL? {
+        let website: String
+        switch self {
+        case .apple: return nil
+        case .deepgram: website = "https://deepgram.com"
+        case .cartesia: website = "https://cartesia.ai"
+        case .gladia: website = "https://www.gladia.io"
+        case .modulate: website = "https://www.modulate-developer-apis.com/web/docs.html"
+        case .assemblyai: website = "https://assemblyai.com"
+        case .soniox: website = "https://soniox.com"
+        case .elevenlabs: website = "https://elevenlabs.io"
+        case .openai: website = "https://platform.openai.com"
+        case .speechmatics: website = "https://www.speechmatics.com"
+        case .xai: website = "https://console.x.ai"
+        }
+        return URL(string: website)
+    }
 }
 
 // MARK: - Routing

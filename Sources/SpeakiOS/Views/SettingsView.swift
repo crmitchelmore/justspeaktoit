@@ -2271,54 +2271,17 @@ private struct IOSMissingTranscriptionAPIKeyAlert: Identifiable {
 
     @MainActor
     init?(modelID: String, settings: AppSettings) {
-        let requirement: IOSProviderRequirement?
-        if modelID.hasPrefix("deepgram") {
-            requirement = IOSProviderRequirement(
-                provider: TranscriptionProviderMetadata(
-                    id: "deepgram",
-                    displayName: "Deepgram",
-                    website: "https://deepgram.com"
-                ),
-                modelName: "Deepgram Nova-3",
-                hasKey: settings.hasDeepgramKey
-            )
-        } else if modelID.hasPrefix("elevenlabs") {
-            requirement = IOSProviderRequirement(
-                provider: TranscriptionProviderMetadata(
-                    id: "elevenlabs",
-                    displayName: "ElevenLabs",
-                    website: "https://elevenlabs.io"
-                ),
-                modelName: "ElevenLabs Scribe",
-                hasKey: settings.hasElevenLabsKey
-            )
-        } else if modelID.hasPrefix("openai") {
-            requirement = IOSProviderRequirement(
-                provider: TranscriptionProviderMetadata(
-                    id: "openai",
-                    displayName: "OpenAI",
-                    website: "https://platform.openai.com"
-                ),
-                modelName: ModelCatalog.friendlyName(for: modelID),
-                hasKey: settings.hasOpenAIKey
-            )
-        } else {
-            requirement = nil
-        }
-
-        guard let requirement, !requirement.hasKey else {
+        // Provider metadata is single-sourced from SpeakCore's live routing so
+        // every provider with a missing key triggers the alert, matching Mac.
+        guard let route = LiveTranscriptionRouting.route(for: modelID),
+              let apiKeyIdentifier = route.apiKeyIdentifier,
+              !settings.storedAPIKeyIdentifiers.contains(apiKeyIdentifier) else {
             return nil
         }
 
-        providerName = requirement.provider.displayName
-        modelName = requirement.modelName
-        apiKeyURL = requirement.provider.apiKeyURL
+        providerName = route.provider.displayName
+        modelName = ModelCatalog.friendlyName(for: modelID)
+        apiKeyURL = route.provider.apiKeyURL
     }
-}
-
-private struct IOSProviderRequirement {
-    let provider: TranscriptionProviderMetadata
-    let modelName: String
-    let hasKey: Bool
 }
 #endif

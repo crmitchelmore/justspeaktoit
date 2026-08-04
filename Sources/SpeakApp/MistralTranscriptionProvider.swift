@@ -104,15 +104,7 @@ struct MistralTranscriptionProvider: TranscriptionProvider {
   }
 
   func supportedModels() -> [ModelCatalog.Option] {
-    [
-      ModelCatalog.Option(
-        id: "mistral/voxtral-mini-latest",
-        displayName: "Voxtral Mini Latest",
-        description: "Mistral Voxtral Mini batch transcription for long-form multilingual audio.",
-        estimatedLatencyMs: 900,
-        latencyTier: .fast
-      )
-    ]
+    ModelCatalog.batchTranscriptionOptions(forProvider: metadata.id)
   }
 
   private func modelID(from model: String) -> String {

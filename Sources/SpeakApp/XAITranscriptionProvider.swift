@@ -72,7 +72,7 @@ struct XAITranscriptionProvider: TranscriptionProvider {
   }
 
   func supportedModels() -> [ModelCatalog.Option] {
-    ModelCatalog.liveTranscription.filter { $0.id == XAIVoiceModels.thinkFast2CatalogID }
+    ModelCatalog.liveTranscriptionOptions(forProvider: metadata.id)
   }
 
   private func debugSnapshot(

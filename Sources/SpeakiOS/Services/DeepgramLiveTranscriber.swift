@@ -7,6 +7,7 @@ import os.log
 /// iOS Deepgram live transcriber that integrates with AudioSessionManager.
 /// Provides higher accuracy transcription via Deepgram's streaming API.
 @MainActor
+// swiftlint:disable:next type_body_length
 public final class DeepgramLiveTranscriber: ObservableObject {
     // MARK: - Published State
 
@@ -37,6 +38,13 @@ public final class DeepgramLiveTranscriber: ObservableObject {
 
     /// Persistent audio recorder — saves audio to disk alongside transcription.
     public let audioRecorder = AudioRecordingPersistence()
+
+    /// Serial queue that takes tap buffers off the real-time audio thread —
+    /// persistence and resample + network sends all run here.
+    private let audioProcessingQueue = DispatchQueue(label: "com.speak.ios.deepgram.audioProcessing")
+    /// Pools for tap-buffer copies and converter output so the hot path never allocates.
+    private let tapBufferPool = PCMBufferPool(maximumBuffers: 4)
+    private let outputBufferPool = PCMBufferPool(maximumBuffers: 2)
 
     // MARK: - Init
 
@@ -132,10 +140,16 @@ public final class DeepgramLiveTranscriber: ObservableObject {
         let client = deepgramClient
 
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) { [weak self] buffer, _ in
-            self?.audioRecorder.writeBuffer(buffer)
-            self?.convertAndSendAudio(buffer: buffer, nativeFormat: nativeFormat,
-                                      targetFormat: targetFormat, converter: converter,
-                                      client: client)
+            // Copy the buffer and hop off the real-time audio thread —
+            // heavy work in the tap makes CoreAudio drop mic buffers.
+            guard let self, let copied = self.tapBufferPool.copy(buffer) else { return }
+            self.audioProcessingQueue.async {
+                defer { self.tapBufferPool.recycle(copied) }
+                self.audioRecorder.writeBuffer(copied)
+                self.convertAndSendAudio(buffer: copied, nativeFormat: nativeFormat,
+                                         targetFormat: targetFormat, converter: converter,
+                                         client: client)
+            }
         }
 
         audioEngine.prepare()
@@ -179,11 +193,22 @@ public final class DeepgramLiveTranscriber: ObservableObject {
     ) {
         let ratio = 16000.0 / nativeFormat.sampleRate
         let outputFrameCapacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio)
-        guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: outputFrameCapacity) else {
+        guard let outputBuffer = outputBufferPool.buffer(
+            format: targetFormat, frameCapacity: outputFrameCapacity
+        ) else {
             return
         }
+        defer { outputBufferPool.recycle(outputBuffer) }
         var error: NSError?
+        var didProvideInput = false
         let status = converter.convert(to: outputBuffer, error: &error) { _, outStatus in
+            // One-shot input: returning the same buffer with .haveData again
+            // would make the converter duplicate audio frames.
+            guard !didProvideInput else {
+                outStatus.pointee = .noDataNow
+                return nil
+            }
+            didProvideInput = true
             outStatus.pointee = .haveData
             return buffer
         }

@@ -541,7 +541,15 @@ private final class OpenAIRealtimeAudioProcessor: @unchecked Sendable {
     // converter is only created once per inputFormat (cachedConverter), so
     // its state is the *correct* thing to preserve across taps.
     var error: NSError?
+    var didProvideInput = false
     let status = converter.convert(to: outputBuffer, error: &error) { _, outStatus in
+      // One-shot input: returning the same buffer with .haveData again
+      // would make the converter duplicate audio frames.
+      guard !didProvideInput else {
+        outStatus.pointee = .noDataNow
+        return nil
+      }
+      didProvideInput = true
       outStatus.pointee = .haveData
       return buffer
     }

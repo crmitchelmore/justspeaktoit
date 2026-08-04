@@ -31,6 +31,13 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     private var startTime: Date?
     private var accumulatedText = ""
 
+    /// Serial queue that takes tap buffers off the real-time audio thread —
+    /// resampling and network sends run here, not in the tap callback.
+    private let audioProcessingQueue = DispatchQueue(label: "com.speak.ios.sharedclient.audioProcessing")
+    /// Pools for tap-buffer copies and converter output so the hot path never allocates.
+    private let tapBufferPool = PCMBufferPool(maximumBuffers: 4)
+    private let outputBufferPool = PCMBufferPool(maximumBuffers: 2)
+
     public init(
         route: LiveTranscriptionRoute,
         apiKey: String,
@@ -173,10 +180,16 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         )
         let nativeSampleRate = nativeFormat.sampleRate
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) { [weak self] buffer, _ in
-            self?.convertAndSend(
-                buffer: buffer, nativeSampleRate: nativeSampleRate,
-                conversion: conversion, client: client
-            )
+            // Copy the buffer and hop off the real-time audio thread —
+            // heavy work in the tap makes CoreAudio drop mic buffers.
+            guard let self, let copied = self.tapBufferPool.copy(buffer) else { return }
+            self.audioProcessingQueue.async {
+                defer { self.tapBufferPool.recycle(copied) }
+                self.convertAndSend(
+                    buffer: copied, nativeSampleRate: nativeSampleRate,
+                    conversion: conversion, client: client
+                )
+            }
         }
 
         audioEngine.prepare()
@@ -217,11 +230,22 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     ) {
         let ratio = conversion.targetSampleRate / nativeSampleRate
         let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 1
-        guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: conversion.targetFormat, frameCapacity: capacity) else {
+        guard let outputBuffer = outputBufferPool.buffer(
+            format: conversion.targetFormat, frameCapacity: capacity
+        ) else {
             return
         }
+        defer { outputBufferPool.recycle(outputBuffer) }
         var conversionError: NSError?
+        var didProvideInput = false
         let status = conversion.converter.convert(to: outputBuffer, error: &conversionError) { _, outStatus in
+            // One-shot input: returning the same buffer with .haveData again
+            // would make the converter duplicate audio frames.
+            guard !didProvideInput else {
+                outStatus.pointee = .noDataNow
+                return nil
+            }
+            didProvideInput = true
             outStatus.pointee = .haveData
             return buffer
         }

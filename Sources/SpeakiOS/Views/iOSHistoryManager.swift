@@ -8,6 +8,7 @@ import UIKit
 
 /// Manages transcription history persistence for iOS with CloudKit sync.
 @MainActor
+// swiftlint:disable:next type_body_length
 public final class iOSHistoryManager: ObservableObject {
     public static let shared = iOSHistoryManager()
 

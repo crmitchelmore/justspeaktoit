@@ -95,13 +95,7 @@ struct GladiaTranscriptionProvider: TranscriptionProvider {
   }
 
   func supportedModels() -> [ModelCatalog.Option] {
-    [
-      ModelCatalog.Option(
-        id: "gladia/solaria-1-streaming",
-        displayName: "Solaria-1 Streaming",
-        description: "Gladia Solaria-1 real-time multilingual STT with automatic language detection."
-      )
-    ]
+    ModelCatalog.liveTranscriptionOptions(forProvider: metadata.id)
   }
 
   func createLiveTranscriber(

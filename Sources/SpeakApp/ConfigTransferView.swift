@@ -102,40 +102,32 @@ struct ConfigTransferView: View {
     private func generateQRCode() async {
         isGenerating = true
         error = nil
-        
+
         do {
-            // Gather secrets
-            let secrets = await gatherSecrets()
-            let settings = gatherSettings()
-            
+            // Gather secrets and settings via the shared transfer manager so
+            // both platforms use the same key list and payload format.
+            let manager = ConfigTransferManager.shared
+            let secrets = await manager.gatherSecrets(storage: secureStorage.coreStorage())
+            let settings = manager.gatherSettings(liveModelDefaultsKey: "liveTranscriptionModel")
+
             secretCount = secrets.count
             settingCount = settings.count
-            
+
             guard !secrets.isEmpty || !settings.isEmpty else {
                 qrImage = nil
                 isGenerating = false
                 return
             }
-            
-            let payload = try ConfigTransferManager.shared.generatePayload(
+
+            let payload = try manager.generatePayload(
                 secrets: secrets,
                 settings: settings
             )
-            
-            // Generate QR code image
-            let context = CIContext()
-            let filter = CIFilter.qrCodeGenerator()
-            filter.message = Data(payload.utf8)
-            filter.correctionLevel = "M"
-            
-            guard let outputImage = filter.outputImage else {
+
+            guard let scaledImage = manager.makeQRCodeImage(payload: payload) else {
                 throw ConfigTransferError.decodingFailed
             }
-            
-            // Scale up for display
-            let scale = 10.0
-            let scaledImage = outputImage.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-            
+
             let rep = NSCIImageRep(ciImage: scaledImage)
             let nsImage = NSImage(size: rep.size)
             nsImage.addRepresentation(rep)
@@ -143,42 +135,8 @@ struct ConfigTransferView: View {
         } catch {
             self.error = error.localizedDescription
         }
-        
+
         isGenerating = false
-    }
-    
-    private func gatherSecrets() async -> [String: String] {
-        var secrets: [String: String] = [:]
-        
-        // Key identifiers used by both macOS and iOS
-        let knownKeys = [
-            "deepgram.apiKey",
-            "openrouter.apiKey",
-            "openai.apiKey",
-            "openai.tts.apiKey",
-            "elevenlabs.apiKey",
-            "azure.speech.apiKey"
-        ]
-        
-        for key in knownKeys {
-            if let value = try? await secureStorage.secret(identifier: key), !value.isEmpty {
-                secrets[key] = value
-            }
-        }
-        
-        return secrets
-    }
-    
-    private func gatherSettings() -> [String: String] {
-        var settings: [String: String] = [:]
-        let defaults = UserDefaults.standard
-        
-        // Settings that make sense to transfer to iOS
-        if let liveModel = defaults.string(forKey: "liveTranscriptionModel") {
-            settings["selectedModel"] = liveModel
-        }
-        
-        return settings
     }
 }
 

@@ -493,18 +493,7 @@ struct ModulateTranscriptionProvider: TranscriptionProvider {
   }
 
   func supportedModels() -> [ModelCatalog.Option] {
-    [
-      ModelCatalog.Option(
-        id: "modulate/velma-2-stt-batch",
-        displayName: "Velma-2 STT Batch",
-        description: "Multilingual batch transcription with diarization and signal detection."
-      ),
-      ModelCatalog.Option(
-        id: "modulate/velma-2-stt-batch-english-vfast",
-        displayName: "Velma-2 STT Batch - English Fast",
-        description: "Fast English-only batch transcription."
-      )
-    ]
+    ModelCatalog.batchTranscriptionOptions(forProvider: metadata.id)
   }
 
   func createLiveTranscriber(

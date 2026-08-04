@@ -88,13 +88,7 @@ struct CartesiaTranscriptionProvider: TranscriptionProvider {
   }
 
   func supportedModels() -> [ModelCatalog.Option] {
-    [
-      ModelCatalog.Option(
-        id: "cartesia/ink-2-streaming",
-        displayName: "Ink-2 Streaming",
-        description: "Cartesia Ink-2 real-time English STT with built-in turn detection."
-      )
-    ]
+    ModelCatalog.liveTranscriptionOptions(forProvider: metadata.id)
   }
 
   func createLiveTranscriber(

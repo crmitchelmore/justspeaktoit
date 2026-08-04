@@ -723,18 +723,7 @@ struct AssemblyAITranscriptionProvider: TranscriptionProvider {
   // MARK: - Supported Models
 
   func supportedModels() -> [ModelCatalog.Option] {
-    [
-      ModelCatalog.Option(
-        id: AssemblyAIModels.universal35ProBatchID,
-        displayName: "Universal-3.5 Pro",
-        description: "AssemblyAI's fastest and most accurate batch speech model."
-      ),
-      ModelCatalog.Option(
-        id: AssemblyAIModels.universal2BatchID,
-        displayName: "Universal-2",
-        description: "AssemblyAI's previous generation model. Fast and reliable."
-      ),
-    ]
+    ModelCatalog.batchTranscriptionOptions(forProvider: metadata.id)
   }
 
   /// Creates a live transcriber for streaming audio.

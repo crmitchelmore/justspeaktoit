@@ -88,22 +88,7 @@ struct ElevenLabsTranscriptionProvider: TranscriptionProvider {
     }
 
     func supportedModels() -> [ModelCatalog.Option] {
-        [
-            ModelCatalog.Option(
-                id: "elevenlabs/scribe_v1",
-                displayName: "ElevenLabs Scribe v1",
-                description: "ElevenLabs Scribe: high-accuracy speech-to-text with word-level timestamps.",
-                estimatedLatencyMs: 800,
-                latencyTier: .fast
-            ),
-            ModelCatalog.Option(
-                id: "elevenlabs/scribe_v1_experimental",
-                displayName: "ElevenLabs Scribe v1 (Experimental)",
-                description: "ElevenLabs Scribe experimental model with cutting-edge accuracy improvements.",
-                estimatedLatencyMs: 900,
-                latencyTier: .fast
-            )
-        ]
+        ModelCatalog.batchTranscriptionOptions(forProvider: metadata.id)
     }
 
     // MARK: - Private Helpers

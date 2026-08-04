@@ -383,28 +383,7 @@ struct DeepgramTranscriptionProvider: TranscriptionProvider {
     }
 
     func supportedModels() -> [ModelCatalog.Option] {
-        [
-            ModelCatalog.Option(
-                id: "deepgram/nova-3",
-                displayName: "Nova-3",
-                description: "Deepgram's highest-performing speech-to-text model."
-            ),
-            ModelCatalog.Option(
-                id: "deepgram/nova",
-                displayName: "Nova",
-                description: "Deepgram's previous generation model. Fast and reliable."
-            ),
-            ModelCatalog.Option(
-                id: "deepgram/enhanced",
-                displayName: "Enhanced",
-                description: "Optimized for specific use cases like phone calls and meetings."
-            ),
-            ModelCatalog.Option(
-                id: "deepgram/base",
-                displayName: "Base",
-                description: "Deepgram's base model. Good balance of speed and accuracy."
-            )
-        ]
+        ModelCatalog.batchTranscriptionOptions(forProvider: metadata.id)
     }
 
     /// Creates a live transcriber for streaming audio.

@@ -40,7 +40,7 @@ The project is generated from Tuist and links to the Swift packages. You should 
 
 4. Link the entitlements file:
    - Build Settings → Code Signing Entitlements
-   - Set to: `Config/SpeakiOS.entitlements`
+   - Set to: `SpeakiOS.entitlements` (repo root)
 
 ## Step 3: Verify Widget Extension Target (Live Activity)
 

@@ -273,10 +273,13 @@ public final class PairingManager {
 public struct DeviceIdentity {
     public static var deviceId: String {
         #if os(iOS)
+        // Keep any previously persisted ID so existing pairings survive.
         if let id = UserDefaults.standard.string(forKey: "speakDeviceId") {
             return id
         }
-        let id = UUID().uuidString
+        // Prefer identifierForVendor: stable across reinstalls while any app
+        // from the same vendor remains installed, unlike a random UUID.
+        let id = UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString
         UserDefaults.standard.set(id, forKey: "speakDeviceId")
         return id
         #else

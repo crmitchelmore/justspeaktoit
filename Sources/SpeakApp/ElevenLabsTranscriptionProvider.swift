@@ -46,7 +46,7 @@ struct ElevenLabsTranscriptionProvider: TranscriptionProvider {
         body.appendFormField(named: "timestamps_granularity", value: "word", boundary: boundary)
 
         if let language {
-            let languageCode = extractLanguageCode(from: language)
+            let languageCode = language.localeLanguageCode
             body.appendFormField(named: "language_code", value: languageCode, boundary: boundary)
         }
 
@@ -96,11 +96,6 @@ struct ElevenLabsTranscriptionProvider: TranscriptionProvider {
     private func extractModelID(from model: String) -> String {
         // Strip the provider prefix: "elevenlabs/scribe_v1" -> "scribe_v1"
         model.split(separator: "/").last.map(String.init) ?? model
-    }
-
-    private func extractLanguageCode(from locale: String) -> String {
-        let components = locale.split(whereSeparator: { $0 == "_" || $0 == "-" })
-        return components.first.map(String.init)?.lowercased() ?? locale.lowercased()
     }
 
     private func buildTranscriptionResult(

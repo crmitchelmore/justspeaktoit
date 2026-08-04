@@ -113,7 +113,7 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
       transcriber = provider.createLiveTranscriber(
         apiKey: apiKey,
         model: realtimeName,
-        language: currentLanguage.map(Self.extractLanguageCode(from:)),
+        language: currentLanguage.map(\.localeLanguageCode),
         // OpenAI Realtime's transcription `prompt` is a glossary-style
         // bias — use the AssemblyAI keyterms list as a comma-joined hint.
         // We deliberately do *not* forward the post-processing system prompt
@@ -339,14 +339,6 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
   private func trimmedKeytermsPrompt() -> String? {
     let raw = appSettings.assemblyAIKeyterms.trimmingCharacters(in: .whitespacesAndNewlines)
     return raw.isEmpty ? nil : raw
-  }
-
-  /// Normalises a BCP-47 locale identifier (e.g. "en-GB", "en_US") to the
-  /// ISO-639-1 two-letter code OpenAI Realtime expects (e.g. "en"). Mirrors
-  /// the helper used by every other transcription provider.
-  static func extractLanguageCode(from locale: String) -> String {
-    let components = locale.split(whereSeparator: { $0 == "_" || $0 == "-" })
-    return components.first.map(String.init)?.lowercased() ?? locale.lowercased()
   }
 
   private func openAIAPIKey() async throws -> String {

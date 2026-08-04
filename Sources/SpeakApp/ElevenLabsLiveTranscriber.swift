@@ -159,7 +159,7 @@ final class ElevenLabsLiveTranscriber: @unchecked Sendable {
             defer { sendGroup.leave() }
             guard let self else { return }
             if let error {
-                if self.isStoppingState() || self.shouldIgnoreSocketError(error) { return }
+                if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
                 self.logger.error("Failed to send audio: \(error.localizedDescription, privacy: .public)")
                 self.currentOnError()?(error)
             }
@@ -309,7 +309,7 @@ final class ElevenLabsLiveTranscriber: @unchecked Sendable {
                 self.receiveMessages()
             case .failure(let error):
                 if self.isStoppingState() { return }
-                if self.shouldIgnoreSocketError(error) { return }
+                if WebSocketErrorFilter.shouldIgnore(error) { return }
                 let mapped = self.mapConnectionError(error)
                 self.logger.error("WebSocket receive error: \(error.localizedDescription, privacy: .public)")
                 self.currentOnError()?(mapped)
@@ -403,15 +403,6 @@ final class ElevenLabsLiveTranscriber: @unchecked Sendable {
             return ElevenLabsLiveError.invalidAPIKeyOrMissingScribeAccess
         }
         return error
-    }
-
-    private func shouldIgnoreSocketError(_ error: Error) -> Bool {
-        let nsError = error as NSError
-        if nsError.domain == NSPOSIXErrorDomain, nsError.code == 57 { return true }
-        if nsError.localizedDescription.localizedCaseInsensitiveContains("socket is not connected") {
-            return true
-        }
-        return false
     }
 }
 

@@ -76,13 +76,15 @@ struct GladiaTranscriptionProvider: TranscriptionProvider {
       }
       switch http.statusCode {
       case 200..<300:
-        let debug = debugSnapshot(request: request, response: http, data: nil)
+        // The listing body echoes previous sessions' transcripts, so it is deliberately
+        // left out of the debug snapshot on success.
+        let debug = APIKeyValidationDebugSnapshot.capture(request: request, response: http)
         return .success(message: "Gladia API key validated", debug: debug)
       case 401, 403:
-        let debug = debugSnapshot(request: request, response: http, data: data)
+        let debug = APIKeyValidationDebugSnapshot.capture(request: request, response: http, data: data)
         return .failure(message: "Gladia rejected the key (HTTP \(http.statusCode))", debug: debug)
       default:
-        let debug = debugSnapshot(request: request, response: http, data: data)
+        let debug = APIKeyValidationDebugSnapshot.capture(request: request, response: http, data: data)
         return .failure(message: "HTTP \(http.statusCode) while validating key", debug: debug)
       }
     } catch {
@@ -114,25 +116,6 @@ struct GladiaTranscriptionProvider: TranscriptionProvider {
     )
   }
 
-  private func debugSnapshot(
-    request: URLRequest,
-    response: HTTPURLResponse,
-    data: Data?
-  ) -> APIKeyValidationDebugSnapshot {
-    APIKeyValidationDebugSnapshot(
-      url: request.url?.absoluteString ?? "",
-      method: request.httpMethod ?? "GET",
-      requestHeaders: request.allHTTPHeaderFields ?? [:],
-      requestBody: request.httpBody.flatMap { String(data: $0, encoding: .utf8) },
-      statusCode: response.statusCode,
-      responseHeaders: response.allHeaderFields.reduce(into: [String: String]()) { partialResult, entry in
-        guard let key = entry.key as? String else { return }
-        partialResult[key] = String(describing: entry.value)
-      },
-      responseBody: data.flatMap { String(data: $0, encoding: .utf8) },
-      errorDescription: nil
-    )
-  }
 }
 
 struct GladiaTranscriptEvent: Equatable, Sendable {
@@ -221,7 +204,7 @@ final class GladiaLiveTranscriber: @unchecked Sendable {
     task.send(.string(message)) { [weak self] error in
       defer { sendGroup.leave() }
       guard let self else { return }
-      if let error, !self.isStoppingState(), !self.shouldIgnoreSocketError(error) {
+      if let error, !self.isStoppingState(), !WebSocketErrorFilter.shouldIgnore(error) {
         self.currentOnError()?(error)
       }
     }
@@ -368,7 +351,7 @@ final class GladiaLiveTranscriber: @unchecked Sendable {
       defer { sendGroup.leave() }
       guard let self else { return }
       if let error {
-        if self.isStoppingState() || self.shouldIgnoreSocketError(error) { return }
+        if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
         self.currentOnError()?(self.mapConnectionError(error))
       }
     }
@@ -383,7 +366,7 @@ final class GladiaLiveTranscriber: @unchecked Sendable {
         self.handleMessage(message)
         self.receiveMessages()
       case .failure(let error):
-        if self.isStoppingState() || self.shouldIgnoreSocketError(error) { return }
+        if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
         self.currentOnError()?(self.mapConnectionError(error))
       }
     }
@@ -430,15 +413,6 @@ final class GladiaLiveTranscriber: @unchecked Sendable {
       return GladiaLiveError.invalidAPIKey
     }
     return error
-  }
-
-  private func shouldIgnoreSocketError(_ error: Error) -> Bool {
-    let nsError = error as NSError
-    if nsError.domain == NSPOSIXErrorDomain, nsError.code == 57 { return true }
-    if nsError.localizedDescription.localizedCaseInsensitiveContains("socket is not connected") {
-      return true
-    }
-    return false
   }
 
   private func withStateLock<T>(_ block: () -> T) -> T {

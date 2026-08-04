@@ -1,5 +1,4 @@
 import SpeakCore
-import AVFoundation
 import Foundation
 
 struct OpenAITranscriptionProvider: TranscriptionProvider {
@@ -55,7 +54,7 @@ struct OpenAITranscriptionProvider: TranscriptionProvider {
         // OpenAI expects ISO-639-1 (2-letter code), not full locale (e.g., "en" not "en_GB").
         // The new GPT Transcribe family accepts plural language hints while
         // existing GPT-4o and Whisper models retain the singular field.
-        let languageCode = extractLanguageCode(from: language)
+        let languageCode = language.localeLanguageCode
         body.appendFormField(
             named: OpenAITranscriptionModels.batchLanguageFieldName(for: modelName),
             value: languageCode,
@@ -93,36 +92,12 @@ struct OpenAITranscriptionProvider: TranscriptionProvider {
   }
 
   func validateAPIKey(_ key: String) async -> APIKeyValidationResult {
-    let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else {
-      return .failure(message: "API key is empty")
-    }
-
-    let url = baseURL.appendingPathComponent("models")
-    var request = URLRequest(url: url)
-    request.httpMethod = "GET"
-    request.setValue("Bearer \(trimmed)", forHTTPHeaderField: "Authorization")
-
-    do {
-      let (data, response) = try await session.data(for: request)
-      guard let http = response as? HTTPURLResponse else {
-        return .failure(message: "Received a non-HTTP response", debug: debugSnapshot(request: request))
-      }
-
-      let debug = debugSnapshot(request: request, response: http, data: data)
-
-      if (200..<300).contains(http.statusCode) {
-        return .success(message: "\(validationServiceName) API key validated", debug: debug)
-      }
-
-      let message = "HTTP \(http.statusCode) while validating key"
-      return .failure(message: message, debug: debug)
-    } catch {
-      return .failure(
-        message: "Validation failed: \(error.localizedDescription)",
-        debug: debugSnapshot(request: request, error: error)
-      )
-    }
+    await GETProbeAPIKeyValidator(
+      url: baseURL.appendingPathComponent("models"),
+      headers: { ["Authorization": "Bearer \($0)"] },
+      serviceName: validationServiceName,
+      session: session
+    ).validate(key)
   }
 
   func requiresAPIKey(for model: String) -> Bool {
@@ -149,20 +124,17 @@ struct OpenAITranscriptionProvider: TranscriptionProvider {
     modelName == "gpt-4o-transcribe-diarize"
   }
 
-  private func extractLanguageCode(from locale: String) -> String {
-    // Extract just the language code from locale identifiers
-    // e.g., "en_GB" -> "en", "en-US" -> "en", "en" -> "en"
-    let components = locale.split(whereSeparator: { $0 == "_" || $0 == "-" })
-    return components.first.map(String.init)?.lowercased() ?? locale.lowercased()
-  }
-
   private func buildTranscriptionResult(
     response: OpenAITranscriptionResponse,
     audioURL: URL,
     model: String,
     payload: Data
   ) async throws -> TranscriptionResult {
-    let duration = await resolvedDuration(for: audioURL, response: response)
+    let duration = await resolvedTranscriptionDuration(
+      reported: response.duration,
+      lastSegmentEnd: response.segments?.last?.end,
+      audioURL: audioURL
+    )
     let transcriptText = response.transcriptText
 
     let mappedSegments =
@@ -187,43 +159,6 @@ struct OpenAITranscriptionProvider: TranscriptionProvider {
       cost: nil,
       rawPayload: String(data: payload, encoding: .utf8),
       debugInfo: nil
-    )
-  }
-
-  private func resolvedDuration(for audioURL: URL, response: OpenAITranscriptionResponse) async -> TimeInterval {
-    if let duration = response.duration, duration > 0 {
-      return duration
-    }
-    if let lastSegmentEnd = response.segments?.last?.end, lastSegmentEnd > 0 {
-      return lastSegmentEnd
-    }
-    let asset = AVURLAsset(url: audioURL)
-    guard let durationTime = try? await asset.load(.duration), durationTime.seconds.isFinite else {
-      return 0
-    }
-    return durationTime.seconds
-  }
-
-  private func debugSnapshot(
-    request: URLRequest,
-    response: HTTPURLResponse? = nil,
-    data: Data? = nil,
-    error: Error? = nil
-  ) -> APIKeyValidationDebugSnapshot {
-    APIKeyValidationDebugSnapshot(
-      url: request.url?.absoluteString ?? "",
-      method: request.httpMethod ?? "GET",
-      requestHeaders: request.allHTTPHeaderFields ?? [:],
-      requestBody: request.httpBody.flatMap { String(data: $0, encoding: .utf8) },
-      statusCode: response?.statusCode,
-      responseHeaders: response.map { headers in
-        headers.allHeaderFields.reduce(into: [String: String]()) { partialResult, entry in
-          guard let key = entry.key as? String else { return }
-          partialResult[key] = String(describing: entry.value)
-        }
-      } ?? [:],
-      responseBody: data.flatMap { String(data: $0, encoding: .utf8) },
-      errorDescription: error?.localizedDescription
     )
   }
 }
@@ -263,17 +198,6 @@ private struct OpenAITranscriptionResponse: Decodable {
   }
 
   private func speakerLabel(from value: String?) -> String? {
-    guard let raw = value?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
-      return nil
-    }
-    let uppercased = raw.uppercased()
-    if uppercased.hasPrefix("SPEAKER_") || uppercased.hasPrefix("SPEAKER ") {
-      let digits = raw.filter(\.isNumber)
-      if let index = Int(digits) {
-        return "Speaker \(index + 1)"
-      }
-      return raw.replacingOccurrences(of: "_", with: " ").capitalized
-    }
-    return raw
+    SpeakerLabelNormalizer.displayLabel(for: value, spacedFormIsIndexed: true)
   }
 }

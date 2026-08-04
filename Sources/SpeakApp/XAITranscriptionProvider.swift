@@ -80,22 +80,12 @@ struct XAITranscriptionProvider: TranscriptionProvider {
     response: HTTPURLResponse,
     data: Data
   ) -> APIKeyValidationDebugSnapshot {
-    var requestHeaders = request.allHTTPHeaderFields ?? [:]
-    if requestHeaders["Authorization"] != nil {
-      requestHeaders["Authorization"] = "Bearer [REDACTED]"
+    // Blank the key out entirely rather than letting the shared redactor keep a
+    // recognisable prefix/suffix of it.
+    var redacted = request
+    if request.value(forHTTPHeaderField: "Authorization") != nil {
+      redacted.setValue("Bearer [REDACTED]", forHTTPHeaderField: "Authorization")
     }
-    return APIKeyValidationDebugSnapshot(
-      url: request.url?.absoluteString ?? "",
-      method: request.httpMethod ?? "GET",
-      requestHeaders: requestHeaders,
-      requestBody: nil,
-      statusCode: response.statusCode,
-      responseHeaders: response.allHeaderFields.reduce(into: [String: String]()) { result, pair in
-        guard let key = pair.key as? String else { return }
-        result[key] = String(describing: pair.value)
-      },
-      responseBody: String(data: data, encoding: .utf8),
-      errorDescription: nil
-    )
+    return .capture(request: redacted, response: response, data: data)
   }
 }

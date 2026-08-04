@@ -187,7 +187,7 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
       self.bufferPool.returnBuffer(&returnBuffer)
 
       if let error {
-        if self.isStoppingState() || self.shouldIgnoreSocketError(error) { return }
+        if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
         self.logger.error("Failed to send audio: \(error.localizedDescription)")
         self.currentOnError()?(error)
       }
@@ -241,7 +241,7 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
       self.bufferPool.returnBuffer(&returnBuffer)
 
       if let error {
-        if self.isStoppingState() || self.shouldIgnoreSocketError(error) { return }
+        if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
         self.logger.error("Failed to send audio: \(error.localizedDescription)")
         self.currentOnError()?(error)
       }
@@ -333,7 +333,7 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
         // We re-arm via asyncAfter (not the completion handler thread) so we
         // don't starve URLSession's delegate queue and prevent it from
         // delivering the Begin/Turn frames.
-        if self.shouldIgnoreSocketError(error) {
+        if WebSocketErrorFilter.shouldIgnore(error) {
           DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.01) { [weak self] in
             self?.receiveMessages()
           }
@@ -490,15 +490,6 @@ private extension AssemblyAILiveTranscriber {
   func currentOnTranscript() -> ((AssemblyAITurnResponse) -> Void)? {
     withStateLock { onTranscript }
   }
-
-  func shouldIgnoreSocketError(_ error: Error) -> Bool {
-    let nsError = error as NSError
-    if nsError.domain == NSPOSIXErrorDomain, nsError.code == 57 { return true }
-    if nsError.localizedDescription.localizedCaseInsensitiveContains("socket is not connected") {
-      return true
-    }
-    return false
-  }
 }
 
 // MARK: - AssemblyAI Transcription Provider
@@ -589,8 +580,7 @@ struct AssemblyAITranscriptionProvider: TranscriptionProvider {
     }
 
     if let language {
-      let code = extractLanguageCode(from: language)
-      body["language_code"] = code
+      body["language_code"] = language.localeLanguageCode
     } else {
       body["language_detection"] = true
     }
@@ -680,40 +670,18 @@ struct AssemblyAITranscriptionProvider: TranscriptionProvider {
   // MARK: - API Key Validation
 
   func validateAPIKey(_ key: String) async -> APIKeyValidationResult {
-    let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else {
-      return .failure(message: "API key is empty")
-    }
-
-    // Use the /v2/transcript endpoint with a lightweight GET to validate
+    // Use the /v2/transcript endpoint with a lightweight GET, limited to 1 result,
+    // just to validate auth.
     let url = baseURL.appendingPathComponent("transcript")
-    var request = URLRequest(url: url)
-    request.httpMethod = "GET"
-    request.setValue(trimmed, forHTTPHeaderField: "Authorization")
-    // Limit to 1 result just to validate auth
     var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
     components.queryItems = [URLQueryItem(name: "limit", value: "1")]
-    request.url = components.url
 
-    do {
-      let (data, response) = try await session.data(for: request)
-      guard let http = response as? HTTPURLResponse else {
-        return .failure(message: "Received a non-HTTP response", debug: debugSnapshot(request: request))
-      }
-
-      let debug = debugSnapshot(request: request, response: http, data: data)
-
-      if (200..<300).contains(http.statusCode) {
-        return .success(message: "AssemblyAI API key validated", debug: debug)
-      }
-
-      return .failure(message: "HTTP \(http.statusCode) while validating key", debug: debug)
-    } catch {
-      return .failure(
-        message: "Validation failed: \(error.localizedDescription)",
-        debug: debugSnapshot(request: request, error: error)
-      )
-    }
+    return await GETProbeAPIKeyValidator(
+      url: components.url ?? url,
+      headers: { ["Authorization": $0] },
+      serviceName: "AssemblyAI",
+      session: session
+    ).validate(key)
   }
 
   func requiresAPIKey(for model: String) -> Bool {
@@ -763,33 +731,6 @@ struct AssemblyAITranscriptionProvider: TranscriptionProvider {
     }
   }
 
-  private func extractLanguageCode(from locale: String) -> String {
-    let components = locale.split(whereSeparator: { $0 == "_" || $0 == "-" })
-    return components.first.map(String.init)?.lowercased() ?? locale.lowercased()
-  }
-
-  private func debugSnapshot(
-    request: URLRequest,
-    response: HTTPURLResponse? = nil,
-    data: Data? = nil,
-    error: Error? = nil
-  ) -> APIKeyValidationDebugSnapshot {
-    APIKeyValidationDebugSnapshot(
-      url: request.url?.absoluteString ?? "",
-      method: request.httpMethod ?? "GET",
-      requestHeaders: request.allHTTPHeaderFields ?? [:],
-      requestBody: request.httpBody.flatMap { String(data: $0, encoding: .utf8) },
-      statusCode: response?.statusCode,
-      responseHeaders: response.map { headers in
-        headers.allHeaderFields.reduce(into: [String: String]()) { partialResult, entry in
-          guard let key = entry.key as? String else { return }
-          partialResult[key] = String(describing: entry.value)
-        }
-      } ?? [:],
-      responseBody: data.flatMap { String(data: $0, encoding: .utf8) },
-      errorDescription: error?.localizedDescription
-    )
-  }
 }
 
 // MARK: - Streaming Response Models

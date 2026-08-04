@@ -59,35 +59,13 @@ struct SpeechmaticsTranscriptionProvider: TranscriptionProvider {
   }
 
   func validateAPIKey(_ key: String) async -> APIKeyValidationResult {
-    let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else {
-      return .failure(message: "API key is empty")
-    }
-
-    var request = URLRequest(url: validationURL)
-    request.httpMethod = "GET"
-    request.setValue("Bearer \(trimmed)", forHTTPHeaderField: "Authorization")
-
-    do {
-      let (data, response) = try await session.data(for: request)
-      guard let http = response as? HTTPURLResponse else {
-        return .failure(message: "Received a non-HTTP response", debug: debugSnapshot(request: request))
-      }
-
-      let debug = debugSnapshot(request: request, response: http, data: data)
-      if (200..<300).contains(http.statusCode) {
-        return .success(message: "Speechmatics API key validated", debug: debug)
-      }
-      if http.statusCode == 401 || http.statusCode == 403 {
-        return .failure(message: "Speechmatics rejected the key (HTTP \(http.statusCode))", debug: debug)
-      }
-      return .failure(message: "HTTP \(http.statusCode) while validating key", debug: debug)
-    } catch {
-      return .failure(
-        message: "Validation failed: \(error.localizedDescription)",
-        debug: debugSnapshot(request: request, error: error)
-      )
-    }
+    await GETProbeAPIKeyValidator(
+      url: validationURL,
+      headers: { ["Authorization": "Bearer \($0)"] },
+      serviceName: "Speechmatics",
+      session: session,
+      rejectionStatusCodes: [401, 403]
+    ).validate(key)
   }
 
   func requiresAPIKey(for model: String) -> Bool {
@@ -107,7 +85,7 @@ struct SpeechmaticsTranscriptionProvider: TranscriptionProvider {
     SpeechmaticsLiveTranscriber(
       apiKey: apiKey,
       model: Self.realtimeModelName(from: model),
-      language: language.map(Self.extractLanguageCode(from:)),
+      language: language.map(\.localeLanguageCode),
       sampleRate: sampleRate
     )
   }
@@ -120,32 +98,6 @@ struct SpeechmaticsTranscriptionProvider: TranscriptionProvider {
     return raw.isEmpty ? "enhanced" : raw
   }
 
-  static func extractLanguageCode(from locale: String) -> String {
-    let components = locale.split(whereSeparator: { $0 == "_" || $0 == "-" })
-    return components.first.map(String.init)?.lowercased() ?? locale.lowercased()
-  }
-
-  private func debugSnapshot(
-    request: URLRequest,
-    response: HTTPURLResponse? = nil,
-    data: Data? = nil,
-    error: Error? = nil
-  ) -> APIKeyValidationDebugSnapshot {
-    APIKeyValidationDebugSnapshot(
-      url: request.url?.absoluteString ?? "",
-      method: request.httpMethod ?? "GET",
-      requestHeaders: request.allHTTPHeaderFields ?? [:],
-      requestBody: request.httpBody.flatMap { String(data: $0, encoding: .utf8) },
-      statusCode: response?.statusCode,
-      responseHeaders: response?.allHeaderFields.reduce(into: [String: String]()) { result, pair in
-        if let key = pair.key as? String {
-          result[key] = String(describing: pair.value)
-        }
-      } ?? [:],
-      responseBody: data.flatMap { String(data: $0, encoding: .utf8) },
-      errorDescription: error?.localizedDescription
-    )
-  }
 }
 
 // MARK: - WebSocket response types
@@ -438,7 +390,7 @@ final class SpeechmaticsLiveTranscriber: @unchecked Sendable {
     model: String = "enhanced",
     sampleRate: Int = 16000
   ) throws -> String {
-    let languageCode = language.map(SpeechmaticsTranscriptionProvider.extractLanguageCode(from:)) ?? "en"
+    let languageCode = language.map(\.localeLanguageCode) ?? "en"
     let payload: [String: Any] = [
       "message": "StartRecognition",
       "audio_format": [
@@ -545,7 +497,7 @@ final class SpeechmaticsLiveTranscriber: @unchecked Sendable {
       var returnBuffer = buffer
       self.bufferPool.returnBuffer(&returnBuffer)
       if let error {
-        if self.isStoppingState() || self.shouldIgnoreSocketError(error) { return }
+        if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
         self.logger.error("Failed to send audio: \(error.localizedDescription, privacy: .public)")
         self.currentOnError()?(error)
       }
@@ -558,7 +510,7 @@ final class SpeechmaticsLiveTranscriber: @unchecked Sendable {
     else { return }
     enqueueOutbound(.string(json), on: task) { [weak self] error in
       guard let self else { return }
-      if let error, !self.isStoppingState(), !self.shouldIgnoreSocketError(error) {
+      if let error, !self.isStoppingState(), !WebSocketErrorFilter.shouldIgnore(error) {
         self.currentOnError()?(error)
       }
     }
@@ -603,7 +555,7 @@ final class SpeechmaticsLiveTranscriber: @unchecked Sendable {
         self.handleMessage(message)
         self.receiveMessages()
       case .failure(let error):
-        if self.isStoppingState() || self.shouldIgnoreSocketError(error) { return }
+        if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
         self.logger.error("Speechmatics receive error: \(error.localizedDescription, privacy: .public)")
         self.currentOnError()?(self.mapConnectionError(error))
       }
@@ -726,15 +678,6 @@ final class SpeechmaticsLiveTranscriber: @unchecked Sendable {
       return SpeechmaticsLiveError.invalidAPIKey
     }
     return SpeechmaticsLiveError.serverError(detail)
-  }
-
-  private func shouldIgnoreSocketError(_ error: Error) -> Bool {
-    let nsError = error as NSError
-    if nsError.domain == NSPOSIXErrorDomain, nsError.code == 57 { return true }
-    if nsError.localizedDescription.localizedCaseInsensitiveContains("socket is not connected") {
-      return true
-    }
-    return false
   }
 
   private func withStateLock<T>(_ block: () -> T) -> T {

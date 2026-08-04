@@ -1,4 +1,3 @@
-import AVFoundation
 import Foundation
 import SpeakCore
 
@@ -69,34 +68,12 @@ struct MistralTranscriptionProvider: TranscriptionProvider {
   }
 
   func validateAPIKey(_ key: String) async -> APIKeyValidationResult {
-    let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else {
-      return .failure(message: "API key is empty")
-    }
-
-    let url = baseURL.appendingPathComponent("models")
-    var request = URLRequest(url: url)
-    request.httpMethod = "GET"
-    request.setValue("Bearer \(trimmed)", forHTTPHeaderField: "Authorization")
-
-    do {
-      let (data, response) = try await session.data(for: request)
-      guard let http = response as? HTTPURLResponse else {
-        return .failure(message: "Received a non-HTTP response", debug: debugSnapshot(request: request))
-      }
-
-      let debug = debugSnapshot(request: request, response: http, data: data)
-      if (200..<300).contains(http.statusCode) {
-        return .success(message: "Mistral API key validated", debug: debug)
-      }
-
-      return .failure(message: "HTTP \(http.statusCode) while validating key", debug: debug)
-    } catch {
-      return .failure(
-        message: "Validation failed: \(error.localizedDescription)",
-        debug: debugSnapshot(request: request, error: error)
-      )
-    }
+    await GETProbeAPIKeyValidator(
+      url: baseURL.appendingPathComponent("models"),
+      headers: { ["Authorization": "Bearer \($0)"] },
+      serviceName: "Mistral",
+      session: session
+    ).validate(key)
   }
 
   func requiresAPIKey(for model: String) -> Bool {
@@ -194,7 +171,11 @@ struct MistralTranscriptionProvider: TranscriptionProvider {
     model: String,
     payload: Data
   ) async throws -> TranscriptionResult {
-    let duration = await resolvedDuration(for: audioURL, response: response)
+    let duration = await resolvedTranscriptionDuration(
+      reported: response.duration,
+      lastSegmentEnd: response.lastSegmentEnd,
+      audioURL: audioURL
+    )
     let transcriptText = response.transcriptText
     let mappedSegments = response.transcriptionSegments(duration: duration)
     let segments = mappedSegments.isEmpty
@@ -210,43 +191,6 @@ struct MistralTranscriptionProvider: TranscriptionProvider {
       cost: nil,
       rawPayload: String(data: payload, encoding: .utf8),
       debugInfo: nil
-    )
-  }
-
-  private func resolvedDuration(for audioURL: URL, response: MistralTranscriptionResponse) async -> TimeInterval {
-    if let duration = response.duration, duration > 0 {
-      return duration
-    }
-    if let lastSegmentEnd = response.lastSegmentEnd, lastSegmentEnd > 0 {
-      return lastSegmentEnd
-    }
-    let asset = AVURLAsset(url: audioURL)
-    guard let durationTime = try? await asset.load(.duration), durationTime.seconds.isFinite else {
-      return 0
-    }
-    return durationTime.seconds
-  }
-
-  private func debugSnapshot(
-    request: URLRequest,
-    response: HTTPURLResponse? = nil,
-    data: Data? = nil,
-    error: Error? = nil
-  ) -> APIKeyValidationDebugSnapshot {
-    APIKeyValidationDebugSnapshot(
-      url: request.url?.absoluteString ?? "",
-      method: request.httpMethod ?? "GET",
-      requestHeaders: request.allHTTPHeaderFields ?? [:],
-      requestBody: request.httpBody.flatMap { String(data: $0, encoding: .utf8) },
-      statusCode: response?.statusCode,
-      responseHeaders: response.map { headers in
-        headers.allHeaderFields.reduce(into: [String: String]()) { partialResult, entry in
-          guard let key = entry.key as? String else { return }
-          partialResult[key] = String(describing: entry.value)
-        }
-      } ?? [:],
-      responseBody: data.flatMap { String(data: $0, encoding: .utf8) },
-      errorDescription: error?.localizedDescription
     )
   }
 }
@@ -342,19 +286,7 @@ private enum MistralSpeaker: Decodable {
     case .int(let value):
       return "Speaker \(value + 1)"
     case .string(let value):
-      let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-      guard !trimmed.isEmpty else { return nil }
-      let uppercased = trimmed.uppercased()
-      if uppercased.hasPrefix("SPEAKER_") {
-        let digits = trimmed.filter(\.isNumber)
-        if let index = Int(digits) {
-          return "Speaker \(index + 1)"
-        }
-        return trimmed.replacingOccurrences(of: "_", with: " ").capitalized
-      } else if uppercased.hasPrefix("SPEAKER ") {
-        return trimmed.capitalized
-      }
-      return trimmed
+      return SpeakerLabelNormalizer.displayLabel(for: value, spacedFormIsIndexed: false)
     }
   }
 }

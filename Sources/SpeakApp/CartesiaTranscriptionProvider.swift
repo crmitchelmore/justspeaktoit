@@ -1,4 +1,3 @@
-// swiftlint:disable file_length
 import Foundation
 import os.log
 import SpeakCore
@@ -104,24 +103,13 @@ struct CartesiaTranscriptionProvider: TranscriptionProvider {
     response: HTTPURLResponse,
     data: Data
   ) -> APIKeyValidationDebugSnapshot {
-    var requestHeaders = request.allHTTPHeaderFields ?? [:]
-    if requestHeaders["Authorization"] != nil {
-      requestHeaders["Authorization"] = "Bearer [REDACTED]"
+    // Blank the key out entirely rather than letting the shared redactor keep a
+    // recognisable prefix/suffix of it.
+    var redacted = request
+    if request.value(forHTTPHeaderField: "Authorization") != nil {
+      redacted.setValue("Bearer [REDACTED]", forHTTPHeaderField: "Authorization")
     }
-
-    return APIKeyValidationDebugSnapshot(
-      url: request.url?.absoluteString ?? "",
-      method: request.httpMethod ?? "GET",
-      requestHeaders: requestHeaders,
-      requestBody: request.httpBody.flatMap { String(data: $0, encoding: .utf8) },
-      statusCode: response.statusCode,
-      responseHeaders: response.allHeaderFields.reduce(into: [String: String]()) { partialResult, entry in
-        guard let key = entry.key as? String else { return }
-        partialResult[key] = String(describing: entry.value)
-      },
-      responseBody: String(data: data, encoding: .utf8),
-      errorDescription: nil
-    )
+    return .capture(request: redacted, response: response, data: data)
   }
 }
 
@@ -187,7 +175,7 @@ final class CartesiaLiveTranscriber: @unchecked Sendable {
       defer { sendGroup.leave() }
       guard let self else { return }
       if let error {
-        if self.isStoppingState() || self.shouldIgnoreSocketError(error) { return }
+        if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
         self.currentOnError()?(self.mapConnectionError(error))
       }
     }
@@ -292,7 +280,7 @@ final class CartesiaLiveTranscriber: @unchecked Sendable {
         self.handleMessage(message)
         self.receiveMessages()
       case .failure(let error):
-        if self.isStoppingState() || self.shouldIgnoreSocketError(error) { return }
+        if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
         self.currentOnError()?(self.mapConnectionError(error))
       }
     }
@@ -325,15 +313,6 @@ final class CartesiaLiveTranscriber: @unchecked Sendable {
       return CartesiaLiveError.invalidAPIKey
     }
     return error
-  }
-
-  private func shouldIgnoreSocketError(_ error: Error) -> Bool {
-    let nsError = error as NSError
-    if nsError.domain == NSPOSIXErrorDomain, nsError.code == 57 { return true }
-    if nsError.localizedDescription.localizedCaseInsensitiveContains("socket is not connected") {
-      return true
-    }
-    return false
   }
 
   private func withStateLock<T>(_ block: () -> T) -> T {

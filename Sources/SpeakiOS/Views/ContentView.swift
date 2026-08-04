@@ -20,6 +20,9 @@ final class TranscriberCoordinator: ObservableObject {
 
     private var transcriptionSession: IOSTranscriptionSession?
     private var startTime: Date?
+    /// Last time the App Group shared state was written for a partial result.
+    private var lastSharedStateWriteAt: Date = .distantPast
+    private static let sharedStateWriteInterval: TimeInterval = 1.0
 
     init() {
         self.audioSessionManager = AudioSessionManager()
@@ -41,11 +44,15 @@ final class TranscriberCoordinator: ObservableObject {
     // swiftlint:disable:next function_body_length
     func start() async throws {
         let settings = AppSettings.shared
+        // Wait for the initial keychain load so auto-start on a cold launch
+        // doesn't read empty API keys and fall back to Apple Speech.
+        await settings.ensureKeysLoaded()
         currentModel = settings.transcriptionMode == .batch
             ? settings.batchTranscriptionModel
             : settings.selectedModel
         partialText = ""
         wordCount = 0
+        lastSharedStateWriteAt = .distantPast
         startTime = Date()
         sharedState.clear()
 
@@ -110,10 +117,17 @@ final class TranscriberCoordinator: ObservableObject {
 
     private func handlePartialResult(text: String, isFinal: Bool) {
         partialText = text
-        wordCount = text.split(separator: " ").count
 
-        // Update shared state for copy actions
-        sharedState.updateTranscript(text)
+        // App Group writes and word counting are O(n) per partial; throttle
+        // them to ~1/s (matching the Live Activity manager's own throttle).
+        // The full transcript is committed once more at stop.
+        let now = Date()
+        if now.timeIntervalSince(lastSharedStateWriteAt) >= Self.sharedStateWriteInterval {
+            lastSharedStateWriteAt = now
+            wordCount = text.split(separator: " ").count
+            // Update shared state for copy actions
+            sharedState.updateTranscript(text)
+        }
 
         // Update Live Activity (if enabled)
         if AppSettings.shared.liveActivitiesEnabled {
@@ -184,6 +198,9 @@ final class TranscriberCoordinator: ObservableObject {
     }
 
     private func finishStop(with result: TranscriptionResult) -> TranscriptionResult {
+        // Live shared-state writes are throttled; commit the final transcript
+        // once so the copy intents always see the complete text.
+        sharedState.updateTranscript(result.text)
         iOSHistoryManager.shared.recordTranscription(
             text: result.text,
             model: currentModel,
@@ -345,6 +362,14 @@ public struct ContentView: View {
                 Text(errorMessage)
             }
             .onChange(of: coordinator.error?.localizedDescription) { _, newError in
+                if let error = newError {
+                    errorMessage = error
+                    showingError = true
+                }
+            }
+            .onChange(of: backgroundService.lastSessionError?.localizedDescription) { _, newError in
+                // A background (Action Button) session failed mid-recording;
+                // surface it instead of silently losing the user's dictation.
                 if let error = newError {
                     errorMessage = error
                     showingError = true

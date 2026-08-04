@@ -221,9 +221,15 @@ public final class DeepgramLiveTranscriber: ObservableObject {
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
 
-        // Stop Deepgram client
-        deepgramClient?.stop()
-        deepgramClient = nil
+        // Graceful drain: ask Deepgram to flush buffered audio (CloseStream)
+        // and wait briefly for the trailing final so the last words spoken
+        // right before stop make it into the result.
+        if let client = deepgramClient {
+            deepgramClient = nil
+            if let trailingFinal = await client.finishAndWait(), !trailingFinal.isEmpty {
+                handleTranscript(text: trailingFinal, isFinal: true)
+            }
+        }
 
         // Stop persistent recording
         _ = audioRecorder.stopRecording()
@@ -313,7 +319,10 @@ public final class DeepgramLiveTranscriber: ObservableObject {
             }
         }
 
-        onPartialResult?(text, isFinal)
+        // Contract: always deliver the full display transcript (accumulated
+        // finals plus any trailing partial), matching iOSLiveTranscriber and
+        // OpenAIRealtimeLiveTranscriber.
+        onPartialResult?(partialText, isFinal)
     }
 
     private func handleError(_ error: Error) {

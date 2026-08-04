@@ -161,6 +161,11 @@ public final class AudioRecordingPersistence: ObservableObject {
     // MARK: - Listing & Management
 
     /// List all saved recordings, newest first.
+    ///
+    /// Durations are not read here: opening each file just to ask for its
+    /// length stalls the main thread on large libraries. Entries are returned
+    /// with `duration == 0`; load real values asynchronously per file with
+    /// `loadDuration(for:)`.
     public static func listRecordings() -> [RecordingInfo] {
         let dir = recordingsDirectory
         guard let files = try? FileManager.default.contentsOfDirectory(
@@ -180,9 +185,6 @@ public final class AudioRecordingPersistence: ObservableObject {
                 let created = res?.creationDate ?? Date()
                 let size = Int64(res?.fileSize ?? 0)
 
-                // Try to get duration
-                let dur = (try? AVAudioPlayer(contentsOf: url))?.duration ?? 0
-
                 let stem = url.deletingPathExtension().lastPathComponent
                 let cleanStem = stem
                     .replacingOccurrences(of: "Recording-", with: "")
@@ -192,11 +194,20 @@ public final class AudioRecordingPersistence: ObservableObject {
                     id: rid,
                     url: url,
                     startedAt: created,
-                    duration: dur,
+                    duration: 0,
                     fileSize: size
                 )
             }
             .sorted { $0.startedAt > $1.startedAt }
+    }
+
+    /// Load a recording's duration without blocking the calling thread.
+    /// `AVURLAsset` reads just the metadata it needs, off the main thread.
+    public static func loadDuration(for url: URL) async -> TimeInterval {
+        let asset = AVURLAsset(url: url)
+        guard let duration = try? await asset.load(.duration) else { return 0 }
+        let seconds = duration.seconds
+        return seconds.isFinite ? max(0, seconds) : 0
     }
 
     /// Delete a specific recording file.

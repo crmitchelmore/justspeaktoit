@@ -94,7 +94,25 @@ public struct RecordingsView: View {
     // MARK: - Actions
 
     private func reload() {
-        recordings = AudioRecordingPersistence.listRecordings()
+        // List immediately (cheap directory scan), then fill in durations
+        // asynchronously so a large library doesn't stall the main thread.
+        let listed = AudioRecordingPersistence.listRecordings()
+        recordings = listed
+        Task { @MainActor in
+            for rec in listed {
+                let duration = await AudioRecordingPersistence.loadDuration(for: rec.url)
+                guard duration > 0,
+                      let index = recordings.firstIndex(where: { $0.id == rec.id })
+                else { continue }
+                recordings[index] = RecordingInfo(
+                    id: rec.id,
+                    url: rec.url,
+                    startedAt: rec.startedAt,
+                    duration: duration,
+                    fileSize: rec.fileSize
+                )
+            }
+        }
     }
 
     private func togglePlayback(_ rec: RecordingInfo) {

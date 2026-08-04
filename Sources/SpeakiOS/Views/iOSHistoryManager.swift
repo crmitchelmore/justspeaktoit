@@ -1,6 +1,7 @@
 #if os(iOS)
 import Foundation
 import SpeakSync
+import UIKit
 
 // MARK: - History Manager
 
@@ -32,6 +33,21 @@ public final class iOSHistoryManager: ObservableObject {
     /// IDs of entries that have been synced to CloudKit.
     @Published private(set) var syncedIDs: Set<UUID> = []
     static let syncedIDsKey = "speak.sync.syncedHistoryIDs"
+
+    /// Debounce interval for coalescing disk writes while remote sync delivers
+    /// entries one at a time. Initial CloudKit sync used to sort + rewrite the
+    /// whole history file per received entry, freezing the UI.
+    static let remoteCommitDebounce: Duration = .milliseconds(250)
+
+    /// Pending debounced commit of remote sync changes, if any.
+    private var pendingRemoteCommit: Task<Void, Never>?
+
+    /// Whether remote sync changes are waiting to be sorted and persisted.
+    private var hasPendingRemoteChanges = false
+
+    /// Lifecycle observers that flush pending changes before backgrounding or
+    /// termination so a debounced commit is never lost.
+    private var lifecycleObservers: [NSObjectProtocol] = []
 
     private var currentItemIDs: Set<UUID> {
         Set(items.map(\.id))
@@ -86,10 +102,41 @@ public final class iOSHistoryManager: ObservableObject {
         // all prior history on disk.
         loadHistoryFromDiskIfNeeded()
 
+        registerLifecycleFlushObservers()
+
         guard syncEnabled else { return }
         Task {
             await initializeSync()
         }
+    }
+
+    deinit {
+        pendingRemoteCommit?.cancel()
+        for observer in lifecycleObservers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
+    private func registerLifecycleFlushObservers() {
+        let names: [Notification.Name] = [
+            UIApplication.didEnterBackgroundNotification,
+            UIApplication.willTerminateNotification
+        ]
+        lifecycleObservers = names.map { name in
+            NotificationCenter.default.addObserver(
+                forName: name,
+                object: nil,
+                queue: .main
+            ) { @MainActor [weak self] _ in
+                self?.flushPendingChanges()
+            }
+        }
+    }
+
+    /// Persists any debounced remote sync changes immediately. Called from the
+    /// lifecycle observers; safe to call at any time.
+    public func flushPendingChanges() {
+        commitRemoteChangesNow()
     }
 
     // MARK: - CloudKit Sync Init
@@ -300,6 +347,35 @@ public final class iOSHistoryManager: ObservableObject {
         }
     }
 
+    // MARK: - Batched Remote Commits
+
+    /// Marks remote sync changes as pending and (re)starts the debounce timer.
+    /// Remote entries arrive one at a time from the sync engine; batching them
+    /// into a single sort + save keeps the initial sync from rewriting the
+    /// history file per entry.
+    private func scheduleRemoteCommit() {
+        hasPendingRemoteChanges = true
+        pendingRemoteCommit?.cancel()
+        pendingRemoteCommit = Task { [weak self] in
+            try? await Task.sleep(for: Self.remoteCommitDebounce)
+            guard !Task.isCancelled else { return }
+            self?.commitRemoteChangesNow()
+        }
+    }
+
+    /// Sorts once and persists once for however many remote changes accumulated.
+    private func commitRemoteChangesNow() {
+        pendingRemoteCommit?.cancel()
+        pendingRemoteCommit = nil
+        guard hasPendingRemoteChanges else { return }
+        hasPendingRemoteChanges = false
+
+        items.sort { $0.createdAt > $1.createdAt }
+        saveHistory()
+        pruneStaleSyncedIDs()
+        saveSyncedIDs()
+    }
+
     // MARK: - Synced IDs Tracking
 
     private func loadSyncedIDs() {
@@ -335,12 +411,12 @@ extension iOSHistoryManager: HistorySyncDelegate {
     }
 
     public func didReceiveRemoteEntry(_ entry: SyncableHistoryEntry) async {
+        // Mutate in memory only; sorting and persisting are debounced so a
+        // burst of remote entries costs one sort + one save, not one each.
         if let index = items.firstIndex(where: { $0.id == entry.id }) {
             let local = items[index]
             if entry.updatedAt > local.updatedAt {
                 items[index] = iOSHistoryItem.fromSyncable(entry)
-                items.sort { $0.createdAt > $1.createdAt }
-                saveHistory()
                 syncedIDs.insert(entry.id)
             } else if entry.updatedAt == local.updatedAt {
                 // An already-present duplicate is an acknowledgement.
@@ -349,24 +425,20 @@ extension iOSHistoryManager: HistorySyncDelegate {
                 // The local entry is newer and must remain pending for upload.
                 syncedIDs.remove(entry.id)
             }
-            pruneStaleSyncedIDs()
-            saveSyncedIDs()
+            scheduleRemoteCommit()
             return
         }
 
         let item = iOSHistoryItem.fromSyncable(entry)
         items.insert(item, at: 0)
-        items.sort { $0.createdAt > $1.createdAt }
-        saveHistory()
         syncedIDs.insert(entry.id)
-        saveSyncedIDs()
+        scheduleRemoteCommit()
     }
 
     public func didDeleteRemoteEntry(id: UUID) async {
         items.removeAll { $0.id == id }
-        saveHistory()
         syncedIDs.remove(id)
-        saveSyncedIDs()
+        scheduleRemoteCommit()
     }
 
     public func didAcknowledgeSyncedEntries(ids: Set<UUID>) async {

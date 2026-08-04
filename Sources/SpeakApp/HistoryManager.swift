@@ -20,7 +20,7 @@ struct HistoryStatistics: Equatable {
 }
 
 /// WAL entry representing a pending history operation
-private struct WALEntry: Codable {
+struct WALEntry: Codable {
   enum Operation: String, Codable {
     case append
     case update
@@ -98,6 +98,9 @@ final class HistoryManager: ObservableObject {
 
   /// Flag to track if we're currently flushing
   private var isFlushing = false
+
+  /// Persistent handle for appending WAL entries (line-delimited JSON).
+  private var walHandle: FileHandle?
   
   /// Observer for app termination notification
   private var terminationObserver: NSObjectProtocol?
@@ -133,6 +136,7 @@ final class HistoryManager: ObservableObject {
 
   deinit {
     flushTimer?.invalidate()
+    try? walHandle?.close()
     if let observer = terminationObserver {
       NotificationCenter.default.removeObserver(observer)
     }
@@ -174,19 +178,21 @@ final class HistoryManager: ObservableObject {
 
   // MARK: - WAL Operations
 
-  /// Append an entry to the WAL file
+  /// Append an entry to the WAL file.
+  ///
+  /// The WAL is line-delimited JSON (one encoded entry per line) so each
+  /// operation is an O(1) append through a persistent handle rather than a
+  /// read-decode-rewrite of the whole file. A torn final line from a crash is
+  /// skipped during recovery.
   private func appendToWAL(_ entry: WALEntry) async {
     pendingWrites.append(entry)
 
     do {
-      var walEntries: [WALEntry] = []
-      if FileManager.default.fileExists(atPath: walURL.path) {
-        let data = try Data(contentsOf: walURL)
-        walEntries = (try? decoder.decode([WALEntry].self, from: data)) ?? []
-      }
-      walEntries.append(entry)
-      let data = try encoder.encode(walEntries)
-      try data.write(to: walURL, options: [.atomic])
+      var line = try encoder.encode(entry)
+      line.append(0x0A)  // "\n"
+      let handle = try walFileHandle()
+      try handle.seekToEnd()
+      try handle.write(contentsOf: line)
     } catch {
       log.error("Failed to append to WAL: \(error.localizedDescription, privacy: .public)")
     }
@@ -197,6 +203,39 @@ final class HistoryManager: ObservableObject {
     }
   }
 
+  /// Returns the persistent WAL append handle, creating the file if needed.
+  private func walFileHandle() throws -> FileHandle {
+    if let walHandle {
+      return walHandle
+    }
+    if !FileManager.default.fileExists(atPath: walURL.path) {
+      FileManager.default.createFile(atPath: walURL.path, contents: nil)
+    }
+    let handle = try FileHandle(forWritingTo: walURL)
+    walHandle = handle
+    return handle
+  }
+
+  /// Decodes WAL entries from either format:
+  /// - Legacy: a single JSON array of entries (rewritten atomically per op).
+  /// - Current: line-delimited JSON, one entry per line.
+  /// Corrupt or partial lines (e.g. a torn final write) are skipped.
+  private func decodeWALEntries(from data: Data) -> [WALEntry] {
+    if let legacy = try? decoder.decode([WALEntry].self, from: data) {
+      return legacy
+    }
+    var entries: [WALEntry] = []
+    for line in data.split(separator: 0x0A) where !line.isEmpty {
+      if let entry = try? decoder.decode(WALEntry.self, from: Data(line)) {
+        entries.append(entry)
+      } else if let legacy = try? decoder.decode([WALEntry].self, from: Data(line)) {
+        // A legacy array file that was continued in the new line format.
+        entries.append(contentsOf: legacy)
+      }
+    }
+    return entries
+  }
+
   /// Replay WAL entries and merge into main storage
   private func replayWAL() async -> [HistoryItem] {
     guard FileManager.default.fileExists(atPath: walURL.path) else {
@@ -205,9 +244,11 @@ final class HistoryManager: ObservableObject {
 
     do {
       let data = try Data(contentsOf: walURL)
-      let walEntries = try decoder.decode([WALEntry].self, from: data)
+      let walEntries = decodeWALEntries(from: data)
 
       if walEntries.isEmpty {
+        // Nothing recoverable — clear so future appends start a fresh file.
+        clearWAL()
         return []
       }
 
@@ -249,7 +290,7 @@ final class HistoryManager: ObservableObject {
       try mergedData.write(to: storageURL, options: [.atomic])
 
       // Clear WAL after successful merge
-      try FileManager.default.removeItem(at: walURL)
+      clearWAL()
 
       log.info("WAL replay complete, cleared WAL file")
 
@@ -264,11 +305,30 @@ final class HistoryManager: ObservableObject {
   /// Clear the WAL file
   private func clearWAL() {
     do {
+      try walHandle?.close()
+      walHandle = nil
       if FileManager.default.fileExists(atPath: walURL.path) {
         try FileManager.default.removeItem(at: walURL)
       }
     } catch {
       log.error("Failed to clear WAL: \(error.localizedDescription, privacy: .public)")
+    }
+  }
+
+  /// Rewrite the WAL to contain only the given entries (line-delimited format).
+  /// Used when a flush persisted a snapshot that predates some pending writes.
+  private func rewriteWAL(with entries: [WALEntry]) {
+    do {
+      try walHandle?.close()
+      walHandle = nil
+      var data = Data()
+      for entry in entries {
+        try data.append(encoder.encode(entry))
+        data.append(0x0A)
+      }
+      try data.write(to: walURL, options: [.atomic])
+    } catch {
+      log.error("Failed to rewrite WAL: \(error.localizedDescription, privacy: .public)")
     }
   }
 
@@ -309,15 +369,26 @@ final class HistoryManager: ObservableObject {
 
     log.info("Flushing \(self.pendingWrites.count) pending writes to disk")
 
-    do {
-      // Persist the full history, not just the currently loaded page.
-      let snapshot = allItemsOnDisk.isEmpty ? items : allItemsOnDisk
-      let data = try encoder.encode(snapshot)
-      try data.write(to: storageURL, options: [.atomic])
+    // Persist the full history, not just the currently loaded page.
+    let snapshot = allItemsOnDisk.isEmpty ? items : allItemsOnDisk
+    let flushedCount = pendingWrites.count
+    let url = storageURL
 
-      // Clear pending writes and WAL after successful persist
-      pendingWrites.removeAll()
-      clearWAL()
+    do {
+      // Encode and write off the main actor; the snapshot is an immutable copy.
+      try await Task.detached(priority: .utility) { [encoder] in
+        let data = try encoder.encode(snapshot)
+        try data.write(to: url, options: [.atomic])
+      }.value
+
+      // Drop only the writes covered by the snapshot; anything appended while
+      // the write was in flight stays pending (and stays in the WAL).
+      pendingWrites.removeFirst(min(flushedCount, pendingWrites.count))
+      if pendingWrites.isEmpty {
+        clearWAL()
+      } else {
+        rewriteWAL(with: pendingWrites)
+      }
 
       log.info("Flush complete")
     } catch {
@@ -411,16 +482,16 @@ final class HistoryManager: ObservableObject {
     current.insert(item, at: 0)
     items = current
 
-    let stats = Self.calculateStatistics(for: allItemsOnDisk)
-    cachedStatistics = stats
-    statistics = stats
+    updateStatisticsForAppend(item)
 
     // Write to WAL instead of directly to disk
     await appendToWAL(WALEntry(operation: .append, item: item))
   }
 
   func update(_ item: HistoryItem) async {
+    var oldItem: HistoryItem?
     if let diskIndex = allItemsOnDisk.firstIndex(where: { $0.id == item.id }) {
+      oldItem = allItemsOnDisk[diskIndex]
       allItemsOnDisk[diskIndex] = item
       allItemsOnDisk.sort { $0.createdAt > $1.createdAt }
     }
@@ -431,9 +502,13 @@ final class HistoryManager: ObservableObject {
       items = updated.sorted { $0.createdAt > $1.createdAt }
     }
 
-    let stats = Self.calculateStatistics(for: allItemsOnDisk)
-    cachedStatistics = stats
-    statistics = stats
+    if let oldItem {
+      updateStatisticsForUpdate(oldItem: oldItem, newItem: item)
+    } else {
+      let stats = Self.calculateStatistics(for: allItemsOnDisk)
+      cachedStatistics = stats
+      statistics = stats
+    }
 
     // Write to WAL instead of directly to disk
     await appendToWAL(WALEntry(operation: .update, item: item))
@@ -445,9 +520,9 @@ final class HistoryManager: ObservableObject {
 
     items.removeAll { $0.id == id }
 
-    let stats = Self.calculateStatistics(for: allItemsOnDisk)
-    cachedStatistics = stats
-    statistics = stats
+    if let diskItem {
+      updateStatisticsForRemove(diskItem)
+    }
 
     // Write to WAL instead of directly to disk
     if let diskItem {
@@ -484,7 +559,19 @@ final class HistoryManager: ObservableObject {
     items.filter { filter.matches($0.presentationItem) }
   }
 
-  private nonisolated static func calculateStatistics(for items: [HistoryItem]) -> HistoryStatistics {
+  /// Duration counted towards statistics for a single item, falling back to
+  /// the recording phase timestamps when no explicit duration was captured.
+  private nonisolated static func effectiveDuration(of item: HistoryItem) -> TimeInterval {
+    if item.recordingDuration > 0 {
+      return item.recordingDuration
+    }
+    if let start = item.phaseTimestamps.recordingStarted, let end = item.phaseTimestamps.recordingEnded {
+      return max(0, end.timeIntervalSince(start))
+    }
+    return 0
+  }
+
+  nonisolated static func calculateStatistics(for items: [HistoryItem]) -> HistoryStatistics {
     guard !items.isEmpty else {
       return .init(
         totalSessions: 0, cumulativeRecordingDuration: 0, totalSpend: 0, averageSessionLength: 0,
@@ -492,13 +579,7 @@ final class HistoryManager: ObservableObject {
     }
 
     let totalDuration = items.reduce(0) { partial, item in
-      if item.recordingDuration > 0 {
-        return partial + item.recordingDuration
-      }
-      if let start = item.phaseTimestamps.recordingStarted, let end = item.phaseTimestamps.recordingEnded {
-        return partial + max(0, end.timeIntervalSince(start))
-      }
-      return partial
+      partial + effectiveDuration(of: item)
     }
     let totalErrors = items.filter { !$0.errors.isEmpty }.count
     let totalSpend = items.reduce(Decimal(0)) { partial, item in
@@ -528,7 +609,7 @@ final class HistoryManager: ObservableObject {
     }
 
     let newTotalSessions = cached.totalSessions + 1
-    let newCumulativeDuration = cached.cumulativeRecordingDuration + item.recordingDuration
+    let newCumulativeDuration = cached.cumulativeRecordingDuration + Self.effectiveDuration(of: item)
     let newTotalSpend = cached.totalSpend + (item.cost?.total ?? 0)
     let newErrorCount = cached.sessionsWithErrors + (item.errors.isEmpty ? 0 : 1)
     let newAverageLength = newTotalSessions > 0 ? newCumulativeDuration / Double(newTotalSessions) : 0
@@ -552,10 +633,17 @@ final class HistoryManager: ObservableObject {
     }
 
     let newTotalSessions = max(0, cached.totalSessions - 1)
-    let newCumulativeDuration = max(0, cached.cumulativeRecordingDuration - item.recordingDuration)
+    guard newTotalSessions > 0 else {
+      // Reset exactly to the empty baseline so float drift can't accumulate.
+      let empty = Self.calculateStatistics(for: [])
+      cachedStatistics = empty
+      statistics = empty
+      return
+    }
+    let newCumulativeDuration = max(0, cached.cumulativeRecordingDuration - Self.effectiveDuration(of: item))
     let newTotalSpend = max(0, cached.totalSpend - (item.cost?.total ?? 0))
     let newErrorCount = max(0, cached.sessionsWithErrors - (item.errors.isEmpty ? 0 : 1))
-    let newAverageLength = newTotalSessions > 0 ? newCumulativeDuration / Double(newTotalSessions) : 0
+    let newAverageLength = newCumulativeDuration / Double(newTotalSessions)
 
     let updated = HistoryStatistics(
       totalSessions: newTotalSessions,
@@ -575,7 +663,7 @@ final class HistoryManager: ObservableObject {
       return
     }
 
-    let durationDelta = newItem.recordingDuration - oldItem.recordingDuration
+    let durationDelta = Self.effectiveDuration(of: newItem) - Self.effectiveDuration(of: oldItem)
     let costDelta = (newItem.cost?.total ?? 0) - (oldItem.cost?.total ?? 0)
     let errorDelta = (newItem.errors.isEmpty ? 0 : 1) - (oldItem.errors.isEmpty ? 0 : 1)
 

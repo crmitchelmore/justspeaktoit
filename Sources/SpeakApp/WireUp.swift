@@ -435,6 +435,17 @@ enum WireUp {
       }
     }
 
+    // The listener can also fail asynchronously, after start() has already returned
+    // (NWListener.start is non-throwing). Handle that the same way as a synchronous
+    // failure so the toggle never stays ON with a dead listener behind it — this covers
+    // both the launch-time start below and the one in Settings, which share this server.
+    environment.transportServer.onFailure = { error in
+      Task { @MainActor in
+        SpeakLogger.logError(error, context: "Send to Mac listener failed", logger: SpeakLogger.transport)
+        settings.enableSendToMac = false
+      }
+    }
+
     if settings.enableSendToMac {
       do {
         try environment.transportServer.start()

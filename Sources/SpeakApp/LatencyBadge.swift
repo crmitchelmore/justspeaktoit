@@ -62,15 +62,20 @@ struct LatencyBadge: View {
 struct LatencyBadgeCompact: View {
   let tier: LatencyTier
   let estimatedMs: Int?
+  /// Adds a tinted capsule behind the glyph for legibility on translucent
+  /// backdrops (used by the HUD capture-health row).
+  let emphasized: Bool
 
-  init(tier: LatencyTier, estimatedMs: Int? = nil) {
+  init(tier: LatencyTier, estimatedMs: Int? = nil, emphasized: Bool = false) {
     self.tier = tier
     self.estimatedMs = estimatedMs
+    self.emphasized = emphasized
   }
 
-  init(option: ModelCatalog.Option) {
+  init(option: ModelCatalog.Option, emphasized: Bool = false) {
     self.tier = option.latencyTier
     self.estimatedMs = option.estimatedLatencyMs
+    self.emphasized = emphasized
   }
 
   private var badgeColor: Color {
@@ -100,10 +105,25 @@ struct LatencyBadgeCompact: View {
   }
 
   var body: some View {
+    if emphasized {
+      glyph
+        .padding(.horizontal, 5)
+        .padding(.vertical, 3)
+        .background(
+          Capsule()
+            .fill(badgeColor.opacity(0.16))
+        )
+        .help(tooltipText)
+    } else {
+      glyph
+        .help(tooltipText)
+    }
+  }
+
+  private var glyph: some View {
     Image(systemName: iconName)
       .font(.system(size: 10, weight: .semibold))
       .foregroundStyle(badgeColor)
-      .help(tooltipText)
   }
 }
 
@@ -125,6 +145,14 @@ struct LatencyBadgeCompact: View {
       LatencyBadgeCompact(tier: .fast, estimatedMs: 500)
       LatencyBadgeCompact(tier: .medium, estimatedMs: 1500)
       LatencyBadgeCompact(tier: .slow, estimatedMs: 3000)
+    }
+
+    Text("Compact Badges (Emphasized)").font(.headline)
+    HStack(spacing: 12) {
+      LatencyBadgeCompact(tier: .instant, estimatedMs: 50, emphasized: true)
+      LatencyBadgeCompact(tier: .fast, estimatedMs: 500, emphasized: true)
+      LatencyBadgeCompact(tier: .medium, estimatedMs: 1500, emphasized: true)
+      LatencyBadgeCompact(tier: .slow, estimatedMs: 3000, emphasized: true)
     }
   }
   .padding()

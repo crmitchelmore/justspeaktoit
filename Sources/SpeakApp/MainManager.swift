@@ -440,9 +440,10 @@ final class MainManager: ObservableObject {
         return FluidAudioParakeetModel.displayName
       }
       #if !APP_STORE
-      let source = LocalModelManager.shared.streamingModelSources.first { $0.id == modelID }
-        ?? LocalModelManager.recommendedStreamingModelSources.first { $0.id == modelID }
-      return source?.modelName ?? "Local Streaming"
+      // Use the catalogue's cleaned-up name rather than the raw source ID
+      // (e.g. "sherpa-onnx-streaming-zipformer-en-2023-06-26") so the HUD
+      // capture-health label stays readable.
+      return ModelCatalog.friendlyName(for: modelID)
       #else
       return "Local Streaming"
       #endif

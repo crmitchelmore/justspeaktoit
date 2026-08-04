@@ -43,41 +43,41 @@ final class MainManager: ObservableObject {
 
   private var cachedRetryData: RetryData?
 
-  private let appSettings: AppSettings
-  private let permissionsManager: PermissionsManager
-  private let audioInputDeviceManager: AudioInputDeviceManager
+  let appSettings: AppSettings
+  let permissionsManager: PermissionsManager
+  let audioInputDeviceManager: AudioInputDeviceManager
   private let hotKeyManager: HotKeyManager
-  private let audioFileManager: AudioFileManager
+  let audioFileManager: AudioFileManager
   private let transcriptionManager: TranscriptionManager
   private let postProcessingManager: PostProcessingManager
   private let historyManager: HistoryManager
-  private let hudManager: HUDManager
+  let hudManager: HUDManager
   private let personalLexicon: PersonalLexiconService
   private let openRouterClient: OpenRouterAPIClient
   private let livePolishManager: LivePolishManager
   private let liveTextInserter: LiveTextInserter
   private let textProcessor: TranscriptionTextProcessor
   private let autoCorrectionTracker: AutoCorrectionTracker
-  private let logger = Logger(subsystem: "com.github.speakapp", category: "MainManager")
+  let logger = Logger(subsystem: "com.github.speakapp", category: "MainManager")
   private let recordingSoundPlayer = RecordingSoundPlayer()
 
-  private var activeSession: ActiveSession?
+  var activeSession: ActiveSession?
   /// Guards against re-entrant calls to endSession (e.g. silence detection + user hotkey racing).
   private var isEndingSession = false
   private let recordingStopTimeout: TimeInterval = 8
-  private var cancellables: Set<AnyCancellable> = []
+  var cancellables: Set<AnyCancellable> = []
   private var hotKeyTokens: [HotKeyListenerToken] = []
   private var shortcutTokens: [ShortcutListenerToken] = []
   private var lastDoubleTapEventUptime: TimeInterval = 0
-  private var audioLevelTimer: Timer?
-  private var silenceStartTime: Date?
+  var audioLevelTimer: Timer?
+  var silenceStartTime: Date?
   // Cached silence settings for timer callback (avoids @Published access in hot path)
-  private var cachedSilenceEnabled: Bool = false
-  private var cachedSilenceThreshold: Float = 0
-  private var cachedSilenceDuration: TimeInterval = 0
+  var cachedSilenceEnabled: Bool = false
+  var cachedSilenceThreshold: Float = 0
+  var cachedSilenceDuration: TimeInterval = 0
   /// Tracks whether the HUD window is visible to skip unnecessary UI updates
-  private var isHUDOccluded: Bool = false
-  private var occlusionObserver: NSObjectProtocol?
+  var isHUDOccluded: Bool = false
+  var occlusionObserver: NSObjectProtocol?
   private var willTerminateObserver: NSObjectProtocol?
 
   private struct RetryData {
@@ -260,203 +260,6 @@ final class MainManager: ObservableObject {
   private func clearRetryData() {
     cachedRetryData = nil
     canRetryPostProcessing = false
-  }
-
-  // MARK: - Capture Health
-
-  private func setupCaptureHealthBindings() {
-    // Push updated snapshot whenever microphone permission changes.
-    permissionsManager.$statuses
-      .receive(on: RunLoop.main)
-      .sink { [weak self] _ in
-        self?.pushCaptureHealthIfActive()
-      }
-      .store(in: &cancellables)
-
-    // Push updated snapshot whenever the selected input device changes.
-    audioInputDeviceManager.$selectedDeviceUID
-      .receive(on: RunLoop.main)
-      .sink { [weak self] _ in
-        self?.pushCaptureHealthIfActive()
-      }
-      .store(in: &cancellables)
-
-    // Push updated snapshot whenever the device list changes (hardware plug/unplug).
-    audioInputDeviceManager.$devices
-      .receive(on: RunLoop.main)
-      .sink { [weak self] _ in
-        self?.pushCaptureHealthIfActive()
-      }
-      .store(in: &cancellables)
-
-    // Push updated snapshot whenever the live transcription model changes.
-    appSettings.$liveTranscriptionModel
-      .receive(on: RunLoop.main)
-      .sink { [weak self] _ in
-        self?.pushCaptureHealthIfActive()
-      }
-      .store(in: &cancellables)
-
-    // Push updated snapshot whenever the batch transcription model changes.
-    appSettings.$batchTranscriptionModel
-      .receive(on: RunLoop.main)
-      .sink { [weak self] _ in
-        self?.pushCaptureHealthIfActive()
-      }
-      .store(in: &cancellables)
-
-    // Push updated snapshot on every HUD phase transition so all `finishFailure` paths
-    // (not just `cleanupAfterFailure`) also receive fresh health data.
-    hudManager.$snapshot
-      .map(\.phase)
-      .removeDuplicates()
-      .receive(on: RunLoop.main)
-      .sink { [weak self] phase in
-        guard let self else { return }
-        switch phase {
-        case .recording, .failure:
-          self.hudManager.updateCaptureHealth(self.buildCaptureHealthSnapshot())
-        default:
-          break
-        }
-      }
-      .store(in: &cancellables)
-  }
-
-  /// Rebuild and forward a `CaptureHealthSnapshot` only when the HUD is visible in a
-  /// phase that renders the health row (recording or failure). This avoids unnecessary
-  /// snapshot builds during idle / transcribing / delivering phases.
-  private func pushCaptureHealthIfActive() {
-    let phase = hudManager.snapshot.phase
-    guard case .recording = phase else {
-      if case .failure = phase {
-        hudManager.updateCaptureHealth(buildCaptureHealthSnapshot())
-      }
-      return
-    }
-    hudManager.updateCaptureHealth(buildCaptureHealthSnapshot())
-  }
-
-  /// Builds a `CaptureHealthSnapshot` from the current manager state.
-  func buildCaptureHealthSnapshot() -> CaptureHealthSnapshot {
-    let micStatus = permissionsManager.status(for: .microphone)
-    let micPermission: CaptureHealthSnapshot.MicrophonePermission
-    switch micStatus {
-    case .granted:
-      micPermission = .granted
-    case .denied, .restricted:
-      micPermission = .denied
-    case .notDetermined:
-      micPermission = .notDetermined
-    }
-
-    let deviceName = audioInputDeviceManager.currentSelectionDisplayName
-
-    let activeModel: String
-    switch appSettings.transcriptionMode {
-    case .liveNative:
-      activeModel = appSettings.liveTranscriptionModel
-    case .batchRemote:
-      activeModel = appSettings.batchTranscriptionModel
-    case .localModel:
-      activeModel = appSettings.localTranscriptionMode == .streaming
-        ? appSettings.localStreamingModelSource
-        : appSettings.localTranscriptionModel
-    }
-    let providerLabel = captureHealthProviderLabel(for: activeModel)
-    let latencyTier = ModelCatalog.allOptions.first(where: { $0.id == activeModel })?.latencyTier ?? .medium
-
-    return CaptureHealthSnapshot(
-      microphonePermission: micPermission,
-      noInputDevicesAvailable: audioInputDeviceManager.devices.isEmpty,
-      inputDeviceName: deviceName,
-      providerLabel: providerLabel,
-      latencyTier: latencyTier
-    )
-  }
-
-  private func currentTranscriptionModelIdentifier() -> String {
-    switch appSettings.transcriptionMode {
-    case .liveNative:
-      return appSettings.liveTranscriptionModel
-    case .batchRemote:
-      return appSettings.batchTranscriptionModel
-    case .localModel:
-      return appSettings.localTranscriptionMode == .streaming
-        ? appSettings.localStreamingModelSource
-        : appSettings.localTranscriptionModel
-    }
-  }
-
-  private func makeHistoryDiagnosticContext() -> HistoryDiagnosticContext {
-    let health = buildCaptureHealthSnapshot()
-    let info = Bundle.main.infoDictionary
-    let appVersion = info?["CFBundleShortVersionString"] as? String ?? "unknown"
-    let appBuild = info?["CFBundleVersion"] as? String ?? "unknown"
-    let microphonePermission: String
-    switch health.microphonePermission {
-    case .granted:
-      microphonePermission = "granted"
-    case .denied:
-      microphonePermission = "denied"
-    case .notDetermined:
-      microphonePermission = "notDetermined"
-    }
-
-    return HistoryDiagnosticContext(
-      appVersion: appVersion,
-      appBuild: appBuild,
-      operatingSystem: ProcessInfo.processInfo.operatingSystemVersionString,
-      processIdentifier: Int(ProcessInfo.processInfo.processIdentifier),
-      microphonePermission: microphonePermission,
-      inputDeviceName: health.inputDeviceName,
-      providerLabel: health.providerLabel,
-      latencyTier: health.latencyTier.displayName,
-      transcriptionMode: appSettings.effectiveTranscriptionModeDisplayName,
-      transcriptionModel: currentTranscriptionModelIdentifier(),
-      postProcessingModel: appSettings.postProcessingModel,
-      speedMode: appSettings.speedMode.displayName
-    )
-  }
-
-  private func attachFailureDiagnostics(to session: ActiveSession) {
-    session.diagnosticContext = makeHistoryDiagnosticContext()
-    let description = "Diagnostic snapshot captured for issue report"
-    if !session.events.contains(where: { $0.kind == .error && $0.description == description }) {
-      session.events.append(HistoryEvent(kind: .error, description: description))
-    }
-  }
-
-  private func captureHealthProviderLabel(for modelID: String) -> String {
-    guard appSettings.transcriptionMode == .localModel else {
-      return ModelCatalog.friendlyName(for: modelID)
-    }
-    if appSettings.localTranscriptionMode == .streaming {
-      if let batchModelID = WhisperKitStreamingModel.batchModelID(from: modelID),
-        let model = LocalModelManager.shared.model(for: batchModelID) {
-        return shortLocalModelDisplayName(model.displayName) + " (Streaming)"
-      }
-      if FluidAudioParakeetModel.matches(modelID) {
-        return FluidAudioParakeetModel.displayName
-      }
-      #if !APP_STORE
-      let source = LocalModelManager.shared.streamingModelSources.first { $0.id == modelID }
-        ?? LocalModelManager.recommendedStreamingModelSources.first { $0.id == modelID }
-      return source?.modelName ?? "Local Streaming"
-      #else
-      return "Local Streaming"
-      #endif
-    }
-    guard let localModel = LocalModelManager.shared.model(for: modelID) else {
-      return ModelCatalog.friendlyName(for: modelID)
-    }
-    return shortLocalModelDisplayName(localModel.displayName)
-  }
-
-  private func shortLocalModelDisplayName(_ displayName: String) -> String {
-    let suffixRange = displayName.range(of: " from ", options: [.caseInsensitive, .backwards])
-    guard let suffixRange else { return displayName }
-    return String(displayName[..<suffixRange.lowerBound])
   }
 
   func userRequestedStopDueToError() {
@@ -670,7 +473,7 @@ final class MainManager: ObservableObject {
   }
 
   // swiftlint:disable cyclomatic_complexity function_body_length
-  private func endSession(trigger: SessionTriggerSource) async {
+  func endSession(trigger: SessionTriggerSource) async {
     guard !isEndingSession else { return }
     guard let session = activeSession else { return }
     isEndingSession = true
@@ -1612,41 +1415,6 @@ final class MainManager: ObservableObject {
     activeSession = nil
   }
 
-  private func startAudioLevelMonitoring() {
-    audioLevelTimer?.invalidate()
-    silenceStartTime = nil
-    
-    // Cache silence detection settings to avoid repeated @Published property access
-    // during high-frequency timer callbacks (30Hz)
-    cachedSilenceEnabled = appSettings.silenceDetectionEnabled
-    cachedSilenceThreshold = appSettings.silenceThreshold
-    cachedSilenceDuration = appSettings.silenceDuration
-    
-    // Track HUD visibility to skip UI updates when app is occluded
-    isHUDOccluded = !(NSApp.occlusionState.contains(.visible))
-    occlusionObserver = NotificationCenter.default.addObserver(
-      forName: NSApplication.didChangeOcclusionStateNotification,
-      object: nil,
-      queue: .main
-    ) { [weak self] _ in
-      self?.isHUDOccluded = !(NSApp.occlusionState.contains(.visible))
-    }
-
-    // Use target-selector Timer pattern to completely bypass Swift concurrency runtime.
-    // Block-based timers with [weak self] can crash in swift_getObjectType during
-    // executor verification if the object is deallocating.
-    audioLevelTimer = Timer.scheduledTimer(
-      timeInterval: 1.0 / 30.0,
-      target: self,
-      selector: #selector(audioLevelTimerFired),
-      userInfo: nil,
-      repeats: true
-    )
-    if let timer = audioLevelTimer {
-      RunLoop.main.add(timer, forMode: .common)
-    }
-  }
-
   private func shouldRunPostProcessing() -> Bool {
     let shouldSkipForLivePolish = appSettings.speedMode.usesLivePolish
       && appSettings.skipPostProcessingWithLivePolish
@@ -1658,69 +1426,6 @@ final class MainManager: ObservableObject {
     return appSettings.postProcessingEnabled || hasAssemblyAIPrompt
   }
   
-  @objc private func audioLevelTimerFired() {
-    // This runs on main thread via RunLoop.main. No Swift concurrency checks.
-    guard state == .recording else { return }
-    let level = audioFileManager.getCurrentAudioLevel()
-    // Only push UI updates when the HUD is likely visible
-    if !isHUDOccluded {
-      hudManager.updateAudioLevel(level)
-    }
-    checkSilenceDetection(
-      level: level,
-      enabled: cachedSilenceEnabled,
-      threshold: cachedSilenceThreshold,
-      duration: cachedSilenceDuration
-    )
-  }
-
-  private func checkSilenceDetection(level: Float, enabled: Bool, threshold: Float, duration: TimeInterval) {
-    guard enabled else {
-      silenceStartTime = nil
-      return
-    }
-    guard state == .recording, activeSession != nil else {
-      silenceStartTime = nil
-      return
-    }
-
-    let isSilent = level < threshold
-
-    if isSilent {
-      if silenceStartTime == nil {
-        silenceStartTime = Date()
-      } else if let startTime = silenceStartTime {
-        let silentDuration = Date().timeIntervalSince(startTime)
-        if silentDuration >= duration {
-          logger.info("Auto-stopping recording after \(silentDuration, privacy: .public)s of silence")
-          SentryManager.addBreadcrumb(
-            category: "recording",
-            message: "Silence auto-stop after \(String(format: "%.1f", silentDuration))s"
-          )
-          silenceStartTime = nil
-          Task {
-            await endSession(trigger: .silenceDetection)
-          }
-        }
-      }
-    } else {
-      // Reset silence timer when audio is detected
-      silenceStartTime = nil
-    }
-  }
-
-  private func stopAudioLevelMonitoring() {
-    audioLevelTimer?.invalidate()
-    audioLevelTimer = nil
-    silenceStartTime = nil
-    isHUDOccluded = false
-    if let observer = occlusionObserver {
-      NotificationCenter.default.removeObserver(observer)
-      occlusionObserver = nil
-    }
-    hudManager.updateAudioLevel(0)
-  }
-
   private func getFocusedElement() -> AXUIElement? {
     let systemWideElement = AXUIElementCreateSystemWide()
     var rawFocused: CFTypeRef?
@@ -1748,122 +1453,6 @@ extension MainManager {
       startedAt: startedAt,
       duration: resolvedDuration,
       fileSize: fileSize
-    )
-  }
-}
-
-private enum SessionTriggerSource {
-  case hold
-  case doubleTap
-  case singleTap
-  case uiButton
-  case silenceDetection
-
-  var historyGesture: HistoryTrigger.HotKeyGesture {
-    switch self {
-    case .hold:
-      return .hold
-    case .doubleTap:
-      return .doubleTap
-    case .singleTap:
-      return .singleTap
-    case .uiButton:
-      return .uiButton
-    case .silenceDetection:
-      return .uiButton  // Treat as UI-initiated for history purposes
-    }
-  }
-}
-
-private final class ActiveSession {
-  let id = UUID()
-  let gesture: HistoryTrigger.HotKeyGesture
-  let hotKeyDescription: String
-  var recordingSummary: RecordingSummary?
-  var transcriptionResult: TranscriptionResult?
-  var postProcessingOutcome: PostProcessingOutcome?
-  var events: [HistoryEvent] = []
-  var errors: [HistoryError] = []
-  var networkExchanges: [HistoryNetworkExchange] = []
-  var modelsUsed: Set<String> = []  // Deprecated: kept for backwards compatibility
-  var modelUsages: [ModelUsage] = []
-  var totalCost: Decimal = 0
-  var costBreakdown: ChatCostBreakdown?
-  var recordingStarted: Date
-  var recordingEnded: Date?
-  var transcriptionStarted: Date?
-  var transcriptionEnded: Date?
-  var postProcessingStarted: Date?
-  var postProcessingEnded: Date?
-  var outputDelivered: Date?
-  var outputMethod: HistoryTrigger.OutputMethod = .none
-  var destination: String?
-  var personalCorrections: PersonalLexiconHistorySummary?
-  var lexiconContext: PersonalLexiconContext = .empty
-  var diagnosticContext: HistoryDiagnosticContext?
-
-  init(gesture: HistoryTrigger.HotKeyGesture, hotKeyDescription: String) {
-    self.gesture = gesture
-    self.hotKeyDescription = hotKeyDescription
-    self.recordingStarted = Date()
-  }
-
-  func recordCostFragment(_ fragment: ChatCostBreakdown) {
-    totalCost += fragment.totalCost
-    costBreakdown = ChatCostBreakdown(
-      inputTokens: (costBreakdown?.inputTokens ?? 0) + fragment.inputTokens,
-      outputTokens: (costBreakdown?.outputTokens ?? 0) + fragment.outputTokens,
-      totalCost: totalCost,
-      currency: fragment.currency
-    )
-  }
-
-  func buildHistoryItem(finalText: String?, source: HistoryItemSource? = nil) -> HistoryItem {
-    let models = Array(modelsUsed)
-    let cost: HistoryCost?
-    if totalCost > 0, let breakdown = costBreakdown {
-      cost = HistoryCost(total: totalCost, currency: breakdown.currency, breakdown: breakdown)
-    } else {
-      cost = nil
-    }
-
-    let createdAt = recordingStarted
-    let updatedAt = Date()
-    let trigger = HistoryTrigger(
-      gesture: gesture,
-      hotKeyDescription: hotKeyDescription,
-      outputMethod: outputMethod,
-      destinationApplication: destination
-    )
-    let timestamps = PhaseTimestamps(
-      recordingStarted: recordingStarted,
-      recordingEnded: recordingEnded,
-      transcriptionStarted: transcriptionStarted,
-      transcriptionEnded: transcriptionEnded,
-      postProcessingStarted: postProcessingStarted,
-      postProcessingEnded: postProcessingEnded,
-      outputDelivered: outputDelivered
-    )
-    return HistoryItem(
-      id: id,
-      createdAt: createdAt,
-      updatedAt: updatedAt,
-      modelsUsed: models,
-      modelUsages: modelUsages,
-      rawTranscription: transcriptionResult?.text,
-      postProcessedTranscription: postProcessingOutcome?.processed,
-      recordingDuration: recordingSummary?.duration ?? 0,
-      cost: cost,
-      audioFileURL: recordingSummary?.url,
-      networkExchanges: networkExchanges,
-      events: events,
-      phaseTimestamps: timestamps,
-      trigger: trigger,
-      personalCorrections: personalCorrections,
-      errors: errors,
-      source: source,
-      postProcessingPrompt: postProcessingOutcome?.promptPayload,
-      diagnosticContext: diagnosticContext
     )
   }
 }

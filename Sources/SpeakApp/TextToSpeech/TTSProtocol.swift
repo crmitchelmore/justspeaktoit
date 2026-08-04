@@ -1,6 +1,9 @@
 import SpeakCore
 import Foundation
 
+// This file intentionally keeps the provider protocol and static voice catalogue together.
+// swiftlint:disable file_length
+
 enum TTSProvider: String, Codable, CaseIterable, Identifiable {
   case elevenlabs
   case openai
@@ -131,6 +134,8 @@ struct TTSVoice: Identifiable, Hashable, Codable {
     case american
     case british
     case australian
+    case filipino
+    case irish
     case professional
     case casual
     case deep
@@ -216,6 +221,8 @@ protocol TextToSpeechClient {
   func validateAPIKey(_ key: String) async -> APIKeyValidationResult
 }
 
+// The provider lists form one static catalogue and are easier to audit as a single type.
+// swiftlint:disable:next type_body_length
 struct VoiceCatalog {
   static let elevenlabsVoices: [TTSVoice] = [
     // Recommended voices
@@ -440,93 +447,16 @@ struct VoiceCatalog {
     ),
   ]
 
-  // Deepgram Aura voices - ultra-low latency (~250ms first byte)
-  static let deepgramVoices: [TTSVoice] = [
+  // Both platform pickers project from the canonical SpeakCore Deepgram catalogue.
+  static let deepgramVoices: [TTSVoice] = DeepgramTTSCatalog.voices.map { voice in
     TTSVoice(
-      id: "deepgram/aura-asteria-en",
-      name: "Asteria",
+      id: voice.providerVoiceID,
+      name: "\(voice.name) · \(voice.model.displayName)",
       provider: .deepgram,
-      traits: [.female, .american, .professional, .lowLatency],
+      traits: deepgramTraits(for: voice),
       previewURL: nil
-    ),
-    TTSVoice(
-      id: "deepgram/aura-luna-en",
-      name: "Luna",
-      provider: .deepgram,
-      traits: [.female, .american, .warm, .lowLatency],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "deepgram/aura-stella-en",
-      name: "Stella",
-      provider: .deepgram,
-      traits: [.female, .american, .professional, .lowLatency],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "deepgram/aura-athena-en",
-      name: "Athena",
-      provider: .deepgram,
-      traits: [.female, .british, .professional, .lowLatency],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "deepgram/aura-hera-en",
-      name: "Hera",
-      provider: .deepgram,
-      traits: [.female, .american, .clear, .lowLatency],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "deepgram/aura-orion-en",
-      name: "Orion",
-      provider: .deepgram,
-      traits: [.male, .american, .deep, .lowLatency],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "deepgram/aura-arcas-en",
-      name: "Arcas",
-      provider: .deepgram,
-      traits: [.male, .american, .professional, .lowLatency],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "deepgram/aura-perseus-en",
-      name: "Perseus",
-      provider: .deepgram,
-      traits: [.male, .american, .energetic, .lowLatency],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "deepgram/aura-angus-en",
-      name: "Angus",
-      provider: .deepgram,
-      traits: [.male, .british, .professional, .lowLatency],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "deepgram/aura-orpheus-en",
-      name: "Orpheus",
-      provider: .deepgram,
-      traits: [.male, .american, .warm, .lowLatency],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "deepgram/aura-helios-en",
-      name: "Helios",
-      provider: .deepgram,
-      traits: [.male, .british, .deep, .lowLatency],
-      previewURL: nil
-    ),
-    TTSVoice(
-      id: "deepgram/aura-zeus-en",
-      name: "Zeus",
-      provider: .deepgram,
-      traits: [.male, .american, .deep, .lowLatency],
-      previewURL: nil
-    ),
-  ]
+    )
+  }
 
   static let allVoices: [TTSVoice] =
     elevenlabsVoices + openaiVoices + azureVoices + deepgramVoices + systemVoices
@@ -560,5 +490,31 @@ struct VoiceCatalog {
       "elevenlabs/bella": "elevenlabs/EXAVITQu4vr4xnSDxMaL",
     ]
     return legacyMappings[id] ?? id
+  }
+
+  private static func deepgramTraits(for voice: DeepgramTTSVoice) -> [TTSVoice.VoiceTrait] {
+    let gender: TTSVoice.VoiceTrait = voice.gender == .female ? .female : .male
+    return [gender, deepgramAccent(voice.accent), deepgramStyle(voice.style), .lowLatency]
+  }
+
+  private static func deepgramAccent(_ accent: DeepgramTTSVoiceAccent) -> TTSVoice.VoiceTrait {
+    switch accent {
+    case .american: .american
+    case .australian: .australian
+    case .british: .british
+    case .filipino: .filipino
+    case .irish: .irish
+    }
+  }
+
+  private static func deepgramStyle(_ style: DeepgramTTSVoiceStyle) -> TTSVoice.VoiceTrait {
+    switch style {
+    case .casual: .casual
+    case .clear: .clear
+    case .deep: .deep
+    case .energetic: .energetic
+    case .professional: .professional
+    case .warm: .warm
+    }
   }
 }

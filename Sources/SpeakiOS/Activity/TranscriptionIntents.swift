@@ -2,6 +2,7 @@
 import AppIntents
 import SpeakCore
 import UIKit
+import os.log
 
 // App Intent declarations intentionally stay together so Shortcuts metadata and
 // foreground-continuation behavior remain auditable in one place.
@@ -144,8 +145,14 @@ public struct StartTranscriptionRecordingIntent: AudioRecordingIntent, Foregroun
 
 /// Intent to stop an active recording from a Live Activity button or a dedicated
 /// Shortcut paired with `StartTranscriptionIntent`.
+///
+/// `LiveActivityIntent` conformance is required so the Live Activity button runs
+/// this in the *app* process. Without it the widget extension executes the intent
+/// itself, where `TranscriptionRecordingService.shared` is a fresh instance with
+/// `isRunning == false`, so the stop button would report "No active recording"
+/// and the actual recording would keep running.
 @available(iOS 18, *)
-public struct StopTranscriptionRecordingIntent: AudioRecordingIntent {
+public struct StopTranscriptionRecordingIntent: AudioRecordingIntent, LiveActivityIntent {
     public static var title: LocalizedStringResource = "Stop Recording"
     public static var description = IntentDescription(
         "Stops the current transcription and routes the result to the destination you chose in Settings."
@@ -328,6 +335,13 @@ public final class SharedTranscriptionState {
 
     private init() {
         defaults = UserDefaults(suiteName: Self.appGroupIdentifier)
+        #if DEBUG
+        if defaults == nil {
+            Logger(subsystem: "com.justspeaktoit.ios", category: "SharedTranscriptionState")
+                .fault("App Group \(Self.appGroupIdentifier) unavailable; shared state is disabled.")
+            assertionFailure("App Group \(Self.appGroupIdentifier) unavailable; check entitlements.")
+        }
+        #endif
         #if DEBUG && targetEnvironment(simulator)
         if let value = ProcessInfo.processInfo.environment["JUSTSPEAKTOIT_SIMULATOR_TRANSCRIPT"]?
             .trimmingCharacters(in: .whitespacesAndNewlines),

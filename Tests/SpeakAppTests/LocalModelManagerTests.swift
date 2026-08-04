@@ -226,10 +226,11 @@ final class LocalModelManagerTests: XCTestCase {
             rawText: "hello world"
         )
 
-        XCTAssertTrue(systemPrompt.contains("<instructions>"))
-        XCTAssertTrue(systemPrompt.contains("Always output in bullet points."))
+        XCTAssertTrue(systemPrompt.hasPrefix(TranscriptCleanupPolicy.baseSystemPrompt))
+        XCTAssertFalse(systemPrompt.contains("Always output in bullet points."))
         XCTAssertFalse(userPrompt.contains("Always output in bullet points."))
-        XCTAssertTrue(userPrompt.contains("<raw_transcript>"))
+        XCTAssertFalse(userPrompt.contains("<raw_transcript>"))
+        XCTAssertTrue(userPrompt.contains("\"transcript\":\"hello world\""))
         XCTAssertTrue(userPrompt.contains("hello world"))
     }
 }

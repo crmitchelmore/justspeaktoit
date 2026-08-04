@@ -8,6 +8,7 @@ final class StatusBarController {
   private let appSettings: AppSettings
   private let historyManager: HistoryManager
   private let mainManager: MainManager
+  private let hotKeyManager: HotKeyManager
 
   private var cancellables: Set<AnyCancellable> = []
 
@@ -15,11 +16,13 @@ final class StatusBarController {
     appSettings: AppSettings,
     historyManager: HistoryManager,
     mainManager: MainManager,
+    hotKeyManager: HotKeyManager,
     openMainWindow: @escaping () -> Void
   ) {
     self.appSettings = appSettings
     self.historyManager = historyManager
     self.mainManager = mainManager
+    self.hotKeyManager = hotKeyManager
     self.openMainWindow = openMainWindow
 
     statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -82,12 +85,29 @@ final class StatusBarController {
         self.updateButton(for: self.mainManager.state)
       }
       .store(in: &cancellables)
+
+    hotKeyManager.$monitoringState
+      .removeDuplicates()
+      .receive(on: RunLoop.main)
+      .sink { [weak self] _ in
+        self?.refresh()
+      }
+      .store(in: &cancellables)
+
+    appSettings.$selectedHotKey
+      .removeDuplicates()
+      .receive(on: RunLoop.main)
+      .sink { [weak self] _ in
+        self?.refresh()
+      }
+      .store(in: &cancellables)
   }
 
   private func refresh() {
     statusItem.menu = buildMenu()
   }
 
+  // swiftlint:disable:next function_body_length
   private func buildMenu() -> NSMenu {
     let menu = NSMenu()
 
@@ -100,6 +120,13 @@ final class StatusBarController {
     modelItem.title = "Mode: \(appSettings.effectiveTranscriptionModeDisplayName)"
     modelItem.isEnabled = false
     menu.addItem(modelItem)
+
+    let hotKeyItem = NSMenuItem()
+    hotKeyItem.title =
+      "Hotkey: \(appSettings.selectedHotKey.displayString)"
+      + " · \(hotKeyManager.monitoringState.displayName)"
+    hotKeyItem.isEnabled = false
+    menu.addItem(hotKeyItem)
 
     let postProcess = NSMenuItem()
     postProcess.title =
@@ -146,6 +173,14 @@ final class StatusBarController {
     )
     toggleItem.target = self
     menu.addItem(toggleItem)
+
+    let reconnectItem = NSMenuItem(
+      title: "Reconnect Hotkey",
+      action: #selector(reconnectHotKey),
+      keyEquivalent: ""
+    )
+    reconnectItem.target = self
+    menu.addItem(reconnectItem)
 
     let openItem = NSMenuItem(
       title: "Open Speak…",
@@ -228,6 +263,10 @@ final class StatusBarController {
     if case .processing = mainManager.state { return }
     if case .delivering = mainManager.state { return }
     mainManager.toggleRecordingFromUI()
+  }
+
+  @objc private func reconnectHotKey() {
+    hotKeyManager.reconnectMonitoring()
   }
 
   @objc private func openApp() {

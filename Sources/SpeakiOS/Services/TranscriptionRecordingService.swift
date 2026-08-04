@@ -8,6 +8,7 @@ import SpeakCore
 /// Headless recording coordinator for Action Button / Shortcuts / Siri.
 /// Manages the full lifecycle: start recording → live transcription → stop → clipboard → Live Activity.
 @MainActor
+// swiftlint:disable:next type_body_length
 public final class TranscriptionRecordingService: ObservableObject {
     public static let shared = TranscriptionRecordingService()
 
@@ -184,6 +185,7 @@ public final class TranscriptionRecordingService: ObservableObject {
     ///   were configurable. Hardware-trigger callers (Action Button, Siri,
     ///   Shortcuts) pass `AppSettings.shared.hardwareTriggerDestination`.
     @discardableResult
+    // swiftlint:disable:next function_body_length
     public func stopRecording(
         destination: HardwareTriggerDestination? = nil,
         saveToHistory: Bool = true,

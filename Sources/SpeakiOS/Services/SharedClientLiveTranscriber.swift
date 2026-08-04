@@ -272,7 +272,10 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         } else {
             partialText = accumulatedText.isEmpty ? text : accumulatedText + " " + text
         }
-        onPartialResult?(text, isFinal)
+        // Contract: always deliver the full display transcript (accumulated
+        // finals plus any trailing partial), matching iOSLiveTranscriber and
+        // OpenAIRealtimeLiveTranscriber.
+        onPartialResult?(partialText, isFinal)
     }
 
     private func handleError(_ error: Error) {

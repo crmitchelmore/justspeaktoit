@@ -221,9 +221,19 @@ public final class ElevenLabsLiveTranscriber: ObservableObject {
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
 
-        // Stop ElevenLabs client
-        elevenLabsClient?.stop()
-        elevenLabsClient = nil
+        // Graceful drain: when interim words are still pending, wait briefly
+        // for the trailing final before closing so they aren't lost. When
+        // nothing is pending, close immediately.
+        if let client = elevenLabsClient {
+            elevenLabsClient = nil
+            if partialText != accumulatedText {
+                if let trailingFinal = await client.finishAndWait(), !trailingFinal.isEmpty {
+                    handleTranscript(text: trailingFinal, isFinal: true)
+                }
+            } else {
+                client.stop()
+            }
+        }
 
         // Stop persistent recording
         _ = audioRecorder.stopRecording()
@@ -315,7 +325,10 @@ public final class ElevenLabsLiveTranscriber: ObservableObject {
             }
         }
 
-        onPartialResult?(text, isFinal)
+        // Contract: always deliver the full display transcript (accumulated
+        // finals plus any trailing partial), matching iOSLiveTranscriber and
+        // OpenAIRealtimeLiveTranscriber.
+        onPartialResult?(partialText, isFinal)
     }
 
     private func handleError(_ error: Error) {

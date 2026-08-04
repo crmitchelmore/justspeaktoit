@@ -14,6 +14,12 @@ public final class TranscriptionRecordingService: ObservableObject {
     @Published public private(set) var isRunning = false
     @Published public private(set) var partialText = ""
     @Published public private(set) var wordCount = 0
+    /// Error that ended the most recent session mid-recording. Published so the
+    /// app can surface it on next foreground instead of silently losing audio.
+    @Published public private(set) var lastSessionError: Error?
+    /// Non-nil when the session silently fell back to on-device transcription
+    /// because the selected cloud model had no API key available.
+    @Published public private(set) var providerFallbackNotice: String?
 
     private let audioSessionManager = AudioSessionManager()
     private let activityManager = TranscriptionActivityManager.shared
@@ -23,6 +29,12 @@ public final class TranscriptionRecordingService: ObservableObject {
     private var startTime: Date?
     private var currentModel: String = ""
     private var sharesLiveTranscript = true
+    /// Guards against concurrent double-starts across the suspension points in
+    /// `startRecording` (key load, transcriber start).
+    private var isStarting = false
+    /// Last time the App Group shared state was written for a partial result.
+    private var lastSharedStateWriteAt: Date = .distantPast
+    private static let sharedStateWriteInterval: TimeInterval = 1.0
 
     static let polishingClipboardPlaceholder = "Polishing… please wait"
 
@@ -60,14 +72,26 @@ public final class TranscriptionRecordingService: ObservableObject {
         sharesLiveTranscript: Bool = true,
         requiresLiveActivity: Bool = true
     ) async throws {
-        guard !isRunning else { return }
+        guard !isRunning, !isStarting else { return }
+        isStarting = true
+        defer { isStarting = false }
 
         let settings = AppSettings.shared
+        // AppSettings.init publishes empty API keys and loads the real values
+        // from the keychain asynchronously. A cold launch from the Action
+        // Button could read those empty keys and silently fall back to Apple
+        // Speech, so wait for the initial load before resolving the model.
+        await settings.ensureKeysLoaded()
+        guard !isRunning else { return }
+
+        lastSessionError = nil
+        providerFallbackNotice = nil
         currentModel = settings.transcriptionMode == .batch
             ? settings.batchTranscriptionModel
             : settings.selectedModel
         partialText = ""
         wordCount = 0
+        lastSharedStateWriteAt = .distantPast
         startTime = Date()
         self.sharesLiveTranscript = sharesLiveTranscript
         sharedState.clear()
@@ -75,11 +99,24 @@ public final class TranscriptionRecordingService: ObservableObject {
         sharedState.recordingStartTime = startTime
 
         if settings.transcriptionMode == .streaming {
+            let requestedModel = currentModel
             let route = LiveTranscriptionRouting.route(for: currentModel)
             currentModel = LiveTranscriptionRouting.resolvedModelID(
                 for: currentModel,
                 apiKey: route.map { settings.liveAPIKey(for: $0) }
             )
+            if currentModel != requestedModel {
+                // Make the silent on-device fallback visible: publish it for
+                // the UI and log it so a "worse than usual" session is
+                // diagnosable.
+                providerFallbackNotice = "Using \(modelDisplayName) (no API key)"
+                SpeakLogger.transcription.warning(
+                    """
+                    No API key for \(requestedModel, privacy: .public); \
+                    falling back to \(self.currentModel, privacy: .public)
+                    """
+                )
+            }
         }
 
         // A Live Activity is required to record in the *background* via an
@@ -87,8 +124,11 @@ public final class TranscriptionRecordingService: ObservableObject {
         // asserts (EXC_BREAKPOINT). In the foreground a Live Activity is optional,
         // so only enforce this when the app isn't active.
         let appIsActive = UIApplication.shared.applicationState == .active
+        let activityProvider = providerFallbackNotice == nil
+            ? modelDisplayName
+            : "\(modelDisplayName) (no API key)"
         let activityStarted = (requiresLiveActivity || appIsActive)
-            ? activityManager.startActivity(provider: modelDisplayName)
+            ? activityManager.startActivity(provider: activityProvider)
             : false
         if requiresLiveActivity && !activityStarted && !appIsActive {
             startTime = nil
@@ -149,6 +189,21 @@ public final class TranscriptionRecordingService: ObservableObject {
         saveToHistory: Bool = true,
         primedActivityMessage: String = "Ready for the Action Button"
     ) async -> TranscriptionResult {
+        // Reentrancy guard: a rapid double-stop (e.g. double Action Button
+        // press) must not produce a second history entry or clobber the
+        // clipboard with stale text. Return an empty no-op result instead.
+        guard isRunning else {
+            return TranscriptionResult(
+                text: "",
+                segments: [],
+                confidence: nil,
+                duration: 0,
+                modelIdentifier: currentModel,
+                cost: nil,
+                rawPayload: nil,
+                debugInfo: nil
+            )
+        }
         isRunning = false
         let duration = elapsedSeconds
 
@@ -191,7 +246,11 @@ public final class TranscriptionRecordingService: ObservableObject {
         let resolvedDestination: HardwareTriggerDestination = destination ?? .clipboard
         await applyDestinationSideEffects(text: text, destination: resolvedDestination)
 
-        // Update shared state
+        // Update shared state. Live writes are throttled, so commit the
+        // complete transcript exactly once at stop.
+        if sharesLiveTranscript {
+            sharedState.updateTranscript(text)
+        }
         sharedState.clearRecordingState()
         sharesLiveTranscript = true
 
@@ -218,6 +277,11 @@ public final class TranscriptionRecordingService: ObservableObject {
         } else {
             assertion.end()
         }
+
+        // Clear per-session live state so a duplicate stop or a later fallback
+        // path can never resurface this session's text.
+        partialText = ""
+        wordCount = 0
 
         return result
     }
@@ -248,9 +312,18 @@ public final class TranscriptionRecordingService: ObservableObject {
 
     private func handlePartialResult(text: String) {
         partialText = text
-        wordCount = text.split(separator: " ").count
-        if sharesLiveTranscript {
-            sharedState.updateTranscript(text)
+
+        // App Group writes (plist + cfprefsd IPC) and word counting are O(n)
+        // per partial; throttle them to ~1/s, mirroring the Live Activity
+        // manager's own update throttle. The full transcript is committed
+        // once more at stop.
+        let now = Date()
+        if now.timeIntervalSince(lastSharedStateWriteAt) >= Self.sharedStateWriteInterval {
+            lastSharedStateWriteAt = now
+            wordCount = text.split(separator: " ").count
+            if sharesLiveTranscript {
+                sharedState.updateTranscript(text)
+            }
         }
 
         activityManager.updateActivity(
@@ -263,6 +336,19 @@ public final class TranscriptionRecordingService: ObservableObject {
 
     private func handleError(_ error: Error) {
         activityManager.reportError(error.localizedDescription)
+
+        // A mid-session failure previously only updated the Live Activity —
+        // the mic stayed hot while the user dictated into a dead session.
+        // Tear the session down, preserving the accumulated transcript, and
+        // publish the error so the app can surface it on next foreground.
+        guard isRunning else { return }
+        lastSessionError = error
+        Task { [weak self] in
+            guard let self, self.isRunning else { return }
+            await self.stopRecording(
+                primedActivityMessage: "Stopped: \(error.localizedDescription)"
+            )
+        }
     }
 
     private func postProcess(

@@ -248,7 +248,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     }
 
     private func setupInterruptionHandling() {
-        audioSessionManager.onInterruption = { [weak self] began in
+        audioSessionManager.addInterruptionObserver(owner: self) { [weak self] began in
             Task { @MainActor in
                 guard began, let self, self.isRunning else { return }
                 self.error = iOSTranscriptionError.interrupted

@@ -278,7 +278,7 @@ public final class ElevenLabsLiveTranscriber: ObservableObject {
     // MARK: - Private
 
     private func setupInterruptionHandling() {
-        audioSessionManager.onInterruption = { [weak self] began in
+        audioSessionManager.addInterruptionObserver(owner: self) { [weak self] began in
             Task { @MainActor in
                 if began {
                     self?.handleInterruption()

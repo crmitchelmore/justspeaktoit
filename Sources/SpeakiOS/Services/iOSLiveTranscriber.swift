@@ -138,7 +138,7 @@ public final class iOSLiveTranscriber: ObservableObject {
 
         activeModelID = AppleLocalModels.legacySpeechModelID
         let (recognizer, request) = try setupRecognition()
-        try startAudioEngine()
+        try startAudioEngine(request: request)
 
         // Start recognition
         recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
@@ -216,16 +216,27 @@ public final class iOSLiveTranscriber: ObservableObject {
         return (recognizer, request)
     }
 
-    private func startAudioEngine() throws {
-        let inputNode = audioEngine.inputNode
-        let recordingFormat = inputNode.outputFormat(forBus: 0)
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
-            self?.recognitionRequest?.append(buffer)
-            self?.audioRecorder.writeBuffer(buffer)
-        }
+    private func startAudioEngine(request: SFSpeechAudioBufferRecognitionRequest) throws {
+        let recordingFormat = installTap(appendingTo: request)
         audioEngine.prepare()
         try audioEngine.start()
         _ = try? audioRecorder.startRecording(format: recordingFormat)
+    }
+
+    /// Installs the input tap appending to `request`. The request is captured
+    /// as an immutable local so the audio-thread tap never reads the
+    /// main-actor `recognitionRequest` property, which is reassigned on
+    /// stop/cancel/restart.
+    @discardableResult
+    private func installTap(appendingTo request: SFSpeechAudioBufferRecognitionRequest) -> AVAudioFormat {
+        let inputNode = audioEngine.inputNode
+        let recordingFormat = inputNode.outputFormat(forBus: 0)
+        let recorder = audioRecorder
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { buffer, _ in
+            request.append(buffer)
+            recorder.writeBuffer(buffer)
+        }
+        return recordingFormat
     }
 
     private func resetState() {
@@ -378,7 +389,7 @@ public final class iOSLiveTranscriber: ObservableObject {
     // MARK: - Private
 
     private func setupInterruptionHandling() {
-        audioSessionManager.onInterruption = { [weak self] began in
+        audioSessionManager.addInterruptionObserver(owner: self) { [weak self] began in
             Task { @MainActor in
                 if began {
                     self?.handleInterruption()
@@ -491,6 +502,11 @@ public final class iOSLiveTranscriber: ObservableObject {
         recognitionRequest = newRequest
         latestResult = nil
         lastFormattedString = ""
+
+        // Reinstall the tap so its closure captures the new request; the old
+        // tap holds the previous (cancelled) request immutably.
+        audioEngine.inputNode.removeTap(onBus: 0)
+        installTap(appendingTo: newRequest)
 
         recognitionTask = recognizer.recognitionTask(with: newRequest) { [weak self] result, error in
             Task { @MainActor in

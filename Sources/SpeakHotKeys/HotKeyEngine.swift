@@ -74,15 +74,19 @@ public final class HotKeyEngine: ObservableObject {
       return
     }
     activeHotKey = hotKey
-    isMonitoring = true
+    let didStart: Bool
 
     switch hotKey {
     case .fnKey:
       log.info("Starting Fn key monitoring")
-      fnBackend.start()
+      didStart = fnBackend.start()
     case .custom(let keyCode, let modifiers):
       log.info("Starting Carbon monitoring: keyCode=\(keyCode), modifiers=\(modifiers.rawValue)")
-      carbonBackend.start(keyCode: keyCode, modifiers: modifiers)
+      didStart = carbonBackend.start(keyCode: keyCode, modifiers: modifiers)
+    }
+    isMonitoring = didStart
+    if !didStart {
+      log.error("Failed to start global hotkey backend for \(hotKey.displayString)")
     }
   }
 

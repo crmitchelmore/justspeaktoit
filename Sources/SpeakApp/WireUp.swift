@@ -215,6 +215,7 @@ final class AppEnvironment: ObservableObject {
     shortcuts.register(action: .stopTTS) { [weak self] in
       self?.tts.stop()
     }
+    shortcuts.register(action: .pasteLastHistoryItem) { [weak self] in self?.pasteLastHistoryItem() }
     registerNavigationShortcutHandlers()
     registerQuickVoiceShortcutHandlers()
     shortcuts.startMonitoring()
@@ -304,6 +305,29 @@ final class AppEnvironment: ObservableObject {
     }
 
     return selectedText
+  }
+}
+
+extension AppEnvironment {
+  /// Pastes the most recent history item's text into the frontmost app,
+  /// preferring the post-processed transcription over the raw one. Reuses the
+  /// same insertion path as transcription delivery (accessibility or paste,
+  /// per the user's configured output method).
+  func pasteLastHistoryItem() {
+    let text = history.items.first.flatMap { $0.postProcessedTranscription ?? $0.rawTranscription }
+    guard let text, PasteTextOutput.hasDeliverableText(text) else {
+      hud.finishFailure(
+        headline: "Nothing to paste",
+        message: "No history items with text yet.",
+        displayDuration: 2.5
+      )
+      return
+    }
+    let output = SmartTextOutput(permissionsManager: permissions, appSettings: settings)
+    let result = output.output(text: text)
+    if let error = result.error {
+      hud.finishFailure(headline: "Delivery failed", message: error.localizedDescription)
+    }
   }
 }
 

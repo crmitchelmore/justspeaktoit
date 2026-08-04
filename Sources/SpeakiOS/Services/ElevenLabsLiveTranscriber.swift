@@ -8,6 +8,7 @@ import os.log
 /// Provides live transcription via ElevenLabs' Scribe streaming API.
 /// Mirrors the DeepgramLiveTranscriber pattern exactly.
 @MainActor
+// swiftlint:disable:next type_body_length
 public final class ElevenLabsLiveTranscriber: ObservableObject {
     // MARK: - Published State
 

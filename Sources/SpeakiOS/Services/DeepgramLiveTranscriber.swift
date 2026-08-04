@@ -7,6 +7,7 @@ import os.log
 /// iOS Deepgram live transcriber that integrates with AudioSessionManager.
 /// Provides higher accuracy transcription via Deepgram's streaming API.
 @MainActor
+// swiftlint:disable:next type_body_length
 public final class DeepgramLiveTranscriber: ObservableObject {
     // MARK: - Published State
 

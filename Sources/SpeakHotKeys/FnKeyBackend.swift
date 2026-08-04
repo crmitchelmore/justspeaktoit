@@ -26,8 +26,9 @@ final class FnKeyBackend {
   private var eventTapRunLoopSource: CFRunLoopSource?
   private var fnIsPressed = false
 
-  func start() {
-    guard globalMonitor == nil else { return }
+  @discardableResult
+  func start() -> Bool {
+    guard globalMonitor == nil else { return true }
 
     globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.flagsChanged, .keyDown, .keyUp]) {
       [weak self] event in
@@ -39,7 +40,8 @@ final class FnKeyBackend {
       return event
     }
 
-    startEventTap()
+    let eventTapStarted = startEventTap()
+    return eventTapStarted || globalMonitor != nil
   }
 
   func stop() {
@@ -95,7 +97,7 @@ final class FnKeyBackend {
 
   // MARK: - CGEvent Tap (Primary)
 
-  private func startEventTap() {
+  private func startEventTap() -> Bool {
     stopEventTap()
     let mask = CGEventMask(1 << CGEventType.flagsChanged.rawValue)
     guard
@@ -113,16 +115,20 @@ final class FnKeyBackend {
       )
     else {
       log.error("Failed to start CGEvent tap; using NSEvent fallback")
-      return
+      return false
+    }
+
+    guard let source = CFMachPortCreateRunLoopSource(nil, tap, 0) else {
+      CGEvent.tapEnable(tap: tap, enable: false)
+      log.error("Failed to create the CGEvent tap run-loop source; using NSEvent fallback")
+      return false
     }
 
     eventTap = tap
-    let source = CFMachPortCreateRunLoopSource(nil, tap, 0)
     eventTapRunLoopSource = source
-    if let source {
-      CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
-    }
+    CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
     CGEvent.tapEnable(tap: tap, enable: true)
+    return true
   }
 
   private func stopEventTap() {

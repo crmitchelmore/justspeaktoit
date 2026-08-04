@@ -28,8 +28,8 @@ final class LiveTextInserter: ObservableObject {
   private let permissionsManager: PermissionsManager
   private let appSettings: AppSettings
 
-  /// Track the focused element to detect if user changed focus
-  private var initialFocusedApp: String?
+  /// Preserve the exact destination that owned focus when recording began.
+  private var target: TextOutputTarget?
 
   /// Character count we've successfully inserted (for incremental updates)
   private var confirmedCharCount: Int = 0
@@ -53,7 +53,7 @@ final class LiveTextInserter: ObservableObject {
   }
 
   /// Start a live insertion session
-  func begin() {
+  func begin(target: TextOutputTarget? = nil) {
     guard canUseAccessibility() else {
       lastError = TextOutputError.accessibilityPermissionMissing
       print("[LiveTextInserter] Cannot start: accessibility permission missing")
@@ -68,8 +68,8 @@ final class LiveTextInserter: ObservableObject {
     usingClipboardFallback = false
     isActive = true
     lastError = nil
-    initialFocusedApp = NSWorkspace.shared.frontmostApplication?.localizedName
-    let targetApp = initialFocusedApp ?? "unknown"
+    self.target = target ?? .capture()
+    let targetApp = self.target?.applicationName ?? "unknown"
     print(
       "[LiveTextInserter] Started live insertion session, target app: \(targetApp), " +
         "deferring AX readiness checks"
@@ -94,7 +94,7 @@ final class LiveTextInserter: ObservableObject {
     usingClipboardFallback = false
     isActive = false
     lastError = nil
-    initialFocusedApp = nil
+    target = nil
   }
 
   /// Update with new transcription text - handles incremental insertion
@@ -104,13 +104,6 @@ final class LiveTextInserter: ObservableObject {
     guard !usingClipboardFallback else { return }
     guard !shouldPauseIncrementalUpdates else { return }
     guard !newText.isEmpty else { return }
-
-    // Check if user switched apps - if so, pause but don't deactivate
-    let currentApp = NSWorkspace.shared.frontmostApplication?.localizedName
-    if let initial = initialFocusedApp, currentApp != initial {
-      // User switched apps, skip this update
-      return
-    }
 
     // Calculate what's new since last confirmed insertion
     let trimmedNew = newText.trimmingCharacters(in: .whitespaces)
@@ -313,6 +306,9 @@ final class LiveTextInserter: ObservableObject {
   }
 
   private func getFocusedTextElement() -> AXUIElement? {
+    if let focusedElement = target?.focusedElement {
+      return focusedElement
+    }
     let systemWideElement = AXUIElementCreateSystemWide()
     var rawFocused: CFTypeRef?
     let copyStatus = AXUIElementCopyAttributeValue(

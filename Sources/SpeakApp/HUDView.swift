@@ -1,4 +1,5 @@
 import Foundation
+import SpeakCore
 import SwiftUI
 
 // swiftlint:disable type_body_length
@@ -141,29 +142,30 @@ struct HUDOverlay: View {
     let confidence = manager.snapshot.liveTextConfidence
 
     HStack(spacing: 6) {
-      if shouldUseLegacyRendering {
+      ZStack(alignment: .top) {
+        // Invisible two-line template reserves a fixed height so the HUD
+        // doesn't reflow every time streamed text wraps from one line to two.
+        Text(verbatim: " \n ")
+          .font(.callout)
+          .hidden()
         Text(text)
           .font(isFinal ? .callout : .callout.italic())
           .fontWeight(isFinal ? .regular : .light)
           .foregroundStyle(isFinal ? .primary : .secondary)
+          .multilineTextAlignment(.center)
           .lineLimit(2)
           .truncationMode(.head)
-          .accessibilityLabel(isFinal ? "Transcript: \(text)" : "Partial transcript: \(text)")
-      } else {
-        Text(text)
-          .font(isFinal ? .callout : .callout.italic())
-          .fontWeight(isFinal ? .regular : .light)
-          .foregroundStyle(isFinal ? .primary : .secondary)
-          .lineLimit(2)
-          .truncationMode(.head)
-          .animation(.easeInOut(duration: 0.2), value: isFinal)
+          .animation(
+            shouldUseLegacyRendering ? nil : .easeInOut(duration: 0.2),
+            value: isFinal
+          )
           .accessibilityLabel(isFinal ? "Transcript: \(text)" : "Partial transcript: \(text)")
       }
 
       if let confidence, confidence > 0 {
         Text("\(Int(confidence * 100))%")
           .font(.caption2.monospacedDigit())
-          .foregroundStyle(.tertiary)
+          .foregroundStyle(.secondary)
           .padding(.horizontal, 4)
           .padding(.vertical, 2)
           .background(
@@ -173,7 +175,6 @@ struct HUDOverlay: View {
           .accessibilityLabel("Confidence: \(Int(confidence * 100)) percent")
       }
     }
-    .frame(maxWidth: 300)
   }
 
   @ViewBuilder
@@ -183,7 +184,6 @@ struct HUDOverlay: View {
       // Show the live transcript inline (no disclosure/expand UI).
       liveTranscriptionView(text: transcriptText)
         .padding(.top, 4)
-        .accessibilityHint("Press Command-R to retry the operation")
     }
   }
 
@@ -207,30 +207,41 @@ struct HUDOverlay: View {
     }()
     let micIcon = micWarning ? "mic.slash.fill" : "mic.fill"
     let deviceLabel = health.noInputDevicesAvailable ? "No microphone connected" : health.inputDeviceName
-    HStack(spacing: 8) {
-      Image(systemName: micIcon)
-        .font(.system(size: 10, weight: .semibold))
-        .foregroundStyle(micColor)
-        .accessibilityLabel("Microphone: \(microphonePermissionLabel)")
+    HStack(spacing: 6) {
+      HStack(spacing: 4) {
+        Image(systemName: micIcon)
+          .font(.system(size: 9, weight: .semibold))
+          .foregroundStyle(micColor)
+          .accessibilityLabel("Microphone: \(microphonePermissionLabel)")
 
-      Text(deviceLabel)
-        .font(.caption2)
-        .foregroundStyle(health.noInputDevicesAvailable ? micColor : .secondary)
-        .lineLimit(1)
-        .truncationMode(.tail)
-        .help(deviceLabel)
-        .accessibilityLabel("Input device: \(deviceLabel)")
+        Text(deviceLabel)
+          .font(.caption2)
+          .foregroundStyle(health.noInputDevicesAvailable ? micColor : .secondary)
+          .lineLimit(1)
+          .truncationMode(.tail)
+          .help(deviceLabel)
+          .accessibilityLabel("Input device: \(deviceLabel)")
+      }
+
+      Text(verbatim: "·")
+        .font(.caption2.weight(.semibold))
+        .foregroundStyle(.tertiary)
+        .accessibilityHidden(true)
 
       Text(health.providerLabel)
-        .font(.caption2)
-        .foregroundStyle(.tertiary)
+        .font(.caption2.weight(.medium))
+        .foregroundStyle(.secondary)
         .lineLimit(1)
-        .truncationMode(.tail)
+        .truncationMode(.middle)
+        .layoutPriority(1)
+        .help(health.providerLabel)
         .accessibilityLabel("Transcription provider: \(health.providerLabel)")
 
-      LatencyBadgeCompact(tier: health.latencyTier)
+      LatencyBadgeCompact(tier: health.latencyTier, emphasized: true)
+        .layoutPriority(2)
         .accessibilityLabel("Latency: \(health.latencyTier.displayName)")
     }
+    .frame(height: 18)
     .accessibilityElement(children: .combine)
   }
 
@@ -355,39 +366,6 @@ struct HUDOverlay: View {
 }
 // swiftlint:enable type_body_length
 
-struct HUDOverlay_Previews: PreviewProvider {
-  static var previews: some View {
-    Group {
-      // Compact preview
-      HUDOverlay(manager: previewManager)
-        .frame(width: 600, height: 400)
-        .previewDisplayName("Compact")
-
-      // Expanded with transcript
-      HUDOverlay(manager: expandedPreviewManager)
-        .frame(width: 600, height: 500)
-        .previewDisplayName("Expanded with Transcript")
-    }
-  }
-
-  private static var previewManager: HUDManager {
-    let manager = HUDManager(appSettings: AppSettings())
-    manager.beginRecording()
-    return manager
-  }
-
-  private static var expandedPreviewManager: HUDManager {
-    let manager = HUDManager(appSettings: AppSettings())
-    manager.beginRecording()
-    manager.updateLiveTranscription(
-      text: "Hello, this is a test of the live transcription feature. It should scroll and show the text properly. And this is still being spoken...",
-      isFinal: false,
-      confidence: 0.92
-    )
-    manager.isExpanded = true
-    return manager
-  }
-}
 // @Implement: This is the view that shows a floating indicator at the bottom middle of the screen. This view should float on top of all windows in the system but only show when recording is in progress. This should be a minimal view but must be engaging and informative to the users. It should have a cool animated graphic for each phase.
 // - Recording: Show in red and how long recording is for with a cool icon as well as animation
 // - Transcribing: If the operation is a batch request, this is the transcribing phase waiting for the raw transcription to return

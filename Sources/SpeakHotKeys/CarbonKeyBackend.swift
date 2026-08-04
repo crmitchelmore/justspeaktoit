@@ -23,13 +23,18 @@ final class CarbonKeyBackend {
   private let hotKeySignature: UInt32 = 0x5348_4B00  // "SHK\0"
   private let hotKeyID: UInt32 = 1
 
-  func start(keyCode: UInt16, modifiers: HotKey.ModifierSet) {
+  @discardableResult
+  func start(keyCode: UInt16, modifiers: HotKey.ModifierSet) -> Bool {
     stop()
     currentKeyCode = keyCode
     currentModifiers = modifiers
 
-    installEventHandler()
-    registerHotKey(keyCode: keyCode, modifiers: modifiers)
+    guard installEventHandler() else { return false }
+    let didRegister = registerHotKey(keyCode: keyCode, modifiers: modifiers)
+    if !didRegister {
+      removeEventHandler()
+    }
+    return didRegister
   }
 
   func stop() {
@@ -48,8 +53,8 @@ final class CarbonKeyBackend {
 
   // MARK: - Carbon Event Handler
 
-  private func installEventHandler() {
-    guard eventHandler == nil else { return }
+  private func installEventHandler() -> Bool {
+    guard eventHandler == nil else { return true }
 
     var eventTypes = [
       EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed)),
@@ -73,7 +78,9 @@ final class CarbonKeyBackend {
 
     if status != noErr {
       log.error("Failed to install Carbon event handler: \(status)")
+      return false
     }
+    return true
   }
 
   private func removeEventHandler() {
@@ -83,7 +90,7 @@ final class CarbonKeyBackend {
     }
   }
 
-  private func registerHotKey(keyCode: UInt16, modifiers: HotKey.ModifierSet) {
+  private func registerHotKey(keyCode: UInt16, modifiers: HotKey.ModifierSet) -> Bool {
     let hotKeyIDSpec = EventHotKeyID(signature: hotKeySignature, id: hotKeyID)
     let status = RegisterEventHotKey(
       UInt32(keyCode),
@@ -96,8 +103,10 @@ final class CarbonKeyBackend {
 
     if status != noErr {
       log.error("Failed to register Carbon hotkey (keyCode=\(keyCode)): \(status)")
+      return false
     } else {
       log.info("Registered Carbon hotkey: keyCode=\(keyCode), modifiers=\(modifiers.rawValue)")
+      return true
     }
   }
 

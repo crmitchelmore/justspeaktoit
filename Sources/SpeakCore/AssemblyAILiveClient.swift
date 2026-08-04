@@ -176,7 +176,7 @@ public final class AssemblyAILiveClient: StreamingTranscriptionClient, @unchecke
     private func send(_ audioData: Data, on task: URLSessionWebSocketTask) {
         task.send(.data(audioData)) { [weak self] error in
             guard let self, let error else { return }
-            if self.isStoppingState() || self.shouldIgnoreSocketError(error) { return }
+            if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
             self.currentOnError()?(error)
         }
     }
@@ -202,7 +202,7 @@ public final class AssemblyAILiveClient: StreamingTranscriptionClient, @unchecke
             case .failure(let error):
                 if self.isStoppingState() { return }
                 // Spurious ENOTCONN around the handshake: re-arm instead of failing.
-                if self.shouldIgnoreSocketError(error) {
+                if WebSocketErrorFilter.shouldIgnore(error) {
                     DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.01) { [weak self] in
                         self?.receiveMessages()
                     }
@@ -270,15 +270,6 @@ public final class AssemblyAILiveClient: StreamingTranscriptionClient, @unchecke
         // This client emits a cumulative display string rather than per-turn
         // deltas, so the generic iOS wrapper must replace its text in both cases.
         currentOnTranscript()?(update.displayText, false)
-    }
-
-    private func shouldIgnoreSocketError(_ error: Error) -> Bool {
-        let nsError = error as NSError
-        if nsError.domain == NSPOSIXErrorDomain, nsError.code == 57 { return true }
-        if nsError.localizedDescription.localizedCaseInsensitiveContains("socket is not connected") {
-            return true
-        }
-        return false
     }
 
     private func withStateLock<T>(_ block: () -> T) -> T {

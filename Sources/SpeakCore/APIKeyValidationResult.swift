@@ -42,6 +42,36 @@ public struct APIKeyValidationDebugSnapshot: Sendable, Equatable {
     }
 }
 
+extension APIKeyValidationDebugSnapshot {
+    /// Captures the request/response pair of an API-key validation probe.
+    ///
+    /// Every provider used to carry its own verbatim copy of this mapping; they now
+    /// share this one. Sensitive request and response headers are redacted by the
+    /// initialiser this calls.
+    public static func capture(
+        request: URLRequest,
+        response: HTTPURLResponse? = nil,
+        data: Data? = nil,
+        error: Error? = nil
+    ) -> APIKeyValidationDebugSnapshot {
+        APIKeyValidationDebugSnapshot(
+            url: request.url?.absoluteString ?? "",
+            method: request.httpMethod ?? "GET",
+            requestHeaders: request.allHTTPHeaderFields ?? [:],
+            requestBody: request.httpBody.flatMap { String(data: $0, encoding: .utf8) },
+            statusCode: response?.statusCode,
+            responseHeaders: response.map { headers in
+                headers.allHeaderFields.reduce(into: [String: String]()) { partialResult, entry in
+                    guard let key = entry.key as? String else { return }
+                    partialResult[key] = String(describing: entry.value)
+                }
+            } ?? [:],
+            responseBody: data.flatMap { String(data: $0, encoding: .utf8) },
+            errorDescription: error?.localizedDescription
+        )
+    }
+}
+
 public struct APIKeyValidationResult: Sendable, Equatable {
     public enum Outcome: Sendable, Equatable {
         case success(message: String)
@@ -66,5 +96,78 @@ public struct APIKeyValidationResult: Sendable, Equatable {
 
     public func updatingOutcome(_ outcome: Outcome) -> Self {
         APIKeyValidationResult(outcome: outcome, debug: debug)
+    }
+}
+
+/// Validates an API key by issuing an authenticated `GET` probe against a cheap
+/// endpoint: any 2xx response means the key works.
+///
+/// Most providers validate exactly this way and only differ in the probe URL, the
+/// header carrying the credential, and the service name used in the message, so
+/// they share this type instead of each re-implementing
+/// trim → probe → snapshot → classify.
+public struct GETProbeAPIKeyValidator {
+    private let url: URL
+    private let headers: (String) -> [String: String]
+    private let serviceName: String
+    private let session: URLSession
+    private let rejectionStatusCodes: Set<Int>
+
+    /// - Parameters:
+    ///   - url: Probe endpoint, including any query items.
+    ///   - headers: Builds the probe's headers from the trimmed key.
+    ///   - serviceName: Name used in the success and rejection messages.
+    ///   - session: Session used for the probe.
+    ///   - rejectionStatusCodes: Status codes reported as an explicit rejection
+    ///     ("<service> rejected the key (HTTP n)") rather than the generic HTTP failure.
+    public init(
+        url: URL,
+        headers: @escaping (String) -> [String: String],
+        serviceName: String,
+        session: URLSession = .shared,
+        rejectionStatusCodes: Set<Int> = []
+    ) {
+        self.url = url
+        self.headers = headers
+        self.serviceName = serviceName
+        self.session = session
+        self.rejectionStatusCodes = rejectionStatusCodes
+    }
+
+    public func validate(_ key: String) async -> APIKeyValidationResult {
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return .failure(message: "API key is empty")
+        }
+
+        var request = URLRequest(url: self.url)
+        request.httpMethod = "GET"
+        for (field, value) in self.headers(trimmed) {
+            request.setValue(value, forHTTPHeaderField: field)
+        }
+
+        do {
+            let (data, response) = try await self.session.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                return .failure(message: "Received a non-HTTP response", debug: .capture(request: request))
+            }
+
+            let debug = APIKeyValidationDebugSnapshot.capture(request: request, response: http, data: data)
+            if (200..<300).contains(http.statusCode) {
+                return .success(message: "\(self.serviceName) API key validated", debug: debug)
+            }
+            if self.rejectionStatusCodes.contains(http.statusCode) {
+                return .failure(
+                    message: "\(self.serviceName) rejected the key (HTTP \(http.statusCode))",
+                    debug: debug
+                )
+            }
+            return .failure(message: "HTTP \(http.statusCode) while validating key", debug: debug)
+        } catch {
+            return .failure(
+                message: "Validation failed: \(error.localizedDescription)",
+                debug: .capture(request: request, error: error)
+            )
+        }
     }
 }

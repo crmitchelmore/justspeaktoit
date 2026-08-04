@@ -229,7 +229,7 @@ struct SonioxTranscriptionProvider: TranscriptionProvider {
         let payload = SonioxCreateTranscriptionPayload(
             model: self.extractModelName(from: "soniox/stt-async-v5"),
             fileID: fileID,
-            languageHints: language.map { [self.extractLanguageCode(from: $0)] },
+            languageHints: language.map { [$0.localeLanguageCode] },
             enableSpeakerDiarization: true,
             enableLanguageIdentification: true
         )
@@ -521,11 +521,6 @@ struct SonioxTranscriptionProvider: TranscriptionProvider {
         return mimeTypes[url.pathExtension.lowercased()] ?? "application/octet-stream"
     }
 
-    private func extractLanguageCode(from locale: String) -> String {
-        let components = locale.split(whereSeparator: { $0 == "_" || $0 == "-" })
-        return components.first.map(String.init)?.lowercased() ?? locale.lowercased()
-    }
-
     private func extractModelName(from model: String) -> String {
         model.split(separator: "/").last.map(String.init) ?? model
     }
@@ -656,7 +651,7 @@ final class SonioxLiveTranscriber: @unchecked Sendable {
             defer { sendGroup.leave() }
             guard let self else { return }
             if let error {
-                if self.isStoppingState() || self.shouldIgnoreSocketError(error) { return }
+                if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
                 self.logger.error("Failed to send audio: \(error.localizedDescription)")
                 self.currentOnError()?(error)
             }
@@ -771,7 +766,7 @@ final class SonioxLiveTranscriber: @unchecked Sendable {
                 self.handleMessage(message)
                 self.receiveMessages()
             case .failure(let error):
-                if self.isStoppingState() || self.shouldIgnoreSocketError(error) { return }
+                if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
                 self.logger.error("Soniox receive error: \(error.localizedDescription)")
                 self.currentOnError()?(self.mapConnectionError(error))
             }
@@ -870,15 +865,6 @@ final class SonioxLiveTranscriber: @unchecked Sendable {
             return SonioxLiveError.invalidAPIKey
         }
         return error
-    }
-
-    private func shouldIgnoreSocketError(_ error: Error) -> Bool {
-        let nsError = error as NSError
-        if nsError.domain == NSPOSIXErrorDomain, nsError.code == 57 { return true }
-        if nsError.localizedDescription.localizedCaseInsensitiveContains("socket is not connected") {
-            return true
-        }
-        return false
     }
 
     private func withStateLock<T>(_ block: () -> T) -> T {

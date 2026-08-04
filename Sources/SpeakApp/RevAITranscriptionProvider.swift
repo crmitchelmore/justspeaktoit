@@ -39,36 +39,12 @@ struct RevAITranscriptionProvider: TranscriptionProvider {
   }
 
   func validateAPIKey(_ key: String) async -> APIKeyValidationResult {
-    let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else {
-      return .failure(message: "API key is empty")
-    }
-
-    let url = baseURL.appendingPathComponent("jobs")
-    var request = URLRequest(url: url)
-    request.httpMethod = "GET"
-    request.setValue("Bearer \(trimmed)", forHTTPHeaderField: "Authorization")
-
-    do {
-      let (data, response) = try await session.data(for: request)
-      guard let http = response as? HTTPURLResponse else {
-        return .failure(message: "Received a non-HTTP response", debug: debugSnapshot(request: request))
-      }
-
-      let debug = debugSnapshot(request: request, response: http, data: data)
-
-      if (200..<300).contains(http.statusCode) {
-        return .success(message: "Rev.ai API key validated", debug: debug)
-      }
-
-      let message = "HTTP \(http.statusCode) while validating key"
-      return .failure(message: message, debug: debug)
-    } catch {
-      return .failure(
-        message: "Validation failed: \(error.localizedDescription)",
-        debug: debugSnapshot(request: request, error: error)
-      )
-    }
+    await GETProbeAPIKeyValidator(
+      url: baseURL.appendingPathComponent("jobs"),
+      headers: { ["Authorization": "Bearer \($0)"] },
+      serviceName: "Rev.ai",
+      session: session
+    ).validate(key)
   }
 
   func requiresAPIKey(for model: String) -> Bool {
@@ -104,8 +80,7 @@ struct RevAITranscriptionProvider: TranscriptionProvider {
     if let language {
       // Rev.ai accepts language codes like "en", but also accepts locale-specific codes
       // Normalize to just language code for consistency
-      let languageCode = extractLanguageCode(from: language)
-      metadata["language"] = languageCode
+      metadata["language"] = language.localeLanguageCode
     }
     metadata["skip_diarization"] = false
     metadata["skip_punctuation"] = false
@@ -247,35 +222,6 @@ struct RevAITranscriptionProvider: TranscriptionProvider {
     )
   }
 
-  private func extractLanguageCode(from locale: String) -> String {
-    // Extract just the language code from locale identifiers
-    // e.g., "en_GB" -> "en", "en-US" -> "en", "en" -> "en"
-    let components = locale.split(whereSeparator: { $0 == "_" || $0 == "-" })
-    return components.first.map(String.init)?.lowercased() ?? locale.lowercased()
-  }
-
-  private func debugSnapshot(
-    request: URLRequest,
-    response: HTTPURLResponse? = nil,
-    data: Data? = nil,
-    error: Error? = nil
-  ) -> APIKeyValidationDebugSnapshot {
-    APIKeyValidationDebugSnapshot(
-      url: request.url?.absoluteString ?? "",
-      method: request.httpMethod ?? "GET",
-      requestHeaders: request.allHTTPHeaderFields ?? [:],
-      requestBody: request.httpBody.flatMap { String(data: $0, encoding: .utf8) },
-      statusCode: response?.statusCode,
-      responseHeaders: response.map { headers in
-        headers.allHeaderFields.reduce(into: [String: String]()) { partialResult, entry in
-          guard let key = entry.key as? String else { return }
-          partialResult[key] = String(describing: entry.value)
-        }
-      } ?? [:],
-      responseBody: data.flatMap { String(data: $0, encoding: .utf8) },
-      errorDescription: error?.localizedDescription
-    )
-  }
 }
 
 // MARK: - Response Models

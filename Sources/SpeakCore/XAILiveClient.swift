@@ -141,7 +141,7 @@ private extension XAILiveClient {
                     self.receiveMessages()
                 }
             case .failure(let error):
-                if self.isStoppingState() || self.shouldIgnoreSocketError(error) { return }
+                if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
                 self.currentOnError()?(self.mapConnectionError(error))
                 self.resumeFinishIfNeeded(with: self.currentTranscript())
             }
@@ -216,7 +216,7 @@ private extension XAILiveClient {
         task.send(message) { [weak self] error in
             defer { group.leave() }
             guard let self, let error else { return }
-            if self.isStoppingState() || self.shouldIgnoreSocketError(error) { return }
+            if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
             self.currentOnError()?(self.mapConnectionError(error))
         }
     }
@@ -322,12 +322,6 @@ private extension XAILiveClient {
             return StreamingClientError.invalidAPIKey(provider: "xAI")
         }
         return error
-    }
-
-    func shouldIgnoreSocketError(_ error: Error) -> Bool {
-        let nsError = error as NSError
-        if nsError.domain == NSPOSIXErrorDomain, nsError.code == 57 { return true }
-        return nsError.localizedDescription.localizedCaseInsensitiveContains("socket is not connected")
     }
 
     func withStateLock<T>(_ block: () -> T) -> T {

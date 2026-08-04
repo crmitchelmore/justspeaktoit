@@ -75,7 +75,7 @@ public final class ModulateLiveClient: StreamingTranscriptionClient, @unchecked 
         payload.append(audioData)
         task.send(.data(payload)) { [weak self] error in
             guard let self, let error else { return }
-            if self.isStoppingState() || self.shouldIgnoreSocketError(error) { return }
+            if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
             self.currentOnError()?(error)
         }
     }
@@ -106,7 +106,7 @@ public final class ModulateLiveClient: StreamingTranscriptionClient, @unchecked 
                 self.handleMessage(message)
                 if self.currentWebSocketTask() != nil { self.receiveMessages() }
             case .failure(let error):
-                if self.isStoppingState() || self.shouldIgnoreSocketError(error) { return }
+                if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
                 self.currentOnError()?(error)
             }
         }
@@ -166,15 +166,6 @@ public final class ModulateLiveClient: StreamingTranscriptionClient, @unchecked 
         append(UInt32(16)); append(UInt16(1)); append(channels); append(UInt32(sampleRate))
         append(byteRate); append(blockAlign); append(bitsPerSample); append("data"); append(UInt32.max)
         return data
-    }
-
-    private func shouldIgnoreSocketError(_ error: Error) -> Bool {
-        let nsError = error as NSError
-        if nsError.domain == NSPOSIXErrorDomain, nsError.code == 57 { return true }
-        if nsError.localizedDescription.localizedCaseInsensitiveContains("socket is not connected") {
-            return true
-        }
-        return false
     }
 
     private func withStateLock<T>(_ block: () -> T) -> T {

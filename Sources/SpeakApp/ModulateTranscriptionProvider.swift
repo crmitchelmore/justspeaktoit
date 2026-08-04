@@ -161,7 +161,7 @@ final class ModulateLiveTranscriber: @unchecked Sendable {
       self.bufferPool.returnBuffer(&returnBuffer)
 
       if let error {
-        if self.isStoppingState() || self.shouldIgnoreSocketError(error) { return }
+        if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
         self.logger.error("Failed to send Modulate audio: \(error.localizedDescription)")
         self.currentOnError()?(error)
       }
@@ -183,7 +183,7 @@ final class ModulateLiveTranscriber: @unchecked Sendable {
     task.send(.string("")) { [weak self] error in
       defer { sendGroup.leave() }
       guard let self, let error else { return }
-      if self.shouldIgnoreSocketError(error) { return }
+      if WebSocketErrorFilter.shouldIgnore(error) { return }
       self.logger.error("Failed to send Modulate end-of-stream: \(error.localizedDescription)")
       self.currentOnError()?(error)
     }
@@ -222,7 +222,7 @@ final class ModulateLiveTranscriber: @unchecked Sendable {
           self.receiveMessages()
         }
       case .failure(let error):
-        if self.isStoppingState() || self.shouldIgnoreSocketError(error) { return }
+        if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
         self.logger.error("Modulate WebSocket receive error: \(error.localizedDescription)")
         self.currentOnError()?(error)
       }
@@ -274,15 +274,6 @@ final class ModulateLiveTranscriber: @unchecked Sendable {
     var components = URLComponents(string: "wss://modulate-developer-apis.com/api/velma-2-stt-streaming")!
     components.queryItems = [URLQueryItem(name: "api_key", value: apiKey)] + featureConfiguration.queryItems
     return components.url!
-  }
-
-  private func shouldIgnoreSocketError(_ error: Error) -> Bool {
-    let nsError = error as NSError
-    if nsError.domain == NSPOSIXErrorDomain, nsError.code == 57 { return true }
-    if nsError.localizedDescription.localizedCaseInsensitiveContains("socket is not connected") {
-      return true
-    }
-    return false
   }
 
   private func withStateLock<T>(_ block: () -> T) -> T {
@@ -445,10 +436,10 @@ struct ModulateTranscriptionProvider: TranscriptionProvider {
     do {
       let (data, response) = try await session.data(for: request)
       guard let http = response as? HTTPURLResponse else {
-        return .failure(message: "Received a non-HTTP response", debug: debugSnapshot(request: request))
+        return .failure(message: "Received a non-HTTP response", debug: .capture(request: request))
       }
 
-      let debug = debugSnapshot(request: request, response: http, data: data)
+      let debug = APIKeyValidationDebugSnapshot.capture(request: request, response: http, data: data)
       let detail = parseValidationDetail(from: data)
 
       switch http.statusCode {
@@ -483,7 +474,7 @@ struct ModulateTranscriptionProvider: TranscriptionProvider {
     } catch {
       return .failure(
         message: "Validation failed: \(error.localizedDescription)",
-        debug: debugSnapshot(request: request, error: error)
+        debug: .capture(request: request, error: error)
       )
     }
   }
@@ -652,29 +643,6 @@ struct ModulateTranscriptionProvider: TranscriptionProvider {
     request.httpBody = body
 
     return request
-  }
-
-  private func debugSnapshot(
-    request: URLRequest,
-    response: HTTPURLResponse? = nil,
-    data: Data? = nil,
-    error: Error? = nil
-  ) -> APIKeyValidationDebugSnapshot {
-    APIKeyValidationDebugSnapshot(
-      url: request.url?.absoluteString ?? "",
-      method: request.httpMethod ?? "GET",
-      requestHeaders: request.allHTTPHeaderFields ?? [:],
-      requestBody: request.httpBody.flatMap { String(data: $0, encoding: .utf8) },
-      statusCode: response?.statusCode,
-      responseHeaders: response.map { headers in
-        headers.allHeaderFields.reduce(into: [String: String]()) { partialResult, entry in
-          guard let key = entry.key as? String else { return }
-          partialResult[key] = String(describing: entry.value)
-        }
-      } ?? [:],
-      responseBody: data.flatMap { String(data: $0, encoding: .utf8) },
-      errorDescription: error?.localizedDescription
-    )
   }
 
   private func currentDefaults() -> UserDefaults {

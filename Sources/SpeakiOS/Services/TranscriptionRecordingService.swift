@@ -8,7 +8,7 @@ import SpeakCore
 /// Headless recording coordinator for Action Button / Shortcuts / Siri.
 /// Manages the full lifecycle: start recording → live transcription → stop → clipboard → Live Activity.
 @MainActor
-public final class TranscriptionRecordingService: ObservableObject { // swiftlint:disable:this type_body_length
+public final class TranscriptionRecordingService: ObservableObject {
     public static let shared = TranscriptionRecordingService()
 
     @Published public private(set) var isRunning = false
@@ -19,12 +19,7 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
     private let activityManager = TranscriptionActivityManager.shared
     private let sharedState = SharedTranscriptionState.shared
 
-    private var appleTranscriber: iOSLiveTranscriber?
-    private var deepgramTranscriber: DeepgramLiveTranscriber?
-    private var elevenLabsTranscriber: ElevenLabsLiveTranscriber?
-    private var openAITranscriber: OpenAIRealtimeLiveTranscriber?
-    private var sharedTranscriber: SharedClientLiveTranscriber?
-    private var batchTranscriber: IOSBatchTranscriber?
+    private var transcriptionSession: IOSTranscriptionSession?
     private var startTime: Date?
     private var currentModel: String = ""
     private var sharesLiveTranscript = true
@@ -52,7 +47,8 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
     private var modelDisplayName: String {
         ModelCatalog.transcriptionDisplayName(
             for: currentModel,
-            isBatch: batchTranscriber != nil
+            isBatch: transcriptionSession?.isBatch
+                ?? (AppSettings.shared.transcriptionMode == .batch)
         )
     }
 
@@ -109,138 +105,30 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
         #endif
 
         do {
-            if settings.transcriptionMode == .batch {
-                let transcriber = IOSBatchTranscriber(
-                    audioSessionManager: audioSessionManager,
-                    model: currentModel,
-                    apiKey: settings.batchAPIKey,
-                    retainRecording: retainBatchRecording
-                )
-                batchTranscriber = transcriber
-                appleTranscriber = nil
-                deepgramTranscriber = nil
-                elevenLabsTranscriber = nil
-                openAITranscriber = nil
-                sharedTranscriber = nil
-                try await transcriber.start()
-            } else if currentModel.hasPrefix("deepgram") {
-                let transcriber = DeepgramLiveTranscriber(audioSessionManager: audioSessionManager)
-                transcriber.configure(apiKey: settings.deepgramAPIKey)
-                transcriber.model = LiveTranscriptionRouting.route(for: currentModel)?.apiModelName
-                    ?? currentModel.replacingOccurrences(of: "deepgram/", with: "")
-
-                transcriber.onPartialResult = { [weak self] text, _ in
-                    Task { @MainActor in
-                        self?.handlePartialResult(text: text)
-                    }
-                }
-                transcriber.onError = { [weak self] error in
-                    Task { @MainActor in
-                        self?.handleError(error)
-                    }
-                }
-
-                deepgramTranscriber = transcriber
-                appleTranscriber = nil
-                elevenLabsTranscriber = nil
-                try await transcriber.start()
-            } else if currentModel.hasPrefix("elevenlabs") {
-                let transcriber = ElevenLabsLiveTranscriber(audioSessionManager: audioSessionManager)
-                transcriber.configure(apiKey: settings.elevenLabsAPIKey)
-                transcriber.modelID = LiveTranscriptionRouting.route(for: currentModel)?.apiModelName
-                    ?? currentModel.replacingOccurrences(of: "elevenlabs/", with: "")
-
-                transcriber.onPartialResult = { [weak self] text, _ in
-                    Task { @MainActor in
-                        self?.handlePartialResult(text: text)
-                    }
-                }
-                transcriber.onError = { [weak self] error in
-                    Task { @MainActor in
-                        self?.handleError(error)
-                    }
-                }
-
-                elevenLabsTranscriber = transcriber
-                deepgramTranscriber = nil
-                appleTranscriber = nil
-                openAITranscriber = nil
-                try await transcriber.start()
-            } else if currentModel.hasPrefix("openai") {
-                let transcriber = OpenAIRealtimeLiveTranscriber(audioSessionManager: audioSessionManager)
-                transcriber.configure(apiKey: settings.openAIAPIKey)
-                transcriber.modelID = LiveTranscriptionRouting.route(for: currentModel)?.apiModelName
-                    ?? currentModel.replacingOccurrences(of: "openai/", with: "")
-
-                transcriber.onPartialResult = { [weak self] text, _ in
-                    Task { @MainActor in
-                        self?.handlePartialResult(text: text)
-                    }
-                }
-                transcriber.onError = { [weak self] error in
-                    Task { @MainActor in
-                        self?.handleError(error)
-                    }
-                }
-
-                openAITranscriber = transcriber
-                elevenLabsTranscriber = nil
-                deepgramTranscriber = nil
-                appleTranscriber = nil
-                sharedTranscriber = nil
-                try await transcriber.start()
-            } else if let route = LiveTranscriptionRouting.route(for: currentModel),
-                      route.provider.isSupportedOnIOS {
-                // Generic shared-client path (Cartesia, and future ported providers).
-                let transcriber = SharedClientLiveTranscriber(
-                    route: route,
-                    apiKey: settings.liveAPIKey(for: route),
-                    audioSessionManager: audioSessionManager
-                )
-                transcriber.onPartialResult = { [weak self] text, _ in
-                    Task { @MainActor in self?.handlePartialResult(text: text) }
-                }
-                transcriber.onError = { [weak self] error in
-                    Task { @MainActor in self?.handleError(error) }
-                }
-                sharedTranscriber = transcriber
-                deepgramTranscriber = nil
-                elevenLabsTranscriber = nil
-                openAITranscriber = nil
-                appleTranscriber = nil
-                try await transcriber.start()
-            } else {
-                let transcriber = iOSLiveTranscriber(audioSessionManager: audioSessionManager)
-                transcriber.modelID = currentModel
-
-                transcriber.onPartialResult = { [weak self] text, _ in
-                    Task { @MainActor in
-                        self?.handlePartialResult(text: text)
-                    }
-                }
-                transcriber.onError = { [weak self] error in
-                    Task { @MainActor in
-                        self?.handleError(error)
-                    }
-                }
-
-                appleTranscriber = transcriber
-                deepgramTranscriber = nil
-                elevenLabsTranscriber = nil
-                openAITranscriber = nil
-                sharedTranscriber = nil
-                try await transcriber.start()
+            let mode: IOSTranscriptionSession.Mode = settings.transcriptionMode == .batch
+                ? .batch(retainRecording: retainBatchRecording)
+                : .streaming
+            let session = try IOSTranscriptionSession(
+                modelID: currentModel,
+                mode: mode,
+                audioSessionManager: audioSessionManager,
+                batchAPIKey: settings.batchAPIKey,
+                liveAPIKey: settings.liveAPIKey(for:)
+            )
+            session.onPartialResult = { [weak self] text, _ in
+                self?.handlePartialResult(text: text)
             }
+            session.onError = { [weak self] error in
+                self?.handleError(error)
+            }
+            transcriptionSession = session
+            try await session.start()
 
             isRunning = true
         } catch {
+            transcriptionSession?.cancel()
             startTime = nil
-            deepgramTranscriber = nil
-            elevenLabsTranscriber = nil
-            openAITranscriber = nil
-            appleTranscriber = nil
-            sharedTranscriber = nil
-            batchTranscriber = nil
+            transcriptionSession = nil
             self.sharesLiveTranscript = true
             sharedState.clearRecordingState()
             activityManager.endActivity()
@@ -270,7 +158,7 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
         // landed, so "Copied N words" was reported but nothing arrived.
         let assertion = beginBackgroundAssertion("Finalise transcription")
 
-        if batchTranscriber != nil {
+        if transcriptionSession?.isBatch == true {
             activityManager.updateActivity(
                 status: .processing,
                 lastSnippet: "Transcribing recording…",
@@ -345,18 +233,8 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
 
     /// Cancels recording without saving.
     public func cancelRecording() {
-        deepgramTranscriber?.cancel()
-        elevenLabsTranscriber?.cancel()
-        openAITranscriber?.cancel()
-        appleTranscriber?.cancel()
-        sharedTranscriber?.cancel()
-        batchTranscriber?.cancel()
-        deepgramTranscriber = nil
-        elevenLabsTranscriber = nil
-        openAITranscriber = nil
-        appleTranscriber = nil
-        sharedTranscriber = nil
-        batchTranscriber = nil
+        transcriptionSession?.cancel()
+        transcriptionSession = nil
         sharesLiveTranscript = true
         isRunning = false
         startTime = nil
@@ -399,7 +277,6 @@ public final class TranscriptionRecordingService: ObservableObject { // swiftlin
             let polished = try await processor.polish(
                 text: text,
                 model: settings.postProcessingModel,
-                prompt: settings.postProcessingPrompt,
                 apiKey: settings.openRouterAPIKey
             )
             guard !polished.isEmpty else { throw PostProcessingError.emptyResult }
@@ -462,10 +339,10 @@ private extension TranscriptionRecordingService {
     /// and otherwise both calls would see the same non-nil transcriber and try
     /// to stop it twice.
     func drainActiveTranscriber(duration: Int) async -> TranscriptionResult {
-        if let batch = batchTranscriber {
-            batchTranscriber = nil
+        if let session = transcriptionSession {
+            transcriptionSession = nil
             do {
-                return try await batch.stop(language: Locale.current.identifier)
+                return try await session.stop(language: Locale.current.identifier)
             } catch {
                 handleError(error)
                 return TranscriptionResult(
@@ -479,26 +356,6 @@ private extension TranscriptionRecordingService {
                     debugInfo: nil
                 )
             }
-        }
-        if let deepgram = deepgramTranscriber {
-            deepgramTranscriber = nil
-            return await deepgram.stop()
-        }
-        if let elevenlabs = elevenLabsTranscriber {
-            elevenLabsTranscriber = nil
-            return await elevenlabs.stop()
-        }
-        if let openai = openAITranscriber {
-            openAITranscriber = nil
-            return await openai.stop()
-        }
-        if let shared = sharedTranscriber {
-            sharedTranscriber = nil
-            return await shared.stop()
-        }
-        if let apple = appleTranscriber {
-            appleTranscriber = nil
-            return await apple.stop()
         }
         return TranscriptionResult(
             text: partialText,

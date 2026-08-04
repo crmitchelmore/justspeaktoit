@@ -131,6 +131,7 @@ final class AppEnvironment: ObservableObject {
       appSettings: settings,
       historyManager: history,
       mainManager: main,
+      hotKeyManager: hotKeys,
       openMainWindow: { [weak self] in self?.presentMainWindow() }
     )
   }

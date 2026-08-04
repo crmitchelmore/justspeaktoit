@@ -436,7 +436,14 @@ enum WireUp {
     }
 
     if settings.enableSendToMac {
-      try? environment.transportServer.start()
+      do {
+        try environment.transportServer.start()
+      } catch {
+        // Keep the stored preference honest: leaving the toggle ON while the
+        // listener never started would silently drop every "Send to Mac" session.
+        SpeakLogger.logError(error, context: "Send to Mac startup", logger: SpeakLogger.transport)
+        settings.enableSendToMac = false
+      }
     }
 
     #if APP_STORE

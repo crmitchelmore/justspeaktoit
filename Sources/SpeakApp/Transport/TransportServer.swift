@@ -36,7 +36,8 @@ public final class TransportServer: ObservableObject {
     /// Start advertising and accepting connections.
     public func start() throws {
         guard !isRunning else { return }
-        
+
+        error = nil
         SpeakLogger.transport.info("Starting transport server")
         
         let parameters = NWParameters.tcp
@@ -69,6 +70,7 @@ public final class TransportServer: ObservableObject {
             
             SpeakLogger.transport.info("Transport server listening on Bonjour")
         } catch {
+            self.error = error
             SpeakLogger.logError(error, context: "TransportServer.start", logger: SpeakLogger.transport)
             throw error
         }

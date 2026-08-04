@@ -100,14 +100,19 @@ public final class ElevenLabsLiveClient: StreamingTranscriptionClient, @unchecke
     /// Sends Float32 audio samples converted to Int16 linear PCM.
     public func sendAudioSamples(_ samples: UnsafePointer<Float>, frameCount: Int) {
         var buffer = bufferPool.checkout()
-        buffer.reserveCapacity(frameCount * 2)
+        buffer.reserveCapacity(frameCount * MemoryLayout<Int16>.size)
 
+        // Single-pass Float32 → Int16 conversion into a preallocated array,
+        // appended in one bulk copy instead of 2 bytes per sample.
+        var int16Samples = [Int16](repeating: 0, count: frameCount)
         for sampleIndex in 0..<frameCount {
             let sample = samples[sampleIndex]
             let clampedSample = max(-1.0, min(1.0, sample))
-            let int16Sample = Int16(clampedSample * Float(Int16.max))
-            withUnsafeBytes(of: int16Sample.littleEndian) { bytes in
-                buffer.append(contentsOf: bytes)
+            int16Samples[sampleIndex] = Int16(clampedSample * Float(Int16.max)).littleEndian
+        }
+        int16Samples.withUnsafeBytes { rawBuffer in
+            if let baseAddress = rawBuffer.baseAddress {
+                buffer.append(baseAddress.assumingMemoryBound(to: UInt8.self), count: rawBuffer.count)
             }
         }
 

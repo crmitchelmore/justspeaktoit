@@ -57,6 +57,12 @@ public final class iOSLiveTranscriber: ObservableObject {
     /// Persistent audio recorder — saves audio to disk alongside transcription.
     public let audioRecorder = AudioRecordingPersistence()
 
+    /// Serial queue that takes tap buffers off the real-time audio thread —
+    /// recognition feeding and persistence run here, not in the tap callback.
+    private let audioProcessingQueue = DispatchQueue(label: "com.speak.ios.applespeech.audioProcessing")
+    /// Pool for tap-buffer copies so the hot path never allocates.
+    private let tapBufferPool = PCMBufferPool(maximumBuffers: 4)
+
     // MARK: - Init
 
     public init(audioSessionManager: AudioSessionManager) {
@@ -169,9 +175,15 @@ public final class iOSLiveTranscriber: ObservableObject {
                 targetFormat: session.audioFormat
             )
             inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
-                self?.audioRecorder.writeBuffer(buffer)
-                guard let converted = converter.convert(buffer) else { return }
-                session.send(converted)
+                // Copy the buffer and hop off the real-time audio thread —
+                // heavy work in the tap makes CoreAudio drop mic buffers.
+                guard let self, let copied = self.tapBufferPool.copy(buffer) else { return }
+                self.audioProcessingQueue.async {
+                    defer { self.tapBufferPool.recycle(copied) }
+                    self.audioRecorder.writeBuffer(copied)
+                    guard let converted = converter.convert(copied) else { return }
+                    session.send(converted)
+                }
             }
             audioEngine.prepare()
             try audioEngine.start()
@@ -220,8 +232,17 @@ public final class iOSLiveTranscriber: ObservableObject {
         let inputNode = audioEngine.inputNode
         let recordingFormat = inputNode.outputFormat(forBus: 0)
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
-            self?.recognitionRequest?.append(buffer)
-            self?.audioRecorder.writeBuffer(buffer)
+            // Copy the buffer and hop off the real-time audio thread —
+            // heavy work in the tap makes CoreAudio drop mic buffers.
+            guard let self, let copied = self.tapBufferPool.copy(buffer) else { return }
+            self.audioProcessingQueue.async {
+                defer { self.tapBufferPool.recycle(copied) }
+                // Read `recognitionRequest` at execution time (as the tap did)
+                // so audio follows the fresh request after a mid-session
+                // restart in `restartRecognitionTask()`.
+                self.recognitionRequest?.append(copied)
+                self.audioRecorder.writeBuffer(copied)
+            }
         }
         audioEngine.prepare()
         try audioEngine.start()

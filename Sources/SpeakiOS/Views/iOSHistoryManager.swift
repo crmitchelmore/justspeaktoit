@@ -437,9 +437,13 @@ extension iOSHistoryManager: HistorySyncDelegate {
     }
 
     public func didDeleteRemoteEntry(id: UUID) async {
+        // Tombstones are rare and must be observable immediately (including
+        // the persisted acknowledgement set), so they bypass the debounced
+        // remote-commit path used for entry bursts.
         items.removeAll { $0.id == id }
         syncedIDs.remove(id)
-        scheduleRemoteCommit()
+        saveHistory()
+        saveSyncedIDs()
     }
 
     public func didAcknowledgeSyncedEntries(ids: Set<UUID>) async {

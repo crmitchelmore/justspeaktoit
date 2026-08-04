@@ -5,7 +5,7 @@ import os.log
 
 /// Cross-platform Deepgram WebSocket client for live transcription.
 /// Works on both macOS and iOS.
-public final class DeepgramLiveClient: StreamingTranscriptionClient, @unchecked Sendable {
+public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
     private let apiKey: String
     private let model: String
     private let language: String?
@@ -18,6 +18,13 @@ public final class DeepgramLiveClient: StreamingTranscriptionClient, @unchecked 
     private var onTranscript: ((String, Bool) -> Void)?
     private var onError: ((Error) -> Void)?
     private var isStopping: Bool = false
+
+    /// Bounded post-stop drain state: after `CloseStream` is sent, the trailing
+    /// final transcript is handed to the awaiting `finishAndWait()` instead of
+    /// `onTranscript`, so the caller appends it exactly once.
+    private let finishLock = NSLock()
+    private var finishContinuation: CheckedContinuation<String?, Never>?
+    private static let finishDrainBudget: TimeInterval = 1.0
 
     public init(
         apiKey: String,
@@ -153,12 +160,43 @@ public final class DeepgramLiveClient: StreamingTranscriptionClient, @unchecked 
         }
     }
 
+    /// Graceful stop: asks Deepgram to flush buffered audio with a
+    /// `CloseStream` frame, waits (bounded) for the trailing final transcript,
+    /// then closes the socket — so words spoken just before stop aren't lost.
+    ///
+    /// Returns a final transcript segment that was *not* delivered through
+    /// `onTranscript`, or `nil` when nothing new arrived within the budget.
+    public func finishAndWait() async -> String? {
+        guard let task = webSocketTask, task.state == .running else {
+            stop()
+            return nil
+        }
+
+        let transcript: String? = await withCheckedContinuation { continuation in
+            finishLock.lock()
+            finishContinuation = continuation
+            finishLock.unlock()
+
+            // Deepgram flushes and finalises any buffered audio on CloseStream.
+            // A send failure just means the socket is already gone; the bounded
+            // wait below still resolves via the timeout.
+            task.send(.string(#"{"type":"CloseStream"}"#)) { _ in }
+
+            DispatchQueue.global().asyncAfter(deadline: .now() + Self.finishDrainBudget) { [weak self] in
+                self?.resolveFinish(with: nil)
+            }
+        }
+        stop()
+        return transcript
+    }
+
     /// Stops the transcription session.
     public func stop() {
         isStopping = true
         bufferPool.logMetrics()
         webSocketTask?.cancel(with: .normalClosure, reason: nil)
         webSocketTask = nil
+        resolveFinish(with: nil)
         logger.info("Deepgram WebSocket connection closed")
     }
 
@@ -218,6 +256,13 @@ public final class DeepgramLiveClient: StreamingTranscriptionClient, @unchecked 
         do {
             let response = try JSONDecoder().decode(DeepgramStreamResponse.self, from: data)
 
+            // After CloseStream, Metadata is the stream's last message — stop
+            // waiting even when no trailing final transcript arrived.
+            if response.type == "Metadata" {
+                resolveFinish(with: nil)
+                return
+            }
+
             guard let channel = response.channel,
                   let alternative = channel.alternatives.first,
                   !alternative.transcript.isEmpty else {
@@ -225,11 +270,29 @@ public final class DeepgramLiveClient: StreamingTranscriptionClient, @unchecked 
             }
 
             let isFinal = response.is_final ?? false
+            if isFinal, resolveFinish(with: alternative.transcript) {
+                // Trailing final consumed by finishAndWait(); don't also
+                // deliver it through onTranscript.
+                return
+            }
             onTranscript?(alternative.transcript, isFinal)
 
         } catch {
             logger.debug("Failed to parse transcript response: \(error.localizedDescription)")
         }
+    }
+
+    /// Resumes a pending `finishAndWait()` exactly once. Returns whether a
+    /// waiter consumed the value.
+    @discardableResult
+    private func resolveFinish(with transcript: String?) -> Bool {
+        finishLock.lock()
+        let continuation = finishContinuation
+        finishContinuation = nil
+        finishLock.unlock()
+        guard let continuation else { return false }
+        continuation.resume(returning: transcript)
+        return true
     }
 
     private func extractLanguageCode(from locale: String) -> String {
@@ -250,6 +313,7 @@ private struct DeepgramStreamResponse: Decodable {
         let alternatives: [Alternative]
     }
 
+    let type: String?
     let channel: Channel?
     let is_final: Bool?
 }

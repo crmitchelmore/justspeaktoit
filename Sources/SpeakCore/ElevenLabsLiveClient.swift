@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import Foundation
 import os.log
 
@@ -5,7 +6,7 @@ import os.log
 
 /// Cross-platform ElevenLabs WebSocket client for live speech-to-text.
 /// Works on both macOS and iOS.
-public final class ElevenLabsLiveClient: StreamingTranscriptionClient, @unchecked Sendable {
+public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
     private let apiKey: String
     private let modelID: String
     private let language: String?
@@ -17,6 +18,13 @@ public final class ElevenLabsLiveClient: StreamingTranscriptionClient, @unchecke
     private var onTranscript: ((String, Bool) -> Void)?
     private var onError: ((Error) -> Void)?
     private var isStopping: Bool = false
+
+    /// Bounded post-stop drain state: while `finishAndWait()` is pending, the
+    /// trailing final transcript is handed to the waiter instead of
+    /// `onTranscript`, so the caller appends it exactly once.
+    private let finishLock = NSLock()
+    private var finishContinuation: CheckedContinuation<String?, Never>?
+    private static let finishDrainBudget: TimeInterval = 1.0
 
     public init(
         apiKey: String,
@@ -135,12 +143,39 @@ public final class ElevenLabsLiveClient: StreamingTranscriptionClient, @unchecke
         }
     }
 
+    /// Graceful stop: waits (bounded) for the trailing final transcript before
+    /// closing the socket, so words spoken just before stop aren't lost. The
+    /// streaming endpoint has no documented end-of-stream frame, so this is a
+    /// bounded wait only.
+    ///
+    /// Returns a final transcript segment that was *not* delivered through
+    /// `onTranscript`, or `nil` when nothing new arrived within the budget.
+    public func finishAndWait() async -> String? {
+        guard webSocketTask?.state == .running else {
+            stop()
+            return nil
+        }
+
+        let transcript: String? = await withCheckedContinuation { continuation in
+            finishLock.lock()
+            finishContinuation = continuation
+            finishLock.unlock()
+
+            DispatchQueue.global().asyncAfter(deadline: .now() + Self.finishDrainBudget) { [weak self] in
+                self?.resolveFinish(with: nil)
+            }
+        }
+        stop()
+        return transcript
+    }
+
     /// Stops the transcription session.
     public func stop() {
         isStopping = true
         bufferPool.logMetrics()
         webSocketTask?.cancel(with: .normalClosure, reason: nil)
         webSocketTask = nil
+        resolveFinish(with: nil)
         logger.info("ElevenLabs WebSocket connection closed")
     }
 
@@ -205,11 +240,29 @@ public final class ElevenLabsLiveClient: StreamingTranscriptionClient, @unchecke
             }
 
             let isFinal = response.speechEventType == "FINAL_TRANSCRIPT"
+            if isFinal, resolveFinish(with: transcript) {
+                // Trailing final consumed by finishAndWait(); don't also
+                // deliver it through onTranscript.
+                return
+            }
             onTranscript?(transcript, isFinal)
 
         } catch {
             logger.debug("Failed to parse transcript response: \(error.localizedDescription)")
         }
+    }
+
+    /// Resumes a pending `finishAndWait()` exactly once. Returns whether a
+    /// waiter consumed the value.
+    @discardableResult
+    private func resolveFinish(with transcript: String?) -> Bool {
+        finishLock.lock()
+        let continuation = finishContinuation
+        finishContinuation = nil
+        finishLock.unlock()
+        guard let continuation else { return false }
+        continuation.resume(returning: transcript)
+        return true
     }
 
     private func extractLanguageCode(from locale: String) -> String {

@@ -165,6 +165,9 @@ public final class AppSettings: ObservableObject {
     private static let logger = Logger(subsystem: "com.justspeaktoit.ios", category: "AppSettings")
     private var keyChangeObserver: NSObjectProtocol?
     private var syncedKeyReloadDepth = 0
+    /// The async keychain load kicked off by `init`. `ensureKeysLoaded()`
+    /// awaits it so cold-start callers never read the placeholder empty keys.
+    private var initialKeyLoadTask: Task<Void, Never>?
 
     /// Persists (or clears when empty) an API key on the canonical secure store.
     /// Keychain failures are logged rather than silently dropped so a key that
@@ -307,13 +310,21 @@ public final class AppSettings: ObservableObject {
         // values from legacy iOS keychain locations first. Default-provider
         // selection runs afterwards so it sees the loaded keys. Assigning each
         // @Published value re-persists it via didSet, which is harmless.
-        Task { @MainActor [weak self] in
+        initialKeyLoadTask = Task { @MainActor [weak self] in
             guard let self else { return }
             await Self.migrateLegacyKeysIfNeeded()
             await self.reloadSyncedAPIKeys()
             self.observeSecureStorageChanges()
             self.configureDefaultProviderIfNeeded()
         }
+    }
+
+    /// Waits until the initial keychain load kicked off by `init` has finished.
+    /// Idempotent and cheap once loaded. Recording paths await this before
+    /// reading API keys so a cold launch (e.g. from the Action Button) doesn't
+    /// see the placeholder empty keys and silently fall back to Apple Speech.
+    public func ensureKeysLoaded() async {
+        await initialKeyLoadTask?.value
     }
 
     deinit {

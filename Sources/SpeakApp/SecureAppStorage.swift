@@ -1,4 +1,5 @@
 import Foundation
+import os.log
 import Security
 import SpeakCore
 
@@ -59,7 +60,9 @@ final class PermissionsManagerBridge: KeychainPermissionsChecking, @unchecked Se
 extension AppSettings: APIKeyIdentifierRegistry {}
 
 // Explicit registry adapter for tests: avoids forcing test doubles to
-// inherit from AppSettings.
+// inherit from AppSettings. Marked @MainActor to match the protocol; tests
+// that need it off the main actor can create it inside `MainActor.run`.
+@MainActor
 final class InMemoryIdentifierRegistry: APIKeyIdentifierRegistry {
     private var identifiers: Set<String>
     init(identifiers: Set<String> = []) { self.identifiers = identifiers }
@@ -97,12 +100,13 @@ actor SecureAppStorage {
             synchronizable: false
         )
 
-        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        print("[SecureAppStorage] Keychain Configuration:")
-        print("  accessGroup: \(configuration.accessGroup ?? "nil")")
-        print("  synchronizable: \(configuration.synchronizable)")
-        print("  service: \(configuration.service)")
-        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        if ProcessInfo.processInfo.environment["SPEAK_DEBUG_KEYCHAIN"] == "1" {
+            Logger(subsystem: "com.github.speakapp", category: "SecureAppStorage").debug(
+                "Keychain config — service: \(configuration.service, privacy: .public) "
+                + "synchronizable: \(configuration.synchronizable, privacy: .public) "
+                + "accessGroup: \(configuration.accessGroup ?? "nil", privacy: .public)"
+            )
+        }
 
         self.storage = SecureStorage(
             configuration: configuration,

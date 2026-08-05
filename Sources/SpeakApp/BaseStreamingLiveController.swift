@@ -55,24 +55,36 @@ open class BaseStreamingLiveController: NSObject {
         pendingQueue.sync { pendingAudioChunks.append(data) }
     }
 
-    /// Flushes pending chunks via `send` closure, awaiting completions with timeout.
+    /// Flushes pending chunks via `send` closure with bounded timeout.
+    /// Returns true if all chunks were sent within `timeout`, false on timeout.
+    @discardableResult
     public func flushPendingChunks(
         send: @escaping (Data) async throws -> Void,
         timeout: TimeInterval = 1.0
-    ) async {
+    ) async -> Bool {
         let chunks: [Data] = pendingQueue.sync {
             let copy = pendingAudioChunks
             pendingAudioChunks.removeAll()
             return copy
         }
-        guard !chunks.isEmpty else { return }
-        await withTaskGroup(of: Void.self) { group in
-            for chunk in chunks {
-                group.addTask { try? await send(chunk) }
+        guard !chunks.isEmpty else { return true }
+        let success = await withTaskGroup(of: Bool.self) { group in
+            group.addTask {
+                for chunk in chunks {
+                    do { try await send(chunk) } catch { return false }
+                }
+                return true
             }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                return false
+            }
+            guard let first = await group.next() else { return false }
+            group.cancelAll()
+            return first
         }
-        // Bounded timeout is enforced by caller; we do not block indefinitely.
-        log.debug("\(self.providerID): flushed \(chunks.count) pending chunks")
+        log.debug("\(self.providerID): flushed \(chunks.count) pending chunks — \(success ? "ok" : "timeout", privacy: .public)")
+        return success
     }
 
     /// Marks stopping state to prevent fallback/reconnect after `stop` begins.

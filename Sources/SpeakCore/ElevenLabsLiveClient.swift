@@ -20,10 +20,15 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
     private var onTranscript: ((String, Bool) -> Void)?
     private var onError: ((Error) -> Void)?
     private var isStopping: Bool = false
+    /// Guarded by `stateLock`: the session's full transcript, folded from the
+    /// finals ElevenLabs streams. `finishAndWait()` returns this, per the
+    /// `FinalizingStreamingTranscriptionClient` contract.
+    private var accumulated = TranscriptAccumulator()
 
     /// Bounded post-stop drain state: while `finishAndWait()` is pending, the
-    /// trailing final transcript is handed to the waiter instead of
-    /// `onTranscript`, so the caller appends it exactly once.
+    /// trailing final is folded in and the full transcript is handed to the
+    /// waiter instead of `onTranscript`, so the caller never sees the same
+    /// words twice.
     private let finishLock = NSLock()
     private var finishContinuation: CheckedContinuation<String?, Never>?
     private static let finishDrainBudget: TimeInterval = 1.0
@@ -52,6 +57,7 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
     ) {
         withStateLock {
             isStopping = false
+            accumulated.reset()
             self.onTranscript = onTranscript
             self.onError = onError
         }
@@ -60,8 +66,7 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
         var queryItems = [URLQueryItem(name: "model_id", value: modelID)]
 
         if let language {
-            let code = extractLanguageCode(from: language)
-            queryItems.append(URLQueryItem(name: "language_code", value: code))
+            queryItems.append(URLQueryItem(name: "language_code", value: language.localeLanguageCode))
         }
 
         urlComponents.queryItems = queryItems
@@ -111,7 +116,7 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
             self.bufferPool.returnBuffer(&returnBuffer)
 
             if let error {
-                if self.isStoppingState() || self.shouldIgnoreSocketError(error) {
+                if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) {
                     return
                 }
                 self.logger.error("Failed to send audio: \(error.localizedDescription)")
@@ -154,7 +159,7 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
             self.bufferPool.returnBuffer(&returnBuffer)
 
             if let error {
-                if self.isStoppingState() || self.shouldIgnoreSocketError(error) {
+                if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) {
                     return
                 }
                 self.logger.error("Failed to send audio: \(error.localizedDescription)")
@@ -173,12 +178,14 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
     /// streaming endpoint has no documented end-of-stream frame, so this is a
     /// bounded wait only.
     ///
-    /// Returns a final transcript segment that was *not* delivered through
-    /// `onTranscript`, or `nil` when nothing new arrived within the budget.
+    /// Returns the session's **full** transcript (every final ElevenLabs sent,
+    /// including any that arrived during the wait), or `nil` when nothing was
+    /// transcribed. A trailing final consumed here is not also delivered
+    /// through `onTranscript`.
     public func finishAndWait() async -> String? {
         guard currentWebSocketTask()?.state == .running else {
             stop()
-            return nil
+            return fullTranscript()
         }
 
         let transcript: String? = await withCheckedContinuation { continuation in
@@ -187,7 +194,7 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
             finishLock.unlock()
 
             DispatchQueue.global().asyncAfter(deadline: .now() + Self.finishDrainBudget) { [weak self] in
-                self?.resolveFinish(with: nil)
+                self?.resolveFinish()
             }
         }
         stop()
@@ -204,7 +211,7 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
         }
         bufferPool.logMetrics()
         task?.cancel(with: .normalClosure, reason: nil)
-        resolveFinish(with: nil)
+        resolveFinish()
         logger.info("ElevenLabs WebSocket connection closed")
     }
 
@@ -214,17 +221,6 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
     }
 
     // MARK: - Private
-
-    private func shouldIgnoreSocketError(_ error: Error) -> Bool {
-        let nsError = error as NSError
-        if nsError.domain == NSPOSIXErrorDomain, nsError.code == 57 { // ENOTCONN
-            return true
-        }
-        if nsError.localizedDescription.localizedCaseInsensitiveContains("socket is not connected") {
-            return true
-        }
-        return false
-    }
 
     private func receiveMessages() {
         guard let task = currentWebSocketTask() else { return }
@@ -237,7 +233,7 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
                 self.receiveMessages()
 
             case .failure(let error):
-                if self.isStoppingState() || self.shouldIgnoreSocketError(error) {
+                if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) {
                     return
                 }
                 self.logger.error("WebSocket receive error: \(error.localizedDescription)")
@@ -259,7 +255,10 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
         }
     }
 
-    private func parseTranscriptResponse(_ json: String) {
+    /// Feeds one raw provider frame through the receive path. The WebSocket
+    /// loop is the only production caller; tests use it to drive the client
+    /// without a live socket.
+    func parseTranscriptResponse(_ json: String) {
         guard let data = json.data(using: .utf8) else { return }
 
         do {
@@ -270,10 +269,14 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
             }
 
             let isFinal = response.speechEventType == "FINAL_TRANSCRIPT"
-            if isFinal, resolveFinish(with: transcript) {
-                // Trailing final consumed by finishAndWait(); don't also
-                // deliver it through onTranscript.
-                return
+            if isFinal {
+                withStateLock { accumulated.append(final: transcript) }
+                if resolveFinish() {
+                    // Trailing final consumed by finishAndWait(), which returns
+                    // the whole transcript; delivering it again through
+                    // onTranscript would double it for callers that append.
+                    return
+                }
             }
             currentOnTranscript()?(transcript, isFinal)
 
@@ -282,23 +285,20 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
         }
     }
 
-    /// Resumes a pending `finishAndWait()` exactly once. Returns whether a
-    /// waiter consumed the value.
+    /// Resumes a pending `finishAndWait()` exactly once with the session's full
+    /// transcript. Returns whether a waiter consumed it.
     @discardableResult
-    private func resolveFinish(with transcript: String?) -> Bool {
+    private func resolveFinish() -> Bool {
         finishLock.lock()
         let continuation = finishContinuation
         finishContinuation = nil
         finishLock.unlock()
         guard let continuation else { return false }
-        continuation.resume(returning: transcript)
+        continuation.resume(returning: fullTranscript())
         return true
     }
 
-    private func extractLanguageCode(from locale: String) -> String {
-        let components = locale.split(whereSeparator: { $0 == "_" || $0 == "-" })
-        return components.first.map(String.init)?.lowercased() ?? locale.lowercased()
-    }
+    private func fullTranscript() -> String? { withStateLock { accumulated.transcriptOrNil } }
 
     private func withStateLock<T>(_ block: () -> T) -> T {
         stateLock.lock()

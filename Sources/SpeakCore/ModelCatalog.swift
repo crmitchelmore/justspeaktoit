@@ -1,3 +1,7 @@
+// swiftlint:disable file_length
+// ModelCatalog grows with provider releases; its catalogue arrays are the
+// single source of truth for model pickers and routing. Split types into
+// `ModelCatalogTypes.swift`; keep arrays together to avoid scattering.
 import Foundation
 
 public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_length

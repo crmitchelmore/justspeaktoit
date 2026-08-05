@@ -83,7 +83,10 @@ open class BaseStreamingLiveController: NSObject {
             group.cancelAll()
             return first
         }
-        log.debug("\(self.providerID): flushed \(chunks.count) pending chunks — \(success ? "ok" : "timeout", privacy: .public)")
+        log.debug(
+            // swiftlint:disable:next line_length
+            "\(self.providerID): flushed \(chunks.count) pending chunks — \(success ? "ok" : "timeout", privacy: .public)"
+        )
         return success
     }
 

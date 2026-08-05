@@ -21,10 +21,13 @@ extension MainManager {
 
     static func friendlyPostProcessingMessage(for error: Error, modelIdentifier: String) -> String {
         let trimmedModel = modelIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
-        let displayName = ModelCatalog.friendlyName(for: trimmedModel.isEmpty ? "inception/mercury" : trimmedModel)
+        let displayName = ModelCatalog.friendlyName(
+            for: trimmedModel.isEmpty ? "inception/mercury" : trimmedModel
+        )
         if let routerError = error as? OpenRouterClientError {
             switch routerError {
             case .apiKeyMissing:
+                // swiftlint:disable:next line_length
                 return "Post-processing skipped because no OpenRouter API key is configured. Add one in Settings › API Keys."
             case .invalidResponse:
                 return "OpenRouter returned an unexpected response while using \(displayName)."
@@ -64,7 +67,8 @@ extension MainManager {
         if lowered.contains("dear ") || lowered.contains("regards") || lowered.contains("sincerely") {
             tags.insert("formal")
         }
-        if lowered.contains("meeting") || lowered.contains("agenda") || lowered.contains("project") || lowered.contains("quarterly") {
+        if lowered.contains("meeting") || lowered.contains("agenda")
+            || lowered.contains("project") || lowered.contains("quarterly") {
             tags.insert("work")
         }
         if lowered.contains("love") || lowered.contains("babe") || lowered.contains("sweetheart") {

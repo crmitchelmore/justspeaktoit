@@ -250,6 +250,7 @@ struct PersonalCorrectionsView: View {
     )
   }
 
+  // swiftlint:disable:next function_body_length
   private func candidateRow(_ candidate: AutoCorrectionCandidate) -> some View {
     HStack(spacing: 12) {
       VStack(alignment: .leading, spacing: 2) {

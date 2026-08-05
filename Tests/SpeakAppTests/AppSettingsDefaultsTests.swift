@@ -60,6 +60,27 @@ final class AppSettingsDefaultsTests: XCTestCase {
     }
 
     @MainActor
+    func testLanguagePreference_defaultsToAutomatic() {
+        let settings = AppSettings(defaults: defaults)
+
+        XCTAssertEqual(
+            settings.preferredLocaleIdentifier,
+            TranscriptionLanguageCatalog.automaticIdentifier
+        )
+        XCTAssertNil(settings.preferredModelLanguage)
+    }
+
+    @MainActor
+    func testLanguagePreference_explicitLocalePersistsAndIsPassedToModels() {
+        let settings = AppSettings(defaults: defaults)
+
+        settings.preferredLocaleIdentifier = "fr_FR"
+
+        XCTAssertEqual(defaults.string(forKey: "preferredLocale"), "fr_FR")
+        XCTAssertEqual(AppSettings(defaults: defaults).preferredModelLanguage, "fr_FR")
+    }
+
+    @MainActor
     func testCoreDefaults_accessibilityInsertionModeIsInsertAtCursor() {
         let settings = AppSettings(defaults: defaults)
         XCTAssertEqual(settings.accessibilityInsertionMode, .insertAtCursor)

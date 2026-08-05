@@ -1,12 +1,6 @@
 import SpeakCore
 import SwiftUI
 
-struct LocaleOption: Identifiable, Equatable {
-  let displayName: String
-  let identifier: String
-  var id: String { identifier }
-}
-
 struct SettingsInlineInfo: View {
   @Environment(\.appVisualDensity) var density
   let title: String

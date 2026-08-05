@@ -57,7 +57,7 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
     // device and `start()` then fails with kAudioHardwareBadDeviceError.
     audioEngine = AVAudioEngine()
 
-    let localeIdentifier = currentLocaleIdentifier ?? appSettings.preferredLocaleIdentifier
+    let localeIdentifier = currentLocaleIdentifier ?? appSettings.resolvedPreferredLocaleIdentifier
 
     guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: localeIdentifier)) else {
       await audioDeviceManager.endUsingPreferredInput(session: sessionContext)

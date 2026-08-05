@@ -69,21 +69,6 @@ extension SettingsView {
             .accessibilityLabel("Remote transcription type picker")
           }
 
-          Picker("Preferred Locale", selection: settingsBinding(\AppSettings.preferredLocaleIdentifier)) {
-            ForEach(resolvedLocaleOptions) { option in
-              Text(option.displayName).tag(option.identifier)
-            }
-          }
-          .pickerStyle(.menu)
-          .padding(.horizontal, 12)
-          .padding(.vertical, 8)
-          .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-              .fill(Color(nsColor: .controlBackgroundColor))
-          )
-          .accessibilityLabel("Preferred locale picker")
-          .speakTooltip("Choose from supported locales so Speak uses the right accent while transcribing.")
-          .accessibilityLabel("Preferred locale picker")
         }
       }
       .speakTooltip("Choose which transcription flow Speak uses and the locale it should prefer.")
@@ -1758,25 +1743,4 @@ extension SettingsView {
     }
   }
 
-  private var resolvedLocaleOptions: [LocaleOption] {
-    var options = Self.localeOptions
-    let current = settings.preferredLocaleIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !current.isEmpty else { return options }
-    if !options.contains(where: { $0.identifier == current }) {
-      let display = localeDisplayName(for: current)
-      options.append(LocaleOption(displayName: display, identifier: current))
-    }
-    return options
-  }
-
-  private func localeDisplayName(for identifier: String) -> String {
-    let locale = Locale(identifier: identifier)
-    if let localized = locale.localizedString(forIdentifier: identifier) {
-      return localized.capitalized
-    }
-    if let localized = Locale.current.localizedString(forIdentifier: identifier) {
-      return localized.capitalized
-    }
-    return identifier
-  }
 }

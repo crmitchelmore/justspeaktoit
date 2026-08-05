@@ -327,6 +327,7 @@ public enum LiveTranscriptionClientFactory {
             return SonioxLiveClient(
                 apiKey: apiKey,
                 model: route.apiModelName,
+                language: language,
                 sampleRate: route.sampleRate
             )
         case .modulate:

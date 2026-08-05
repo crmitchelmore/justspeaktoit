@@ -46,6 +46,32 @@ extension SettingsView {
       }
       .speakTooltip("Set Speak's look to match your workspace with light, dark, or system themes.")
 
+      SettingsCard(title: "Language", systemImage: "character.bubble", tint: Color.brandAccentWarm) {
+        VStack(alignment: .leading, spacing: 12) {
+          Text("Choose the spoken language sent to transcription models across every recording surface.")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+
+          Picker("Spoken Language", selection: settingsBinding(\AppSettings.preferredLocaleIdentifier)) {
+            ForEach(TranscriptionLanguageCatalog.options) { option in
+              Text(option.displayName).tag(option.id)
+            }
+          }
+          .pickerStyle(.menu)
+          .padding(.horizontal, 12)
+          .padding(.vertical, 8)
+          .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+              .fill(Color(nsColor: .controlBackgroundColor))
+          )
+          .speakTooltip(
+            "Automatic lets remote providers detect the language. Apple speech uses your current system locale."
+          )
+          .accessibilityLabel("Spoken language picker")
+        }
+      }
+      .speakTooltip("Set the language preference used by local and remote transcription models.")
+
       SettingsCard(title: "Output", systemImage: "textformat.alt", tint: Color.brandLagoon) {
         VStack(alignment: .leading, spacing: 12) {
           if DistributionChannel.current.supportsAccessibilityTextInsertion {

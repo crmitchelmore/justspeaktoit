@@ -1,10 +1,16 @@
-// swiftlint:disable file_length
 import Foundation
 import os.log
 
 // MARK: - Deepgram Live Client (Cross-platform WebSocket)
 
 /// Cross-platform Deepgram WebSocket client for live transcription.
+///
+/// Covers both of Deepgram's streaming APIs: classic `v1/listen` (nova/enhanced
+/// /base, interim results plus `is_final` segments) and **Flux** `v2/listen`
+/// (`flux-*` models, conversational `Update`/`EndOfTurn` events). The model name
+/// selects the endpoint and the response shape; everything else — transport,
+/// stop semantics, buffer pooling — is shared.
+///
 /// Works on both macOS and iOS.
 public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
     private let apiKey: String
@@ -21,10 +27,15 @@ public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @
     private var onTranscript: ((String, Bool) -> Void)?
     private var onError: ((Error) -> Void)?
     private var isStopping: Bool = false
+    /// Guarded by `stateLock`: the session's full transcript, folded from the
+    /// segment finals Deepgram streams. `finishAndWait()` returns this, per the
+    /// `FinalizingStreamingTranscriptionClient` contract.
+    private var accumulated = TranscriptAccumulator()
 
     /// Bounded post-stop drain state: after `CloseStream` is sent, the trailing
-    /// final transcript is handed to the awaiting `finishAndWait()` instead of
-    /// `onTranscript`, so the caller appends it exactly once.
+    /// final transcript is folded in and the full transcript is handed to the
+    /// awaiting `finishAndWait()` instead of `onTranscript`, so the caller
+    /// never sees the same words twice.
     private let finishLock = NSLock()
     private var finishContinuation: CheckedContinuation<String?, Never>?
     private static let finishDrainBudget: TimeInterval = 1.0
@@ -55,32 +66,12 @@ public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @
     ) {
         withStateLock {
             isStopping = false
+            accumulated.reset()
             self.onTranscript = onTranscript
             self.onError = onError
         }
 
-        var urlComponents = URLComponents(string: "wss://api.deepgram.com/v1/listen")!
-        var queryItems = [
-            URLQueryItem(name: "model", value: model),
-            URLQueryItem(name: "punctuate", value: "true"),
-            URLQueryItem(name: "smart_format", value: "true"),
-            URLQueryItem(name: "numerals", value: "true"),
-            URLQueryItem(name: "interim_results", value: "true"),
-            URLQueryItem(name: "encoding", value: "linear16"),
-            URLQueryItem(name: "sample_rate", value: String(sampleRate)),
-            URLQueryItem(name: "channels", value: "1"),
-            URLQueryItem(name: "endpointing", value: "300"),
-            URLQueryItem(name: "vad_events", value: "true")
-        ]
-
-        if let language {
-            let languageCode = extractLanguageCode(from: language)
-            queryItems.append(URLQueryItem(name: "language", value: languageCode))
-        }
-
-        urlComponents.queryItems = queryItems
-
-        guard let url = urlComponents.url else {
+        guard let url = Self.webSocketURL(model: model, language: language, sampleRate: sampleRate) else {
             onError(DeepgramLiveError.invalidURL)
             return
         }
@@ -126,7 +117,7 @@ public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @
             self.bufferPool.returnBuffer(&returnBuffer)
 
             if let error {
-                if self.isStoppingState() || self.shouldIgnoreSocketError(error) {
+                if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) {
                     return
                 }
                 self.logger.error("Failed to send audio: \(error.localizedDescription)")
@@ -172,7 +163,7 @@ public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @
             self.bufferPool.returnBuffer(&returnBuffer)
 
             if let error {
-                if self.isStoppingState() || self.shouldIgnoreSocketError(error) {
+                if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) {
                     return
                 }
                 self.logger.error("Failed to send audio: \(error.localizedDescription)")
@@ -185,12 +176,14 @@ public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @
     /// `CloseStream` frame, waits (bounded) for the trailing final transcript,
     /// then closes the socket — so words spoken just before stop aren't lost.
     ///
-    /// Returns a final transcript segment that was *not* delivered through
-    /// `onTranscript`, or `nil` when nothing new arrived within the budget.
+    /// Returns the session's **full** transcript (every final Deepgram sent,
+    /// including any that arrived during the drain), or `nil` when nothing was
+    /// transcribed. A trailing final consumed here is not also delivered
+    /// through `onTranscript`.
     public func finishAndWait() async -> String? {
         guard let task = currentWebSocketTask(), task.state == .running else {
             stop()
-            return nil
+            return fullTranscript()
         }
 
         let transcript: String? = await withCheckedContinuation { continuation in
@@ -204,7 +197,7 @@ public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @
             task.send(.string(#"{"type":"CloseStream"}"#)) { _ in }
 
             DispatchQueue.global().asyncAfter(deadline: .now() + Self.finishDrainBudget) { [weak self] in
-                self?.resolveFinish(with: nil)
+                self?.resolveFinish()
             }
         }
         stop()
@@ -221,7 +214,7 @@ public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @
         }
         bufferPool.logMetrics()
         task?.cancel(with: .normalClosure, reason: nil)
-        resolveFinish(with: nil)
+        resolveFinish()
         logger.info("Deepgram WebSocket connection closed")
     }
 
@@ -231,17 +224,6 @@ public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @
     }
 
     // MARK: - Private
-
-    private func shouldIgnoreSocketError(_ error: Error) -> Bool {
-        let nsError = error as NSError
-        if nsError.domain == NSPOSIXErrorDomain, nsError.code == 57 { // ENOTCONN
-            return true
-        }
-        if nsError.localizedDescription.localizedCaseInsensitiveContains("socket is not connected") {
-            return true
-        }
-        return false
-    }
 
     private func receiveMessages() {
         guard let task = currentWebSocketTask() else { return }
@@ -254,7 +236,7 @@ public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @
                 self.receiveMessages()
 
             case .failure(let error):
-                if self.isStoppingState() || self.shouldIgnoreSocketError(error) {
+                if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) {
                     return
                 }
                 self.logger.error("WebSocket receive error: \(error.localizedDescription)")
@@ -276,55 +258,45 @@ public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @
         }
     }
 
-    private func parseTranscriptResponse(_ json: String) {
-        guard let data = json.data(using: .utf8) else { return }
-
-        do {
-            let response = try JSONDecoder().decode(DeepgramStreamResponse.self, from: data)
-
-            // After CloseStream, Metadata is the stream's last message — stop
-            // waiting even when no trailing final transcript arrived.
-            if response.type == "Metadata" {
-                resolveFinish(with: nil)
-                return
-            }
-
-            guard let channel = response.channel,
-                  let alternative = channel.alternatives.first,
-                  !alternative.transcript.isEmpty else {
-                return
-            }
-
-            let isFinal = response.is_final ?? false
-            if isFinal, resolveFinish(with: alternative.transcript) {
-                // Trailing final consumed by finishAndWait(); don't also
-                // deliver it through onTranscript.
-                return
-            }
-            currentOnTranscript()?(alternative.transcript, isFinal)
-
-        } catch {
-            logger.debug("Failed to parse transcript response: \(error.localizedDescription)")
+    /// Feeds one raw provider frame through the receive path. The WebSocket
+    /// loop is the only production caller; tests use it to drive the client
+    /// without a live socket.
+    func parseTranscriptResponse(_ json: String) {
+        // After CloseStream, Metadata is the stream's last message — stop
+        // waiting even when no trailing final transcript arrived.
+        if Self.isMetadataFrame(json) {
+            resolveFinish()
+            return
         }
+
+        guard let event = Self.transcriptEvent(from: json, model: model) else { return }
+
+        if event.isFinal {
+            withStateLock { accumulated.append(final: event.text) }
+            if resolveFinish() {
+                // Trailing final consumed by finishAndWait(), which returns the
+                // whole transcript; delivering it again through onTranscript
+                // would double it for callers that append.
+                return
+            }
+        }
+        currentOnTranscript()?(event.text, event.isFinal)
     }
 
-    /// Resumes a pending `finishAndWait()` exactly once. Returns whether a
-    /// waiter consumed the value.
+    /// Resumes a pending `finishAndWait()` exactly once with the session's full
+    /// transcript. Returns whether a waiter consumed it.
     @discardableResult
-    private func resolveFinish(with transcript: String?) -> Bool {
+    private func resolveFinish() -> Bool {
         finishLock.lock()
         let continuation = finishContinuation
         finishContinuation = nil
         finishLock.unlock()
         guard let continuation else { return false }
-        continuation.resume(returning: transcript)
+        continuation.resume(returning: fullTranscript())
         return true
     }
 
-    private func extractLanguageCode(from locale: String) -> String {
-        let components = locale.split(whereSeparator: { $0 == "_" || $0 == "-" })
-        return components.first.map(String.init)?.lowercased() ?? locale.lowercased()
-    }
+    private func fullTranscript() -> String? { withStateLock { accumulated.transcriptOrNil } }
 
     private func withStateLock<T>(_ block: () -> T) -> T {
         stateLock.lock()
@@ -336,23 +308,6 @@ public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @
     private func isStoppingState() -> Bool { withStateLock { isStopping } }
     private func currentOnTranscript() -> ((String, Bool) -> Void)? { withStateLock { onTranscript } }
     private func currentOnError() -> ((Error) -> Void)? { withStateLock { onError } }
-}
-
-// MARK: - Response Models
-
-private struct DeepgramStreamResponse: Decodable {
-    struct Channel: Decodable {
-        struct Alternative: Decodable {
-            let transcript: String
-            let confidence: Double?
-        }
-
-        let alternatives: [Alternative]
-    }
-
-    let type: String?
-    let channel: Channel?
-    let is_final: Bool?
 }
 
 // MARK: - Error Types

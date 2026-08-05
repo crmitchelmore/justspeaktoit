@@ -98,6 +98,9 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     audioEngine.inputNode.removeTap(onBus: 0)
 
     if let finalizingClient = client as? FinalizingStreamingTranscriptionClient {
+      // Contract: `finishAndWait()` returns the session's full transcript, so
+      // this replaces what we have rather than appending to it — appending
+      // would double every word the client already streamed.
       if let finalTranscript = await finalizingClient.finishAndWait(),
          latestTranscript != finalTranscript {
         handleTranscript(finalTranscript, isFinal: true)
@@ -139,6 +142,14 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     return apiKey
   }
 
+  /// Applies a transcript update.
+  ///
+  /// This *replaces* `latestTranscript`, which is right for the cumulative
+  /// providers routed here (xAI resends the whole turn on every event) and for
+  /// the full transcript `finishAndWait()` returns. A provider whose
+  /// `onTranscript` emits standalone segments (Deepgram, ElevenLabs) needs
+  /// `TranscriptAccumulator` here before it can be routed through this
+  /// controller — its live updates would otherwise show only the last segment.
   private func handleTranscript(_ text: String, isFinal: Bool) {
     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return }

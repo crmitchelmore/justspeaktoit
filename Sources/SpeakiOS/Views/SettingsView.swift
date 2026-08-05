@@ -162,6 +162,12 @@ public final class AppSettings: ObservableObject {
         )
     )
 
+    /// The canonical API-key store, exposed so QR config transfer reads and
+    /// writes the same keychain items the rest of the app uses. Exporting or
+    /// importing against any other service silently produces keys the app
+    /// never sees.
+    static var canonicalCredentialStorage: SecureStorage { credentialStorage }
+
     private static let logger = Logger(subsystem: "com.justspeaktoit.ios", category: "AppSettings")
     private var keyChangeObserver: NSObjectProtocol?
     private var syncedKeyReloadDepth = 0

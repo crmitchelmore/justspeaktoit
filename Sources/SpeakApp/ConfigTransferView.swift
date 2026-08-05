@@ -10,6 +10,7 @@ import SwiftUI
 struct ConfigTransferView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var qrImage: NSImage?
+    @State private var transferCode: String?
     @State private var isGenerating = false
     @State private var error: String?
     @State private var secretCount = 0
@@ -42,7 +43,25 @@ struct ConfigTransferView: View {
                     Text("Scan with Just Speak to It on iOS")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                    
+
+                    if let transferCode {
+                        VStack(spacing: 4) {
+                            Text("Then enter this code")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(ConfigTransferCode.formatted(transferCode))
+                                .font(.system(.title2, design: .monospaced))
+                                .fontWeight(.semibold)
+                                .textSelection(.enabled)
+                                .accessibilityLabel(
+                                    Text(transferCode.map { String($0) }.joined(separator: " "))
+                                )
+                        }
+                        .padding(.vertical, 4)
+                        .frame(maxWidth: .infinity)
+                        .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+                    }
+
                     HStack(spacing: 16) {
                         Label("\(secretCount) API keys", systemImage: "key.fill")
                         Label("\(settingCount) settings", systemImage: "gearshape")
@@ -115,24 +134,30 @@ struct ConfigTransferView: View {
 
             guard !secrets.isEmpty || !settings.isEmpty else {
                 qrImage = nil
+                transferCode = nil
                 isGenerating = false
                 return
             }
 
-            let payload = try manager.generatePayload(
+            // The QR carries only ciphertext; the one-time code below it is what
+            // decrypts it, and it travels by the user reading it out.
+            let transfer = try manager.makeTransfer(
                 secrets: secrets,
                 settings: settings
             )
 
-            guard let scaledImage = manager.makeQRCodeImage(payload: payload) else {
-                throw ConfigTransferError.decodingFailed
+            guard let scaledImage = manager.makeQRCodeImage(payload: transfer.payload) else {
+                throw ConfigTransferError.qrGenerationFailed
             }
 
             let rep = NSCIImageRep(ciImage: scaledImage)
             let nsImage = NSImage(size: rep.size)
             nsImage.addRepresentation(rep)
             qrImage = nsImage
+            transferCode = transfer.code
         } catch {
+            qrImage = nil
+            transferCode = nil
             self.error = error.localizedDescription
         }
 

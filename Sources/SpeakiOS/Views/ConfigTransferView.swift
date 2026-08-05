@@ -1,5 +1,4 @@
 #if os(iOS)
-import AVFoundation
 import CoreImage.CIFilterBuiltins
 import SpeakCore
 import SwiftUI
@@ -10,9 +9,10 @@ import SwiftUI
 struct QRCodeGeneratorView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var qrImage: UIImage?
+    @State private var transferCode: String?
     @State private var isGenerating = false
     @State private var error: String?
-    
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 24) {
@@ -31,7 +31,25 @@ struct QRCodeGeneratorView: View {
                     Text("Scan this code on your other device")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                    
+
+                    if let transferCode {
+                        VStack(spacing: 6) {
+                            Text("Then enter this code")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(ConfigTransferCode.formatted(transferCode))
+                                .font(.system(.title, design: .monospaced))
+                                .fontWeight(.semibold)
+                                .textSelection(.enabled)
+                                .accessibilityLabel(
+                                    Text(transferCode.map { String($0) }.joined(separator: " "))
+                                )
+                        }
+                        .padding()
+                        .frame(maxWidth: .infinity)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                    }
+
                     Text("Code expires in 10 minutes")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
@@ -71,36 +89,39 @@ struct QRCodeGeneratorView: View {
 
         do {
             // Gather secrets and settings via the shared transfer manager so
-            // both platforms use the same key list and payload format.
+            // both platforms use the same key list and payload format. Read from
+            // the canonical credential store the rest of the app uses.
             let manager = ConfigTransferManager.shared
-            let storage = SecureStorage(
-                configuration: SecureStorageConfiguration(
-                    service: "com.speak.ios.credentials"
-                )
-            )
-            let secrets = try await manager.gatherSecrets(storage: storage)
+            let secrets = try await manager.gatherSecrets(storage: AppSettings.canonicalCredentialStorage)
             let settings = manager.gatherSettings()
 
             guard !secrets.isEmpty || !settings.isEmpty else {
                 qrImage = nil
+                transferCode = nil
                 isGenerating = false
                 return
             }
 
-            let payload = try manager.generatePayload(
+            // The QR carries only ciphertext; the one-time code shown beneath it
+            // is what decrypts it, and it travels by the user reading it out.
+            let transfer = try manager.makeTransfer(
                 secrets: secrets,
                 settings: settings
             )
 
-            guard let scaledImage = manager.makeQRCodeImage(payload: payload) else {
-                throw ConfigTransferError.decodingFailed
+            guard let scaledImage = manager.makeQRCodeImage(payload: transfer.payload) else {
+                throw ConfigTransferError.qrGenerationFailed
             }
 
             let context = CIContext()
-            if let cgImage = context.createCGImage(scaledImage, from: scaledImage.extent) {
-                qrImage = UIImage(cgImage: cgImage)
+            guard let cgImage = context.createCGImage(scaledImage, from: scaledImage.extent) else {
+                throw ConfigTransferError.qrGenerationFailed
             }
+            qrImage = UIImage(cgImage: cgImage)
+            transferCode = transfer.code
         } catch {
+            qrImage = nil
+            transferCode = nil
             self.error = error.localizedDescription
         }
 
@@ -115,10 +136,17 @@ struct QRCodeScannerView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var scanner = QRScannerCoordinator()
     @State private var showingImportConfirmation = false
+    @State private var showingCodePrompt = false
+    /// The scanned ciphertext, held until the user types the code that unlocks it.
+    @State private var scannedEnvelope: String?
+    @State private var enteredCode = ""
+    /// Whether the last failure was a bad code, i.e. worth re-prompting instead
+    /// of sending the user back to the camera.
+    @State private var canRetryCode = false
     @State private var pendingPayload: ConfigTransferPayload?
     @State private var importError: String?
     @State private var isImporting = false
-    
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -163,14 +191,20 @@ struct QRCodeScannerView: View {
                     handleScannedCode(code)
                 }
             }
+            .alert("Enter Transfer Code", isPresented: $showingCodePrompt) {
+                TextField("\(ConfigTransferCode.length)-character code", text: $enteredCode)
+                    .textInputAutocapitalization(.characters)
+                    .autocorrectionDisabled()
+                Button("Unlock") { unlockScannedPayload() }
+                Button("Cancel", role: .cancel) { cancelPendingImport() }
+            } message: {
+                Text("Type the code shown next to the QR code on the other device.")
+            }
             .alert("Import Configuration?", isPresented: $showingImportConfirmation) {
                 Button("Import") {
                     Task { await importPayload() }
                 }
-                Button("Cancel", role: .cancel) {
-                    pendingPayload = nil
-                    scanner.startScanning()
-                }
+                Button("Cancel", role: .cancel) { cancelPendingImport() }
             } message: {
                 if let payload = pendingPayload {
                     Text("Import \(payload.secrets.count) API keys and \(payload.settings.count) settings?")
@@ -178,7 +212,7 @@ struct QRCodeScannerView: View {
             }
             .alert("Import Error", isPresented: .init(
                 get: { importError != nil },
-                set: { if !$0 { importError = nil; scanner.startScanning() } }
+                set: { if !$0 { dismissImportError() } }
             )) {
                 Button("OK") {}
             } message: {
@@ -196,45 +230,91 @@ struct QRCodeScannerView: View {
         }
     }
     
+    /// Nothing is decrypted at scan time: an encrypted payload is parked until
+    /// the user supplies the one-time code from the exporting device.
     private func handleScannedCode(_ code: String) {
         scanner.stopScanning()
-        
+
         do {
-            let payload = try ConfigTransferManager.shared.decodePayload(code)
-            
-            guard ConfigTransferManager.shared.validatePayloadFreshness(payload) else {
-                throw ConfigTransferError.payloadExpired
+            switch try ConfigTransferManager.shared.format(of: code) {
+            case .encrypted:
+                scannedEnvelope = code
+                enteredCode = ""
+                showingCodePrompt = true
+            case .legacy:
+                let payload = try ConfigTransferManager.shared.decodeLegacyPayload(code)
+                guard ConfigTransferManager.shared.validatePayloadFreshness(payload) else {
+                    throw ConfigTransferError.payloadExpired
+                }
+                pendingPayload = payload
+                showingImportConfirmation = true
             }
-            
-            pendingPayload = payload
-            showingImportConfirmation = true
         } catch {
             importError = error.localizedDescription
         }
     }
-    
+
+    /// Decrypts the parked payload with the typed code. A wrong code, an expired
+    /// code or a tampered payload all fail here, before any credential is stored.
+    private func unlockScannedPayload() {
+        guard let envelope = scannedEnvelope else { return }
+
+        do {
+            pendingPayload = try ConfigTransferManager.shared.decodePayload(envelope, code: enteredCode)
+            enteredCode = ""
+            showingImportConfirmation = true
+        } catch {
+            enteredCode = ""
+            // A mistyped code shouldn't cost the user another scan: keep the
+            // payload and re-prompt once the error is acknowledged. Anything
+            // else (expired, unknown version, corrupt) needs a fresh code.
+            let transferError = error as? ConfigTransferError
+            canRetryCode = transferError == .authenticationFailed || transferError == .invalidCode
+            importError = error.localizedDescription
+        }
+    }
+
+    private func dismissImportError() {
+        importError = nil
+        guard canRetryCode, scannedEnvelope != nil else {
+            cancelPendingImport()
+            return
+        }
+        canRetryCode = false
+        // Re-present on the next runloop pass so SwiftUI has finished
+        // dismissing the error alert before the code prompt appears.
+        Task { @MainActor in showingCodePrompt = true }
+    }
+
+    private func cancelPendingImport() {
+        pendingPayload = nil
+        scannedEnvelope = nil
+        enteredCode = ""
+        canRetryCode = false
+        scanner.startScanning()
+    }
+
     private func importPayload() async {
         guard let payload = pendingPayload else { return }
-        
+
         isImporting = true
-        
+
         do {
-            // Import secrets
-            let storage = SecureStorage(
-                configuration: SecureStorageConfiguration(
-                    service: "com.speak.ios.credentials"
-                )
-            )
-            
+            // Write to the canonical credential store the rest of the app reads,
+            // so imported keys are actually visible in Settings.
+            let storage = AppSettings.canonicalCredentialStorage
+
             for (key, value) in payload.secrets {
                 try await storage.storeSecret(value, identifier: key)
             }
-            
+
             // Import settings
             for (key, value) in payload.settings {
                 UserDefaults.standard.set(value, forKey: key)
             }
-            
+
+            pendingPayload = nil
+            scannedEnvelope = nil
             isImporting = false
             dismiss()
         } catch {
@@ -244,94 +324,4 @@ struct QRCodeScannerView: View {
     }
 }
 
-// MARK: - Camera Preview
-
-struct CameraPreviewView: UIViewRepresentable {
-    let session: AVCaptureSession
-    
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView(frame: .zero)
-        let previewLayer = AVCaptureVideoPreviewLayer(session: session)
-        previewLayer.videoGravity = .resizeAspectFill
-        view.layer.addSublayer(previewLayer)
-        context.coordinator.previewLayer = previewLayer
-        return view
-    }
-    
-    func updateUIView(_ uiView: UIView, context: Context) {
-        context.coordinator.previewLayer?.frame = uiView.bounds
-    }
-    
-    func makeCoordinator() -> Coordinator {
-        Coordinator()
-    }
-    
-    class Coordinator {
-        var previewLayer: AVCaptureVideoPreviewLayer?
-    }
-}
-
-// MARK: - QR Scanner Coordinator
-
-@MainActor
-class QRScannerCoordinator: NSObject, ObservableObject {
-    @Published var scannedCode: String?
-    @Published var isScanning = false
-    
-    let session = AVCaptureSession()
-    private let metadataOutput = AVCaptureMetadataOutput()
-    
-    override init() {
-        super.init()
-        setupSession()
-    }
-    
-    private func setupSession() {
-        guard let device = AVCaptureDevice.default(for: .video),
-              let input = try? AVCaptureDeviceInput(device: device)
-        else { return }
-        
-        if session.canAddInput(input) {
-            session.addInput(input)
-        }
-        
-        if session.canAddOutput(metadataOutput) {
-            session.addOutput(metadataOutput)
-            metadataOutput.setMetadataObjectsDelegate(self, queue: .main)
-            metadataOutput.metadataObjectTypes = [.qr]
-        }
-    }
-    
-    func startScanning() {
-        scannedCode = nil
-        isScanning = true
-        Task.detached { [weak self] in
-            self?.session.startRunning()
-        }
-    }
-    
-    func stopScanning() {
-        isScanning = false
-        Task.detached { [weak self] in
-            self?.session.stopRunning()
-        }
-    }
-}
-
-extension QRScannerCoordinator: AVCaptureMetadataOutputObjectsDelegate {
-    nonisolated func metadataOutput(
-        _ output: AVCaptureMetadataOutput,
-        didOutput metadataObjects: [AVMetadataObject],
-        from connection: AVCaptureConnection
-    ) {
-        guard let metadataObject = metadataObjects.first as? AVMetadataMachineReadableCodeObject,
-              metadataObject.type == .qr,
-              let stringValue = metadataObject.stringValue
-        else { return }
-        
-        Task { @MainActor in
-            scannedCode = stringValue
-        }
-    }
-}
 #endif

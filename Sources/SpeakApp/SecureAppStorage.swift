@@ -52,8 +52,21 @@ final class PermissionsManagerBridge: KeychainPermissionsChecking, @unchecked Se
 
 // MARK: - AppSettings Bridge
 
-/// Makes AppSettings conform to APIKeyIdentifierRegistry
+/// AppSettings acts as the registry for known API-key identifiers so
+/// SecureStorage can validate writes without coupling the core type to
+/// app-layer storage. Conformance is via empty extension to keep the
+/// registry surface minimal — no app logic leaks into SpeakCore.
 extension AppSettings: APIKeyIdentifierRegistry {}
+
+// Explicit registry adapter for tests: avoids forcing test doubles to
+// inherit from AppSettings.
+final class InMemoryIdentifierRegistry: APIKeyIdentifierRegistry {
+    private var identifiers: Set<String>
+    init(identifiers: Set<String> = []) { self.identifiers = identifiers }
+    func registerAPIKeyIdentifier(_ identifier: String) { identifiers.insert(identifier) }
+    func removeAPIKeyIdentifier(_ identifier: String) { identifiers.remove(identifier) }
+    var trackedAPIKeyIdentifiers: [String] { Array(identifiers) }
+}
 
 // MARK: - SecureAppStorage (Thin Wrapper)
 

@@ -139,37 +139,20 @@ public enum EncryptedSecretCrypto {
         return SymmetricKey(data: keyData)
     }
 
+    /// Shared with the QR config transfer via SpeakCore, so both password-based
+    /// features stretch their secrets identically.
     static func pbkdf2SHA256(
         password: Data,
         salt: Data,
         iterations: Int,
         keyByteCount: Int
     ) -> Data {
-        let hmacKey = SymmetricKey(data: password)
-        let blockCount = Int(ceil(Double(keyByteCount) / Double(SHA256.byteCount)))
-        var derived = Data()
-
-        for blockIndex in 1...blockCount {
-            var blockSalt = salt
-            var bigEndianIndex = UInt32(blockIndex).bigEndian
-            withUnsafeBytes(of: &bigEndianIndex) { blockSalt.append(contentsOf: $0) }
-
-            var iterationOutput = Data(HMAC<SHA256>.authenticationCode(for: blockSalt, using: hmacKey))
-            var block = iterationOutput
-
-            if iterations > 1 {
-                for _ in 2...iterations {
-                    iterationOutput = Data(HMAC<SHA256>.authenticationCode(for: iterationOutput, using: hmacKey))
-                    for index in block.indices {
-                        block[index] ^= iterationOutput[index]
-                    }
-                }
-            }
-
-            derived.append(block)
-        }
-
-        return Data(derived.prefix(keyByteCount))
+        KeyDerivation.pbkdf2SHA256(
+            password: password,
+            salt: salt,
+            iterations: iterations,
+            keyByteCount: keyByteCount
+        )
     }
 
     public static func encryptSecret(

@@ -233,14 +233,14 @@ extension SettingsView {
                   RoundedRectangle(cornerRadius: 8)
                     .fill(Color.brandAccentWarm.opacity(0.05))
                 )
-
-                Text("Scroll to view the full prompt.")
-                  .font(.caption)
-                  .foregroundStyle(.secondary)
                 .overlay(
                   RoundedRectangle(cornerRadius: 8)
                     .stroke(Color.brandAccentWarm.opacity(0.2), lineWidth: 1)
                 )
+
+                Text("Scroll to view the full prompt.")
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
               }
             }
           }

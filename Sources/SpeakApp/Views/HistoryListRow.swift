@@ -291,7 +291,10 @@ struct HistoryListRow: View { // swiftlint:disable:this type_body_length
     if let processed = processedTranscriptToDisplay {
       return processed
     }
-    if let raw = item.rawTranscription, !raw.isEmpty {
+    // Same emptiness test as `bestTranscript`, so a whitespace-only transcript
+    // can't make the row show blank preview text while the copy button is hidden.
+    if let raw = item.rawTranscription,
+      !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
       return raw
     }
     return item.trigger.hotKeyDescription
@@ -677,9 +680,12 @@ struct HistoryListRow: View { // swiftlint:disable:this type_body_length
     case .transcriptionBatch:
       return 1
     case .transcriptionLocal:
-      return 1
-    case .postProcessing:
+      // Distinct from .transcriptionBatch: equal ranks leave the sort order of
+      // the two phases unspecified, so the grouped summary could reorder itself
+      // between renders.
       return 2
+    case .postProcessing:
+      return 3
     }
   }
 

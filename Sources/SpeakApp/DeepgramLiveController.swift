@@ -298,7 +298,7 @@ private extension DeepgramLiveController {
         print("[DeepgramLiveController] ERROR: Deepgram API key is empty")
         throw DeepgramError.missingAPIKey
       }
-      print("[DeepgramLiveController] API key retrieved (length: \(apiKey.count))")
+      print("[DeepgramLiveController] API key retrieved")
       return apiKey
     } catch let error as SecureAppStorageError {
       if case .valueNotFound = error {

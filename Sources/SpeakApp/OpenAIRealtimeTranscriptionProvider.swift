@@ -282,7 +282,7 @@ final class OpenAIRealtimeLiveTranscriber: @unchecked Sendable {
     task.send(.string(json)) { [weak self] error in
       defer { sendGroup.leave() }
       guard let self else { return }
-      if let error, !self.isStoppingState(), !self.shouldIgnoreSocketError(error) {
+      if let error, !self.isStoppingState(), !WebSocketErrorFilter.shouldIgnore(error) {
         self.logger.error("Failed to send audio: \(error.localizedDescription)")
         self.currentOnError()?(error)
       }
@@ -314,7 +314,7 @@ final class OpenAIRealtimeLiveTranscriber: @unchecked Sendable {
         self.receiveMessages()
       case .failure(let error):
         if self.isStoppingState() { return }
-        if self.shouldIgnoreSocketError(error) {
+        if WebSocketErrorFilter.shouldIgnore(error) {
           // ENOTCONN / "Socket is not connected" is terminal — a
           // URLSessionWebSocketTask cannot be reused for receiving once
           // disconnected. Stop the receive loop instead of spinning every
@@ -426,15 +426,6 @@ private extension OpenAIRealtimeLiveTranscriber {
 
   func isStoppingState() -> Bool {
     withStateLock { isStopping }
-  }
-
-  func shouldIgnoreSocketError(_ error: Error) -> Bool {
-    let nsError = error as NSError
-    if nsError.domain == NSPOSIXErrorDomain, nsError.code == 57 { return true }
-    if nsError.localizedDescription.localizedCaseInsensitiveContains("socket is not connected") {
-      return true
-    }
-    return false
   }
 }
 

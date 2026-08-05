@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import Foundation
 import os.log
 
@@ -5,19 +6,28 @@ import os.log
 
 /// Cross-platform Deepgram WebSocket client for live transcription.
 /// Works on both macOS and iOS.
-public final class DeepgramLiveClient: StreamingTranscriptionClient, @unchecked Sendable {
+public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
     private let apiKey: String
     private let model: String
     private let language: String?
     private let sampleRate: Int
-    private var webSocketTask: URLSessionWebSocketTask?
     private let session: URLSession
     private let bufferPool: AudioBufferPool
     private let logger = Logger(subsystem: "com.speak.app", category: "DeepgramLiveClient")
+    private let stateLock = NSLock()
 
+    // Guarded by `stateLock`: mutated by the caller while URLSession callbacks read them.
+    private var webSocketTask: URLSessionWebSocketTask?
     private var onTranscript: ((String, Bool) -> Void)?
     private var onError: ((Error) -> Void)?
     private var isStopping: Bool = false
+
+    /// Bounded post-stop drain state: after `CloseStream` is sent, the trailing
+    /// final transcript is handed to the awaiting `finishAndWait()` instead of
+    /// `onTranscript`, so the caller appends it exactly once.
+    private let finishLock = NSLock()
+    private var finishContinuation: CheckedContinuation<String?, Never>?
+    private static let finishDrainBudget: TimeInterval = 1.0
 
     public init(
         apiKey: String,
@@ -43,9 +53,11 @@ public final class DeepgramLiveClient: StreamingTranscriptionClient, @unchecked 
         onTranscript: @escaping (String, Bool) -> Void,
         onError: @escaping (Error) -> Void
     ) {
-        isStopping = false
-        self.onTranscript = onTranscript
-        self.onError = onError
+        withStateLock {
+            isStopping = false
+            self.onTranscript = onTranscript
+            self.onError = onError
+        }
 
         var urlComponents = URLComponents(string: "wss://api.deepgram.com/v1/listen")!
         var queryItems = [
@@ -76,8 +88,19 @@ public final class DeepgramLiveClient: StreamingTranscriptionClient, @unchecked 
         var request = URLRequest(url: url)
         request.setValue("Token \(apiKey)", forHTTPHeaderField: "Authorization")
 
-        webSocketTask = session.webSocketTask(with: request)
-        webSocketTask?.resume()
+        let task = session.webSocketTask(with: request)
+        // `stop()` can land while the task is being created; publishing
+        // unconditionally would resurrect a session the caller already ended.
+        let published = withStateLock { () -> Bool in
+            guard !isStopping else { return false }
+            webSocketTask = task
+            return true
+        }
+        guard published else {
+            task.cancel(with: .goingAway, reason: nil)
+            return
+        }
+        task.resume()
 
         logger.info("Deepgram WebSocket connection started")
         receiveMessages()
@@ -86,7 +109,7 @@ public final class DeepgramLiveClient: StreamingTranscriptionClient, @unchecked 
     /// Sends raw audio data to the transcription service.
     /// - Parameter audioData: Raw audio data in linear16 format.
     public func sendAudio(_ audioData: Data) {
-        guard let webSocketTask, webSocketTask.state == .running else {
+        guard let task = currentWebSocketTask(), task.state == .running else {
             return
         }
 
@@ -96,18 +119,18 @@ public final class DeepgramLiveClient: StreamingTranscriptionClient, @unchecked 
         let dataToSend = buffer
         let message = URLSessionWebSocketTask.Message.data(dataToSend)
 
-        webSocketTask.send(message) { [weak self] error in
+        task.send(message) { [weak self] error in
             guard let self else { return }
 
             var returnBuffer = buffer
             self.bufferPool.returnBuffer(&returnBuffer)
 
             if let error {
-                if self.isStopping || self.shouldIgnoreSocketError(error) {
+                if self.isStoppingState() || self.shouldIgnoreSocketError(error) {
                     return
                 }
                 self.logger.error("Failed to send audio: \(error.localizedDescription)")
-                self.onError?(error)
+                self.currentOnError()?(error)
             }
         }
     }
@@ -118,18 +141,23 @@ public final class DeepgramLiveClient: StreamingTranscriptionClient, @unchecked 
     ///   - frameCount: Number of frames to send.
     public func sendAudioSamples(_ samples: UnsafePointer<Float>, frameCount: Int) {
         var buffer = bufferPool.checkout()
-        buffer.reserveCapacity(frameCount * 2)
+        buffer.reserveCapacity(frameCount * MemoryLayout<Int16>.size)
 
+        // Single-pass Float32 → Int16 conversion into a preallocated array,
+        // appended in one bulk copy instead of 2 bytes per sample.
+        var int16Samples = [Int16](repeating: 0, count: frameCount)
         for i in 0..<frameCount {
             let sample = samples[i]
             let clampedSample = max(-1.0, min(1.0, sample))
-            let int16Sample = Int16(clampedSample * Float(Int16.max))
-            withUnsafeBytes(of: int16Sample.littleEndian) { bytes in
-                buffer.append(contentsOf: bytes)
+            int16Samples[i] = Int16(clampedSample * Float(Int16.max)).littleEndian
+        }
+        int16Samples.withUnsafeBytes { rawBuffer in
+            if let baseAddress = rawBuffer.baseAddress {
+                buffer.append(baseAddress.assumingMemoryBound(to: UInt8.self), count: rawBuffer.count)
             }
         }
 
-        guard let webSocketTask, webSocketTask.state == .running else {
+        guard let task = currentWebSocketTask(), task.state == .running else {
             bufferPool.returnBuffer(&buffer)
             return
         }
@@ -137,34 +165,69 @@ public final class DeepgramLiveClient: StreamingTranscriptionClient, @unchecked 
         let dataToSend = buffer
         let message = URLSessionWebSocketTask.Message.data(dataToSend)
 
-        webSocketTask.send(message) { [weak self] error in
+        task.send(message) { [weak self] error in
             guard let self else { return }
 
             var returnBuffer = buffer
             self.bufferPool.returnBuffer(&returnBuffer)
 
             if let error {
-                if self.isStopping || self.shouldIgnoreSocketError(error) {
+                if self.isStoppingState() || self.shouldIgnoreSocketError(error) {
                     return
                 }
                 self.logger.error("Failed to send audio: \(error.localizedDescription)")
-                self.onError?(error)
+                self.currentOnError()?(error)
             }
         }
     }
 
+    /// Graceful stop: asks Deepgram to flush buffered audio with a
+    /// `CloseStream` frame, waits (bounded) for the trailing final transcript,
+    /// then closes the socket — so words spoken just before stop aren't lost.
+    ///
+    /// Returns a final transcript segment that was *not* delivered through
+    /// `onTranscript`, or `nil` when nothing new arrived within the budget.
+    public func finishAndWait() async -> String? {
+        guard let task = currentWebSocketTask(), task.state == .running else {
+            stop()
+            return nil
+        }
+
+        let transcript: String? = await withCheckedContinuation { continuation in
+            finishLock.lock()
+            finishContinuation = continuation
+            finishLock.unlock()
+
+            // Deepgram flushes and finalises any buffered audio on CloseStream.
+            // A send failure just means the socket is already gone; the bounded
+            // wait below still resolves via the timeout.
+            task.send(.string(#"{"type":"CloseStream"}"#)) { _ in }
+
+            DispatchQueue.global().asyncAfter(deadline: .now() + Self.finishDrainBudget) { [weak self] in
+                self?.resolveFinish(with: nil)
+            }
+        }
+        stop()
+        return transcript
+    }
+
     /// Stops the transcription session.
     public func stop() {
-        isStopping = true
+        let task = withStateLock { () -> URLSessionWebSocketTask? in
+            isStopping = true
+            let task = webSocketTask
+            webSocketTask = nil
+            return task
+        }
         bufferPool.logMetrics()
-        webSocketTask?.cancel(with: .normalClosure, reason: nil)
-        webSocketTask = nil
+        task?.cancel(with: .normalClosure, reason: nil)
+        resolveFinish(with: nil)
         logger.info("Deepgram WebSocket connection closed")
     }
 
     /// Check if the client is currently connected.
     public var isConnected: Bool {
-        webSocketTask?.state == .running
+        currentWebSocketTask()?.state == .running
     }
 
     // MARK: - Private
@@ -181,7 +244,8 @@ public final class DeepgramLiveClient: StreamingTranscriptionClient, @unchecked 
     }
 
     private func receiveMessages() {
-        webSocketTask?.receive { [weak self] result in
+        guard let task = currentWebSocketTask() else { return }
+        task.receive { [weak self] result in
             guard let self else { return }
 
             switch result {
@@ -190,11 +254,11 @@ public final class DeepgramLiveClient: StreamingTranscriptionClient, @unchecked 
                 self.receiveMessages()
 
             case .failure(let error):
-                if self.isStopping || self.shouldIgnoreSocketError(error) {
+                if self.isStoppingState() || self.shouldIgnoreSocketError(error) {
                     return
                 }
                 self.logger.error("WebSocket receive error: \(error.localizedDescription)")
-                self.onError?(error)
+                self.currentOnError()?(error)
             }
         }
     }
@@ -218,6 +282,13 @@ public final class DeepgramLiveClient: StreamingTranscriptionClient, @unchecked 
         do {
             let response = try JSONDecoder().decode(DeepgramStreamResponse.self, from: data)
 
+            // After CloseStream, Metadata is the stream's last message — stop
+            // waiting even when no trailing final transcript arrived.
+            if response.type == "Metadata" {
+                resolveFinish(with: nil)
+                return
+            }
+
             guard let channel = response.channel,
                   let alternative = channel.alternatives.first,
                   !alternative.transcript.isEmpty else {
@@ -225,17 +296,46 @@ public final class DeepgramLiveClient: StreamingTranscriptionClient, @unchecked 
             }
 
             let isFinal = response.is_final ?? false
-            onTranscript?(alternative.transcript, isFinal)
+            if isFinal, resolveFinish(with: alternative.transcript) {
+                // Trailing final consumed by finishAndWait(); don't also
+                // deliver it through onTranscript.
+                return
+            }
+            currentOnTranscript()?(alternative.transcript, isFinal)
 
         } catch {
             logger.debug("Failed to parse transcript response: \(error.localizedDescription)")
         }
     }
 
+    /// Resumes a pending `finishAndWait()` exactly once. Returns whether a
+    /// waiter consumed the value.
+    @discardableResult
+    private func resolveFinish(with transcript: String?) -> Bool {
+        finishLock.lock()
+        let continuation = finishContinuation
+        finishContinuation = nil
+        finishLock.unlock()
+        guard let continuation else { return false }
+        continuation.resume(returning: transcript)
+        return true
+    }
+
     private func extractLanguageCode(from locale: String) -> String {
         let components = locale.split(whereSeparator: { $0 == "_" || $0 == "-" })
         return components.first.map(String.init)?.lowercased() ?? locale.lowercased()
     }
+
+    private func withStateLock<T>(_ block: () -> T) -> T {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return block()
+    }
+
+    private func currentWebSocketTask() -> URLSessionWebSocketTask? { withStateLock { webSocketTask } }
+    private func isStoppingState() -> Bool { withStateLock { isStopping } }
+    private func currentOnTranscript() -> ((String, Bool) -> Void)? { withStateLock { onTranscript } }
+    private func currentOnError() -> ((Error) -> Void)? { withStateLock { onError } }
 }
 
 // MARK: - Response Models
@@ -250,6 +350,7 @@ private struct DeepgramStreamResponse: Decodable {
         let alternatives: [Alternative]
     }
 
+    let type: String?
     let channel: Channel?
     let is_final: Bool?
 }

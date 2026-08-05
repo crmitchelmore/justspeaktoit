@@ -44,7 +44,7 @@ private final class OpenAIRealtimePCMBufferPool: @unchecked Sendable {
 ///
 /// Mirrors the macOS `OpenAIRealtimeLiveTranscriber` / `OpenAIRealtimeLiveController`
 /// pair, collapsed into a single `ObservableObject` to match the existing
-/// iOS provider shape (`DeepgramLiveTranscriber`, `ElevenLabsLiveTranscriber`).
+/// iOS provider shape (`SharedClientLiveTranscriber`, `iOSLiveTranscriber`).
 ///
 /// Endpoint: `wss://api.openai.com/v1/realtime?intent=transcription`.
 /// All Realtime transcription models use this GA transcription session shape;
@@ -103,6 +103,13 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
     /// Persistent audio recorder — saves audio to disk alongside transcription.
     public let audioRecorder = AudioRecordingPersistence()
 
+    /// Serial queue that takes tap buffers off the real-time audio thread —
+    /// persistence, resampling, and the base64/JSON encode inside
+    /// `sendAudio` all run here instead of in the tap callback.
+    private let audioProcessingQueue = DispatchQueue(label: "com.speak.ios.openairealtime.audioProcessing")
+    /// Pool for tap-buffer copies so the hot path never allocates.
+    private let tapBufferPool = PCMBufferPool(maximumBuffers: 4)
+
     // MARK: - Init
 
     public init(audioSessionManager: AudioSessionManager) {
@@ -155,6 +162,11 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
         hasFinishedStopping = true
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
+
+        // Buffers handed to the queue just before the tap came off are still
+        // being written and sent; let them land before the input buffer is
+        // committed and the recorder is closed.
+        await audioProcessingQueue.drainPendingWork()
 
         preStopCompletedItemIDs = Set(finalsByItem.keys)
 
@@ -319,14 +331,20 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
         let client = transcriber
 
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) { [weak self] buffer, _ in
-            self?.audioRecorder.writeBuffer(buffer)
-            self?.convertAndSendAudio(
-                buffer: buffer,
-                nativeFormat: nativeFormat,
-                targetFormat: target,
-                converter: conv,
-                client: client
-            )
+            // Copy the buffer and hop off the real-time audio thread —
+            // heavy work in the tap makes CoreAudio drop mic buffers.
+            guard let self, let copied = self.tapBufferPool.copy(buffer) else { return }
+            self.audioProcessingQueue.async {
+                defer { self.tapBufferPool.recycle(copied) }
+                self.audioRecorder.writeBuffer(copied)
+                self.convertAndSendAudio(
+                    buffer: copied,
+                    nativeFormat: nativeFormat,
+                    targetFormat: target,
+                    converter: conv,
+                    client: client
+                )
+            }
         }
 
         audioEngine.prepare()
@@ -378,7 +396,15 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
         }
         defer { openAIRealtimeOutputBufferPool.recycle(outputBuffer) }
         var error: NSError?
+        var didProvideInput = false
         let status = converter.convert(to: outputBuffer, error: &error) { _, outStatus in
+            // One-shot input: returning the same buffer with .haveData again
+            // would make the converter duplicate audio frames.
+            guard !didProvideInput else {
+                outStatus.pointee = .noDataNow
+                return nil
+            }
+            didProvideInput = true
             outStatus.pointee = .haveData
             return buffer
         }
@@ -406,7 +432,7 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
     }
 
     private func setupInterruptionHandling() {
-        audioSessionManager.onInterruption = { [weak self] began in
+        audioSessionManager.addInterruptionObserver(owner: self) { [weak self] began in
             Task { @MainActor in
                 if began { self?.handleInterruption() }
             }

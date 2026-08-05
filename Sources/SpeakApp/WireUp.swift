@@ -215,6 +215,7 @@ final class AppEnvironment: ObservableObject {
     shortcuts.register(action: .stopTTS) { [weak self] in
       self?.tts.stop()
     }
+    shortcuts.register(action: .pasteLastHistoryItem) { [weak self] in self?.pasteLastHistoryItem() }
     registerNavigationShortcutHandlers()
     registerQuickVoiceShortcutHandlers()
     shortcuts.startMonitoring()
@@ -304,6 +305,29 @@ final class AppEnvironment: ObservableObject {
     }
 
     return selectedText
+  }
+}
+
+extension AppEnvironment {
+  /// Pastes the most recent history item's text into the frontmost app,
+  /// preferring the post-processed transcription over the raw one. Reuses the
+  /// same insertion path as transcription delivery (accessibility or paste,
+  /// per the user's configured output method).
+  func pasteLastHistoryItem() {
+    let text = history.items.first.flatMap { $0.postProcessedTranscription ?? $0.rawTranscription }
+    guard let text, PasteTextOutput.hasDeliverableText(text) else {
+      hud.finishFailure(
+        headline: "Nothing to paste",
+        message: "No history items with text yet.",
+        displayDuration: 2.5
+      )
+      return
+    }
+    let output = SmartTextOutput(permissionsManager: permissions, appSettings: settings)
+    let result = output.output(text: text)
+    if let error = result.error {
+      hud.finishFailure(headline: "Delivery failed", message: error.localizedDescription)
+    }
   }
 }
 
@@ -436,8 +460,26 @@ enum WireUp {
       }
     }
 
+    // The listener can also fail asynchronously, after start() has already returned
+    // (NWListener.start is non-throwing). Handle that the same way as a synchronous
+    // failure so the toggle never stays ON with a dead listener behind it — this covers
+    // both the launch-time start below and the one in Settings, which share this server.
+    environment.transportServer.onFailure = { error in
+      Task { @MainActor in
+        SpeakLogger.logError(error, context: "Send to Mac listener failed", logger: SpeakLogger.transport)
+        settings.enableSendToMac = false
+      }
+    }
+
     if settings.enableSendToMac {
-      try? environment.transportServer.start()
+      do {
+        try environment.transportServer.start()
+      } catch {
+        // Keep the stored preference honest: leaving the toggle ON while the
+        // listener never started would silently drop every "Send to Mac" session.
+        SpeakLogger.logError(error, context: "Send to Mac startup", logger: SpeakLogger.transport)
+        settings.enableSendToMac = false
+      }
     }
 
     #if APP_STORE

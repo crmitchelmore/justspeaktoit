@@ -121,5 +121,21 @@ final class TranscriptionRecordingServiceTextTests: XCTestCase {
         )
         XCTAssertEqual(text, "fallback")
     }
+
+    /// A stop with no active session (e.g. the second of a rapid double
+    /// Action Button press) must be a no-op: no history entry, no clipboard
+    /// write, and an empty result rather than stale text.
+    func testStopWhenNotRunningReturnsEmptyNoOpResult() async {
+        let service = TranscriptionRecordingService.shared
+        XCTAssertFalse(service.isRunning)
+
+        let result = await service.stopRecording()
+
+        XCTAssertEqual(result.text, "")
+        XCTAssertEqual(result.duration, 0)
+        XCTAssertFalse(service.isRunning)
+        XCTAssertEqual(service.partialText, "")
+        XCTAssertEqual(service.wordCount, 0)
+    }
 }
 #endif

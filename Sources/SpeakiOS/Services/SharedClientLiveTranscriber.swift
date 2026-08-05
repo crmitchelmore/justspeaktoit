@@ -9,8 +9,11 @@ import os.log
 /// It captures microphone audio with `AVAudioEngine`, converts it to linear16
 /// mono PCM at the provider's expected sample rate, and streams it to a client
 /// built by ``LiveTranscriptionClientFactory``. This is the single iOS capture
-/// path for every provider whose client lives in `SpeakCore`, so adding a new
-/// provider needs only its shared client + a factory case — no new iOS wiring.
+/// path for every provider whose client lives in `SpeakCore` — Deepgram and
+/// ElevenLabs included — so adding a new provider needs only its shared client
+/// + a factory case, with no new iOS wiring. Anything genuinely per-provider
+/// (sample rate, API model name, stop-grace semantics) is read from the route
+/// or the client's own contract rather than branched on here.
 @MainActor
 public final class SharedClientLiveTranscriber: ObservableObject {
     @Published private(set) public var isRunning = false
@@ -31,6 +34,18 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     private var startTime: Date?
     private var accumulatedText = ""
 
+    /// Persistent audio recorder — saves audio to disk alongside transcription,
+    /// so a session survives the network dropping mid-stream.
+    public let audioRecorder = AudioRecordingPersistence()
+
+    /// Serial queue that takes tap buffers off the real-time audio thread —
+    /// persistence and resample + network sends all run here, not in the tap
+    /// callback.
+    private let audioProcessingQueue = DispatchQueue(label: "com.speak.ios.sharedclient.audioProcessing")
+    /// Pools for tap-buffer copies and converter output so the hot path never allocates.
+    private let tapBufferPool = PCMBufferPool(maximumBuffers: 4)
+    private let outputBufferPool = PCMBufferPool(maximumBuffers: 2)
+
     public init(
         route: LiveTranscriptionRoute,
         apiKey: String,
@@ -46,6 +61,15 @@ public final class SharedClientLiveTranscriber: ObservableObject {
 
     public func start() async throws {
         guard !isRunning else { return }
+
+        guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            let err = StreamingClientError.missingAPIKey(provider: route.provider.displayName)
+            SpeakLogger.logError(
+                err, context: "SharedClientLiveTranscriber.start", logger: SpeakLogger.transcription
+            )
+            self.error = err
+            throw err
+        }
 
         guard let client = LiveTranscriptionClientFactory.makeClient(
             for: route, apiKey: apiKey, language: language
@@ -91,15 +115,12 @@ public final class SharedClientLiveTranscriber: ObservableObject {
 
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
-        if let finalizingClient = client as? FinalizingStreamingTranscriptionClient {
-            if let finalTranscript = await finalizingClient.finishAndWait(),
-               finalText != finalTranscript {
-                handleTranscript(text: finalTranscript, isFinal: true)
-            }
-        } else {
-            client?.stop()
-        }
-        client = nil
+        // Buffers handed to the queue just before the tap came off are still
+        // being written and sent; let them land before the client is finalised
+        // and the recorder is closed.
+        await audioProcessingQueue.drainPendingWork()
+        await finishClient()
+        _ = audioRecorder.stopRecording()
         isRunning = false
         audioSessionManager.deactivate()
 
@@ -121,11 +142,38 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         audioEngine.inputNode.removeTap(onBus: 0)
         client?.stop()
         client = nil
+        // Cancel persistent recording (keeps the partial file).
+        audioRecorder.cancelRecording()
         isRunning = false
         audioSessionManager.deactivate()
     }
 
     // MARK: - Private
+
+    /// Closes the client, giving providers that can still deliver words a
+    /// bounded grace period first.
+    ///
+    /// Providers whose finish flushes buffered audio (Deepgram's `CloseStream`)
+    /// always drain, because untranscribed audio can still yield words. For
+    /// providers whose finish is only a bounded wait (ElevenLabs), draining
+    /// with nothing outstanding would just add latency, so the socket closes
+    /// straight away when every interim has already been finalised.
+    private func finishClient() async {
+        defer { client = nil }
+        guard let finalizingClient = client as? FinalizingStreamingTranscriptionClient else {
+            client?.stop()
+            return
+        }
+        guard finalizingClient.finishFlushesBufferedAudio || partialText != accumulatedText else {
+            finalizingClient.stop()
+            return
+        }
+        if let finalTranscript = await finalizingClient.finishAndWait(),
+           !finalTranscript.isEmpty,
+           finalText != finalTranscript {
+            handleTranscript(text: finalTranscript, isFinal: true)
+        }
+    }
 
     private func makeResult(text: String, duration: TimeInterval) -> TranscriptionResult {
         TranscriptionResult(
@@ -161,83 +209,6 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         }
     }
 
-    private func startAudioEngine() throws {
-        let inputNode = audioEngine.inputNode
-        let nativeFormat = inputNode.outputFormat(forBus: 0)
-        let (targetFormat, converter) = try makeConverter(from: nativeFormat)
-        let sampleRate = Double(route.sampleRate)
-        let client = self.client
-
-        let conversion = Conversion(
-            targetFormat: targetFormat, converter: converter, targetSampleRate: sampleRate
-        )
-        let nativeSampleRate = nativeFormat.sampleRate
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) { [weak self] buffer, _ in
-            self?.convertAndSend(
-                buffer: buffer, nativeSampleRate: nativeSampleRate,
-                conversion: conversion, client: client
-            )
-        }
-
-        audioEngine.prepare()
-        try audioEngine.start()
-    }
-
-    /// Bundles the audio-conversion context handed to the capture tap.
-    private struct Conversion {
-        let targetFormat: AVAudioFormat
-        let converter: AVAudioConverter
-        let targetSampleRate: Double
-    }
-
-    private func makeConverter(
-        from nativeFormat: AVAudioFormat
-    ) throws -> (AVAudioFormat, AVAudioConverter) {
-        guard let targetFormat = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: Double(route.sampleRate),
-            channels: 1,
-            interleaved: false
-        ), let converter = AVAudioConverter(from: nativeFormat, to: targetFormat) else {
-            let err = iOSTranscriptionError.audioSessionFailed(
-                NSError(domain: "SharedClientLiveTranscriber", code: -1,
-                        userInfo: [NSLocalizedDescriptionKey: "Failed to build audio converter"])
-            )
-            self.error = err
-            throw err
-        }
-        return (targetFormat, converter)
-    }
-
-    private nonisolated func convertAndSend(
-        buffer: AVAudioPCMBuffer,
-        nativeSampleRate: Double,
-        conversion: Conversion,
-        client: StreamingTranscriptionClient?
-    ) {
-        let ratio = conversion.targetSampleRate / nativeSampleRate
-        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 1
-        guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: conversion.targetFormat, frameCapacity: capacity) else {
-            return
-        }
-        var conversionError: NSError?
-        let status = conversion.converter.convert(to: outputBuffer, error: &conversionError) { _, outStatus in
-            outStatus.pointee = .haveData
-            return buffer
-        }
-        guard status != .error, let channelData = outputBuffer.floatChannelData?[0] else { return }
-
-        let frameCount = Int(outputBuffer.frameLength)
-        guard frameCount > 0 else { return }
-        var samples = [Int16](repeating: 0, count: frameCount)
-        for index in 0..<frameCount {
-            let clamped = max(-1.0, min(1.0, channelData[index]))
-            samples[index] = Int16(clamped * Float(Int16.max))
-        }
-        let data = samples.withUnsafeBufferPointer { Data(buffer: $0) }
-        client?.sendAudio(data)
-    }
-
     private func resetState() {
         partialText = ""
         finalText = ""
@@ -248,7 +219,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     }
 
     private func setupInterruptionHandling() {
-        audioSessionManager.onInterruption = { [weak self] began in
+        audioSessionManager.addInterruptionObserver(owner: self) { [weak self] began in
             Task { @MainActor in
                 guard began, let self, self.isRunning else { return }
                 self.error = iOSTranscriptionError.interrupted
@@ -272,7 +243,10 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         } else {
             partialText = accumulatedText.isEmpty ? text : accumulatedText + " " + text
         }
-        onPartialResult?(text, isFinal)
+        // Contract: always deliver the full display transcript (accumulated
+        // finals plus any trailing partial), matching iOSLiveTranscriber and
+        // OpenAIRealtimeLiveTranscriber.
+        onPartialResult?(partialText, isFinal)
     }
 
     private func handleError(_ error: Error) {
@@ -280,4 +254,105 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         onError?(error)
     }
 }
+
+// MARK: - Audio capture
+
+private extension SharedClientLiveTranscriber {
+    func startAudioEngine() throws {
+        let inputNode = audioEngine.inputNode
+        let nativeFormat = inputNode.outputFormat(forBus: 0)
+        let (targetFormat, converter) = try makeConverter(from: nativeFormat)
+        let sampleRate = Double(route.sampleRate)
+        let client = self.client
+
+        let conversion = Conversion(
+            targetFormat: targetFormat, converter: converter, targetSampleRate: sampleRate
+        )
+        let nativeSampleRate = nativeFormat.sampleRate
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) { [weak self] buffer, _ in
+            // Copy the buffer and hop off the real-time audio thread —
+            // heavy work in the tap makes CoreAudio drop mic buffers.
+            guard let self, let copied = self.tapBufferPool.copy(buffer) else { return }
+            self.audioProcessingQueue.async {
+                defer { self.tapBufferPool.recycle(copied) }
+                self.audioRecorder.writeBuffer(copied)
+                self.convertAndSend(
+                    buffer: copied, nativeSampleRate: nativeSampleRate,
+                    conversion: conversion, client: client
+                )
+            }
+        }
+
+        audioEngine.prepare()
+        try audioEngine.start()
+        try? audioRecorder.startRecording(format: nativeFormat)
+    }
+
+    /// Bundles the audio-conversion context handed to the capture tap.
+    struct Conversion {
+        let targetFormat: AVAudioFormat
+        let converter: AVAudioConverter
+        let targetSampleRate: Double
+    }
+
+    func makeConverter(
+        from nativeFormat: AVAudioFormat
+    ) throws -> (AVAudioFormat, AVAudioConverter) {
+        guard let targetFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: Double(route.sampleRate),
+            channels: 1,
+            interleaved: false
+        ), let converter = AVAudioConverter(from: nativeFormat, to: targetFormat) else {
+            let err = iOSTranscriptionError.audioSessionFailed(
+                NSError(domain: "SharedClientLiveTranscriber", code: -1,
+                        userInfo: [NSLocalizedDescriptionKey: "Failed to build audio converter"])
+            )
+            self.error = err
+            throw err
+        }
+        return (targetFormat, converter)
+    }
+
+    nonisolated func convertAndSend(
+        buffer: AVAudioPCMBuffer,
+        nativeSampleRate: Double,
+        conversion: Conversion,
+        client: StreamingTranscriptionClient?
+    ) {
+        let ratio = conversion.targetSampleRate / nativeSampleRate
+        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 1
+        guard let outputBuffer = outputBufferPool.buffer(
+            format: conversion.targetFormat, frameCapacity: capacity
+        ) else {
+            return
+        }
+        defer { outputBufferPool.recycle(outputBuffer) }
+        var conversionError: NSError?
+        var didProvideInput = false
+        let status = conversion.converter.convert(to: outputBuffer, error: &conversionError) { _, outStatus in
+            // One-shot input: returning the same buffer with .haveData again
+            // would make the converter duplicate audio frames.
+            guard !didProvideInput else {
+                outStatus.pointee = .noDataNow
+                return nil
+            }
+            didProvideInput = true
+            outStatus.pointee = .haveData
+            return buffer
+        }
+        guard status != .error, let channelData = outputBuffer.floatChannelData?[0] else { return }
+
+        let frameCount = Int(outputBuffer.frameLength)
+        guard frameCount > 0 else { return }
+        var samples = [Int16](repeating: 0, count: frameCount)
+        for index in 0..<frameCount {
+            let clamped = max(-1.0, min(1.0, channelData[index]))
+            samples[index] = Int16(clamped * Float(Int16.max))
+        }
+        let data = samples.withUnsafeBufferPointer { Data(buffer: $0) }
+        client?.sendAudio(data)
+    }
+}
+
 #endif

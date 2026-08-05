@@ -38,6 +38,19 @@ public protocol FinalizingStreamingTranscriptionClient: StreamingTranscriptionCl
     /// Commits pending input, waits for the provider's final transcript (with
     /// an implementation-defined timeout), then closes the connection.
     func finishAndWait() async -> String?
+
+    /// Whether `finishAndWait()` actively flushes audio the provider has
+    /// received but not yet transcribed (e.g. Deepgram's `CloseStream`).
+    ///
+    /// When `true` the caller must always finish gracefully, because unseen
+    /// words can still arrive. When `false` the call is only a bounded wait for
+    /// an already-pending transcript, so a caller with nothing outstanding can
+    /// close immediately instead of burning the drain budget.
+    var finishFlushesBufferedAudio: Bool { get }
+}
+
+public extension FinalizingStreamingTranscriptionClient {
+    var finishFlushesBufferedAudio: Bool { true }
 }
 
 // MARK: - Providers
@@ -116,6 +129,28 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
         case .speechmatics: return "Speechmatics"
         case .xai: return "xAI"
         }
+    }
+
+    /// Sign-up/console page where the user can create this provider's API
+    /// key, or `nil` for on-device providers. Both platforms' "API key
+    /// required" alerts derive their "Get API Key" link from this so the
+    /// provider metadata never drifts between Mac and iPhone.
+    public var apiKeyURL: URL? {
+        let website: String
+        switch self {
+        case .apple: return nil
+        case .deepgram: website = "https://deepgram.com"
+        case .cartesia: website = "https://cartesia.ai"
+        case .gladia: website = "https://www.gladia.io"
+        case .modulate: website = "https://www.modulate-developer-apis.com/web/docs.html"
+        case .assemblyai: website = "https://assemblyai.com"
+        case .soniox: website = "https://soniox.com"
+        case .elevenlabs: website = "https://elevenlabs.io"
+        case .openai: website = "https://platform.openai.com"
+        case .speechmatics: website = "https://www.speechmatics.com"
+        case .xai: website = "https://console.x.ai"
+        }
+        return URL(string: website)
     }
 }
 
@@ -241,6 +276,7 @@ public enum LiveTranscriptionClientError: LocalizedError {
 public enum StreamingClientError: LocalizedError {
     case invalidURL
     case invalidAPIKey(provider: String)
+    case missingAPIKey(provider: String)
 
     public var errorDescription: String? {
         switch self {
@@ -248,6 +284,8 @@ public enum StreamingClientError: LocalizedError {
             return "Could not build the streaming transcription URL."
         case .invalidAPIKey(let provider):
             return "\(provider) rejected the API key. Check it in Settings."
+        case .missingAPIKey(let provider):
+            return "\(provider) API key is missing. Please configure it in Settings."
         }
     }
 }

@@ -165,6 +165,9 @@ public final class AppSettings: ObservableObject {
     private static let logger = Logger(subsystem: "com.justspeaktoit.ios", category: "AppSettings")
     private var keyChangeObserver: NSObjectProtocol?
     private var syncedKeyReloadDepth = 0
+    /// The async keychain load kicked off by `init`. `ensureKeysLoaded()`
+    /// awaits it so cold-start callers never read the placeholder empty keys.
+    private var initialKeyLoadTask: Task<Void, Never>?
 
     /// Persists (or clears when empty) an API key on the canonical secure store.
     /// Keychain failures are logged rather than silently dropped so a key that
@@ -307,13 +310,21 @@ public final class AppSettings: ObservableObject {
         // values from legacy iOS keychain locations first. Default-provider
         // selection runs afterwards so it sees the loaded keys. Assigning each
         // @Published value re-persists it via didSet, which is harmless.
-        Task { @MainActor [weak self] in
+        initialKeyLoadTask = Task { @MainActor [weak self] in
             guard let self else { return }
             await Self.migrateLegacyKeysIfNeeded()
             await self.reloadSyncedAPIKeys()
             self.observeSecureStorageChanges()
             self.configureDefaultProviderIfNeeded()
         }
+    }
+
+    /// Waits until the initial keychain load kicked off by `init` has finished.
+    /// Idempotent and cheap once loaded. Recording paths await this before
+    /// reading API keys so a cold launch (e.g. from the Action Button) doesn't
+    /// see the placeholder empty keys and silently fall back to Apple Speech.
+    public func ensureKeysLoaded() async {
+        await initialKeyLoadTask?.value
     }
 
     deinit {
@@ -2260,54 +2271,17 @@ private struct IOSMissingTranscriptionAPIKeyAlert: Identifiable {
 
     @MainActor
     init?(modelID: String, settings: AppSettings) {
-        let requirement: IOSProviderRequirement?
-        if modelID.hasPrefix("deepgram") {
-            requirement = IOSProviderRequirement(
-                provider: TranscriptionProviderMetadata(
-                    id: "deepgram",
-                    displayName: "Deepgram",
-                    website: "https://deepgram.com"
-                ),
-                modelName: "Deepgram Nova-3",
-                hasKey: settings.hasDeepgramKey
-            )
-        } else if modelID.hasPrefix("elevenlabs") {
-            requirement = IOSProviderRequirement(
-                provider: TranscriptionProviderMetadata(
-                    id: "elevenlabs",
-                    displayName: "ElevenLabs",
-                    website: "https://elevenlabs.io"
-                ),
-                modelName: "ElevenLabs Scribe",
-                hasKey: settings.hasElevenLabsKey
-            )
-        } else if modelID.hasPrefix("openai") {
-            requirement = IOSProviderRequirement(
-                provider: TranscriptionProviderMetadata(
-                    id: "openai",
-                    displayName: "OpenAI",
-                    website: "https://platform.openai.com"
-                ),
-                modelName: ModelCatalog.friendlyName(for: modelID),
-                hasKey: settings.hasOpenAIKey
-            )
-        } else {
-            requirement = nil
-        }
-
-        guard let requirement, !requirement.hasKey else {
+        // Provider metadata is single-sourced from SpeakCore's live routing so
+        // every provider with a missing key triggers the alert, matching Mac.
+        guard let route = LiveTranscriptionRouting.route(for: modelID),
+              let apiKeyIdentifier = route.apiKeyIdentifier,
+              !settings.storedAPIKeyIdentifiers.contains(apiKeyIdentifier) else {
             return nil
         }
 
-        providerName = requirement.provider.displayName
-        modelName = requirement.modelName
-        apiKeyURL = requirement.provider.apiKeyURL
+        providerName = route.provider.displayName
+        modelName = ModelCatalog.friendlyName(for: modelID)
+        apiKeyURL = route.provider.apiKeyURL
     }
-}
-
-private struct IOSProviderRequirement {
-    let provider: TranscriptionProviderMetadata
-    let modelName: String
-    let hasKey: Bool
 }
 #endif

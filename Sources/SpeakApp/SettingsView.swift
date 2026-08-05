@@ -1193,7 +1193,13 @@ struct SettingsView: View {
               set: { newValue in
                 settings.enableSendToMac = newValue
                 if newValue {
-                  try? environment.transportServer.start()
+                  do {
+                    try environment.transportServer.start()
+                  } catch {
+                    // Reflect reality: the listener did not start, so flip the
+                    // toggle back off and let the error label explain why.
+                    settings.enableSendToMac = false
+                  }
                 } else {
                   environment.transportServer.stop()
                 }
@@ -1204,6 +1210,16 @@ struct SettingsView: View {
           .speakTooltip(
             "When enabled, your Mac will advertise itself on the local network and accept connections from Speak iOS."
           )
+
+          if let transportError = environment.transportServer.error,
+             !environment.transportServer.isRunning {
+            Label(
+              "Send to Mac could not start: \(transportError.localizedDescription)",
+              systemImage: "exclamationmark.triangle.fill"
+            )
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.orange)
+          }
 
           if settings.enableSendToMac {
             Divider()

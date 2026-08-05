@@ -12,11 +12,54 @@ public final class AudioSessionManager: ObservableObject {
     private var interruptionObserver: NSObjectProtocol?
     private var routeChangeObserver: NSObjectProtocol?
 
-    public var onInterruption: ((Bool) -> Void)?
-    public var onRouteChange: (() -> Void)?
+    /// A registered audio-session callback. The owner is held weakly so
+    /// entries registered by a transcriber are pruned automatically once that
+    /// transcriber is deallocated.
+    private struct Observer<Handler> {
+        weak var owner: AnyObject?
+        let handler: Handler
+    }
+
+    private var interruptionObservers: [UUID: Observer<(Bool) -> Void>] = [:]
+    private var routeChangeObservers: [UUID: Observer<() -> Void>] = [:]
 
     public init() {
         setupNotificationObservers()
+    }
+
+    /// Registers an interruption handler. Unlike a single-slot closure,
+    /// multiple observers (one per transcriber) can coexist; each is invoked
+    /// on every interruption. The returned token can be passed to
+    /// `removeInterruptionObserver(_:)`; otherwise the entry is pruned once
+    /// `owner` deallocates.
+    @discardableResult
+    public func addInterruptionObserver(
+        owner: AnyObject,
+        _ handler: @escaping (Bool) -> Void
+    ) -> UUID {
+        let token = UUID()
+        interruptionObservers[token] = Observer(owner: owner, handler: handler)
+        return token
+    }
+
+    public func removeInterruptionObserver(_ token: UUID) {
+        interruptionObservers.removeValue(forKey: token)
+    }
+
+    /// Registers a route-change handler. Same multicast semantics as
+    /// `addInterruptionObserver(owner:_:)`.
+    @discardableResult
+    public func addRouteChangeObserver(
+        owner: AnyObject,
+        _ handler: @escaping () -> Void
+    ) -> UUID {
+        let token = UUID()
+        routeChangeObservers[token] = Observer(owner: owner, handler: handler)
+        return token
+    }
+
+    public func removeRouteChangeObserver(_ token: UUID) {
+        routeChangeObservers.removeValue(forKey: token)
     }
 
     deinit {
@@ -214,7 +257,7 @@ public final class AudioSessionManager: ObservableObject {
         switch type {
         case .began:
             print("[AudioSessionManager] Interruption began")
-            onInterruption?(true)
+            notifyInterruptionObservers(began: true)
 
         case .ended:
             print("[AudioSessionManager] Interruption ended")
@@ -225,10 +268,30 @@ public final class AudioSessionManager: ObservableObject {
                     print("[AudioSessionManager] Should resume after interruption")
                 }
             }
-            onInterruption?(false)
+            notifyInterruptionObservers(began: false)
 
         @unknown default:
             break
+        }
+    }
+
+    private func notifyInterruptionObservers(began: Bool) {
+        for (token, observer) in interruptionObservers {
+            guard observer.owner != nil else {
+                interruptionObservers.removeValue(forKey: token)
+                continue
+            }
+            observer.handler(began)
+        }
+    }
+
+    private func notifyRouteChangeObservers() {
+        for (token, observer) in routeChangeObservers {
+            guard observer.owner != nil else {
+                routeChangeObservers.removeValue(forKey: token)
+                continue
+            }
+            observer.handler()
         }
     }
 
@@ -240,7 +303,7 @@ public final class AudioSessionManager: ObservableObject {
 
         print("[AudioSessionManager] Route changed: \(reason)")
         updateCurrentRoute()
-        onRouteChange?()
+        notifyRouteChangeObservers()
     }
 
     private func updateCurrentRoute() {

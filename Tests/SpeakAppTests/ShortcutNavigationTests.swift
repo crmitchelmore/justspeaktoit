@@ -59,4 +59,21 @@ final class ShortcutNavigationTests: XCTestCase {
         XCTAssertEqual(ShortcutAction.quickVoice2.defaultKeyBinding.displayString, "⌥⌘2")
         XCTAssertEqual(ShortcutAction.quickVoice3.defaultKeyBinding.displayString, "⌥⌘3")
     }
+
+    func testPasteLastHistoryItemDefault_isGlobalOptionCommandV() {
+        let binding = ShortcutAction.pasteLastHistoryItem.defaultKeyBinding
+        XCTAssertEqual(binding.displayString, "⌥⌘V")
+        XCTAssertTrue(binding.isGlobal, "Paste Last History Item should be a global shortcut")
+        XCTAssertTrue(binding.isEnabled, "Paste Last History Item should be enabled by default")
+        XCTAssertTrue(ShortcutAction.pasteLastHistoryItem.isGlobalByDefault)
+    }
+
+    func testPasteLastHistoryItemBinding_roundTripsThroughCodable() throws {
+        let bindings: [ShortcutAction: KeyBinding] = [
+            .pasteLastHistoryItem: ShortcutAction.pasteLastHistoryItem.defaultKeyBinding
+        ]
+        let data = try JSONEncoder().encode(bindings)
+        let decoded = try JSONDecoder().decode([ShortcutAction: KeyBinding].self, from: data)
+        XCTAssertEqual(decoded[.pasteLastHistoryItem], ShortcutAction.pasteLastHistoryItem.defaultKeyBinding)
+    }
 }

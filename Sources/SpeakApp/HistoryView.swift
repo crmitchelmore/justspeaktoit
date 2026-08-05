@@ -115,7 +115,12 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
     }
   }
 
-  private var filteredItems: [HistoryItem] {
+  /// Filtered items cached in state so a body pass doesn't re-filter the full
+  /// history several times per render; recomputed when the source items or any
+  /// filter input change.
+  @State private var filteredItems: [HistoryItem] = []
+
+  private func recomputeFilteredItems() {
     var filter = HistoryFilter.none
     filter.searchText = searchText.isEmpty ? nil : searchText
     filter.includeErrorsOnly = showErrorsOnly
@@ -125,7 +130,7 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
     if dateRangeEnabled {
       filter.dateRange = normalizedDateRange
     }
-    return apply(filter: filter, to: historyItems)
+    filteredItems = apply(filter: filter, to: historyItems)
   }
 
   /// All unique models used across history items, cached to avoid re-computing on every render.
@@ -154,7 +159,9 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
                   .id(item.id)
               }
             }
-            .animation(.spring(response: 0.28, dampingFraction: 0.88), value: filteredItems)
+            // Animate on IDs so the animation diff doesn't have to compare
+            // full HistoryItem values (network exchanges, events, ...).
+            .animation(.spring(response: 0.28, dampingFraction: 0.88), value: filteredItems.map(\.id))
           }
         }
         .padding(density.pagePadding)
@@ -162,6 +169,7 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
       }
       .onAppear {
         historyItems = environment.history.allItems
+        recomputeFilteredItems()
         availableModels = computeAvailableModels(from: historyItems)
         historyStats = environment.history.statistics
         // Delay to show skeleton briefly for improved perceived performance
@@ -176,6 +184,7 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
         let updated = environment.history.allItems
         withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
           historyItems = updated
+          recomputeFilteredItems()
         }
         availableModels = computeAvailableModels(from: updated)
         guard let newest = items.first else { return }
@@ -193,6 +202,12 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
           historyStats = stats
         }
       }
+      .onChange(of: searchText) { _, _ in recomputeFilteredItems() }
+      .onChange(of: showErrorsOnly) { _, _ in recomputeFilteredItems() }
+      .onChange(of: selectedModelFilter) { _, _ in recomputeFilteredItems() }
+      .onChange(of: dateRangeEnabled) { _, _ in recomputeFilteredItems() }
+      .onChange(of: startDate) { _, _ in recomputeFilteredItems() }
+      .onChange(of: endDate) { _, _ in recomputeFilteredItems() }
 
     }
     .background(

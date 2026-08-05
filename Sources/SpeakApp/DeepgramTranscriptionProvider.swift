@@ -88,7 +88,7 @@ final class DeepgramLiveTranscriber: @unchecked Sendable {
             self.bufferPool.returnBuffer(&returnBuffer)
 
             if let error {
-                if self.isStopping || self.shouldIgnoreSocketError(error) {
+                if self.isStopping || WebSocketErrorFilter.shouldIgnore(error) {
                     return
                 }
                 self.logger.error("Failed to send audio: \(error.localizedDescription)")
@@ -131,7 +131,7 @@ final class DeepgramLiveTranscriber: @unchecked Sendable {
             self.bufferPool.returnBuffer(&returnBuffer)
 
             if let error {
-                if self.isStopping || self.shouldIgnoreSocketError(error) {
+                if self.isStopping || WebSocketErrorFilter.shouldIgnore(error) {
                     return
                 }
                 self.logger.error("Failed to send audio: \(error.localizedDescription)")
@@ -147,17 +147,6 @@ final class DeepgramLiveTranscriber: @unchecked Sendable {
         webSocketTask?.cancel(with: .normalClosure, reason: nil)
         webSocketTask = nil
         logger.info("Deepgram WebSocket connection closed")
-    }
-
-    private func shouldIgnoreSocketError(_ error: Error) -> Bool {
-        let nsError = error as NSError
-        if nsError.domain == NSPOSIXErrorDomain, nsError.code == 57 { // ENOTCONN
-            return true
-        }
-        if nsError.localizedDescription.localizedCaseInsensitiveContains("socket is not connected") {
-            return true
-        }
-        return false
     }
 
     private func receiveMessages() {
@@ -176,7 +165,7 @@ final class DeepgramLiveTranscriber: @unchecked Sendable {
                 self.receiveMessages()
 
             case .failure(let error):
-                if stopping || self.shouldIgnoreSocketError(error) {
+                if stopping || WebSocketErrorFilter.shouldIgnore(error) {
                     return
                 }
                 self.logger.error("WebSocket receive error: \(error.localizedDescription)")
@@ -243,7 +232,7 @@ final class DeepgramLiveTranscriber: @unchecked Sendable {
 
         if isFlux {
             if model == "flux-general-multi", let language {
-                queryItems.append(URLQueryItem(name: "language_hint", value: extractLanguageCode(from: language)))
+                queryItems.append(URLQueryItem(name: "language_hint", value: language.localeLanguageCode))
             }
         } else {
             queryItems.append(contentsOf: [
@@ -256,7 +245,7 @@ final class DeepgramLiveTranscriber: @unchecked Sendable {
                 URLQueryItem(name: "vad_events", value: "true")
             ])
             if let language {
-                queryItems.append(URLQueryItem(name: "language", value: extractLanguageCode(from: language)))
+                queryItems.append(URLQueryItem(name: "language", value: language.localeLanguageCode))
             }
         }
 
@@ -264,10 +253,6 @@ final class DeepgramLiveTranscriber: @unchecked Sendable {
         return urlComponents.url
     }
 
-    private nonisolated static func extractLanguageCode(from locale: String) -> String {
-        let components = locale.split(whereSeparator: { $0 == "_" || $0 == "-" })
-        return components.first.map(String.init)?.lowercased() ?? locale.lowercased()
-    }
 }
 
 // MARK: - Deepgram Transcription Provider
@@ -308,7 +293,7 @@ struct DeepgramTranscriptionProvider: TranscriptionProvider {
             URLQueryItem(name: "utterances", value: "true")
         ]
         if let language {
-            let languageCode = extractLanguageCode(from: language)
+            let languageCode = language.localeLanguageCode
             queryItems.append(URLQueryItem(name: "language", value: languageCode))
         }
 
@@ -346,36 +331,12 @@ struct DeepgramTranscriptionProvider: TranscriptionProvider {
     }
 
     func validateAPIKey(_ key: String) async -> APIKeyValidationResult {
-        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            return .failure(message: "API key is empty")
-        }
-
-        let url = baseURL.appendingPathComponent("projects")
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.setValue("Token \(trimmed)", forHTTPHeaderField: "Authorization")
-
-        do {
-            let (data, response) = try await session.data(for: request)
-            guard let http = response as? HTTPURLResponse else {
-                return .failure(message: "Received a non-HTTP response", debug: debugSnapshot(request: request))
-            }
-
-            let debug = debugSnapshot(request: request, response: http, data: data)
-
-            if (200..<300).contains(http.statusCode) {
-                return .success(message: "Deepgram API key validated", debug: debug)
-            }
-
-            let message = "HTTP \(http.statusCode) while validating key"
-            return .failure(message: message, debug: debug)
-        } catch {
-            return .failure(
-                message: "Validation failed: \(error.localizedDescription)",
-                debug: debugSnapshot(request: request, error: error)
-            )
-        }
+        await GETProbeAPIKeyValidator(
+            url: baseURL.appendingPathComponent("projects"),
+            headers: { ["Authorization": "Token \($0)"] },
+            serviceName: "Deepgram",
+            session: session
+        ).validate(key)
     }
 
     func requiresAPIKey(for model: String) -> Bool {
@@ -383,28 +344,7 @@ struct DeepgramTranscriptionProvider: TranscriptionProvider {
     }
 
     func supportedModels() -> [ModelCatalog.Option] {
-        [
-            ModelCatalog.Option(
-                id: "deepgram/nova-3",
-                displayName: "Nova-3",
-                description: "Deepgram's highest-performing speech-to-text model."
-            ),
-            ModelCatalog.Option(
-                id: "deepgram/nova",
-                displayName: "Nova",
-                description: "Deepgram's previous generation model. Fast and reliable."
-            ),
-            ModelCatalog.Option(
-                id: "deepgram/enhanced",
-                displayName: "Enhanced",
-                description: "Optimized for specific use cases like phone calls and meetings."
-            ),
-            ModelCatalog.Option(
-                id: "deepgram/base",
-                displayName: "Base",
-                description: "Deepgram's base model. Good balance of speed and accuracy."
-            )
-        ]
+        ModelCatalog.batchTranscriptionOptions(forProvider: metadata.id)
     }
 
     /// Creates a live transcriber for streaming audio.
@@ -433,11 +373,6 @@ struct DeepgramTranscriptionProvider: TranscriptionProvider {
             name = String(name.dropLast("-streaming".count))
         }
         return name
-    }
-
-    private func extractLanguageCode(from locale: String) -> String {
-        let components = locale.split(whereSeparator: { $0 == "_" || $0 == "-" })
-        return components.first.map(String.init)?.lowercased() ?? locale.lowercased()
     }
 
     private func buildTranscriptionResult(
@@ -491,28 +426,6 @@ struct DeepgramTranscriptionProvider: TranscriptionProvider {
         )
     }
 
-    private func debugSnapshot(
-        request: URLRequest,
-        response: HTTPURLResponse? = nil,
-        data: Data? = nil,
-        error: Error? = nil
-    ) -> APIKeyValidationDebugSnapshot {
-        APIKeyValidationDebugSnapshot(
-            url: request.url?.absoluteString ?? "",
-            method: request.httpMethod ?? "GET",
-            requestHeaders: request.allHTTPHeaderFields ?? [:],
-            requestBody: request.httpBody.flatMap { String(data: $0, encoding: .utf8) },
-            statusCode: response?.statusCode,
-            responseHeaders: response.map { headers in
-                headers.allHeaderFields.reduce(into: [String: String]()) { partialResult, entry in
-                    guard let key = entry.key as? String else { return }
-                    partialResult[key] = String(describing: entry.value)
-                }
-            } ?? [:],
-            responseBody: data.flatMap { String(data: $0, encoding: .utf8) },
-            errorDescription: error?.localizedDescription
-        )
-    }
 }
 
 // MARK: - Response Models

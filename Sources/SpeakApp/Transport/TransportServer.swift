@@ -30,13 +30,22 @@ public final class TransportServer: ObservableObject {
     
     /// Callback when transcript chunk received
     public var onTranscriptReceived: ((String, String) -> Void)?
-    
+
+    /// Callback when the server stops because of a failure.
+    ///
+    /// `NWListener.start(queue:)` is non-throwing, so a listener that cannot bind reports
+    /// the problem asynchronously through its state handler — long after `start()` has
+    /// returned successfully. Callers use this to keep their own state (e.g. the
+    /// "Send to Mac" preference) in sync with reality.
+    public var onFailure: ((Error) -> Void)?
+
     public init() {}
     
     /// Start advertising and accepting connections.
     public func start() throws {
         guard !isRunning else { return }
-        
+
+        error = nil
         SpeakLogger.transport.info("Starting transport server")
         
         let parameters = NWParameters.tcp
@@ -69,6 +78,7 @@ public final class TransportServer: ObservableObject {
             
             SpeakLogger.transport.info("Transport server listening on Bonjour")
         } catch {
+            self.error = error
             SpeakLogger.logError(error, context: "TransportServer.start", logger: SpeakLogger.transport)
             throw error
         }
@@ -107,8 +117,20 @@ public final class TransportServer: ObservableObject {
             SpeakLogger.transport.info("Listener ready")
         case .failed(let error):
             SpeakLogger.logError(error, context: "Listener failed", logger: SpeakLogger.transport)
+            // Tear the listener down so a later start() builds a fresh one instead of
+            // leaking the dead listener. Drop live connections too: WireUp only flips
+            // `enableSendToMac` off on failure, so a surviving TransportConnection would
+            // keep delivering transcript chunks while the UI says Send to Mac is off.
+            for connection in connections.values {
+                connection.disconnect()
+            }
+            connections.removeAll()
+            connectedDevices.removeAll()
+            listener?.cancel()
+            listener = nil
             self.error = error
             isRunning = false
+            onFailure?(error)
         case .cancelled:
             isRunning = false
         default:

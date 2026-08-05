@@ -68,74 +68,43 @@ struct QRCodeGeneratorView: View {
     private func generateQRCode() async {
         isGenerating = true
         error = nil
-        
+
         do {
-            // Gather secrets and settings
-            let secrets = await gatherSecrets()
-            let settings = gatherSettings()
-            
+            // Gather secrets and settings via the shared transfer manager so
+            // both platforms use the same key list and payload format.
+            let manager = ConfigTransferManager.shared
+            let storage = SecureStorage(
+                configuration: SecureStorageConfiguration(
+                    service: "com.speak.ios.credentials"
+                )
+            )
+            let secrets = try await manager.gatherSecrets(storage: storage)
+            let settings = manager.gatherSettings()
+
             guard !secrets.isEmpty || !settings.isEmpty else {
                 qrImage = nil
                 isGenerating = false
                 return
             }
-            
-            let payload = try ConfigTransferManager.shared.generatePayload(
+
+            let payload = try manager.generatePayload(
                 secrets: secrets,
                 settings: settings
             )
-            
-            // Generate QR code image
-            let context = CIContext()
-            let filter = CIFilter.qrCodeGenerator()
-            filter.message = Data(payload.utf8)
-            filter.correctionLevel = "M"
-            
-            guard let outputImage = filter.outputImage else {
+
+            guard let scaledImage = manager.makeQRCodeImage(payload: payload) else {
                 throw ConfigTransferError.decodingFailed
             }
-            
-            // Scale up for display
-            let scale = 10.0
-            let scaledImage = outputImage.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-            
+
+            let context = CIContext()
             if let cgImage = context.createCGImage(scaledImage, from: scaledImage.extent) {
                 qrImage = UIImage(cgImage: cgImage)
             }
         } catch {
             self.error = error.localizedDescription
         }
-        
+
         isGenerating = false
-    }
-    
-    private func gatherSecrets() async -> [String: String] {
-        var secrets: [String: String] = [:]
-        let storage = SecureStorage(
-            configuration: SecureStorageConfiguration(
-                service: "com.speak.ios.credentials"
-            )
-        )
-        
-        let knownKeys = ["deepgram.apiKey", "openrouter.apiKey", "openai.apiKey", "elevenlabs.apiKey"]
-        for key in knownKeys {
-            if let value = try? await storage.secret(identifier: key), !value.isEmpty {
-                secrets[key] = value
-            }
-        }
-        
-        return secrets
-    }
-    
-    private func gatherSettings() -> [String: String] {
-        var settings: [String: String] = [:]
-        let defaults = UserDefaults.standard
-        
-        if let model = defaults.string(forKey: "selectedModel") {
-            settings["selectedModel"] = model
-        }
-        
-        return settings
     }
 }
 

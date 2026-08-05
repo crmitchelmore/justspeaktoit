@@ -1,3 +1,5 @@
+// swiftlint:disable file_length
+import CoreImage.CIFilterBuiltins
 import Foundation
 
 // MARK: - Settings Sync using iCloud Key-Value Store
@@ -158,15 +160,75 @@ public struct ConfigTransferPayload: Codable {
 /// Handles encoding/decoding of configuration for QR transfer.
 public final class ConfigTransferManager {
     public static let shared = ConfigTransferManager()
-    
+
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
-    
+
     private init() {
         encoder.dateEncodingStrategy = .iso8601
         decoder.dateDecodingStrategy = .iso8601
     }
-    
+
+    /// API-key identifiers included in a device-to-device transfer: the union
+    /// of the keys either platform can hold, so exporting from one platform
+    /// and importing on the other never silently drops a stored credential.
+    public static let transferableSecretIdentifiers: [String] = [
+        "deepgram.apiKey",
+        "openrouter.apiKey",
+        "openai.apiKey",
+        "openai.tts.apiKey",
+        "elevenlabs.apiKey",
+        "azure.speech.apiKey"
+    ]
+
+    /// Collects the transferable secrets currently stored in `storage`,
+    /// skipping identifiers that are missing or empty.
+    ///
+    /// Only `SecureStorageError.valueNotFound` is treated as "not stored".
+    /// Access-denied, corruption and other Keychain failures are rethrown: a
+    /// transfer that silently omits a credential the user believes they exported
+    /// is worse than one that fails visibly.
+    public func gatherSecrets(storage: SecureStorage) async throws -> [String: String] {
+        var secrets: [String: String] = [:]
+        for identifier in Self.transferableSecretIdentifiers {
+            do {
+                let value = try await storage.secret(identifier: identifier)
+                if !value.isEmpty {
+                    secrets[identifier] = value
+                }
+            } catch SecureStorageError.valueNotFound {
+                continue
+            }
+        }
+        return secrets
+    }
+
+    /// Gathers the non-secret settings included in a transfer. The payload
+    /// always uses the shared `selectedModel` key; `liveModelDefaultsKey`
+    /// names the local UserDefaults key the calling platform stores its live
+    /// transcription model under.
+    public func gatherSettings(
+        defaults: UserDefaults = .standard,
+        liveModelDefaultsKey: String = "selectedModel"
+    ) -> [String: String] {
+        var settings: [String: String] = [:]
+        if let model = defaults.string(forKey: liveModelDefaultsKey) {
+            settings["selectedModel"] = model
+        }
+        return settings
+    }
+
+    /// Builds the QR code image for an encoded payload, scaled up for crisp
+    /// on-screen display. Callers wrap the `CIImage` in the platform image
+    /// type (NSImage/UIImage).
+    public func makeQRCodeImage(payload: String, scale: CGFloat = 10) -> CIImage? {
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(payload.utf8)
+        filter.correctionLevel = "M"
+        guard let outputImage = filter.outputImage else { return nil }
+        return outputImage.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+    }
+
     /// Generates an encrypted payload string for QR code generation.
     /// The payload is base64-encoded JSON with optional encryption.
     public func generatePayload(secrets: [String: String], settings: [String: String]) throws -> String {

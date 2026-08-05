@@ -38,6 +38,19 @@ public protocol FinalizingStreamingTranscriptionClient: StreamingTranscriptionCl
     /// Commits pending input, waits for the provider's final transcript (with
     /// an implementation-defined timeout), then closes the connection.
     func finishAndWait() async -> String?
+
+    /// Whether `finishAndWait()` actively flushes audio the provider has
+    /// received but not yet transcribed (e.g. Deepgram's `CloseStream`).
+    ///
+    /// When `true` the caller must always finish gracefully, because unseen
+    /// words can still arrive. When `false` the call is only a bounded wait for
+    /// an already-pending transcript, so a caller with nothing outstanding can
+    /// close immediately instead of burning the drain budget.
+    var finishFlushesBufferedAudio: Bool { get }
+}
+
+public extension FinalizingStreamingTranscriptionClient {
+    var finishFlushesBufferedAudio: Bool { true }
 }
 
 // MARK: - Providers
@@ -263,6 +276,7 @@ public enum LiveTranscriptionClientError: LocalizedError {
 public enum StreamingClientError: LocalizedError {
     case invalidURL
     case invalidAPIKey(provider: String)
+    case missingAPIKey(provider: String)
 
     public var errorDescription: String? {
         switch self {
@@ -270,6 +284,8 @@ public enum StreamingClientError: LocalizedError {
             return "Could not build the streaming transcription URL."
         case .invalidAPIKey(let provider):
             return "\(provider) rejected the API key. Check it in Settings."
+        case .missingAPIKey(let provider):
+            return "\(provider) API key is missing. Please configure it in Settings."
         }
     }
 }

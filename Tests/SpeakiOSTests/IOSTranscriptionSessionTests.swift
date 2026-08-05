@@ -58,16 +58,56 @@ final class IOSTranscriptionSessionTests: XCTestCase {
             switch route.provider {
             case .apple:
                 expectedBackend = .apple
-            case .deepgram:
-                expectedBackend = .deepgram
-            case .elevenlabs:
-                expectedBackend = .elevenLabs
             case .openai:
                 expectedBackend = .openAI
             default:
                 expectedBackend = .shared(route.provider)
             }
             XCTAssertEqual(resolution.backend, expectedBackend, route.modelID)
+        }
+    }
+
+    /// Deepgram and ElevenLabs used to have bespoke iOS transcribers; they now
+    /// run on the same generic capture path as every other shared-client
+    /// provider, with their model/sample-rate wiring coming from the route.
+    func testDeepgramAndElevenLabsResolveToTheSharedCapturePath() throws {
+        let deepgram = try IOSTranscriptionSession.resolve(
+            modelID: "deepgram/nova-3-streaming",
+            mode: .streaming
+        )
+        XCTAssertEqual(deepgram.backend, .shared(.deepgram))
+        XCTAssertEqual(deepgram.route?.apiModelName, "nova-3")
+        XCTAssertEqual(deepgram.sampleRate, 16_000)
+
+        let elevenLabs = try IOSTranscriptionSession.resolve(
+            modelID: "elevenlabs/scribe-v2-streaming",
+            mode: .streaming
+        )
+        XCTAssertEqual(elevenLabs.backend, .shared(.elevenlabs))
+        XCTAssertEqual(elevenLabs.route?.apiModelName, "scribe_v2_realtime")
+        XCTAssertEqual(elevenLabs.sampleRate, 16_000)
+    }
+
+    /// A blank key never reaches the microphone: the shared transcriber fails
+    /// before configuring the audio session, as the bespoke providers did.
+    @MainActor
+    func testSharedTranscriberRejectsBlankAPIKeyBeforeCapture() async {
+        let route = try? XCTUnwrap(LiveTranscriptionRouting.route(for: "deepgram/nova-3-streaming"))
+        guard let route else { return XCTFail("missing deepgram route") }
+        let transcriber = SharedClientLiveTranscriber(
+            route: route,
+            apiKey: "   ",
+            audioSessionManager: AudioSessionManager()
+        )
+
+        do {
+            try await transcriber.start()
+            XCTFail("expected a missing-API-key error")
+        } catch {
+            XCTAssertFalse(transcriber.isRunning)
+            guard case StreamingClientError.missingAPIKey = error else {
+                return XCTFail("unexpected error: \(error)")
+            }
         }
     }
 

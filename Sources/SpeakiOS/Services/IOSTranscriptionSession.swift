@@ -14,8 +14,6 @@ final class IOSTranscriptionSession {
     enum BackendKind: Equatable, Sendable {
         case batch
         case apple
-        case deepgram
-        case elevenLabs
         case openAI
         case shared(LiveTranscriptionProviderID)
     }
@@ -42,10 +40,6 @@ final class IOSTranscriptionSession {
             return ""
         case .apple(let transcriber):
             return transcriber.partialText
-        case .deepgram(let transcriber):
-            return transcriber.partialText
-        case .elevenLabs(let transcriber):
-            return transcriber.partialText
         case .openAI(let transcriber):
             return transcriber.partialText
         case .shared(let transcriber):
@@ -61,8 +55,6 @@ final class IOSTranscriptionSession {
     private enum Backend {
         case batch(IOSBatchTranscriber)
         case apple(iOSLiveTranscriber)
-        case deepgram(DeepgramLiveTranscriber)
-        case elevenLabs(ElevenLabsLiveTranscriber)
         case openAI(OpenAIRealtimeLiveTranscriber)
         case shared(SharedClientLiveTranscriber)
     }
@@ -101,10 +93,6 @@ final class IOSTranscriptionSession {
         switch route.provider {
         case .apple:
             backend = .apple
-        case .deepgram:
-            backend = .deepgram
-        case .elevenlabs:
-            backend = .elevenLabs
         case .openai:
             backend = .openAI
         default:
@@ -143,18 +131,6 @@ final class IOSTranscriptionSession {
             let transcriber = iOSLiveTranscriber(audioSessionManager: audioSessionManager)
             transcriber.modelID = resolution.modelID
             return .apple(transcriber)
-        case .deepgram:
-            let route = try requiredRoute(for: resolution)
-            let transcriber = DeepgramLiveTranscriber(audioSessionManager: audioSessionManager)
-            transcriber.configure(apiKey: liveAPIKey(route))
-            transcriber.model = route.apiModelName
-            return .deepgram(transcriber)
-        case .elevenLabs:
-            let route = try requiredRoute(for: resolution)
-            let transcriber = ElevenLabsLiveTranscriber(audioSessionManager: audioSessionManager)
-            transcriber.configure(apiKey: liveAPIKey(route))
-            transcriber.modelID = route.apiModelName
-            return .elevenLabs(transcriber)
         case .openAI:
             let route = try requiredRoute(for: resolution)
             let transcriber = OpenAIRealtimeLiveTranscriber(audioSessionManager: audioSessionManager)
@@ -186,10 +162,6 @@ final class IOSTranscriptionSession {
             try await transcriber.start()
         case .apple(let transcriber):
             try await transcriber.start()
-        case .deepgram(let transcriber):
-            try await transcriber.start()
-        case .elevenLabs(let transcriber):
-            try await transcriber.start()
         case .openAI(let transcriber):
             try await transcriber.start()
         case .shared(let transcriber):
@@ -203,10 +175,6 @@ final class IOSTranscriptionSession {
             return try await transcriber.stop(language: language)
         case .apple(let transcriber):
             return await transcriber.stop()
-        case .deepgram(let transcriber):
-            return await transcriber.stop()
-        case .elevenLabs(let transcriber):
-            return await transcriber.stop()
         case .openAI(let transcriber):
             return await transcriber.stop()
         case .shared(let transcriber):
@@ -219,10 +187,6 @@ final class IOSTranscriptionSession {
         case .batch(let transcriber):
             transcriber.cancel()
         case .apple(let transcriber):
-            transcriber.cancel()
-        case .deepgram(let transcriber):
-            transcriber.cancel()
-        case .elevenLabs(let transcriber):
             transcriber.cancel()
         case .openAI(let transcriber):
             transcriber.cancel()
@@ -244,12 +208,6 @@ final class IOSTranscriptionSession {
         case .batch:
             break
         case .apple(let transcriber):
-            transcriber.onPartialResult = partialHandler
-            transcriber.onError = errorHandler
-        case .deepgram(let transcriber):
-            transcriber.onPartialResult = partialHandler
-            transcriber.onError = errorHandler
-        case .elevenLabs(let transcriber):
             transcriber.onPartialResult = partialHandler
             transcriber.onError = errorHandler
         case .openAI(let transcriber):

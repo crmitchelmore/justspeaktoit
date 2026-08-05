@@ -44,7 +44,7 @@ private final class OpenAIRealtimePCMBufferPool: @unchecked Sendable {
 ///
 /// Mirrors the macOS `OpenAIRealtimeLiveTranscriber` / `OpenAIRealtimeLiveController`
 /// pair, collapsed into a single `ObservableObject` to match the existing
-/// iOS provider shape (`DeepgramLiveTranscriber`, `ElevenLabsLiveTranscriber`).
+/// iOS provider shape (`SharedClientLiveTranscriber`, `iOSLiveTranscriber`).
 ///
 /// Endpoint: `wss://api.openai.com/v1/realtime?intent=transcription`.
 /// All Realtime transcription models use this GA transcription session shape;

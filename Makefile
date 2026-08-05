@@ -1,6 +1,12 @@
 SWIFT_FLAGS ?=
 ARCHIVE_PATH ?= ~/Desktop/JustSpeakToIt.xcarchive
 EXPORT_PATH ?= ~/Desktop/JustSpeakToIt-AppStore
+# Provisioning profile used for Mac App Store manual signing. Project.swift only applies
+# manual signing when TUIST_MAC_PROFILE_NAME is set — Tuist forwards only TUIST_-prefixed
+# variables into manifest evaluation, so a plain MAC_PROFILE_NAME in the shell would be
+# dropped. Accept either spelling here and forward it explicitly.
+MAC_PROFILE_NAME ?=
+TUIST_MAC_PROFILE_NAME ?= $(MAC_PROFILE_NAME)
 
 .DEFAULT_GOAL := run
 
@@ -70,7 +76,25 @@ xcode: ## Generate and open Xcode workspace
 	open "Just Speak to It.xcworkspace"
 
 .PHONY: archive
-archive: ## Create Xcode archive for App Store
+archive: ## Create Xcode archive of the direct/Developer ID flavour
+	@echo "Generating direct flavour (TUIST_APP_STORE=0)..."
+	TUIST_APP_STORE=0 tuist generate --no-open
+	@echo "Creating archive at $(ARCHIVE_PATH)..."
+	xcodebuild -workspace "Just Speak to It.xcworkspace" \
+		-scheme "SpeakApp" \
+		-configuration Release \
+		-archivePath $(ARCHIVE_PATH) \
+		archive
+	@echo "Archive created at $(ARCHIVE_PATH)"
+
+.PHONY: archive-appstore
+archive-appstore: ## Regenerate the App Store flavour and create its Xcode archive
+	@echo "Generating App Store flavour (TUIST_APP_STORE=1)..."
+	@if [ -z "$(TUIST_MAC_PROFILE_NAME)" ]; then \
+		echo "⚠️  No MAC_PROFILE_NAME set: generating with automatic signing."; \
+		echo "   For a distributable archive run: make archive-appstore MAC_PROFILE_NAME=\"<profile name>\""; \
+	fi
+	TUIST_APP_STORE=1 TUIST_MAC_PROFILE_NAME="$(TUIST_MAC_PROFILE_NAME)" tuist generate --no-open
 	@echo "Creating archive at $(ARCHIVE_PATH)..."
 	xcodebuild -workspace "Just Speak to It.xcworkspace" \
 		-scheme "SpeakApp" \
@@ -80,7 +104,7 @@ archive: ## Create Xcode archive for App Store
 	@echo "Archive created at $(ARCHIVE_PATH)"
 
 .PHONY: export-appstore
-export-appstore: ## Export archive for App Store submission
+export-appstore: archive-appstore ## Archive the App Store flavour and export it for submission
 	@echo "Exporting for App Store..."
 	xcodebuild -exportArchive \
 		-archivePath $(ARCHIVE_PATH) \

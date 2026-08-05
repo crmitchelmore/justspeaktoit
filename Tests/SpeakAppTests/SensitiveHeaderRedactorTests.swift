@@ -170,14 +170,17 @@ final class SensitiveHeaderRedactorTests: XCTestCase {
             errorDescription: nil
         )
         
-        // Verify sensitive headers are redacted
-        XCTAssertTrue(
-            snapshot.requestHeaders["Authorization"]?.contains("...") ?? false,
-            "Request Authorization header should be redacted"
+        // Snapshots redact sensitive headers outright: no fragment of the
+        // credential is retained, only the auth scheme.
+        XCTAssertEqual(
+            snapshot.requestHeaders["Authorization"],
+            "Bearer [REDACTED]",
+            "Request Authorization header should be fully redacted"
         )
-        XCTAssertTrue(
-            snapshot.responseHeaders["x-api-key"]?.contains("...") ?? false,
-            "Response x-api-key header should be redacted"
+        XCTAssertEqual(
+            snapshot.responseHeaders["x-api-key"],
+            "[REDACTED]",
+            "Response x-api-key header should be fully redacted"
         )
         
         // Verify non-sensitive headers are preserved
@@ -193,8 +196,9 @@ final class SensitiveHeaderRedactorTests: XCTestCase {
         )
         
         // Verify original headers are not modified (immutability check)
-        XCTAssertFalse(
-            requestHeaders["Authorization"]?.contains("...") ?? true,
+        XCTAssertEqual(
+            requestHeaders["Authorization"],
+            "Bearer sk-proj-1234567890abcdefghijklmnopqrstuvwxyz",
             "Original request headers should not be modified"
         )
     }

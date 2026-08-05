@@ -145,7 +145,7 @@ final class GladiaTranscriptionProviderTests: XCTestCase {
     } else {
       XCTFail("Expected validation success")
     }
-    XCTAssertEqual(result.debug?.requestHeaders["x-gladia-key"], "gla...-key")
+    XCTAssertEqual(result.debug?.requestHeaders["x-gladia-key"], "[REDACTED]")
     XCTAssertNil(result.debug?.responseBody)
   }
 

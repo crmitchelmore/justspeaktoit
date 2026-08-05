@@ -121,6 +121,12 @@ final class TranscriptionManager: ObservableObject {
 
   private var continuation: CheckedContinuation<TranscriptionResult, Error>?
   private var pendingError: Error?
+  /// Monotonic token identifying the current stop request. The safety timeout
+  /// captures the value at spawn time and only fires if it still matches, so a
+  /// stale timeout from an earlier session can never resume a later session's
+  /// continuation.
+  private var stopGeneration = 0
+  private var stopTimeoutTask: Task<Void, Never>?
 
   init(
     appSettings: AppSettings,
@@ -168,25 +174,41 @@ final class TranscriptionManager: ObservableObject {
       throw error
     }
     guard isLiveTranscribing else { throw TranscriptionManagerError.liveSessionNotRunning }
+    stopGeneration += 1
+    let generation = stopGeneration
     return try await withCheckedThrowingContinuation { continuation in
       self.continuation = continuation
       Task {
         await self.liveController.stop()
       }
       // Safety timeout: if the delegate never calls back, resume with an error
-      // rather than hanging forever.
-      Task { @MainActor [weak self] in
+      // rather than hanging forever. Guarded by the generation token so a stale
+      // timeout from a previous session can't resume a later session's continuation.
+      stopTimeoutTask?.cancel()
+      stopTimeoutTask = Task { @MainActor [weak self] in
         try? await Task.sleep(nanoseconds: 10_000_000_000)
-        guard let self, let cont = self.continuation else { return }
+        guard let self, !Task.isCancelled,
+          self.stopGeneration == generation,
+          let cont = self.continuation
+        else { return }
         print("[TranscriptionManager] Safety timeout: continuation not resumed after 10s, forcing error")
         self.continuation = nil
+        self.stopTimeoutTask = nil
         self.isLiveTranscribing = false
         cont.resume(throwing: TranscriptionManagerError.liveSessionNotRunning)
       }
     }
   }
 
+  /// Cancels the pending stop safety timeout once the continuation has been
+  /// resumed through a normal path (delegate callback or explicit cancel).
+  private func cancelStopTimeout() {
+    stopTimeoutTask?.cancel()
+    stopTimeoutTask = nil
+  }
+
   func cancelLiveTranscription() {
+    cancelStopTimeout()
     continuation?.resume(throwing: TranscriptionManagerError.liveSessionNotRunning)
     continuation = nil
     Task {
@@ -339,11 +361,16 @@ final class TranscriptionManager: ObservableObject {
     return provider.metadata
   }
 
+  /// Reads the provider API key, mapping only a genuine "not found" to
+  /// `apiKeyMissing`. Other keychain failures (locked keychain, denied access,
+  /// unexpected status) are rethrown as-is so users aren't told to re-enter a
+  /// key that exists.
   private func getAPIKey(for metadata: TranscriptionProviderMetadata) async throws -> String {
-    guard let key = try? await secureStorage.secret(identifier: metadata.apiKeyIdentifier) else {
+    do {
+      return try await secureStorage.secret(identifier: metadata.apiKeyIdentifier)
+    } catch SecureAppStorageError.valueNotFound {
       throw TranscriptionProviderError.apiKeyMissing
     }
-    return key
   }
 
   private func hasAPIKey(for metadata: TranscriptionProviderMetadata) async -> Bool {
@@ -376,6 +403,7 @@ extension TranscriptionManager: LiveTranscriptionSessionDelegate {
       print("[TranscriptionManager] didFinishWith called but no continuation (already finished?)")
       return
     }
+    cancelStopTimeout()
     continuation = nil
     isLiveTranscribing = false
     livePartialText = result.text
@@ -387,6 +415,7 @@ extension TranscriptionManager: LiveTranscriptionSessionDelegate {
   func liveTranscriber(_ session: any LiveTranscriptionController, didFail error: Error) {
     if let cont = continuation {
       // We're in the middle of stopping - resume with the error
+      cancelStopTimeout()
       continuation = nil
       isLiveTranscribing = false
       cont.resume(throwing: error)

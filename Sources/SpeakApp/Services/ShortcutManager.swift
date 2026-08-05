@@ -28,6 +28,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
     case quickVoice1
     case quickVoice2
     case quickVoice3
+    case pasteLastHistoryItem
 
     var id: String { rawValue }
 
@@ -55,6 +56,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .quickVoice1: return "Quick Switch Voice 1"
         case .quickVoice2: return "Quick Switch Voice 2"
         case .quickVoice3: return "Quick Switch Voice 3"
+        case .pasteLastHistoryItem: return "Paste Last History Item"
         }
     }
 
@@ -104,6 +106,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
             return KeyBinding(keyCode: 19, modifiers: [.command, .option], isGlobal: false)  // ⌘⌥2
         case .quickVoice3:
             return KeyBinding(keyCode: 20, modifiers: [.command, .option], isGlobal: false)  // ⌘⌥3
+        case .pasteLastHistoryItem:
+            return KeyBinding(keyCode: 9, modifiers: [.command, .option])  // ⌥⌘V
         }
     }
 
@@ -150,7 +154,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
 
     var isGlobalByDefault: Bool {
         switch self {
-        case .startStopRecording, .speakSelectedText, .speakClipboard:
+        case .startStopRecording, .speakSelectedText, .speakClipboard, .pasteLastHistoryItem:
             return true
         default:
             return false

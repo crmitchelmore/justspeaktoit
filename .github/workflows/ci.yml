@@ -39,6 +39,13 @@ jobs:
       - name: Test (Release)
         run: swift test -c release
 
+      - name: Build SpeakCore (App Store flavour)
+        # SpeakCore has no package dependencies, so this cheaply compiles the
+        # `#if APP_STORE` branches that only the Mac App Store build exercises.
+        # Runs after the test steps because the extra -Xswiftc flag invalidates
+        # the shared debug build cache for the targets it rebuilds.
+        run: swift build -Xswiftc -DAPP_STORE --target SpeakCore
+
       - name: Report Coverage
         if: always()
         run: |

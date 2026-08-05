@@ -57,6 +57,12 @@ public final class iOSLiveTranscriber: ObservableObject {
     /// Persistent audio recorder — saves audio to disk alongside transcription.
     public let audioRecorder = AudioRecordingPersistence()
 
+    /// Serial queue that takes tap buffers off the real-time audio thread —
+    /// recognition feeding and persistence run here, not in the tap callback.
+    private let audioProcessingQueue = DispatchQueue(label: "com.speak.ios.applespeech.audioProcessing")
+    /// Pool for tap-buffer copies so the hot path never allocates.
+    private let tapBufferPool = PCMBufferPool(maximumBuffers: 4)
+
     // MARK: - Init
 
     public init(audioSessionManager: AudioSessionManager) {
@@ -138,7 +144,7 @@ public final class iOSLiveTranscriber: ObservableObject {
 
         activeModelID = AppleLocalModels.legacySpeechModelID
         let (recognizer, request) = try setupRecognition()
-        try startAudioEngine()
+        try startAudioEngine(request: request)
 
         // Start recognition
         recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
@@ -169,9 +175,15 @@ public final class iOSLiveTranscriber: ObservableObject {
                 targetFormat: session.audioFormat
             )
             inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
-                self?.audioRecorder.writeBuffer(buffer)
-                guard let converted = converter.convert(buffer) else { return }
-                session.send(converted)
+                // Copy the buffer and hop off the real-time audio thread —
+                // heavy work in the tap makes CoreAudio drop mic buffers.
+                guard let self, let copied = self.tapBufferPool.copy(buffer) else { return }
+                self.audioProcessingQueue.async {
+                    defer { self.tapBufferPool.recycle(copied) }
+                    self.audioRecorder.writeBuffer(copied)
+                    guard let converted = converter.convert(copied) else { return }
+                    session.send(converted)
+                }
             }
             audioEngine.prepare()
             try audioEngine.start()
@@ -216,16 +228,37 @@ public final class iOSLiveTranscriber: ObservableObject {
         return (recognizer, request)
     }
 
-    private func startAudioEngine() throws {
-        let inputNode = audioEngine.inputNode
-        let recordingFormat = inputNode.outputFormat(forBus: 0)
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
-            self?.recognitionRequest?.append(buffer)
-            self?.audioRecorder.writeBuffer(buffer)
-        }
+    private func startAudioEngine(request: SFSpeechAudioBufferRecognitionRequest) throws {
+        let recordingFormat = installTap(appendingTo: request)
         audioEngine.prepare()
         try audioEngine.start()
         _ = try? audioRecorder.startRecording(format: recordingFormat)
+    }
+
+    /// Installs the input tap appending to `request`. The request is captured
+    /// as an immutable local so the audio-thread tap never reads the
+    /// main-actor `recognitionRequest` property, which is reassigned on
+    /// stop/cancel/restart.
+    @discardableResult
+    private func installTap(appendingTo request: SFSpeechAudioBufferRecognitionRequest) -> AVAudioFormat {
+        let inputNode = audioEngine.inputNode
+        let recordingFormat = inputNode.outputFormat(forBus: 0)
+        let recorder = audioRecorder
+        let pool = tapBufferPool
+        let queue = audioProcessingQueue
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { buffer, _ in
+            // Copy the buffer and hop off the real-time audio thread —
+            // heavy work in the tap makes CoreAudio drop mic buffers.
+            // `request` is captured immutably; the tap is reinstalled with the
+            // fresh request in `restartRecognitionTask()`.
+            guard let copied = pool.copy(buffer) else { return }
+            queue.async {
+                defer { pool.recycle(copied) }
+                request.append(copied)
+                recorder.writeBuffer(copied)
+            }
+        }
+        return recordingFormat
     }
 
     private func resetState() {
@@ -264,12 +297,15 @@ public final class iOSLiveTranscriber: ObservableObject {
 
         isShuttingDownRecognitionTask = true
 
-        // Signal end of audio
-        recognitionRequest?.endAudio()
-
-        // Stop audio engine
+        // Stop audio engine first, then let the buffers already queued on the
+        // processing queue be appended to the request — `endAudio()` before the
+        // drain would discard the last words spoken.
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
+        await audioProcessingQueue.drainPendingWork()
+
+        // Signal end of audio
+        recognitionRequest?.endAudio()
 
         // Cancel recognition task
         recognitionTask?.cancel()
@@ -299,6 +335,9 @@ public final class iOSLiveTranscriber: ObservableObject {
     private func stopSpeechAnalyzer(_ session: AppleSpeechAnalyzerLiveSession) async -> TranscriptionResult {
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
+        // Let queued buffers reach the analyser and the recorder before
+        // `session.finish()` and the recorder close below.
+        await audioProcessingQueue.drainPendingWork()
         _ = audioRecorder.stopRecording()
 
         let elapsed = startTime.map { Date().timeIntervalSince($0) } ?? 0
@@ -378,7 +417,7 @@ public final class iOSLiveTranscriber: ObservableObject {
     // MARK: - Private
 
     private func setupInterruptionHandling() {
-        audioSessionManager.onInterruption = { [weak self] began in
+        audioSessionManager.addInterruptionObserver(owner: self) { [weak self] began in
             Task { @MainActor in
                 if began {
                     self?.handleInterruption()
@@ -480,6 +519,15 @@ public final class iOSLiveTranscriber: ObservableObject {
 
         isShuttingDownRecognitionTask = true
         appendLatestSegments()
+
+        // Let buffers already queued reach the *old* request before its task is
+        // cancelled — the tap captured that request immutably, so anything still
+        // queued would otherwise be appended to a dead request and dropped.
+        // `sync` (not `await`) because the restart must stay atomic on the main
+        // actor; the queued work is an append plus a buffer copy, and nothing on
+        // this queue ever waits on the main actor, so it cannot deadlock.
+        audioProcessingQueue.sync {}
+
         recognitionTask?.cancel()
         recognitionTask = nil
 
@@ -491,6 +539,11 @@ public final class iOSLiveTranscriber: ObservableObject {
         recognitionRequest = newRequest
         latestResult = nil
         lastFormattedString = ""
+
+        // Reinstall the tap so its closure captures the new request; the old
+        // tap holds the previous (cancelled) request immutably.
+        audioEngine.inputNode.removeTap(onBus: 0)
+        installTap(appendingTo: newRequest)
 
         recognitionTask = recognizer.recognitionTask(with: newRequest) { [weak self] result, error in
             Task { @MainActor in

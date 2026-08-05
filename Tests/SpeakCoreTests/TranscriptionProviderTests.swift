@@ -106,3 +106,21 @@ final class TranscriptionProviderMetadataTests: XCTestCase {
         XCTAssertEqual(meta.website, "https://deepgram.com")
     }
 }
+
+final class LocaleLanguageCodeTests: XCTestCase {
+    func testLocaleLanguageCode_stripsRegionAndLowercases() {
+        XCTAssertEqual("en_GB".localeLanguageCode, "en")
+        XCTAssertEqual("en-US".localeLanguageCode, "en")
+        XCTAssertEqual("EN".localeLanguageCode, "en")
+    }
+
+    func testLocaleLanguageCode_trimsSurroundingWhitespace() {
+        // Untrimmed values used to yield " en", which providers reject.
+        XCTAssertEqual(" en-US ".localeLanguageCode, "en")
+        XCTAssertEqual("\n en \t".localeLanguageCode, "en")
+    }
+
+    func testLocaleLanguageCode_blankInput_isEmpty() {
+        XCTAssertEqual("   ".localeLanguageCode, "")
+    }
+}

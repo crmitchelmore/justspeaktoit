@@ -7,6 +7,7 @@ import Sentry
 #if !APP_STORE
 import Sparkle
 #endif
+import SpeakCore
 import SwiftUI
 
 @main
@@ -199,6 +200,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func checkAndOfferDMGCleanup() {
+        // DMG installs exist only on the direct-download channel. The App Store
+        // build is installed by the store and sandboxed, so probing /Volumes,
+        // spawning hdiutil, and copying into /Applications would only produce
+        // spurious dialogs and guaranteed failures there.
+        guard DistributionChannel.current == .direct else { return }
+
         let bundlePath = Bundle.main.bundlePath
         
         // Check if running from a DMG (mounted volume that's not /Applications)

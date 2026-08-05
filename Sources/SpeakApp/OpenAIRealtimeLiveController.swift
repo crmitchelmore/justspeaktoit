@@ -113,7 +113,7 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
       transcriber = provider.createLiveTranscriber(
         apiKey: apiKey,
         model: realtimeName,
-        language: currentLanguage.map(Self.extractLanguageCode(from:)),
+        language: currentLanguage.map(\.localeLanguageCode),
         // OpenAI Realtime's transcription `prompt` is a glossary-style
         // bias — use the AssemblyAI keyterms list as a comma-joined hint.
         // We deliberately do *not* forward the post-processing system prompt
@@ -341,14 +341,6 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
     return raw.isEmpty ? nil : raw
   }
 
-  /// Normalises a BCP-47 locale identifier (e.g. "en-GB", "en_US") to the
-  /// ISO-639-1 two-letter code OpenAI Realtime expects (e.g. "en"). Mirrors
-  /// the helper used by every other transcription provider.
-  static func extractLanguageCode(from locale: String) -> String {
-    let components = locale.split(whereSeparator: { $0 == "_" || $0 == "-" })
-    return components.first.map(String.init)?.lowercased() ?? locale.lowercased()
-  }
-
   private func openAIAPIKey() async throws -> String {
     do {
       let apiKey = try await secureStorage.secret(identifier: "openai.apiKey")
@@ -541,7 +533,15 @@ private final class OpenAIRealtimeAudioProcessor: @unchecked Sendable {
     // converter is only created once per inputFormat (cachedConverter), so
     // its state is the *correct* thing to preserve across taps.
     var error: NSError?
+    var didProvideInput = false
     let status = converter.convert(to: outputBuffer, error: &error) { _, outStatus in
+      // One-shot input: returning the same buffer with .haveData again
+      // would make the converter duplicate audio frames.
+      guard !didProvideInput else {
+        outStatus.pointee = .noDataNow
+        return nil
+      }
+      didProvideInput = true
       outStatus.pointee = .haveData
       return buffer
     }

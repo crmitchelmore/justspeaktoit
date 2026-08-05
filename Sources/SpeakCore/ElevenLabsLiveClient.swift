@@ -10,11 +10,13 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
     private let apiKey: String
     private let modelID: String
     private let language: String?
-    private var webSocketTask: URLSessionWebSocketTask?
     private let session: URLSession
     private let bufferPool: AudioBufferPool
     private let logger = Logger(subsystem: "com.speak.app", category: "ElevenLabsLiveClient")
+    private let stateLock = NSLock()
 
+    // Guarded by `stateLock`: mutated by the caller while URLSession callbacks read them.
+    private var webSocketTask: URLSessionWebSocketTask?
     private var onTranscript: ((String, Bool) -> Void)?
     private var onError: ((Error) -> Void)?
     private var isStopping: Bool = false
@@ -48,9 +50,11 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
         onTranscript: @escaping (String, Bool) -> Void,
         onError: @escaping (Error) -> Void
     ) {
-        isStopping = false
-        self.onTranscript = onTranscript
-        self.onError = onError
+        withStateLock {
+            isStopping = false
+            self.onTranscript = onTranscript
+            self.onError = onError
+        }
 
         var urlComponents = URLComponents(string: "wss://api.elevenlabs.io/v1/speech-to-text/stream")!
         var queryItems = [URLQueryItem(name: "model_id", value: modelID)]
@@ -70,8 +74,19 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
         var request = URLRequest(url: url)
         request.setValue(apiKey, forHTTPHeaderField: "xi-api-key")
 
-        webSocketTask = session.webSocketTask(with: request)
-        webSocketTask?.resume()
+        let task = session.webSocketTask(with: request)
+        // `stop()` can land while the task is being created; publishing
+        // unconditionally would resurrect a session the caller already ended.
+        let published = withStateLock { () -> Bool in
+            guard !isStopping else { return false }
+            webSocketTask = task
+            return true
+        }
+        guard published else {
+            task.cancel(with: .goingAway, reason: nil)
+            return
+        }
+        task.resume()
 
         logger.info("ElevenLabs WebSocket connection started")
         receiveMessages()
@@ -79,7 +94,7 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
 
     /// Sends raw PCM Int16 audio data to the transcription service.
     public func sendAudio(_ audioData: Data) {
-        guard let webSocketTask, webSocketTask.state == .running else {
+        guard let task = currentWebSocketTask(), task.state == .running else {
             return
         }
 
@@ -89,18 +104,18 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
         let dataToSend = buffer
         let message = URLSessionWebSocketTask.Message.data(dataToSend)
 
-        webSocketTask.send(message) { [weak self] error in
+        task.send(message) { [weak self] error in
             guard let self else { return }
 
             var returnBuffer = buffer
             self.bufferPool.returnBuffer(&returnBuffer)
 
             if let error {
-                if self.isStopping || self.shouldIgnoreSocketError(error) {
+                if self.isStoppingState() || self.shouldIgnoreSocketError(error) {
                     return
                 }
                 self.logger.error("Failed to send audio: \(error.localizedDescription)")
-                self.onError?(error)
+                self.currentOnError()?(error)
             }
         }
     }
@@ -108,18 +123,23 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
     /// Sends Float32 audio samples converted to Int16 linear PCM.
     public func sendAudioSamples(_ samples: UnsafePointer<Float>, frameCount: Int) {
         var buffer = bufferPool.checkout()
-        buffer.reserveCapacity(frameCount * 2)
+        buffer.reserveCapacity(frameCount * MemoryLayout<Int16>.size)
 
+        // Single-pass Float32 → Int16 conversion into a preallocated array,
+        // appended in one bulk copy instead of 2 bytes per sample.
+        var int16Samples = [Int16](repeating: 0, count: frameCount)
         for sampleIndex in 0..<frameCount {
             let sample = samples[sampleIndex]
             let clampedSample = max(-1.0, min(1.0, sample))
-            let int16Sample = Int16(clampedSample * Float(Int16.max))
-            withUnsafeBytes(of: int16Sample.littleEndian) { bytes in
-                buffer.append(contentsOf: bytes)
+            int16Samples[sampleIndex] = Int16(clampedSample * Float(Int16.max)).littleEndian
+        }
+        int16Samples.withUnsafeBytes { rawBuffer in
+            if let baseAddress = rawBuffer.baseAddress {
+                buffer.append(baseAddress.assumingMemoryBound(to: UInt8.self), count: rawBuffer.count)
             }
         }
 
-        guard let webSocketTask, webSocketTask.state == .running else {
+        guard let task = currentWebSocketTask(), task.state == .running else {
             bufferPool.returnBuffer(&buffer)
             return
         }
@@ -127,18 +147,18 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
         let dataToSend = buffer
         let message = URLSessionWebSocketTask.Message.data(dataToSend)
 
-        webSocketTask.send(message) { [weak self] error in
+        task.send(message) { [weak self] error in
             guard let self else { return }
 
             var returnBuffer = buffer
             self.bufferPool.returnBuffer(&returnBuffer)
 
             if let error {
-                if self.isStopping || self.shouldIgnoreSocketError(error) {
+                if self.isStoppingState() || self.shouldIgnoreSocketError(error) {
                     return
                 }
                 self.logger.error("Failed to send audio: \(error.localizedDescription)")
-                self.onError?(error)
+                self.currentOnError()?(error)
             }
         }
     }
@@ -151,7 +171,7 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
     /// Returns a final transcript segment that was *not* delivered through
     /// `onTranscript`, or `nil` when nothing new arrived within the budget.
     public func finishAndWait() async -> String? {
-        guard webSocketTask?.state == .running else {
+        guard currentWebSocketTask()?.state == .running else {
             stop()
             return nil
         }
@@ -171,17 +191,21 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
 
     /// Stops the transcription session.
     public func stop() {
-        isStopping = true
+        let task = withStateLock { () -> URLSessionWebSocketTask? in
+            isStopping = true
+            let task = webSocketTask
+            webSocketTask = nil
+            return task
+        }
         bufferPool.logMetrics()
-        webSocketTask?.cancel(with: .normalClosure, reason: nil)
-        webSocketTask = nil
+        task?.cancel(with: .normalClosure, reason: nil)
         resolveFinish(with: nil)
         logger.info("ElevenLabs WebSocket connection closed")
     }
 
     /// Check if the client is currently connected.
     public var isConnected: Bool {
-        webSocketTask?.state == .running
+        currentWebSocketTask()?.state == .running
     }
 
     // MARK: - Private
@@ -198,7 +222,8 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
     }
 
     private func receiveMessages() {
-        webSocketTask?.receive { [weak self] result in
+        guard let task = currentWebSocketTask() else { return }
+        task.receive { [weak self] result in
             guard let self else { return }
 
             switch result {
@@ -207,11 +232,11 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
                 self.receiveMessages()
 
             case .failure(let error):
-                if self.isStopping || self.shouldIgnoreSocketError(error) {
+                if self.isStoppingState() || self.shouldIgnoreSocketError(error) {
                     return
                 }
                 self.logger.error("WebSocket receive error: \(error.localizedDescription)")
-                self.onError?(error)
+                self.currentOnError()?(error)
             }
         }
     }
@@ -245,7 +270,7 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
                 // deliver it through onTranscript.
                 return
             }
-            onTranscript?(transcript, isFinal)
+            currentOnTranscript()?(transcript, isFinal)
 
         } catch {
             logger.debug("Failed to parse transcript response: \(error.localizedDescription)")
@@ -269,6 +294,17 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
         let components = locale.split(whereSeparator: { $0 == "_" || $0 == "-" })
         return components.first.map(String.init)?.lowercased() ?? locale.lowercased()
     }
+
+    private func withStateLock<T>(_ block: () -> T) -> T {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return block()
+    }
+
+    private func currentWebSocketTask() -> URLSessionWebSocketTask? { withStateLock { webSocketTask } }
+    private func isStoppingState() -> Bool { withStateLock { isStopping } }
+    private func currentOnTranscript() -> ((String, Bool) -> Void)? { withStateLock { onTranscript } }
+    private func currentOnError() -> ((Error) -> Void)? { withStateLock { onError } }
 }
 
 // MARK: - Response Models

@@ -87,11 +87,14 @@ final class PermissionsManagerTests: XCTestCase {
             statusProvider: { _ in .notDetermined },
             speechAuthorizationRequester: { callback in
                 Task {
-                    try? await Task.sleep(for: .seconds(0.05))
+                    // Wide margin vs the 0.1s timeout: loaded CI runners can
+                    // stall the process long enough for tighter sleeps to
+                    // invert, letting the "late" callback beat the timeout.
+                    try? await Task.sleep(for: .seconds(1.0))
                     callback(.authorized)
                 }
             },
-            speechAuthorizationTimeout: 0.01,
+            speechAuthorizationTimeout: 0.1,
             notificationCenter: NotificationCenter()
         )
 
@@ -99,7 +102,7 @@ final class PermissionsManagerTests: XCTestCase {
 
         XCTAssertEqual(result, .notDetermined)
         XCTAssertEqual(manager.requestIssue(for: .speechRecognition), .timedOut)
-        try? await Task.sleep(for: .seconds(0.1))
+        try? await Task.sleep(for: .seconds(1.2))
         XCTAssertEqual(manager.requestIssue(for: .speechRecognition), .timedOut)
     }
 

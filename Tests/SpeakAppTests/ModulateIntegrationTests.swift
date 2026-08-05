@@ -163,7 +163,7 @@ final class ModulateIntegrationTests: XCTestCase {
     }
     XCTAssertEqual(message, "Invalid API key.")
     XCTAssertNotEqual(result.debug?.requestHeaders["X-API-Key"], "definitely-invalid-key")
-    XCTAssertEqual(result.debug?.requestHeaders["X-API-Key"], "def...-key")
+    XCTAssertEqual(result.debug?.requestHeaders["X-API-Key"], "[REDACTED]")
   }
 
   func testTranscriptionProviderRegistryIncludesModulate() async {

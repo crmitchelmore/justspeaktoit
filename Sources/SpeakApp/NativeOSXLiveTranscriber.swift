@@ -105,16 +105,23 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
     // task creation run on the main actor, where every generation read happens,
     // so a callback can never observe a half-updated counter.
     await MainActor.run {
+      // Publish session state before starting recognition so final/error
+      // callbacks (all main-actor ordered) observe a fully started session.
+      self.activeInputSession = sessionContext
+      self.isRunning = true
       self.recognitionGeneration += 1
       self.startRecognitionTask(with: recognizer)
     }
-
-    activeInputSession = sessionContext
-    isRunning = true
   }
 
   func stop() async {
     guard isRunning else { return }
+    // Bump the generation before tearing the request/task down so any callback
+    // that fires during teardown is already stale. Ordered on the main actor
+    // with the generation reads in the recognition callbacks.
+    await MainActor.run {
+      self.recognitionGeneration += 1
+    }
     request?.endAudio()
     audioEngine.stop()
     audioEngine.inputNode.removeTap(onBus: 0)
@@ -128,10 +135,6 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
     // already dispatched finish(), the hasFinished guard prevents a
     // double-resume.
     await MainActor.run {
-      // Bump generation to suppress error callbacks from the cancelled task.
-      // Done here rather than off-actor so it is ordered against the reads in
-      // the recognition callbacks, which are all main-actor isolated.
-      self.recognitionGeneration += 1
       guard !self.hasFinished else { return }
       if let result = self.latestResult {
         self.finish(with: result)

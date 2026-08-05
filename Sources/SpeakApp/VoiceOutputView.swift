@@ -141,6 +141,7 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
     if tts.isSynthesizing {
       ProgressView()
         .controlSize(.mini)
+        .accessibilityLabel("Synthesizing voice")
     } else if tts.isPlaying {
       Button {
         tts.stop()
@@ -150,6 +151,7 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
       }
       .buttonStyle(.borderless)
       .accessibilityLabel("Stop voice output")
+      .accessibilityAddTraits(.isButton)
     }
   }
 

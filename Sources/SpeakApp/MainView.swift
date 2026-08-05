@@ -89,12 +89,9 @@ struct MainView: View {
       .keyboardShortcut(.space, modifiers: [.command, .shift])
       .speakTooltip("Start or stop a recording from anywhere in Speak. We'll let you know when we're listening.")
       .accessibilityLabel(accessibilityLabelForRecordButton)
-      .accessibilityHint(
-        environment.main.state == .recording
-          ? "Stops recording and processes the transcription"
-          : "Starts a new recording"
-      )
-      .accessibilityAddTraits(environment.main.state == .recording ? [.isButton, .startsMediaSession] : .isButton)
+      .accessibilityHint(accessibilityHintForRecordButton)
+      .accessibilityAddTraits(accessibilityTraitsForRecordButton)
+      .disabled(isRecordButtonDisabled)
     }
     if !settings.visualDensity.isCompact {
       ToolbarItem(placement: .status) {
@@ -157,6 +154,35 @@ struct MainView: View {
       return "Processing recording"
     case .delivering:
       return "Delivering transcription"
+    }
+  }
+
+  private var accessibilityHintForRecordButton: String {
+    switch environment.main.state {
+    case .idle, .completed, .failed:
+      return "Starts a new recording"
+    case .recording:
+      return "Stops recording and processes the transcription"
+    case .processing, .delivering:
+      return ""
+    }
+  }
+
+  private var accessibilityTraitsForRecordButton: AccessibilityTraits {
+    switch environment.main.state {
+    case .idle, .completed, .failed:
+      return .startsMediaSession
+    case .recording, .processing, .delivering:
+      return []
+    }
+  }
+
+  private var isRecordButtonDisabled: Bool {
+    switch environment.main.state {
+    case .processing, .delivering:
+      return true
+    case .idle, .recording, .completed, .failed:
+      return false
     }
   }
 }

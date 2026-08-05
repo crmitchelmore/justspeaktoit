@@ -151,7 +151,6 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
       }
       .buttonStyle(.borderless)
       .accessibilityLabel("Stop voice output")
-      .accessibilityAddTraits(.isButton)
     }
   }
 

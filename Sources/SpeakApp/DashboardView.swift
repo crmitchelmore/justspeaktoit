@@ -73,8 +73,7 @@ struct DashboardView: View {
         .disabled(isBusy)
         .keyboardShortcut(.space, modifiers: [.command])
         .accessibilityLabel(buttonTitle)
-        .accessibilityHint(environment.main.state == .recording ? "Stops the current recording" : "Starts a new recording")
-        .accessibilityAddTraits(.isButton)
+        .accessibilityHint(recordButtonAccessibilityHint)
       }
 
       if let preview = livePreviewText, !preview.isEmpty {
@@ -131,8 +130,7 @@ struct DashboardView: View {
         .disabled(isBusy)
         .speakTooltip("Start a new recording instantly or stop the current one—Speak keeps you informed every step of the way.")
         .accessibilityLabel(buttonTitle)
-        .accessibilityHint(environment.main.state == .recording ? "Stops the current recording" : "Starts a new recording")
-        .accessibilityAddTraits(.isButton)
+        .accessibilityHint(recordButtonAccessibilityHint)
         .shadow(color: Color.black.opacity(0.25), radius: 18, x: 0, y: 12)
         .animation(.easeInOut(duration: 0.2), value: environment.main.state)
       }
@@ -290,6 +288,17 @@ struct DashboardView: View {
       return "hourglass"
     case .delivering:
       return "arrowshape.turn.up.right"
+    }
+  }
+
+  private var recordButtonAccessibilityHint: String {
+    switch environment.main.state {
+    case .idle, .completed, .failed:
+      return "Starts a new recording"
+    case .recording:
+      return "Stops the current recording"
+    case .processing, .delivering:
+      return ""
     }
   }
 

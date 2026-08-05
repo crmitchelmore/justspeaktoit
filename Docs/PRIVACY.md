@@ -71,11 +71,36 @@ Uninstall and reinstall the app, or use iOS Settings → Speak → Reset
 
 ## Analytics & Telemetry
 
-Speak does **not** collect:
-- Usage analytics
-- Crash reports (beyond what Apple collects)
-- Personal information
-- Transcription content
+### macOS diagnostics
+
+Production macOS builds use Sentry's EU service for reliability monitoring. The
+Sentry SDK sends:
+
+- Crash and error reports
+- Performance traces (sampled at 20%)
+- Automatic app sessions, associated with a persistent random installation ID
+- Automatic diagnostic breadcrumbs and failed HTTP-request metadata
+
+Sentry is disabled in debug builds and test runs. `sendDefaultPii` is disabled,
+and the data is not used to track users across other companies' apps or websites.
+Just Speak to It does not intentionally send transcript text, microphone audio,
+clipboard contents, API keys, email addresses, or names to Sentry.
+
+The macOS dashboard's transcription history and usage charts are stored locally;
+they are not product-analytics events sent to the developer.
+
+### iOS diagnostics
+
+The iOS app does not currently initialise Sentry or another
+developer-operated analytics SDK. Apple may provide the developer with
+aggregated App Store and crash diagnostics under Apple's own privacy terms.
+
+### Identifiability
+
+The Sentry installation ID is random and is not an account identifier. Just
+Speak to It does not set a Sentry user name or email address. Diagnostic data is
+not linked to a known identity and is not used for advertising or cross-app
+tracking.
 
 ## Questions?
 
@@ -83,4 +108,4 @@ For privacy questions, contact: [your contact email]
 
 ---
 
-*Last updated: January 2026*
+*Last updated: August 2026*

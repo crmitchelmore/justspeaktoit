@@ -183,11 +183,21 @@ public final class ConfigTransferManager {
 
     /// Collects the transferable secrets currently stored in `storage`,
     /// skipping identifiers that are missing or empty.
-    public func gatherSecrets(storage: SecureStorage) async -> [String: String] {
+    ///
+    /// Only `SecureStorageError.valueNotFound` is treated as "not stored".
+    /// Access-denied, corruption and other Keychain failures are rethrown: a
+    /// transfer that silently omits a credential the user believes they exported
+    /// is worse than one that fails visibly.
+    public func gatherSecrets(storage: SecureStorage) async throws -> [String: String] {
         var secrets: [String: String] = [:]
         for identifier in Self.transferableSecretIdentifiers {
-            if let value = try? await storage.secret(identifier: identifier), !value.isEmpty {
-                secrets[identifier] = value
+            do {
+                let value = try await storage.secret(identifier: identifier)
+                if !value.isEmpty {
+                    secrets[identifier] = value
+                }
+            } catch SecureStorageError.valueNotFound {
+                continue
             }
         }
         return secrets

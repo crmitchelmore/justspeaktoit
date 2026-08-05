@@ -89,7 +89,17 @@ public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @
         request.setValue("Token \(apiKey)", forHTTPHeaderField: "Authorization")
 
         let task = session.webSocketTask(with: request)
-        withStateLock { webSocketTask = task }
+        // `stop()` can land while the task is being created; publishing
+        // unconditionally would resurrect a session the caller already ended.
+        let published = withStateLock { () -> Bool in
+            guard !isStopping else { return false }
+            webSocketTask = task
+            return true
+        }
+        guard published else {
+            task.cancel(with: .goingAway, reason: nil)
+            return
+        }
         task.resume()
 
         logger.info("Deepgram WebSocket connection started")

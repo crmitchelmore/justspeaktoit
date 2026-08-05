@@ -34,6 +34,31 @@ public enum SensitiveHeaderRedactor {
         return result
     }
 
+    /// Redacts sensitive headers with a fixed marker, keeping **no** fragment of
+    /// the original value.
+    ///
+    /// Use this wherever the redacted headers are stored or displayed (debug
+    /// snapshots, logs, screenshots): `redactSensitiveHeaders` keeps a
+    /// recognisable prefix/suffix, which is fine for interactive "is this the key
+    /// I pasted?" comparison but is still credential material at rest.
+    /// - Parameter headers: Dictionary of HTTP headers
+    /// - Returns: Dictionary with every sensitive value replaced by `[REDACTED]`
+    public static func fullyRedactSensitiveHeaders(_ headers: [String: String]) -> [String: String] {
+        var result: [String: String] = [:]
+        for (key, value) in headers {
+            if isSensitiveKey(key) || isSensitiveValue(value) {
+                // Keep the scheme so the snapshot still shows *how* the request
+                // authenticated; the token itself is gone.
+                result[key] = value.trimmingCharacters(in: .whitespaces).hasPrefix("Bearer ")
+                    ? "Bearer [REDACTED]"
+                    : "[REDACTED]"
+            } else {
+                result[key] = value
+            }
+        }
+        return result
+    }
+
     /// Determines if a header key is sensitive
     /// - Parameter key: Header name
     /// - Returns: True if the header is known to contain sensitive data

@@ -32,11 +32,13 @@ public struct APIKeyValidationDebugSnapshot: Sendable, Equatable {
     ) {
         self.url = url
         self.method = method
-        // Automatically redact sensitive headers to prevent exposure in debug UI
-        self.requestHeaders = SensitiveHeaderRedactor.redactSensitiveHeaders(requestHeaders)
+        // Snapshots are stored and rendered in the debug UI, so sensitive header
+        // values are replaced outright — no prefix/suffix of the credential is
+        // retained. Callers therefore never need to pre-blank the auth header.
+        self.requestHeaders = SensitiveHeaderRedactor.fullyRedactSensitiveHeaders(requestHeaders)
         self.requestBody = requestBody
         self.statusCode = statusCode
-        self.responseHeaders = SensitiveHeaderRedactor.redactSensitiveHeaders(responseHeaders)
+        self.responseHeaders = SensitiveHeaderRedactor.fullyRedactSensitiveHeaders(responseHeaders)
         self.responseBody = responseBody
         self.errorDescription = errorDescription
     }

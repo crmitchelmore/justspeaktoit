@@ -78,7 +78,7 @@ struct QRCodeGeneratorView: View {
                     service: "com.speak.ios.credentials"
                 )
             )
-            let secrets = await manager.gatherSecrets(storage: storage)
+            let secrets = try await manager.gatherSecrets(storage: storage)
             let settings = manager.gatherSettings()
 
             guard !secrets.isEmpty || !settings.isEmpty else {

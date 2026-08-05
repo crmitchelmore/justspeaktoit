@@ -348,15 +348,31 @@ final class HistoryManager: ObservableObject {
     }
   }
 
-  /// Sync wrapper for termination - uses semaphore to block until complete
+  /// Termination flush. Runs entirely on the main actor and writes inline.
+  ///
+  /// The previous shape — `Task.detached { await flushImmediately() }` plus
+  /// `DispatchSemaphore.wait()` — deadlocked: `flushImmediately()` is main-actor
+  /// isolated, so the detached task could never enter it while the main actor was
+  /// parked on the semaphore. The app then exited five seconds later with the
+  /// pending writes unflushed. Doing the encode + write synchronously here costs a
+  /// short stall during `willTerminate`, but actually persists the data.
   private func flushImmediatelySync() {
     guard !pendingWrites.isEmpty, !isFlushing else { return }
-    let semaphore = DispatchSemaphore(value: 0)
-    Task.detached { [weak self] in
-      await self?.flushImmediately()
-      semaphore.signal()
+    isFlushing = true
+    defer { isFlushing = false }
+
+    log.info("Flushing \(self.pendingWrites.count) pending writes to disk (termination)")
+
+    let snapshot = allItemsOnDisk.isEmpty ? items : allItemsOnDisk
+    let flushedCount = pendingWrites.count
+
+    do {
+      try Self.writeSnapshot(snapshot, to: storageURL, encoder: encoder)
+      completeFlush(flushedCount: flushedCount)
+      log.info("Termination flush complete")
+    } catch {
+      log.error("Failed to flush history: \(error.localizedDescription, privacy: .public)")
     }
-    _ = semaphore.wait(timeout: .now() + 5.0)
   }
 
   /// Force immediate flush of all pending writes
@@ -377,22 +393,36 @@ final class HistoryManager: ObservableObject {
     do {
       // Encode and write off the main actor; the snapshot is an immutable copy.
       try await Task.detached(priority: .utility) { [encoder] in
-        let data = try encoder.encode(snapshot)
-        try data.write(to: url, options: [.atomic])
+        try Self.writeSnapshot(snapshot, to: url, encoder: encoder)
       }.value
 
-      // Drop only the writes covered by the snapshot; anything appended while
-      // the write was in flight stays pending (and stays in the WAL).
-      pendingWrites.removeFirst(min(flushedCount, pendingWrites.count))
-      if pendingWrites.isEmpty {
-        clearWAL()
-      } else {
-        rewriteWAL(with: pendingWrites)
-      }
-
+      completeFlush(flushedCount: flushedCount)
       log.info("Flush complete")
     } catch {
       log.error("Failed to flush history: \(error.localizedDescription, privacy: .public)")
+    }
+  }
+
+  /// Encode + atomic write. Touches no actor state, so both the async and the
+  /// termination path can share it.
+  private nonisolated static func writeSnapshot(
+    _ items: [HistoryItem],
+    to url: URL,
+    encoder: JSONEncoder
+  ) throws {
+    let data = try encoder.encode(items)
+    try data.write(to: url, options: [.atomic])
+  }
+
+  /// Post-write bookkeeping. Drops only the writes covered by the snapshot;
+  /// anything appended while the write was in flight stays pending (and stays
+  /// in the WAL).
+  private func completeFlush(flushedCount: Int) {
+    pendingWrites.removeFirst(min(flushedCount, pendingWrites.count))
+    if pendingWrites.isEmpty {
+      clearWAL()
+    } else {
+      rewriteWAL(with: pendingWrites)
     }
   }
 

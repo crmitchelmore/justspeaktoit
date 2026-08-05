@@ -98,6 +98,9 @@ public final class SharedClientLiveTranscriber: ObservableObject {
 
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
+        // Buffers handed to the queue just before the tap came off are still
+        // converting; let them reach the client before we finalise it.
+        await audioProcessingQueue.drainPendingWork()
         if let finalizingClient = client as? FinalizingStreamingTranscriptionClient {
             if let finalTranscript = await finalizingClient.finishAndWait(),
                finalText != finalTranscript {

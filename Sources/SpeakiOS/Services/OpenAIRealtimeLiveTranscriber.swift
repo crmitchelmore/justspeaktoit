@@ -163,6 +163,11 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
 
+        // Buffers handed to the queue just before the tap came off are still
+        // being written and sent; let them land before the input buffer is
+        // committed and the recorder is closed.
+        await audioProcessingQueue.drainPendingWork()
+
         preStopCompletedItemIDs = Set(finalsByItem.keys)
 
         if let client = transcriber {

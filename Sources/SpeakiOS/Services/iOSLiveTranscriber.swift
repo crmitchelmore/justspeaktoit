@@ -297,12 +297,15 @@ public final class iOSLiveTranscriber: ObservableObject {
 
         isShuttingDownRecognitionTask = true
 
-        // Signal end of audio
-        recognitionRequest?.endAudio()
-
-        // Stop audio engine
+        // Stop audio engine first, then let the buffers already queued on the
+        // processing queue be appended to the request — `endAudio()` before the
+        // drain would discard the last words spoken.
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
+        await audioProcessingQueue.drainPendingWork()
+
+        // Signal end of audio
+        recognitionRequest?.endAudio()
 
         // Cancel recognition task
         recognitionTask?.cancel()
@@ -332,6 +335,9 @@ public final class iOSLiveTranscriber: ObservableObject {
     private func stopSpeechAnalyzer(_ session: AppleSpeechAnalyzerLiveSession) async -> TranscriptionResult {
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
+        // Let queued buffers reach the analyser and the recorder before
+        // `session.finish()` and the recorder close below.
+        await audioProcessingQueue.drainPendingWork()
         _ = audioRecorder.stopRecording()
 
         let elapsed = startTime.map { Date().timeIntervalSince($0) } ?? 0
@@ -513,6 +519,15 @@ public final class iOSLiveTranscriber: ObservableObject {
 
         isShuttingDownRecognitionTask = true
         appendLatestSegments()
+
+        // Let buffers already queued reach the *old* request before its task is
+        // cancelled — the tap captured that request immutably, so anything still
+        // queued would otherwise be appended to a dead request and dropped.
+        // `sync` (not `await`) because the restart must stay atomic on the main
+        // actor; the queued work is an append plus a buffer copy, and nothing on
+        // this queue ever waits on the main actor, so it cannot deadlock.
+        audioProcessingQueue.sync {}
+
         recognitionTask?.cancel()
         recognitionTask = nil
 

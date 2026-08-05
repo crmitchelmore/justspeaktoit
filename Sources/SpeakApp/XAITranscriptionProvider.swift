@@ -53,7 +53,7 @@ struct XAITranscriptionProvider: TranscriptionProvider {
       guard let http = response as? HTTPURLResponse else {
         return .failure(message: "Received a non-HTTP response")
       }
-      let debug = debugSnapshot(request: request, response: http, data: data)
+      let debug = APIKeyValidationDebugSnapshot.capture(request: request, response: http, data: data)
       switch http.statusCode {
       case 200..<300:
         return .success(message: "xAI API key validated", debug: debug)
@@ -73,19 +73,5 @@ struct XAITranscriptionProvider: TranscriptionProvider {
 
   func supportedModels() -> [ModelCatalog.Option] {
     ModelCatalog.liveTranscriptionOptions(forProvider: metadata.id)
-  }
-
-  private func debugSnapshot(
-    request: URLRequest,
-    response: HTTPURLResponse,
-    data: Data
-  ) -> APIKeyValidationDebugSnapshot {
-    // Blank the key out entirely rather than letting the shared redactor keep a
-    // recognisable prefix/suffix of it.
-    var redacted = request
-    if request.value(forHTTPHeaderField: "Authorization") != nil {
-      redacted.setValue("Bearer [REDACTED]", forHTTPHeaderField: "Authorization")
-    }
-    return .capture(request: redacted, response: response, data: data)
   }
 }

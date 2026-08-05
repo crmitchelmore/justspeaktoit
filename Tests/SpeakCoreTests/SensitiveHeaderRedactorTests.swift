@@ -129,4 +129,28 @@ final class SensitiveHeaderRedactorTests: XCTestCase {
         let auth = result["Authorization"] ?? ""
         XCTAssertFalse(auth.contains(apiKey), "API key must not appear verbatim in redacted output")
     }
+
+    // MARK: - fullyRedactSensitiveHeaders
+
+    func testFullyRedactSensitiveHeaders_keepsNoFragmentOfTheCredential() {
+        let apiKey = "sk-ABCDEFGHIJKLMNOPQRSTUVWX"
+        let result = SensitiveHeaderRedactor.fullyRedactSensitiveHeaders([
+            "Authorization": "Bearer \(apiKey)",
+            "x-api-key": "gladia-key-1234567890abcdef",
+            "Content-Type": "application/json"
+        ])
+
+        XCTAssertEqual(result["Authorization"], "Bearer [REDACTED]")
+        XCTAssertEqual(result["x-api-key"], "[REDACTED]")
+        XCTAssertEqual(result["Content-Type"], "application/json", "Non-sensitive headers pass through")
+    }
+
+    func testFullyRedactSensitiveHeaders_leaksNoPrefixOrSuffix() {
+        let apiKey = "abcdefghijklmnopqrstuvwxyz012345"
+        let result = SensitiveHeaderRedactor.fullyRedactSensitiveHeaders(["x-api-key": apiKey])
+        let redacted = result["x-api-key"] ?? ""
+
+        XCTAssertFalse(redacted.contains(apiKey.prefix(3)))
+        XCTAssertFalse(redacted.contains(apiKey.suffix(4)))
+    }
 }

@@ -68,7 +68,7 @@ struct CartesiaTranscriptionProvider: TranscriptionProvider {
       guard let http = response as? HTTPURLResponse else {
         return .failure(message: "Non-HTTP response")
       }
-      let debug = debugSnapshot(request: request, response: http, data: data)
+      let debug = APIKeyValidationDebugSnapshot.capture(request: request, response: http, data: data)
       switch http.statusCode {
       case 200..<300:
         return .success(message: "Cartesia API key validated", debug: debug)
@@ -96,20 +96,6 @@ struct CartesiaTranscriptionProvider: TranscriptionProvider {
     sampleRate: Int = 16_000
   ) -> CartesiaLiveTranscriber {
     CartesiaLiveTranscriber(apiKey: apiKey, model: model, sampleRate: sampleRate, session: session)
-  }
-
-  private func debugSnapshot(
-    request: URLRequest,
-    response: HTTPURLResponse,
-    data: Data
-  ) -> APIKeyValidationDebugSnapshot {
-    // Blank the key out entirely rather than letting the shared redactor keep a
-    // recognisable prefix/suffix of it.
-    var redacted = request
-    if request.value(forHTTPHeaderField: "Authorization") != nil {
-      redacted.setValue("Bearer [REDACTED]", forHTTPHeaderField: "Authorization")
-    }
-    return .capture(request: redacted, response: response, data: data)
   }
 }
 

@@ -246,6 +246,11 @@ public final class ElevenLabsLiveTranscriber: ObservableObject {
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
 
+        // Buffers handed to the queue just before the tap came off are still
+        // being written and sent; let them land before the client is finalised
+        // and the recorder is closed.
+        await audioProcessingQueue.drainPendingWork()
+
         // Graceful drain: when interim words are still pending, wait briefly
         // for the trailing final before closing so they aren't lost. When
         // nothing is pending, close immediately.

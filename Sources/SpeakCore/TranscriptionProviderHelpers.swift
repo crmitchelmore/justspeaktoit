@@ -10,8 +10,11 @@ extension String {
     /// Transcription APIs expect ISO-639-1 (`"en"`), not a full locale, so
     /// `"en_GB"`, `"en-US"` and `"en"` all map to `"en"`.
     public var localeLanguageCode: String {
-        let components = self.split(whereSeparator: { $0 == "_" || $0 == "-" })
-        return components.first.map(String.init)?.lowercased() ?? self.lowercased()
+        // Trim first: `" en-US "` must yield `"en"`, not `" en"` — the value goes
+        // straight into provider query parameters.
+        let normalized = trimmingCharacters(in: .whitespacesAndNewlines)
+        let components = normalized.split(whereSeparator: { $0 == "_" || $0 == "-" })
+        return components.first.map(String.init)?.lowercased() ?? normalized.lowercased()
     }
 }
 

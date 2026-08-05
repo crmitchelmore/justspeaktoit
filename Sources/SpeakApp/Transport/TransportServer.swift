@@ -118,7 +118,14 @@ public final class TransportServer: ObservableObject {
         case .failed(let error):
             SpeakLogger.logError(error, context: "Listener failed", logger: SpeakLogger.transport)
             // Tear the listener down so a later start() builds a fresh one instead of
-            // leaking the dead listener.
+            // leaking the dead listener. Drop live connections too: WireUp only flips
+            // `enableSendToMac` off on failure, so a surviving TransportConnection would
+            // keep delivering transcript chunks while the UI says Send to Mac is off.
+            for connection in connections.values {
+                connection.disconnect()
+            }
+            connections.removeAll()
+            connectedDevices.removeAll()
             listener?.cancel()
             listener = nil
             self.error = error

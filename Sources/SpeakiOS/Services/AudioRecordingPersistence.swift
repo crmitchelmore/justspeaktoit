@@ -90,8 +90,10 @@ public final class AudioRecordingPersistence: ObservableObject {
             commonFormat: format.commonFormat,
             interleaved: format.isInterleaved
         )
-        ioQueue.async { [weak self] in self?.ioFile = file }
+        // Install the file and open admission under one lock hold, so the
+        // install is queued strictly ahead of any write this unlock admits.
         stateLock.lock()
+        ioQueue.async { [weak self] in self?.ioFile = file }
         isWriterOpen = true
         stateLock.unlock()
 
@@ -109,21 +111,28 @@ public final class AudioRecordingPersistence: ObservableObject {
     /// buffer is copied immediately and the AAC encode + file write happen
     /// asynchronously on the persistence I/O queue.
     nonisolated public func writeBuffer(_ buffer: AVAudioPCMBuffer) {
+        // Admission and enqueue are one atomic step against `closeWriter`'s
+        // barrier. Releasing the lock before `ioQueue.async` would let a stalled
+        // caller enqueue *after* the session closed; that block would then
+        // resolve `ioFile` at execution time and splice prior-session audio into
+        // the next recording. Holding the lock across the submit means every
+        // admitted write is already queued ahead of `closeWriter`'s `ioQueue.sync`
+        // barrier, so it lands in the file it was admitted for — or not at all.
+        // `ioQueue` blocks never take `stateLock`, so the async submit can't deadlock.
         stateLock.lock()
-        let isOpen = isWriterOpen
-        stateLock.unlock()
-        guard isOpen, let copy = writeBufferPool.copy(buffer) else { return }
-
-        ioQueue.async { [weak self] in
-            guard let self else { return }
-            defer { self.writeBufferPool.recycle(copy) }
-            guard let file = self.ioFile else { return }
-            do {
-                try file.write(from: copy)
-            } catch {
-                // Log but don't throw — we don't want to interrupt the
-                // transcription pipeline for a write failure.
-                print("[AudioPersistence] Write error: \(error)")
+        defer { stateLock.unlock() }
+        if isWriterOpen, let copy = writeBufferPool.copy(buffer) {
+            ioQueue.async { [weak self] in
+                guard let self else { return }
+                defer { self.writeBufferPool.recycle(copy) }
+                guard let file = self.ioFile else { return }
+                do {
+                    try file.write(from: copy)
+                } catch {
+                    // Log but don't throw — we don't want to interrupt the
+                    // transcription pipeline for a write failure.
+                    print("[AudioPersistence] Write error: \(error)")
+                }
             }
         }
     }

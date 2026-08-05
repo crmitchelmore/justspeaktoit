@@ -246,6 +246,11 @@ public final class DeepgramLiveTranscriber: ObservableObject {
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
 
+        // Buffers handed to the queue just before the tap came off are still
+        // being written and sent; let them land before the client is finalised
+        // and the recorder is closed.
+        await audioProcessingQueue.drainPendingWork()
+
         // Graceful drain: ask Deepgram to flush buffered audio (CloseStream)
         // and wait briefly for the trailing final so the last words spoken
         // right before stop make it into the result.

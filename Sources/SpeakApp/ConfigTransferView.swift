@@ -107,7 +107,7 @@ struct ConfigTransferView: View {
             // Gather secrets and settings via the shared transfer manager so
             // both platforms use the same key list and payload format.
             let manager = ConfigTransferManager.shared
-            let secrets = await manager.gatherSecrets(storage: secureStorage.coreStorage())
+            let secrets = try await manager.gatherSecrets(storage: secureStorage.coreStorage())
             let settings = manager.gatherSettings(liveModelDefaultsKey: "liveTranscriptionModel")
 
             secretCount = secrets.count

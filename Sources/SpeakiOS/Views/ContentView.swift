@@ -83,6 +83,7 @@ final class TranscriberCoordinator: ObservableObject {
         let session = try IOSTranscriptionSession(
             modelID: currentModel,
             mode: mode,
+            language: settings.preferredModelLanguage,
             audioSessionManager: audioSessionManager,
             batchAPIKey: settings.batchAPIKey,
             liveAPIKey: settings.liveAPIKey(for:)
@@ -170,7 +171,7 @@ final class TranscriberCoordinator: ObservableObject {
         if let session = transcriptionSession {
             transcriptionSession = nil
             do {
-                let result = try await session.stop(language: Locale.current.identifier)
+                let result = try await session.stop()
                 if session.isBatch {
                     partialText = result.text
                     wordCount = result.text.split(whereSeparator: \.isWhitespace).count

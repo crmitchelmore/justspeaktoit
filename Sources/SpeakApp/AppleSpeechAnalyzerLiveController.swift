@@ -58,7 +58,7 @@ final class AppleSpeechAnalyzerLiveController: LiveTranscriptionController {
   @available(macOS 26.0, *)
   private func startSpeechAnalyzer() async throws {
     let session = try await AppleSpeechAnalyzerLiveSession(
-      localeIdentifier: currentLanguage ?? appSettings.preferredLocaleIdentifier
+      localeIdentifier: currentLanguage ?? appSettings.resolvedPreferredLocaleIdentifier
     ) { [weak self] update in
       Task { @MainActor [weak self] in
         guard let self else { return }

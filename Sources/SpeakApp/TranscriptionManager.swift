@@ -152,8 +152,8 @@ final class TranscriptionManager: ObservableObject {
   func startLiveTranscription() async throws {
     guard !isLiveTranscribing else { throw TranscriptionManagerError.liveSessionAlreadyRunning }
     let model = try liveTranscriptionModelForCurrentMode()
-    let language = appSettings.preferredLocaleIdentifier
-    print("[TranscriptionManager] startLiveTranscription - model: \(model), language: \(language)")
+    let language = appSettings.preferredModelLanguage
+    print("[TranscriptionManager] startLiveTranscription - model: \(model), language: \(language ?? "automatic")")
     liveController.configure(
       language: language,
       model: model
@@ -231,7 +231,7 @@ final class TranscriptionManager: ObservableObject {
       if #available(macOS 26.0, *) {
         return try await AppleSpeechAnalyzerTranscriber.transcribeFile(
           at: url,
-          localeIdentifier: appSettings.preferredLocaleIdentifier
+          localeIdentifier: appSettings.resolvedPreferredLocaleIdentifier
         )
       }
       throw AppleLocalModelError.speechTranscriberUnavailable
@@ -240,7 +240,7 @@ final class TranscriptionManager: ObservableObject {
       return try await LocalModelManager.shared.transcribeFile(
         at: url,
         modelID: model,
-        language: appSettings.preferredLocaleIdentifier
+        language: appSettings.preferredModelLanguage
       )
     }
 
@@ -253,7 +253,7 @@ final class TranscriptionManager: ObservableObject {
         at: url,
         apiKey: apiKey,
         model: model,
-        language: appSettings.preferredLocaleIdentifier
+        language: appSettings.preferredModelLanguage
       )
     }
 
@@ -261,7 +261,7 @@ final class TranscriptionManager: ObservableObject {
     return try await batchClient.transcribeFile(
       at: url,
       model: model,
-      language: appSettings.preferredLocaleIdentifier
+      language: appSettings.preferredModelLanguage
     )
   }
 

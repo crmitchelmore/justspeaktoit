@@ -152,6 +152,7 @@ public final class TranscriptionRecordingService: ObservableObject {
             let session = try IOSTranscriptionSession(
                 modelID: currentModel,
                 mode: mode,
+                language: settings.preferredModelLanguage,
                 audioSessionManager: audioSessionManager,
                 batchAPIKey: settings.batchAPIKey,
                 liveAPIKey: settings.liveAPIKey(for:)
@@ -430,7 +431,7 @@ private extension TranscriptionRecordingService {
         if let session = transcriptionSession {
             transcriptionSession = nil
             do {
-                return try await session.stop(language: Locale.current.identifier)
+                return try await session.stop()
             } catch {
                 handleError(error)
                 return TranscriptionResult(

@@ -60,19 +60,23 @@ final class IOSTranscriptionSession {
     }
 
     private let backend: Backend
+    private let language: String?
 
     init(
         modelID: String,
         mode: Mode,
+        language: String? = nil,
         audioSessionManager: AudioSessionManager,
         batchAPIKey: String,
         liveAPIKey: (LiveTranscriptionRoute) -> String
     ) throws {
         let resolution = try Self.resolve(modelID: modelID, mode: mode)
         self.resolution = resolution
+        self.language = language
         backend = try Self.makeBackend(
             resolution: resolution,
             mode: mode,
+            language: language,
             audioSessionManager: audioSessionManager,
             batchAPIKey: batchAPIKey,
             liveAPIKey: liveAPIKey
@@ -104,9 +108,12 @@ final class IOSTranscriptionSession {
         return Resolution(modelID: route.modelID, backend: backend, route: route)
     }
 
+    // Keeping construction inputs together makes every recording surface use the same routing contract.
+    // swiftlint:disable:next function_parameter_count
     private static func makeBackend(
         resolution: Resolution,
         mode: Mode,
+        language: String?,
         audioSessionManager: AudioSessionManager,
         batchAPIKey: String,
         liveAPIKey: (LiveTranscriptionRoute) -> String
@@ -130,12 +137,14 @@ final class IOSTranscriptionSession {
         case .apple:
             let transcriber = iOSLiveTranscriber(audioSessionManager: audioSessionManager)
             transcriber.modelID = resolution.modelID
+            transcriber.language = language ?? Locale.current.identifier
             return .apple(transcriber)
         case .openAI:
             let route = try requiredRoute(for: resolution)
             let transcriber = OpenAIRealtimeLiveTranscriber(audioSessionManager: audioSessionManager)
             transcriber.configure(apiKey: liveAPIKey(route))
             transcriber.modelID = route.apiModelName
+            transcriber.language = language
             return .openAI(transcriber)
         case .shared:
             let route = try requiredRoute(for: resolution)
@@ -143,6 +152,7 @@ final class IOSTranscriptionSession {
                 SharedClientLiveTranscriber(
                     route: route,
                     apiKey: liveAPIKey(route),
+                    language: language,
                     audioSessionManager: audioSessionManager
                 )
             )
@@ -169,7 +179,7 @@ final class IOSTranscriptionSession {
         }
     }
 
-    func stop(language: String?) async throws -> TranscriptionResult {
+    func stop() async throws -> TranscriptionResult {
         switch backend {
         case .batch(let transcriber):
             return try await transcriber.stop(language: language)

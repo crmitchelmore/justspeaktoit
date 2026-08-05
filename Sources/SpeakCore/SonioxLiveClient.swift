@@ -15,6 +15,7 @@ public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Se
 
     private let apiKey: String
     private let model: String
+    private let language: String?
     private let sampleRate: Int
     private let session: URLSession
     private let logger = Logger(subsystem: "com.justspeaktoit", category: "SonioxLiveClient")
@@ -30,11 +31,13 @@ public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Se
     public init(
         apiKey: String,
         model: String = "stt-rt-v5",
+        language: String? = nil,
         sampleRate: Int = 16_000,
         session: URLSession = .shared
     ) {
         self.apiKey = apiKey
         self.model = model
+        self.language = language
         self.sampleRate = sampleRate
         self.session = session
     }
@@ -116,13 +119,16 @@ public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Se
 
     private func sendInitialConfig() {
         guard let task = currentWebSocketTask() else { return }
-        let payload: [String: Any] = [
+        var payload: [String: Any] = [
             "api_key": apiKey,
             "model": model,
             "audio_format": "pcm_s16le",
             "sample_rate": sampleRate,
             "num_channels": 1
         ]
+        if let language {
+            payload["language_hints"] = [language.localeLanguageCode]
+        }
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
               let json = String(data: data, encoding: .utf8) else { return }
         let sendGroup = pendingSendGroup

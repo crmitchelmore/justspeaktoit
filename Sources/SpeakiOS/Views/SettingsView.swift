@@ -207,6 +207,14 @@ public final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(autoStartRecording, forKey: "autoStartRecording") }
     }
 
+    @Published public var preferredLocaleIdentifier: String {
+        didSet { UserDefaults.standard.set(preferredLocaleIdentifier, forKey: "preferredLocale") }
+    }
+
+    public var preferredModelLanguage: String? {
+        TranscriptionLanguageCatalog.providerLanguage(for: preferredLocaleIdentifier)
+    }
+
     /// What happens to the transcript when a hardware-triggered recording (Action Button,
     /// Siri, Shortcuts, Lock Screen widget, Back Tap, Control Center) stops.
     @Published public var hardwareTriggerDestination: HardwareTriggerDestination {
@@ -270,6 +278,9 @@ public final class AppSettings: ObservableObject {
             rawValue: UserDefaults.standard.string(forKey: "visualDensity") ?? ""
         ) ?? .normal
         let autoStart = UserDefaults.standard.bool(forKey: "autoStartRecording")
+        let preferredLocale = TranscriptionLanguageCatalog.normalizedIdentifier(
+            UserDefaults.standard.string(forKey: "preferredLocale")
+        )
 
         // Hardware trigger destination (Action Button, Siri, Shortcuts).
         // Default to .clipboard for backwards compatibility with prior versions.
@@ -307,6 +318,7 @@ public final class AppSettings: ObservableObject {
         self.liveActivitiesEnabled = liveActivities
         self.visualDensity = density
         self.autoStartRecording = autoStart
+        self.preferredLocaleIdentifier = preferredLocale
         self.hardwareTriggerDestination = hardwareDest
         self.postProcessingEnabled = postEnabled
         self.postProcessingModel = postModel
@@ -690,6 +702,25 @@ public struct SettingsView: View {
                 }
             }
 
+            Section("Language") {
+                Picker("Spoken Language", selection: $settings.preferredLocaleIdentifier) {
+                    ForEach(TranscriptionLanguageCatalog.options) { option in
+                        Text(option.displayName).tag(option.id)
+                    }
+                }
+                .pickerStyle(.navigationLink)
+                .accessibilityIdentifier("spokenLanguagePicker")
+
+                if !usesInlineDensityLayout {
+                    Text(
+                        "Automatic lets remote providers detect the language. "
+                            + "Apple on-device transcription uses your current system locale."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+            }
+
             Section("Transcription") {
                 Picker("Where transcription runs", selection: transcriptionLocationBinding) {
                     ForEach(IOSTranscriptionLocation.allCases) { location in
@@ -821,10 +852,6 @@ public struct SettingsView: View {
                     .font(.caption)
                 }
 
-                LabeledContent("Language") {
-                    Text(Locale.current.identifier)
-                        .foregroundStyle(.secondary)
-                }
             }
 
             Section("Behavior") {

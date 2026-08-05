@@ -401,6 +401,14 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     didSet { store(preferredLocaleIdentifier, key: .preferredLocale) }
   }
 
+  var preferredModelLanguage: String? {
+    TranscriptionLanguageCatalog.providerLanguage(for: preferredLocaleIdentifier)
+  }
+
+  var resolvedPreferredLocaleIdentifier: String {
+    TranscriptionLanguageCatalog.localeIdentifier(for: preferredLocaleIdentifier)
+  }
+
   @Published var preferredAudioInputUID: String? {
     didSet {
       let key = DefaultsKey.preferredAudioInputUID.rawValue
@@ -874,8 +882,9 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       supportedLocalStreamingIDs.contains(storedLocalStreamingSource ?? "")
       ? storedLocalStreamingSource ?? defaultLocalStreamingSource
       : defaultLocalStreamingSource
-    preferredLocaleIdentifier =
-      defaults.string(forKey: DefaultsKey.preferredLocale.rawValue) ?? Locale.current.identifier
+    preferredLocaleIdentifier = TranscriptionLanguageCatalog.normalizedIdentifier(
+      defaults.string(forKey: DefaultsKey.preferredLocale.rawValue)
+    )
     preferredAudioInputUID = defaults.string(forKey: DefaultsKey.preferredAudioInputUID.rawValue)
     postProcessingEnabled =
       defaults.object(forKey: DefaultsKey.postProcessingEnabled.rawValue) as? Bool ?? true

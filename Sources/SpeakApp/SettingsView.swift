@@ -29,26 +29,6 @@ struct SettingsView: View {
   @ObservedObject var sherpaRuntime = SherpaOnnxRuntimeManager.shared
   #endif
   @ObservedObject var localPostProcessingModels = LocalPostProcessingModelManager.shared
-  static let localeOptions: [LocaleOption] = [
-    LocaleOption(displayName: "English (United States)", identifier: "en_US"),
-    LocaleOption(displayName: "English (United Kingdom)", identifier: "en_GB"),
-    LocaleOption(displayName: "English (Australia)", identifier: "en_AU"),
-    LocaleOption(displayName: "English (Canada)", identifier: "en_CA"),
-    LocaleOption(displayName: "Spanish (Spain)", identifier: "es_ES"),
-    LocaleOption(displayName: "Spanish (Mexico)", identifier: "es_MX"),
-    LocaleOption(displayName: "French (France)", identifier: "fr_FR"),
-    LocaleOption(displayName: "German (Germany)", identifier: "de_DE"),
-    LocaleOption(displayName: "Hindi (India)", identifier: "hi_IN"),
-    LocaleOption(displayName: "Japanese (Japan)", identifier: "ja_JP"),
-    LocaleOption(displayName: "Korean (South Korea)", identifier: "ko_KR"),
-    LocaleOption(displayName: "Portuguese (Brazil)", identifier: "pt_BR"),
-    LocaleOption(displayName: "Portuguese (Portugal)", identifier: "pt_PT"),
-    LocaleOption(displayName: "Chinese (Simplified)", identifier: "zh_CN"),
-    LocaleOption(displayName: "Chinese (Traditional)", identifier: "zh_TW"),
-    LocaleOption(displayName: "Arabic (Saudi Arabia)", identifier: "ar_SA"),
-    LocaleOption(displayName: "Russian (Russia)", identifier: "ru_RU")
-  ]
-
   let tab: SettingsTab
   @Binding var sidebarSelection: SidebarItem?
   @State var newAPIKeyValue: String = ""

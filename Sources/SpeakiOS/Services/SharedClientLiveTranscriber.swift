@@ -32,7 +32,8 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     private var client: StreamingTranscriptionClient?
     private let audioEngine = AVAudioEngine()
     private var startTime: Date?
-    private var accumulatedText = ""
+    /// Finalised text so far, folded from the client's finals.
+    private var accumulated = TranscriptAccumulator()
 
     /// Persistent audio recorder — saves audio to disk alongside transcription,
     /// so a session survives the network dropping mid-stream.
@@ -109,7 +110,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
 
     public func stop() async -> TranscriptionResult {
         guard isRunning else {
-            let text = partialText.isEmpty ? accumulatedText : partialText
+            let text = partialText.isEmpty ? accumulated.text : partialText
             return makeResult(text: text, duration: 0)
         }
 
@@ -126,7 +127,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
 
         // `partialText` is the fullest view (finalised text plus any trailing
         // non-final words); fall back to the accumulated finals if empty.
-        let text = partialText.isEmpty ? accumulatedText : partialText
+        let text = partialText.isEmpty ? accumulated.text : partialText
         let duration = startTime.map { Date().timeIntervalSince($0) } ?? 0
         let result = makeResult(text: text, duration: duration)
         SpeakLogger.logTranscription(
@@ -164,15 +165,27 @@ public final class SharedClientLiveTranscriber: ObservableObject {
             client?.stop()
             return
         }
-        guard finalizingClient.finishFlushesBufferedAudio || partialText != accumulatedText else {
+        guard finalizingClient.finishFlushesBufferedAudio || partialText != accumulated.text else {
             finalizingClient.stop()
             return
         }
+        // Contract: the return is the session's *full* transcript, not the
+        // trailing segment, so it replaces what we accumulated. Appending it
+        // would double every word the client already streamed.
         if let finalTranscript = await finalizingClient.finishAndWait(),
            !finalTranscript.isEmpty,
            finalText != finalTranscript {
-            handleTranscript(text: finalTranscript, isFinal: true)
+            applyFullTranscript(finalTranscript)
         }
+    }
+
+    /// Adopts a transcript that is already complete (the `finishAndWait()`
+    /// return) as the whole session transcript.
+    private func applyFullTranscript(_ transcript: String) {
+        accumulated.replace(with: transcript)
+        finalText = accumulated.text
+        partialText = accumulated.text
+        onPartialResult?(partialText, true)
     }
 
     private func makeResult(text: String, duration: TimeInterval) -> TranscriptionResult {
@@ -212,7 +225,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     private func resetState() {
         partialText = ""
         finalText = ""
-        accumulatedText = ""
+        accumulated.reset()
         error = nil
         startTime = Date()
         isRunning = true
@@ -231,17 +244,14 @@ public final class SharedClientLiveTranscriber: ObservableObject {
 
     private func handleTranscript(text: String, isFinal: Bool) {
         if isFinal {
-            if accumulatedText.isEmpty
-                || text == accumulatedText
-                || text.hasPrefix(accumulatedText + " ") {
-                accumulatedText = text
-            } else {
-                accumulatedText += " " + text
-            }
-            finalText = accumulatedText
-            partialText = accumulatedText
+            // Providers disagree on whether a final is a standalone segment or
+            // the whole utterance so far; `TranscriptAccumulator` folds both
+            // shapes the same way the shared clients do.
+            accumulated.append(final: text)
+            finalText = accumulated.text
+            partialText = accumulated.text
         } else {
-            partialText = accumulatedText.isEmpty ? text : accumulatedText + " " + text
+            partialText = accumulated.display(withInterim: text)
         }
         // Contract: always deliver the full display transcript (accumulated
         // finals plus any trailing partial), matching iOSLiveTranscriber and

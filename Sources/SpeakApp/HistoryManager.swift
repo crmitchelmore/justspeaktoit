@@ -188,12 +188,12 @@ final class HistoryManager: ObservableObject {
     }
   }
 
-  private func clearWAL() {
-    Task { await walStore.clear() }
+  private func clearWAL() async {
+    await walStore.clear()
   }
 
-  private func rewriteWAL(with entries: [WALEntry]) {
-    Task { await walStore.rewrite(with: entries) }
+  private func rewriteWAL(with entries: [WALEntry]) async {
+    await walStore.rewrite(with: entries)
   }
 
   /// Replay WAL entries and merge into main storage via the isolated store.
@@ -303,13 +303,14 @@ final class HistoryManager: ObservableObject {
 
   /// Post-write bookkeeping. Drops only the writes covered by the snapshot;
   /// anything appended while the write was in flight stays pending (and stays
-  /// in the WAL).
+  /// in the WAL). WAL cleanup is now properly awaited.
   private func completeFlush(flushedCount: Int) {
     pendingWrites.removeFirst(min(flushedCount, pendingWrites.count))
     if pendingWrites.isEmpty {
-      clearWAL()
+      Task { await self.clearWAL() }
     } else {
-      rewriteWAL(with: pendingWrites)
+      let remaining = pendingWrites
+      Task { await self.rewriteWAL(with: remaining) }
     }
   }
 

@@ -19,6 +19,8 @@ env:
 jobs:
   build-and-release:
     runs-on: macos-15
+    # Archive + notarisation polling (up to 60 min) + DMG notarisation.
+    timeout-minutes: 90
     permissions:
       contents: write
     

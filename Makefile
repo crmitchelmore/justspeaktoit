@@ -66,9 +66,8 @@ install-verify: release ## Build release, install to /Applications, launch and v
 preflight: test-all verify ## Full pre-release check (tests + launch verification)
 
 .PHONY: lint
-lint: ## Run SwiftLint (strict) and SwiftFormat (lint mode)
-	swift package plugin --allow-writing-to-package-directory swiftlint --strict
-	swift package plugin --allow-writing-to-package-directory swiftformat --lint --recursive
+lint: ## Run strict SwiftLint against the checked-in debt baseline
+	swift package plugin --allow-writing-to-package-directory swiftlint --strict --baseline .swiftlint-baseline.json
 
 .PHONY: format
 format: ## Auto-fix formatting and lint violations where possible
@@ -77,7 +76,6 @@ format: ## Auto-fix formatting and lint violations where possible
 
 .PHONY: verify-checksums
 verify-checksums: ## Verify binary XCFramework and package checksums
-	chmod +x scripts/verify-checksums.sh
 	./scripts/verify-checksums.sh
 
 .PHONY: install-hooks

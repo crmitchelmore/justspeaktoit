@@ -70,10 +70,13 @@ final class HistoryManagerTests: XCTestCase {
             flushInterval: 3600,
             batchSizeThreshold: 10_000
         )
-        // Let the initializer's own async load settle so its completion cannot
-        // land in the middle of, and clobber, state the test mutates.
-        try? await Task.sleep(for: .milliseconds(200))
+        await manager.waitUntilLoaded()
         return manager
+    }
+
+    private func makeWALStore() throws -> HistoryWALStore {
+        try FileManager.default.createDirectory(at: historyDir, withIntermediateDirectories: true)
+        return HistoryWALStore(storageURL: storageURL, walURL: walURL)
     }
 
     private func makeCoder() -> (JSONEncoder, JSONDecoder) {
@@ -200,6 +203,48 @@ final class HistoryManagerTests: XCTestCase {
         // Assert: the intact entry was recovered; the torn line was skipped.
         XCTAssertTrue(manager.allItems.contains { $0.id == item.id })
         XCTAssertEqual(manager.allItems.count, 1)
+    }
+
+    func testConcurrentSnapshotCommitPreservesLaterWALAppendForRecovery() async throws {
+        let store = try makeWALStore()
+        let flushedItem = makeItem(createdAt: Date().addingTimeInterval(-10))
+        let laterItem = makeItem()
+        let flushedEntry = WALEntry(operation: .append, item: flushedItem)
+        let laterEntry = WALEntry(operation: .append, item: laterItem)
+        await store.append(flushedEntry)
+
+        async let commit: Void = store.commitSnapshot([flushedItem], flushing: [flushedEntry])
+        async let append: Void = store.append(laterEntry)
+        try await commit
+        await append
+
+        let pending = try await store.loadWALEntries()
+        XCTAssertEqual(pending.map(\.id), [laterEntry.id])
+
+        let replayed = try await store.replayWAL()
+        let recovered = try XCTUnwrap(replayed)
+        XCTAssertEqual(Set(recovered.map(\.id)), Set([flushedItem.id, laterItem.id]))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: walURL.path))
+    }
+
+    func testImmediateAppendWaitsForStartupLoadBeforeMutatingState() async throws {
+        try FileManager.default.createDirectory(at: historyDir, withIntermediateDirectories: true)
+        let existingItem = makeItem(createdAt: Date().addingTimeInterval(-10))
+        let appendedItem = makeItem()
+        let (encoder, decoder) = makeCoder()
+        try encoder.encode([existingItem]).write(to: storageURL, options: [.atomic])
+
+        let manager = HistoryManager(
+            fileManager: fileManager,
+            flushInterval: 3600,
+            batchSizeThreshold: 10_000
+        )
+        await manager.append(appendedItem)
+        await manager.flushImmediately()
+
+        XCTAssertEqual(Set(manager.allItems.map(\.id)), Set([existingItem.id, appendedItem.id]))
+        let persisted = try decoder.decode([HistoryItem].self, from: Data(contentsOf: storageURL))
+        XCTAssertEqual(Set(persisted.map(\.id)), Set([existingItem.id, appendedItem.id]))
     }
 
     // MARK: - Incremental Statistics

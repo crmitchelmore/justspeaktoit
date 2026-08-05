@@ -16,11 +16,13 @@ actor HistoryWALStore {
     private var walHandle: FileHandle?
     private let log = Logger(subsystem: "com.github.speakapp", category: "HistoryWALStore")
 
-    init(storageURL: URL, walURL: URL, encoder: JSONEncoder, decoder: JSONDecoder) {
+    init(storageURL: URL, walURL: URL) {
         self.storageURL = storageURL
         self.walURL = walURL
-        self.encoder = encoder
-        self.decoder = decoder
+        self.encoder = JSONEncoder()
+        self.encoder.dateEncodingStrategy = .iso8601
+        self.decoder = JSONDecoder()
+        self.decoder.dateDecodingStrategy = .iso8601
     }
 
     deinit {
@@ -41,33 +43,6 @@ actor HistoryWALStore {
         }
     }
 
-    func rewrite(with entries: [WALEntry]) {
-        do {
-            try walHandle?.close()
-            walHandle = nil
-            var data = Data()
-            for entry in entries {
-                try data.append(encoder.encode(entry))
-                data.append(0x0A)
-            }
-            try data.write(to: walURL, options: [.atomic])
-        } catch {
-            log.error("Failed to rewrite WAL: \(error.localizedDescription, privacy: .public)")
-        }
-    }
-
-    func clear() {
-        do {
-            try walHandle?.close()
-            walHandle = nil
-            if FileManager.default.fileExists(atPath: walURL.path) {
-                try FileManager.default.removeItem(at: walURL)
-            }
-        } catch {
-            log.error("Failed to clear WAL: \(error.localizedDescription, privacy: .public)")
-        }
-    }
-
     // MARK: Snapshot
 
     func writeSnapshot(_ items: [HistoryItem]) throws {
@@ -78,11 +53,60 @@ actor HistoryWALStore {
     func loadSnapshot() throws -> [HistoryItem] {
         guard FileManager.default.fileExists(atPath: storageURL.path) else { return [] }
         let data = try Data(contentsOf: storageURL)
-        return (try? decoder.decode([HistoryItem].self, from: data)) ?? []
+        return try decoder.decode([HistoryItem].self, from: data)
+    }
+
+    /// Persists a snapshot and removes only the WAL operations represented by it.
+    /// Appends queued before or after this actor operation remain in the WAL
+    /// unless their entry IDs are explicitly included in `entries`.
+    func commitSnapshot(_ items: [HistoryItem], flushing entries: [WALEntry]) throws {
+        try writeSnapshot(items)
+        let flushedIDs = Set(entries.map(\.id))
+        let remaining = try loadWALEntries().filter { !flushedIDs.contains($0.id) }
+        try replaceWAL(with: remaining)
+    }
+
+    /// Replays and clears the WAL as one actor operation. Keeping the complete
+    /// read/merge/write/clear sequence here prevents a concurrent append from
+    /// being cleared without first being included in the snapshot.
+    func replayWAL() throws -> [HistoryItem]? {
+        let walEntries = try loadWALEntries()
+        guard !walEntries.isEmpty else {
+            if FileManager.default.fileExists(atPath: walURL.path) {
+                try replaceWAL(with: [])
+            }
+            return nil
+        }
+
+        log.info("Replaying \(walEntries.count) WAL entries")
+        var currentItems = try loadSnapshot()
+        for entry in walEntries {
+            switch entry.operation {
+            case .append:
+                if let item = entry.item, !currentItems.contains(where: { $0.id == item.id }) {
+                    currentItems.insert(item, at: 0)
+                }
+            case .update:
+                if let item = entry.item,
+                   let index = currentItems.firstIndex(where: { $0.id == item.id }) {
+                    currentItems[index] = item
+                }
+            case .remove:
+                if let item = entry.item { currentItems.removeAll { $0.id == item.id } }
+            case .removeAll:
+                currentItems.removeAll()
+            }
+        }
+
+        try writeSnapshot(currentItems)
+        try replaceWAL(with: [])
+        log.info("WAL replay complete, cleared WAL file")
+        return currentItems
     }
 
     func loadWALEntries() throws -> [WALEntry] {
         guard FileManager.default.fileExists(atPath: walURL.path) else { return [] }
+        try walHandle?.synchronize()
         let data = try Data(contentsOf: walURL)
         return decodeWALEntries(from: data)
     }
@@ -97,6 +121,25 @@ actor HistoryWALStore {
         let handle = try FileHandle(forWritingTo: walURL)
         walHandle = handle
         return handle
+    }
+
+    private func replaceWAL(with entries: [WALEntry]) throws {
+        try walHandle?.close()
+        walHandle = nil
+
+        guard !entries.isEmpty else {
+            if FileManager.default.fileExists(atPath: walURL.path) {
+                try FileManager.default.removeItem(at: walURL)
+            }
+            return
+        }
+
+        var data = Data()
+        for entry in entries {
+            try data.append(encoder.encode(entry))
+            data.append(0x0A)
+        }
+        try data.write(to: walURL, options: [.atomic])
     }
 
     private func decodeWALEntries(from data: Data) -> [WALEntry] {

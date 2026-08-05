@@ -101,10 +101,13 @@ actor SecureAppStorage {
         )
 
         if ProcessInfo.processInfo.environment["SPEAK_DEBUG_KEYCHAIN"] == "1" {
+            let details = [
+                "service: \(configuration.service)",
+                "synchronizable: \(configuration.synchronizable)",
+                "accessGroup: \(configuration.accessGroup ?? "nil")"
+            ].joined(separator: ", ")
             Logger(subsystem: "com.github.speakapp", category: "SecureAppStorage").debug(
-                "Keychain config — service: \(configuration.service, privacy: .public) "
-                + "synchronizable: \(configuration.synchronizable, privacy: .public) "
-                + "accessGroup: \(configuration.accessGroup ?? "nil", privacy: .public)"
+                "Keychain config — \(details, privacy: .public)"
             )
         }
 

@@ -2,6 +2,23 @@ import Foundation
 import SpeakCore
 import os.log
 
+private final class OneShotStreamingResult: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Bool, Never>?
+
+    init(continuation: CheckedContinuation<Bool, Never>) {
+        self.continuation = continuation
+    }
+
+    func resolve(_ result: Bool) {
+        lock.lock()
+        let pendingContinuation = continuation
+        self.continuation = nil
+        lock.unlock()
+        pendingContinuation?.resume(returning: result)
+    }
+}
+
 // MARK: - BaseStreamingLiveController
 
 /// Shared WebSocket lifecycle for cloud live-transcription providers.
@@ -55,11 +72,12 @@ open class BaseStreamingLiveController: NSObject {
         pendingQueue.sync { pendingAudioChunks.append(data) }
     }
 
-    /// Flushes pending chunks via `send` closure with bounded timeout.
-    /// Returns true if all chunks were sent within `timeout`, false on timeout.
+    /// Flushes pending chunks via `send` closure with a hard caller-facing timeout.
+    /// Returns false at the deadline even if a provider send ignores cancellation;
+    /// that abandoned send may still finish in its unstructured task later.
     @discardableResult
     public func flushPendingChunks(
-        send: @escaping (Data) async throws -> Void,
+        send: @escaping @Sendable (Data) async throws -> Void,
         timeout: TimeInterval = 1.0
     ) async -> Bool {
         let chunks: [Data] = pendingQueue.sync {
@@ -68,20 +86,26 @@ open class BaseStreamingLiveController: NSObject {
             return copy
         }
         guard !chunks.isEmpty else { return true }
-        let success = await withTaskGroup(of: Bool.self) { group in
-            group.addTask {
+        guard timeout.isFinite, timeout > 0 else { return false }
+        let maximumTimeout = TimeInterval(UInt64.max / 1_000_000_000)
+        let timeoutNanoseconds = UInt64(min(timeout, maximumTimeout) * 1_000_000_000)
+        let success = await withCheckedContinuation { continuation in
+            let result = OneShotStreamingResult(continuation: continuation)
+            Task {
                 for chunk in chunks {
-                    do { try await send(chunk) } catch { return false }
+                    do {
+                        try await send(chunk)
+                    } catch {
+                        result.resolve(false)
+                        return
+                    }
                 }
-                return true
+                result.resolve(true)
             }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                return false
+            Task {
+                try? await Task.sleep(nanoseconds: timeoutNanoseconds)
+                result.resolve(false)
             }
-            guard let first = await group.next() else { return false }
-            group.cancelAll()
-            return first
         }
         log.debug(
             // swiftlint:disable:next line_length

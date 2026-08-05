@@ -1,32 +1,69 @@
 #!/bin/bash
 set -euo pipefail
 
-# Verifies binary target checksums in Package.swift against Package.resolved
-# and ensures no stale .swiftlint-baseline.json drift.
-echo "→ Verifying Package.resolved checksums..."
-if ! swift package resolve 2>&1 | grep -q "error:"; then
-  echo "✓ Package resolution OK"
-else
-  echo "✗ Package resolution failed" >&2
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+repo_root=$(cd "$script_dir/.." && pwd)
+cd "$repo_root"
+
+# Validate dependency resolution using SwiftPM's exit status directly.
+echo "→ Resolving Swift package dependencies..."
+swift package resolve
+echo "✓ Package resolution OK"
+
+# Extract the complete multiline CTranscribe target declaration.
+target_block=$(
+  awk '
+    /[.]binaryTarget[[:space:]]*[(]/ { capture = 1; block = $0 ORS; next }
+    capture {
+      block = block $0 ORS
+      if ($0 ~ /^[[:space:]]*[)][,]?[[:space:]]*$/) {
+        if (block ~ /name:[[:space:]]*"CTranscribe"/) { printf "%s", block }
+        capture = 0
+        block = ""
+      }
+    }
+  ' Package.swift
+)
+
+binary_url=$(
+  printf '%s' "$target_block" \
+    | awk '/url:/ { capture = 1 } /checksum:/ { capture = 0 } capture' \
+    | grep -o '"[^"]*"' \
+    | tr -d '"\n'
+)
+declared_checksum=$(
+  printf '%s' "$target_block" \
+    | awk -F'"' '/checksum:/ { print $2; exit }'
+)
+
+if [[ -z "$binary_url" || ! "$declared_checksum" =~ ^[0-9a-f]{64}$ ]]; then
+  echo "✗ Could not extract CTranscribe URL and checksum from Package.swift" >&2
   exit 1
 fi
 
-# Verify CTranscribe binary checksum matches Package.swift declaration
-EXPECTED_CHECKSUM=$(grep -A2 'binaryTarget.*CTranscribe' Package.swift | grep checksum | grep -o '"[^"]*"' | tail -1 | tr -d '"')
-if [ -z "$EXPECTED_CHECKSUM" ]; then
-  echo "⚠ Could not extract CTranscribe checksum from Package.swift"
-else
-  echo "✓ CTranscribe checksum present: ${EXPECTED_CHECKSUM:0:12}..."
+archive=$(mktemp "${TMPDIR:-/tmp}/CTranscribe.XXXXXX.zip")
+trap 'rm -f "$archive"' EXIT
+echo "→ Downloading CTranscribe artifact..."
+curl --fail --location --silent --show-error "$binary_url" --output "$archive"
+actual_checksum=$(swift package compute-checksum "$archive")
+if [[ "$actual_checksum" != "$declared_checksum" ]]; then
+  echo "✗ CTranscribe checksum mismatch" >&2
+  echo "  declared: $declared_checksum" >&2
+  echo "  actual:   $actual_checksum" >&2
+  exit 1
 fi
+echo "✓ CTranscribe checksum verified: ${declared_checksum:0:12}..."
 
-# Warn if baseline is stale (>700 entries suggests debt not being burned down)
+# Enforce the current SwiftLint debt ceiling rather than merely warning.
 if [ -f .swiftlint-baseline.json ]; then
-  COUNT=$(grep -o '"ruleIdentifier"' .swiftlint-baseline.json | wc -l | tr -d ' ')
-  echo "→ SwiftLint baseline entries: $COUNT"
-  if [ "$COUNT" -gt 780 ]; then
-    echo "⚠ Baseline grew — please run 'make format' and reduce debt"
+  baseline_count=$(grep -o '"ruleIdentifier"' .swiftlint-baseline.json | wc -l | tr -d ' ')
+  baseline_ceiling=780
+  echo "→ SwiftLint baseline entries: $baseline_count (ceiling: $baseline_ceiling)"
+  if [ "$baseline_count" -gt "$baseline_ceiling" ]; then
+    echo "✗ SwiftLint baseline exceeds the allowed debt ceiling" >&2
+    exit 1
   else
-    echo "✓ Baseline not growing"
+    echo "✓ SwiftLint baseline is within the debt ceiling"
   fi
 fi
 

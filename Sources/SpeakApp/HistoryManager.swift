@@ -69,11 +69,10 @@ final class HistoryManager: ObservableObject {
   private var cachedStatistics: HistoryStatistics?
 
   private let storageURL: URL
-  private let walURL: URL
   private let encoder: JSONEncoder
-  private let decoder: JSONDecoder
   private let log = Logger(subsystem: "com.github.speakapp", category: "HistoryManager")
   private let walStore: HistoryWALStore
+  private var initialLoadTask: Task<Void, Never>?
 
   /// Pending writes waiting to be flushed
   private var pendingWrites: [WALEntry] = []
@@ -114,27 +113,26 @@ final class HistoryManager: ObservableObject {
       try? fileManager.createDirectory(at: historyDir, withIntermediateDirectories: true)
     }
     storageURL = historyDir.appendingPathComponent("history-log.json", isDirectory: false)
-    walURL = historyDir.appendingPathComponent("history-wal.json", isDirectory: false)
+    let walURL = historyDir.appendingPathComponent("history-wal.json", isDirectory: false)
 
     encoder = JSONEncoder()
     encoder.dateEncodingStrategy = .iso8601
-    decoder = JSONDecoder()
-    decoder.dateDecodingStrategy = .iso8601
 
     self.flushInterval = flushInterval
     self.batchSizeThreshold = batchSizeThreshold
-    self.walStore = HistoryWALStore(
-        storageURL: storageURL, walURL: walURL, encoder: encoder, decoder: decoder)
+    self.walStore = HistoryWALStore(storageURL: storageURL, walURL: walURL)
 
-    Task {
-      await loadFromDisk()
-      scheduleFlushTimer()
+    initialLoadTask = Task { [weak self] in
+      guard let self else { return }
+      await self.loadFromDisk()
+      self.scheduleFlushTimer()
     }
 
     registerForTerminationNotification()
   }
 
   deinit {
+    initialLoadTask?.cancel()
     flushTimer?.invalidate()
     if let observer = terminationObserver {
       NotificationCenter.default.removeObserver(observer)
@@ -188,45 +186,11 @@ final class HistoryManager: ObservableObject {
     }
   }
 
-  private func clearWAL() async {
-    await walStore.clear()
-  }
-
-  private func rewriteWAL(with entries: [WALEntry]) async {
-    await walStore.rewrite(with: entries)
-  }
-
-  /// Replay WAL entries and merge into main storage via the isolated store.
-  private func replayWAL() async -> [HistoryItem] {
-    do {
-      let walEntries = try await walStore.loadWALEntries()
-      if walEntries.isEmpty { return [] }
-      log.info("Replaying \(walEntries.count) WAL entries")
-      var currentItems = try await walStore.loadSnapshot()
-      for entry in walEntries {
-        switch entry.operation {
-        case .append:
-          if let item = entry.item, !currentItems.contains(where: { $0.id == item.id }) {
-            currentItems.insert(item, at: 0)
-          }
-        case .update:
-          if let item = entry.item, let index = currentItems.firstIndex(where: { $0.id == item.id }) {
-            currentItems[index] = item
-          }
-        case .remove:
-          if let item = entry.item { currentItems.removeAll { $0.id == item.id } }
-        case .removeAll:
-          currentItems.removeAll()
-        }
-      }
-      try await walStore.writeSnapshot(currentItems)
-      await walStore.clear()
-      log.info("WAL replay complete, cleared WAL file")
-      return currentItems
-    } catch {
-      log.error("Failed to replay WAL: \(error.localizedDescription, privacy: .public)")
-      return []
-    }
+  /// Allows callers and tests to wait until startup replay has populated the
+  /// in-memory view. Mutations call this before changing state so startup load
+  /// can never overwrite a newly appended history item.
+  func waitUntilLoaded() async {
+    await initialLoadTask?.value
   }
 
   // MARK: - Flush Operations
@@ -240,7 +204,7 @@ final class HistoryManager: ObservableObject {
   /// Sync wrapper for timer callback - timer already runs on main thread
   private func flushIfNeededSync() {
     guard !pendingWrites.isEmpty, !isFlushing else { return }
-    Task.detached { [weak self] in
+    Task { [weak self] in
       await self?.flushImmediately()
     }
   }
@@ -261,11 +225,11 @@ final class HistoryManager: ObservableObject {
     log.info("Flushing \(self.pendingWrites.count) pending writes to disk (termination)")
 
     let snapshot = allItemsOnDisk.isEmpty ? items : allItemsOnDisk
-    let flushedCount = pendingWrites.count
 
     do {
       try Self.writeSnapshot(snapshot, to: storageURL, encoder: encoder)
-      completeFlush(flushedCount: flushedCount)
+      // Intentionally retain the WAL during termination. Replay is idempotent,
+      // and an asynchronous actor cleanup is not guaranteed to run before exit.
       log.info("Termination flush complete")
     } catch {
       log.error("Failed to flush history: \(error.localizedDescription, privacy: .public)")
@@ -274,6 +238,7 @@ final class HistoryManager: ObservableObject {
 
   /// Force immediate flush of all pending writes — now via isolated WAL store
   func flushImmediately() async {
+    await waitUntilLoaded()
     guard !isFlushing else { return }
     isFlushing = true
     defer { isFlushing = false }
@@ -281,8 +246,9 @@ final class HistoryManager: ObservableObject {
     log.info("Flushing \(self.pendingWrites.count) pending writes to disk")
     let snapshot = allItemsOnDisk.isEmpty ? items : allItemsOnDisk
     let flushedCount = pendingWrites.count
+    let flushedEntries = Array(pendingWrites.prefix(flushedCount))
     do {
-      try await walStore.writeSnapshot(snapshot)
+      try await walStore.commitSnapshot(snapshot, flushing: flushedEntries)
       completeFlush(flushedCount: flushedCount)
       log.info("Flush complete")
     } catch {
@@ -301,72 +267,35 @@ final class HistoryManager: ObservableObject {
     try data.write(to: url, options: [.atomic])
   }
 
-  /// Post-write bookkeeping. Drops only the writes covered by the snapshot;
-  /// anything appended while the write was in flight stays pending (and stays
-  /// in the WAL). WAL cleanup is now properly awaited.
+  /// Post-write bookkeeping. The WAL actor has already removed exactly these
+  /// entries before this method runs, so later appends remain pending and durable.
   private func completeFlush(flushedCount: Int) {
     pendingWrites.removeFirst(min(flushedCount, pendingWrites.count))
-    if pendingWrites.isEmpty {
-      Task { await self.clearWAL() }
-    } else {
-      let remaining = pendingWrites
-      Task { await self.rewriteWAL(with: remaining) }
-    }
   }
 
   // MARK: - Public API
 
   func loadFromDisk() async {
-    // First replay any WAL entries from a previous crash
-    let walItems = await replayWAL()
-
     do {
-      if !walItems.isEmpty {
-        // Sort and calculate stats in background
-        let (sorted, stats) = await Task.detached(priority: .userInitiated) {
-          let sorted = walItems.sorted { $0.createdAt > $1.createdAt }
-          let stats = Self.calculateStatistics(for: sorted)
-          return (sorted, stats)
-        }.value
-        
-        await MainActor.run {
-          self.allItemsOnDisk = sorted
-          self.items = Array(sorted.prefix(self.pageSize))
-          self.hasMoreItems = sorted.count > self.pageSize
-          self.cachedStatistics = stats
-          self.statistics = stats
-        }
-        return
+      // Replay is a single actor transaction; if there is no WAL, load the
+      // snapshot through the same actor so all history file I/O stays ordered.
+      let persisted: [HistoryItem]
+      if let replayed = try await walStore.replayWAL() {
+        persisted = replayed
+      } else {
+        persisted = try await walStore.loadSnapshot()
       }
-
-      guard FileManager.default.fileExists(atPath: storageURL.path) else {
-        await MainActor.run {
-          self.allItemsOnDisk = []
-          self.items = []
-          self.hasMoreItems = false
-          self.cachedStatistics = Self.calculateStatistics(for: [])
-          self.statistics = self.cachedStatistics!
-        }
-        return
-      }
-      
-      // Load and decode in background to avoid blocking UI
-      let url = storageURL
-      let (sorted, stats) = try await Task.detached(priority: .userInitiated) { [decoder] in
-        let data = try Data(contentsOf: url)
-        let decoded = try decoder.decode([HistoryItem].self, from: data)
-        let sorted = decoded.sorted { $0.createdAt > $1.createdAt }
+      let (sorted, stats) = await Task.detached(priority: .userInitiated) {
+        let sorted = persisted.sorted { $0.createdAt > $1.createdAt }
         let stats = Self.calculateStatistics(for: sorted)
         return (sorted, stats)
       }.value
 
-      await MainActor.run {
-        self.allItemsOnDisk = sorted
-        self.items = Array(sorted.prefix(self.pageSize))
-        self.hasMoreItems = sorted.count > self.pageSize
-        self.cachedStatistics = stats
-        self.statistics = stats
-      }
+      allItemsOnDisk = sorted
+      items = Array(sorted.prefix(pageSize))
+      hasMoreItems = sorted.count > pageSize
+      cachedStatistics = stats
+      statistics = stats
     } catch {
       log.error("Failed to load history: \(error.localizedDescription, privacy: .public)")
     }
@@ -394,6 +323,7 @@ final class HistoryManager: ObservableObject {
   }
 
   func append(_ item: HistoryItem) async {
+    await waitUntilLoaded()
     allItemsOnDisk.insert(item, at: 0)
 
     var current = items
@@ -407,6 +337,7 @@ final class HistoryManager: ObservableObject {
   }
 
   func update(_ item: HistoryItem) async {
+    await waitUntilLoaded()
     var oldItem: HistoryItem?
     if let diskIndex = allItemsOnDisk.firstIndex(where: { $0.id == item.id }) {
       oldItem = allItemsOnDisk[diskIndex]
@@ -433,6 +364,7 @@ final class HistoryManager: ObservableObject {
   }
 
   func remove(id: UUID) async {
+    await waitUntilLoaded()
     let diskItem = allItemsOnDisk.first(where: { $0.id == id })
     allItemsOnDisk.removeAll { $0.id == id }
 
@@ -449,6 +381,7 @@ final class HistoryManager: ObservableObject {
   }
 
   func removeAll() async {
+    await waitUntilLoaded()
     allItemsOnDisk = []
     items = []
     let stats = Self.calculateStatistics(for: [])

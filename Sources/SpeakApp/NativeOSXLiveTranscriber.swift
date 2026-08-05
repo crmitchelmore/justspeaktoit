@@ -27,8 +27,10 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
   /// implicit text resets where Apple silently clears the transcript.
   private var lastFormattedString: String = ""
   /// Monotonic counter incremented on each recognition restart so that
-  /// error callbacks from cancelled tasks are ignored.
-  private var recognitionGeneration: Int = 0
+  /// error callbacks from cancelled tasks are ignored. Main-actor isolated:
+  /// every read happens inside a `@MainActor` callback task, so the writes must
+  /// be serialised against them for the stale-callback check to mean anything.
+  @MainActor private var recognitionGeneration: Int = 0
 
   init(
     permissionsManager: PermissionsManager,
@@ -91,17 +93,21 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
     hasFinished = false
     committedText = ""
     lastFormattedString = ""
-    // Monotonically increase so late callbacks from a previous session can never
-    // match the generation of this one. Resetting to 0 would let a stale task
-    // whose generation happened to be 0 be treated as current.
-    recognitionGeneration += 1
     guard request != nil else {
       audioEngine.stop()
       audioEngine.inputNode.removeTap(onBus: 0)
       await audioDeviceManager.endUsingPreferredInput(session: sessionContext)
       throw TranscriptionManagerError.recognizerUnavailable
     }
-    startRecognitionTask(with: recognizer)
+    // Monotonically increase so late callbacks from a previous session can never
+    // match the generation of this one. Resetting to 0 would let a stale task
+    // whose generation happened to be 0 be treated as current. The bump and the
+    // task creation run on the main actor, where every generation read happens,
+    // so a callback can never observe a half-updated counter.
+    await MainActor.run {
+      self.recognitionGeneration += 1
+      self.startRecognitionTask(with: recognizer)
+    }
 
     activeInputSession = sessionContext
     isRunning = true
@@ -121,9 +127,11 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
     // TranscriptionManager is resumed.  If a recognition callback Task
     // already dispatched finish(), the hasFinished guard prevents a
     // double-resume.
-    // Bump generation to suppress error callbacks from the cancelled task.
-    recognitionGeneration += 1
     await MainActor.run {
+      // Bump generation to suppress error callbacks from the cancelled task.
+      // Done here rather than off-actor so it is ordered against the reads in
+      // the recognition callbacks, which are all main-actor isolated.
+      self.recognitionGeneration += 1
       guard !self.hasFinished else { return }
       if let result = self.latestResult {
         self.finish(with: result)
@@ -211,6 +219,7 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
   /// Creates and starts a recognition task, routing results through the
   /// accumulation logic so that mid-session `isFinal` events commit text
   /// rather than clearing it.
+  @MainActor
   private func startRecognitionTask(with recognizer: SFSpeechRecognizer) {
     let generation = recognitionGeneration
     guard let activeRequest = request else { return }

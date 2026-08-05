@@ -42,7 +42,7 @@ final class AudioRecordingPersistenceRaceTests: XCTestCase {
     }
 
     @MainActor
-    func testStalledAdmittedWriteLandsInTheSessionItWasAdmittedFor() async throws {
+    func testStalledAdmittedWrite_landsInTheSessionItWasAdmittedFor() async throws {
         // Arrange
         let persistence = AudioRecordingPersistence()
         let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1))
@@ -65,11 +65,16 @@ final class AudioRecordingPersistenceRaceTests: XCTestCase {
         await Self.wait(for: admitted)
         persistence.writeAdmissionStallHook = nil
 
-        // Release the stalled writer only after the main actor has committed to
-        // stopping, so the stop/start and the pending write genuinely overlap.
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.15) { release.signal() }
+        // Release the stalled writer at the verified synchronisation point: the
+        // hook fires only when the close path finds `stateLock` already held by
+        // the admitted write, so the overlap under test is observed rather than
+        // timed. Under the pre-fix lock scope nothing contends, the hook never
+        // fires, and the stalled write lands in session two — which is exactly
+        // what the assertions below reject.
+        persistence.writerCloseContentionHook = { release.signal() }
 
         XCTAssertNotNil(persistence.stopRecording())
+        persistence.writerCloseContentionHook = nil
 
         let secondURL = try persistence.startRecording(format: format)
         createdURLs.append(secondURL)
@@ -93,7 +98,7 @@ final class AudioRecordingPersistenceRaceTests: XCTestCase {
     }
 
     @MainActor
-    func testWritesAfterStopAreNotAdmitted() throws {
+    func testWriteAfterStop_isNotAdmitted() throws {
         // Arrange
         let persistence = AudioRecordingPersistence()
         let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1))

@@ -53,6 +53,12 @@ public final class AudioRecordingPersistence: ObservableObject {
     /// actually written into, so a test can assert a stalled write never lands
     /// in a later session's file.
     nonisolated(unsafe) public var didWriteBufferHook: (@Sendable (URL) -> Void)?
+
+    /// Called from `closeWriter` only when `stateLock` is genuinely held by an
+    /// in-flight admitted write, i.e. the close path is about to block behind
+    /// it. A test releases its stalled writer here, so the interleaving it
+    /// asserts on is observed rather than guessed at with a sleep.
+    nonisolated(unsafe) public var writerCloseContentionHook: (@Sendable () -> Void)?
     #endif
 
     // MARK: - Directory
@@ -166,10 +172,22 @@ public final class AudioRecordingPersistence: ObservableObject {
     /// queue. `sync` so pending writes finish and the file header is
     /// finalised before callers read the file (size, playback, deletion).
     private func closeWriter() {
-        stateLock.lock()
+        acquireStateLockForClose()
         isWriterOpen = false
         stateLock.unlock()
         ioQueue.sync { ioFile = nil }
+    }
+
+    /// Takes `stateLock` for the close path. A failed `try()` means an admitted
+    /// write still holds the lock across its `ioQueue` submit — the exact state
+    /// the lock scope exists to guarantee — so DEBUG builds report it before
+    /// blocking. Release builds just take the lock.
+    private func acquireStateLockForClose() {
+        #if DEBUG
+        if stateLock.try() { return }
+        writerCloseContentionHook?()
+        #endif
+        stateLock.lock()
     }
 
     /// Stop recording and return metadata about the saved file.

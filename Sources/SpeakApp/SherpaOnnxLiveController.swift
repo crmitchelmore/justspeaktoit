@@ -31,9 +31,14 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
   private var hasFinished: Bool = false
   private var isStopping: Bool = false
   private var sidecarOutputBuffer = ""
-  private var sidecarErrorBuffer = ""
+  /// Sink for the current process's stderr. Replaced on every start so stderr
+  /// from a previous sidecar can never be attributed to this session.
+  private var sidecarErrorSink: SidecarErrorSink?
+  /// Set once `process.run()` succeeds; the pipes only reach EOF for a process
+  /// that actually launched, so draining them is unsafe before this is true.
+  private var processDidLaunch = false
   /// Cap on retained sidecar stderr so a chatty process cannot grow this without bound.
-  private static let maxSidecarErrorBufferCount = 8192
+  private static let maxSidecarErrorByteCount = 8192
 
   init(
     appSettings: AppSettings,
@@ -74,7 +79,9 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
     latestText = ""
     hasFinished = false
     sidecarOutputBuffer = ""
-    sidecarErrorBuffer = ""
+    processDidLaunch = false
+    let errorSink = SidecarErrorSink(maxByteCount: Self.maxSidecarErrorByteCount)
+    sidecarErrorSink = errorSink
     self.process = process
     self.stdinPipe = stdinPipe
     self.stdoutPipe = stdoutPipe
@@ -90,15 +97,22 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
 
     // Drain stderr continuously: an undrained pipe fills its kernel buffer and
     // blocks the sidecar's next write, which would stall transcription entirely.
-    stderrPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-      let data = handle.availableData
-      guard !data.isEmpty else { return }
-      Task { @MainActor [weak self] in
-        self?.handleSidecarError(data)
-      }
+    // The append is synchronous and capped, so a burst of stderr neither spawns
+    // a task per read nor grows memory; the sink is captured by value so bytes
+    // always land in the session they were produced for.
+    stderrPipe.fileHandleForReading.readabilityHandler = { [errorSink] handle in
+      errorSink.append(handle.availableData)
     }
 
-    try process.run()
+    do {
+      try process.run()
+      processDidLaunch = true
+    } catch {
+      // The pipes, handlers and `process` are already stored on self; without
+      // this the failed launch would leave them attached to the next start.
+      await cleanupAfterFailedStart()
+      throw error
+    }
 
     let sessionContext = await audioDeviceManager.beginUsingPreferredInput()
     activeInputSession = sessionContext
@@ -151,9 +165,8 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
     await applyLiveStopGrace(appSettings.liveStopGracePeriod)
     try? stdinPipe?.fileHandleForWriting.close()
     await waitForProcessExit()
+    drainRemainingSidecarPipes()
     processRemainingSidecarOutput()
-    stdoutPipe?.fileHandleForReading.readabilityHandler = nil
-    stderrPipe?.fileHandleForReading.readabilityHandler = nil
     logSidecarErrorOutput()
     isRunning = false
 
@@ -203,18 +216,44 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
     }
   }
 
-  private func handleSidecarError(_ data: Data) {
-    guard let output = String(data: data, encoding: .utf8), !output.isEmpty else { return }
-    sidecarErrorBuffer += output
-    if sidecarErrorBuffer.count > Self.maxSidecarErrorBufferCount {
-      sidecarErrorBuffer = String(sidecarErrorBuffer.suffix(Self.maxSidecarErrorBufferCount))
+  private func logSidecarErrorOutput() {
+    guard let captured = sidecarErrorSink?.drainText()
+      .trimmingCharacters(in: .whitespacesAndNewlines), !captured.isEmpty
+    else { return }
+    logger.error("sherpa-onnx sidecar stderr: \(captured, privacy: .public)")
+  }
+
+  /// Detaches the readability handlers and picks up whatever the sidecar left in
+  /// the pipes. `resetProcessState()` drops the pipes straight after, so bytes
+  /// still sitting in the kernel buffer when the process exited would otherwise
+  /// never reach the logs. Only reads once the process has actually exited:
+  /// `availableData` blocks while a writer is still attached to the pipe.
+  private func drainRemainingSidecarPipes() {
+    stdoutPipe?.fileHandleForReading.readabilityHandler = nil
+    stderrPipe?.fileHandleForReading.readabilityHandler = nil
+    guard processDidLaunch, process?.isRunning == false else { return }
+    if let stdout = stdoutPipe?.fileHandleForReading {
+      for chunk in Self.remainingData(on: stdout) {
+        handleSidecarOutput(chunk)
+      }
+    }
+    if let stderr = stderrPipe?.fileHandleForReading, let sink = sidecarErrorSink {
+      for chunk in Self.remainingData(on: stderr) {
+        sink.append(chunk)
+      }
     }
   }
 
-  private func logSidecarErrorOutput() {
-    let captured = sidecarErrorBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !captured.isEmpty else { return }
-    logger.error("sherpa-onnx sidecar stderr: \(captured, privacy: .public)")
+  /// Reads buffered bytes until EOF, bounded so a pipe that somehow still has a
+  /// writer attached can never spin the main actor indefinitely.
+  private static func remainingData(on handle: FileHandle) -> [Data] {
+    var chunks: [Data] = []
+    for _ in 0..<8 {
+      let chunk = handle.availableData
+      guard !chunk.isEmpty else { break }
+      chunks.append(chunk)
+    }
+    return chunks
   }
 
   private func processRemainingSidecarOutput() {
@@ -264,9 +303,12 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
     audioEngine.inputNode.removeTap(onBus: 0)
     audioProcessor.setRunning(false)
     try? stdinPipe?.fileHandleForWriting.close()
-    process?.terminate()
-    stdoutPipe?.fileHandleForReading.readabilityHandler = nil
-    stderrPipe?.fileHandleForReading.readabilityHandler = nil
+    // `terminate()` raises on a process that never launched, which is exactly
+    // the case when `process.run()` itself is what failed.
+    if let process, process.isRunning {
+      process.terminate()
+    }
+    drainRemainingSidecarPipes()
     logSidecarErrorOutput()
     isRunning = false
     isStopping = false
@@ -282,18 +324,62 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
 
   private func resetProcessState() {
     process = nil
+    processDidLaunch = false
     stdinPipe = nil
     stdoutPipe = nil
     stderrPipe = nil
     streamingStartTime = nil
     sidecarOutputBuffer = ""
-    sidecarErrorBuffer = ""
+    sidecarErrorSink = nil
   }
 
   private struct SidecarEvent: Decodable {
     let type: String
     let text: String?
     let message: String?
+  }
+
+  /// Capped, lock-guarded store for one sidecar's stderr.
+  ///
+  /// The pipe's readability handler runs on its own dispatch queue and appends
+  /// here directly, so draining costs no task allocation per read and the
+  /// retained bytes stay bounded regardless of how chatty the process is.
+  /// Bytes are decoded only when read back: `availableData` can split a
+  /// multibyte UTF-8 sequence across two reads, which would make a per-chunk
+  /// decode drop the chunk.
+  private final class SidecarErrorSink: @unchecked Sendable {
+    private let lock = NSLock()
+    private var buffer = Data()
+    private let maxByteCount: Int
+
+    init(maxByteCount: Int) {
+      self.maxByteCount = maxByteCount
+    }
+
+    func append(_ data: Data) {
+      guard !data.isEmpty else { return }
+      lock.lock()
+      defer { lock.unlock() }
+      buffer.append(data)
+      guard buffer.count > maxByteCount else { return }
+      buffer.removeFirst(buffer.count - maxByteCount)
+      // Trimming the head can land mid-character; drop the orphaned
+      // continuation bytes so the log doesn't start with a replacement char.
+      while let first = buffer.first, first & 0xC0 == 0x80 {
+        buffer.removeFirst()
+      }
+    }
+
+    func drainText() -> String {
+      lock.lock()
+      let captured = buffer
+      buffer = Data()
+      lock.unlock()
+      // Deliberately lossy: a failable decode would throw away a whole log
+      // fragment because the head was trimmed mid-character.
+      // swiftlint:disable:next optional_data_string_conversion
+      return String(decoding: captured, as: UTF8.self)
+    }
   }
 
   private final class SherpaOnnxAudioProcessor: @unchecked Sendable {

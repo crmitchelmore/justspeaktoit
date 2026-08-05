@@ -152,6 +152,38 @@ final class LiveTranscriptionRoutingTests: XCTestCase {
         }
     }
 
+    /// Deepgram and ElevenLabs lost their bespoke iOS transcribers; the stop
+    /// grace they used to implement by hand now has to survive on the shared
+    /// capture path, which drives it entirely off these two contract points.
+    func testFactory_deepgramAndElevenLabsKeepTheirStopGraceContract() throws {
+        // Arrange
+        let deepgramRoute = try XCTUnwrap(LiveTranscriptionRouting.route(for: "deepgram/nova-3-streaming"))
+        let elevenLabsRoute = try XCTUnwrap(
+            LiveTranscriptionRouting.route(for: "elevenlabs/scribe-v2-streaming")
+        )
+
+        // Act
+        let deepgram = LiveTranscriptionClientFactory.makeClient(
+            for: deepgramRoute, apiKey: "k", language: "en_GB"
+        ) as? FinalizingStreamingTranscriptionClient
+        let elevenLabs = LiveTranscriptionClientFactory.makeClient(
+            for: elevenLabsRoute, apiKey: "k", language: "en_GB"
+        ) as? FinalizingStreamingTranscriptionClient
+
+        // Assert: Deepgram's CloseStream flushes audio it hasn't transcribed
+        // yet, so a stop must always drain it. ElevenLabs has no end-of-stream
+        // frame, so a stop with nothing outstanding closes immediately rather
+        // than burning the drain budget.
+        XCTAssertEqual(deepgram?.finishFlushesBufferedAudio, true)
+        XCTAssertEqual(elevenLabs?.finishFlushesBufferedAudio, false)
+    }
+
+    func testStreamingClientError_missingAPIKeyNamesTheProvider() {
+        // Assert
+        let message = StreamingClientError.missingAPIKey(provider: "Deepgram").errorDescription
+        XCTAssertEqual(message, "Deepgram API key is missing. Please configure it in Settings.")
+    }
+
     func testFactory_returnsNilForNativeProviders() {
         // Apple (on-device) and OpenAI (platform-native transcriber) have no
         // shared factory client.

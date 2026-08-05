@@ -163,6 +163,11 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
         }
     }
 
+    /// The streaming endpoint has no documented end-of-stream frame, so
+    /// `finishAndWait()` cannot flush audio ElevenLabs hasn't transcribed yet —
+    /// callers with nothing outstanding should close immediately.
+    public var finishFlushesBufferedAudio: Bool { false }
+
     /// Graceful stop: waits (bounded) for the trailing final transcript before
     /// closing the socket, so words spoken just before stop aren't lost. The
     /// streaming endpoint has no documented end-of-stream frame, so this is a

@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import SpeakCore
 @preconcurrency import AVFoundation
 import Foundation
@@ -30,6 +31,9 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
   private var hasFinished: Bool = false
   private var isStopping: Bool = false
   private var sidecarOutputBuffer = ""
+  private var sidecarErrorBuffer = ""
+  /// Cap on retained sidecar stderr so a chatty process cannot grow this without bound.
+  private static let maxSidecarErrorBufferCount = 8192
 
   init(
     appSettings: AppSettings,
@@ -70,6 +74,7 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
     latestText = ""
     hasFinished = false
     sidecarOutputBuffer = ""
+    sidecarErrorBuffer = ""
     self.process = process
     self.stdinPipe = stdinPipe
     self.stdoutPipe = stdoutPipe
@@ -80,6 +85,16 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
       guard !data.isEmpty else { return }
       Task { @MainActor [weak self] in
         self?.handleSidecarOutput(data)
+      }
+    }
+
+    // Drain stderr continuously: an undrained pipe fills its kernel buffer and
+    // blocks the sidecar's next write, which would stall transcription entirely.
+    stderrPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+      let data = handle.availableData
+      guard !data.isEmpty else { return }
+      Task { @MainActor [weak self] in
+        self?.handleSidecarError(data)
       }
     }
 
@@ -139,6 +154,7 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
     processRemainingSidecarOutput()
     stdoutPipe?.fileHandleForReading.readabilityHandler = nil
     stderrPipe?.fileHandleForReading.readabilityHandler = nil
+    logSidecarErrorOutput()
     isRunning = false
 
     let duration = streamingStartTime.map { Date().timeIntervalSince($0) } ?? 0
@@ -185,6 +201,20 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
     for line in lines.dropLast() {
       decodeSidecarEvent(String(line))
     }
+  }
+
+  private func handleSidecarError(_ data: Data) {
+    guard let output = String(data: data, encoding: .utf8), !output.isEmpty else { return }
+    sidecarErrorBuffer += output
+    if sidecarErrorBuffer.count > Self.maxSidecarErrorBufferCount {
+      sidecarErrorBuffer = String(sidecarErrorBuffer.suffix(Self.maxSidecarErrorBufferCount))
+    }
+  }
+
+  private func logSidecarErrorOutput() {
+    let captured = sidecarErrorBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !captured.isEmpty else { return }
+    logger.error("sherpa-onnx sidecar stderr: \(captured, privacy: .public)")
   }
 
   private func processRemainingSidecarOutput() {
@@ -235,6 +265,9 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
     audioProcessor.setRunning(false)
     try? stdinPipe?.fileHandleForWriting.close()
     process?.terminate()
+    stdoutPipe?.fileHandleForReading.readabilityHandler = nil
+    stderrPipe?.fileHandleForReading.readabilityHandler = nil
+    logSidecarErrorOutput()
     isRunning = false
     isStopping = false
     await endActiveInputSession()
@@ -254,6 +287,7 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
     stderrPipe = nil
     streamingStartTime = nil
     sidecarOutputBuffer = ""
+    sidecarErrorBuffer = ""
   }
 
   private struct SidecarEvent: Decodable {

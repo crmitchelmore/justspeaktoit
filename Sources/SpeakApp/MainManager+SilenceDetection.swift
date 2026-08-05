@@ -16,6 +16,12 @@ extension MainManager {
     
     // Track HUD visibility to skip UI updates when app is occluded
     isHUDOccluded = !(NSApp.occlusionState.contains(.visible))
+    // Drop any registration left over from a previous monitoring session so
+    // repeated starts don't stack up observers on the same notification.
+    if let existingObserver = occlusionObserver {
+      NotificationCenter.default.removeObserver(existingObserver)
+      occlusionObserver = nil
+    }
     occlusionObserver = NotificationCenter.default.addObserver(
       forName: NSApplication.didChangeOcclusionStateNotification,
       object: nil,

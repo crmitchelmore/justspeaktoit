@@ -91,7 +91,10 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
     hasFinished = false
     committedText = ""
     lastFormattedString = ""
-    recognitionGeneration = 0
+    // Monotonically increase so late callbacks from a previous session can never
+    // match the generation of this one. Resetting to 0 would let a stale task
+    // whose generation happened to be 0 be treated as current.
+    recognitionGeneration += 1
     guard request != nil else {
       audioEngine.stop()
       audioEngine.inputNode.removeTap(onBus: 0)

@@ -36,6 +36,25 @@ public final class AudioRecordingPersistence: ObservableObject {
         category: "AudioPersistence"
     )
 
+    #if DEBUG
+    // MARK: - Test Seams
+    //
+    // Debug-only hooks that let a test drive the write/stop/start interleaving
+    // deterministically. Set them before recording starts and leave them nil in
+    // every non-test build.
+
+    /// Called from `writeBuffer` once admission has been granted and the buffer
+    /// copied, i.e. exactly where the pre-fix code released `stateLock` before
+    /// submitting to `ioQueue`. A test blocks here to hold a writer mid-flight
+    /// while it stops the session and starts the next one.
+    nonisolated(unsafe) public var writeAdmissionStallHook: (@Sendable () -> Void)?
+
+    /// Called on `ioQueue` with the URL of the file each admitted buffer was
+    /// actually written into, so a test can assert a stalled write never lands
+    /// in a later session's file.
+    nonisolated(unsafe) public var didWriteBufferHook: (@Sendable (URL) -> Void)?
+    #endif
+
     // MARK: - Directory
 
     /// Returns the persistent recordings directory, creating it if needed.
@@ -122,12 +141,18 @@ public final class AudioRecordingPersistence: ObservableObject {
         stateLock.lock()
         defer { stateLock.unlock() }
         if isWriterOpen, let copy = writeBufferPool.copy(buffer) {
+            #if DEBUG
+            writeAdmissionStallHook?()
+            #endif
             ioQueue.async { [weak self] in
                 guard let self else { return }
                 defer { self.writeBufferPool.recycle(copy) }
                 guard let file = self.ioFile else { return }
                 do {
                     try file.write(from: copy)
+                    #if DEBUG
+                    self.didWriteBufferHook?(file.url)
+                    #endif
                 } catch {
                     // Log but don't throw — we don't want to interrupt the
                     // transcription pipeline for a write failure.

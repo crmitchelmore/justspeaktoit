@@ -42,22 +42,16 @@ extension SettingsView {
           }
         }
       }
-      .onAppear {
-        if let target = environment.apiKeysScrollTarget {
-          revealAPIKeyTarget()
-          DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            withAnimation { proxy.scrollTo(target, anchor: .top) }
-            environment.apiKeysScrollTarget = nil
-          }
-        }
-      }
-      .onChange(of: environment.apiKeysScrollTarget) { _, newValue in
-        guard let target = newValue else { return }
+      // Covers both the initial appearance and later target changes; the work is
+      // cancelled with the view instead of firing from a detached timer.
+      .task(id: environment.apiKeysScrollTarget) {
+        guard let target = environment.apiKeysScrollTarget else { return }
         revealAPIKeyTarget()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-          withAnimation { proxy.scrollTo(target, anchor: .top) }
-          environment.apiKeysScrollTarget = nil
-        }
+        // Give the reveal above a beat to expand its section before scrolling.
+        try? await Task.sleep(for: .milliseconds(100))
+        guard !Task.isCancelled else { return }
+        withAnimation { proxy.scrollTo(target, anchor: .top) }
+        environment.apiKeysScrollTarget = nil
       }
     }
   }

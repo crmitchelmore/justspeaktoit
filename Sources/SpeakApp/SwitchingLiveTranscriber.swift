@@ -1,4 +1,3 @@
-// swiftlint:disable file_length
 import SpeakCore
 import AppKit
 @preconcurrency import AVFoundation
@@ -40,24 +39,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   private let secureStorage: SecureAppStorage
   private let nowProvider: () -> Date
   private var activeController: (any LiveTranscriptionController)?
-  private var nativeController: NativeOSXLiveTranscriber
-  private var speechAnalyzerController: AppleSpeechAnalyzerLiveController
-  private var deepgramController: DeepgramLiveController
-  private var modulateController: ModulateLiveController
-  private var assemblyAIController: AssemblyAILiveController
-  private var elevenlabsController: ElevenLabsLiveController
-  private var sonioxController: SonioxLiveController
-  private var speechmaticsController: SpeechmaticsLiveController
-  private var cartesiaController: CartesiaLiveController
-  private var gladiaController: GladiaLiveController
-  private var openAIRealtimeController: OpenAIRealtimeLiveController
-  private var sharedClientController: SharedClientLiveController
-  private var fluidAudioController: FluidAudioParakeetLiveController
-  private var whisperKitController: WhisperKitLiveController
-  #if !APP_STORE
-  private var sherpaOnnxController: SherpaOnnxLiveController
-  #endif
-  private var unsupportedLocalLiveController: UnsupportedLocalLiveTranscriber
+  private var controllers: ControllerSet
   private var currentLanguage: String?
   private var currentModel: String?
   private var invalidateBeforeNextStart: Bool = false
@@ -65,7 +47,6 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   private var willSleepObserver: NSObjectProtocol?
   private var didWakeObserver: NSObjectProtocol?
 
-  // swiftlint:disable:next function_body_length
   init(
     appSettings: AppSettings,
     permissionsManager: PermissionsManager,
@@ -78,95 +59,12 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     self.audioDeviceManager = audioDeviceManager
     self.secureStorage = secureStorage
     self.nowProvider = nowProvider
-    nativeController = NativeOSXLiveTranscriber(
-      permissionsManager: permissionsManager,
-      appSettings: appSettings,
-      audioDeviceManager: audioDeviceManager
-    )
-    speechAnalyzerController = AppleSpeechAnalyzerLiveController(
-      permissionsManager: permissionsManager,
-      appSettings: appSettings,
-      audioDeviceManager: audioDeviceManager
-    )
-    deepgramController = DeepgramLiveController(
+    controllers = ControllerSet(
       appSettings: appSettings,
       permissionsManager: permissionsManager,
       audioDeviceManager: audioDeviceManager,
       secureStorage: secureStorage
     )
-    modulateController = ModulateLiveController(
-      appSettings: appSettings,
-      permissionsManager: permissionsManager,
-      audioDeviceManager: audioDeviceManager,
-      secureStorage: secureStorage
-    )
-    assemblyAIController = AssemblyAILiveController(
-      appSettings: appSettings,
-      permissionsManager: permissionsManager,
-      audioDeviceManager: audioDeviceManager,
-      secureStorage: secureStorage
-    )
-    elevenlabsController = ElevenLabsLiveController(
-      appSettings: appSettings,
-      permissionsManager: permissionsManager,
-      audioDeviceManager: audioDeviceManager,
-      secureStorage: secureStorage
-    )
-    sonioxController = SonioxLiveController(
-      appSettings: appSettings,
-      permissionsManager: permissionsManager,
-      audioDeviceManager: audioDeviceManager,
-      secureStorage: secureStorage
-    )
-    speechmaticsController = SpeechmaticsLiveController(
-      appSettings: appSettings,
-      permissionsManager: permissionsManager,
-      audioDeviceManager: audioDeviceManager,
-      secureStorage: secureStorage
-    )
-    cartesiaController = CartesiaLiveController(
-      appSettings: appSettings,
-      permissionsManager: permissionsManager,
-      audioDeviceManager: audioDeviceManager,
-      secureStorage: secureStorage
-    )
-    gladiaController = GladiaLiveController(
-      appSettings: appSettings,
-      permissionsManager: permissionsManager,
-      audioDeviceManager: audioDeviceManager,
-      secureStorage: secureStorage
-    )
-    openAIRealtimeController = OpenAIRealtimeLiveController(
-      appSettings: appSettings,
-      permissionsManager: permissionsManager,
-      audioDeviceManager: audioDeviceManager,
-      secureStorage: secureStorage
-    )
-    sharedClientController = SharedClientLiveController(
-      permissionsManager: permissionsManager,
-      audioDeviceManager: audioDeviceManager,
-      secureStorage: secureStorage
-    )
-    fluidAudioController = FluidAudioParakeetLiveController(
-      appSettings: appSettings,
-      permissionsManager: permissionsManager,
-      audioDeviceManager: audioDeviceManager,
-      modelManager: FluidAudioModelManager.shared
-    )
-    whisperKitController = WhisperKitLiveController(
-      permissionsManager: permissionsManager,
-      audioDeviceManager: audioDeviceManager,
-      modelManager: LocalModelManager.shared
-    )
-    #if !APP_STORE
-    sherpaOnnxController = SherpaOnnxLiveController(
-      appSettings: appSettings,
-      permissionsManager: permissionsManager,
-      audioDeviceManager: audioDeviceManager,
-      runtimeManager: SherpaOnnxRuntimeManager.shared
-    )
-    #endif
-    unsupportedLocalLiveController = UnsupportedLocalLiveTranscriber()
     applyDelegateAndConfiguration()
     startObservingLifecycle()
   }
@@ -206,6 +104,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
         print(
           "[SwitchingLiveTranscriber] SpeechAnalyzer failed "
             + "(\(error.localizedDescription)); using legacy Apple Speech")
+        let nativeController = controllers.native
         nativeController.configure(
           language: currentLanguage,
           model: AppleLocalModels.legacySpeechModelID
@@ -236,63 +135,43 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
 
   func controller(for model: String) -> any LiveTranscriptionController {
     if model == AppleLocalModels.speechTranscriberModelID {
-      return speechAnalyzerController
+      return controllers.speechAnalyzer
     }
     if let route = controllerRoutes.first(where: { model.hasPrefix($0.prefix) }) {
       return route.controller
     }
     // SwitchingLiveTranscriber only routes live transcription models, and
     // OpenAI's only live transcription transport is the Realtime WebSocket
-    // API. So any openai/* live model is handled by openAIRealtimeController.
-    if model.hasPrefix("openai/") { return openAIRealtimeController }
-    if FluidAudioParakeetModel.matches(model) { return fluidAudioController }
-    if WhisperKitStreamingModel.matches(model) { return whisperKitController }
+    // API. So any openai/* live model is handled by the realtime controller.
+    if model.hasPrefix("openai/") { return controllers.openAIRealtime }
+    if FluidAudioParakeetModel.matches(model) { return controllers.fluidAudio }
+    if WhisperKitStreamingModel.matches(model) { return controllers.whisperKit }
     #if !APP_STORE
-    if model.hasPrefix("local/streaming/") { return sherpaOnnxController }
+    if model.hasPrefix("local/streaming/") { return controllers.sherpaOnnx }
     #else
-    if model.hasPrefix("local/streaming/") { return unsupportedLocalLiveController }
+    if model.hasPrefix("local/streaming/") { return controllers.unsupportedLocalLive }
     #endif
-    if ModelRouting.family(for: model).isDownloadedLocal { return unsupportedLocalLiveController }
-    return nativeController
+    if ModelRouting.family(for: model).isDownloadedLocal { return controllers.unsupportedLocalLive }
+    return controllers.native
   }
 
   private var controllerRoutes: [(prefix: String, controller: any LiveTranscriptionController)] {
     [
-      ("assemblyai/", assemblyAIController),
-      ("deepgram/", deepgramController),
-      ("modulate/", modulateController),
-      ("elevenlabs/", elevenlabsController),
-      ("soniox/", sonioxController),
-      ("speechmatics/", speechmaticsController),
-      ("cartesia/", cartesiaController),
-      ("gladia/", gladiaController),
-      ("xai/", sharedClientController)
+      ("assemblyai/", controllers.assemblyAI),
+      ("deepgram/", controllers.deepgram),
+      ("modulate/", controllers.modulate),
+      ("elevenlabs/", controllers.elevenlabs),
+      ("soniox/", controllers.soniox),
+      ("speechmatics/", controllers.speechmatics),
+      ("cartesia/", controllers.cartesia),
+      ("gladia/", controllers.gladia),
+      ("xai/", controllers.sharedClient)
     ]
   }
 
   private func applyDelegateAndConfiguration() {
-    var controllers: [any LiveTranscriptionController] = [
-      nativeController,
-      speechAnalyzerController,
-      deepgramController,
-      modulateController,
-      assemblyAIController,
-      elevenlabsController,
-      sonioxController,
-      speechmaticsController,
-      cartesiaController,
-      gladiaController,
-      openAIRealtimeController,
-      sharedClientController,
-      unsupportedLocalLiveController
-    ]
-    controllers.insert(whisperKitController, at: controllers.count - 1)
-    controllers.insert(fluidAudioController, at: controllers.count - 1)
-    #if !APP_STORE
-    controllers.insert(sherpaOnnxController, at: controllers.count - 1)
-    #endif
     let model = currentModel ?? appSettings.liveTranscriptionModel
-    for controller in controllers {
+    for controller in controllers.all {
       controller.delegate = delegate
       controller.configure(language: currentLanguage, model: model)
     }
@@ -306,98 +185,14 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     )
   }
 
-  // swiftlint:disable:next function_body_length
   private func resetControllers() {
     activeController = nil
-    nativeController = NativeOSXLiveTranscriber(
-      permissionsManager: permissionsManager,
-      appSettings: appSettings,
-      audioDeviceManager: audioDeviceManager
-    )
-    speechAnalyzerController = AppleSpeechAnalyzerLiveController(
-      permissionsManager: permissionsManager,
-      appSettings: appSettings,
-      audioDeviceManager: audioDeviceManager
-    )
-    deepgramController = DeepgramLiveController(
+    controllers = ControllerSet(
       appSettings: appSettings,
       permissionsManager: permissionsManager,
       audioDeviceManager: audioDeviceManager,
       secureStorage: secureStorage
     )
-    modulateController = ModulateLiveController(
-      appSettings: appSettings,
-      permissionsManager: permissionsManager,
-      audioDeviceManager: audioDeviceManager,
-      secureStorage: secureStorage
-    )
-    assemblyAIController = AssemblyAILiveController(
-      appSettings: appSettings,
-      permissionsManager: permissionsManager,
-      audioDeviceManager: audioDeviceManager,
-      secureStorage: secureStorage
-    )
-    elevenlabsController = ElevenLabsLiveController(
-      appSettings: appSettings,
-      permissionsManager: permissionsManager,
-      audioDeviceManager: audioDeviceManager,
-      secureStorage: secureStorage
-    )
-    sonioxController = SonioxLiveController(
-      appSettings: appSettings,
-      permissionsManager: permissionsManager,
-      audioDeviceManager: audioDeviceManager,
-      secureStorage: secureStorage
-    )
-    speechmaticsController = SpeechmaticsLiveController(
-      appSettings: appSettings,
-      permissionsManager: permissionsManager,
-      audioDeviceManager: audioDeviceManager,
-      secureStorage: secureStorage
-    )
-    cartesiaController = CartesiaLiveController(
-      appSettings: appSettings,
-      permissionsManager: permissionsManager,
-      audioDeviceManager: audioDeviceManager,
-      secureStorage: secureStorage
-    )
-    gladiaController = GladiaLiveController(
-      appSettings: appSettings,
-      permissionsManager: permissionsManager,
-      audioDeviceManager: audioDeviceManager,
-      secureStorage: secureStorage
-    )
-    openAIRealtimeController = OpenAIRealtimeLiveController(
-      appSettings: appSettings,
-      permissionsManager: permissionsManager,
-      audioDeviceManager: audioDeviceManager,
-      secureStorage: secureStorage
-    )
-    sharedClientController = SharedClientLiveController(
-      permissionsManager: permissionsManager,
-      audioDeviceManager: audioDeviceManager,
-      secureStorage: secureStorage
-    )
-    fluidAudioController = FluidAudioParakeetLiveController(
-      appSettings: appSettings,
-      permissionsManager: permissionsManager,
-      audioDeviceManager: audioDeviceManager,
-      modelManager: FluidAudioModelManager.shared
-    )
-    whisperKitController = WhisperKitLiveController(
-      permissionsManager: permissionsManager,
-      audioDeviceManager: audioDeviceManager,
-      modelManager: LocalModelManager.shared
-    )
-    #if !APP_STORE
-    sherpaOnnxController = SherpaOnnxLiveController(
-      appSettings: appSettings,
-      permissionsManager: permissionsManager,
-      audioDeviceManager: audioDeviceManager,
-      runtimeManager: SherpaOnnxRuntimeManager.shared
-    )
-    #endif
-    unsupportedLocalLiveController = UnsupportedLocalLiveTranscriber()
     invalidateBeforeNextStart = false
     lastStopDate = nil
     applyDelegateAndConfiguration()
@@ -431,5 +226,151 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   @MainActor
   func markControllersStale() {
     invalidateBeforeNextStart = true
+  }
+
+  /// The single place live controllers are constructed. `init` and
+  /// `resetControllers` both build one of these so the two paths cannot drift.
+  @MainActor
+  private struct ControllerSet {
+    let native: NativeOSXLiveTranscriber
+    let speechAnalyzer: AppleSpeechAnalyzerLiveController
+    let deepgram: DeepgramLiveController
+    let modulate: ModulateLiveController
+    let assemblyAI: AssemblyAILiveController
+    let elevenlabs: ElevenLabsLiveController
+    let soniox: SonioxLiveController
+    let speechmatics: SpeechmaticsLiveController
+    let cartesia: CartesiaLiveController
+    let gladia: GladiaLiveController
+    let openAIRealtime: OpenAIRealtimeLiveController
+    let sharedClient: SharedClientLiveController
+    let fluidAudio: FluidAudioParakeetLiveController
+    let whisperKit: WhisperKitLiveController
+    #if !APP_STORE
+    let sherpaOnnx: SherpaOnnxLiveController
+    #endif
+    let unsupportedLocalLive: UnsupportedLocalLiveTranscriber
+
+    // swiftlint:disable:next function_body_length
+    init(
+      appSettings: AppSettings,
+      permissionsManager: PermissionsManager,
+      audioDeviceManager: AudioInputDeviceManager,
+      secureStorage: SecureAppStorage
+    ) {
+      native = NativeOSXLiveTranscriber(
+        permissionsManager: permissionsManager,
+        appSettings: appSettings,
+        audioDeviceManager: audioDeviceManager
+      )
+      speechAnalyzer = AppleSpeechAnalyzerLiveController(
+        permissionsManager: permissionsManager,
+        appSettings: appSettings,
+        audioDeviceManager: audioDeviceManager
+      )
+      deepgram = DeepgramLiveController(
+        appSettings: appSettings,
+        permissionsManager: permissionsManager,
+        audioDeviceManager: audioDeviceManager,
+        secureStorage: secureStorage
+      )
+      modulate = ModulateLiveController(
+        appSettings: appSettings,
+        permissionsManager: permissionsManager,
+        audioDeviceManager: audioDeviceManager,
+        secureStorage: secureStorage
+      )
+      assemblyAI = AssemblyAILiveController(
+        appSettings: appSettings,
+        permissionsManager: permissionsManager,
+        audioDeviceManager: audioDeviceManager,
+        secureStorage: secureStorage
+      )
+      elevenlabs = ElevenLabsLiveController(
+        appSettings: appSettings,
+        permissionsManager: permissionsManager,
+        audioDeviceManager: audioDeviceManager,
+        secureStorage: secureStorage
+      )
+      soniox = SonioxLiveController(
+        appSettings: appSettings,
+        permissionsManager: permissionsManager,
+        audioDeviceManager: audioDeviceManager,
+        secureStorage: secureStorage
+      )
+      speechmatics = SpeechmaticsLiveController(
+        appSettings: appSettings,
+        permissionsManager: permissionsManager,
+        audioDeviceManager: audioDeviceManager,
+        secureStorage: secureStorage
+      )
+      cartesia = CartesiaLiveController(
+        appSettings: appSettings,
+        permissionsManager: permissionsManager,
+        audioDeviceManager: audioDeviceManager,
+        secureStorage: secureStorage
+      )
+      gladia = GladiaLiveController(
+        appSettings: appSettings,
+        permissionsManager: permissionsManager,
+        audioDeviceManager: audioDeviceManager,
+        secureStorage: secureStorage
+      )
+      openAIRealtime = OpenAIRealtimeLiveController(
+        appSettings: appSettings,
+        permissionsManager: permissionsManager,
+        audioDeviceManager: audioDeviceManager,
+        secureStorage: secureStorage
+      )
+      sharedClient = SharedClientLiveController(
+        permissionsManager: permissionsManager,
+        audioDeviceManager: audioDeviceManager,
+        secureStorage: secureStorage
+      )
+      fluidAudio = FluidAudioParakeetLiveController(
+        appSettings: appSettings,
+        permissionsManager: permissionsManager,
+        audioDeviceManager: audioDeviceManager,
+        modelManager: FluidAudioModelManager.shared
+      )
+      whisperKit = WhisperKitLiveController(
+        permissionsManager: permissionsManager,
+        audioDeviceManager: audioDeviceManager,
+        modelManager: LocalModelManager.shared
+      )
+      #if !APP_STORE
+      sherpaOnnx = SherpaOnnxLiveController(
+        appSettings: appSettings,
+        permissionsManager: permissionsManager,
+        audioDeviceManager: audioDeviceManager,
+        runtimeManager: SherpaOnnxRuntimeManager.shared
+      )
+      #endif
+      unsupportedLocalLive = UnsupportedLocalLiveTranscriber()
+    }
+
+    var all: [any LiveTranscriptionController] {
+      var controllers: [any LiveTranscriptionController] = [
+        native,
+        speechAnalyzer,
+        deepgram,
+        modulate,
+        assemblyAI,
+        elevenlabs,
+        soniox,
+        speechmatics,
+        cartesia,
+        gladia,
+        openAIRealtime,
+        sharedClient,
+        whisperKit,
+        fluidAudio
+      ]
+      #if !APP_STORE
+      controllers.append(sherpaOnnx)
+      #endif
+      controllers.append(unsupportedLocalLive)
+      return controllers
+    }
   }
 }

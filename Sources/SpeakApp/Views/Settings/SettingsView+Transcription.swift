@@ -1310,8 +1310,11 @@ extension SettingsView {
             if let fallback = firstInstalledStreamingSourceID(excluding: source.id) {
               settings.localStreamingModelSource = fallback
             } else {
-              settings.localStreamingModelSource =
-                LocalModelManager.recommendedStreamingModelSources.first?.id ?? source.id
+              // Nothing installed is left, so point at a recommended source the
+              // user could download next — never back at the source we removed.
+              settings.localStreamingModelSource = LocalModelManager
+                .recommendedStreamingModelSources
+                .first { $0.id != source.id }?.id ?? ""
               settings.localTranscriptionMode = .batch
             }
           }

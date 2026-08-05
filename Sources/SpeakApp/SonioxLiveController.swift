@@ -92,6 +92,7 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
       let newTranscriber = SonioxLiveTranscriber(
         apiKey: apiKey,
         model: modelID,
+        language: currentLanguage,
         sampleRate: 16000
       )
       transcriber = newTranscriber

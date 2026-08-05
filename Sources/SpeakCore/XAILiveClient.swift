@@ -86,6 +86,14 @@ public final class XAILiveClient: FinalizingStreamingTranscriptionClient, @unche
         sendAudioFrame(audioData, on: task)
     }
 
+    /// Commits the input buffer and waits (bounded) for xAI's completed
+    /// transcription.
+    ///
+    /// Returns the session's **full** transcript, or `nil` when nothing was
+    /// transcribed. xAI's transcription events are cumulative — each one
+    /// carries the whole turn — so `latestTranscript` already *is* the full
+    /// transcript and needs no folding (unlike the segment-shaped providers,
+    /// which use `TranscriptAccumulator`).
     public func finishAndWait() async -> String? {
         let task = withStateLock { () -> URLSessionWebSocketTask? in
             guard !isStopping else { return nil }
@@ -116,6 +124,13 @@ public final class XAILiveClient: FinalizingStreamingTranscriptionClient, @unche
         }
         if let task { close(task) }
         resumeFinishIfNeeded(with: currentTranscript())
+    }
+
+    /// Feeds one raw realtime event through the receive path. The WebSocket
+    /// loop is the only production caller; tests use it to drive the client
+    /// without a live socket.
+    func ingest(_ text: String) {
+        handleMessage(.string(text))
     }
 }
 

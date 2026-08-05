@@ -8,38 +8,14 @@
     <key>NSPrivacyTrackingDomains</key>
     <array/>
 
-    <!-- Data types the app collects. Transcription audio is sent to the
-         user-selected provider for App Functionality; crash/performance data is
-         collected by Sentry. None is used for tracking or linked to identity. -->
+    <!-- Data types the iOS app collects. Transcription audio is sent to the
+         user-selected provider for App Functionality. The iOS app does not
+         currently initialise Sentry or another developer analytics SDK. -->
     <key>NSPrivacyCollectedDataTypes</key>
     <array>
         <dict>
             <key>NSPrivacyCollectedDataType</key>
             <string>NSPrivacyCollectedDataTypeAudioData</string>
-            <key>NSPrivacyCollectedDataTypeLinked</key>
-            <false/>
-            <key>NSPrivacyCollectedDataTypeTracking</key>
-            <false/>
-            <key>NSPrivacyCollectedDataTypePurposes</key>
-            <array>
-                <string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
-            </array>
-        </dict>
-        <dict>
-            <key>NSPrivacyCollectedDataType</key>
-            <string>NSPrivacyCollectedDataTypeCrashData</string>
-            <key>NSPrivacyCollectedDataTypeLinked</key>
-            <false/>
-            <key>NSPrivacyCollectedDataTypeTracking</key>
-            <false/>
-            <key>NSPrivacyCollectedDataTypePurposes</key>
-            <array>
-                <string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
-            </array>
-        </dict>
-        <dict>
-            <key>NSPrivacyCollectedDataType</key>
-            <string>NSPrivacyCollectedDataTypePerformanceData</string>
             <key>NSPrivacyCollectedDataTypeLinked</key>
             <false/>
             <key>NSPrivacyCollectedDataTypeTracking</key>

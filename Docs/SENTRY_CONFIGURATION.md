@@ -1,80 +1,58 @@
 # Sentry Configuration
 
-This document explains how to configure Sentry crash reporting for the Just Speak to It app.
+Just Speak to It uses Sentry for anonymous macOS reliability diagnostics. The
+iOS app does not currently initialise Sentry.
 
-## Configuration
+## Runtime configuration
 
-The Sentry DSN (Data Source Name) is now read from build configuration instead of being hardcoded. This allows for:
-- Easy rotation of Sentry keys
-- Different DSNs per environment (dev/staging/production)
-- No sensitive data committed to the repository
+`Sources/SpeakApp/SentryManager.swift` owns the runtime configuration and starts
+Sentry when the macOS app launches. The production DSN points to the project's
+EU Sentry ingest endpoint and is intentionally safe to embed in the client; it
+permits event ingestion, not authenticated access to Sentry data.
 
-## Setup
+Production macOS builds currently configure:
 
-1. Add your Sentry DSN to the `.env` file in the project root:
-   ```bash
-   SENTRY_DSN=https://your-key@your-org.ingest.sentry.io/your-project-id
-   ```
+- Environment: `production`
+- Release: `justspeaktoit-mac@<version>+<build>`
+- Performance trace sample rate: 20%
+- Automatic session tracking: enabled by the Sentry SDK default
+- Automatic breadcrumbs: enabled
+- Failed HTTP-request capture: enabled
+- Default PII collection: disabled
 
-2. The `.env` file is already in `.gitignore` to prevent committing secrets.
+Debug builds and XCTest runs initialise the SDK in disabled mode and do not send
+events.
 
-3. When building the app, the DSN is injected into the Info.plist via build settings.
+## Privacy requirements
 
-## Building
+Sentry events must never contain transcript text, microphone audio, clipboard
+contents, API keys, authorization headers, email addresses, names, or other
+free-form user content. Prefer bounded error codes, counts, durations, and
+provider/model identifiers when adding diagnostic context.
 
-### Local Development
+The SDK creates a persistent random installation ID for session health. The app
+does not currently call `SentryManager.setUser`, so it does not attach a known
+user identity.
 
-The Makefile automatically loads `.env` variables:
-```bash
-make build
-make run
-make xcode  # Generates Xcode project with env vars
-```
+Any change to Sentry collection must also update:
 
-### CI/CD
+- `Docs/PRIVACY.md`
+- `SECURITY.md`
+- The relevant Apple privacy manifest and App Store privacy answers
 
-For CI/CD pipelines, set the `SENTRY_DSN` environment variable in your CI configuration (GitHub Actions, etc.):
-```yaml
-env:
-  SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-```
+## Release integration
 
-### Xcode Builds
-
-If building directly in Xcode (not via Makefile):
-1. Run `make xcode` to generate the workspace with environment variables loaded
-2. Or manually export the environment variable before opening Xcode:
-   ```bash
-   export SENTRY_DSN="your-dsn-here"
-   open "Just Speak to It.xcworkspace"
-   ```
-
-## How It Works
-
-1. **Project.swift**: Reads `SENTRY_DSN` from environment and adds it to build settings
-2. **AppInfo.plist**: Contains placeholder `$(SENTRY_DSN)` that gets replaced at build time
-3. **SentryManager.swift**: Reads the DSN from `Bundle.main.infoDictionary` at runtime
-
-## Debug Builds
-
-Sentry is automatically disabled in DEBUG builds to avoid polluting production data with development errors.
+The macOS release workflow optionally uses authenticated Sentry CI secrets to
+create a release and upload debug symbols. These server-side credentials are
+separate from the client DSN and must remain in GitHub Actions secrets.
 
 ## Validation
 
-If the DSN is not configured or invalid, you'll see a warning in the console:
-```
-⚠️ Sentry DSN not configured - crash reporting disabled
-```
+Before shipping a telemetry change:
 
-This is safe - the app will run normally but won't send crash reports.
-
-## Environment-Specific DSNs
-
-To use different DSNs for different environments:
-
-1. Create separate `.env` files:
-   - `.env.development`
-   - `.env.staging`
-   - `.env.production`
-
-2. Load the appropriate one based on your build configuration or copy to `.env` before building.
+1. Confirm debug and test builds remain disabled.
+2. Inspect a production-format event and verify that user-generated content and
+   credentials are absent.
+3. Confirm `sendDefaultPii` remains disabled.
+4. Confirm the privacy documentation, manifest, and App Store answers match the
+   actual platform behaviour.

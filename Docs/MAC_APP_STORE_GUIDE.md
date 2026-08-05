@@ -117,6 +117,16 @@ Fill in the following:
      - Not used for tracking
    - **Usage Data** - Analytics
      - Not linked to user identity
+     - Covers anonymous app-session diagnostics
+     - Not used for tracking
+   - **Diagnostics** - Crash Data, Performance Data, and Other Diagnostic Data
+     - Used for app functionality and reliability through Sentry EU
+     - Not linked to user identity
+     - Not used for tracking
+
+Keep these answers aligned with `Sources/SpeakApp/SentryManager.swift`, Sentry's
+bundled privacy manifest, and `Docs/PRIVACY.md`. Re-review the answers whenever
+analytics or diagnostics behaviour changes.
 
 ## Step 4: Prepare Store Listing
 

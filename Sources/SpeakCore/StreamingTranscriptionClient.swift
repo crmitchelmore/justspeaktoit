@@ -34,9 +34,29 @@ public protocol StreamingTranscriptionClient: AnyObject {
 
 /// Optional graceful-finalisation path for providers that only emit their
 /// definitive transcript after the input buffer is committed.
+///
+/// ## Return contract
+///
+/// `finishAndWait()` returns the **full transcript for the whole session** —
+/// never just the trailing segment — or `nil` when the session produced no
+/// speech at all. Providers that stream segment-shaped finals accumulate them
+/// internally (see `TranscriptAccumulator`) so every conformer answers the same
+/// question, and consumers can *replace* their transcript with the return value
+/// instead of guessing whether to append it.
+///
+/// The `onTranscript` callbacks stay provider-shaped (Deepgram/ElevenLabs emit
+/// segments, xAI emits cumulative text); only this return value is normalised.
+/// `TranscriptAccumulator` is the shared way to fold segment finals into a full
+/// transcript on the consumer side.
+///
+/// `StreamingClientContractTests` asserts this for every conformer.
 public protocol FinalizingStreamingTranscriptionClient: StreamingTranscriptionClient {
     /// Commits pending input, waits for the provider's final transcript (with
     /// an implementation-defined timeout), then closes the connection.
+    ///
+    /// - Returns: the session's full transcript, or `nil` if nothing was
+    ///   transcribed. A trailing final consumed here is *not* also delivered
+    ///   through `onTranscript`.
     func finishAndWait() async -> String?
 
     /// Whether `finishAndWait()` actively flushes audio the provider has

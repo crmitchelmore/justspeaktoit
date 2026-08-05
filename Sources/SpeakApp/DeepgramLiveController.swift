@@ -6,8 +6,11 @@ import os.log
 
 // MARK: - Deepgram Live Controller
 
-/// Wraps DeepgramLiveTranscriber to conform to LiveTranscriptionController protocol.
-/// Resamples audio from device sample rate (typically 48kHz) to 16kHz for Deepgram.
+/// Drives the shared `SpeakCore.DeepgramLiveClient` behind the
+/// `LiveTranscriptionController` protocol: macOS owns capture and resampling
+/// (device rate, typically 48kHz → 16kHz PCM16), the client owns the Deepgram
+/// transport and event parsing for both nova (`v1/listen`) and Flux
+/// (`v2/listen`) models.
 final class DeepgramLiveController: NSObject, LiveTranscriptionController {
   weak var delegate: LiveTranscriptionSessionDelegate?
   private(set) var isRunning: Bool = false
@@ -16,7 +19,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
   private let permissionsManager: PermissionsManager
   private let audioDeviceManager: AudioInputDeviceManager
   private let secureStorage: SecureAppStorage
-  private var transcriber: DeepgramLiveTranscriber?
+  private var transcriber: DeepgramLiveClient?
   private var currentLanguage: String?
   private var currentModel: String?
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
@@ -155,7 +158,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
       _ buffer: AVAudioPCMBuffer,
       inputFormat: AVAudioFormat,
       outputFormat: AVAudioFormat,
-      transcriber: DeepgramLiveTranscriber,
+      transcriber: DeepgramLiveClient,
       logger: Logger
     ) {
       guard let copied = copyPCMBuffer(buffer) else { return }
@@ -193,7 +196,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
       _ buffer: AVAudioPCMBuffer,
       from inputFormat: AVAudioFormat,
       to outputFormat: AVAudioFormat,
-      transcriber: DeepgramLiveTranscriber,
+      transcriber: DeepgramLiveClient,
       logger: Logger
     ) {
       // Get or create cached converter (avoids ~30 allocations/sec)
@@ -339,7 +342,7 @@ private extension DeepgramLiveController {
     return outputFormat
   }
 
-  func makeDeepgramTranscriber(apiKey: String) throws -> DeepgramLiveTranscriber {
+  func makeDeepgramTranscriber(apiKey: String) throws -> DeepgramLiveClient {
     let provider = DeepgramTranscriptionProvider()
     print("[DeepgramLiveController] Creating transcriber with model: \(currentModel ?? "nova-3")")
     let transcriber = provider.createLiveTranscriber(
@@ -372,7 +375,7 @@ private extension DeepgramLiveController {
     on inputNode: AVAudioInputNode,
     inputFormat: AVAudioFormat,
     outputFormat: AVAudioFormat,
-    transcriber: DeepgramLiveTranscriber
+    transcriber: DeepgramLiveClient
   ) {
     audioProcessor.setRunning(true)
     let processor = audioProcessor

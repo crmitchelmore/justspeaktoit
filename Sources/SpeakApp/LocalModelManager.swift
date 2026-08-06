@@ -103,7 +103,7 @@ final class LocalModelManager: ObservableObject {
   private var activePipelines: [String: WhisperKit] = [:]
   private var loadingPipelines: [String: Task<WhisperKit, Error>] = [:]
   private let fileManager: FileManager
-  private let logger = Logger(subsystem: "com.github.speakapp", category: "LocalModelManager")
+  private let logger = SpeakLogger.logger(category: "LocalModelManager")
   private let markerDirectory: URL
   private let importedModelsURL: URL
   #if !APP_STORE

@@ -195,7 +195,7 @@ final class SpeechmaticsLiveTranscriber: @unchecked Sendable {
   private let sampleRate: Int
   private let session: URLSession
   private let bufferPool: AudioBufferPool
-  private let logger = Logger(subsystem: "com.speak.app", category: "SpeechmaticsLiveTranscriber")
+  private let logger = SpeakLogger.logger(category: "SpeechmaticsLiveTranscriber")
   private let stateLock = NSLock()
   private let pendingSendGroup = DispatchGroup()
   private let outboundSendQueue = DispatchQueue(label: "com.speak.app.speechmatics.outbound")

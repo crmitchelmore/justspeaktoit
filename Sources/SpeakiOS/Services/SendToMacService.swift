@@ -2,6 +2,9 @@
 import Foundation
 import Network
 import SpeakCore
+import os.log
+
+private let logger = SpeakLogger.logger(category: "SendToMac")
 
 // MARK: - Mac Discovery
 
@@ -45,7 +48,7 @@ public final class MacDiscovery: ObservableObject {
             Task { @MainActor in
                 switch state {
                 case .failed(let error):
-                    print("[MacDiscovery] Browser failed: \(error)")
+                    logger.error("Browser failed: \(error.localizedDescription, privacy: .public)")
                     self?.isSearching = false
                 case .cancelled:
                     self?.isSearching = false

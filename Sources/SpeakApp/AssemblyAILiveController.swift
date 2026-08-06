@@ -22,7 +22,7 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
   private var currentLanguage: String?
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
   private var audioEngine = AVAudioEngine()
-  private let logger = Logger(subsystem: "com.speak.app", category: "AssemblyAILiveController")
+  private let logger = SpeakLogger.logger(category: "AssemblyAILiveController")
   private let audioProcessor = AssemblyAIAudioProcessor()
   private var hasFinished: Bool = false
 

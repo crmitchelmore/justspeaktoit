@@ -75,7 +75,7 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
     private let apiKeyOverride: String?
     private let maximumInlineAudioBytes: Int64
     private let branding: OpenRouterBranding
-    private let logger = Logger(subsystem: "com.github.speakapp", category: "OpenRouter")
+    private let logger = SpeakLogger.logger(category: "OpenRouter")
 
     private struct ValidationAttemptResult {
         let success: Bool

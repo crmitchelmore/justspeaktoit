@@ -27,7 +27,7 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
   private var currentLanguage: String?
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
   private var audioEngine = AVAudioEngine()
-  private let logger = Logger(subsystem: "com.speak.app", category: "OpenAIRealtimeLiveController")
+  private let logger = SpeakLogger.logger(category: "OpenAIRealtimeLiveController")
   private let audioProcessor = OpenAIRealtimeAudioProcessor(targetSampleRate: 24_000)
   private var hasFinished: Bool = false
 

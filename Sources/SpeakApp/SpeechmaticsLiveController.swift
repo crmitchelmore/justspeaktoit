@@ -16,7 +16,7 @@ final class SpeechmaticsLiveController: NSObject, LiveTranscriptionController {
   private var currentModel: String?
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
   private var audioEngine = AVAudioEngine()
-  private let logger = Logger(subsystem: "com.speak.app", category: "SpeechmaticsLiveController")
+  private let logger = SpeakLogger.logger(category: "SpeechmaticsLiveController")
   private let audioProcessor = SpeechmaticsAudioProcessor()
   private var hasFinished = false
   private let targetSampleRate: Double = 16000

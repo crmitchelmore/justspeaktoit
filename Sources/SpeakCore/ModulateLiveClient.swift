@@ -16,7 +16,7 @@ public final class ModulateLiveClient: StreamingTranscriptionClient, @unchecked 
     private let apiKey: String
     private let sampleRate: Int
     private let session: URLSession
-    private let logger = Logger(subsystem: "com.justspeaktoit", category: "ModulateLiveClient")
+    private let logger = SpeakLogger.logger(category: "ModulateLiveClient")
     private let stateLock = NSLock()
 
     private var webSocketTask: URLSessionWebSocketTask?

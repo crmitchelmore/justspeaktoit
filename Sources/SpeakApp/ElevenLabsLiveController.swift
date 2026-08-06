@@ -22,7 +22,7 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
   private var currentModel: String?
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
   private var audioEngine = AVAudioEngine()
-  private let logger = Logger(subsystem: "com.speak.app", category: "ElevenLabsLiveController")
+  private let logger = SpeakLogger.logger(category: "ElevenLabsLiveController")
   private let audioProcessor = ElevenLabsAudioProcessor()
   private var hasFinished: Bool = false
 

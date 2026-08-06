@@ -20,7 +20,7 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
   /// on macOS. A dedicated, default-configured session avoids that.
   private let session: URLSession
   private let bufferPool: AudioBufferPool
-  private let logger = Logger(subsystem: "com.speak.app", category: "AssemblyAILiveTranscriber")
+  private let logger = SpeakLogger.logger(category: "AssemblyAILiveTranscriber")
   private let stateLock = NSLock()
   private let pendingSendGroup = DispatchGroup()
 

@@ -19,7 +19,7 @@ public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @
     private let sampleRate: Int
     private let session: URLSession
     private let bufferPool: AudioBufferPool
-    private let logger = Logger(subsystem: "com.speak.app", category: "DeepgramLiveClient")
+    private let logger = SpeakLogger.logger(category: "DeepgramLiveClient")
     private let stateLock = NSLock()
 
     // Guarded by `stateLock`: mutated by the caller while URLSession callbacks read them.

@@ -48,7 +48,7 @@ public final class RecordingSoundPlayer {
     }
   }
 
-  private let logger = Logger(subsystem: "com.github.speakapp", category: "RecordingSoundPlayer")
+  private let logger = SpeakLogger.logger(category: "RecordingSoundPlayer")
 
   public var profile: SoundProfile = .classic {
     didSet {

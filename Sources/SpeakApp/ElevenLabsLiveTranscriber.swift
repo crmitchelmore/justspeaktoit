@@ -78,7 +78,7 @@ final class ElevenLabsLiveTranscriber: @unchecked Sendable {
     private let sampleRate: Int
     private let session: URLSession
     private let bufferPool: AudioBufferPool
-    private let logger = Logger(subsystem: "com.speak.app", category: "ElevenLabsLiveTranscriber")
+    private let logger = SpeakLogger.logger(category: "ElevenLabsLiveTranscriber")
     private let stateLock = NSLock()
     private let pendingSendGroup = DispatchGroup()
 

@@ -2,6 +2,9 @@
 import SpeakCore
 import SwiftUI
 import UniformTypeIdentifiers
+import os.log
+
+private let logger = SpeakLogger.logger(category: "VoiceOutput")
 
 enum TTSInputSource: String, CaseIterable, Identifiable {
   case manual
@@ -630,10 +633,10 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
       do {
         inputText = try String(contentsOf: url, encoding: .utf8)
       } catch {
-        print("Failed to read file: \(error)")
+        logger.error("Failed to read file: \(error.localizedDescription, privacy: .public)")
       }
     case .failure(let error):
-      print("File import failed: \(error)")
+      logger.error("File import failed: \(error.localizedDescription, privacy: .public)")
     }
   }
 
@@ -645,7 +648,7 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
     do {
       _ = try await tts.synthesize(text: inputText, voice: selectedVoice, useSSML: nil)
     } catch {
-      print("Synthesis error: \(error)")
+      logger.error("Synthesis error: \(error.localizedDescription, privacy: .public)")
     }
   }
 

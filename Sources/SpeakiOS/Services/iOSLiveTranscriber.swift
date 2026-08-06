@@ -5,6 +5,8 @@ import Speech
 import SpeakCore
 import os.log
 
+private let logger = SpeakLogger.logger(category: "iOSLiveTranscriber")
+
 // swiftlint:disable file_length
 /// iOS-native live transcription using Apple Speech framework.
 @MainActor
@@ -130,7 +132,7 @@ public final class iOSLiveTranscriber: ObservableObject {
                     try await startSpeechAnalyzer()
                     activeModelID = AppleLocalModels.speechTranscriberModelID
                     isRunning = true
-                    print("[iOSLiveTranscriber] Started with SpeechAnalyzer")
+                    logger.info("Started with SpeechAnalyzer")
                     return
                 } catch {
                     SpeakLogger.logError(
@@ -154,7 +156,7 @@ public final class iOSLiveTranscriber: ObservableObject {
         }
 
         isRunning = true
-        print("[iOSLiveTranscriber] Started")
+        logger.info("Started")
     }
 
     @available(iOS 26.0, *)
@@ -411,7 +413,7 @@ public final class iOSLiveTranscriber: ObservableObject {
 
         audioSessionManager.deactivate()
 
-        print("[iOSLiveTranscriber] Cancelled")
+        logger.info("Cancelled")
     }
 
     // MARK: - Private
@@ -429,7 +431,7 @@ public final class iOSLiveTranscriber: ObservableObject {
     private func handleInterruption() {
         guard isRunning else { return }
 
-        print("[iOSLiveTranscriber] Handling interruption")
+        logger.info("Handling interruption")
         error = iOSTranscriptionError.interrupted
         onError?(iOSTranscriptionError.interrupted)
 
@@ -454,7 +456,7 @@ public final class iOSLiveTranscriber: ObservableObject {
                     .filter { !$0.isEmpty }.joined(separator: " ")
                 lastFormattedString = ""
             }
-            print("[iOSLiveTranscriber] Recognition error: \(error.localizedDescription)")
+            logger.error("Recognition error: \(error.localizedDescription, privacy: .public)")
             self.error = iOSTranscriptionError.recognitionFailed(error)
             onError?(self.error!)
             return
@@ -490,8 +492,7 @@ public final class iOSLiveTranscriber: ObservableObject {
         onPartialResult?(displayText, resultIsFinal)
 
         if resultIsFinal {
-            print("[iOSLiveTranscriber] Mid-session isFinal – "
-                  + "committing \(displayText.count) chars, restarting")
+            logger.info("Mid-session isFinal – committing \(displayText.count) chars, restarting")
             committedText = displayText
             lastFormattedString = ""
             restartRecognitionTask()
@@ -506,8 +507,7 @@ public final class iOSLiveTranscriber: ObservableObject {
               lastFormattedString.count >= 1,
               currentText.count < lastFormattedString.count / 2
         else { return }
-        print("[iOSLiveTranscriber] Implicit text reset – "
-              + "committing \(lastFormattedString.count) chars")
+        logger.info("Implicit text reset – committing \(self.lastFormattedString.count) chars")
         committedText = [committedText, lastFormattedString]
             .filter { !$0.isEmpty }.joined(separator: " ")
     }

@@ -337,7 +337,7 @@ public final class SharedTranscriptionState {
         defaults = UserDefaults(suiteName: Self.appGroupIdentifier)
         #if DEBUG
         if defaults == nil {
-            Logger(subsystem: "com.justspeaktoit.ios", category: "SharedTranscriptionState")
+            SpeakLogger.logger(category: "SharedTranscriptionState")
                 .fault("App Group \(Self.appGroupIdentifier) unavailable; shared state is disabled.")
             assertionFailure("App Group \(Self.appGroupIdentifier) unavailable; check entitlements.")
         }

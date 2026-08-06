@@ -58,7 +58,7 @@ final class MainManager: ObservableObject {
   let liveTextInserter: LiveTextInserter
   let textProcessor: TranscriptionTextProcessor
   let autoCorrectionTracker: AutoCorrectionTracker
-  let logger = Logger(subsystem: "com.github.speakapp", category: "MainManager")
+  let logger = SpeakLogger.logger(category: "MainManager")
   private let recordingSoundPlayer = RecordingSoundPlayer()
 
   var activeSession: ActiveSession?

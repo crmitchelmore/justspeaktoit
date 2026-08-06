@@ -136,7 +136,7 @@ final class GladiaLiveTranscriber: @unchecked Sendable {
   private let sampleRate: Int
   private let session: URLSession
   private let baseURL: URL
-  private let logger = Logger(subsystem: "com.speak.app", category: "GladiaLiveTranscriber")
+  private let logger = SpeakLogger.logger(category: "GladiaLiveTranscriber")
   private let stateLock = NSLock()
   private let pendingSendGroup = DispatchGroup()
 

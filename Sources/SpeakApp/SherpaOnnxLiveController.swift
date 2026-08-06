@@ -18,7 +18,7 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
   private var audioEngine = AVAudioEngine()
   private let audioProcessor = SherpaOnnxAudioProcessor()
   private let targetSampleRate: Double = 16000
-  private let logger = Logger(subsystem: "com.github.speakapp", category: "SherpaOnnxLiveController")
+  private let logger = SpeakLogger.logger(category: "SherpaOnnxLiveController")
 
   private var process: Process?
   private var stdinPipe: Pipe?

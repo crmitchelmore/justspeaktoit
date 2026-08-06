@@ -97,6 +97,13 @@ final class LocalModelManagerTests: XCTestCase {
     func testStreamingApproximateSizeMB_identifiesKnownSherpaModels() {
         XCTAssertEqual(
             LocalModelManager.streamingApproximateSizeMB(
+                repoID: ParakeetLocalModels.tdtV3Int8RepoID,
+                modelName: ParakeetLocalModels.tdtV3Int8ModelName
+            ),
+            ParakeetLocalModels.tdtV3Int8DownloadSizeMB
+        )
+        XCTAssertEqual(
+            LocalModelManager.streamingApproximateSizeMB(
                 repoID: "csukuangfj/sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06",
                 modelName: "streaming-zipformer-en-kroko-2025-08-06"
             ),
@@ -126,15 +133,21 @@ final class LocalModelManagerTests: XCTestCase {
     }
 
     @MainActor
-    func testRecommendedStreamingSources_prioritizeLatestNemotronCandidates() {
+    func testRecommendedStreamingSources_leadWithParakeetV3ThenNemotron() {
         let sources = LocalModelManager.recommendedStreamingModelSources
+        XCTAssertEqual(sources.first?.modelName, ParakeetLocalModels.tdtV3Int8ModelName)
+        XCTAssertEqual(sources.first?.id, ParakeetLocalModels.tdtV3Int8SourceID)
+        XCTAssertEqual(sources.first?.approximateSizeMB, ParakeetLocalModels.tdtV3Int8DownloadSizeMB)
+        XCTAssertEqual(sources.first?.archiveURL, ParakeetLocalModels.tdtV3Int8ArchiveURL)
+        XCTAssertTrue(
+            sources.dropFirst().prefix(2).allSatisfy {
+                $0.modelName.contains("nemotron-speech-streaming-en-0.6b")
+            }
+        )
         XCTAssertEqual(
-            sources.first?.modelName,
+            sources.dropFirst().first?.modelName,
             "sherpa-onnx-nemotron-speech-streaming-en-0.6b-1120ms-int8-2026-04-25"
         )
-        XCTAssertEqual(sources.first?.approximateSizeMB, 632)
-        XCTAssertNotNil(sources.first?.archiveURL)
-        XCTAssertTrue(sources.prefix(2).allSatisfy { $0.modelName.contains("nemotron-speech-streaming-en-0.6b") })
     }
 
     @MainActor
@@ -156,6 +169,27 @@ final class LocalModelManagerTests: XCTestCase {
         )
 
         XCTAssertFalse(LocalModelManager.isSupportedStreamingSource(source))
+    }
+
+    func testSupportedStreamingSource_acceptsSherpaParakeetV3Source() {
+        let source = LocalStreamingModelSource(
+            repoID: ParakeetLocalModels.tdtV3Int8RepoID,
+            modelName: ParakeetLocalModels.tdtV3Int8ModelName,
+            runtime: "sherpa-onnx streaming runtime"
+        )
+
+        XCTAssertTrue(LocalModelManager.isSupportedStreamingSource(source))
+    }
+
+    func testParakeetV3SourceID_matchesSharedCatalogueConstant() {
+        let source = LocalStreamingModelSource(
+            repoID: ParakeetLocalModels.tdtV3Int8RepoID,
+            modelName: ParakeetLocalModels.tdtV3Int8ModelName
+        )
+
+        XCTAssertEqual(source.id, ParakeetLocalModels.tdtV3Int8SourceID)
+        XCTAssertEqual(source.approximateSizeMB, ParakeetLocalModels.tdtV3Int8DownloadSizeMB)
+        XCTAssertEqual(source.runtime, "sherpa-onnx streaming runtime")
     }
 
     func testSupportedStreamingSource_acceptsSherpaNemotronSource() {

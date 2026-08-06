@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import Foundation
 
@@ -153,6 +154,10 @@ final class HUDManager: ObservableObject {
     invalidateTimers()
     audioLevel = 0
     snapshot = .hidden
+    NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested, userInfo: [
+      .announcement: "Hud dismissed",
+      .priority: NSAccessibilityPriorityLevel.high.rawValue
+    ])
   }
 
   func updateCaptureHealth(_ health: CaptureHealthSnapshot) {
@@ -173,6 +178,22 @@ final class HUDManager: ObservableObject {
       liveText: nil, liveTextIsFinal: true, liveTextConfidence: nil, streamingText: nil,
       finalTranscript: "", interimTranscript: ""
     )
+    let announcement: String
+    switch phase {
+    case .recording: announcement = "Recording started. \(headline)"
+    case .transcribing: announcement = "Transcribing. \(headline)"
+    case .postProcessing: announcement = "Post processing. \(headline)"
+    case .delivering: announcement = "Delivering transcription. \(headline)"
+    case .success(let message): announcement = "Success. \(message)"
+    case .failure(let message): announcement = "Failed. \(message)"
+    case .hidden: announcement = ""
+    }
+    if !announcement.isEmpty {
+      NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested, userInfo: [
+        .announcement: announcement,
+        .priority: NSAccessibilityPriorityLevel.high.rawValue
+      ])
+    }
 
     guard showsTimer else { return }
 

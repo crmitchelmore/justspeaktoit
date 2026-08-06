@@ -19,11 +19,11 @@ final class MainManager: ObservableObject {
     case failed(String)
   }
 
-  @Published private(set) var state: State = .idle
+  @Published var state: State = .idle
   @Published private(set) var livePreview: String = ""
   @Published private(set) var polishedLivePreview: String = ""
   @Published private(set) var isPolishing: Bool = false
-  @Published private(set) var lastErrorMessage: String?
+  @Published var lastErrorMessage: String?
   @Published private(set) var canRetryPostProcessing: Bool = false
 
   /// Set when a live-recording attempt is aborted because the selected
@@ -36,7 +36,7 @@ final class MainManager: ObservableObject {
     appSettings.speedMode.usesLivePolish && appSettings.textOutputMethod != .clipboardOnly
   }
 
-  private var isStreamingTranscriptionMode: Bool {
+  var isStreamingTranscriptionMode: Bool {
     appSettings.transcriptionMode == .liveNative
       || (appSettings.transcriptionMode == .localModel && appSettings.localTranscriptionMode == .streaming)
   }
@@ -46,25 +46,25 @@ final class MainManager: ObservableObject {
   let appSettings: AppSettings
   let permissionsManager: PermissionsManager
   let audioInputDeviceManager: AudioInputDeviceManager
-  private let hotKeyManager: HotKeyManager
+  let hotKeyManager: HotKeyManager
   let audioFileManager: AudioFileManager
-  private let transcriptionManager: TranscriptionManager
-  private let postProcessingManager: PostProcessingManager
-  private let historyManager: HistoryManager
+  let transcriptionManager: TranscriptionManager
+  let postProcessingManager: PostProcessingManager
+  let historyManager: HistoryManager
   let hudManager: HUDManager
-  private let personalLexicon: PersonalLexiconService
-  private let openRouterClient: OpenRouterAPIClient
-  private let livePolishManager: LivePolishManager
-  private let liveTextInserter: LiveTextInserter
-  private let textProcessor: TranscriptionTextProcessor
-  private let autoCorrectionTracker: AutoCorrectionTracker
+  let personalLexicon: PersonalLexiconService
+  let openRouterClient: OpenRouterAPIClient
+  let livePolishManager: LivePolishManager
+  let liveTextInserter: LiveTextInserter
+  let textProcessor: TranscriptionTextProcessor
+  let autoCorrectionTracker: AutoCorrectionTracker
   let logger = Logger(subsystem: "com.github.speakapp", category: "MainManager")
   private let recordingSoundPlayer = RecordingSoundPlayer()
 
   var activeSession: ActiveSession?
   /// Guards against re-entrant calls to endSession (e.g. silence detection + user hotkey racing).
-  private var isEndingSession = false
-  private let recordingStopTimeout: TimeInterval = 8
+  var isEndingSession = false
+  let recordingStopTimeout: TimeInterval = 8
   var cancellables: Set<AnyCancellable> = []
   private var hotKeyTokens: [HotKeyListenerToken] = []
   private var shortcutTokens: [ShortcutListenerToken] = []
@@ -80,7 +80,7 @@ final class MainManager: ObservableObject {
   var occlusionObserver: NSObjectProtocol?
   private var willTerminateObserver: NSObjectProtocol?
 
-  private struct RetryData {
+  struct RetryData {
     let transcriptionResult: TranscriptionResult
     let recordingSummary: RecordingSummary?
     let personalCorrections: PersonalLexiconHistorySummary?
@@ -88,7 +88,7 @@ final class MainManager: ObservableObject {
     let originalHistoryItemID: UUID?
   }
 
-  private enum SessionStopError: LocalizedError {
+  enum SessionStopError: LocalizedError {
     case recordingStopTimedOut(seconds: TimeInterval)
 
     var errorDescription: String? {
@@ -1243,203 +1243,6 @@ final class MainManager: ObservableObject {
       await historyManager.append(historyItem)
       activeSession = nil
     }
-  }
-
-  private func ensureBatchAPIKeyAvailable(for session: ActiveSession, message: String) async
-    -> Bool {
-    guard await transcriptionManager.hasValidBatchAPIKey() else {
-      await handleMissingAPIKey(
-        session,
-        phase: .transcription,
-        message: message
-      )
-      return false
-    }
-    return true
-  }
-
-  private func ensurePostProcessingAPIKeyAvailable(for session: ActiveSession, message: String)
-    async -> Bool {
-    guard await postProcessingManager.hasRequiredAPIKey() else {
-      await handleMissingAPIKey(session, phase: .postProcessing, message: message)
-      return false
-    }
-    return true
-  }
-
-  private func handleMissingAPIKey(
-    _ session: ActiveSession,
-    phase: HistoryError.Phase,
-    message: String
-  ) async {
-    session.errors.append(HistoryError(phase: phase, message: message, debugDescription: nil))
-    session.events.append(HistoryEvent(kind: .error, description: message))
-    hudManager.finishFailure(message: message)
-    state = .failed(message)
-    lastErrorMessage = message
-    attachFailureDiagnostics(to: session)
-    let historyItem = session.buildHistoryItem(finalText: session.transcriptionResult?.text)
-    await historyManager.append(historyItem)
-    activeSession = nil
-  }
-
-  private func stopRecordingWithTimeout() async throws -> RecordingSummary {
-    let timeout = recordingStopTimeout
-    let audioFileManager = self.audioFileManager
-    return try await withThrowingTaskGroup(of: RecordingSummary.self) { group in
-      group.addTask {
-        try await audioFileManager.stopRecording()
-      }
-      group.addTask {
-        try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-        throw SessionStopError.recordingStopTimedOut(seconds: timeout)
-      }
-
-      guard let summary = try await group.next() else {
-        throw SessionStopError.recordingStopTimedOut(seconds: timeout)
-      }
-      group.cancelAll()
-      return summary
-    }
-  }
-
-  private func postProcessingRequestPreview(systemPrompt: String, rawText: String) -> String {
-    let trimmedPrompt = systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-    let promptSection = trimmedPrompt.isEmpty ? "<default prompt>" : trimmedPrompt
-    let truncatedRaw = rawText.prefix(600)
-    return "System Prompt:\n\(promptSection)\n\nUser Text:\n\(truncatedRaw)"
-  }
-
-  private static func friendlyPostProcessingMessage(
-    for error: Error,
-    modelIdentifier: String
-  ) -> String {
-    let trimmedModel = modelIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
-    let displayName = ModelCatalog.friendlyName(for: trimmedModel.isEmpty ? "inception/mercury" : trimmedModel)
-
-    if let routerError = error as? OpenRouterClientError {
-      switch routerError {
-      case .apiKeyMissing:
-        return "Post-processing skipped because no OpenRouter API key is configured. Add one in Settings › API Keys."
-      case .invalidResponse:
-        return "OpenRouter returned an unexpected response while using \(displayName)."
-      case .httpStatus(let code, let body):
-        if let detail = parseOpenRouterMessage(from: body) {
-          return "OpenRouter rejected \(displayName) (status \(code)): \(detail)"
-        }
-        return "OpenRouter responded with status \(code) while using \(displayName)."
-      case .audioFileTooLarge:
-        return routerError.localizedDescription
-      }
-    }
-
-    let nsError = error as NSError
-    if nsError.domain == NSURLErrorDomain {
-      return "Network error while contacting OpenRouter: \(nsError.localizedDescription)."
-    }
-
-    return error.localizedDescription
-  }
-
-  private static func parseOpenRouterMessage(from body: String) -> String? {
-    guard let data = body.data(using: .utf8) else { return nil }
-    if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-      if let errorDict = json["error"] as? [String: Any], let message = errorDict["message"] as? String {
-        return message
-      }
-      if let message = json["message"] as? String {
-        return message
-      }
-    }
-
-    let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else { return nil }
-    if trimmed.count > 200 {
-      return String(trimmed.prefix(200)) + "…"
-    }
-    return trimmed
-  }
-
-  private func makeLexiconContext(for text: String, destination: String?) -> PersonalLexiconContext {
-    var tags: Set<String> = []
-    let lowered = text.lowercased()
-    if lowered.contains("dear ") || lowered.contains("regards") || lowered.contains("sincerely") {
-      tags.insert("formal")
-    }
-    if lowered.contains("meeting") || lowered.contains("agenda") || lowered.contains("project") || lowered.contains("quarterly") {
-      tags.insert("work")
-    }
-    if lowered.contains("love") || lowered.contains("babe") || lowered.contains("sweetheart") {
-      tags.insert("intimate")
-    }
-    if let destination, !destination.isEmpty {
-      let lowerDest = destination.lowercased()
-      if lowerDest.contains("mail") || lowerDest.contains("outlook") {
-        tags.insert("formal")
-      }
-      if lowerDest.contains("messages") || lowerDest.contains("imessage") {
-        tags.insert("casual")
-      }
-      if lowerDest.contains("slack") || lowerDest.contains("teams") {
-        tags.insert("work")
-      }
-    }
-    let window = String(text.suffix(400))
-    return PersonalLexiconContext(
-      tags: tags,
-      destinationApplication: destination,
-      recentTranscriptWindow: window
-    )
-  }
-
-  private func cleanupAfterFailure(message: String, preserveFile: Bool) {
-    lastErrorMessage = message
-    hudManager.finishFailure(message: message)
-    state = .failed(message)
-    stopAudioLevelMonitoring()
-    livePolishManager.reset()
-    liveTextInserter.reset()
-
-    if isStreamingTranscriptionMode {
-      transcriptionManager.cancelLiveTranscription()
-    }
-
-    if let session = activeSession {
-      attachFailureDiagnostics(to: session)
-    }
-
-    Task { [failedSession = activeSession] in
-      await audioFileManager.cancelRecording(deleteFile: !preserveFile)
-      if let session = failedSession {
-        let historyItem = session.buildHistoryItem(finalText: session.transcriptionResult?.text)
-        await historyManager.append(historyItem)
-      }
-    }
-
-    activeSession = nil
-  }
-
-  private func shouldRunPostProcessing() -> Bool {
-    let shouldSkipForLivePolish = appSettings.speedMode.usesLivePolish
-      && appSettings.skipPostProcessingWithLivePolish
-    guard !shouldSkipForLivePolish else { return false }
-
-    let hasAssemblyAIPrompt = false
-      && appSettings.liveTranscriptionModel.contains("assemblyai")
-
-    return appSettings.postProcessingEnabled || hasAssemblyAIPrompt
-  }
-  
-  private func getFocusedElement() -> AXUIElement? {
-    let systemWideElement = AXUIElementCreateSystemWide()
-    var rawFocused: CFTypeRef?
-    let copyStatus = AXUIElementCopyAttributeValue(
-      systemWideElement, kAXFocusedUIElementAttribute as CFString, &rawFocused
-    )
-    guard copyStatus == .success, let rawFocused else {
-      return nil
-    }
-    return unsafeBitCast(rawFocused, to: AXUIElement.self)
   }
 }
 // swiftlint:enable type_body_length

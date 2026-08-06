@@ -40,7 +40,11 @@ public struct KeyboardInstantDictationSession: Codable, Equatable, Sendable {
 /// App Group-backed preference and liveness state for the containing app's
 /// Instant Dictation audio session. Audio and transcript content never enter
 /// this store.
-public final class KeyboardInstantDictationStore {
+/// `@unchecked` only because `UserDefaults` lacks a Sendable annotation in the
+/// SDK: all stored properties are immutable references, `UserDefaults` is
+/// documented thread-safe, and the `NSLock` serializes every
+/// read-modify-write.
+public final class KeyboardInstantDictationStore: @unchecked Sendable {
     public static let shared = KeyboardInstantDictationStore()
     public static let heartbeatLifetime: TimeInterval = 4
 
@@ -48,8 +52,6 @@ public final class KeyboardInstantDictationStore {
     private static let enabledKey = "keyboardInstantDictation.enabled.v1"
 
     private let defaults: UserDefaults?
-    private let encoder = JSONEncoder()
-    private let decoder = JSONDecoder()
     private let lock = NSLock()
 
     public convenience init() {
@@ -130,7 +132,7 @@ public final class KeyboardInstantDictationStore {
     }
 
     private func writeUnlocked(_ session: KeyboardInstantDictationSession) -> Bool {
-        guard let defaults, let data = try? encoder.encode(session) else { return false }
+        guard let defaults, let data = try? JSONEncoder().encode(session) else { return false }
         defaults.set(data, forKey: Self.sessionKey)
         defaults.synchronize()
         return true
@@ -138,7 +140,7 @@ public final class KeyboardInstantDictationStore {
 
     private func readUnlocked() -> KeyboardInstantDictationSession? {
         guard let data = defaults?.data(forKey: Self.sessionKey),
-              let session = try? decoder.decode(KeyboardInstantDictationSession.self, from: data),
+              let session = try? JSONDecoder().decode(KeyboardInstantDictationSession.self, from: data),
               session.schemaVersion == KeyboardInstantDictationSession.schemaVersion else {
             return nil
         }
@@ -154,12 +156,14 @@ public final class KeyboardInstantDictationStore {
 /// A payload-free Darwin notification used only as a wake-up hint. The actual
 /// command and nonce remain in the App Group record and are validated there.
 public enum KeyboardHandoffSignal {
-    private static let requestChangedName = "com.justspeaktoit.keyboardHandoff.requestChanged" as CFString
+    // Stored as String (Sendable) and bridged to CFString at each use site,
+    // so the shared static needs no concurrency escape hatch.
+    private static let requestChangedName = "com.justspeaktoit.keyboardHandoff.requestChanged"
 
     public static func postRequestChanged() {
         CFNotificationCenterPostNotification(
             CFNotificationCenterGetDarwinNotifyCenter(),
-            CFNotificationName(requestChangedName),
+            CFNotificationName(requestChangedName as CFString),
             nil,
             nil,
             true
@@ -169,7 +173,7 @@ public enum KeyboardHandoffSignal {
     public static func observeRequestChanges(
         _ handler: @escaping @Sendable () -> Void
     ) -> KeyboardHandoffSignalObservation {
-        KeyboardHandoffSignalObservation(name: requestChangedName, handler: handler)
+        KeyboardHandoffSignalObservation(name: requestChangedName as CFString, handler: handler)
     }
 }
 

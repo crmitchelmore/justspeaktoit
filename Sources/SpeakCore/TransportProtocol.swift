@@ -184,7 +184,7 @@ public struct AckMessage: Codable {
     }
 }
 
-public struct ErrorMessage: Codable {
+public struct ErrorMessage: Codable, Sendable {
     public var code: Int
     public var message: String
     
@@ -201,7 +201,11 @@ public struct ErrorMessage: Codable {
 // MARK: - Pairing
 
 /// Manages pairing codes for device authentication.
-public final class PairingManager {
+///
+/// `@unchecked` only because `UserDefaults` lacks a Sendable annotation in the
+/// SDK: the only stored properties are immutable `String` keys and a
+/// `UserDefaults` reference, which is documented thread-safe.
+public final class PairingManager: @unchecked Sendable {
     public static let shared = PairingManager()
     
     private let defaults = UserDefaults.standard

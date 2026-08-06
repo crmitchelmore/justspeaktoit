@@ -1,6 +1,7 @@
 import SwiftUI
 
-public extension Color {
+/// Shared brand palette used by both the macOS and iOS apps.
+extension Color {
   public static let brandAccent = Color(red: 1.0, green: 0.42, blue: 0.24)
   public static let brandAccentWarm = Color(red: 1.0, green: 0.61, blue: 0.29)
   public static let brandAccentDeep = Color(red: 0.89, green: 0.32, blue: 0.18)

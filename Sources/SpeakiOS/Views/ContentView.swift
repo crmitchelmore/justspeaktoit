@@ -347,6 +347,7 @@ public struct ContentView: View {
                                 }
                         }
                         .accessibilityLabel(showHistoryBadge ? "History, new background recording" : "History")
+                        .accessibilityIdentifier("historyNavLink")
 
                         NavigationLink {
                             SettingsView()
@@ -354,6 +355,7 @@ public struct ContentView: View {
                             Image(systemName: "gear")
                         }
                         .accessibilityLabel("Settings")
+                        .accessibilityIdentifier("settingsNavLink")
                     }
                 }
             }
@@ -442,6 +444,7 @@ public struct ContentView: View {
                 .tint(isAnyRecording ? .red : .brandAccent)
                 .clipShape(Circle())
                 .accessibilityLabel(isAnyRecording ? "Stop recording" : "Start recording")
+                .accessibilityIdentifier("recordToggleButton")
 
                 // Secondary actions (only visible when there's text and not recording)
                 if hasTextToShow && !isAnyRecording {
@@ -457,6 +460,7 @@ public struct ContentView: View {
                     .tint(.purple)
                     .clipShape(Circle())
                     .accessibilityLabel("Polish transcript")
+                    .accessibilityIdentifier("polishTranscriptButton")
                     .transition(.scale.combined(with: .opacity))
 
                     // Copy button
@@ -471,6 +475,7 @@ public struct ContentView: View {
                     .tint(.brandAccentWarm)
                     .clipShape(Circle())
                     .accessibilityLabel(copied ? "Copied to clipboard" : "Copy transcript")
+                    .accessibilityIdentifier("copyTranscriptButton")
                     .transition(.scale.combined(with: .opacity))
                 }
             }
@@ -498,6 +503,7 @@ public struct ContentView: View {
             .tint(isAnyRecording ? .red : .accentColor)
             .clipShape(Circle())
             .accessibilityLabel(isAnyRecording ? "Stop recording" : "Start recording")
+            .accessibilityIdentifier("recordToggleButton")
 
             // Secondary actions (only visible when there's text and not recording)
             if hasTextToShow && !isAnyRecording {
@@ -513,6 +519,7 @@ public struct ContentView: View {
                 .tint(.purple)
                 .clipShape(Circle())
                 .accessibilityLabel("Polish transcript")
+                .accessibilityIdentifier("polishTranscriptButton")
                 .transition(.scale.combined(with: .opacity))
 
                 // Copy button
@@ -526,6 +533,7 @@ public struct ContentView: View {
                 .buttonStyle(.bordered)
                 .clipShape(Circle())
                 .accessibilityLabel(copied ? "Copied to clipboard" : "Copy transcript")
+                .accessibilityIdentifier("copyTranscriptButton")
                 .transition(.scale.combined(with: .opacity))
             }
         }

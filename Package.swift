@@ -28,6 +28,10 @@ let package = Package(
         .package(
             url: "https://github.com/FluidInference/FluidAudio.git",
             exact: "0.15.5"
+        ),
+        .package(
+            url: "https://github.com/pointfreeco/swift-snapshot-testing.git",
+            from: "1.18.0"
         )
     ],
     targets: [
@@ -95,6 +99,14 @@ let package = Package(
         .testTarget(
             name: "SpeakAppTests",
             dependencies: ["SpeakApp", "SpeakHotKeys"]
+        ),
+        .testTarget(
+            name: "SpeakAppSnapshotTests",
+            dependencies: [
+                "SpeakApp",
+                .product(name: "SnapshotTesting", package: "swift-snapshot-testing")
+            ],
+            exclude: ["__Snapshots__"]
         ),
         .testTarget(
             name: "SpeakiOSTests",

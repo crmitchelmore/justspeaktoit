@@ -313,6 +313,18 @@ jobs:
           
           echo "DMG_PATH=$DMG_PATH" >> $GITHUB_ENV
 
+      - name: Generate detailed release notes
+        if: startsWith(github.ref, 'refs/tags/mac-v')
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          RELEASE_NOTES_MODEL: gpt-5.6-luna
+          RELEASE_NOTES_REASONING_EFFORT: medium
+        run: |
+          node scripts/generate-release-notes.mjs \
+            --tag "${GITHUB_REF_NAME}" \
+            --output "$RUNNER_TEMP/release-notes.md" \
+            --html-output "$RUNNER_TEMP/release-notes.html"
+
       - name: Generate Appcast for Sparkle Updates
         if: startsWith(github.ref, 'refs/tags/mac-v')
         env:
@@ -325,7 +337,12 @@ jobs:
           DMG_PATH="${{ env.DMG_PATH }}"
           
           chmod +x scripts/generate-appcast.sh
-          ./scripts/generate-appcast.sh "$VERSION" "$BUILD_NUMBER" "$DMG_PATH" "$SPARKLE_PRIVATE_KEY" > "$RUNNER_TEMP/appcast.xml"
+          ./scripts/generate-appcast.sh \
+            "$VERSION" \
+            "$BUILD_NUMBER" \
+            "$DMG_PATH" \
+            "$SPARKLE_PRIVATE_KEY" \
+            "$RUNNER_TEMP/release-notes.html" > "$RUNNER_TEMP/appcast.xml"
           
           echo "APPCAST_PATH=$RUNNER_TEMP/appcast.xml" >> "$GITHUB_ENV"
           echo "Generated appcast.xml:"
@@ -338,7 +355,8 @@ jobs:
           files: |
             ${{ env.DMG_PATH }}
             ${{ env.APPCAST_PATH }}
-          generate_release_notes: true
+          body_path: ${{ runner.temp }}/release-notes.md
+          generate_release_notes: false
           draft: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

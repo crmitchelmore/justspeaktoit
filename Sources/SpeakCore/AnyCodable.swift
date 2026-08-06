@@ -8,9 +8,9 @@ import Foundation
 /// Sendable. Decoding only ever produces immutable value types (`Bool`, `Int`,
 /// `Double`, `String`, `NSNull`, and arrays/dictionaries of those), so decoded
 /// instances are safe to share.
-/// TODO(strict-concurrency): `init(_ value: Any)` is public, so callers could
-/// still wrap a mutable reference type; consider constraining the initializer
-/// to a closed set of JSON value types.
+/// Strict-concurrency follow-up: `init(_ value: Any)` is public, so callers
+/// could still wrap a mutable reference type; consider constraining the
+/// initializer to a closed set of JSON value types.
 public struct AnyCodable: Codable, @unchecked Sendable {
     public let value: Any
 

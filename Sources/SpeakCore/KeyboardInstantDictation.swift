@@ -63,29 +63,53 @@ public final class KeyboardInstantDictationStore: @unchecked Sendable {
     }
 
     public var isEnabled: Bool {
-        defaults?.bool(forKey: Self.enabledKey) ?? false
+        lock.withLock { isEnabledUnlocked }
     }
 
+    /// Disabling clears any live session in the same locked transaction, so a
+    /// concurrent `start()` can neither observe `enabled == false` with a
+    /// session still present nor create a fresh session after the clear.
     public func setEnabled(_ enabled: Bool) {
         guard let defaults else { return }
-        defaults.set(enabled, forKey: Self.enabledKey)
-        if !enabled {
-            lock.withLock {
+        lock.withLock {
+            defaults.set(enabled, forKey: Self.enabledKey)
+            if !enabled {
                 clearUnlocked()
             }
+            defaults.synchronize()
         }
-        defaults.synchronize()
     }
 
+    /// Creates a readiness session. The enabled check (and, with
+    /// `enabling: true`, the enable write itself) happens inside the same lock
+    /// as the session write, so `start()` can never race `setEnabled(false)`
+    /// into a session that outlives the disable.
+    ///
+    /// - Parameter enabling: When `true`, atomically turns the preference on
+    ///   with the new session — the consent path, where enable + start must be
+    ///   one transaction. When `false` (default), returns `nil` while disabled.
     @discardableResult
-    public func start(now: Date = Date()) -> KeyboardInstantDictationSession? {
-        lock.withLock {
+    public func start(now: Date = Date(), enabling: Bool = false) -> KeyboardInstantDictationSession? {
+        guard let defaults else { return nil }
+        return lock.withLock {
+            if enabling {
+                defaults.set(true, forKey: Self.enabledKey)
+            } else if !isEnabledUnlocked {
+                return nil
+            }
             let session = KeyboardInstantDictationSession(
                 startedAt: now,
                 lastHeartbeatAt: now,
                 phase: .ready
             )
-            return writeUnlocked(session) ? session : nil
+            guard writeUnlocked(session) else {
+                // Keep "enabled implies a session was created" intact.
+                if enabling {
+                    defaults.set(false, forKey: Self.enabledKey)
+                }
+                return nil
+            }
+            return session
         }
     }
 
@@ -129,6 +153,10 @@ public final class KeyboardInstantDictationStore: @unchecked Sendable {
         lock.withLock {
             clearUnlocked()
         }
+    }
+
+    private var isEnabledUnlocked: Bool {
+        defaults?.bool(forKey: Self.enabledKey) ?? false
     }
 
     private func writeUnlocked(_ session: KeyboardInstantDictationSession) -> Bool {

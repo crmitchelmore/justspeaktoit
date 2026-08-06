@@ -50,6 +50,7 @@ final class KeyboardHandoffTests: XCTestCase {
 
     func testInstantDictationRequiresFreshHeartbeat() {
         let now = Date(timeIntervalSince1970: 4_000)
+        instantStore.setEnabled(true)
         let session = instantStore.start(now: now)
 
         XCTAssertEqual(session?.phase, .ready)
@@ -68,6 +69,7 @@ final class KeyboardHandoffTests: XCTestCase {
 
     func testInstantDictationOwnerCanClearStaleSession() {
         let now = Date(timeIntervalSince1970: 4_500)
+        instantStore.setEnabled(true)
         _ = instantStore.start(now: now)
         let staleTime = now.addingTimeInterval(KeyboardInstantDictationStore.heartbeatLifetime + 1)
 
@@ -77,6 +79,7 @@ final class KeyboardHandoffTests: XCTestCase {
 
     func testInstantDictationHasNoFixedReadinessWindow() {
         let now = Date(timeIntervalSince1970: 5_000)
+        instantStore.setEnabled(true)
         _ = instantStore.start(now: now)
         let recording = instantStore.heartbeat(phase: .recording, now: now.addingTimeInterval(0.5))
 
@@ -95,6 +98,28 @@ final class KeyboardHandoffTests: XCTestCase {
         instantStore.setEnabled(true)
         _ = instantStore.start()
 
+        XCTAssertTrue(instantStore.isEnabled)
+        XCTAssertNotNil(instantStore.activeSession())
+
+        instantStore.setEnabled(false)
+
+        XCTAssertFalse(instantStore.isEnabled)
+        XCTAssertNil(instantStore.activeSession())
+    }
+
+    func testInstantDictationStartIsRejectedWhileDisabled() {
+        XCTAssertFalse(instantStore.isEnabled)
+
+        XCTAssertNil(instantStore.start())
+        XCTAssertNil(instantStore.activeSession())
+    }
+
+    func testInstantDictationStartCanEnableAtomically() {
+        XCTAssertFalse(instantStore.isEnabled)
+
+        let session = instantStore.start(enabling: true)
+
+        XCTAssertNotNil(session)
         XCTAssertTrue(instantStore.isEnabled)
         XCTAssertNotNil(instantStore.activeSession())
 

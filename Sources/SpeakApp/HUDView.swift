@@ -2,11 +2,12 @@ import Foundation
 import SpeakCore
 import SwiftUI
 
-// swiftlint:disable type_body_length
+// swiftlint:disable type_body_length file_length
 struct HUDOverlay: View {
   @ObservedObject var manager: HUDManager
   @EnvironmentObject private var settings: AppSettings
   @Environment(\.colorScheme) private var colorScheme
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
@@ -53,7 +54,6 @@ struct HUDOverlay: View {
             .foregroundStyle(.secondary)
             .padding(.top, 4)
             .accessibilityHint("Press Command-R to retry the operation")
-            .accessibilityAddTraits(.isButton)
         }
       }
       .accessibilityElement(children: .combine)
@@ -75,7 +75,6 @@ struct HUDOverlay: View {
           .foregroundStyle(.secondary)
           .accessibilityLabel("Elapsed time: \(elapsedText)")
           .accessibilityAddTraits(.updatesFrequently)
-          .monospacedDigit()
       }
 
       // Live transcript section (only during recording phase with content)
@@ -97,7 +96,7 @@ struct HUDOverlay: View {
     .accessibilityElement(children: .contain)
     .accessibilitySortPriority(1)
     let shell = hudShell(base)
-      .frame(maxWidth: manager.isExpanded ? 500 : 320)
+      .frame(maxWidth: hudMaxWidth)
       .padding(.horizontal, 60)
       .accessibilityAddTraits(.isModal)
     if shouldUseLegacyRendering || reduceMotion {
@@ -131,7 +130,15 @@ struct HUDOverlay: View {
 
   @ViewBuilder
   private func hudShellFallback<Content: View>(_ view: Content, shape: RoundedRectangle) -> some View {
-    if shouldUseLegacyRendering {
+    if reduceTransparency {
+      view
+        .background(
+          shape
+            .fill(opaqueBackgroundColor)
+            .overlay(phaseTint)
+        )
+        .overlay(shape.stroke(phaseColor.opacity(0.45), lineWidth: strokeWidth))
+    } else if shouldUseLegacyRendering {
       view
         .background(
           shape
@@ -347,7 +354,7 @@ struct HUDOverlay: View {
         Circle()
           .fill(phaseColor)
           .frame(width: 18, height: 18)
-          .accessibilityLabel("Recording status indicator")
+          .accessibilityLabel("\(manager.snapshot.headline) status indicator")
           .accessibilityAddTraits(.isImage)
       } else {
         TimelineView(.animation) { context in
@@ -358,7 +365,7 @@ struct HUDOverlay: View {
             .frame(width: 18, height: 18)
             .scaleEffect(scale)
             .shadow(color: phaseColor.opacity(0.4), radius: 6, x: 0, y: 4)
-            .accessibilityLabel("Recording status indicator")
+            .accessibilityLabel("\(manager.snapshot.headline) status indicator")
             .accessibilityAddTraits(.isImage)
         }
       }
@@ -367,6 +374,14 @@ struct HUDOverlay: View {
 
   private var shouldUseLegacyRendering: Bool {
     HUDPlatformWorkarounds.isLegacyRenderingEnabled
+  }
+
+  private var hudMaxWidth: CGFloat {
+    dynamicTypeSize.isAccessibilitySize || manager.isExpanded ? 500 : 320
+  }
+
+  private var opaqueBackgroundColor: Color {
+    colorScheme == .dark ? .black : .white
   }
 
   private var legacyBackgroundColor: Color {
@@ -386,10 +401,4 @@ struct HUDOverlay: View {
     }
   }
 }
-// swiftlint:enable type_body_length
-
-// @Implement: This is the view that shows a floating indicator at the bottom middle of the screen. This view should float on top of all windows in the system but only show when recording is in progress. This should be a minimal view but must be engaging and informative to the users. It should have a cool animated graphic for each phase.
-// - Recording: Show in red and how long recording is for with a cool icon as well as animation
-// - Transcribing: If the operation is a batch request, this is the transcribing phase waiting for the raw transcription to return
-// - Post Processing: This is the call to an LLM to clean up the transcription and also is be optional based on app settings
-// - Error: IF any phase errors show the error message.
+// swiftlint:enable type_body_length file_length

@@ -350,7 +350,7 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
         .disabled(historyItems.isEmpty || isClearingAll || isImportingFiles)
         .speakTooltip("Clear all history")
         .accessibilityLabel("Clear all history")
-        .accessibilityHint("Deletes all history items. This cannot be undone.")
+        .accessibilityHint("Opens a confirmation before deleting all history items")
         .accessibilityAddTraits(.isButton)
       }
 

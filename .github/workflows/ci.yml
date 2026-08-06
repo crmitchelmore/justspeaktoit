@@ -19,6 +19,7 @@ jobs:
   build-macos:
     name: Build & Test (macOS)
     runs-on: macos-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -36,8 +37,8 @@ jobs:
       - name: Test (Debug)
         run: swift test --enable-code-coverage
 
-      - name: Test (Release)
-        run: swift test -c release
+      # Release-configuration tests run as the release gate in release-mac.yml;
+      # running them here too effectively doubled test time on 10x-billed macOS runners.
 
       - name: Build SpeakCore (App Store flavour)
         # SpeakCore has no package dependencies, so this cheaply compiles the
@@ -65,6 +66,7 @@ jobs:
   build-ios:
     name: Build iOS Library
     runs-on: macos-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
         with:
@@ -103,6 +105,7 @@ jobs:
   lint:
     name: Lint
     runs-on: macos-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 

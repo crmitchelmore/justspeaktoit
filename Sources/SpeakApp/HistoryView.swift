@@ -336,6 +336,8 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
         .buttonStyle(.borderless)
         .disabled(isClearingAll || isImportingFiles || environment.main.isBusy)
         .speakTooltip("Import audio")
+        .accessibilityLabel("Import audio")
+        .accessibilityAddTraits(.isButton)
 
         Button {
           showClearAllConfirmation = true
@@ -347,6 +349,9 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
         .buttonStyle(.borderless)
         .disabled(historyItems.isEmpty || isClearingAll || isImportingFiles)
         .speakTooltip("Clear all history")
+        .accessibilityLabel("Clear all history")
+        .accessibilityHint("Deletes all history items. This cannot be undone.")
+        .accessibilityAddTraits(.isButton)
       }
 
       HStack(spacing: density.groupSpacing) {

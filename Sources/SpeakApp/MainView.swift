@@ -89,6 +89,12 @@ struct MainView: View {
       .keyboardShortcut(.space, modifiers: [.command, .shift])
       .speakTooltip("Start or stop a recording from anywhere in Speak. We'll let you know when we're listening.")
       .accessibilityLabel(accessibilityLabelForRecordButton)
+      .accessibilityHint(
+        environment.main.state == .recording
+          ? "Stops recording and processes the transcription"
+          : "Starts a new recording"
+      )
+      .accessibilityAddTraits(environment.main.state == .recording ? [.isButton, .startsMediaSession] : .isButton)
     }
     if !settings.visualDensity.isCompact {
       ToolbarItem(placement: .status) {

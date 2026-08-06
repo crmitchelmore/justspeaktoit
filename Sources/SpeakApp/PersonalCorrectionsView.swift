@@ -250,6 +250,7 @@ struct PersonalCorrectionsView: View {
     )
   }
 
+  // swiftlint:disable:next function_body_length
   private func candidateRow(_ candidate: AutoCorrectionCandidate) -> some View {
     HStack(spacing: 12) {
       VStack(alignment: .leading, spacing: 2) {
@@ -289,6 +290,8 @@ struct PersonalCorrectionsView: View {
         }
         .buttonStyle(.borderless)
         .help("Add as correction rule")
+        .accessibilityLabel("Add as correction rule: \(candidate.original) to \(candidate.corrected)")
+        .accessibilityAddTraits(.isButton)
 
         Button {
           autoCorrectionTracker.dismissCandidate(id: candidate.id)
@@ -298,6 +301,8 @@ struct PersonalCorrectionsView: View {
         .buttonStyle(.borderless)
         .foregroundStyle(.secondary)
         .help("Dismiss")
+        .accessibilityLabel("Dismiss candidate \(candidate.original)")
+        .accessibilityAddTraits(.isButton)
       }
     }
     .padding(.vertical, 6)

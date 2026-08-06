@@ -8,10 +8,18 @@ on:
   schedule:
     - cron: '30 5 * * 1' # Weekly on Monday at 5:30 UTC
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Only cancel superseded PR runs; keep main/scheduled analyses intact.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   analyze:
     name: Analyze
     runs-on: macos-latest
+    # CodeQL tracing slows the Swift build, so this gets more headroom than
+    # the plain CI build jobs.
+    timeout-minutes: 60
     permissions:
       actions: read
       contents: read

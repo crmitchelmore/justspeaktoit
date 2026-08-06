@@ -62,12 +62,17 @@ final class HUDManager: ObservableObject {
   @Published private(set) var audioLevel: Float = 0
 
   private let appSettings: AppSettings
+  private let accessibilityAnnouncementPoster: ((String) -> Void)?
   private var timer: Timer?
   private var phaseStartDate: Date?
   private var autoHideTimer: Timer?
 
-  init(appSettings: AppSettings) {
+  init(
+    appSettings: AppSettings,
+    accessibilityAnnouncementPoster: ((String) -> Void)? = nil
+  ) {
     self.appSettings = appSettings
+    self.accessibilityAnnouncementPoster = accessibilityAnnouncementPoster
   }
 
   static func accessibilityAnnouncement(
@@ -256,6 +261,10 @@ final class HUDManager: ObservableObject {
   }
 
   private func postAccessibilityAnnouncement(_ announcement: String) {
+    if let accessibilityAnnouncementPoster {
+      accessibilityAnnouncementPoster(announcement)
+      return
+    }
     NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested, userInfo: [
       .announcement: announcement,
       .priority: NSAccessibilityPriorityLevel.high.rawValue

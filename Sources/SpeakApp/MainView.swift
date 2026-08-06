@@ -171,9 +171,9 @@ struct MainView: View {
   private var accessibilityTraitsForRecordButton: AccessibilityTraits {
     switch environment.main.state {
     case .idle, .completed, .failed:
-      return .startsMediaSession
+      return [.isButton, .startsMediaSession]
     case .recording, .processing, .delivering:
-      return []
+      return .isButton
     }
   }
 

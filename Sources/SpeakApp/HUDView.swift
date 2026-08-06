@@ -2,7 +2,7 @@ import Foundation
 import SpeakCore
 import SwiftUI
 
-// swiftlint:disable type_body_length
+// swiftlint:disable type_body_length file_length
 struct HUDOverlay: View {
   @ObservedObject var manager: HUDManager
   @EnvironmentObject private var settings: AppSettings
@@ -33,16 +33,19 @@ struct HUDOverlay: View {
   private var content: some View {
     let base = VStack(spacing: 12) {
       animatedGlyph
+        .accessibilityHidden(false)
       VStack(spacing: 4) {
         Text(manager.snapshot.headline)
           .font(.headline)
           .foregroundStyle(headlineColor)
+          .dynamicTypeSize(...DynamicTypeSize.accessibility1)
           .accessibilityLabel("Status: \(manager.snapshot.headline)")
           .accessibilityAddTraits(.isHeader)
         if let sub = manager.snapshot.subheadline {
           Text(sub)
             .font(.subheadline)
             .foregroundStyle(.secondary)
+            .dynamicTypeSize(...DynamicTypeSize.accessibility1)
             .accessibilityLabel(sub)
         }
         if manager.snapshot.showRetryHint {
@@ -95,6 +98,7 @@ struct HUDOverlay: View {
     let shell = hudShell(base)
       .frame(maxWidth: hudMaxWidth)
       .padding(.horizontal, 60)
+      .accessibilityAddTraits(.isModal)
     if shouldUseLegacyRendering || reduceMotion {
       return AnyView(shell)
     } else {
@@ -397,4 +401,4 @@ struct HUDOverlay: View {
     }
   }
 }
-// swiftlint:enable type_body_length
+// swiftlint:enable type_body_length file_length

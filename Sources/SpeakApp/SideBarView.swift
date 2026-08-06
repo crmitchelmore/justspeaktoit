@@ -144,7 +144,8 @@ struct SideBarView: View {
           .speakTooltip(item.helpMessage)
           .accessibilityLabel(item.title(isAssemblyAI: settings.isActiveAssemblyAILiveModel))
           .accessibilityHint(accessibilityHint(for: item))
-          .accessibilityAddTraits(selection == item ? .isSelected : [])
+          .accessibilityAddTraits(selection == item ? [.isButton, .isSelected] : .isButton)
+          .accessibilityValue(selection == item ? "Selected" : "")
         }
       } header: {
         sidebarSectionHeader("Speak")
@@ -186,7 +187,8 @@ struct SideBarView: View {
           .speakTooltip(item.helpMessage)
           .accessibilityLabel(item.title(isAssemblyAI: settings.isActiveAssemblyAILiveModel))
           .accessibilityHint(accessibilityHint(for: item))
-          .accessibilityAddTraits(selection == item ? .isSelected : [])
+          .accessibilityAddTraits(selection == item ? [.isButton, .isSelected] : .isButton)
+          .accessibilityValue(selection == item ? "Selected" : "")
         }
       } header: {
         sidebarSectionHeader("Settings")

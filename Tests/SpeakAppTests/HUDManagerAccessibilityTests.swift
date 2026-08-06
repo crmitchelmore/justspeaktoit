@@ -37,11 +37,31 @@ final class HUDManagerAccessibilityTests: XCTestCase {
   }
 
   @MainActor
+  func testVisiblePhaseTransitionAndHide_postAccessibilityAnnouncements() {
+    var announcements: [String] = []
+    let manager = HUDManager(
+      appSettings: AppSettings(),
+      accessibilityAnnouncementPoster: { announcements.append($0) }
+    )
+
+    manager.beginRecording()
+    manager.hide()
+
+    XCTAssertEqual(announcements, ["Recording started. Capturing audio", "HUD dismissed"])
+    XCTAssertEqual(manager.snapshot, .hidden)
+  }
+
+  @MainActor
   func testHide_whenAlreadyHiddenIsANoOp() {
-    let manager = HUDManager(appSettings: AppSettings())
+    var announcements: [String] = []
+    let manager = HUDManager(
+      appSettings: AppSettings(),
+      accessibilityAnnouncementPoster: { announcements.append($0) }
+    )
 
     manager.hide()
 
     XCTAssertEqual(manager.snapshot, .hidden)
+    XCTAssertTrue(announcements.isEmpty)
   }
 }

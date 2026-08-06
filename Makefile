@@ -65,6 +65,19 @@ install-verify: release ## Build release, install to /Applications, launch and v
 .PHONY: preflight
 preflight: test-all verify ## Full pre-release check (tests + launch verification)
 
+.PHONY: lint
+lint: ## Run strict SwiftLint against the checked-in debt baseline
+	swift package plugin --allow-writing-to-package-directory swiftlint --strict --baseline .swiftlint-baseline.json
+
+.PHONY: format
+format: ## Auto-fix formatting and lint violations where possible
+	swift package plugin --allow-writing-to-package-directory swiftformat --recursive
+	swift package plugin --allow-writing-to-package-directory swiftlint --fix --format
+
+.PHONY: verify-checksums
+verify-checksums: ## Verify binary XCFramework and package checksums
+	./scripts/verify-checksums.sh
+
 .PHONY: install-hooks
 install-hooks: ## Install git hooks for pre-push verification
 	git config core.hooksPath .githooks

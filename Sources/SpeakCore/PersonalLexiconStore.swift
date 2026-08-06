@@ -1,19 +1,19 @@
 import Foundation
 
-actor PersonalLexiconStore {
+public actor PersonalLexiconStore {
   private let fileURL: URL
   private let encoder: JSONEncoder
   private let decoder: JSONDecoder
   private let fileManager: FileManager
 
-  init(fileManager: FileManager = .default, baseDirectory: URL? = nil) {
+  public init(fileManager: FileManager = .default, baseDirectory: URL? = nil) {
     self.fileManager = fileManager
     let supportURL: URL
     if let baseDirectory {
       supportURL = baseDirectory
     } else {
       supportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-        ?? fileManager.homeDirectoryForCurrentUser
+        ?? URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
     }
     let appFolder = supportURL.appendingPathComponent("SpeakApp", isDirectory: true)
     let lexiconFolder = appFolder.appendingPathComponent("PersonalLexicon", isDirectory: true)
@@ -30,7 +30,7 @@ actor PersonalLexiconStore {
     decoder.dateDecodingStrategy = .iso8601
   }
 
-  func load() throws -> [PersonalLexiconRule] {
+  public func load() throws -> [PersonalLexiconRule] {
     guard fileManager.fileExists(atPath: fileURL.path) else {
       return []
     }
@@ -39,7 +39,7 @@ actor PersonalLexiconStore {
     return try decoder.decode([PersonalLexiconRule].self, from: data)
   }
 
-  func save(_ rules: [PersonalLexiconRule]) throws {
+  public func save(_ rules: [PersonalLexiconRule]) throws {
     if rules.isEmpty {
       if fileManager.fileExists(atPath: fileURL.path) {
         try fileManager.removeItem(at: fileURL)

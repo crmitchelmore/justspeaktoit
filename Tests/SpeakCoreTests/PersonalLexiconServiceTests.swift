@@ -1,5 +1,5 @@
 import XCTest
-@testable import SpeakApp
+import SpeakCore
 
 @MainActor
 final class PersonalLexiconServiceTests: XCTestCase {
@@ -39,7 +39,9 @@ final class PersonalLexiconServiceTests: XCTestCase {
       notes: nil
     )
 
-    let context = PersonalLexiconContext(tags: ["personal"], destinationApplication: nil, recentTranscriptWindow: "Met with Acme")
+    let context = PersonalLexiconContext(
+      tags: ["personal"], destinationApplication: nil, recentTranscriptWindow: "Met with Acme"
+    )
     let result = service.apply(to: "Met with Acme", context: context)
 
     XCTAssertEqual(result.transformedText, "Met with Acme")

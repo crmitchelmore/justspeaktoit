@@ -345,13 +345,13 @@ final class CartesiaLiveTranscriber: @unchecked Sendable {
 }
 
 private struct CartesiaTurnResponse: Decodable {
-  struct Result: Decodable {
+  struct TurnResult: Decodable {
     let transcript: String?
   }
 
   let type: String
   let transcript: String?
-  let results: [Result]?
+  let results: [TurnResult]?
 
   private enum CodingKeys: String, CodingKey {
     case type

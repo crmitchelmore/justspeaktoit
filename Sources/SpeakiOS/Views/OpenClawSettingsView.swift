@@ -10,7 +10,7 @@ public struct OpenClawSettingsView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var tokenInput = ""
     @State private var urlInput = ""
-    @State private var testState: OpenClawConnectionTester.Result = .idle
+    @State private var testState: OpenClawConnectionTester.Outcome = .idle
     @State private var voiceTestState: VoiceTestState = .idle
 
     enum VoiceTestState: Equatable {

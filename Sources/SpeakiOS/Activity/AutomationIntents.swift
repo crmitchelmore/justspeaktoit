@@ -68,7 +68,9 @@ public struct TranscribeAudioFileIntent: AppIntent {
 
     public static var openAppWhenRun: Bool = false
 
-    @Parameter(title: "Audio File", supportedContentTypes: [.audio])
+    // No supportedContentTypes: that Parameter initializer needs iOS 18 and
+    // the app targets iOS 17. The extension check below validates instead.
+    @Parameter(title: "Audio File")
     public var file: IntentFile
 
     public init() {}
@@ -138,8 +140,7 @@ public struct GetLastTranscriptionIntent: AppIntent {
 public struct PolishTextIntent: AppIntent {
     public static var title: LocalizedStringResource = "Polish Text"
     public static var description = IntentDescription(
-        "Cleans up text with your post-processing model. "
-            + "Provide a custom prompt to override the default cleanup instructions."
+        "Cleans up text with your post-processing model. A custom prompt overrides the cleanup instructions."
     )
 
     public static var openAppWhenRun: Bool = false
@@ -147,7 +148,7 @@ public struct PolishTextIntent: AppIntent {
     @Parameter(title: "Text")
     public var text: String
 
-    @Parameter(title: "Custom Prompt", default: nil)
+    @Parameter(title: "Custom Prompt")
     public var customPrompt: String?
 
     public init() {}

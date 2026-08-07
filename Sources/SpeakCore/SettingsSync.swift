@@ -3,6 +3,7 @@ import CoreImage.CIFilterBuiltins
 import CryptoKit
 import Foundation
 import Security
+import os.log
 
 // MARK: - Settings Sync using iCloud Key-Value Store
 
@@ -57,7 +58,7 @@ public final class SettingsSync: @unchecked Sendable {
             // iCloud not available - use local storage fallback
             self.store = nil
             self.isAvailable = false
-            print("[SettingsSync] iCloud not available - using local storage only")
+            SpeakLogger.sync.info("iCloud not available - using local storage only")
         }
     }
     
@@ -134,9 +135,9 @@ public final class SettingsSync: @unchecked Sendable {
             // Post notification for UI to update
             notificationCenter.post(name: Self.didReceiveRemoteChangesNotification, object: self)
         case NSUbiquitousKeyValueStoreQuotaViolationChange:
-            print("[SettingsSync] iCloud KV store quota exceeded")
+            SpeakLogger.sync.error("iCloud KV store quota exceeded")
         case NSUbiquitousKeyValueStoreAccountChange:
-            print("[SettingsSync] iCloud account changed")
+            SpeakLogger.sync.notice("iCloud account changed")
         default:
             break
         }

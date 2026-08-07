@@ -1,6 +1,10 @@
 import AppKit
 import ApplicationServices
 import Foundation
+import SpeakCore
+import os.log
+
+private let logger = SpeakLogger.logger(category: "LiveTextInserter")
 
 /// Handles live incremental text insertion during streaming transcription.
 /// Tracks what's been inserted and handles updates/replacements.
@@ -56,7 +60,7 @@ final class LiveTextInserter: ObservableObject {
   func begin(target: TextOutputTarget? = nil) {
     guard canUseAccessibility() else {
       lastError = TextOutputError.accessibilityPermissionMissing
-      print("[LiveTextInserter] Cannot start: accessibility permission missing")
+      logger.error("Cannot start: accessibility permission missing")
       return
     }
 
@@ -70,16 +74,15 @@ final class LiveTextInserter: ObservableObject {
     lastError = nil
     self.target = target ?? .capture()
     let targetApp = self.target?.applicationName ?? "unknown"
-    print(
-      "[LiveTextInserter] Started live insertion session, target app: \(targetApp), " +
-        "deferring AX readiness checks"
+    logger.info(
+      "Started live insertion session, target app: \(targetApp), deferring AX readiness checks"
     )
   }
 
   /// End the live insertion session
   func end() {
     if isActive {
-      print("[LiveTextInserter] Ended session, inserted \(insertedText.count) characters")
+      logger.info("Ended session, inserted \(self.insertedText.count) characters")
     }
     isActive = false
   }
@@ -154,12 +157,12 @@ final class LiveTextInserter: ObservableObject {
     }
 
     guard canDeferToStandardDelivery else {
-      print("[LiveTextInserter] \(reason)")
+      logger.info("\(reason, privacy: .public)")
       return
     }
 
     usingClipboardFallback = true
-    print("[LiveTextInserter] \(reason), deferring to standard delivery")
+    logger.info("\(reason, privacy: .public), deferring to standard delivery")
   }
 
   private func appendText(_ text: String) {
@@ -196,20 +199,20 @@ final class LiveTextInserter: ObservableObject {
       if !firstInsertionVerified {
         if verifyInsertion(expected: newValue, element: focusedElement) {
           firstInsertionVerified = true
-          print("[LiveTextInserter] First insertion verified successfully")
+          logger.debug("First insertion verified successfully")
         } else {
           insertedText = newValue
           confirmedCharCount = insertedText.count
           shouldPauseIncrementalUpdates = true
           lastError = TextOutputError.unableToVerifyInsertion
-          print("[LiveTextInserter] First insertion verification failed, pausing incremental updates")
+          logger.warning("First insertion verification failed, pausing incremental updates")
           return
         }
       }
 
       insertedText += text
       confirmedCharCount = insertedText.count
-      print("[LiveTextInserter] Appended \(text.count) chars, total: \(insertedText.count)")
+      logger.debug("Appended \(text.count) chars, total: \(self.insertedText.count)")
     } else {
       deferToStandardDelivery(
         reason: "appendText failed with AXError: \(setResult.rawValue)",

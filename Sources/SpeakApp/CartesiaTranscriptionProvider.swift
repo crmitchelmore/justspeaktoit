@@ -111,7 +111,7 @@ final class CartesiaLiveTranscriber: @unchecked Sendable {
   private let model: String
   private let sampleRate: Int
   private let session: URLSession
-  private let logger = Logger(subsystem: "com.speak.app", category: "CartesiaLiveTranscriber")
+  private let logger = SpeakLogger.logger(category: "CartesiaLiveTranscriber")
   private let stateLock = NSLock()
   private let pendingSendGroup = DispatchGroup()
 

@@ -8,7 +8,7 @@ public final class AudioBufferPool: @unchecked Sendable {
     private var availableBuffers: [Data]
     private var bufferSize: Int
     private let initialPoolSize: Int
-    private let logger = Logger(subsystem: "com.speak.app", category: "AudioBufferPool")
+    private let logger = SpeakLogger.logger(category: "AudioBufferPool")
 
     // Metrics
     private var _poolHits: Int = 0

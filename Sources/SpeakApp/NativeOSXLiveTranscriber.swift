@@ -4,6 +4,8 @@ import Foundation
 import Speech
 import os.log
 
+private let logger = SpeakLogger.logger(category: "NativeOSXLiveTranscriber")
+
 final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
   weak var delegate: LiveTranscriptionSessionDelegate?
   private(set) var isRunning: Bool = false
@@ -249,9 +251,7 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
           self.delegate?.liveTranscriber(self, didUpdateWith: update)
           self.delegate?.liveTranscriber(self, didUpdatePartial: displayText)
           if result.isFinal {
-            print(
-              "[NativeOSXLiveTranscriber] Mid-session isFinal – "
-                + "committing \(displayText.count) chars, restarting")
+            logger.info("Mid-session isFinal – committing \(displayText.count) chars, restarting")
             self.committedText = displayText
             self.lastFormattedString = ""
             self.restartRecognitionTask()
@@ -280,9 +280,7 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
       lastFormattedString.count >= 10,
       currentText.count < lastFormattedString.count / 2
     else { return }
-    print(
-      "[NativeOSXLiveTranscriber] Implicit text reset – "
-        + "committing \(lastFormattedString.count) chars")
+    logger.info("Implicit text reset – committing \(self.lastFormattedString.count) chars")
     committedText = [committedText, lastFormattedString]
       .filter { !$0.isEmpty }.joined(separator: " ")
   }

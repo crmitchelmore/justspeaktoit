@@ -70,7 +70,7 @@ final class HistoryManager: ObservableObject {
 
   private let storageURL: URL
   private let encoder: JSONEncoder
-  private let log = Logger(subsystem: "com.github.speakapp", category: "HistoryManager")
+  private let log = SpeakLogger.logger(category: "HistoryManager")
   private let walStore: HistoryWALStore
   private var initialLoadTask: Task<Void, Never>?
 

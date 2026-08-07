@@ -21,7 +21,7 @@ final class ModulateLiveController: NSObject, LiveTranscriptionController {
   private var currentLanguage: String?
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
   private var audioEngine = AVAudioEngine()
-  private let logger = Logger(subsystem: "com.speak.app", category: "ModulateLiveController")
+  private let logger = SpeakLogger.logger(category: "ModulateLiveController")
   private let audioProcessor = ModulateAudioProcessor()
   private var hasFinished: Bool = false
   private let targetSampleRate: Double = 16_000

@@ -1,6 +1,7 @@
 import AppKit
 import CoreGraphics
 import Foundation
+import SpeakCore
 import SpeakHotKeys
 import os.log
 
@@ -67,7 +68,7 @@ final class HotKeyManager: ObservableObject {
 
 	private let permissionsManager: PermissionsManager
 	private let appSettings: AppSettings
-	private let log = Logger(subsystem: "com.github.speakapp", category: "HotKeyManager")
+	private let log = SpeakLogger.logger(category: "HotKeyManager")
 
 	/// The underlying engine from SpeakHotKeys library.
 	let engine: HotKeyEngine

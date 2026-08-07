@@ -20,7 +20,7 @@ final class CartesiaLiveController: NSObject, LiveTranscriptionController {
   private var currentModel: String?
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
   private var audioEngine = AVAudioEngine()
-  private let logger = Logger(subsystem: "com.speak.app", category: "CartesiaLiveController")
+  private let logger = SpeakLogger.logger(category: "CartesiaLiveController")
   private let audioProcessor = CartesiaAudioProcessor()
   private var hasFinished: Bool = false
 

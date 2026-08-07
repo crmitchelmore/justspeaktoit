@@ -8,9 +8,20 @@ import os.log
 public enum SpeakLogger {
     
     // MARK: - Subsystems
-    
-    private static let subsystem = "com.speak"
-    
+
+    /// Single logging subsystem for the whole app, matching the real bundle
+    /// identifier (com.justspeaktoit.mac / com.justspeaktoit.mac.appstore /
+    /// com.justspeaktoit.ios) so `log stream` / `log collect` filters and the
+    /// in-app diagnostics tooling see every message. Falls back to the shared
+    /// prefix when there is no bundle identifier (e.g. SwiftPM test runners).
+    public static let subsystem = Bundle.main.bundleIdentifier ?? "com.justspeaktoit"
+
+    /// Creates a Logger in the unified app subsystem for the given category.
+    /// Prefer this over instantiating `Logger(subsystem:category:)` directly.
+    public static func logger(category: String) -> Logger {
+        Logger(subsystem: subsystem, category: category)
+    }
+
     public static let audio = Logger(subsystem: subsystem, category: "audio")
     public static let transcription = Logger(subsystem: subsystem, category: "transcription")
     public static let network = Logger(subsystem: subsystem, category: "network")

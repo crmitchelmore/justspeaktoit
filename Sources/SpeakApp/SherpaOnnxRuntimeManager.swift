@@ -1,4 +1,5 @@
 import Foundation
+import SpeakCore
 import OSLog
 
 #if !APP_STORE
@@ -57,7 +58,7 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
   @Published private(set) var modelStates: [String: InstallState] = [:]
 
   private let fileManager: FileManager
-  private let logger = Logger(subsystem: "com.github.speakapp", category: "SherpaOnnxRuntime")
+  private let logger = SpeakLogger.logger(category: "SherpaOnnxRuntime")
   private let baseDirectory: URL
   private let sidecarURL: URL
   private let virtualEnvironmentURL: URL

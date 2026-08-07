@@ -168,7 +168,7 @@ public final class AppSettings: ObservableObject {
     /// never sees.
     static var canonicalCredentialStorage: SecureStorage { credentialStorage }
 
-    private static let logger = Logger(subsystem: "com.justspeaktoit.ios", category: "AppSettings")
+    private static let logger = SpeakLogger.logger(category: "AppSettings")
     private var keyChangeObserver: NSObjectProtocol?
     private var syncedKeyReloadDepth = 0
     /// The async keychain load kicked off by `init`. `ensureKeysLoaded()`

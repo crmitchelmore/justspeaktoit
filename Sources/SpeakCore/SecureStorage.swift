@@ -104,7 +104,7 @@ public struct SecureStorageConfiguration: Sendable {
 /// Uses Keychain Services on both macOS and iOS.
 public actor SecureStorage {
     // swiftlint:disable:previous type_body_length
-    private static let logger = Logger(subsystem: "com.justspeaktoit", category: "SecureStorage")
+    private static let logger = SpeakLogger.logger(category: "SecureStorage")
 
     public static let didChangeSecretNotification = Notification.Name("SecureStorageDidChangeSecret")
 

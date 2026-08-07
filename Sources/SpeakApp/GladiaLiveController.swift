@@ -19,7 +19,7 @@ final class GladiaLiveController: NSObject, LiveTranscriptionController {
   private var currentModel: String?
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
   private var audioEngine = AVAudioEngine()
-  private let logger = Logger(subsystem: "com.speak.app", category: "GladiaLiveController")
+  private let logger = SpeakLogger.logger(category: "GladiaLiveController")
   private let audioProcessor = GladiaAudioProcessor()
   private var hasFinished: Bool = false
   private var stopContinuation: CheckedContinuation<Void, Never>?

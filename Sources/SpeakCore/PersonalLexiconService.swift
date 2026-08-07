@@ -2,8 +2,8 @@ import Foundation
 import os.log
 
 @MainActor
-final class PersonalLexiconService: ObservableObject {
-  @Published private(set) var rules: [PersonalLexiconRule] = [] {
+public final class PersonalLexiconService: ObservableObject {
+  @Published public private(set) var rules: [PersonalLexiconRule] = [] {
     didSet { regexCache.removeAll() }
   }
 
@@ -11,14 +11,14 @@ final class PersonalLexiconService: ObservableObject {
   private let log = Logger(subsystem: "com.github.speakapp", category: "PersonalLexicon")
   private var regexCache: [String: NSRegularExpression] = [:]
 
-  init(store: PersonalLexiconStore) {
+  public init(store: PersonalLexiconStore) {
     self.store = store
     Task { [weak self] in
       await self?.loadInitialRules()
     }
   }
 
-  func refresh() async {
+  public func refresh() async {
     do {
       let loaded = try await store.load()
       rules = Self.normalised(rules: loaded)
@@ -27,7 +27,8 @@ final class PersonalLexiconService: ObservableObject {
     }
   }
 
-  func addRule(
+  // swiftlint:disable:next function_parameter_count
+  public func addRule(
     displayName: String,
     canonical: String,
     aliases: [String],
@@ -63,7 +64,7 @@ final class PersonalLexiconService: ObservableObject {
     return rule
   }
 
-  func updateRule(_ rule: PersonalLexiconRule) async throws {
+  public func updateRule(_ rule: PersonalLexiconRule) async throws {
     guard let index = rules.firstIndex(where: { $0.id == rule.id }) else {
       throw PersonalLexiconServiceError.unknownRule
     }
@@ -81,19 +82,19 @@ final class PersonalLexiconService: ObservableObject {
     await persistSnapshot()
   }
 
-  func deleteRule(id: UUID) async {
+  public func deleteRule(id: UUID) async {
     rules.removeAll { $0.id == id }
     await persistSnapshot()
   }
 
-  func moveRules(from offsets: IndexSet, to destination: Int) async {
+  public func moveRules(from offsets: IndexSet, to destination: Int) async {
     var mutable = rules
     mutable.move(fromOffsets: offsets, toOffset: destination)
     rules = mutable
     await persistSnapshot()
   }
 
-  func apply(to text: String, context: PersonalLexiconContext) -> PersonalLexiconApplicationResult {
+  public func apply(to text: String, context: PersonalLexiconContext) -> PersonalLexiconApplicationResult {
     guard !rules.isEmpty else {
       return PersonalLexiconApplicationResult(
         transformedText: text,
@@ -124,32 +125,21 @@ final class PersonalLexiconService: ObservableObject {
         guard !aliasPattern.isEmpty else { continue }
 
         let (matches, replacedText) = apply(alias: aliasPattern, with: rule.canonical, to: workingText)
-        if matches == 0 {
-          continue
-        }
+        guard matches > 0 else { continue }
 
+        let record = PersonalLexiconCorrectionRecord(
+          ruleID: rule.id,
+          alias: aliasPattern,
+          canonical: rule.canonical,
+          occurrences: matches,
+          wasApplied: eligibleForAutoApply,
+          confidence: rule.confidence,
+          reason: reasonBase
+        )
         if eligibleForAutoApply {
           workingText = replacedText
-          let record = PersonalLexiconCorrectionRecord(
-            ruleID: rule.id,
-            alias: aliasPattern,
-            canonical: rule.canonical,
-            occurrences: matches,
-            wasApplied: true,
-            confidence: rule.confidence,
-            reason: reasonBase
-          )
           applied.append(record)
         } else {
-          let record = PersonalLexiconCorrectionRecord(
-            ruleID: rule.id,
-            alias: aliasPattern,
-            canonical: rule.canonical,
-            occurrences: matches,
-            wasApplied: false,
-            confidence: rule.confidence,
-            reason: reasonBase
-          )
           suggestions.append(record)
         }
       }
@@ -162,7 +152,7 @@ final class PersonalLexiconService: ObservableObject {
     )
   }
 
-  func activeRules(for context: PersonalLexiconContext) -> [PersonalLexiconRule] {
+  public func activeRules(for context: PersonalLexiconContext) -> [PersonalLexiconRule] {
     rules.filter { $0.shouldAutoApply(in: context) }
   }
 
@@ -223,12 +213,12 @@ final class PersonalLexiconService: ObservableObject {
   }
 }
 
-enum PersonalLexiconServiceError: LocalizedError {
+public enum PersonalLexiconServiceError: LocalizedError {
   case invalidCanonical
   case missingAlias
   case unknownRule
 
-  var errorDescription: String? {
+  public var errorDescription: String? {
     switch self {
     case .invalidCanonical:
       return "Canonical term cannot be empty."

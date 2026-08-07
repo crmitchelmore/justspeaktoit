@@ -1,28 +1,39 @@
 import Foundation
 
+// MARK: - Phoneme Capability
+
+/// Describes a TTS provider's SSML phoneme support so pronunciation processing
+/// can stay platform- and provider-agnostic.
+public protocol PronunciationPhonemeCapable {
+    /// Whether this provider supports SSML phoneme tags.
+    var supportsSSMLPhonemes: Bool { get }
+    /// The phoneme alphabet to use for SSML tags.
+    var phonemeAlphabet: String { get }
+}
+
 /// Manages the pronunciation dictionary for TTS processing.
 /// Handles loading, saving, applying replacements, and import/export.
 @MainActor
-final class PronunciationManager: ObservableObject { // swiftlint:disable:this type_body_length
+public final class PronunciationManager: ObservableObject { // swiftlint:disable:this type_body_length
     private static let storageKey = "pronunciationDictionary"
     private static let fileExtension = "json"
 
-    @Published private(set) var entries: [PronunciationEntry] = []
-    @Published private(set) var isLoading = false
+    @Published public private(set) var entries: [PronunciationEntry] = []
+    @Published public private(set) var isLoading = false
 
     private let defaults: UserDefaults
 
     // Cache compiled NSRegularExpression instances; key = "<options.rawValue>:<pattern>"
     private var regexCache: [String: NSRegularExpression] = [:]
 
-    init(defaults: UserDefaults = .standard) {
+    public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         loadEntries()
     }
 
     // MARK: - Entry Management
 
-    func addEntry(_ entry: PronunciationEntry) {
+    public func addEntry(_ entry: PronunciationEntry) {
         // Check for duplicates
         guard !entries.contains(where: { $0.word.lowercased() == entry.word.lowercased() }) else {
             return
@@ -31,24 +42,24 @@ final class PronunciationManager: ObservableObject { // swiftlint:disable:this t
         saveEntries()
     }
 
-    func updateEntry(_ entry: PronunciationEntry) {
+    public func updateEntry(_ entry: PronunciationEntry) {
         if let index = entries.firstIndex(where: { $0.id == entry.id }) {
             entries[index] = entry
             saveEntries()
         }
     }
 
-    func deleteEntry(_ entry: PronunciationEntry) {
+    public func deleteEntry(_ entry: PronunciationEntry) {
         entries.removeAll { $0.id == entry.id }
         saveEntries()
     }
 
-    func deleteEntries(at offsets: IndexSet) {
+    public func deleteEntries(at offsets: IndexSet) {
         entries.remove(atOffsets: offsets)
         saveEntries()
     }
 
-    func moveEntries(from source: IndexSet, to destination: Int) {
+    public func moveEntries(from source: IndexSet, to destination: Int) {
         entries.move(fromOffsets: source, toOffset: destination)
         saveEntries()
     }
@@ -56,7 +67,7 @@ final class PronunciationManager: ObservableObject { // swiftlint:disable:this t
     // MARK: - Quick Add
 
     /// Quick-add a word with pronunciation, auto-detecting category.
-    func quickAdd(word: String, pronunciation: String) {
+    public func quickAdd(word: String, pronunciation: String) {
         let category = detectCategory(for: word)
         let entry = PronunciationEntry(
             word: word,
@@ -84,7 +95,7 @@ final class PronunciationManager: ObservableObject { // swiftlint:disable:this t
     // MARK: - Text Processing
 
     /// Apply pronunciation replacements to text before TTS processing.
-    func applyReplacements(to text: String) -> String {
+    public func applyReplacements(to text: String) -> String {
         var result = text
 
         for entry in entries {
@@ -175,7 +186,7 @@ final class PronunciationManager: ObservableObject { // swiftlint:disable:this t
 
     /// Generate SSML with phoneme tags for providers that support it.
     /// Uses IPA (International Phonetic Alphabet) when available.
-    func generateSSML(for text: String, provider: TTSProvider) -> String {
+    public func generateSSML(for text: String, provider: PronunciationPhonemeCapable) -> String {
         guard provider.supportsSSMLPhonemes else {
             // For providers without phoneme support, just use text replacement
             return applyReplacements(to: text)
@@ -214,7 +225,11 @@ final class PronunciationManager: ObservableObject { // swiftlint:disable:this t
         return result
     }
 
-    private func buildPhonemeTag(word: String, pronunciation: String, provider: TTSProvider) -> String {
+    private func buildPhonemeTag(
+        word: String,
+        pronunciation: String,
+        provider: PronunciationPhonemeCapable
+    ) -> String {
         // Different providers use different phoneme alphabets
         let alphabet = provider.phonemeAlphabet
         let escapedPronunciation = pronunciation
@@ -227,21 +242,21 @@ final class PronunciationManager: ObservableObject { // swiftlint:disable:this t
 
     // MARK: - Category Filtering
 
-    func entries(for category: PronunciationEntry.Category?) -> [PronunciationEntry] {
+    public func entries(for category: PronunciationEntry.Category?) -> [PronunciationEntry] {
         guard let category = category else {
             return entries
         }
         return entries.filter { $0.category == category.rawValue }
     }
 
-    var categories: [PronunciationEntry.Category] {
+    public var categories: [PronunciationEntry.Category] {
         let usedCategories = Set(entries.compactMap { $0.category })
         return PronunciationEntry.Category.allCases.filter { usedCategories.contains($0.rawValue) }
     }
 
     // MARK: - Search
 
-    func search(_ query: String) -> [PronunciationEntry] {
+    public func search(_ query: String) -> [PronunciationEntry] {
         guard !query.isEmpty else { return entries }
         let lowercasedQuery = query.lowercased()
         return entries.filter { entry in
@@ -254,22 +269,21 @@ final class PronunciationManager: ObservableObject { // swiftlint:disable:this t
 
     // MARK: - Import/Export
 
-    func exportToJSON() throws -> Data {
+    public func exportToJSON() throws -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return try encoder.encode(entries)
     }
 
-    func importFromJSON(_ data: Data, merge: Bool = true) throws {
+    public func importFromJSON(_ data: Data, merge: Bool = true) throws {
         let decoder = JSONDecoder()
         let importedEntries = try decoder.decode([PronunciationEntry].self, from: data)
 
         if merge {
             // Merge: add new entries, skip duplicates
-            for entry in importedEntries {
-                if !entries.contains(where: { $0.word.lowercased() == entry.word.lowercased() }) {
-                    entries.append(entry)
-                }
+            for entry in importedEntries
+            where !entries.contains(where: { $0.word.lowercased() == entry.word.lowercased() }) {
+                entries.append(entry)
             }
         } else {
             // Replace all entries
@@ -279,7 +293,7 @@ final class PronunciationManager: ObservableObject { // swiftlint:disable:this t
         saveEntries()
     }
 
-    func exportToFile() throws -> URL {
+    public func exportToFile() throws -> URL {
         let data = try exportToJSON()
         let tempDir = FileManager.default.temporaryDirectory
         let filename = "pronunciation_dictionary_\(ISO8601DateFormatter().string(from: Date())).\(Self.fileExtension)"
@@ -288,28 +302,27 @@ final class PronunciationManager: ObservableObject { // swiftlint:disable:this t
         return fileURL
     }
 
-    func importFromFile(_ url: URL, merge: Bool = true) throws {
+    public func importFromFile(_ url: URL, merge: Bool = true) throws {
         let data = try Data(contentsOf: url)
         try importFromJSON(data, merge: merge)
     }
 
     // MARK: - Reset/Defaults
 
-    func resetToDefaults() {
+    public func resetToDefaults() {
         entries = PronunciationEntry.defaultEntries
         saveEntries()
     }
 
-    func addDefaultEntries() {
-        for defaultEntry in PronunciationEntry.defaultEntries {
-            if !entries.contains(where: { $0.word.lowercased() == defaultEntry.word.lowercased() }) {
-                entries.append(defaultEntry)
-            }
+    public func addDefaultEntries() {
+        for defaultEntry in PronunciationEntry.defaultEntries
+        where !entries.contains(where: { $0.word.lowercased() == defaultEntry.word.lowercased() }) {
+            entries.append(defaultEntry)
         }
         saveEntries()
     }
 
-    func clearAll() {
+    public func clearAll() {
         entries = []
         saveEntries()
     }
@@ -342,27 +355,6 @@ final class PronunciationManager: ObservableObject { // swiftlint:disable:this t
             defaults.set(data, forKey: Self.storageKey)
         } catch {
             // Silent failure - entries will be reloaded on next launch
-        }
-    }
-}
-
-// MARK: - TTSProvider Extensions
-
-extension TTSProvider {
-    /// Whether this provider supports SSML phoneme tags.
-    var supportsSSMLPhonemes: Bool {
-        switch self {
-        case .azure, .system: return true
-        case .elevenlabs, .openai, .deepgram: return false
-        }
-    }
-
-    /// The phoneme alphabet to use for SSML tags.
-    var phonemeAlphabet: String {
-        switch self {
-        case .azure: return "ipa"
-        case .system: return "ipa"
-        default: return "ipa"
         }
     }
 }

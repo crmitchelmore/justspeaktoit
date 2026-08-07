@@ -84,6 +84,21 @@ public final class IOSBatchTranscriber {
         if audioSessionManager.hasMicrophonePermission() { return true }
         return await audioSessionManager.requestMicrophonePermission()
     }
+
+    /// One-shot transcription of an existing audio file, reusing the same
+    /// batch client the record-and-upload path uses. Used by the Transcribe
+    /// Audio File App Intent (Shortcuts), which supplies its own file instead
+    /// of recording one.
+    public static func transcribeFile(
+        at url: URL,
+        model: String,
+        apiKey: String,
+        language: String?,
+        session: URLSession = .shared
+    ) async throws -> TranscriptionResult {
+        try await IOSBatchTranscriptionClient(apiKey: apiKey, session: session)
+            .transcribeFile(at: url, model: model, language: language)
+    }
 }
 
 private struct IOSBatchTranscriptionClient {

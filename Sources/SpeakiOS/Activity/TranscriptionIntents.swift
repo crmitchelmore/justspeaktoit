@@ -303,6 +303,26 @@ struct TranscriptionShortcuts: AppShortcutsProvider {
         )
 
         AppShortcut(
+            intent: StopDictationIntent(),
+            phrases: [
+                "Stop dictation and get text with \(.applicationName)",
+                "Finish dictation with \(.applicationName)"
+            ],
+            shortTitle: "Stop and Get Text",
+            systemImageName: "text.badge.checkmark"
+        )
+
+        AppShortcut(
+            intent: GetLastTranscriptionIntent(),
+            phrases: [
+                "Get my last transcription from \(.applicationName)",
+                "Get the last dictation from \(.applicationName)"
+            ],
+            shortTitle: "Last Transcription",
+            systemImageName: "clock.arrow.circlepath"
+        )
+
+        AppShortcut(
             intent: CopyLastSentenceIntent(),
             phrases: [
                 "Copy last sentence from \(.applicationName)",

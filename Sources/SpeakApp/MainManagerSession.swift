@@ -7,6 +7,7 @@ enum SessionTriggerSource {
   case singleTap
   case uiButton
   case silenceDetection
+  case automation
 
   var historyGesture: HistoryTrigger.HotKeyGesture {
     switch self {
@@ -20,6 +21,8 @@ enum SessionTriggerSource {
       return .uiButton
     case .silenceDetection:
       return .uiButton  // Treat as UI-initiated for history purposes
+    case .automation:
+      return .uiButton  // Shortcuts / App Intents; recorded like a UI trigger
     }
   }
 }

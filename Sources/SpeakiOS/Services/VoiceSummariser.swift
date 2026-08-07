@@ -30,7 +30,8 @@ public final class VoiceSummariser {
         """
 
     /// Summarise a response for voice output.
-    /// Uses OpenRouter API with the configured post-processing model.
+    /// Uses the shared SpeakCore OpenRouter client with the configured
+    /// post-processing model.
     public func summarise(
         _ text: String,
         apiKey: String,
@@ -47,40 +48,40 @@ public final class VoiceSummariser {
             return text
         }
 
-        let url = URL(string: "https://openrouter.ai/api/v1/chat/completions")!
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Just Speak to It iOS", forHTTPHeaderField: "X-Title")
-
-        let body: [String: Any] = [
-            "model": model,
-            "messages": [
-                ["role": "system", "content": Self.systemPrompt],
-                ["role": "user", "content": text]
-            ],
-            "max_tokens": 300,
-            "temperature": 0.3
-        ]
-
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-        let (data, response) = try await session.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse,
-              (200..<300).contains(httpResponse.statusCode) else {
-            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-            let body = String(data: data, encoding: .utf8) ?? ""
-            throw VoiceSummariserError.apiError(statusCode: statusCode, message: body)
+        guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw VoiceSummariserError.apiError(statusCode: 401, message: "Missing OpenRouter API key")
         }
 
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let choices = json["choices"] as? [[String: Any]],
-              let first = choices.first,
-              let message = first["message"] as? [String: Any],
-              let content = message["content"] as? String else {
+        let client = OpenRouterAPIClient(
+            apiKey: apiKey,
+            session: session,
+            branding: OpenRouterBranding(
+                title: "Just Speak to It iOS",
+                referer: "https://github.com/crmitchelmore/justspeaktoit"
+            )
+        )
+
+        let response: ChatResponse
+        do {
+            response = try await client.sendChat(
+                systemPrompt: Self.systemPrompt,
+                messages: [ChatMessage(role: .user, content: text)],
+                model: model,
+                temperature: 0.3,
+                maxTokens: 300
+            )
+        } catch let error as OpenRouterClientError {
+            switch error {
+            case .httpStatus(let statusCode, let body):
+                throw VoiceSummariserError.apiError(statusCode: statusCode, message: body)
+            default:
+                throw VoiceSummariserError.invalidResponse
+            }
+        } catch is DecodingError {
+            throw VoiceSummariserError.invalidResponse
+        }
+
+        guard let content = response.messages.last(where: { $0.role == .assistant })?.content else {
             throw VoiceSummariserError.invalidResponse
         }
 

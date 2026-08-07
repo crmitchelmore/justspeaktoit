@@ -2,7 +2,7 @@ import Foundation
 import os.log
 
 /// Persists auto-correction candidates to disk.
-actor AutoCorrectionStore {
+public actor AutoCorrectionStore {
   /// Candidates older than this with only 1 occurrence are auto-expired
   private static let candidateExpirationInterval: TimeInterval = 30 * 24 * 60 * 60  // 30 days
 
@@ -12,14 +12,14 @@ actor AutoCorrectionStore {
   private let fileManager: FileManager
   private let log = Logger(subsystem: "com.github.speakapp", category: "AutoCorrectionStore")
 
-  init(fileManager: FileManager = .default, baseDirectory: URL? = nil) {
+  public init(fileManager: FileManager = .default, baseDirectory: URL? = nil) {
     self.fileManager = fileManager
     let supportURL: URL
     if let baseDirectory {
       supportURL = baseDirectory
     } else {
       supportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-        ?? fileManager.homeDirectoryForCurrentUser
+        ?? URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
     }
     let appFolder = supportURL.appendingPathComponent("SpeakApp", isDirectory: true)
     let autoCorrectionFolder = appFolder.appendingPathComponent("AutoCorrections", isDirectory: true)
@@ -36,7 +36,7 @@ actor AutoCorrectionStore {
     decoder.dateDecodingStrategy = .iso8601
   }
 
-  func load() throws -> [AutoCorrectionCandidate] {
+  public func load() throws -> [AutoCorrectionCandidate] {
     guard fileManager.fileExists(atPath: fileURL.path) else {
       return []
     }
@@ -51,7 +51,7 @@ actor AutoCorrectionStore {
     }
   }
 
-  func save(_ candidates: [AutoCorrectionCandidate]) throws {
+  public func save(_ candidates: [AutoCorrectionCandidate]) throws {
     if candidates.isEmpty {
       if fileManager.fileExists(atPath: fileURL.path) {
         try fileManager.removeItem(at: fileURL)
@@ -63,7 +63,7 @@ actor AutoCorrectionStore {
     try data.write(to: fileURL, options: [.atomic])
   }
 
-  func deleteAll() throws {
+  public func deleteAll() throws {
     if fileManager.fileExists(atPath: fileURL.path) {
       try fileManager.removeItem(at: fileURL)
     }

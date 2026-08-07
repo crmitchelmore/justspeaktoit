@@ -2,13 +2,13 @@ import Foundation
 
 /// Detects word-level changes between original and edited text.
 /// Focuses on finding direct replacements rather than general rewrites.
-struct WordDiffer {
+public struct WordDiffer {
   /// Minimum word length to consider for corrections
-  static let minimumWordLength = 2
+  public static let minimumWordLength = 2
 
   /// Find word-level changes between the original inserted text and the edited version.
   /// Returns only changes that look like intentional corrections (not rewrites).
-  static func findChanges(original: String, edited: String) -> [WordChange] {
+  public static func findChanges(original: String, edited: String) -> [WordChange] {
     let originalWords = tokenize(original)
     let editedWords = tokenize(edited)
 
@@ -48,20 +48,19 @@ struct WordDiffer {
 
   /// Find the length of common prefix and suffix in word arrays.
   /// Expects pre-lowercased arrays so no per-element lowercasing is needed.
-  private static func findCommonEnds(_ a: [String], _ b: [String]) -> (prefix: Int, suffix: Int) {
+  private static func findCommonEnds(_ lhs: [String], _ rhs: [String]) -> (prefix: Int, suffix: Int) {
     // Find common prefix length
     var prefixLen = 0
-    let minLen = min(a.count, b.count)
-    while prefixLen < minLen && a[prefixLen] == b[prefixLen] {
+    let minLen = min(lhs.count, rhs.count)
+    while prefixLen < minLen && lhs[prefixLen] == rhs[prefixLen] {
       prefixLen += 1
     }
 
     // Find common suffix length (not overlapping with prefix)
     var suffixLen = 0
     let maxSuffix = minLen - prefixLen
-    while suffixLen < maxSuffix
-      && a[a.count - 1 - suffixLen] == b[b.count - 1 - suffixLen]
-    {
+    while suffixLen < maxSuffix,
+      lhs[lhs.count - 1 - suffixLen] == rhs[rhs.count - 1 - suffixLen] {
       suffixLen += 1
     }
 
@@ -77,9 +76,8 @@ struct WordDiffer {
       // Same word count - look for 1:1 replacements
       for (orig, edit) in zip(original, edited) {
         // Detect any change including case-only changes (speak → Speak)
-        if orig != edit && orig.count >= minimumWordLength
-          && edit.count >= minimumWordLength
-        {
+        if orig != edit, orig.count >= minimumWordLength,
+          edit.count >= minimumWordLength {
           let change = WordChange(type: .replacement, original: orig, corrected: edit)
           if change.isLikelyCorrection {
             changes.append(change)

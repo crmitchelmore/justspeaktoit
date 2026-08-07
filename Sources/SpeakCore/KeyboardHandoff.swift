@@ -4,7 +4,11 @@ import Foundation
 ///
 /// The entire handoff is a single encoded value so readers never combine fields
 /// from different requests. Each mutation validates the nonce and transition.
-public final class KeyboardHandoffStore {
+/// `@unchecked` only because `UserDefaults` lacks a Sendable annotation in the
+/// SDK: all stored properties are immutable references, `UserDefaults` is
+/// documented thread-safe, and the `NSLock` serializes every
+/// read-modify-write.
+public final class KeyboardHandoffStore: @unchecked Sendable {
     public static let appGroupIdentifier = "group.com.justspeaktoit.ios"
     public static let shared = KeyboardHandoffStore()
 
@@ -16,8 +20,6 @@ public final class KeyboardHandoffStore {
     private static let observationKey = "keyboardHandoff.extensionObservation.v2"
 
     private let defaults: UserDefaults?
-    private let encoder = JSONEncoder()
-    private let decoder = JSONDecoder()
     private let lock = NSLock()
 
     public convenience init() {
@@ -213,14 +215,14 @@ public final class KeyboardHandoffStore {
     public func recordExtensionObservation(hasFullAccess: Bool, now: Date = Date()) {
         guard let defaults else { return }
         let observation = KeyboardExtensionObservation(lastSeenAt: now, hadFullAccess: hasFullAccess)
-        guard let data = try? encoder.encode(observation) else { return }
+        guard let data = try? JSONEncoder().encode(observation) else { return }
         defaults.set(data, forKey: Self.observationKey)
         defaults.synchronize()
     }
 
     public func extensionObservation() -> KeyboardExtensionObservation? {
         guard let data = defaults?.data(forKey: Self.observationKey) else { return nil }
-        return try? decoder.decode(KeyboardExtensionObservation.self, from: data)
+        return try? JSONDecoder().decode(KeyboardExtensionObservation.self, from: data)
     }
 }
 
@@ -269,13 +271,13 @@ private extension KeyboardHandoffStore {
 
     func writeUnlocked(_ record: KeyboardHandoffRecord) throws {
         guard let defaults else { throw KeyboardHandoffStoreError.unavailable }
-        defaults.set(try encoder.encode(record), forKey: Self.recordKey)
+        defaults.set(try JSONEncoder().encode(record), forKey: Self.recordKey)
         defaults.synchronize()
     }
 
     func readUnlocked() -> KeyboardHandoffRecord? {
         guard let data = defaults?.data(forKey: Self.recordKey),
-              let record = try? decoder.decode(KeyboardHandoffRecord.self, from: data),
+              let record = try? JSONDecoder().decode(KeyboardHandoffRecord.self, from: data),
               record.schemaVersion == KeyboardHandoffRecord.schemaVersion else {
             return nil
         }

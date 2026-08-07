@@ -1,6 +1,9 @@
-import AVFoundation
+// AVFAudio types (AVAudioPCMBuffer, AVAudioConverter callbacks) predate
+// Sendable annotations; @preconcurrency downgrades those diagnostics.
+@preconcurrency import AVFoundation
 import CoreMedia
 import Foundation
+import os
 import Speech
 
 #if canImport(FoundationModels)
@@ -326,14 +329,22 @@ public final class AppleSpeechAudioConverter: @unchecked Sendable {
             return nil
         }
 
-        var providedInput = false
+        // Lock-guarded flag instead of a captured `var`: the input block is
+        // @Sendable in the SDK, so mutating a captured local would be a
+        // strict-concurrency violation (it is only ever called synchronously
+        // inside `convert`, but the compiler cannot see that).
+        let providedInput = OSAllocatedUnfairLock(initialState: false)
         var conversionError: NSError?
         let status = converter.convert(to: output, error: &conversionError) { _, outStatus in
-            if providedInput {
+            let alreadyProvided = providedInput.withLock { provided -> Bool in
+                if provided { return true }
+                provided = true
+                return false
+            }
+            if alreadyProvided {
                 outStatus.pointee = .noDataNow
                 return nil
             }
-            providedInput = true
             outStatus.pointee = .haveData
             return buffer
         }

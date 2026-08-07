@@ -465,6 +465,8 @@ struct SettingsView: View {
       transcriptionSettings
     case .postProcessing:
       postProcessingSettings
+    case .profiles:
+      profilesSettings
     case .voiceOutput:
       voiceOutputSettings
     case .pronunciation:

@@ -277,6 +277,8 @@ private extension SettingsTab {
       return .openTranscriptionSettings
     case .postProcessing:
       return .openPostProcessingSettings
+    case .profiles:
+      return .openProfilesSettings
     case .voiceOutput:
       return .openVoiceOutputSettings
     case .pronunciation:

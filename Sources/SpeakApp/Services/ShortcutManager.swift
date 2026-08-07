@@ -19,6 +19,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
     case openTroubleshooting
     case openTranscriptionSettings
     case openPostProcessingSettings
+    case openProfilesSettings
     case openVoiceOutputSettings
     case openPronunciationSettings
     case openAPIKeysSettings
@@ -47,6 +48,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .openTroubleshooting: return "Open Troubleshooting"
         case .openTranscriptionSettings: return "Open Transcription Settings"
         case .openPostProcessingSettings: return "Open Post-processing Settings"
+        case .openProfilesSettings: return "Open Profiles Settings"
         case .openVoiceOutputSettings: return "Open Voice Output Settings"
         case .openPronunciationSettings: return "Open Pronunciation Settings"
         case .openAPIKeysSettings: return "Open API Keys Settings"
@@ -88,6 +90,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
             return KeyBinding(keyCode: 19, modifiers: [.command], isGlobal: false)  // ⌘2
         case .openPostProcessingSettings:
             return KeyBinding(keyCode: 20, modifiers: [.command], isGlobal: false)  // ⌘3
+        case .openProfilesSettings:
+            return KeyBinding(keyCode: 29, modifiers: [.command], isGlobal: false)  // ⌘0
         case .openVoiceOutputSettings:
             return KeyBinding(keyCode: 21, modifiers: [.command], isGlobal: false)  // ⌘4
         case .openPronunciationSettings:

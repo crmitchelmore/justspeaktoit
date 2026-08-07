@@ -58,10 +58,21 @@ final class MainManager: ObservableObject {
   let liveTextInserter: LiveTextInserter
   let textProcessor: TranscriptionTextProcessor
   let autoCorrectionTracker: AutoCorrectionTracker
+  let profileStore: DictationProfileStore
   let logger = Logger(subsystem: "com.github.speakapp", category: "MainManager")
   private let recordingSoundPlayer = RecordingSoundPlayer()
+  /// Applies/reverts per-app dictation profile overrides for a session.
+  private let profileApplier = SessionProfileApplier()
 
-  var activeSession: ActiveSession?
+  var activeSession: ActiveSession? {
+    didSet {
+      // Every session-teardown path clears `activeSession`, so this is the one
+      // place profile overrides are reverted back to the user's own settings.
+      if activeSession == nil {
+        profileApplier.end(settings: appSettings, postProcessing: postProcessingManager)
+      }
+    }
+  }
   /// Guards against re-entrant calls to endSession (e.g. silence detection + user hotkey racing).
   var isEndingSession = false
   let recordingStopTimeout: TimeInterval = 8
@@ -116,7 +127,8 @@ final class MainManager: ObservableObject {
     livePolishManager: LivePolishManager,
     liveTextInserter: LiveTextInserter,
     textProcessor: TranscriptionTextProcessor,
-    autoCorrectionTracker: AutoCorrectionTracker
+    autoCorrectionTracker: AutoCorrectionTracker,
+    profileStore: DictationProfileStore
   ) {
     self.appSettings = appSettings
     self.permissionsManager = permissionsManager
@@ -133,6 +145,7 @@ final class MainManager: ObservableObject {
     self.liveTextInserter = liveTextInserter
     self.textProcessor = textProcessor
     self.autoCorrectionTracker = autoCorrectionTracker
+    self.profileStore = profileStore
 
     recordingSoundPlayer.profile = appSettings.recordingSoundProfile
     appSettings.$recordingSoundProfile
@@ -408,9 +421,26 @@ final class MainManager: ObservableObject {
   // swiftlint:disable:next function_body_length
   private func startSession(trigger: SessionTriggerSource) async {
     guard activeSession == nil else { return }
-    if await presentMissingLiveAPIKeyAlertIfNeeded() { return }
+
+    // Per-app dictation profile: resolve the frontmost app and apply its
+    // overrides for this session only. Applied before the API-key check so the
+    // check sees the profile's provider. Reverted whenever `activeSession`
+    // returns to nil; the early-exit paths below revert explicitly because no
+    // session was created yet.
+    profileApplier.begin(
+      settings: appSettings,
+      postProcessing: postProcessingManager,
+      profiles: profileStore.profiles,
+      frontmostBundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+    )
+
+    if await presentMissingLiveAPIKeyAlertIfNeeded() {
+      profileApplier.end(settings: appSettings, postProcessing: postProcessingManager)
+      return
+    }
 
     if audioInputDeviceManager.devices.isEmpty {
+      profileApplier.end(settings: appSettings, postProcessing: postProcessingManager)
       let message = "No microphone connected. Plug in a USB or Bluetooth microphone and try again."
       state = .failed(message)
       lastErrorMessage = message
@@ -463,7 +493,7 @@ final class MainManager: ObservableObject {
     if appSettings.showHUDDuringSessions {
       permissionsManager.refresh(.microphone)
       hudManager.updateCaptureHealth(buildCaptureHealthSnapshot())
-      hudManager.beginRecording()
+      hudManager.beginRecording(profileName: profileApplier.activeProfileName)
     }
 
     do {

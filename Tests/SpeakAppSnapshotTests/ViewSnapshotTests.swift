@@ -112,7 +112,7 @@ final class ViewSnapshotTests: XCTestCase {
     let controller = NSHostingController(
       rootView: view.environment(\.colorScheme, .light)
     )
-    withSnapshotTesting(record: .missing) {
+    withSnapshotTesting(record: .never) {
       assertSnapshot(
         of: controller.view,
         as: .pinnedImage(size: size),

@@ -11,10 +11,14 @@ import Foundation
 /// (see `Project.swift`, which maps the env var to the
 /// `SHOW_OPENCLAW_TAB` compilation condition).
 enum FeatureFlags {
-    /// Whether the custom keyboard extension and its app-owned readiness flow
-    /// are enabled. Defaults to `false`; `Project.swift` includes the extension
-    /// and defines `IOS_KEYBOARD_FEATURE` only when generated with
-    /// `TUIST_IOS_KEYBOARD=1`.
+    /// Whether the custom keyboard extension (in-keyboard dictation with the
+    /// Instant Dictation handoff as fallback) is enabled. Defaults to `false`
+    /// so App Store and TestFlight builds ship without it; `Project.swift`
+    /// includes the extension and defines `IOS_KEYBOARD_FEATURE` only when
+    /// generated with `TUIST_IOS_KEYBOARD=1`. Internal builds (CI and the
+    /// manual `include_keyboard` release input) turn it on; the physical
+    /// device matrix in `Docs/ios-keyboard-mvp-verification.md` is the gate
+    /// for enabling it in TestFlight.
     static var iOSKeyboardEnabled: Bool {
         #if IOS_KEYBOARD_FEATURE
         true

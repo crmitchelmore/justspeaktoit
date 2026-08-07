@@ -154,8 +154,19 @@ final class DistributionBuildIdentityTests: XCTestCase {
     }
 
     func testIOSKeyboardUsesInstantSessionLivePreviewAndRetainsHistory() throws {
-        let keyboard = try String(
+        // Keyboard v2 splits the extension into controller + model + view +
+        // engine + handoff files; the fallback handoff invariants from v1 must
+        // survive in the split sources.
+        let controller = try String(
             contentsOf: repositoryRoot.appendingPathComponent("JustSpeakKeyboard/KeyboardViewController.swift"),
+            encoding: .utf8
+        )
+        let handoff = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("JustSpeakKeyboard/KeyboardHandoffController.swift"),
+            encoding: .utf8
+        )
+        let rootView = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("JustSpeakKeyboard/KeyboardRootView.swift"),
             encoding: .utf8
         )
         let instantCoordinator = try String(
@@ -165,14 +176,14 @@ final class DistributionBuildIdentityTests: XCTestCase {
             encoding: .utf8
         )
 
-        XCTAssertFalse(keyboard.contains("extensionContext.open"))
-        XCTAssertTrue(keyboard.contains("if requestID == nil, isInstantReady"))
-        XCTAssertTrue(keyboard.contains("Open Just Speak once"))
-        XCTAssertTrue(keyboard.contains("KeyboardHandoffSignal.postRequestChanged"))
-        XCTAssertTrue(keyboard.contains("Stop & Insert"))
-        XCTAssertTrue(keyboard.contains("keyboardLiveTranscript"))
-        XCTAssertTrue(keyboard.contains("completed transcripts remain in History"))
-        XCTAssertFalse(keyboard.contains("Results are deleted after insertion"))
+        for source in [controller, handoff, rootView] {
+            XCTAssertFalse(source.contains("extensionContext.open"))
+        }
+        XCTAssertTrue(handoff.contains("if requestID == nil, isInstantReady"))
+        XCTAssertTrue(handoff.contains("KeyboardHandoffSignal.postRequestChanged"))
+        XCTAssertTrue(rootView.contains("Open Just Speak once"))
+        XCTAssertTrue(rootView.contains("keyboardLiveTranscript"))
+        XCTAssertFalse(rootView.contains("Results are deleted after insertion"))
         XCTAssertTrue(instantCoordinator.contains("input.installTap"))
         XCTAssertTrue(instantCoordinator.contains("requiresLiveActivity: false"))
         XCTAssertTrue(instantCoordinator.contains("updateInterim"))

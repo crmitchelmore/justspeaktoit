@@ -29,12 +29,18 @@ public enum TranscriptCleanupPolicy {
     """
 
     /// Builds the shared policy while safely layering optional user and platform context.
+    ///
+    /// `customBasePrompt` (e.g. from a dictation profile) replaces the built-in
+    /// cleanup instructions while keeping the language/lexicon layering and the
+    /// output contract intact.
     public static func systemPrompt(
+        customBasePrompt: String? = nil,
         outputLanguage: String? = nil,
         lexiconDirectives: [String] = [],
         lexiconContextTags: [String] = []
     ) -> String {
-        var sections = [baseSystemPrompt]
+        let customPrompt = normalized(customBasePrompt)
+        var sections = [customPrompt ?? baseSystemPrompt]
 
         if let language = normalized(outputLanguage) {
             sections.append(
@@ -68,7 +74,9 @@ public enum TranscriptCleanupPolicy {
         }
 
         sections.append(
-            "The hard constraints are always authoritative. Return only the cleaned transcript text."
+            customPrompt == nil
+                ? "The hard constraints are always authoritative. Return only the cleaned transcript text."
+                : "Return only the cleaned transcript text."
         )
         return sections.joined(separator: "\n\n")
     }

@@ -1,16 +1,16 @@
 import Foundation
 
 /// Represents a custom pronunciation entry for TTS engines.
-struct PronunciationEntry: Codable, Identifiable, Hashable {
-    let id: UUID
-    var word: String           // Original text to match
-    var pronunciation: String  // How to pronounce (IPA or phonetic)
-    var replacement: String?   // Simple text replacement alternative
-    var category: String?      // e.g., "Technical", "Names", "Acronyms"
-    var isRegex: Bool          // Whether word should be treated as a regex pattern
-    var caseSensitive: Bool    // Whether matching should be case-sensitive
+public struct PronunciationEntry: Codable, Identifiable, Hashable {
+    public let id: UUID
+    public var word: String           // Original text to match
+    public var pronunciation: String  // How to pronounce (IPA or phonetic)
+    public var replacement: String?   // Simple text replacement alternative
+    public var category: String?      // e.g., "Technical", "Names", "Acronyms"
+    public var isRegex: Bool          // Whether word should be treated as a regex pattern
+    public var caseSensitive: Bool    // Whether matching should be case-sensitive
 
-    init(
+    public init(
         id: UUID = UUID(),
         word: String,
         pronunciation: String,
@@ -29,7 +29,7 @@ struct PronunciationEntry: Codable, Identifiable, Hashable {
     }
 
     /// Commonly used categories for pronunciation entries.
-    enum Category: String, CaseIterable, Identifiable {
+    public enum Category: String, CaseIterable, Identifiable {
         case technical = "Technical"
         case names = "Names"
         case acronyms = "Acronyms"
@@ -38,9 +38,9 @@ struct PronunciationEntry: Codable, Identifiable, Hashable {
         case medical = "Medical"
         case custom = "Custom"
 
-        var id: String { rawValue }
+        public var id: String { rawValue }
 
-        var systemImage: String {
+        public var systemImage: String {
             switch self {
             case .technical: return "gearshape"
             case .names: return "person.fill"
@@ -58,7 +58,7 @@ struct PronunciationEntry: Codable, Identifiable, Hashable {
 
 extension PronunciationEntry {
     /// Pre-populated common pronunciation entries.
-    static let defaultEntries: [PronunciationEntry] = [
+    public static let defaultEntries: [PronunciationEntry] = [
         // Technical terms
         PronunciationEntry(
             word: "API",
@@ -253,6 +253,6 @@ extension PronunciationEntry {
             pronunciation: "open A I",
             replacement: "open A I",
             category: Category.brands.rawValue
-        ),
+        )
     ]
 }

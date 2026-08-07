@@ -36,6 +36,15 @@ final class MainManager: ObservableObject {
     appSettings.speedMode.usesLivePolish && appSettings.textOutputMethod != .clipboardOnly
   }
 
+  /// Whether the experimental streaming-insertion setting can apply to this
+  /// configuration (issue #611). The per-app allowlist is checked at session
+  /// start against the captured output target.
+  private var streamingInsertionEligible: Bool {
+    appSettings.streamingInsertionEnabled
+      && appSettings.textOutputMethod != .clipboardOnly
+      && isStreamingTranscriptionMode
+  }
+
   var isStreamingTranscriptionMode: Bool {
     appSettings.transcriptionMode == .liveNative
       || (appSettings.transcriptionMode == .localModel && appSettings.localTranscriptionMode == .streaming)
@@ -242,8 +251,9 @@ final class MainManager: ObservableObject {
       }
     }
 
-    // Live insertion during recording (for streaming + accessibility mode)
-    if state == .recording && liveInsertionEnabled {
+    // Live insertion during recording (live-polish full-value mode or the
+    // experimental ranged streaming mode; `update` no-ops when inactive).
+    if state == .recording && liveTextInserter.isActive {
       liveTextInserter.update(with: text)
     }
 
@@ -482,9 +492,16 @@ final class MainManager: ObservableObject {
     // Reset live polish for new session
     livePolishManager.reset()
 
-    // Start live text insertion if enabled
-    if liveInsertionEnabled {
-      liveTextInserter.begin(target: session.outputTarget)
+    // Start live text insertion if enabled. The experimental streaming mode
+    // patches partials into allowlisted apps via ranged AX replacement; other
+    // apps (or with the setting off) keep today's behaviour.
+    let useRangedStreaming = streamingInsertionEligible
+      && StreamingInsertionAllowlist.allows(session.outputTarget)
+    if liveInsertionEnabled || useRangedStreaming {
+      liveTextInserter.begin(
+        target: session.outputTarget,
+        strategy: useRangedStreaming ? .rangedStreaming : .fullValue
+      )
       if !liveTextInserter.isActive {
         logger.warning("Live text insertion failed to start - will use standard delivery")
       }
@@ -847,7 +864,7 @@ final class MainManager: ObservableObject {
 
       // Handle live text insertion finalization
       var liveFinalizationResult: LiveTextInserter.FinalizationResult = .deferred
-      if liveInsertionEnabled && liveTextInserter.isActive {
+      if liveTextInserter.isActive {
         liveFinalizationResult = liveTextInserter.applyPolishedFinal(finalText)
         liveTextInserter.end()
       }

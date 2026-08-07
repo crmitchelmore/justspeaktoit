@@ -320,6 +320,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     case livePolishTailWindowChars
     case skipPostProcessingWithLivePolish
     case voiceCommandsEnabled
+    case streamingInsertionEnabled
     case clipboardInsertionTriggers
     case enableSendToMac
     case autoCorrectionsEnabled
@@ -739,6 +740,13 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     didSet { store(voiceCommandsEnabled, key: .voiceCommandsEnabled) }
   }
 
+  /// Experimental (issue #611): progressively stream partial transcripts into
+  /// allowlisted apps via ranged accessibility replacement while dictating.
+  /// Default OFF; non-allowlisted apps always keep the paste-at-end path.
+  @Published var streamingInsertionEnabled: Bool {
+    didSet { store(streamingInsertionEnabled, key: .streamingInsertionEnabled) }
+  }
+
   /// Custom triggers for clipboard insertion (comma-separated), in addition to built-in triggers
   @Published var clipboardInsertionTriggers: String {
     didSet { store(clipboardInsertionTriggers, key: .clipboardInsertionTriggers) }
@@ -1038,6 +1046,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     // Voice Commands Settings
     voiceCommandsEnabled =
       defaults.object(forKey: DefaultsKey.voiceCommandsEnabled.rawValue) as? Bool ?? true
+    streamingInsertionEnabled =
+      defaults.object(forKey: DefaultsKey.streamingInsertionEnabled.rawValue) as? Bool ?? false
     clipboardInsertionTriggers =
       defaults.string(forKey: DefaultsKey.clipboardInsertionTriggers.rawValue) ?? ""
 

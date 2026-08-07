@@ -811,6 +811,11 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   private let defaults: UserDefaults
   private let log = Logger(subsystem: "com.github.speakapp", category: "AppSettings")
 
+  /// When true, `store` skips writing to `UserDefaults` while the published
+  /// in-memory values still update. Used by `SessionProfileApplier` so
+  /// session-scoped dictation-profile overrides never touch persisted defaults.
+  var suppressesPersistence = false
+
   init(defaults: UserDefaults = .standard) { // swiftlint:disable:this function_body_length
     self.defaults = defaults
 
@@ -1088,6 +1093,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   }
 
   private func store<T>(_ value: T, key: DefaultsKey) {
+    guard !suppressesPersistence else { return }
     switch value {
     case let boolValue as Bool:
       defaults.set(boolValue, forKey: key.rawValue)

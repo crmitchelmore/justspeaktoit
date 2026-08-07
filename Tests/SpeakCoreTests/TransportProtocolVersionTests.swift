@@ -57,6 +57,7 @@ final class TransportProtocolVersionTests: XCTestCase {
 
     func testProtocolMismatchError_usesSameCodeAsStaticConstant() {
         let error = ErrorMessage.protocolMismatch(clientVersion: 99)
+        XCTAssertEqual(error.code, 400)
         XCTAssertEqual(error.code, ErrorMessage.protocolMismatch.code)
     }
 

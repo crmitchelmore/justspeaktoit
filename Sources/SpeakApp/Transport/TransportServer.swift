@@ -289,6 +289,17 @@ final class TransportConnection {
             
             switch message {
             case .hello(let hello):
+                guard hello.isProtocolVersionCompatible else {
+                    SpeakLogger.transport.warning(
+                        """
+                        Rejecting \(hello.deviceName, privacy: .public): protocol version mismatch \
+                        (client v\(hello.protocolVersion), server v\(SpeakTransportProtocolVersion))
+                        """
+                    )
+                    await self.send(.error(.protocolMismatch(clientVersion: hello.protocolVersion)))
+                    self.connection.cancel()
+                    return
+                }
                 deviceId = hello.deviceId
                 deviceName = hello.deviceName
                 SpeakLogger.transport.info("Hello from \(hello.deviceName, privacy: .public)")
@@ -357,11 +368,16 @@ final class TransportConnection {
             let lengthData = withUnsafeBytes(of: &length) { Data($0) }
             
             connection.send(content: lengthData, completion: .contentProcessed { _ in })
-            connection.send(content: data, completion: .contentProcessed { error in
-                if let error {
-                    SpeakLogger.logError(error, context: "Send message", logger: SpeakLogger.transport)
-                }
-            })
+            // Await delivery so callers that cancel the connection right after sending
+            // (protocol-mismatch and auth-failure rejections) don't race the close.
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                self.connection.send(content: data, completion: .contentProcessed { error in
+                    if let error {
+                        SpeakLogger.logError(error, context: "Send message", logger: SpeakLogger.transport)
+                    }
+                    continuation.resume()
+                })
+            }
         } catch {
             SpeakLogger.logError(error, context: "Encode message", logger: SpeakLogger.transport)
         }

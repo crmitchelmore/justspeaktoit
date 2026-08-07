@@ -124,13 +124,14 @@ public final class iOSLiveTranscriber: ObservableObject {
 
         resetState()
 
-        if modelID == AppleLocalModels.speechTranscriberModelID {
+        if AppleLocalModels.isSpeechAnalyzerModel(modelID) {
             if #available(iOS 26.0, *) {
                 do {
-                    try await startSpeechAnalyzer()
-                    activeModelID = AppleLocalModels.speechTranscriberModelID
+                    let engine = AppleSpeechAnalyzerEngine(modelID: modelID)
+                    try await startSpeechAnalyzer(engine: engine)
+                    activeModelID = engine.modelID
                     isRunning = true
-                    print("[iOSLiveTranscriber] Started with SpeechAnalyzer")
+                    print("[iOSLiveTranscriber] Started with SpeechAnalyzer (\(engine.modelID))")
                     return
                 } catch {
                     SpeakLogger.logError(
@@ -158,9 +159,10 @@ public final class iOSLiveTranscriber: ObservableObject {
     }
 
     @available(iOS 26.0, *)
-    private func startSpeechAnalyzer() async throws {
+    private func startSpeechAnalyzer(engine: AppleSpeechAnalyzerEngine) async throws {
         let session = try await AppleSpeechAnalyzerLiveSession(
-            localeIdentifier: language
+            localeIdentifier: language,
+            engine: engine
         ) { [weak self] update in
             Task { @MainActor [weak self] in
                 self?.handleSpeechAnalyzerUpdate(update)
@@ -349,7 +351,7 @@ public final class iOSLiveTranscriber: ObservableObject {
                 segments: analyzerResult.segments,
                 confidence: analyzerResult.confidence,
                 duration: max(elapsed, analyzerResult.duration),
-                modelIdentifier: AppleLocalModels.speechTranscriberModelID,
+                modelIdentifier: activeModelID,
                 cost: nil,
                 rawPayload: nil,
                 debugInfo: nil
@@ -362,7 +364,7 @@ public final class iOSLiveTranscriber: ObservableObject {
                 segments: [],
                 confidence: confidence,
                 duration: elapsed,
-                modelIdentifier: AppleLocalModels.speechTranscriberModelID,
+                modelIdentifier: activeModelID,
                 cost: nil,
                 rawPayload: nil,
                 debugInfo: nil

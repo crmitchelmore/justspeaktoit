@@ -227,11 +227,12 @@ final class TranscriptionManager: ObservableObject {
 
   func transcribeFile(at url: URL) async throws -> TranscriptionResult {
     let model = offlineTranscriptionModel
-    if model == AppleLocalModels.speechTranscriberModelID {
+    if AppleLocalModels.isSpeechAnalyzerModel(model) {
       if #available(macOS 26.0, *) {
         return try await AppleSpeechAnalyzerTranscriber.transcribeFile(
           at: url,
-          localeIdentifier: appSettings.resolvedPreferredLocaleIdentifier
+          localeIdentifier: appSettings.resolvedPreferredLocaleIdentifier,
+          engine: AppleSpeechAnalyzerEngine(modelID: model)
         )
       }
       throw AppleLocalModelError.speechTranscriberUnavailable

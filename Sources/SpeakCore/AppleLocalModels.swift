@@ -10,6 +10,7 @@ import FoundationModels
 public enum AppleLocalModels {
     public static let legacySpeechModelID = "apple/local/SFSpeechRecognizer"
     public static let speechTranscriberModelID = "apple/local/SpeechTranscriber"
+    public static let dictationTranscriberModelID = "apple/local/DictationTranscriber"
     public static let foundationModelID = "apple/local/FoundationModels"
 
     public static var supportsSpeechTranscriber: Bool {
@@ -19,12 +20,37 @@ public enum AppleLocalModels {
         return false
     }
 
+    /// `DictationTranscriber` ships with every OS 26 install — it reuses the
+    /// system keyboard-dictation assets, so unlike `SpeechTranscriber` it does
+    /// not require an Apple Intelligence-capable device.
+    public static var supportsDictationTranscriber: Bool {
+        if #available(macOS 26.0, iOS 26.0, *) {
+            return true
+        }
+        return false
+    }
+
     public static var preferredSpeechModelID: String {
-        preferredSpeechModelID(speechTranscriberAvailable: supportsSpeechTranscriber)
+        preferredSpeechModelID(
+            speechTranscriberAvailable: supportsSpeechTranscriber,
+            dictationTranscriberAvailable: supportsDictationTranscriber
+        )
     }
 
     public static func preferredSpeechModelID(speechTranscriberAvailable: Bool) -> String {
-        speechTranscriberAvailable ? speechTranscriberModelID : legacySpeechModelID
+        preferredSpeechModelID(
+            speechTranscriberAvailable: speechTranscriberAvailable,
+            dictationTranscriberAvailable: false
+        )
+    }
+
+    public static func preferredSpeechModelID(
+        speechTranscriberAvailable: Bool,
+        dictationTranscriberAvailable: Bool
+    ) -> String {
+        if speechTranscriberAvailable { return speechTranscriberModelID }
+        if dictationTranscriberAvailable { return dictationTranscriberModelID }
+        return legacySpeechModelID
     }
 
     public static var supportsFoundationModels: Bool {
@@ -37,7 +63,12 @@ public enum AppleLocalModels {
     }
 
     public static func isAppleSpeechModel(_ modelID: String) -> Bool {
-        modelID == legacySpeechModelID || modelID == speechTranscriberModelID
+        modelID == legacySpeechModelID || isSpeechAnalyzerModel(modelID)
+    }
+
+    /// Whether the model runs on the SpeechAnalyzer pipeline (OS 26+).
+    public static func isSpeechAnalyzerModel(_ modelID: String) -> Bool {
+        modelID == speechTranscriberModelID || modelID == dictationTranscriberModelID
     }
 }
 
@@ -64,239 +95,6 @@ public enum AppleLocalModelError: LocalizedError {
         case .emptyTranscript:
             return "Apple SpeechTranscriber returned an empty transcript."
         }
-    }
-}
-
-@available(macOS 26.0, iOS 26.0, *)
-public enum AppleSpeechAnalyzerTranscriber {
-    public static func transcribeFile(
-        at url: URL,
-        localeIdentifier: String?
-    ) async throws -> TranscriptionResult {
-        let transcriber = try await makeTranscriber(
-            localeIdentifier: localeIdentifier,
-            preset: .timeIndexedTranscriptionWithAlternatives
-        )
-        let analyzer = SpeechAnalyzer(modules: [transcriber])
-        let audioFile = try AVAudioFile(forReading: url)
-        let duration = audioFile.processingFormat.sampleRate > 0
-            ? Double(audioFile.length) / audioFile.processingFormat.sampleRate
-            : 0
-
-        async let collectedSegments = collectFinalSegments(from: transcriber)
-        _ = try await analyzer.analyzeSequence(from: audioFile)
-        try await analyzer.finalizeAndFinishThroughEndOfInput()
-        let segments = try await collectedSegments
-        let text = segments.map(\.text).joined(separator: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { throw AppleLocalModelError.emptyTranscript }
-
-        return TranscriptionResult(
-            text: text,
-            segments: segments,
-            confidence: averageConfidence(in: segments),
-            duration: duration,
-            modelIdentifier: AppleLocalModels.speechTranscriberModelID,
-            cost: nil,
-            rawPayload: nil,
-            debugInfo: nil
-        )
-    }
-
-    static func makeTranscriber(
-        localeIdentifier: String?,
-        preset: SpeechTranscriber.Preset
-    ) async throws -> SpeechTranscriber {
-        guard SpeechTranscriber.isAvailable else {
-            throw AppleLocalModelError.speechTranscriberUnavailable
-        }
-
-        let requestedLocale = Locale(identifier: localeIdentifier ?? Locale.current.identifier)
-        guard let supportedLocale = await SpeechTranscriber.supportedLocale(equivalentTo: requestedLocale) else {
-            throw AppleLocalModelError.localeUnsupported(requestedLocale.identifier)
-        }
-
-        let transcriber = SpeechTranscriber(locale: supportedLocale, preset: preset)
-        try await ensureAssets(for: transcriber)
-        return transcriber
-    }
-
-    private static func ensureAssets(for transcriber: SpeechTranscriber) async throws {
-        switch await AssetInventory.status(forModules: [transcriber]) {
-        case .installed:
-            return
-        case .supported, .downloading:
-            if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
-                try await request.downloadAndInstall()
-            }
-            guard try await waitForInstalledAssets(for: transcriber) else {
-                throw AppleLocalModelError.modelAssetsUnavailable
-            }
-        case .unsupported:
-            throw AppleLocalModelError.modelAssetsUnavailable
-        @unknown default:
-            throw AppleLocalModelError.modelAssetsUnavailable
-        }
-    }
-
-    private static func waitForInstalledAssets(for transcriber: SpeechTranscriber) async throws -> Bool {
-        for _ in 0 ..< 120 {
-            try Task.checkCancellation()
-            switch await AssetInventory.status(forModules: [transcriber]) {
-            case .installed:
-                return true
-            case .downloading:
-                try await Task.sleep(for: .milliseconds(250))
-            case .supported, .unsupported:
-                return false
-            @unknown default:
-                return false
-            }
-        }
-        return false
-    }
-
-    private static func collectFinalSegments(
-        from transcriber: SpeechTranscriber
-    ) async throws -> [TranscriptionSegment] {
-        var segments: [TranscriptionSegment] = []
-        for try await result in transcriber.results where result.isFinal {
-            let segment = makeSegment(from: result, isFinal: true)
-            guard !segment.text.isEmpty else { continue }
-            segments.append(segment)
-        }
-        return segments.sorted { $0.startTime < $1.startTime }
-    }
-
-    static func makeSegment(
-        from result: SpeechTranscriber.Result,
-        isFinal: Bool
-    ) -> TranscriptionSegment {
-        let start = max(0, result.range.start.seconds)
-        let duration = max(0, result.range.duration.seconds)
-        return TranscriptionSegment(
-            startTime: start.isFinite ? start : 0,
-            endTime: start.isFinite && duration.isFinite ? start + duration : 0,
-            text: String(result.text.characters).trimmingCharacters(in: .whitespacesAndNewlines),
-            isFinal: isFinal,
-            confidence: nil
-        )
-    }
-
-    static func averageConfidence(in segments: [TranscriptionSegment]) -> Double? {
-        let values = segments.compactMap(\.confidence)
-        guard !values.isEmpty else { return nil }
-        return values.reduce(0, +) / Double(values.count)
-    }
-}
-
-@available(macOS 26.0, iOS 26.0, *)
-public struct AppleSpeechAnalyzerUpdate: Sendable {
-    public let text: String
-    public let isFinal: Bool
-    public let confidence: Double?
-
-    public init(text: String, isFinal: Bool, confidence: Double?) {
-        self.text = text
-        self.isFinal = isFinal
-        self.confidence = confidence
-    }
-}
-
-@available(macOS 26.0, iOS 26.0, *)
-public final class AppleSpeechAnalyzerLiveSession: @unchecked Sendable {
-    public let audioFormat: AVAudioFormat
-
-    private let analyzer: SpeechAnalyzer
-    private let inputContinuation: AsyncStream<AnalyzerInput>.Continuation
-    private let resultTask: Task<TranscriptionResult, Error>
-
-    public init(
-        localeIdentifier: String?,
-        onUpdate: @escaping @Sendable (AppleSpeechAnalyzerUpdate) -> Void
-    ) async throws {
-        let transcriber = try await AppleSpeechAnalyzerTranscriber.makeTranscriber(
-            localeIdentifier: localeIdentifier,
-            preset: .timeIndexedProgressiveTranscription
-        )
-        guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) else {
-            throw AppleLocalModelError.compatibleAudioFormatUnavailable
-        }
-
-        let (inputSequence, continuation) = AsyncStream<AnalyzerInput>.makeStream()
-        let analyzer = SpeechAnalyzer(modules: [transcriber])
-        self.audioFormat = format
-        self.analyzer = analyzer
-        self.inputContinuation = continuation
-        self.resultTask = Self.makeResultTask(transcriber: transcriber, onUpdate: onUpdate)
-
-        try await analyzer.start(inputSequence: inputSequence)
-    }
-
-    private static func makeResultTask(
-        transcriber: SpeechTranscriber,
-        onUpdate: @escaping @Sendable (AppleSpeechAnalyzerUpdate) -> Void
-    ) -> Task<TranscriptionResult, Error> {
-        Task {
-            var finalSegments: [TranscriptionSegment] = []
-            var volatileSegment: TranscriptionSegment?
-
-            for try await result in transcriber.results {
-                let segment = AppleSpeechAnalyzerTranscriber.makeSegment(
-                    from: result,
-                    isFinal: result.isFinal
-                )
-                guard !segment.text.isEmpty else { continue }
-
-                if result.isFinal {
-                    finalSegments.append(segment)
-                    finalSegments.sort { $0.startTime < $1.startTime }
-                    volatileSegment = nil
-                } else {
-                    volatileSegment = segment
-                }
-
-                let displayedSegments = finalSegments + [volatileSegment].compactMap { $0 }
-                let text = displayedSegments.map(\.text).joined(separator: " ")
-                onUpdate(
-                    AppleSpeechAnalyzerUpdate(
-                        text: text,
-                        isFinal: result.isFinal,
-                        confidence: AppleSpeechAnalyzerTranscriber.averageConfidence(in: displayedSegments)
-                    )
-                )
-            }
-
-            let text = finalSegments.map(\.text).joined(separator: " ")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let duration = finalSegments.map(\.endTime).max() ?? 0
-            return TranscriptionResult(
-                text: text,
-                segments: finalSegments,
-                confidence: AppleSpeechAnalyzerTranscriber.averageConfidence(in: finalSegments),
-                duration: duration,
-                modelIdentifier: AppleLocalModels.speechTranscriberModelID,
-                cost: nil,
-                rawPayload: nil,
-                debugInfo: nil
-            )
-        }
-    }
-
-    public func send(_ buffer: AVAudioPCMBuffer) {
-        inputContinuation.yield(AnalyzerInput(buffer: buffer))
-    }
-
-    public func finish() async throws -> TranscriptionResult {
-        inputContinuation.finish()
-        try await analyzer.finalizeAndFinishThroughEndOfInput()
-        return try await resultTask.value
-    }
-
-    public func cancel() async {
-        inputContinuation.finish()
-        await analyzer.cancelAndFinishNow()
-        resultTask.cancel()
     }
 }
 

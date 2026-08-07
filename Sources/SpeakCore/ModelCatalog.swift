@@ -241,6 +241,17 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
                 tags: [.fast, .privacy]
             )]
         }
+        if AppleLocalModels.supportsDictationTranscriber {
+            return [Option(
+                id: AppleLocalModels.dictationTranscriberModelID,
+                displayName: "Apple DictationTranscriber (On-device)",
+                description: "Apple's on-device dictation model via SpeechAnalyzer; "
+                    + "no Apple Intelligence required.",
+                estimatedLatencyMs: 50,
+                latencyTier: .instant,
+                tags: [.fast, .privacy]
+            )]
+        }
         return [Option(
             id: AppleLocalModels.legacySpeechModelID,
             displayName: "Apple Speech (On-device)",
@@ -252,15 +263,27 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
     }()
 
     private static let appleBatchTranscriptionOptions: [Option] = {
-        guard AppleLocalModels.supportsSpeechTranscriber else { return [] }
-        return [Option(
-            id: AppleLocalModels.speechTranscriberModelID,
-            displayName: "Apple SpeechTranscriber (On-device)",
-            description: "Transcribes recorded audio locally with Apple's latest long-form speech model.",
-            estimatedLatencyMs: 250,
-            latencyTier: .instant,
-            tags: [.fast, .privacy]
-        )]
+        if AppleLocalModels.supportsSpeechTranscriber {
+            return [Option(
+                id: AppleLocalModels.speechTranscriberModelID,
+                displayName: "Apple SpeechTranscriber (On-device)",
+                description: "Transcribes recorded audio locally with Apple's latest long-form speech model.",
+                estimatedLatencyMs: 250,
+                latencyTier: .instant,
+                tags: [.fast, .privacy]
+            )]
+        }
+        if AppleLocalModels.supportsDictationTranscriber {
+            return [Option(
+                id: AppleLocalModels.dictationTranscriberModelID,
+                displayName: "Apple DictationTranscriber (On-device)",
+                description: "Transcribes recorded audio locally with Apple's on-device dictation model.",
+                estimatedLatencyMs: 250,
+                latencyTier: .instant,
+                tags: [.fast, .privacy]
+            )]
+        }
+        return []
     }()
 
     private static let retiredBatchTranscriptionModels: Set<String> = [
@@ -278,6 +301,12 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
         }
         if trimmed == AppleLocalModels.speechTranscriberModelID,
            !AppleLocalModels.supportsSpeechTranscriber {
+            return AppleLocalModels.supportsDictationTranscriber
+                ? AppleLocalModels.dictationTranscriberModelID
+                : defaultBatchTranscriptionModel
+        }
+        if trimmed == AppleLocalModels.dictationTranscriberModelID,
+           !AppleLocalModels.supportsDictationTranscriber {
             return defaultBatchTranscriptionModel
         }
         guard !trimmed.isEmpty, !retiredBatchTranscriptionModels.contains(trimmed) else {

@@ -1,6 +1,6 @@
 import XCTest
 
-@testable import SpeakApp
+import SpeakCore
 
 final class AutoCorrectionModelTests: XCTestCase {
 

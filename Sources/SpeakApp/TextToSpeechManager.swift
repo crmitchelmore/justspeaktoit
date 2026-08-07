@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import SpeakCore
 import SwiftUI
 
 @MainActor

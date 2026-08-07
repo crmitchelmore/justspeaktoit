@@ -3,26 +3,26 @@ import Foundation
 // MARK: - Domain Models
 
 // Personal lexicon rules capture canonical spellings and contextual hints for corrections.
-struct PersonalLexiconRule: Identifiable, Codable, Equatable {
-  enum Activation: String, Codable, CaseIterable {
+public struct PersonalLexiconRule: Identifiable, Codable, Equatable {
+  public enum Activation: String, Codable, CaseIterable {
     case automatic
     case requireContextMatch
     case manual
   }
 
-  let id: UUID
-  var displayName: String
-  var canonical: String
-  var aliases: [String]
-  var activation: Activation
-  var contextTags: Set<String>
-  var confidence: PersonalLexiconConfidence
-  var notes: String?
-  var source: PersonalLexiconRuleSource
-  var createdAt: Date
-  var updatedAt: Date
+  public let id: UUID
+  public var displayName: String
+  public var canonical: String
+  public var aliases: [String]
+  public var activation: Activation
+  public var contextTags: Set<String>
+  public var confidence: PersonalLexiconConfidence
+  public var notes: String?
+  public var source: PersonalLexiconRuleSource
+  public var createdAt: Date
+  public var updatedAt: Date
 
-  init(
+  public init(
     id: UUID = UUID(),
     displayName: String,
     canonical: String,
@@ -48,13 +48,13 @@ struct PersonalLexiconRule: Identifiable, Codable, Equatable {
     self.updatedAt = updatedAt
   }
 
-  func updatingTimestamps() -> PersonalLexiconRule {
+  public func updatingTimestamps() -> PersonalLexiconRule {
     var copy = self
     copy.updatedAt = Date()
     return copy
   }
 
-  func sanitised() -> PersonalLexiconRule {
+  public func sanitised() -> PersonalLexiconRule {
     let trimmedCanonical = canonical.trimmingCharacters(in: .whitespacesAndNewlines)
     let uniqueAliases = LinkedHashSet(values: aliases)
       .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -76,31 +76,37 @@ struct PersonalLexiconRule: Identifiable, Codable, Equatable {
   }
 }
 
-struct PersonalLexiconContext: Equatable {
-  var tags: Set<String>
-  var destinationApplication: String?
-  var recentTranscriptWindow: String
+public struct PersonalLexiconContext: Equatable {
+  public var tags: Set<String>
+  public var destinationApplication: String?
+  public var recentTranscriptWindow: String
 
-  static let empty = PersonalLexiconContext(tags: [], destinationApplication: nil, recentTranscriptWindow: "")
+  public init(tags: Set<String>, destinationApplication: String?, recentTranscriptWindow: String) {
+    self.tags = tags
+    self.destinationApplication = destinationApplication
+    self.recentTranscriptWindow = recentTranscriptWindow
+  }
+
+  public static let empty = PersonalLexiconContext(tags: [], destinationApplication: nil, recentTranscriptWindow: "")
 }
 
-enum PersonalLexiconConfidence: String, Codable, CaseIterable {
+public enum PersonalLexiconConfidence: String, Codable, CaseIterable {
   case high
   case medium
   case low
 }
 
-struct PersonalLexiconCorrectionRecord: Codable, Hashable, Identifiable {
-  let id: UUID
-  let ruleID: UUID
-  let alias: String
-  let canonical: String
-  let occurrences: Int
-  let wasApplied: Bool
-  let confidence: PersonalLexiconConfidence
-  let reason: String?
+public struct PersonalLexiconCorrectionRecord: Codable, Hashable, Identifiable {
+  public let id: UUID
+  public let ruleID: UUID
+  public let alias: String
+  public let canonical: String
+  public let occurrences: Int
+  public let wasApplied: Bool
+  public let confidence: PersonalLexiconConfidence
+  public let reason: String?
 
-  init(
+  public init(
     id: UUID = UUID(),
     ruleID: UUID,
     alias: String,
@@ -121,19 +127,29 @@ struct PersonalLexiconCorrectionRecord: Codable, Hashable, Identifiable {
   }
 }
 
-struct PersonalLexiconApplicationResult {
-  let transformedText: String
-  let applied: [PersonalLexiconCorrectionRecord]
-  let suggestions: [PersonalLexiconCorrectionRecord]
+public struct PersonalLexiconApplicationResult {
+  public let transformedText: String
+  public let applied: [PersonalLexiconCorrectionRecord]
+  public let suggestions: [PersonalLexiconCorrectionRecord]
+
+  public init(
+    transformedText: String,
+    applied: [PersonalLexiconCorrectionRecord],
+    suggestions: [PersonalLexiconCorrectionRecord]
+  ) {
+    self.transformedText = transformedText
+    self.applied = applied
+    self.suggestions = suggestions
+  }
 }
 
-struct PersonalLexiconHistorySummary: Codable, Hashable {
-  let applied: [PersonalLexiconCorrectionRecord]
-  let suggestions: [PersonalLexiconCorrectionRecord]
-  let contextTags: [String]
-  let destinationApplication: String?
+public struct PersonalLexiconHistorySummary: Codable, Hashable {
+  public let applied: [PersonalLexiconCorrectionRecord]
+  public let suggestions: [PersonalLexiconCorrectionRecord]
+  public let contextTags: [String]
+  public let destinationApplication: String?
 
-  init(
+  public init(
     applied: [PersonalLexiconCorrectionRecord],
     suggestions: [PersonalLexiconCorrectionRecord],
     contextTags: [String] = [],
@@ -145,7 +161,7 @@ struct PersonalLexiconHistorySummary: Codable, Hashable {
     self.destinationApplication = destinationApplication
   }
 
-  func updatingContext(tags: [String], destination: String?) -> PersonalLexiconHistorySummary {
+  public func updatingContext(tags: [String], destination: String?) -> PersonalLexiconHistorySummary {
     PersonalLexiconHistorySummary(
       applied: applied,
       suggestions: suggestions,
@@ -163,10 +179,8 @@ private struct LinkedHashSet<Element: Hashable>: Sequence {
   init(values: [Element]) {
     var seen: Set<Element> = []
     var buffer: [Element] = []
-    for value in values {
-      if seen.insert(value).inserted {
-        buffer.append(value)
-      }
+    for value in values where seen.insert(value).inserted {
+      buffer.append(value)
     }
     ordered = buffer
   }
@@ -177,7 +191,7 @@ private struct LinkedHashSet<Element: Hashable>: Sequence {
 }
 
 extension PersonalLexiconRule {
-  func shouldAutoApply(in context: PersonalLexiconContext) -> Bool {
+  public func shouldAutoApply(in context: PersonalLexiconContext) -> Bool {
     switch activation {
     case .automatic:
       return true

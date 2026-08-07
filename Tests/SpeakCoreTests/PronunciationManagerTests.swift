@@ -1,5 +1,5 @@
 import XCTest
-@testable import SpeakApp
+import SpeakCore
 
 final class PronunciationManagerTests: XCTestCase {
   private var suiteName = ""

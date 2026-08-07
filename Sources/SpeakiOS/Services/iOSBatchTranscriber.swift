@@ -174,46 +174,16 @@ private struct IOSBatchTranscriptionClient {
         language: String?,
         apiKey: String
     ) async throws -> TranscriptionResult {
-        let audioData = try Data(contentsOf: url)
-        guard audioData.count <= 50 * 1024 * 1024 else {
+        let client = OpenRouterAPIClient(apiKey: apiKey, session: session)
+        do {
+            return try await client.transcribeFile(at: url, model: model, language: language)
+        } catch OpenRouterClientError.audioFileTooLarge {
             throw IOSBatchTranscriptionError.audioTooLarge
+        } catch OpenRouterClientError.invalidResponse {
+            throw IOSBatchTranscriptionError.invalidResponse
+        } catch let OpenRouterClientError.httpStatus(statusCode, body) {
+            throw IOSBatchTranscriptionError.httpError("OpenRouter", statusCode, body)
         }
-        var request = URLRequest(url: URL(string: "https://openrouter.ai/api/v1/chat/completions")!)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("Just Speak to It (iOS)", forHTTPHeaderField: "X-Title")
-        request.setValue("https://github.com/crmitchelmore/justspeaktoit", forHTTPHeaderField: "HTTP-Referer")
-
-        let locale = language?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let prompt = locale.isEmpty
-            ? "Transcribe this audio file. Return only the transcript text, with no commentary."
-            : "Transcribe this audio file using locale \(locale). Return only the transcript text, with no commentary."
-        request.httpBody = try JSONEncoder().encode(
-            OpenRouterRequest(
-                model: model,
-                messages: [OpenRouterMessage(role: "user", content: [
-                    OpenRouterContent(type: "text", text: prompt, inputAudio: nil),
-                    OpenRouterContent(
-                        type: "input_audio",
-                        text: nil,
-                        inputAudio: OpenRouterAudio(
-                            data: audioData.base64EncodedString(),
-                            format: "m4a"
-                        )
-                    )
-                ])]
-            )
-        )
-
-        let (data, response) = try await session.data(for: request)
-        try validate(response: response, data: data, service: "OpenRouter")
-        let payload = try JSONDecoder().decode(OpenRouterResponse.self, from: data)
-        let text = payload.choices.compactMap(\.message?.content)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .first(where: { !$0.isEmpty }) ?? ""
-        guard !text.isEmpty else { throw IOSBatchTranscriptionError.emptyTranscript }
-        return await result(text: text, url: url, model: model, rawPayload: data)
     }
 
     private func validate(response: URLResponse, data: Data, service: String) throws {
@@ -260,43 +230,6 @@ private struct OpenAIResponse: Decodable {
 private struct OpenAIResponseSegment: Decodable {
     let text: String
     let speaker: String?
-}
-
-private struct OpenRouterRequest: Encodable {
-    let model: String
-    let temperature = 0
-    let stream = false
-    let messages: [OpenRouterMessage]
-}
-
-private struct OpenRouterMessage: Encodable {
-    let role: String
-    let content: [OpenRouterContent]
-}
-
-private struct OpenRouterContent: Encodable {
-    let type: String
-    let text: String?
-    let inputAudio: OpenRouterAudio?
-
-    enum CodingKeys: String, CodingKey { case type, text; case inputAudio = "input_audio" }
-}
-
-private struct OpenRouterAudio: Encodable {
-    let data: String
-    let format: String
-}
-
-private struct OpenRouterResponse: Decodable {
-    let choices: [OpenRouterChoice]
-}
-
-private struct OpenRouterChoice: Decodable {
-    let message: OpenRouterResponseMessage?
-}
-
-private struct OpenRouterResponseMessage: Decodable {
-    let content: String
 }
 
 public enum IOSBatchTranscriptionError: LocalizedError {

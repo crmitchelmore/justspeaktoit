@@ -118,83 +118,20 @@ public final class iOSPostProcessingManager: ObservableObject {
     }
     
     // MARK: - OpenRouter API
-    
+
+    /// Streams a chat completion through the shared SpeakCore OpenRouter client.
     private func sendChatStreaming(
         systemPrompt: String,
         userMessage: String,
         model: String,
         apiKey: String
     ) -> AsyncThrowingStream<String, Error> {
-        AsyncThrowingStream { continuation in
-            Task {
-                do {
-                    guard let url = URL(string: "https://openrouter.ai/api/v1/chat/completions") else {
-                        continuation.finish(throwing: PostProcessingError.invalidURL)
-                        return
-                    }
-                    
-                    var request = URLRequest(url: url)
-                    request.httpMethod = "POST"
-                    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                    request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-                    request.setValue("JustSpeakToIt iOS", forHTTPHeaderField: "X-Title")
-                    request.setValue("https://justspeaktoit.com", forHTTPHeaderField: "HTTP-Referer")
-                    
-                    let body: [String: Any] = [
-                        "model": model,
-                        "temperature": 0.2,
-                        "stream": true,
-                        "messages": [
-                            ["role": "system", "content": systemPrompt],
-                            ["role": "user", "content": userMessage]
-                        ]
-                    ]
-                    
-                    request.httpBody = try JSONSerialization.data(withJSONObject: body)
-                    
-                    let (bytes, response) = try await URLSession.shared.bytes(for: request)
-                    
-                    guard let httpResponse = response as? HTTPURLResponse else {
-                        continuation.finish(throwing: PostProcessingError.invalidResponse)
-                        return
-                    }
-                    
-                    guard httpResponse.statusCode == 200 else {
-                        continuation.finish(throwing: PostProcessingError.httpError(httpResponse.statusCode))
-                        return
-                    }
-                    
-                    // Parse SSE stream
-                    for try await line in bytes.lines {
-                        if Task.isCancelled {
-                            continuation.finish()
-                            return
-                        }
-                        
-                        guard line.hasPrefix("data: ") else { continue }
-                        let data = String(line.dropFirst(6))
-                        
-                        if data == "[DONE]" {
-                            break
-                        }
-                        
-                        guard let jsonData = data.data(using: .utf8),
-                              let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
-                              let choices = json["choices"] as? [[String: Any]],
-                              let delta = choices.first?["delta"] as? [String: Any],
-                              let content = delta["content"] as? String else {
-                            continue
-                        }
-                        
-                        continuation.yield(content)
-                    }
-                    
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
-        }
+        OpenRouterAPIClient(apiKey: apiKey).sendChatStreaming(
+            systemPrompt: systemPrompt,
+            messages: [ChatMessage(role: .user, content: userMessage)],
+            model: model,
+            temperature: 0.2
+        )
     }
 }
 

@@ -1,4 +1,5 @@
 import Foundation
+import os.log
 import Security
 import SpeakCore
 
@@ -52,8 +53,23 @@ final class PermissionsManagerBridge: KeychainPermissionsChecking, @unchecked Se
 
 // MARK: - AppSettings Bridge
 
-/// Makes AppSettings conform to APIKeyIdentifierRegistry
+/// AppSettings acts as the registry for known API-key identifiers so
+/// SecureStorage can validate writes without coupling the core type to
+/// app-layer storage. Conformance is via empty extension to keep the
+/// registry surface minimal — no app logic leaks into SpeakCore.
 extension AppSettings: APIKeyIdentifierRegistry {}
+
+// Explicit registry adapter for tests: avoids forcing test doubles to
+// inherit from AppSettings. Marked @MainActor to match the protocol; tests
+// that need it off the main actor can create it inside `MainActor.run`.
+@MainActor
+final class InMemoryIdentifierRegistry: APIKeyIdentifierRegistry {
+    private var identifiers: Set<String>
+    init(identifiers: Set<String> = []) { self.identifiers = identifiers }
+    func registerAPIKeyIdentifier(_ identifier: String) { identifiers.insert(identifier) }
+    func removeAPIKeyIdentifier(_ identifier: String) { identifiers.remove(identifier) }
+    var trackedAPIKeyIdentifiers: [String] { Array(identifiers) }
+}
 
 // MARK: - SecureAppStorage (Thin Wrapper)
 
@@ -84,12 +100,16 @@ actor SecureAppStorage {
             synchronizable: false
         )
 
-        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        print("[SecureAppStorage] Keychain Configuration:")
-        print("  accessGroup: \(configuration.accessGroup ?? "nil")")
-        print("  synchronizable: \(configuration.synchronizable)")
-        print("  service: \(configuration.service)")
-        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        if ProcessInfo.processInfo.environment["SPEAK_DEBUG_KEYCHAIN"] == "1" {
+            let details = [
+                "service: \(configuration.service)",
+                "synchronizable: \(configuration.synchronizable)",
+                "accessGroup: \(configuration.accessGroup ?? "nil")"
+            ].joined(separator: ", ")
+            Logger(subsystem: "com.github.speakapp", category: "SecureAppStorage").debug(
+                "Keychain config — \(details, privacy: .public)"
+            )
+        }
 
         self.storage = SecureStorage(
             configuration: configuration,

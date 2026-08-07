@@ -56,8 +56,7 @@ let package = Package(
         .target(
             name: "SpeakiOSLib",
             dependencies: ["SpeakCore", "SpeakSync"],
-            path: "Sources/SpeakiOS",
-            exclude: ["SpeakiOSApp.swift"]
+            path: "Sources/SpeakiOS"
         ),
         .executableTarget(
             name: "SpeakApp",

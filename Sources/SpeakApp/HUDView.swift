@@ -2,11 +2,14 @@ import Foundation
 import SpeakCore
 import SwiftUI
 
-// swiftlint:disable type_body_length
+// swiftlint:disable type_body_length file_length
 struct HUDOverlay: View {
   @ObservedObject var manager: HUDManager
   @EnvironmentObject private var settings: AppSettings
   @Environment(\.colorScheme) private var colorScheme
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
   var body: some View {
     if manager.snapshot.phase.isVisible {
@@ -20,7 +23,7 @@ struct HUDOverlay: View {
 
   @ViewBuilder
   private var presentedContent: some View {
-    if shouldUseLegacyRendering {
+    if shouldUseLegacyRendering || reduceMotion {
       content
     } else {
       content
@@ -31,15 +34,19 @@ struct HUDOverlay: View {
   private var content: some View {
     let base = VStack(spacing: 12) {
       animatedGlyph
+        .accessibilityHidden(false)
       VStack(spacing: 4) {
         Text(manager.snapshot.headline)
           .font(.headline)
           .foregroundStyle(headlineColor)
+          .dynamicTypeSize(...DynamicTypeSize.accessibility1)
           .accessibilityLabel("Status: \(manager.snapshot.headline)")
+          .accessibilityAddTraits(.isHeader)
         if let sub = manager.snapshot.subheadline {
           Text(sub)
             .font(.subheadline)
             .foregroundStyle(.secondary)
+            .dynamicTypeSize(...DynamicTypeSize.accessibility1)
             .accessibilityLabel(sub)
         }
         if manager.snapshot.showRetryHint {
@@ -50,22 +57,25 @@ struct HUDOverlay: View {
             .accessibilityHint("Press Command-R to retry the operation")
         }
       }
+      .accessibilityElement(children: .combine)
       if case .recording = manager.snapshot.phase {
         AudioLevelMeterView(
           level: manager.audioLevel,
-          animatesLevel: !shouldUseLegacyRendering,
+          animatesLevel: !shouldUseLegacyRendering && !reduceMotion,
           width: 100,
           height: 4
         )
           .padding(.top, 2)
           .accessibilityLabel("Audio level meter")
           .accessibilityValue("\(Int(manager.audioLevel * 100)) percent")
+          .accessibilityAddTraits(.updatesFrequently)
       }
       if manager.snapshot.phase.isTerminal == false {
         Text(elapsedText)
           .font(.caption.monospacedDigit())
           .foregroundStyle(.secondary)
           .accessibilityLabel("Elapsed time: \(elapsedText)")
+          .accessibilityAddTraits(.updatesFrequently)
       }
 
       // Live transcript section (only during recording phase with content)
@@ -84,10 +94,13 @@ struct HUDOverlay: View {
     }
     .padding(.horizontal, 24)
     .padding(.vertical, 16)
+    .accessibilityElement(children: .contain)
+    .accessibilitySortPriority(1)
     let shell = hudShell(base)
-      .frame(maxWidth: manager.isExpanded ? 500 : 320)
+      .frame(maxWidth: hudMaxWidth)
       .padding(.horizontal, 60)
-    if shouldUseLegacyRendering {
+      .accessibilityAddTraits(.isModal)
+    if shouldUseLegacyRendering || reduceMotion {
       return AnyView(shell)
     } else {
       return AnyView(
@@ -103,7 +116,7 @@ struct HUDOverlay: View {
   private func hudShell<Content: View>(_ view: Content) -> some View {
     let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
     #if compiler(>=6.1) && canImport(SwiftUI, _version: 7.0)
-    if #available(macOS 26.0, *), HUDPlatformWorkarounds.isGlassEffectEnabled {
+    if #available(macOS 26.0, *), HUDPlatformWorkarounds.isGlassEffectEnabled, !reduceTransparency {
       view
         .background(phaseTint)
         .glassEffect(.regular.tint(phaseColor.opacity(0.18)).interactive(), in: .rect(cornerRadius: 20))
@@ -118,7 +131,15 @@ struct HUDOverlay: View {
 
   @ViewBuilder
   private func hudShellFallback<Content: View>(_ view: Content, shape: RoundedRectangle) -> some View {
-    if shouldUseLegacyRendering {
+    if reduceTransparency {
+      view
+        .background(
+          shape
+            .fill(opaqueBackgroundColor)
+            .overlay(phaseTint)
+        )
+        .overlay(shape.stroke(phaseColor.opacity(0.45), lineWidth: strokeWidth))
+    } else if shouldUseLegacyRendering {
       view
         .background(
           shape
@@ -157,7 +178,7 @@ struct HUDOverlay: View {
           .lineLimit(2)
           .truncationMode(.head)
           .animation(
-            shouldUseLegacyRendering ? nil : .easeInOut(duration: 0.2),
+            (shouldUseLegacyRendering || reduceMotion) ? nil : .easeInOut(duration: 0.2),
             value: isFinal
           )
           .accessibilityLabel(isFinal ? "Transcript: \(text)" : "Partial transcript: \(text)")
@@ -192,7 +213,10 @@ struct HUDOverlay: View {
   private var captureHealthRow: some View {
     let health = manager.captureHealth
     let micWarning = health.noInputDevicesAvailable || health.microphonePermission == .denied
-    let micColor: Color = micWarning ? phaseColor : .secondary
+    // Use higher contrast for warning state to meet WCAG AA.
+    let micColor: Color = micWarning
+      ? (colorScheme == .dark ? Color.red.opacity(0.9) : Color.red)
+      : .secondary
     let microphonePermissionLabel = {
       if health.noInputDevicesAvailable {
         return "No device"
@@ -300,11 +324,12 @@ struct HUDOverlay: View {
   private var animatedGlyph: some View {
     switch manager.snapshot.phase {
     case .failure:
-      if shouldUseLegacyRendering {
+      if shouldUseLegacyRendering || reduceMotion {
         Image(systemName: "exclamationmark.triangle.fill")
           .font(.system(size: 32, weight: .bold))
           .foregroundStyle(phaseColor)
           .accessibilityLabel("Error indicator")
+          .accessibilityAddTraits(.isImage)
       } else {
         TimelineView(.animation) { context in
           let progress = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1)
@@ -315,6 +340,7 @@ struct HUDOverlay: View {
             .scaleEffect(scale)
             .shadow(color: phaseColor.opacity(0.45), radius: 10, x: 0, y: 6)
             .accessibilityLabel("Error indicator")
+            .accessibilityAddTraits(.isImage)
         }
       }
     case .success:
@@ -323,12 +349,14 @@ struct HUDOverlay: View {
         .foregroundStyle(phaseColor)
         .shadow(color: phaseColor.opacity(0.3), radius: 6, x: 0, y: 4)
         .accessibilityLabel("Success indicator")
+        .accessibilityAddTraits(.isImage)
     default:
-      if shouldUseLegacyRendering {
+      if shouldUseLegacyRendering || reduceMotion {
         Circle()
           .fill(phaseColor)
           .frame(width: 18, height: 18)
-          .accessibilityLabel("Recording status indicator")
+          .accessibilityLabel("\(manager.snapshot.headline) status indicator")
+          .accessibilityAddTraits(.isImage)
       } else {
         TimelineView(.animation) { context in
           let progress = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1)
@@ -338,7 +366,8 @@ struct HUDOverlay: View {
             .frame(width: 18, height: 18)
             .scaleEffect(scale)
             .shadow(color: phaseColor.opacity(0.4), radius: 6, x: 0, y: 4)
-            .accessibilityLabel("Recording status indicator")
+            .accessibilityLabel("\(manager.snapshot.headline) status indicator")
+            .accessibilityAddTraits(.isImage)
         }
       }
     }
@@ -346,6 +375,14 @@ struct HUDOverlay: View {
 
   private var shouldUseLegacyRendering: Bool {
     HUDPlatformWorkarounds.isLegacyRenderingEnabled
+  }
+
+  private var hudMaxWidth: CGFloat {
+    dynamicTypeSize.isAccessibilitySize || manager.isExpanded ? 500 : 320
+  }
+
+  private var opaqueBackgroundColor: Color {
+    colorScheme == .dark ? .black : .white
   }
 
   private var legacyBackgroundColor: Color {
@@ -365,10 +402,4 @@ struct HUDOverlay: View {
     }
   }
 }
-// swiftlint:enable type_body_length
-
-// @Implement: This is the view that shows a floating indicator at the bottom middle of the screen. This view should float on top of all windows in the system but only show when recording is in progress. This should be a minimal view but must be engaging and informative to the users. It should have a cool animated graphic for each phase.
-// - Recording: Show in red and how long recording is for with a cool icon as well as animation
-// - Transcribing: If the operation is a batch request, this is the transcribing phase waiting for the raw transcription to return
-// - Post Processing: This is the call to an LLM to clean up the transcription and also is be optional based on app settings
-// - Error: IF any phase errors show the error message.
+// swiftlint:enable type_body_length file_length

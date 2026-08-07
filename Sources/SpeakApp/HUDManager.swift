@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import Foundation
 
@@ -61,12 +62,40 @@ final class HUDManager: ObservableObject {
   @Published private(set) var audioLevel: Float = 0
 
   private let appSettings: AppSettings
+  private let accessibilityAnnouncementPoster: ((String) -> Void)?
   private var timer: Timer?
   private var phaseStartDate: Date?
   private var autoHideTimer: Timer?
 
-  init(appSettings: AppSettings) {
+  init(
+    appSettings: AppSettings,
+    accessibilityAnnouncementPoster: ((String) -> Void)? = nil
+  ) {
     self.appSettings = appSettings
+    self.accessibilityAnnouncementPoster = accessibilityAnnouncementPoster
+  }
+
+  static func accessibilityAnnouncement(
+    for phase: Snapshot.Phase,
+    subheadline: String?
+  ) -> String? {
+    let detail = subheadline.map { ". \($0)" } ?? ""
+    switch phase {
+    case .recording:
+      return "Recording started\(detail)"
+    case .transcribing:
+      return "Transcribing\(detail)"
+    case .postProcessing:
+      return "Post-processing\(detail)"
+    case .delivering:
+      return "Delivering transcription\(detail)"
+    case .success(let message):
+      return "Success. \(message)"
+    case .failure(let message):
+      return "Failed. \(message)"
+    case .hidden:
+      return nil
+    }
   }
 
   func beginRecording() {
@@ -150,9 +179,11 @@ final class HUDManager: ObservableObject {
   }
 
   func hide() {
+    guard snapshot.phase.isVisible else { return }
     invalidateTimers()
     audioLevel = 0
     snapshot = .hidden
+    postAccessibilityAnnouncement("HUD dismissed")
   }
 
   func updateCaptureHealth(_ health: CaptureHealthSnapshot) {
@@ -173,6 +204,9 @@ final class HUDManager: ObservableObject {
       liveText: nil, liveTextIsFinal: true, liveTextConfidence: nil, streamingText: nil,
       finalTranscript: "", interimTranscript: ""
     )
+    if let announcement = Self.accessibilityAnnouncement(for: phase, subheadline: subheadline) {
+      postAccessibilityAnnouncement(announcement)
+    }
 
     guard showsTimer else { return }
 
@@ -224,6 +258,17 @@ final class HUDManager: ObservableObject {
     timer = nil
     autoHideTimer?.invalidate()
     autoHideTimer = nil
+  }
+
+  private func postAccessibilityAnnouncement(_ announcement: String) {
+    if let accessibilityAnnouncementPoster {
+      accessibilityAnnouncementPoster(announcement)
+      return
+    }
+    NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested, userInfo: [
+      .announcement: announcement,
+      .priority: NSAccessibilityPriorityLevel.high.rawValue
+    ])
   }
 }
 // @Implement: This file is the state manager for the Heads-Up display. It exposes lifecycle functions so that another class can notify it when recording has started, transcribing has started, post-processing has started, etc. It has an enum for all the states it can be in and is a state machine. It also has the ability to surface errors in any of those things and it has an internal timer that shows the duration of each step.

@@ -279,26 +279,7 @@ struct PersonalCorrectionsView: View {
 
       Spacer()
 
-      HStack(spacing: 8) {
-        Button {
-          Task {
-            await autoCorrectionTracker.promoteCandidate(candidate)
-          }
-        } label: {
-          Image(systemName: "checkmark.circle")
-        }
-        .buttonStyle(.borderless)
-        .help("Add as correction rule")
-
-        Button {
-          autoCorrectionTracker.dismissCandidate(id: candidate.id)
-        } label: {
-          Image(systemName: "xmark.circle")
-        }
-        .buttonStyle(.borderless)
-        .foregroundStyle(.secondary)
-        .help("Dismiss")
-      }
+      candidateActions(candidate)
     }
     .padding(.vertical, 6)
     .padding(.horizontal, 10)
@@ -306,6 +287,31 @@ struct PersonalCorrectionsView: View {
       RoundedRectangle(cornerRadius: 8, style: .continuous)
         .fill(Color(nsColor: .controlBackgroundColor))
     )
+  }
+
+  private func candidateActions(_ candidate: AutoCorrectionCandidate) -> some View {
+    HStack(spacing: 8) {
+      Button {
+        Task {
+          await autoCorrectionTracker.promoteCandidate(candidate)
+        }
+      } label: {
+        Image(systemName: "checkmark.circle")
+      }
+      .buttonStyle(.borderless)
+      .help("Add as correction rule")
+      .accessibilityLabel("Add as correction rule: \(candidate.original) to \(candidate.corrected)")
+
+      Button {
+        autoCorrectionTracker.dismissCandidate(id: candidate.id)
+      } label: {
+        Image(systemName: "xmark.circle")
+      }
+      .buttonStyle(.borderless)
+      .foregroundStyle(.secondary)
+      .help("Dismiss")
+      .accessibilityLabel("Dismiss candidate \(candidate.original)")
+    }
   }
 
   private var editorCard: some View {

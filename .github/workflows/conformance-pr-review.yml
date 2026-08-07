@@ -17,6 +17,7 @@ jobs:
   conformance-pr-review:
     name: Advisory conformance review
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     continue-on-error: true
     steps:
       - name: Checkout repository

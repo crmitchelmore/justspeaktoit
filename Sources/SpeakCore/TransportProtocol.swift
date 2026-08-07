@@ -104,11 +104,19 @@ public struct HelloMessage: Codable {
     public var protocolVersion: Int
     public var deviceName: String
     public var deviceId: String
-    
+
     public init(protocolVersion: Int = SpeakTransportProtocolVersion, deviceName: String, deviceId: String) {
         self.protocolVersion = protocolVersion
         self.deviceName = deviceName
         self.deviceId = deviceId
+    }
+
+    /// Whether this hello's protocol version is compatible with the running build.
+    ///
+    /// Policy: exact match. Both endpoints ship from this repository, so there is no
+    /// need to support version skew yet; a range check can replace this if that changes.
+    public var isProtocolVersionCompatible: Bool {
+        self.protocolVersion == SpeakTransportProtocolVersion
     }
 }
 
@@ -196,6 +204,18 @@ public struct ErrorMessage: Codable {
     public static let authenticationFailed = ErrorMessage(code: 401, message: "Authentication failed")
     public static let protocolMismatch = ErrorMessage(code: 400, message: "Protocol version mismatch")
     public static let sessionNotFound = ErrorMessage(code: 404, message: "Session not found")
+
+    /// Protocol-mismatch error that tells the client both versions, so the rejection
+    /// is actionable ("update the app") instead of a silent disconnect.
+    public static func protocolMismatch(
+        clientVersion: Int,
+        serverVersion: Int = SpeakTransportProtocolVersion
+    ) -> ErrorMessage {
+        ErrorMessage(
+            code: ErrorMessage.protocolMismatch.code,
+            message: "Protocol version mismatch: client sent v\(clientVersion), server requires v\(serverVersion)"
+        )
+    }
 }
 
 // MARK: - Pairing

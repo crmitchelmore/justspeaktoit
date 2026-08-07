@@ -98,7 +98,9 @@ final class HUDManager: ObservableObject {
     }
   }
 
-  func beginRecording() {
+  /// Begins the recording phase. When a dictation profile is active for the
+  /// session, its name is surfaced in the HUD subheadline.
+  func beginRecording(profileName: String? = nil) {
     // Set initial expansion state based on user preference
     switch appSettings.hudSizePreference {
     case .compact:
@@ -108,7 +110,8 @@ final class HUDManager: ObservableObject {
     case .autoExpand:
       isExpanded = false  // Will auto-expand when transcript exceeds threshold
     }
-    transition(.recording, headline: "Recording", subheadline: "Capturing audio")
+    let subheadline = profileName.map { "Profile: \($0)" } ?? "Capturing audio"
+    transition(.recording, headline: "Recording", subheadline: subheadline)
   }
 
   /// Update the current audio level during recording (0.0 to 1.0)

@@ -1,19 +1,26 @@
 import AppKit
 import ApplicationServices
+import Combine
 import Foundation
+import SpeakCore
 import os.log
 
 /// Monitors text fields after transcription insertion to detect user corrections.
 /// When the same correction pattern is seen multiple times, it's promoted to a rule.
+///
+/// Thin macOS wrapper: the Accessibility (AXUIElement) monitoring lives here,
+/// while candidate tracking and promotion is delegated to SpeakCore's
+/// AutoCorrectionEngine.
 @MainActor
 final class AutoCorrectionTracker: ObservableObject {
-  @Published private(set) var candidates: [AutoCorrectionCandidate] = []
   @Published private(set) var isMonitoring: Bool = false
 
-  private let store: AutoCorrectionStore
-  private let lexiconService: PersonalLexiconService
+  var candidates: [AutoCorrectionCandidate] { engine.candidates }
+
+  private let engine: AutoCorrectionEngine
   private let appSettings: AppSettings
   private let log = Logger(subsystem: "com.github.speakapp", category: "AutoCorrectionTracker")
+  private var engineChanges: AnyCancellable?
 
   private var monitoringTask: Task<Void, Never>?
   private var insertedText: String = ""
@@ -28,12 +35,16 @@ final class AutoCorrectionTracker: ObservableObject {
   private let maxMonitorDuration: TimeInterval = 30.0
 
   init(store: AutoCorrectionStore, lexiconService: PersonalLexiconService, appSettings: AppSettings) {
-    self.store = store
-    self.lexiconService = lexiconService
+    self.engine = AutoCorrectionEngine(
+      store: store,
+      lexiconService: lexiconService,
+      promotionThreshold: { appSettings.autoCorrectionsPromotionThreshold }
+    )
     self.appSettings = appSettings
 
-    Task { [weak self] in
-      await self?.loadCandidates()
+    // Re-publish engine changes so views observing the tracker stay in sync.
+    engineChanges = engine.objectWillChange.sink { [weak self] _ in
+      self?.objectWillChange.send()
     }
   }
 
@@ -86,54 +97,25 @@ final class AutoCorrectionTracker: ObservableObject {
 
   /// Manually promote a candidate to a correction rule.
   func promoteCandidate(_ candidate: AutoCorrectionCandidate) async {
-    await createRuleFromCandidate(candidate)
-    removeCandidate(id: candidate.id)
+    await engine.promoteCandidate(candidate)
   }
 
   /// Dismiss a candidate (user doesn't want this correction).
   func dismissCandidate(id: UUID) {
-    guard let index = candidates.firstIndex(where: { $0.id == id }) else { return }
-    candidates[index].dismissed = true
-    Task { await persistCandidates() }
+    engine.dismissCandidate(id: id)
   }
 
   /// Remove a candidate entirely.
   func removeCandidate(id: UUID) {
-    candidates.removeAll { $0.id == id }
-    Task { await persistCandidates() }
+    engine.removeCandidate(id: id)
   }
 
   /// Clear all candidates.
   func clearAllCandidates() {
-    candidates.removeAll()
-    Task {
-      do {
-        try await store.deleteAll()
-      } catch {
-        log.error("Failed to delete candidates: \(error.localizedDescription, privacy: .public)")
-      }
-    }
+    engine.clearAllCandidates()
   }
 
   // MARK: - Private Methods
-
-  private func loadCandidates() async {
-    do {
-      let loaded = try await store.load()
-      candidates = loaded.filter { !$0.dismissed }
-      log.info("Loaded \(self.candidates.count, privacy: .public) auto-correction candidates")
-    } catch {
-      log.error("Failed to load candidates: \(error.localizedDescription, privacy: .public)")
-    }
-  }
-
-  private func persistCandidates() async {
-    do {
-      try await store.save(candidates)
-    } catch {
-      log.error("Failed to save candidates: \(error.localizedDescription, privacy: .public)")
-    }
-  }
 
   private func countSentences(in text: String) -> Int {
     let sentenceEnders = CharacterSet(charactersIn: ".!?")
@@ -160,83 +142,6 @@ final class AutoCorrectionTracker: ObservableObject {
       return
     }
 
-    // Check if text was modified
-    guard currentString != insertedText else {
-      log.debug("Text unchanged, no corrections detected")
-      return
-    }
-
-    // Find word-level changes
-    let changes = WordDiffer.findChanges(original: insertedText, edited: currentString)
-
-    guard !changes.isEmpty else {
-      log.debug("No word-level corrections detected (might be a rewrite)")
-      return
-    }
-
-    log.info("Detected \(changes.count, privacy: .public) potential corrections")
-
-    // Process each change
-    for change in changes {
-      await processChange(change)
-    }
-  }
-
-  private func processChange(_ change: WordChange) async {
-    let matchKey = "\(change.original.lowercased())→\(change.corrected.lowercased())"
-
-    // Check if we already have this candidate
-    if let index = candidates.firstIndex(where: { $0.matchKey == matchKey }) {
-      // Increment seen count
-      candidates[index] = candidates[index].incrementingSeen(app: insertionApp)
-      log.info(
-        "Seen correction '\(change.original, privacy: .public)' → '\(change.corrected, privacy: .public)' \(self.candidates[index].seenCount, privacy: .public) times"
-      )
-
-      // Check if ready to promote
-      if candidates[index].seenCount >= appSettings.autoCorrectionsPromotionThreshold {
-        log.info("Promoting correction to rule")
-        await createRuleFromCandidate(candidates[index])
-        candidates.remove(at: index)
-      }
-    } else {
-      // New candidate
-      var sourceApps: Set<String> = []
-      if let app = insertionApp {
-        sourceApps.insert(app)
-      }
-
-      let candidate = AutoCorrectionCandidate(
-        original: change.original,
-        corrected: change.corrected,
-        sourceApps: sourceApps
-      )
-      candidates.append(candidate)
-      log.info(
-        "New correction candidate: '\(change.original, privacy: .public)' → '\(change.corrected, privacy: .public)'"
-      )
-    }
-
-    await persistCandidates()
-  }
-
-  private func createRuleFromCandidate(_ candidate: AutoCorrectionCandidate) async {
-    do {
-      _ = try await lexiconService.addRule(
-        displayName: candidate.corrected,
-        canonical: candidate.corrected,
-        aliases: [candidate.original],
-        activation: .automatic,
-        contextTags: [],
-        confidence: .medium,
-        notes: "Auto-created from repeated corrections",
-        source: .automatic
-      )
-      log.info(
-        "Created auto-correction rule: '\(candidate.original, privacy: .public)' → '\(candidate.corrected, privacy: .public)'"
-      )
-    } catch {
-      log.error("Failed to create rule: \(error.localizedDescription, privacy: .public)")
-    }
+    await engine.recordEdit(original: insertedText, edited: currentString, app: insertionApp)
   }
 }

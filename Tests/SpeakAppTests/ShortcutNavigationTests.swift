@@ -68,6 +68,14 @@ final class ShortcutNavigationTests: XCTestCase {
         XCTAssertTrue(ShortcutAction.pasteLastHistoryItem.isGlobalByDefault)
     }
 
+    func testEditSelectionByVoiceDefault_isGlobalOptionCommandE() {
+        let binding = ShortcutAction.editSelectionByVoice.defaultKeyBinding
+        XCTAssertEqual(binding.displayString, "⌥⌘E")
+        XCTAssertTrue(binding.isGlobal, "Edit Selection by Voice should be a global shortcut")
+        XCTAssertTrue(binding.isEnabled, "Edit Selection by Voice should be enabled by default")
+        XCTAssertTrue(ShortcutAction.editSelectionByVoice.isGlobalByDefault)
+    }
+
     func testPasteLastHistoryItemBinding_roundTripsThroughCodable() throws {
         let bindings: [ShortcutAction: KeyBinding] = [
             .pasteLastHistoryItem: ShortcutAction.pasteLastHistoryItem.defaultKeyBinding

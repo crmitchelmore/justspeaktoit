@@ -77,8 +77,9 @@ struct HUDOverlay: View {
           .accessibilityAddTraits(.updatesFrequently)
       }
 
-      // Live transcript section (only during recording phase with content)
-      if case .recording = manager.snapshot.phase, settings.showLiveTranscriptInHUD {
+      // Live transcript section (recording and voice-edit listening phases with content)
+      if manager.snapshot.phase == .recording || manager.snapshot.phase == .editing,
+         settings.showLiveTranscriptInHUD {
         transcriptSection
       }
 
@@ -279,6 +280,8 @@ struct HUDOverlay: View {
       return .brandAccent
     case .delivering:
       return .green
+    case .editing:
+      return .brandAccentWarm
     case .success:
       return .green
     case .failure:

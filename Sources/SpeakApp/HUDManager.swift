@@ -13,6 +13,7 @@ final class HUDManager: ObservableObject {
       case transcribing
       case postProcessing
       case delivering
+      case editing
       case success(message: String)
       case failure(message: String)
 
@@ -89,6 +90,8 @@ final class HUDManager: ObservableObject {
       return "Post-processing\(detail)"
     case .delivering:
       return "Delivering transcription\(detail)"
+    case .editing:
+      return "Editing\(detail)"
     case .success(let message):
       return "Success. \(message)"
     case .failure(let message):
@@ -119,7 +122,7 @@ final class HUDManager: ObservableObject {
 
   /// Update live transcription text, final state, and confidence
   func updateLiveTranscription(text: String, isFinal: Bool, confidence: Double?) {
-    guard snapshot.phase == .recording else { return }
+    guard snapshot.phase == .recording || snapshot.phase == .editing else { return }
     snapshot.liveText = text.isEmpty ? nil : text
     snapshot.liveTextIsFinal = isFinal
     snapshot.liveTextConfidence = confidence
@@ -156,6 +159,12 @@ final class HUDManager: ObservableObject {
 
   func beginDelivering() {
     transition(.delivering, headline: "Delivering", subheadline: "Pasting into target app")
+  }
+
+  /// Voice-edit mode: a distinct "Editing" state reused across its listening, rewriting, and
+  /// applying stages (the subheadline tells them apart).
+  func beginEditing(subheadline: String) {
+    transition(.editing, headline: "Editing", subheadline: subheadline)
   }
 
   func finishSuccess(message: String) {

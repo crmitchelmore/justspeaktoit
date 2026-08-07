@@ -112,3 +112,6 @@ jobs:
       - name: SwiftLint
         run: |
           swift package --disable-dependency-cache plugin --allow-writing-to-package-directory swiftlint --strict --baseline .swiftlint-baseline.json
+
+      - name: Test release-notes generator
+        run: node --test Tests/ReleaseNotesTests/*.test.mjs

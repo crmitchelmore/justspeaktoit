@@ -4,6 +4,7 @@ enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
   case general
   case transcription
   case postProcessing
+  case profiles
   case voiceOutput
   case pronunciation
   case apiKeys
@@ -22,6 +23,7 @@ enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
     case .general: return "General"
     case .transcription: return "Transcription"
     case .postProcessing: return isAssemblyAI ? "Pre-processing" : "Post-processing"
+    case .profiles: return "Profiles"
     case .voiceOutput: return "Voice Output"
     case .pronunciation: return "Pronunciation"
     case .apiKeys: return "API Keys"
@@ -36,6 +38,7 @@ enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
     case .general: return "gearshape"
     case .transcription: return "waveform"
     case .postProcessing: return "wand.and.stars"
+    case .profiles: return "person.crop.rectangle.stack"
     case .voiceOutput: return "speaker.wave.3"
     case .pronunciation: return "character.book.closed"
     case .apiKeys: return "key.fill"

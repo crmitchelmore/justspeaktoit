@@ -9,6 +9,7 @@ struct DashboardView: View {
   @Environment(\.appVisualDensity) private var density
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @State private var requestingPermission: PermissionType?
+  @StateObject private var speechInsights = SpeechInsightsModel()
 
   var body: some View {
     ScrollView {
@@ -217,6 +218,9 @@ struct DashboardView: View {
         statisticsSection
         recentSection
       }
+
+      // Speech analytics (computed locally from raw transcripts)
+      speechInsightsSection
 
       // Usage Charts
       dailyUsageChartSection
@@ -634,6 +638,13 @@ struct DashboardView: View {
       RoundedRectangle(cornerRadius: density.isCompact ? 7 : 20, style: .continuous)
         .fill(.thinMaterial)
     )
+  }
+
+  private var speechInsightsSection: some View {
+    SpeechInsightsSection(model: speechInsights)
+      .task(id: history.statistics) {
+        speechInsights.refresh(using: history.allItems)
+      }
   }
 
   private var dailyUsageChartSection: some View {

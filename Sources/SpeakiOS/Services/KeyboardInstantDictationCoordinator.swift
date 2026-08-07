@@ -107,12 +107,14 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
 
         do {
             try readinessAudio.start()
-            guard let started = sessionStore.start() else {
+            // `enabling: true` turns the preference on and creates the session
+            // in one locked store transaction, so a concurrent disable can't
+            // interleave between the two writes.
+            guard let started = sessionStore.start(enabling: true) else {
                 readinessAudio.stop(deactivateAudioSession: true)
                 errorMessage = "Instant Dictation could not access the shared keyboard container."
                 return
             }
-            sessionStore.setEnabled(true)
             session = started
             startHeartbeat()
             handleRequestChange()

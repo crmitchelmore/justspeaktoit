@@ -231,6 +231,17 @@ final class MainManager: ObservableObject {
   private func handleLiveTextUpdate(_ text: String) {
     livePreview = text
 
+    // Latency checkpoint: first non-empty partial while still recording.
+    if self.state == .recording, !text.isEmpty,
+       let session = self.activeSession, session.firstPartialReceived == nil {
+      session.firstPartialReceived = Date()
+      if let firstPartialMs = SessionLatencyMetrics.milliseconds(
+        from: session.captureStarted, to: session.firstPartialReceived
+      ) {
+        self.logger.info("Latency: first partial \(firstPartialMs)ms after capture start")
+      }
+    }
+
     // Live insertion during recording (for streaming + accessibility mode)
     if state == .recording && liveInsertionEnabled {
       liveTextInserter.update(with: text)
@@ -487,6 +498,7 @@ final class MainManager: ObservableObject {
 
     do {
       _ = try await audioFileManager.startRecording()
+      recordCaptureStart(for: session)
       startAudioLevelMonitoring()
       if isStreamingTranscriptionMode {
         try await transcriptionManager.startLiveTranscription()
@@ -503,12 +515,26 @@ final class MainManager: ObservableObject {
     }
   }
 
+  /// Latency checkpoint: the recorder is live. hotkey → capture-start is the
+  /// cold-start figure competitors market, so log it explicitly every session.
+  private func recordCaptureStart(for session: ActiveSession) {
+    session.captureStarted = Date()
+    if let coldStartMs = SessionLatencyMetrics.milliseconds(
+      from: session.recordingStarted, to: session.captureStarted
+    ) {
+      self.logger.info("Latency: capture started \(coldStartMs)ms after trigger (cold start)")
+    }
+  }
+
   // swiftlint:disable cyclomatic_complexity function_body_length
   func endSession(trigger: SessionTriggerSource) async {
     guard !isEndingSession else { return }
     guard let session = activeSession else { return }
     isEndingSession = true
     defer { isEndingSession = false }
+
+    // Latency checkpoint: user asked to stop (before the optional tail sleep).
+    session.stopRequested = Date()
 
     stopAudioLevelMonitoring()
 
@@ -825,6 +851,9 @@ final class MainManager: ObservableObject {
         liveFinalizationResult = liveTextInserter.applyPolishedFinal(finalText)
         liveTextInserter.end()
       }
+      // Latency checkpoint: when the first character actually reached the target
+      // app via live insertion (nil when the session never streamed text).
+      session.firstInsertion = self.liveTextInserter.firstInsertionAt
 
       switch liveFinalizationResult {
       case .applied:
@@ -898,7 +927,15 @@ final class MainManager: ObservableObject {
         lastErrorMessage = notice.message
         state = .failed(notice.message)
       } else {
-        hudManager.finishSuccess(message: "Delivered")
+        if let stopToFinalMs = SessionLatencyMetrics.milliseconds(
+          from: session.stopRequested, to: session.outputDelivered
+        ) {
+          hudManager.finishSuccess(
+            message: "Delivered in \(SessionLatencyMetrics.formattedMilliseconds(stopToFinalMs))"
+          )
+        } else {
+          hudManager.finishSuccess(message: "Delivered")
+        }
         state = .completed(historyItem)
       }
 

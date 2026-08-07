@@ -225,6 +225,8 @@ struct DashboardView: View {
       // Usage Charts
       dailyUsageChartSection
 
+      latencySection
+
       LazyVGrid(
         columns: [GridItem(.adaptive(minimum: density.gridMinimumWidth), spacing: density.sectionSpacing)],
         spacing: density.sectionSpacing
@@ -650,6 +652,18 @@ struct DashboardView: View {
       DailyRecordingsChart(data: history.allItems.dailyUsageForLastMonth())
     }
     .speakTooltip("See when you rely on Speak the most so you can plan deep work and reviews thoughtfully.")
+  }
+
+  private var latencySection: some View {
+    DashboardCard(title: "Latency", systemImage: "bolt.badge.clock", tint: Color.brandLagoonDeep) {
+      LatencyInsightsView(
+        providers: history.allItems.latencyInsightsByProvider(),
+        overview: history.allItems.latencyOverview()
+      )
+    }
+    .speakTooltip(
+      "How fast dictation feels: cold start, time to first words, and stop-to-inserted latency per provider (p50/p95)."
+    )
   }
 
   private var transcriptionModelChartSection: some View {

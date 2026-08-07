@@ -23,6 +23,7 @@ final class ShortcutNavigationTests: XCTestCase {
             .openSettings,
             .openTranscriptionSettings,
             .openPostProcessingSettings,
+            .openProfilesSettings,
             .openVoiceOutputSettings,
             .openPronunciationSettings,
             .openAPIKeysSettings,
@@ -54,6 +55,7 @@ final class ShortcutNavigationTests: XCTestCase {
         XCTAssertEqual(ShortcutAction.openKeyboardSettings.defaultKeyBinding.displayString, "⌘7")
         XCTAssertEqual(ShortcutAction.openPermissionsSettings.defaultKeyBinding.displayString, "⌘8")
         XCTAssertEqual(ShortcutAction.openAboutSettings.defaultKeyBinding.displayString, "⌘9")
+        XCTAssertEqual(ShortcutAction.openProfilesSettings.defaultKeyBinding.displayString, "⌘0")
 
         XCTAssertEqual(ShortcutAction.quickVoice1.defaultKeyBinding.displayString, "⌥⌘1")
         XCTAssertEqual(ShortcutAction.quickVoice2.defaultKeyBinding.displayString, "⌥⌘2")

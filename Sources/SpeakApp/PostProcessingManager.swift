@@ -20,6 +20,10 @@ final class PostProcessingManager: ObservableObject {
 
   static let defaultPrompt = TranscriptCleanupPolicy.baseSystemPrompt
 
+  /// Session-scoped custom polish prompt from the active dictation profile.
+  /// Set by `SessionProfileApplier` for the duration of a session; never persisted.
+  var sessionPromptOverride: String?
+
   init(client: ChatLLMClient, settings: AppSettings, personalLexicon: PersonalLexiconService) {
     self.client = client
     self.settings = settings
@@ -338,6 +342,7 @@ final class PostProcessingManager: ObservableObject {
 
   private func basePrompt() -> String {
     TranscriptCleanupPolicy.systemPrompt(
+      customBasePrompt: sessionPromptOverride,
       outputLanguage: normalizedOutputLanguage()
     )
   }
@@ -348,6 +353,7 @@ final class PostProcessingManager: ObservableObject {
   ) -> String {
     let directives = lexiconDirectives(for: context, corrections: corrections)
     return TranscriptCleanupPolicy.systemPrompt(
+      customBasePrompt: sessionPromptOverride,
       outputLanguage: normalizedOutputLanguage(),
       lexiconDirectives: settings.postProcessingIncludeLexiconDirectives ? directives : [],
       lexiconContextTags: settings.postProcessingIncludeContextTags ? Array(context.tags) : []

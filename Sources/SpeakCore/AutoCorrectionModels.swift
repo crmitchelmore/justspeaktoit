@@ -4,17 +4,17 @@ import Foundation
 
 /// A candidate correction detected from user edits after transcription insertion.
 /// When seen multiple times, candidates are promoted to PersonalLexiconRules.
-struct AutoCorrectionCandidate: Identifiable, Codable, Equatable {
-  let id: UUID
-  var original: String        // The word(s) from transcription that was corrected
-  var corrected: String       // What the user changed it to
-  var seenCount: Int          // Number of times this correction was observed
-  var firstSeenAt: Date
-  var lastSeenAt: Date
-  var sourceApps: Set<String> // Apps where this correction was observed
-  var dismissed: Bool         // User chose to ignore this candidate
+public struct AutoCorrectionCandidate: Identifiable, Codable, Equatable {
+  public let id: UUID
+  public var original: String        // The word(s) from transcription that was corrected
+  public var corrected: String       // What the user changed it to
+  public var seenCount: Int          // Number of times this correction was observed
+  public var firstSeenAt: Date
+  public var lastSeenAt: Date
+  public var sourceApps: Set<String> // Apps where this correction was observed
+  public var dismissed: Bool         // User chose to ignore this candidate
 
-  init(
+  public init(
     id: UUID = UUID(),
     original: String,
     corrected: String,
@@ -35,11 +35,11 @@ struct AutoCorrectionCandidate: Identifiable, Codable, Equatable {
   }
 
   /// Key used to identify duplicate candidates (case-insensitive)
-  var matchKey: String {
+  public var matchKey: String {
     "\(original.lowercased())→\(corrected.lowercased())"
   }
 
-  func incrementingSeen(app: String?) -> AutoCorrectionCandidate {
+  public func incrementingSeen(app: String?) -> AutoCorrectionCandidate {
     var copy = self
     copy.seenCount += 1
     copy.lastSeenAt = Date()
@@ -53,19 +53,25 @@ struct AutoCorrectionCandidate: Identifiable, Codable, Equatable {
 // MARK: - Word Diff Result
 
 /// Represents a single word-level change detected between original and edited text.
-struct WordChange: Equatable, Hashable {
-  enum ChangeType: String, Codable {
+public struct WordChange: Equatable, Hashable {
+  public enum ChangeType: String, Codable {
     case replacement  // Single word replaced with another single word
     case split        // One word became multiple words
     case merge        // Multiple words became one word
   }
 
-  let type: ChangeType
-  let original: String   // The original word(s)
-  let corrected: String  // The corrected word(s)
+  public let type: ChangeType
+  public let original: String   // The original word(s)
+  public let corrected: String  // The corrected word(s)
+
+  public init(type: ChangeType, original: String, corrected: String) {
+    self.type = type
+    self.original = original
+    self.corrected = corrected
+  }
 
   /// Check if this looks like a valid correction (not a complete rewrite)
-  var isLikelyCorrection: Bool {
+  public var isLikelyCorrection: Bool {
     let origLower = original.lowercased()
     let corrLower = corrected.lowercased()
 
@@ -102,22 +108,20 @@ struct WordChange: Equatable, Hashable {
   }
 
   /// Simple string similarity based on common character sequences
-  private func stringSimilarity(_ a: String, _ b: String) -> Double {
-    let aChars = Array(a)
-    let bChars = Array(b)
-    let maxLen = max(aChars.count, bChars.count)
+  private func stringSimilarity(_ lhs: String, _ rhs: String) -> Double {
+    let lhsChars = Array(lhs)
+    let rhsChars = Array(rhs)
+    let maxLen = max(lhsChars.count, rhsChars.count)
     guard maxLen > 0 else { return 1.0 }
 
     var matches = 0
-    let minLen = min(aChars.count, bChars.count)
-    for i in 0..<minLen {
-      if aChars[i] == bChars[i] {
-        matches += 1
-      }
+    let minLen = min(lhsChars.count, rhsChars.count)
+    for index in 0..<minLen where lhsChars[index] == rhsChars[index] {
+      matches += 1
     }
 
     // Also check if one contains the other
-    if a.contains(b) || b.contains(a) {
+    if lhs.contains(rhs) || rhs.contains(lhs) {
       return 0.7
     }
 
@@ -128,7 +132,7 @@ struct WordChange: Equatable, Hashable {
 // MARK: - Rule Source
 
 /// Indicates how a PersonalLexiconRule was created.
-enum PersonalLexiconRuleSource: String, Codable {
+public enum PersonalLexiconRuleSource: String, Codable {
   case manual     // User created manually
   case automatic  // Auto-promoted from correction candidate
 }

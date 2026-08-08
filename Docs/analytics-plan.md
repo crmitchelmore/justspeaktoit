@@ -1,7 +1,8 @@
 # Product Analytics Plan
 
-**Status:** Proposal (planning doc for issue [#591](https://github.com/crmitchelmore/justspeaktoit/issues/591))
-**Scope:** Planning only. No SDK, no events, no runtime changes ship with this document.
+**Status:** Accepted; foundation implementation in progress
+**Scope:** The typed, vendor-neutral foundation implements the consent and payload boundary first. Vendor transport,
+production credentials, UI consent surfaces, disclosures, and event call sites remain gated by the go/no-go checklist.
 **Last updated:** August 2026
 
 This plan builds on the research already captured in issue #591 (Apple ATT rules,

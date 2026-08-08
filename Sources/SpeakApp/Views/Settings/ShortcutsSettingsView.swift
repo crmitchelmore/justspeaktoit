@@ -1,3 +1,4 @@
+import SpeakCore
 import SwiftUI
 
 /// Settings view for configuring keyboard shortcuts.

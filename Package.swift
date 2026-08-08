@@ -42,7 +42,13 @@ let package = Package(
             path: "Sources/SpeakHotKeys"
         ),
         .target(
-            name: "SpeakCore"
+            name: "SpeakCore",
+            swiftSettings: [
+                // Strict concurrency checking (warnings-only under Swift 5 language
+                // mode). Tuist consumes this same package target, so the setting
+                // applies to Xcode builds too.
+                .enableExperimentalFeature("StrictConcurrency")
+            ]
         ),
         .target(
             name: "SpeakSync",

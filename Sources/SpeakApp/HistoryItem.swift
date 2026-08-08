@@ -184,6 +184,9 @@ struct HistoryItem: Codable, Identifiable, Hashable {
   let source: HistoryItemSource?
   let postProcessingPrompt: PostProcessingPromptPayload?
   let diagnosticContext: HistoryDiagnosticContext?
+  /// Per-session latency checkpoints. Additive optional field: items written
+  /// before this existed decode with `nil`.
+  let latency: SessionLatencyMetrics?
 
   init(
     id: UUID = UUID(), createdAt: Date = .init(), updatedAt: Date = .init(), modelsUsed: [String],
@@ -194,7 +197,8 @@ struct HistoryItem: Codable, Identifiable, Hashable {
     personalCorrections: PersonalLexiconHistorySummary?, errors: [HistoryError],
     source: HistoryItemSource? = nil,
     postProcessingPrompt: PostProcessingPromptPayload? = nil,
-    diagnosticContext: HistoryDiagnosticContext? = nil
+    diagnosticContext: HistoryDiagnosticContext? = nil,
+    latency: SessionLatencyMetrics? = nil
   ) {
     self.id = id
     self.createdAt = createdAt
@@ -215,6 +219,7 @@ struct HistoryItem: Codable, Identifiable, Hashable {
     self.source = source
     self.postProcessingPrompt = postProcessingPrompt
     self.diagnosticContext = diagnosticContext
+    self.latency = latency
   }
 
   static let placeholder: HistoryItem = .init(

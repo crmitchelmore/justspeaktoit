@@ -233,13 +233,13 @@ public final class CartesiaLiveClient: StreamingTranscriptionClient, @unchecked 
 }
 
 private struct CartesiaTurnResponse: Decodable {
-    struct Result: Decodable {
+    struct TurnResult: Decodable {
         let transcript: String?
     }
 
     let type: String
     let transcript: String?
-    let results: [Result]?
+    let results: [TurnResult]?
 
     var transcriptText: String? {
         if let transcript { return transcript }

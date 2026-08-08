@@ -7,14 +7,14 @@ import SpeakCore
 /// using the v3 challenge-response protocol.
 enum OpenClawConnectionTester {
     /// Possible outcomes of a connection test.
-    enum Result: Equatable {
+    enum Outcome: Equatable {
         case idle
         case testing
         case success(String)
         case failure(String)
     }
 
-    static func test(rawURL: String, token: String) async -> Result {
+    static func test(rawURL: String, token: String) async -> Outcome {
         guard let url = normalisedURL(from: rawURL) else {
             return .failure("Invalid URL")
         }
@@ -43,7 +43,7 @@ enum OpenClawConnectionTester {
         task: URLSessionWebSocketTask,
         token: String,
         start: CFAbsoluteTime,
-        cont: CheckedContinuation<Result, Never>
+        cont: CheckedContinuation<Outcome, Never>
     ) {
         task.receive { result in
             switch result {
@@ -65,7 +65,7 @@ enum OpenClawConnectionTester {
         task: URLSessionWebSocketTask,
         token: String,
         start: CFAbsoluteTime,
-        cont: CheckedContinuation<Result, Never>
+        cont: CheckedContinuation<Outcome, Never>
     ) {
         let event = json["event"] as? String
         guard event == "connect.challenge" else {
@@ -81,7 +81,7 @@ enum OpenClawConnectionTester {
         task: URLSessionWebSocketTask,
         token: String,
         start: CFAbsoluteTime,
-        cont: CheckedContinuation<Result, Never>
+        cont: CheckedContinuation<Outcome, Never>
     ) {
         let connectFrame: [String: Any] = [
             "type": "req",
@@ -123,7 +123,7 @@ enum OpenClawConnectionTester {
     private static func receiveConnectResult(
         task: URLSessionWebSocketTask,
         start: CFAbsoluteTime,
-        cont: CheckedContinuation<Result, Never>
+        cont: CheckedContinuation<Outcome, Never>
     ) {
         task.receive { result in
             let elapsed = Int((CFAbsoluteTimeGetCurrent() - start) * 1000)
@@ -143,7 +143,7 @@ enum OpenClawConnectionTester {
     }
 
     /// Evaluate whether the connect response indicates success.
-    static func evaluateConnectResponse(_ json: [String: Any], elapsed: Int) -> Result {
+    static func evaluateConnectResponse(_ json: [String: Any], elapsed: Int) -> Outcome {
         if let err = json["error"] as? [String: Any],
            let msg = err["message"] as? String {
             return .failure(msg)
@@ -170,8 +170,8 @@ enum OpenClawConnectionTester {
 
     private static func finish(
         task: URLSessionWebSocketTask,
-        cont: CheckedContinuation<Result, Never>,
-        state: Result
+        cont: CheckedContinuation<Outcome, Never>,
+        state: Outcome
     ) {
         task.cancel(with: .normalClosure, reason: nil)
         cont.resume(returning: state)

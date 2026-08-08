@@ -19,11 +19,11 @@ public struct KeyboardSetupView: View {
                         .font(.system(size: 42, weight: .semibold))
                         .foregroundStyle(.tint)
                         .accessibilityHidden(true)
-                    Text("Speak into any supported text field")
+                    Text("Dictate in any app, right from the keyboard")
                         .font(.title2.bold())
                     Text(
-                        "Just Speak is a transcription-first keyboard. Use its globe button "
-                            + "to return to the system keyboard for normal typing."
+                        "Tap the mic key and your words stream into the text field as you speak — "
+                            + "no app switching. Use the globe key to return to the system keyboard for typing."
                     )
                     .foregroundStyle(.secondary)
                 }
@@ -33,8 +33,8 @@ public struct KeyboardSetupView: View {
             Section("Setup") {
                 setupStep(
                     number: 1,
-                    title: "Add Just Speak",
-                    detail: "In Settings, go to General › Keyboard › Keyboards › Add New Keyboard."
+                    title: "Add the keyboard",
+                    detail: "Settings › General › Keyboard › Keyboards › Add New Keyboard › Just Speak."
                 )
                 setupStep(
                     number: 2,
@@ -43,13 +43,9 @@ public struct KeyboardSetupView: View {
                 )
                 setupStep(
                     number: 3,
-                    title: "Enable Instant Dictation once",
-                    detail: "Return here and enable the always-ready microphone session. Idle audio is discarded."
-                )
-                setupStep(
-                    number: 4,
-                    title: "Choose it in a text field",
-                    detail: "Touch and hold the globe key, select Just Speak, and begin speaking."
+                    title: "Tap the mic and speak",
+                    detail: "In any text field, hold the globe key, pick Just Speak, and tap the mic. "
+                        + "Allow microphone and speech recognition when asked the first time."
                 )
 
                 Button {
@@ -76,16 +72,16 @@ public struct KeyboardSetupView: View {
                     readyText: fullAccessStatus
                 )
                 Text(
-                    "iOS does not provide the containing app with a complete keyboard-enabled status API. "
-                        + "These indicators update after the Just Speak keyboard has been opened."
+                    "iOS does not tell apps which keyboards are enabled. "
+                        + "These indicators update after the Just Speak keyboard has been opened once."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
 
-            Section("Instant Dictation") {
+            Section("Fallback: Instant Dictation") {
                 statusRow(
-                    title: "Keyboard microphone",
+                    title: "App-owned microphone",
                     isReady: instantDictation.isReady || instantDictation.isRecording,
                     readyText: instantDictationStatus
                 )
@@ -110,9 +106,10 @@ public struct KeyboardSetupView: View {
                 .accessibilityIdentifier("keyboardInstantDictationButton")
 
                 Text(
-                    "Enable once, then opening the Just Speak keyboard starts transcription automatically. "
-                        + "The orange microphone indicator stays visible while Instant Dictation is ready. "
-                        + "Idle audio is discarded immediately on device and is never saved or sent."
+                    "Only needed if the keyboard can't use the microphone itself (for example, if you "
+                        + "declined its permission). Just Speak then keeps a ready microphone session and the "
+                        + "keyboard hands recording to the app — still without leaving the app you're typing in. "
+                        + "Idle audio is discarded immediately and never saved or sent."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -125,13 +122,22 @@ public struct KeyboardSetupView: View {
             }
 
             Section("Why Full Access?") {
-                Label("Start transcription as soon as the keyboard appears", systemImage: "mic.fill")
-                Label("Bind each result to its original text document", systemImage: "scope")
-                Label("Use cloud transcription only when your selected model requires it", systemImage: "network")
+                Label(
+                    "Lets the keyboard run the microphone and Apple speech recognition",
+                    systemImage: "mic.fill"
+                )
+                Label(
+                    "Shares your language choice and dictation state with the app",
+                    systemImage: "gearshape.2"
+                )
+                Label(
+                    "Required by iOS before a keyboard may record or reach the network",
+                    systemImage: "lock.open"
+                )
                 Text(
-                    "iOS does not give keyboard extensions microphone access. Just Speak owns the explicit, "
-                        + "user-enabled audio session while the keyboard sends only nonce-scoped commands. "
-                        + "It does not read, persist, or transmit surrounding text."
+                    "The keyboard never reads, stores, or transmits what you type. It records only while "
+                        + "the mic key is active, prefers on-device Apple speech, and shares state with "
+                        + "Just Speak solely through the private App Group."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -141,22 +147,6 @@ public struct KeyboardSetupView: View {
                 limitation("Secure password fields", symbol: "lock.fill")
                 limitation("Phone-pad fields", symbol: "phone.fill")
                 limitation("Apps that disable third-party keyboards", symbol: "app.badge")
-            }
-
-            Section("What to Expect") {
-                Text(
-                    "After setup, focus any supported text field and choose Just Speak. Recording starts "
-                        + "automatically; tap Stop to insert the final text at that field's cursor."
-                )
-                Text(
-                    "After an iPhone restart, force quit, or audio interruption, open Just Speak once to reconnect."
-                )
-                .foregroundStyle(.secondary)
-                Text(
-                    "Local Apple Speech can work offline after its language resources are available. "
-                        + "Cloud models need a network connection and the provider key configured in Just Speak."
-                )
-                .foregroundStyle(.secondary)
             }
         }
         .navigationTitle("Just Speak Keyboard")
@@ -177,7 +167,7 @@ public struct KeyboardSetupView: View {
     private var instantDictationStatus: String {
         guard let session = instantDictation.session,
               instantDictation.isReady || instantDictation.isRecording else {
-            return instantDictation.isEnabled ? "Needs reconnect" : "Not enabled"
+            return instantDictation.isEnabled ? "Needs reconnect" : "Off"
         }
         if session.phase == .recording { return "Recording" }
         return "Ready until turned off"
@@ -229,6 +219,10 @@ public struct KeyboardSetupView: View {
 
     private func refresh() {
         observation = KeyboardHandoffStore.shared.extensionObservation()
+        // Keep the keyboard's language chip in sync with the app preference.
+        KeyboardDictationPreferencesStore.shared.mirrorAppPreference(
+            selectedIdentifier: AppSettings.shared.preferredLocaleIdentifier
+        )
     }
 }
 #endif

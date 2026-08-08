@@ -23,6 +23,18 @@ enum FeatureFlags {
         #endif
     }
 
+    /// Whether the Apple Watch companion app (and the iPhone-side
+    /// WatchConnectivity capture receiver) are enabled. Defaults to `false`;
+    /// `Project.swift` includes the watch app target and defines
+    /// `WATCH_APP_FEATURE` only when generated with `TUIST_WATCH_APP=1`.
+    static var watchCaptureEnabled: Bool {
+        #if WATCH_APP_FEATURE
+        true
+        #else
+        false
+        #endif
+    }
+
     /// Whether the OpenClaw tab is shown in the main tab bar. Defaults to
     /// `false` (hidden) so App Store builds ship without it; set the
     /// `SHOW_OPENCLAW_TAB` build condition to bring the tab back (e.g. for

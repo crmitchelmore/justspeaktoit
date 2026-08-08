@@ -200,7 +200,8 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
       "--encoder", bundle.encoder.path,
       "--decoder", bundle.decoder.path,
       "--joiner", bundle.joiner.path,
-      "--feature-dim", "\(bundle.featureDim)"
+      "--feature-dim", "\(bundle.featureDim)",
+      "--model-type", bundle.modelType
     ]
     return process
   }
@@ -290,7 +291,10 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
 
   private func waitForProcessExit() async {
     guard let process else { return }
-    for _ in 0..<40 where process.isRunning {
+    // Offline transducer models (Parakeet TDT) decode the whole session once
+    // stdin closes, so long recordings need more headroom than the online
+    // models, which exit almost immediately.
+    for _ in 0..<100 where process.isRunning {
       try? await Task.sleep(for: .milliseconds(100))
     }
     if process.isRunning {

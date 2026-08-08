@@ -1,3 +1,4 @@
+import SpeakCore
 import SwiftUI
 
 enum SidebarItem: Hashable, Identifiable {

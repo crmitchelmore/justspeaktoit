@@ -65,6 +65,48 @@ final class ModelCatalogTests: XCTestCase {
         )
     }
 
+    func testFriendlyName_parakeetV3SherpaSource_returnsDisplayName() {
+        XCTAssertEqual(
+            ModelCatalog.friendlyName(for: ParakeetLocalModels.tdtV3Int8SourceID),
+            ParakeetLocalModels.tdtV3DisplayName
+        )
+    }
+
+    func testParakeetV3Catalogue_pinsArtifactURLAndChecksum() throws {
+        let url = try XCTUnwrap(ParakeetLocalModels.tdtV3Int8ArchiveURL)
+        XCTAssertEqual(url.scheme, "https")
+        XCTAssertEqual(url.host, "github.com")
+        XCTAssertTrue(url.path.hasPrefix("/k2-fsa/sherpa-onnx/releases/download/asr-models/"))
+        XCTAssertTrue(url.lastPathComponent.hasSuffix(".tar.bz2"))
+        XCTAssertTrue(url.lastPathComponent.contains(ParakeetLocalModels.tdtV3Int8ModelName))
+
+        XCTAssertEqual(ParakeetLocalModels.tdtV3Int8ArchiveSHA256.count, 64)
+        XCTAssertTrue(ParakeetLocalModels.tdtV3Int8ArchiveSHA256.allSatisfy(\.isHexDigit))
+    }
+
+    func testParakeetV3Catalogue_describesLanguagesRAMAndLicence() {
+        let codes = ParakeetLocalModels.tdtV3LanguageCodes
+        XCTAssertEqual(codes.count, 25, "Parakeet v3 auto-detects among 25 European languages")
+        XCTAssertEqual(Set(codes).count, codes.count, "Language codes should be unique")
+        XCTAssertTrue(codes.allSatisfy { $0.count == 2 && $0 == $0.lowercased() })
+        for expected in ["en", "de", "fr", "es", "uk"] {
+            XCTAssertTrue(codes.contains(expected), "Missing \(expected)")
+        }
+        XCTAssertTrue(ParakeetLocalModels.tdtV3SupportsLanguageAutoDetection)
+
+        XCTAssertEqual(ParakeetLocalModels.tdtV3License, "CC-BY-4.0")
+        XCTAssertGreaterThan(ParakeetLocalModels.tdtV3Int8DownloadSizeMB, 0)
+        XCTAssertGreaterThan(
+            ParakeetLocalModels.tdtV3Int8InstalledSizeMB,
+            ParakeetLocalModels.tdtV3Int8DownloadSizeMB
+        )
+        XCTAssertGreaterThan(
+            ParakeetLocalModels.tdtV3ApproximateRAMMB,
+            ParakeetLocalModels.tdtV3Int8InstalledSizeMB,
+            "RAM guidance should exceed the on-disk model size"
+        )
+    }
+
     func testFriendlyName_emptyString_returnsNonEmpty() {
         let name = ModelCatalog.friendlyName(for: "")
         XCTAssertFalse(name.isEmpty, "Should return something even for empty identifier")

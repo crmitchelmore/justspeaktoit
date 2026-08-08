@@ -978,6 +978,11 @@ extension SettingsView {
           Text("\(source.runtime) · \(localStreamingSizeLabel(for: source)) · local-only streaming.")
             .font(.caption)
             .foregroundStyle(.secondary)
+          if source.id == ParakeetLocalModels.tdtV3Int8SourceID {
+            Text(ParakeetLocalModels.tdtV3SettingsSummary)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
         }
         Button {
           addSelectedStreamingModelSource()

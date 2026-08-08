@@ -634,6 +634,9 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             if lowercased == "local/streaming/fluidaudio/parakeet-realtime-eou-120m" {
                 return "Parakeet Realtime EOU 120M"
             }
+            if lowercased == ParakeetLocalModels.tdtV3Int8SourceID {
+                return ParakeetLocalModels.tdtV3DisplayName
+            }
             if lowercased == "local/post-processing/rules" {
                 return "Local Cleanup (Offline)"
             }

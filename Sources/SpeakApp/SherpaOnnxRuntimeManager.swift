@@ -1,5 +1,7 @@
+import CryptoKit
 import Foundation
 import OSLog
+import SpeakCore
 
 #if !APP_STORE
 // swiftlint:disable file_length
@@ -34,6 +36,9 @@ struct SherpaOnnxModelBundle: Equatable, Sendable {
   let decoder: URL
   let joiner: URL
   let featureDim: Int
+  /// sherpa-onnx model type: "transducer" runs the online recognizer;
+  /// "nemo_transducer" runs the offline recognizer (e.g. NVIDIA Parakeet TDT).
+  let modelType: String
 }
 
 @MainActor
@@ -144,7 +149,7 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
       try fileManager.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
 
       if let archiveURL = spec.archiveURL {
-        try await downloadArchive(from: archiveURL, to: tempDirectory)
+        try await downloadArchive(from: archiveURL, to: tempDirectory, expectedSHA256: spec.archiveSHA256)
       } else {
         for file in spec.files {
           let destination = tempDirectory.appendingPathComponent(file)
@@ -172,7 +177,8 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
       encoder: directory.appendingPathComponent(spec.encoder),
       decoder: directory.appendingPathComponent(spec.decoder),
       joiner: directory.appendingPathComponent(spec.joiner),
-      featureDim: spec.featureDim
+      featureDim: spec.featureDim,
+      modelType: spec.modelType
     )
     guard fileManager.fileExists(atPath: bundle.tokens.path),
       fileManager.fileExists(atPath: bundle.encoder.path),
@@ -278,13 +284,23 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
     try fileManager.moveItem(at: downloadedURL, to: destination)
   }
 
-  private func downloadArchive(from url: URL, to destination: URL) async throws {
+  private func downloadArchive(from url: URL, to destination: URL, expectedSHA256: String?) async throws {
     let (downloadedURL, response) = try await URLSession.shared.download(from: url)
     defer { try? fileManager.removeItem(at: downloadedURL) }
     if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
       throw SherpaOnnxRuntimeError.downloadFailed(
         "Download returned HTTP \(http.statusCode) for \(url.lastPathComponent)."
       )
+    }
+    if let expectedSHA256 {
+      let actual = try await Task.detached(priority: .utility) {
+        try Self.sha256Hex(of: downloadedURL)
+      }.value
+      guard actual.caseInsensitiveCompare(expectedSHA256) == .orderedSame else {
+        throw SherpaOnnxRuntimeError.downloadFailed(
+          "Checksum mismatch for \(url.lastPathComponent): expected \(expectedSHA256), got \(actual)."
+        )
+      }
     }
     do {
       _ = try await Self.runProcess(
@@ -296,6 +312,17 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
         "Failed to extract model archive: \(error.localizedDescription)"
       )
     }
+  }
+
+  /// Streaming SHA256 so the ~0.5 GB model archives never need to sit in memory.
+  private nonisolated static func sha256Hex(of fileURL: URL) throws -> String {
+    let handle = try FileHandle(forReadingFrom: fileURL)
+    defer { try? handle.close() }
+    var hasher = SHA256()
+    while let data = try handle.read(upToCount: 4 * 1024 * 1024), !data.isEmpty {
+      hasher.update(data: data)
+    }
+    return hasher.finalize().map { String(format: "%02x", $0) }.joined()
   }
 
   private nonisolated static func runProcess(executableURL: URL, arguments: [String]) async throws -> String {
@@ -355,7 +382,10 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
     try data.write(to: sidecarURL, options: .atomic)
   }
 
-  private nonisolated static func specification(for source: LocalStreamingModelSource) throws -> ModelSpecification {
+  nonisolated static func specification(for source: LocalStreamingModelSource) throws -> ModelSpecification {
+    if let parakeet = parakeetSpecification(for: source) {
+      return parakeet
+    }
     let repo = source.repoID.lowercased()
     if repo.contains("en-20m-2023-02-17") {
       return ModelSpecification(
@@ -404,18 +434,44 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
     throw SherpaOnnxRuntimeError.unsupportedModel(source.displayName)
   }
 
-  private struct ModelSpecification {
+  /// NVIDIA Parakeet v3: offline NeMo TDT transducer. Decoded by the offline
+  /// recognizer (model_type "nemo_transducer", greedy search) with the 128-dim
+  /// mel features the NeMo export was trained on.
+  private nonisolated static func parakeetSpecification(
+    for source: LocalStreamingModelSource
+  ) -> ModelSpecification? {
+    let searchText = "\(source.repoID) \(source.modelName)".lowercased()
+    guard searchText.contains("nemo-parakeet-tdt-0.6b-v3") else { return nil }
+    let root = source.modelName
+    return ModelSpecification(
+      tokens: "\(root)/tokens.txt",
+      encoder: "\(root)/encoder.int8.onnx",
+      decoder: "\(root)/decoder.int8.onnx",
+      joiner: "\(root)/joiner.int8.onnx",
+      featureDim: 128,
+      archiveURL: source.archiveURL ?? ParakeetLocalModels.tdtV3Int8ArchiveURL,
+      modelType: "nemo_transducer",
+      archiveSHA256: ParakeetLocalModels.tdtV3Int8ArchiveSHA256
+    )
+  }
+
+  struct ModelSpecification {
     let tokens: String
     let encoder: String
     let decoder: String
     let joiner: String
     var featureDim: Int = 80
     var archiveURL: URL?
+    /// "transducer" (online recognizer) unless the model is an offline NeMo
+    /// transducer such as Parakeet TDT ("nemo_transducer").
+    var modelType: String = "transducer"
+    /// Pinned archive checksum, verified after download when present.
+    var archiveSHA256: String?
 
     var files: [String] { [tokens, encoder, decoder, joiner] }
   }
 
-  private nonisolated static let sidecarScript = """
+  nonisolated static let sidecarScript = """
 #!/usr/bin/env python3
 import argparse
 import array
@@ -429,15 +485,18 @@ def emit(kind, text):
     print(json.dumps({"type": kind, "text": text}), flush=True)
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--tokens", required=True)
-    parser.add_argument("--encoder", required=True)
-    parser.add_argument("--decoder", required=True)
-    parser.add_argument("--joiner", required=True)
-    parser.add_argument("--feature-dim", type=int, default=80)
-    args = parser.parse_args()
+def read_samples():
+    chunk = sys.stdin.buffer.read(6400)
+    if not chunk:
+        return None
+    usable = len(chunk) - (len(chunk) % 4)
+    samples = array.array("f")
+    if usable > 0:
+        samples.frombytes(chunk[:usable])
+    return samples
 
+
+def run_online(args):
     recognizer = sherpa_onnx.OnlineRecognizer.from_transducer(
         tokens=args.tokens,
         encoder=args.encoder,
@@ -453,14 +512,11 @@ def main():
     last_text = ""
 
     while True:
-        chunk = sys.stdin.buffer.read(6400)
-        if not chunk:
+        samples = read_samples()
+        if samples is None:
             break
-        usable = len(chunk) - (len(chunk) % 4)
-        if usable <= 0:
+        if not samples:
             continue
-        samples = array.array("f")
-        samples.frombytes(chunk[:usable])
         stream.accept_waveform(16000, samples)
         while recognizer.is_ready(stream):
             recognizer.decode_stream(stream)
@@ -474,6 +530,70 @@ def main():
         recognizer.decode_stream(stream)
     final_text = recognizer.get_result(stream) or last_text
     emit("session_final", final_text)
+
+
+def run_offline(args):
+    # Offline transducers (e.g. NVIDIA Parakeet TDT) decode a whole utterance
+    # at a time. Re-decode the accumulated audio after every ~2 s of new input
+    # to stream partial results, then decode once more at end of input for the
+    # session final.
+    recognizer = sherpa_onnx.OfflineRecognizer.from_transducer(
+        encoder=args.encoder,
+        decoder=args.decoder,
+        joiner=args.joiner,
+        tokens=args.tokens,
+        num_threads=2,
+        sample_rate=16000,
+        feature_dim=args.feature_dim,
+        decoding_method="greedy_search",
+        model_type=args.model_type,
+        provider="cpu",
+    )
+    buffered = array.array("f")
+    last_text = ""
+    samples_since_decode = 0
+    decode_interval = 16000 * 2
+
+    def decode_buffered():
+        stream = recognizer.create_stream()
+        stream.accept_waveform(16000, buffered)
+        recognizer.decode_stream(stream)
+        return stream.result.text
+
+    while True:
+        samples = read_samples()
+        if samples is None:
+            break
+        if not samples:
+            continue
+        buffered.extend(samples)
+        samples_since_decode += len(samples)
+        if samples_since_decode < decode_interval:
+            continue
+        samples_since_decode = 0
+        text = decode_buffered()
+        if text and text != last_text:
+            last_text = text
+            emit("partial", text)
+
+    final_text = (decode_buffered() if buffered else "") or last_text
+    emit("session_final", final_text)
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--tokens", required=True)
+    parser.add_argument("--encoder", required=True)
+    parser.add_argument("--decoder", required=True)
+    parser.add_argument("--joiner", required=True)
+    parser.add_argument("--feature-dim", type=int, default=80)
+    parser.add_argument("--model-type", default="transducer")
+    args = parser.parse_args()
+
+    if args.model_type == "transducer":
+        run_online(args)
+    else:
+        run_offline(args)
 
 
 if __name__ == "__main__":

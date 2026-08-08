@@ -512,7 +512,7 @@ public final class AppSettings: ObservableObject {
     }
 
     public var batchAPIKey: String {
-        if batchTranscriptionModel == AppleLocalModels.speechTranscriberModelID {
+        if AppleLocalModels.isSpeechAnalyzerModel(batchTranscriptionModel) {
             return ""
         }
         if Self.openAIBatchModelIDs.contains(batchTranscriptionModel) {
@@ -536,7 +536,7 @@ public final class AppSettings: ObservableObject {
     /// Mac but are hidden until their upload clients are available on iPhone.
     public static let supportedBatchModels: [ModelCatalog.Option] =
         ModelCatalog.batchTranscription.filter { option in
-            option.id == AppleLocalModels.speechTranscriberModelID
+            AppleLocalModels.isSpeechAnalyzerModel(option.id)
                 || openAIBatchModelIDs.contains(option.id)
                 || option.id.hasPrefix("google/")
                 || option.id == "openai/gpt-4o-audio-preview-2024-12-17"
@@ -840,7 +840,7 @@ public struct SettingsView: View {
 
                 if transcriptionLocationBinding.wrappedValue == .remote,
                    settings.transcriptionMode == .batch,
-                   settings.batchTranscriptionModel != AppleLocalModels.speechTranscriberModelID,
+                   !AppleLocalModels.isSpeechAnalyzerModel(settings.batchTranscriptionModel),
                    settings.batchAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Label(
                         AppSettings.openAIBatchModelIDs.contains(settings.batchTranscriptionModel)
@@ -1135,7 +1135,7 @@ public struct SettingsView: View {
     }
 
     private var batchModeDescription: String {
-        if settings.batchTranscriptionModel == AppleLocalModels.speechTranscriberModelID {
+        if AppleLocalModels.isSpeechAnalyzerModel(settings.batchTranscriptionModel) {
             return "Audio is recorded first, then transcribed privately on this device when you stop."
         }
         return "Audio is recorded first, then uploaded when you stop for a more complete transcript."

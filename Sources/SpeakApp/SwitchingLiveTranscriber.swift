@@ -100,7 +100,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       try await controller.start()
       invalidateBeforeNextStart = false
     } catch {
-      if model == AppleLocalModels.speechTranscriberModelID {
+      if AppleLocalModels.isSpeechAnalyzerModel(model) {
         print(
           "[SwitchingLiveTranscriber] SpeechAnalyzer failed "
             + "(\(error.localizedDescription)); using legacy Apple Speech")
@@ -134,7 +134,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   }
 
   func controller(for model: String) -> any LiveTranscriptionController {
-    if model == AppleLocalModels.speechTranscriberModelID {
+    if AppleLocalModels.isSpeechAnalyzerModel(model) {
       return controllers.speechAnalyzer
     }
     if let route = controllerRoutes.first(where: { model.hasPrefix($0.prefix) }) {

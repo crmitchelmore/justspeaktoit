@@ -16,6 +16,7 @@ final class AppleSpeechAnalyzerLiveController: LiveTranscriptionController {
   private var audioConverter: Any?
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
   private var currentLanguage: String?
+  private var currentModel: String = AppleLocalModels.speechTranscriberModelID
   private var latestUpdate = LiveTranscriptionUpdate(text: "")
 
   init(
@@ -30,6 +31,9 @@ final class AppleSpeechAnalyzerLiveController: LiveTranscriptionController {
 
   func configure(language: String?, model: String) {
     currentLanguage = language
+    if AppleLocalModels.isSpeechAnalyzerModel(model) {
+      currentModel = model
+    }
   }
 
   func start() async throws {
@@ -58,7 +62,8 @@ final class AppleSpeechAnalyzerLiveController: LiveTranscriptionController {
   @available(macOS 26.0, *)
   private func startSpeechAnalyzer() async throws {
     let session = try await AppleSpeechAnalyzerLiveSession(
-      localeIdentifier: currentLanguage ?? appSettings.resolvedPreferredLocaleIdentifier
+      localeIdentifier: currentLanguage ?? appSettings.resolvedPreferredLocaleIdentifier,
+      engine: AppleSpeechAnalyzerEngine(modelID: currentModel)
     ) { [weak self] update in
       Task { @MainActor [weak self] in
         guard let self else { return }
@@ -126,7 +131,7 @@ final class AppleSpeechAnalyzerLiveController: LiveTranscriptionController {
           segments: [],
           confidence: latestUpdate.confidence,
           duration: 0,
-          modelIdentifier: AppleLocalModels.speechTranscriberModelID,
+          modelIdentifier: currentModel,
           cost: nil,
           rawPayload: nil,
           debugInfo: nil

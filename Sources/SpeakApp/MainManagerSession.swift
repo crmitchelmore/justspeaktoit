@@ -40,6 +40,13 @@ final class ActiveSession {
   var costBreakdown: ChatCostBreakdown?
   var recordingStarted: Date
   var recordingEnded: Date?
+  /// Latency checkpoints (issue #611): when the recorder actually began
+  /// capturing, when the first live partial arrived, when the first character
+  /// reached the target app, and when the user requested stop.
+  var captureStarted: Date?
+  var firstPartialReceived: Date?
+  var firstInsertion: Date?
+  var stopRequested: Date?
   var transcriptionStarted: Date?
   var transcriptionEnded: Date?
   var postProcessingStarted: Date?
@@ -65,6 +72,18 @@ final class ActiveSession {
       outputTokens: (costBreakdown?.outputTokens ?? 0) + fragment.outputTokens,
       totalCost: totalCost,
       currency: fragment.currency
+    )
+  }
+
+  /// Latency intervals derived from this session's checkpoints (issue #611).
+  private var latencyMetrics: SessionLatencyMetrics {
+    SessionLatencyMetrics(
+      hotKeyPressedAt: self.recordingStarted,
+      captureStartedAt: self.captureStarted,
+      firstPartialAt: self.firstPartialReceived,
+      firstInsertAt: self.firstInsertion ?? self.outputDelivered,
+      stopPressedAt: self.stopRequested,
+      finalInsertAt: self.outputDelivered
     )
   }
 
@@ -94,6 +113,7 @@ final class ActiveSession {
       postProcessingEnded: postProcessingEnded,
       outputDelivered: outputDelivered
     )
+    let latency = self.latencyMetrics
     return HistoryItem(
       id: id,
       createdAt: createdAt,
@@ -113,7 +133,8 @@ final class ActiveSession {
       errors: errors,
       source: source,
       postProcessingPrompt: postProcessingOutcome?.promptPayload,
-      diagnosticContext: diagnosticContext
+      diagnosticContext: diagnosticContext,
+      latency: latency.hasAnyInterval ? latency : nil
     )
   }
 }

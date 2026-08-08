@@ -192,7 +192,7 @@ public struct AckMessage: Codable {
     }
 }
 
-public struct ErrorMessage: Codable {
+public struct ErrorMessage: Codable, Sendable {
     public var code: Int
     public var message: String
     
@@ -221,17 +221,73 @@ public struct ErrorMessage: Codable {
 // MARK: - Pairing
 
 /// Manages pairing codes for device authentication.
-public final class PairingManager {
+///
+/// `@unchecked` only because `UserDefaults` lacks a Sendable annotation in the
+/// SDK. Every pairing-code and paired-device transaction is serialized behind
+/// one `NSLock` — `UserDefaults` alone is thread-safe per call, but the
+/// read-modify-write sequences here need a single owner to avoid losing
+/// entries or minting competing codes.
+public final class PairingManager: @unchecked Sendable {
     public static let shared = PairingManager()
-    
+
     private let defaults = UserDefaults.standard
     private let pairingCodeKey = "speakTransportPairingCode"
     private let pairedDevicesKey = "speakTransportPairedDevices"
-    
+    /// Serializes all read-modify-write transactions below. Not reentrant:
+    /// public members take it once and only call `...Unlocked` helpers inside.
+    private let lock = NSLock()
+
     private init() {}
-    
+
     /// Gets or generates the pairing code for this device.
     public var pairingCode: String {
+        lock.withLock { pairingCodeUnlocked() }
+    }
+
+    /// Regenerates the pairing code (invalidates all existing pairings).
+    public func regeneratePairingCode() -> String {
+        lock.withLock {
+            let code = generatePairingCode()
+            defaults.set(code, forKey: pairingCodeKey)
+            defaults.removeObject(forKey: pairedDevicesKey)
+            return code
+        }
+    }
+
+    /// Validates a pairing code.
+    public func validatePairingCode(_ code: String) -> Bool {
+        lock.withLock { code == pairingCodeUnlocked() }
+    }
+
+    /// Records a paired device.
+    public func addPairedDevice(id: String, name: String) {
+        lock.withLock {
+            var devices = pairedDevicesUnlocked()
+            devices[id] = name
+            defaults.set(devices, forKey: pairedDevicesKey)
+        }
+    }
+
+    /// Removes a paired device.
+    public func removePairedDevice(id: String) {
+        lock.withLock {
+            var devices = pairedDevicesUnlocked()
+            devices.removeValue(forKey: id)
+            defaults.set(devices, forKey: pairedDevicesKey)
+        }
+    }
+
+    /// Gets all paired devices.
+    public var pairedDevices: [String: String] {
+        lock.withLock { pairedDevicesUnlocked() }
+    }
+
+    /// Checks if a device is paired.
+    public func isDevicePaired(id: String) -> Bool {
+        lock.withLock { pairedDevicesUnlocked()[id] != nil }
+    }
+
+    private func pairingCodeUnlocked() -> String {
         if let existing = defaults.string(forKey: pairingCodeKey) {
             return existing
         }
@@ -239,51 +295,14 @@ public final class PairingManager {
         defaults.set(code, forKey: pairingCodeKey)
         return code
     }
-    
-    /// Regenerates the pairing code (invalidates all existing pairings).
-    public func regeneratePairingCode() -> String {
-        let code = generatePairingCode()
-        defaults.set(code, forKey: pairingCodeKey)
-        defaults.removeObject(forKey: pairedDevicesKey)
-        return code
-    }
-    
-    /// Validates a pairing code.
-    public func validatePairingCode(_ code: String) -> Bool {
-        code == pairingCode
-    }
-    
-    /// Records a paired device.
-    public func addPairedDevice(id: String, name: String) {
-        var devices = pairedDevices
-        devices[id] = name
-        savePairedDevices(devices)
-    }
-    
-    /// Removes a paired device.
-    public func removePairedDevice(id: String) {
-        var devices = pairedDevices
-        devices.removeValue(forKey: id)
-        savePairedDevices(devices)
-    }
-    
-    /// Gets all paired devices.
-    public var pairedDevices: [String: String] {
+
+    private func pairedDevicesUnlocked() -> [String: String] {
         defaults.dictionary(forKey: pairedDevicesKey) as? [String: String] ?? [:]
     }
-    
-    /// Checks if a device is paired.
-    public func isDevicePaired(id: String) -> Bool {
-        pairedDevices[id] != nil
-    }
-    
+
     private func generatePairingCode() -> String {
         // Generate 6-digit numeric code
         String(format: "%06d", Int.random(in: 0...999999))
-    }
-    
-    private func savePairedDevices(_ devices: [String: String]) {
-        defaults.set(devices, forKey: pairedDevicesKey)
     }
 }
 

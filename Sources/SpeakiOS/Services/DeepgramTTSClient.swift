@@ -6,6 +6,9 @@ import SpeakCore
 
 /// Deepgram Aura TTS client for iOS.
 /// Converts text to speech using Deepgram's Aura API.
+///
+/// HTTP transport lives in `SpeakCore.DeepgramTTSAPI`, shared with the macOS
+/// client; this wrapper adds audio-session management and playback.
 @MainActor
 public final class DeepgramTTSClient: ObservableObject {
     // MARK: - Published State
@@ -16,7 +19,7 @@ public final class DeepgramTTSClient: ObservableObject {
     // MARK: - Private
 
     private var audioPlayer: AVAudioPlayer?
-    private let session: URLSession
+    private let api: DeepgramTTSAPI
     private let logger = Logger(subsystem: "com.justspeaktoit.ios", category: "DeepgramTTS")
 
     // MARK: - Configuration
@@ -29,7 +32,7 @@ public final class DeepgramTTSClient: ObservableObject {
     // MARK: - Init
 
     public init(session: URLSession = .shared) {
-        self.session = session
+        self.api = DeepgramTTSAPI(session: session)
     }
 
     // MARK: - Public API
@@ -57,25 +60,22 @@ public final class DeepgramTTSClient: ObservableObject {
             modelID: model,
             voiceID: voice
         ).voice.id
-        let url = URL(string: "https://api.deepgram.com/v1/speak?model=\(modelParam)")!
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("Token \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        let body: [String: Any] = ["text": text]
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-        let (data, response) = try await session.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw DeepgramTTSError.invalidResponse
-        }
-
-        guard (200..<300).contains(httpResponse.statusCode) else {
-            let body = String(data: data, encoding: .utf8) ?? ""
-            throw DeepgramTTSError.apiError(statusCode: httpResponse.statusCode, message: body)
+        let data: Data
+        do {
+            data = try await api.synthesize(
+                text: text,
+                apiKey: apiKey,
+                queryItems: [URLQueryItem(name: "model", value: modelParam)]
+            )
+        } catch let error as DeepgramTTSAPIError {
+            switch error {
+            case .invalidURL, .invalidResponse:
+                throw DeepgramTTSError.invalidResponse
+            case .unauthorized(let statusCode, let message),
+                .httpError(let statusCode, let message):
+                throw DeepgramTTSError.apiError(statusCode: statusCode, message: message)
+            }
         }
 
         logger.info("TTS synthesis complete: \(data.count) bytes")

@@ -3,15 +3,17 @@ import AVFoundation
 import Foundation
 
 /// Deepgram Aura TTS client - ultra-low latency text-to-speech (~250ms first byte)
+///
+/// HTTP transport lives in `SpeakCore.DeepgramTTSAPI`, shared with the iOS
+/// client; this wrapper adds keychain lookup, file handling and cost tracking.
 actor DeepgramTTSClient: TextToSpeechClient {
     let provider: TTSProvider = .deepgram
-    private let baseURL = URL(string: "https://api.deepgram.com/v1/speak")!
-    private let session: URLSession
+    private let api: DeepgramTTSAPI
     private let secureStorage: SecureAppStorage
 
     init(secureStorage: SecureAppStorage, session: URLSession = .shared) {
         self.secureStorage = secureStorage
-        self.session = session
+        self.api = DeepgramTTSAPI(session: session)
     }
 
     func synthesize(text: String, voice: String, settings: TTSSettings) async throws -> TTSResult {
@@ -23,56 +25,38 @@ actor DeepgramTTSClient: TextToSpeechClient {
 
         let voiceID = voice.replacingOccurrences(of: "deepgram/", with: "")
 
-        // Build URL with query parameters
-        var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)!
-        components.queryItems = [
+        var queryItems = [
             URLQueryItem(name: "model", value: voiceID),
             URLQueryItem(name: "encoding", value: encodingFormat(for: settings.format)),
         ]
 
-        // `container` is not applicable for MP3 (and can trigger HTTP 400).
+        // `container` and `sample_rate` are not applicable for MP3 (and can
+        // trigger HTTP 400).
         if settings.format == .wav {
-            components.queryItems?.append(URLQueryItem(name: "container", value: containerFormat(for: settings.format)))
-        }
+            queryItems.append(URLQueryItem(name: "container", value: containerFormat(for: settings.format)))
 
-        // `sample_rate` is not applicable for MP3 (and can trigger HTTP 400).
-        if settings.format == .wav {
             // Add sample rate for better quality
             if settings.quality == .highest {
-                components.queryItems?.append(URLQueryItem(name: "sample_rate", value: "48000"))
+                queryItems.append(URLQueryItem(name: "sample_rate", value: "48000"))
             } else if settings.quality == .high {
-                components.queryItems?.append(URLQueryItem(name: "sample_rate", value: "24000"))
+                queryItems.append(URLQueryItem(name: "sample_rate", value: "24000"))
             }
         }
 
-        guard let url = components.url else {
-            throw TTSError.synthesisFailure("Invalid URL")
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("Token \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        let body: [String: Any] = [
-            "text": text
-        ]
-
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-        let (data, response) = try await session.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw TTSError.synthesisFailure("Invalid response")
-        }
-
-        if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
-            throw TTSError.apiKeyMissing(provider)
-        }
-
-        guard httpResponse.statusCode == 200 else {
-            let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
-            throw TTSError.synthesisFailure("HTTP \(httpResponse.statusCode): \(errorMessage)")
+        let data: Data
+        do {
+            data = try await api.synthesize(text: text, apiKey: apiKey, queryItems: queryItems)
+        } catch let error as DeepgramTTSAPIError {
+            switch error {
+            case .unauthorized:
+                throw TTSError.apiKeyMissing(provider)
+            case .httpError(let statusCode, let message):
+                throw TTSError.synthesisFailure("HTTP \(statusCode): \(message)")
+            case .invalidURL:
+                throw TTSError.synthesisFailure("Invalid URL")
+            case .invalidResponse:
+                throw TTSError.synthesisFailure("Invalid response")
+            }
         }
 
         // Save audio data to temporary file
@@ -81,8 +65,7 @@ actor DeepgramTTSClient: TextToSpeechClient {
         // Calculate duration
         let duration = try await getAudioDuration(url: outputURL)
 
-        // Deepgram Aura pricing: $0.0135 per 1000 characters
-        let cost = Decimal(text.count) * Decimal(string: "0.0135")! / 1000
+        let cost = Decimal(text.count) * DeepgramTTSAPI.costPerThousandCharacters / 1000
 
         return TTSResult(
             audioURL: outputURL,
@@ -99,30 +82,7 @@ actor DeepgramTTSClient: TextToSpeechClient {
     }
 
     func validateAPIKey(_ key: String) async -> APIKeyValidationResult {
-        // Use the projects endpoint to validate
-        guard let url = URL(string: "https://api.deepgram.com/v1/projects") else {
-            return .failure(message: "Invalid URL")
-        }
-
-        var request = URLRequest(url: url)
-        request.setValue("Token \(key)", forHTTPHeaderField: "Authorization")
-
-        do {
-            let (_, response) = try await session.data(for: request)
-            guard let httpResponse = response as? HTTPURLResponse else {
-                return .failure(message: "Invalid response")
-            }
-
-            if httpResponse.statusCode == 200 {
-                return .success(message: "API key is valid")
-            } else if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
-                return .failure(message: "Invalid API key")
-            } else {
-                return .failure(message: "HTTP \(httpResponse.statusCode)")
-            }
-        } catch {
-            return .failure(message: error.localizedDescription)
-        }
+        await api.validateAPIKey(key)
     }
 
     // MARK: - Private Helpers

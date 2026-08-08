@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Cross-platform realtime transcription client for xAI Grok Voice.
 ///
@@ -250,13 +251,16 @@ private extension XAILiveClient {
     func waitForPendingSends(timeout: TimeInterval = 1.5) async {
         let group = pendingSendGroup
         await withCheckedContinuation { continuation in
-            let lock = NSLock()
-            var didResume = false
-            let resumeOnce = {
-                lock.lock()
-                defer { lock.unlock() }
-                guard !didResume else { return }
-                didResume = true
+            // Lock-guarded flag instead of a captured `var`, so the closure can
+            // be @Sendable for the concurrent notify/timeout callbacks below.
+            let didResume = OSAllocatedUnfairLock(initialState: false)
+            let resumeOnce: @Sendable () -> Void = {
+                let shouldResume = didResume.withLock { alreadyResumed -> Bool in
+                    guard !alreadyResumed else { return false }
+                    alreadyResumed = true
+                    return true
+                }
+                guard shouldResume else { return }
                 continuation.resume()
             }
 

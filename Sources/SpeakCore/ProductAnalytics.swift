@@ -69,12 +69,52 @@ public enum ProductAnalyticsEvent: Sendable, Equatable {
     case appActiveDaily
     case onboardingStarted(entryPoint: AnalyticsOnboardingEntryPoint)
     case onboardingStepCompleted(step: AnalyticsOnboardingStep)
+    case onboardingPermissionResult(permission: AnalyticsPermissionType, state: AnalyticsPermissionState)
     case onboardingCompleted(stepsSkipped: AnalyticsCountBucket)
     case firstTranscriptionSucceeded(
         provider: AnalyticsProviderType,
         engine: AnalyticsEngineType,
         daysSinceInstall: AnalyticsDaysSinceInstallBucket
     )
+    case transcriptionStarted(AnalyticsTranscriptionDimensions)
+    case transcriptionCompleted(
+        AnalyticsTranscriptionDimensions,
+        duration: AnalyticsDurationBucket,
+        wordCount: AnalyticsWordCountBucket,
+        latency: AnalyticsLatencyBucket,
+        output: AnalyticsOutputMethod
+    )
+    case transcriptionFailed(
+        AnalyticsTranscriptionDimensions,
+        error: AnalyticsErrorCategory,
+        stage: AnalyticsPipelineStage
+    )
+    case transcriptionCancelled(AnalyticsTranscriptionDimensions, duration: AnalyticsDurationBucket)
+    case polishCompleted(
+        engine: AnalyticsEngineType,
+        provider: AnalyticsProviderType,
+        latency: AnalyticsLatencyBucket,
+        preset: AnalyticsPolishPreset
+    )
+    case polishFailed(
+        engine: AnalyticsEngineType,
+        provider: AnalyticsProviderType,
+        latency: AnalyticsLatencyBucket,
+        preset: AnalyticsPolishPreset,
+        error: AnalyticsErrorCategory
+    )
+    case correctionApplied(rulesMatched: AnalyticsCountBucket)
+    case correctionRuleCreated(totalRules: AnalyticsCountBucket)
+    case profileActivated(profileCount: AnalyticsCountBucket, isDefault: Bool)
+    case insightsViewed(surface: AnalyticsSurface)
+    case historyAction(AnalyticsHistoryAction)
+    case voiceOutputUsed(engine: AnalyticsEngineType, provider: AnalyticsProviderType)
+    case sendToMacCompleted(success: Bool, latency: AnalyticsLatencyBucket)
+    case modelDownloadCompleted(modelFamily: String, size: AnalyticsModelSizeBucket, success: Bool)
+    case keyboardEnabledState(enabled: Bool)
+    case providerConfigured(provider: AnalyticsProviderType, method: AnalyticsProviderConfigurationMethod)
+    case settingsChanged(setting: AnalyticsSettingID, category: AnalyticsSettingCategory)
+    case errorDisplayed(error: AnalyticsErrorCategory, surface: AnalyticsSurface)
     case analyticsOptIn(surface: AnalyticsOptInSurface)
 
     public var name: String {
@@ -82,19 +122,45 @@ public enum ProductAnalyticsEvent: Sendable, Equatable {
         case .appActiveDaily: "app_active_daily"
         case .onboardingStarted: "onboarding_started"
         case .onboardingStepCompleted: "onboarding_step_completed"
+        case .onboardingPermissionResult: "onboarding_permission_result"
         case .onboardingCompleted: "onboarding_completed"
         case .firstTranscriptionSucceeded: "first_transcription_succeeded"
+        case .transcriptionStarted: "transcription_started"
+        case .transcriptionCompleted: "transcription_completed"
+        case .transcriptionFailed: "transcription_failed"
+        case .transcriptionCancelled: "transcription_cancelled"
+        case .polishCompleted: "polish_completed"
+        case .polishFailed: "polish_failed"
+        case .correctionApplied: "correction_applied"
+        case .correctionRuleCreated: "correction_rule_created"
+        case .profileActivated: "profile_activated"
+        case .insightsViewed: "insights_viewed"
+        case .historyAction: "history_action"
+        case .voiceOutputUsed: "voice_output_used"
+        case .sendToMacCompleted: "send_to_mac_completed"
+        case .modelDownloadCompleted: "model_download_completed"
+        case .keyboardEnabledState: "keyboard_enabled_state"
+        case .providerConfigured: "provider_configured"
+        case .settingsChanged: "settings_changed"
+        case .errorDisplayed: "error_displayed"
         case .analyticsOptIn: "analytics_opt_in"
         }
     }
 
-    public var privacyClass: AnalyticsPrivacyClass { .pseudonymous }
+    public var privacyClass: AnalyticsPrivacyClass {
+        switch self {
+        case .correctionApplied, .errorDisplayed: .anonymousCounter
+        default: .pseudonymous
+        }
+    }
 
     public var properties: [String: String] {
         switch self {
         case .appActiveDaily: [:]
         case let .onboardingStarted(entryPoint): ["entry_point": entryPoint.rawValue]
         case let .onboardingStepCompleted(step): ["step": step.rawValue]
+        case let .onboardingPermissionResult(permission, state):
+            ["permission": permission.rawValue, "state": state.rawValue]
         case let .onboardingCompleted(stepsSkipped): ["steps_skipped_bucket": stepsSkipped.rawValue]
         case let .firstTranscriptionSucceeded(provider, engine, daysSinceInstall):
             [
@@ -102,8 +168,72 @@ public enum ProductAnalyticsEvent: Sendable, Equatable {
                 "engine_type": engine.rawValue,
                 "days_since_install_bucket": daysSinceInstall.rawValue
             ]
+        case let .transcriptionStarted(dimensions): dimensions.properties
+        case let .transcriptionCompleted(dimensions, duration, wordCount, latency, output):
+            dimensions.properties.merging([
+                "duration_bucket": duration.rawValue,
+                "word_count_bucket": wordCount.rawValue,
+                "latency_bucket": latency.rawValue,
+                "output_method": output.rawValue
+            ]) { current, _ in current }
+        case let .transcriptionFailed(dimensions, error, stage):
+            dimensions.properties.merging([
+                "error_category": error.rawValue,
+                "pipeline_stage": stage.rawValue
+            ]) { current, _ in current }
+        case let .transcriptionCancelled(dimensions, duration):
+            dimensions.properties.merging(["duration_bucket": duration.rawValue]) { current, _ in current }
+        case let .polishCompleted(engine, provider, latency, preset):
+            polishProperties(engine: engine, provider: provider, latency: latency, preset: preset)
+        case let .polishFailed(engine, provider, latency, preset, error):
+            polishProperties(engine: engine, provider: provider, latency: latency, preset: preset)
+                .merging(["error_category": error.rawValue]) { current, _ in current }
+        case let .correctionApplied(rulesMatched): ["rules_matched_bucket": rulesMatched.rawValue]
+        case let .correctionRuleCreated(totalRules): ["total_rules_bucket": totalRules.rawValue]
+        case let .profileActivated(profileCount, isDefault):
+            ["profile_count_bucket": profileCount.rawValue, "is_default": String(isDefault)]
+        case let .insightsViewed(surface): ["surface": surface.rawValue]
+        case let .historyAction(action): ["action": action.rawValue]
+        case let .voiceOutputUsed(engine, provider):
+            ["engine_type": engine.rawValue, "provider_type": provider.rawValue]
+        case let .sendToMacCompleted(success, latency):
+            ["success": String(success), "latency_bucket": latency.rawValue]
+        case let .modelDownloadCompleted(modelFamily, size, success):
+            [
+                "model_family": AnalyticsTranscriptionDimensions(
+                    mode: .batch,
+                    engine: .onDevice,
+                    provider: .local,
+                    modelFamily: modelFamily,
+                    languageCode: "other",
+                    trigger: .menuBar
+                ).modelFamily,
+                "size_bucket": size.rawValue,
+                "success": String(success)
+            ]
+        case let .keyboardEnabledState(enabled): ["enabled": String(enabled)]
+        case let .providerConfigured(provider, method):
+            ["provider_type": provider.rawValue, "method": method.rawValue]
+        case let .settingsChanged(setting, category):
+            ["setting_id": setting.rawValue, "category": category.rawValue]
+        case let .errorDisplayed(error, surface):
+            ["error_category": error.rawValue, "surface": surface.rawValue]
         case let .analyticsOptIn(surface): ["surface": surface.rawValue]
         }
+    }
+
+    private func polishProperties(
+        engine: AnalyticsEngineType,
+        provider: AnalyticsProviderType,
+        latency: AnalyticsLatencyBucket,
+        preset: AnalyticsPolishPreset
+    ) -> [String: String] {
+        [
+            "engine_type": engine.rawValue,
+            "provider_type": provider.rawValue,
+            "latency_bucket": latency.rawValue,
+            "preset": preset.rawValue
+        ]
     }
 }
 
@@ -138,11 +268,11 @@ public struct ProductAnalyticsContext: Codable, Equatable, Sendable {
 
 public struct ProductAnalyticsPayload: Codable, Equatable, Sendable {
     public let event: String
-    public let distinctID: UUID
+    public let distinctID: UUID?
     public let privacyClass: AnalyticsPrivacyClass
     public let properties: [String: String]
 
-    public init(event: ProductAnalyticsEvent, context: ProductAnalyticsContext, distinctID: UUID) {
+    public init(event: ProductAnalyticsEvent, context: ProductAnalyticsContext, distinctID: UUID?) {
         self.event = event.name
         self.distinctID = distinctID
         self.privacyClass = event.privacyClass
@@ -215,7 +345,7 @@ public actor ProductAnalyticsController {
 
     public func capture(_ event: ProductAnalyticsEvent) async throws {
         guard consent.permitsCollection, !forceDisabled() else { return }
-        let distinctID = try installationID()
+        let distinctID = event.privacyClass == .pseudonymous ? try installationID() : nil
         try await sink.capture(ProductAnalyticsPayload(event: event, context: context, distinctID: distinctID))
     }
 

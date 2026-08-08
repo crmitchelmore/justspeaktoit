@@ -65,6 +65,60 @@ final class ProductAnalyticsTests: XCTestCase {
         XCTAssertEqual(payload.properties["entry_point"], "fresh_install")
     }
 
+    func testDetailedTranscriptionEventBucketsRawMeasurementsLocally() async throws {
+        let fixture = try Fixture()
+        try await fixture.controller.setConsent(.optedIn)
+        let dimensions = AnalyticsTranscriptionDimensions(
+            mode: .live,
+            engine: .cloud,
+            provider: .deepgram,
+            modelFamily: "nova-3",
+            languageCode: "en-GB",
+            trigger: .hotkey
+        )
+        try await fixture.controller.capture(.transcriptionCompleted(
+            dimensions,
+            duration: .fifteenToSixtySeconds,
+            wordCount: .fiftyOneToTwoHundred,
+            latency: .milliseconds250ToOneSecond,
+            output: .paste
+        ))
+
+        let payloads = await fixture.sink.payloads
+        let payload = try XCTUnwrap(payloads.first)
+        XCTAssertEqual(payload.properties["duration_bucket"], "15-60s")
+        XCTAssertEqual(payload.properties["word_count_bucket"], "51-200")
+        XCTAssertEqual(payload.properties["latency_bucket"], "250ms-1s")
+        XCTAssertNil(payload.properties["transcript"])
+        XCTAssertNil(payload.properties["duration_ms"])
+        XCTAssertNil(payload.properties["word_count"])
+    }
+
+    func testAnonymousCounterNeverReceivesInstallationIdentity() async throws {
+        let fixture = try Fixture()
+        try await fixture.controller.setConsent(.optedIn)
+        try await fixture.controller.capture(.correctionApplied(rulesMatched: .twoToFive))
+
+        let payloads = await fixture.sink.payloads
+        let payload = try XCTUnwrap(payloads.first)
+        XCTAssertEqual(payload.privacyClass, .anonymousCounter)
+        XCTAssertNil(payload.distinctID)
+        XCTAssertNil(try fixture.store.loadInstallationID())
+    }
+
+    func testUnboundedModelFamilyFallsBackWithoutLeakingContent() {
+        let dimensions = AnalyticsTranscriptionDimensions(
+            mode: .batch,
+            engine: .onDevice,
+            provider: .local,
+            modelFamily: "private model name with spaces /Users/chris/model",
+            languageCode: "not a language code 123",
+            trigger: .menuBar
+        )
+        XCTAssertEqual(dimensions.modelFamily, "other")
+        XCTAssertEqual(dimensions.languageCode, "other")
+    }
+
     private static let allowedFirstSuccessKeys: Set<String> = [
         "provider_type", "engine_type", "days_since_install_bucket", "platform", "app_version", "build",
         "os_major_minor", "distribution_channel", "locale_language_code", "architecture", "analytics_schema_version"

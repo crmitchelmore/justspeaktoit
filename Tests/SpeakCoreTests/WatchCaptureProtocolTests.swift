@@ -8,7 +8,7 @@ final class WatchCaptureProtocolTests: XCTestCase {
 
     // MARK: - Envelope round-trip
 
-    func testEnvelopeRoundTripsThroughMetadata() throws {
+    func testEnvelope_roundTripsThroughTransferMetadata() throws {
         let envelope = WatchCaptureEnvelope(
             id: UUID(),
             createdAt: wholeSecondDate,
@@ -22,7 +22,7 @@ final class WatchCaptureProtocolTests: XCTestCase {
         XCTAssertEqual(decoded, envelope)
     }
 
-    func testEnvelopeMetadataIsPropertyListSafe() throws {
+    func testEnvelopeMetadata_isPropertyListSafe() throws {
         let envelope = WatchCaptureEnvelope(duration: 5)
         let metadata = try XCTUnwrap(envelope.metadata())
 
@@ -30,7 +30,7 @@ final class WatchCaptureProtocolTests: XCTestCase {
         XCTAssertTrue(PropertyListSerialization.propertyList(metadata, isValidFor: .binary))
     }
 
-    func testEnvelopeFromMissingOrMalformedMetadataIsNil() {
+    func testEnvelopeDecoding_returnsNilForMissingOrMalformedMetadata() {
         XCTAssertNil(WatchCaptureEnvelope.from(metadata: nil))
         XCTAssertNil(WatchCaptureEnvelope.from(metadata: [:]))
         XCTAssertNil(WatchCaptureEnvelope.from(metadata: ["unrelated": "value"]))
@@ -38,7 +38,7 @@ final class WatchCaptureProtocolTests: XCTestCase {
         XCTAssertNil(WatchCaptureEnvelope.from(metadata: [WatchCaptureEnvelope.metadataKey: 42]))
     }
 
-    func testEnvelopeFromIncompatibleFutureSchemaIsNil() throws {
+    func testEnvelopeDecoding_returnsNilForIncompatibleFutureSchema() throws {
         let future = WatchCaptureEnvelope(
             duration: 5,
             schemaVersion: WatchCaptureEnvelope.currentSchemaVersion + 1
@@ -48,7 +48,7 @@ final class WatchCaptureProtocolTests: XCTestCase {
         XCTAssertNil(WatchCaptureEnvelope.from(metadata: metadata))
     }
 
-    func testEnvelopeToleratesUnknownJSONKeys() throws {
+    func testEnvelopeDecoding_toleratesUnknownJSONKeys() throws {
         let json = """
         {"schemaVersion":1,"id":"\(UUID().uuidString)","createdAt":"2026-08-06T12:00:00Z",\
         "duration":12,"fileExtension":"m4a","futureField":"ignored"}
@@ -62,7 +62,7 @@ final class WatchCaptureProtocolTests: XCTestCase {
 
     // MARK: - Ack round-trip
 
-    func testAckRoundTripsThroughUserInfo() throws {
+    func testAck_roundTripsThroughUserInfo() throws {
         let ack = WatchCaptureAck(id: UUID(), outcome: .transcribed)
 
         let userInfo = try XCTUnwrap(ack.userInfo())
@@ -71,7 +71,7 @@ final class WatchCaptureProtocolTests: XCTestCase {
         XCTAssertEqual(decoded, ack)
     }
 
-    func testFailedAckCarriesMessage() throws {
+    func testFailedAck_carriesFailureMessage() throws {
         let ack = WatchCaptureAck(id: UUID(), outcome: .failed, message: "No API key")
 
         let decoded = try XCTUnwrap(WatchCaptureAck.from(userInfo: ack.userInfo()))
@@ -80,7 +80,7 @@ final class WatchCaptureProtocolTests: XCTestCase {
         XCTAssertEqual(decoded.message, "No API key")
     }
 
-    func testAckFromMissingOrMalformedUserInfoIsNil() {
+    func testAckDecoding_returnsNilForMissingOrMalformedUserInfo() {
         XCTAssertNil(WatchCaptureAck.from(userInfo: nil))
         XCTAssertNil(WatchCaptureAck.from(userInfo: [:]))
         XCTAssertNil(WatchCaptureAck.from(userInfo: [WatchCaptureAck.userInfoKey: "not json"]))
@@ -88,7 +88,7 @@ final class WatchCaptureProtocolTests: XCTestCase {
 
     // MARK: - Status state machine
 
-    func testStatusTransitionMatrix() {
+    func testStatusTransitions_allowOnlyTheDocumentedMatrix() {
         let allowed: [WatchCaptureStatus: Set<WatchCaptureStatus>] = [
             .recorded: [.transferring],
             .transferring: [.delivered, .failed],
@@ -108,7 +108,7 @@ final class WatchCaptureProtocolTests: XCTestCase {
         }
     }
 
-    func testOnlyTranscribedIsTerminal() {
+    func testStatusIsTerminal_onlyForTranscribed() {
         for status in WatchCaptureStatus.allCases {
             XCTAssertEqual(status.isTerminal, status == .transcribed, "\(status)")
         }

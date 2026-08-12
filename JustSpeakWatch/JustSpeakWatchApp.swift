@@ -2,7 +2,9 @@ import SwiftUI
 
 @main
 struct JustSpeakWatchApp: App {
-    @StateObject private var captureStore = WatchCaptureStore.shared
+    // `WatchCaptureStore.shared` manages its own lifetime, so the view
+    // observes it rather than owning it.
+    @ObservedObject private var captureStore = WatchCaptureStore.shared
     @StateObject private var recorder = WatchAudioRecorder()
 
     var body: some Scene {

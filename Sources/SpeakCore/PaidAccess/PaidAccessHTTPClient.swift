@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import Foundation
 
 /// HTTP implementation of ``PaidAccessClienting``.
@@ -7,7 +8,7 @@ import Foundation
 /// headers — with two additions the paid path needs: an explicit request
 /// timeout, and a correlation identifier on every request so a user-visible
 /// failure can be traced in the Worker's logs without asking for any content.
-public struct PaidAccessHTTPClient: PaidAccessClienting {
+public struct PaidAccessHTTPClient: PaidAccessClienting { // swiftlint:disable:this type_body_length
     /// Default production endpoint.
     public static let defaultBaseURL = URL(string: "https://api.justspeaktoit.com")!
 

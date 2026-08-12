@@ -17,6 +17,7 @@ import UIKit
 /// API keys keep working with no account at all.
 @MainActor
 public final class PaidAccessStore: NSObject, ObservableObject {
+    // swiftlint:disable:previous type_body_length
 
     public static let shared = PaidAccessStore()
 

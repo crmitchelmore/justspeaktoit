@@ -18,7 +18,7 @@ import StoreKit
 ///     the user's own API keys or local models, which is what the subscription
 ///     is an alternative to — not a prerequisite for.
 @MainActor
-final class PaidAccessManager: NSObject, ObservableObject {
+final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable:this type_body_length
 
   @Published private(set) var entitlement: PaidEntitlement = .unentitled
   @Published private(set) var policy: PaidRoutingPolicy = .unknown

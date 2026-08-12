@@ -62,7 +62,10 @@ extension SettingsView {
   @ViewBuilder
   private var paidAccessSignedOutSection: some View {
     VStack(alignment: .leading, spacing: 10) {
-      Text("Sign in with Apple to start or restore a subscription. The same Apple account works on your Mac and iPhone.")
+      Text(
+        "Sign in with Apple to start or restore a subscription. "
+          + "The same Apple account works on your Mac and iPhone."
+      )
         .font(.caption)
         .foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)

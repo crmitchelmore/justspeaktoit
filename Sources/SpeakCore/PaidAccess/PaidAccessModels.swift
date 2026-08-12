@@ -263,10 +263,13 @@ public enum PaidAccessError: LocalizedError, Sendable, Equatable {
     /// local model instead of surfacing an error.
     public var permitsSilentFallback: Bool {
         switch self {
+        // Running out of included usage is not a failure of the user's own
+        // configuration, so the request completes through their own key exactly
+        // as the error message promises.
         case .notSignedIn, .entitlementRequired, .paidRoutingDisabled, .serviceUnavailable,
-             .network:
+             .network, .quotaExceeded:
             return true
-        case .quotaExceeded, .tooManySessions, .unsupportedOperation, .billingChannelUnavailable,
+        case .tooManySessions, .unsupportedOperation, .billingChannelUnavailable,
              .invalidResponse:
             return false
         }

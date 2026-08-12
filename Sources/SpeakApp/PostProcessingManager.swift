@@ -267,7 +267,7 @@ final class PostProcessingManager: ObservableObject {
     // serving this request no personal key is needed; otherwise fall through to
     // the wrapped client so the "key required" warning stays truthful.
     if let proxy = client as? PaidAccessProxyClient {
-      if await proxy.isPaidRoutingActive() {
+      if await proxy.isPaidRoutingActive(configuredModel: resolvedModel) {
         return true
       }
       return await Self.hasOpenRouterAccess(proxy.fallback, model: resolvedModel)

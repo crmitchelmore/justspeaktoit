@@ -28,6 +28,7 @@ interface SessionMetadata extends LiveSessionInit {
 }
 
 const METADATA_KEY = 'metadata';
+const SETTLED_KEY = 'settled';
 const OUTCOME_PATH = '/outcome';
 
 export interface LiveSessionOutcome {
@@ -57,6 +58,13 @@ export class LiveSessionDurableObject implements DurableObject {
 
     if (request.headers.get('upgrade') !== 'websocket') {
       return new Response('Expected WebSocket upgrade', { status: 426 });
+    }
+
+    // One reservation, one socket. A second upgrade for the same Durable Object
+    // would replace `this.client`/`this.upstream` and orphan the first relay,
+    // which then never settles its share of the reservation.
+    if (this.client !== null || (await this.state.storage.get<SessionMetadata>(METADATA_KEY))) {
+      return new Response('Live session is already in use', { status: 409 });
     }
 
     const init = JSON.parse(request.headers.get('x-session-init') ?? '{}') as Partial<LiveSessionInit>;
@@ -172,7 +180,14 @@ export class LiveSessionDurableObject implements DurableObject {
    */
   private async settle(closed: boolean): Promise<void> {
     if (this.settled) return;
+    // The in-memory flag is lost when the Durable Object is evicted, so the
+    // durable copy is what makes a double settle idempotent across restarts.
+    if ((await this.state.storage.get<boolean>(SETTLED_KEY)) === true) {
+      this.settled = true;
+      return;
+    }
     this.settled = true;
+    await this.state.storage.put(SETTLED_KEY, true);
 
     const metadata =
       this.metadata ?? (await this.state.storage.get<SessionMetadata>(METADATA_KEY)) ?? null;

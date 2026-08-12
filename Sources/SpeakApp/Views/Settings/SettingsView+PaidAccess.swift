@@ -146,7 +146,7 @@ extension SettingsView {
           Text("Models in use")
             .font(.caption.weight(.semibold))
             .foregroundStyle(.secondary)
-          ForEach(paidAccess.policy.routes, id: \.model) { route in
+          ForEach(paidAccess.policy.routes, id: \.operation) { route in
             HStack {
               Text(route.operation.displayName)
                 .font(.caption)

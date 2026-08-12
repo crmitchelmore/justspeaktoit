@@ -121,12 +121,13 @@ export async function handleStripeWebhook(
     });
     context.logger.info('webhook.stripe.processed', { event_type: event.type });
   } catch (error) {
-    await context.repository.completeWebhookEvent({
-      provider: 'stripe',
-      eventId: event.id,
-      status: 'failed',
-      failureReason: error instanceof Error ? error.name : 'unknown',
-      nowSeconds: context.nowSeconds,
+    // A processing failure is transient by assumption, so the claim is released
+    // and the provider's retry is processed instead of being answered as a
+    // duplicate and dropped for ever.
+    await context.repository.releaseWebhookClaim({ provider: 'stripe', eventId: event.id });
+    context.logger.error('webhook.stripe.failed', {
+      event_type: event.type,
+      reason: error instanceof Error ? error.name : 'unknown',
     });
     throw error;
   }
@@ -196,6 +197,21 @@ export async function handleAppStoreWebhook(
       rootDer,
       context.nowMs,
     );
+    // The notification envelope is bound to our bundle, but the transaction it
+    // carries is a separate JWS. Validate it against the same allow-lists so a
+    // notification cannot grant an entitlement for another app or product.
+    if (
+      typeof transaction.bundleId !== 'string' ||
+      !context.config.appleBundleIds.includes(transaction.bundleId)
+    ) {
+      throw new ApiError('bad_request', 'Notification transaction is for an unexpected bundle');
+    }
+    if (
+      typeof transaction.productId !== 'string' ||
+      !context.config.storeKitProductIds.includes(transaction.productId)
+    ) {
+      throw new ApiError('bad_request', 'Notification transaction is for an unexpected product');
+    }
     const renewal =
       typeof notification.data?.signedRenewalInfo === 'string'
         ? await verifyAppleSignedJws<StoreKitRenewalPayload>(
@@ -204,6 +220,14 @@ export async function handleAppStoreWebhook(
             context.nowMs,
           )
         : null;
+    // Renewal info is only meaningful for the transaction it belongs to.
+    if (
+      renewal !== null &&
+      typeof renewal.originalTransactionId === 'string' &&
+      renewal.originalTransactionId !== transaction.originalTransactionId
+    ) {
+      throw new ApiError('bad_request', 'Renewal info does not match the signed transaction');
+    }
 
     const originalTransactionId = transaction.originalTransactionId;
     if (typeof originalTransactionId !== 'string') {
@@ -256,12 +280,12 @@ export async function handleAppStoreWebhook(
       notification_type: notification.notificationType ?? 'unknown',
     });
   } catch (error) {
-    await context.repository.completeWebhookEvent({
+    await context.repository.releaseWebhookClaim({
       provider: 'appstore',
       eventId: notificationId,
-      status: 'failed',
-      failureReason: error instanceof Error ? error.name : 'unknown',
-      nowSeconds: context.nowSeconds,
+    });
+    context.logger.error('webhook.appstore.failed', {
+      reason: error instanceof Error ? error.name : 'unknown',
     });
     throw error;
   }

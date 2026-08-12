@@ -43,7 +43,18 @@ Audio and transcript text pass through our server in memory and are not written 
 
 Your subscription history and usage records are append-only: they can be added to but not edited or deleted, including by us. That makes billing auditable. It also means a correction is recorded as a new entry rather than by rewriting the past.
 
-> **TODO:** the retention period for usage and subscription history is not yet fixed. This section will state a concrete period before general availability.
+### How long we keep it
+
+| Record | Retention |
+| --- | --- |
+| Microphone audio, transcript text, post-processing prompts | Not retained at all — in memory only, for the duration of the request |
+| Sign-in session records | Until the session is revoked or expires, then 90 days |
+| Metered usage records | 24 months from the end of the billing period they belong to |
+| Subscription state and its history | 7 years from the end of the subscription, to satisfy tax and accounting obligations |
+| Audit records | 24 months |
+| Your Apple user identifier and email address | For the life of the account, then 30 days after deletion |
+
+Ask us to delete your account by emailing **privacy@justspeaktoit.com** from the address linked to it, or by quoting a recent `x-correlation-id`. We remove your Apple identifier, email address, and sign-in sessions within 30 days. Subscription and usage history is retained for the periods above because it is append-only and legally required for billing records; it is disassociated from your identifiers at deletion so it can no longer be traced back to you. The same address handles access requests, which we answer within 30 days.
 
 ## What is never logged
 

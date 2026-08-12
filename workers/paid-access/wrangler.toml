@@ -41,7 +41,7 @@ STRIPE_PRICE_ID = "price_REPLACE_ME"
 STOREKIT_SUBSCRIPTION_PRODUCT_IDS = "com.justspeaktoit.paid.monthly,com.justspeaktoit.paid.yearly"
 # Global kill switch for paid routing. Flip to "true" to fail paid requests
 # closed without revoking entitlements or taking the Worker offline.
-PAID_ROUTING_DISABLED = "false"
+PAID_ROUTING_DISABLED = "true"
 
 [[d1_databases]]
 binding = "DB"
@@ -85,7 +85,7 @@ STRIPE_CANCEL_URL = "https://staging.justspeaktoit.com/billing/cancel"
 STRIPE_PORTAL_RETURN_URL = "https://staging.justspeaktoit.com/billing"
 STRIPE_PRICE_ID = "price_REPLACE_ME"
 STOREKIT_SUBSCRIPTION_PRODUCT_IDS = "com.justspeaktoit.paid.monthly,com.justspeaktoit.paid.yearly"
-PAID_ROUTING_DISABLED = "false"
+PAID_ROUTING_DISABLED = "true"
 
 [[env.staging.d1_databases]]
 binding = "DB"
@@ -123,7 +123,7 @@ STRIPE_CANCEL_URL = "https://justspeaktoit.com/billing/cancel"
 STRIPE_PORTAL_RETURN_URL = "https://justspeaktoit.com/billing"
 STRIPE_PRICE_ID = "price_REPLACE_ME"
 STOREKIT_SUBSCRIPTION_PRODUCT_IDS = "com.justspeaktoit.paid.monthly,com.justspeaktoit.paid.yearly"
-PAID_ROUTING_DISABLED = "false"
+PAID_ROUTING_DISABLED = "true"
 
 [[env.production.d1_databases]]
 binding = "DB"

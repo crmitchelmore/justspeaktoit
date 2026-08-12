@@ -15,6 +15,7 @@ import {
 } from '../entitlement.js';
 import { StripeClient } from '../billing/stripe.js';
 import {
+  acceptedAppleEnvironments,
   appleRootCertificate,
   storeKitEntitlementView,
   verifyStoreKitTransaction,
@@ -191,7 +192,10 @@ export async function handleStripeCheckout(
     userId: context.session.userId,
     successUrl: context.config.stripeSuccessUrl,
     cancelUrl: context.config.stripeCancelUrl,
-    idempotencyKey: `checkout:${context.session.userId}:${context.session.sessionId}`,
+    // Scoped to this request, not to the auth session: a session lives for weeks,
+    // and Stripe replays the first checkout for any key it has already seen, so a
+    // reusing key would hand back a stale (or already-completed) checkout URL.
+    idempotencyKey: `checkout:${context.session.userId}:${context.correlationId}`,
   });
 
   await context.repository.recordAudit({
@@ -266,6 +270,7 @@ export async function handleStoreKitSync(
         rootDer,
         bundleIds: context.config.appleBundleIds,
         productIds: context.config.storeKitProductIds,
+        environments: acceptedAppleEnvironments(context.config.environment),
       },
       context.nowMs,
     );
@@ -294,6 +299,15 @@ export async function handleStoreKitSync(
     } catch {
       throw new ApiError('unauthorized', 'Signed renewal info could not be verified');
     }
+    // Renewal info only describes the transaction it belongs to; accepting an
+    // unrelated one would let a caller mix an active renewal into an expired
+    // transaction.
+    if (
+      typeof renewal.originalTransactionId === 'string' &&
+      renewal.originalTransactionId !== transaction.originalTransactionId
+    ) {
+      throw new ApiError('bad_request', 'Renewal info does not match the signed transaction');
+    }
   }
 
   const view = storeKitEntitlementView(transaction, renewal, context.nowSeconds);
@@ -308,12 +322,21 @@ export async function handleStoreKitSync(
     throw new ApiError('conflict', 'This subscription is already linked to another account');
   }
 
-  await context.repository.linkBillingCustomer({
-    userId: context.session.userId,
-    provider: 'storekit',
-    providerCustomerId: view.originalTransactionId,
-    nowSeconds: context.nowSeconds,
-  });
+  // The `owner` check above is advisory: two concurrent syncs can both pass it.
+  // The unique constraint on the billing customer is the real guard, so a
+  // constraint failure is reported as the same conflict rather than a 500.
+  try {
+    await context.repository.linkBillingCustomer({
+      userId: context.session.userId,
+      provider: 'storekit',
+      providerCustomerId: view.originalTransactionId,
+      nowSeconds: context.nowSeconds,
+    });
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    context.logger.warn('billing.storekit.link_conflict');
+    throw new ApiError('conflict', 'This subscription is already linked to another account');
+  }
 
   const result = await transitionEntitlement(context, {
     userId: context.session.userId,

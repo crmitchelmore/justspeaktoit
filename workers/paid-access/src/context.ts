@@ -77,6 +77,11 @@ export async function authenticate(
   if (user === null || user.disabledAt !== null) {
     throw new ApiError('unauthorized', 'Access token is not valid');
   }
+  if (!(await context.repository.isAuthSessionActive(session.sessionId, context.nowSeconds))) {
+    // Sign-out and refresh reuse detection revoke the session row; an access
+    // token minted before that must stop working immediately.
+    throw new ApiError('unauthorized', 'Access token is not valid');
+  }
   if (user.role !== session.role) {
     // Role changed since the token was minted; force a refresh rather than
     // honouring stale claims.

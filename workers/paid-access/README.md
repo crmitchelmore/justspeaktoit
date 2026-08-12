@@ -23,7 +23,7 @@ These are deliberate and load-bearing. Changing any of them is a design decision
 
 ## Layout
 
-```
+```text
 workers/paid-access/
 ├── migrations/0001_init.sql     D1 schema, constraints and append-only triggers
 ├── src/

@@ -133,7 +133,7 @@ public struct PaidAccessSettingsView: View {
             }
 
             if self.store.isPaidRoutingActive {
-                ForEach(self.store.policy.routes, id: \.model) { route in
+                ForEach(self.store.policy.routes, id: \.operation) { route in
                     LabeledContent(route.operation.displayName, value: route.displayName)
                         .font(.caption)
                 }

@@ -47,6 +47,7 @@ public final class PaidAccessStore: NSObject, ObservableObject {
     private let client: any PaidAccessClienting
     private let sessionStore: any PaidAccessSessionStoring
     private var transactionListener: Task<Void, Never>?
+    private var refreshTask: Task<PaidAccessSession?, Never>?
     private var signInContinuation: CheckedContinuation<ASAuthorization, Error>?
 
     override private convenience init() {
@@ -117,16 +118,30 @@ public final class PaidAccessStore: NSObject, ObservableObject {
             return nil
         }
 
-        do {
-            let refreshed = try await self.client.refresh(session: stored)
-            try await self.sessionStore.saveSession(refreshed)
-            return refreshed
-        } catch PaidAccessError.notSignedIn {
-            await self.clearSession()
-            return nil
-        } catch {
-            return stored
+        // `@MainActor` isolation does not survive the await below, so without a
+        // single-flight task two concurrent callers would each present the same
+        // refresh token and the server's reuse detection would sign the user out.
+        if let inFlight = self.refreshTask {
+            return await inFlight.value
         }
+        let task = Task { [client, sessionStore] () -> PaidAccessSession? in
+            do {
+                let refreshed = try await client.refresh(session: stored)
+                try await sessionStore.saveSession(refreshed)
+                return refreshed
+            } catch PaidAccessError.notSignedIn {
+                return nil
+            } catch {
+                return stored
+            }
+        }
+        self.refreshTask = task
+        let result = await task.value
+        self.refreshTask = nil
+        if result == nil {
+            await self.clearSession()
+        }
+        return result
     }
 
     private func clearSession() async {
@@ -159,6 +174,9 @@ public final class PaidAccessStore: NSObject, ObservableObject {
     // MARK: - Sign in with Apple
 
     public func signIn() async {
+        // A second sign-in would overwrite `signInContinuation`, leaking the
+        // first continuation and leaving `isBusy` stuck true for the session.
+        guard self.signInContinuation == nil, !self.isBusy else { return }
         self.isBusy = true
         self.lastError = nil
         defer { self.isBusy = false }
@@ -208,7 +226,10 @@ public final class PaidAccessStore: NSObject, ObservableObject {
     private func performAuthorization(
         for request: ASAuthorizationAppleIDRequest
     ) async throws -> ASAuthorization {
-        try await withCheckedThrowingContinuation { continuation in
+        guard self.signInContinuation == nil else {
+            throw PaidAccessError.network("A sign-in is already in progress.")
+        }
+        return try await withCheckedThrowingContinuation { continuation in
             self.signInContinuation = continuation
             let controller = ASAuthorizationController(authorizationRequests: [request])
             controller.delegate = self

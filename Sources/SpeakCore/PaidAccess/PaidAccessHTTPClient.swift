@@ -283,9 +283,25 @@ public struct PaidAccessHTTPClient: PaidAccessClienting { // swiftlint:disable:t
             session: session,
             query: query
         )
+        // `URLSessionWebSocketTask` requires a ws/wss URL; the base URL is https.
+        guard
+            let url = request.url,
+            var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        else {
+            throw PaidAccessError.invalidResponse
+        }
+        switch components.scheme {
+        case "https": components.scheme = "wss"
+        case "http": components.scheme = "ws"
+        default: break
+        }
+        guard let socketURL = components.url else {
+            throw PaidAccessError.invalidResponse
+        }
+        request.url = socketURL
         // The socket connects to our Worker, not to a vendor, so only the
-        // user's own session token is attached.
-        request.timeoutInterval = self.timeout
+        // user's own session token is attached. The timeout applies to
+        // connection setup, not to the established socket.
         return request
     }
 

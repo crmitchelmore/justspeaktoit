@@ -44,10 +44,24 @@ async function seedUnentitledUser(): Promise<string> {
   return userId;
 }
 
+/** Access tokens are only honoured while their auth session row is live. */
+async function seedAuthSession(userId: string): Promise<string> {
+  const sessionId = crypto.randomUUID();
+  const now = Math.floor(Date.now() / 1_000);
+  await env.DB.prepare(
+    `INSERT INTO auth_sessions
+       (id, user_id, refresh_token_hash, device_label, created_at, expires_at)
+     VALUES (?1, ?2, ?3, NULL, ?4, ?5)`,
+  )
+    .bind(sessionId, userId, sessionId.replace(/-/g, '').padEnd(64, '0'), now, now + 86_400)
+    .run();
+  return sessionId;
+}
+
 async function tokenFor(userId: string): Promise<string> {
   const issued = await issueAccessToken(
     SIGNING_KEY,
-    { userId, sessionId: crypto.randomUUID(), role: 'user' },
+    { userId, sessionId: await seedAuthSession(userId), role: 'user' },
     3_600,
     Math.floor(Date.now() / 1_000),
   );

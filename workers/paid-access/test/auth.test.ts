@@ -17,11 +17,25 @@ async function seedUser(): Promise<string> {
   return id;
 }
 
+/** Access tokens are only honoured while their auth session row is live. */
+async function seedAuthSession(userId: string): Promise<string> {
+  const sessionId = crypto.randomUUID();
+  const now = Math.floor(Date.now() / 1_000);
+  await env.DB.prepare(
+    `INSERT INTO auth_sessions
+       (id, user_id, refresh_token_hash, device_label, created_at, expires_at)
+     VALUES (?1, ?2, ?3, NULL, ?4, ?5)`,
+  )
+    .bind(sessionId, userId, sessionId.replace(/-/g, '').padEnd(64, '0'), now, now + 86_400)
+    .run();
+  return sessionId;
+}
+
 async function tokenFor(userId: string, role: 'user' | 'admin' = 'user'): Promise<string> {
   const now = Math.floor(Date.now() / 1_000);
   const issued = await issueAccessToken(
     SIGNING_KEY,
-    { userId, sessionId: crypto.randomUUID(), role },
+    { userId, sessionId: await seedAuthSession(userId), role },
     3_600,
     now,
   );
@@ -109,9 +123,14 @@ describe('authentication', () => {
   });
 
   it('rejects a valid token for a user that does not exist', async () => {
-    const token = await tokenFor(crypto.randomUUID());
+    const issued = await issueAccessToken(
+      SIGNING_KEY,
+      { userId: crypto.randomUUID(), sessionId: crypto.randomUUID(), role: 'user' },
+      3_600,
+      Math.floor(Date.now() / 1_000),
+    );
     const response = await SELF.fetch('https://api.test/v1/entitlement', {
-      headers: { authorization: `Bearer ${token}` },
+      headers: { authorization: `Bearer ${issued.token}` },
     });
     expect(response.status).toBe(401);
   });
@@ -133,6 +152,24 @@ describe('authentication', () => {
       headers: { authorization: `Bearer ${await tokenFor(userId, 'admin')}` },
     });
     expect(response.status).toBe(401);
+  });
+
+  it('rejects an access token whose auth session has been revoked', async () => {
+    const userId = await seedUser();
+    const token = await tokenFor(userId);
+    const accepted = await SELF.fetch('https://api.test/v1/entitlement', {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(accepted.status).toBe(200);
+
+    await env.DB.prepare('UPDATE auth_sessions SET revoked_at = ?2 WHERE user_id = ?1')
+      .bind(userId, Math.floor(Date.now() / 1_000))
+      .run();
+
+    const rejected = await SELF.fetch('https://api.test/v1/entitlement', {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(rejected.status).toBe(401);
   });
 
   it('accepts a valid token and reports a fresh account as unentitled', async () => {

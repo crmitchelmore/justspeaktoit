@@ -378,4 +378,17 @@ Triage guidance:
 
 To grant, extend or revoke access manually, apply a `manual`-source entitlement transition through the billing code path so it is recorded in `entitlement_events` with a reason and correlation id. Do not write to `entitlements` directly.
 
-> **TODO:** the retention period for `usage_ledger`, `entitlement_events` and `audit_events` is not yet defined. Agree it and record it here and in [`paid-access-privacy.md`](paid-access-privacy.md) before general availability.
+### Retention
+
+| Table | Retention | Operator action |
+| --- | --- | --- |
+| `auth_sessions` | 90 days after `revoked_at` or `expires_at` | Monthly purge of rows past both |
+| `usage_ledger` | 24 months from the end of `billing_period` | Monthly purge of older periods |
+| `entitlement_events` | 7 years from the end of the subscription | Retained for billing audit; never edited |
+| `entitlements` | 7 years from the end of the subscription | Retained for billing audit; never edited |
+| `audit_events` | 24 months | Monthly purge of older rows |
+| `users` | Life of the account, then 30 days | On a deletion request, clear `apple_sub` and `email` and disable the account within 30 days |
+
+Deletion and access requests arrive at the address published in [`paid-access-privacy.md`](paid-access-privacy.md). Handling a deletion request means disabling the account, revoking its sessions, and clearing the Apple identifier and email address; the append-only billing history stays, without identifiers that tie it to a person. Answer both request types within 30 days.
+
+These periods are duplicated in [`paid-access-privacy.md`](paid-access-privacy.md) and the two must be changed together.

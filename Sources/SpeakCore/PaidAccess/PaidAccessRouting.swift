@@ -163,10 +163,15 @@ public struct PaidAccessRouter: Sendable {
         let isLocal = ModelRouting.family(for: configuredModel).isDownloadedLocal
             || AppleLocalModels.isAppleSpeechModel(configuredModel)
 
+        // An explicit on-device selection stays on device. Paid access is a
+        // convenience over remote keys, never an opt-in to uploading audio that
+        // the user asked to keep local.
+        if isLocal {
+            return .localModel(model: configuredModel)
+        }
+
         guard self.isPaidRoutingPreferred, self.entitlement.allowsPaidRouting(asOf: now) else {
-            return isLocal
-                ? .localModel(model: configuredModel)
-                : .bringYourOwnKey(model: configuredModel)
+            return .bringYourOwnKey(model: configuredModel)
         }
 
         guard let route = self.policy.route(for: operation) else {

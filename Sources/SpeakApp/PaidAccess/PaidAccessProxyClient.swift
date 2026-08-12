@@ -32,15 +32,17 @@ actor PaidAccessProxyClient: StreamingChatLLMClient, BatchTranscriptionClient {
 
   // MARK: - Routing
 
-  /// Whether a paid route would currently be used for transcript cleanup.
+  /// Whether a paid route would currently be used for transcript cleanup of the
+  /// given model.
   ///
-  /// Callers use this to decide whether a personal API key is still required.
-  func isPaidRoutingActive() async -> Bool {
+  /// Callers use this to decide whether a personal API key is still required,
+  /// so it must be asked about the model the request will actually use.
+  func isPaidRoutingActive(configuredModel: String) async -> Bool {
     let router = await self.routerProvider()
     guard
       let decision = try? router.decide(
         for: .postProcessing,
-        configuredModel: ModelCatalog.defaultPostProcessingModel
+        configuredModel: configuredModel
       ),
       decision.usesPaidService
     else {

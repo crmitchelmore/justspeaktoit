@@ -81,7 +81,13 @@ export function appleRootCertificate(overrideBase64?: string): Uint8Array {
 
 export async function verifyStoreKitTransaction(
   signedTransaction: string,
-  options: { rootDer: Uint8Array; bundleIds: readonly string[]; productIds: readonly string[] },
+  options: {
+    rootDer: Uint8Array;
+    bundleIds: readonly string[];
+    productIds: readonly string[];
+    /** Apple environments this deployment accepts, e.g. `['Production']`. */
+    environments?: readonly string[];
+  },
   nowMs: number,
 ): Promise<StoreKitTransactionPayload> {
   const payload = await verifyAppleSignedJws<StoreKitTransactionPayload>(
@@ -96,10 +102,29 @@ export async function verifyStoreKitTransaction(
   if (typeof payload.productId !== 'string' || !options.productIds.includes(payload.productId)) {
     throw new StoreKitError('Signed transaction is for an unexpected product identifier');
   }
+  // A Sandbox receipt is trivially obtainable and must never grant production
+  // entitlements, so the environment is checked like any other claim.
+  if (options.environments !== undefined) {
+    if (
+      typeof payload.environment !== 'string' ||
+      !options.environments.includes(payload.environment)
+    ) {
+      throw new StoreKitError('Signed transaction is for an unexpected Apple environment');
+    }
+  }
   if (typeof payload.originalTransactionId !== 'string') {
     throw new StoreKitError('Signed transaction has no original transaction identifier');
   }
   return payload;
+}
+
+/**
+ * The Apple environments a deployment accepts. Production installs only trust
+ * Production receipts; every other deployment also accepts Sandbox so TestFlight
+ * and local builds can exercise the flow.
+ */
+export function acceptedAppleEnvironments(deployment: string): readonly string[] {
+  return deployment.toLowerCase() === 'production' ? ['Production'] : ['Production', 'Sandbox'];
 }
 
 export async function verifyAppStoreNotification(

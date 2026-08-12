@@ -184,6 +184,24 @@ export class Repository {
       .run();
   }
 
+  /**
+   * Whether the auth session behind an access token is still live.
+   *
+   * Access tokens are short-lived but not revocable on their own, so sign-out
+   * and refresh-token reuse detection only take effect if every authenticated
+   * request re-checks the session row.
+   */
+  async isAuthSessionActive(sessionId: string, nowSeconds: number): Promise<boolean> {
+    const row = await this.db
+      .prepare(
+        `SELECT id FROM auth_sessions
+          WHERE id = ?1 AND revoked_at IS NULL AND expires_at > ?2`,
+      )
+      .bind(sessionId, nowSeconds)
+      .first<{ id: string }>();
+    return row !== null;
+  }
+
   // -------------------------------------------------------------------------
   // Billing customers
   // -------------------------------------------------------------------------
@@ -393,6 +411,25 @@ export class Repository {
       )
       .run();
     return (result.meta.changes ?? 0) > 0;
+  }
+
+  /**
+   * Reopens a claimed webhook delivery so the provider's retry is processed
+   * rather than answered as a duplicate. Only a delivery that is still
+   * `received` (never completed) is removed, so a processed event stays
+   * deduplicated for ever.
+   */
+  async releaseWebhookClaim(input: {
+    provider: 'stripe' | 'appstore';
+    eventId: string;
+  }): Promise<void> {
+    await this.db
+      .prepare(
+        `DELETE FROM webhook_events
+          WHERE provider = ?1 AND event_id = ?2 AND status = 'received'`,
+      )
+      .bind(input.provider, input.eventId)
+      .run();
   }
 
   async completeWebhookEvent(input: {

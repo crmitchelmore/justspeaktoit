@@ -742,31 +742,33 @@ public struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                if transcriptionLocationBinding.wrappedValue == .local, !hidesModelSelection {
-                    Picker("Apple On-Device Model", selection: selectedModelBinding) {
-                        ForEach(ModelCatalog.onDeviceLiveTranscription) { option in
-                            HStack {
-                                Text(option.displayName)
-                                Spacer()
-                                IOSModelCredentialStatusView(
-                                    availability: ModelCredentialResolver.availability(
-                                        for: option.id,
-                                        purpose: .liveTranscription,
-                                        storedAPIKeyIdentifiers: settings.storedAPIKeyIdentifiers
+                if transcriptionLocationBinding.wrappedValue == .local {
+                    if !hidesModelSelection {
+                        Picker("Apple On-Device Model", selection: selectedModelBinding) {
+                            ForEach(ModelCatalog.onDeviceLiveTranscription) { option in
+                                HStack {
+                                    Text(option.displayName)
+                                    Spacer()
+                                    IOSModelCredentialStatusView(
+                                        availability: ModelCredentialResolver.availability(
+                                            for: option.id,
+                                            purpose: .liveTranscription,
+                                            storedAPIKeyIdentifiers: settings.storedAPIKeyIdentifiers
+                                        )
                                     )
-                                )
+                                }
+                                .accessibilityElement(children: .combine)
+                                .tag(option.id)
                             }
-                            .accessibilityElement(children: .combine)
-                            .tag(option.id)
                         }
-                    }
-                    .pickerStyle(.navigationLink)
-                    .accessibilityIdentifier("appleOnDeviceModelPicker")
+                        .pickerStyle(.navigationLink)
+                        .accessibilityIdentifier("appleOnDeviceModelPicker")
 
-                    if !usesInlineDensityLayout {
-                        Text("Uses Apple's built-in speech engine. Audio stays on this device.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        if !usesInlineDensityLayout {
+                            Text("Uses Apple's built-in speech engine. Audio stays on this device.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 } else {
                     Picker("Remote Mode", selection: remoteTranscriptionModeBinding) {

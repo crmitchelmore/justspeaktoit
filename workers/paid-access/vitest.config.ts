@@ -22,6 +22,9 @@ export default defineWorkersConfig({
             STRIPE_WEBHOOK_SECRET: 'whsec_test_placeholder',
             OPENROUTER_API_KEY: 'test-openrouter-key',
             DEEPGRAM_API_KEY: 'test-deepgram-key',
+            // Deployed environments ship with the kill switch on until billing
+            // setup is verified; the suites exercise the enabled path.
+            PAID_ROUTING_DISABLED: 'false',
           },
         },
       },

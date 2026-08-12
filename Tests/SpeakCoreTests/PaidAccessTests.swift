@@ -267,6 +267,32 @@ final class PaidAccessRoutingTests: XCTestCase {
         XCTAssertEqual(decision, .localModel(model: AppleLocalModels.preferredSpeechModelID))
     }
 
+    func testOnDeviceSelection_staysLocalForAnEntitledSubscriber() throws {
+        // Paid access is a convenience over remote keys, never an opt-in to
+        // uploading audio the user asked to keep on the device.
+        let router = self.router(entitlement: self.entitled(), preferred: true)
+
+        let speech = try router.decide(
+            for: .liveTranscription,
+            configuredModel: AppleLocalModels.preferredSpeechModelID,
+            now: self.now
+        )
+        XCTAssertEqual(speech, .localModel(model: AppleLocalModels.preferredSpeechModelID))
+
+        let cleanup = try router.decide(
+            for: .postProcessing,
+            configuredModel: "local/post-processing/rules",
+            now: self.now
+        )
+        XCTAssertEqual(cleanup, .localModel(model: "local/post-processing/rules"))
+    }
+
+    func testQuotaExceeded_permitsSilentFallbackToTheUsersOwnKey() {
+        // The message tells the user their own keys still work, so the current
+        // request has to complete rather than being lost.
+        XCTAssertTrue(PaidAccessError.quotaExceeded.permitsSilentFallback)
+    }
+
     // MARK: - Unsupported operations fail loudly
 
     func testOperationWithNoPublishedRoute_throwsRatherThanSilentlyFallingBack() {
@@ -460,6 +486,8 @@ final class PaidAccessClientRequestTests: XCTestCase {
         )
 
         let url = try XCTUnwrap(request.url)
+        // `URLSessionWebSocketTask` only accepts ws/wss.
+        XCTAssertEqual(url.scheme, "wss")
         XCTAssertEqual(url.path, "/v1/paid/transcribe/live")
         XCTAssertTrue(url.query?.contains("sample_rate=16000") == true)
         XCTAssertTrue(url.query?.contains("language=en") == true)

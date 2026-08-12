@@ -467,9 +467,6 @@ final class MainManager: ObservableObject {
     activeSession = session
     state = .recording
 
-    if appSettings.recordingSoundsEnabled {
-      recordingSoundPlayer.play(.start, volume: appSettings.recordingSoundVolume)
-    }
     lastErrorMessage = nil
     polishedLivePreview = ""
     session.events.append(
@@ -497,12 +494,24 @@ final class MainManager: ObservableObject {
     }
 
     do {
-      _ = try await audioFileManager.startRecording()
-      recordCaptureStart(for: session)
-      startAudioLevelMonitoring()
-      if isStreamingTranscriptionMode {
-        try await transcriptionManager.startLiveTranscription()
-      }
+      // Issue #641: the start cue is played by the sequencer *after* capture is
+      // proven live (and, in streaming modes, after the audio tap is running),
+      // so the user is never invited to speak into a microphone that isn't
+      // listening yet.
+      let startStream: RecordingStartSequencer.Step? = isStreamingTranscriptionMode
+        ? { [transcriptionManager] in try await transcriptionManager.startLiveTranscription() }
+        : nil
+      let sequencer = RecordingStartSequencer(
+        startCapture: { [weak self] in
+          guard let self else { return }
+          _ = try await self.audioFileManager.startRecording()
+          self.startAudioLevelMonitoring()
+        },
+        startStream: startStream,
+        playCue: { [weak self] in self?.playRecordingStartCue() }
+      )
+      let timeline = try await sequencer.run()
+      recordCaptureStart(for: session, timeline: timeline)
     } catch {
       session.errors.append(
         HistoryError(
@@ -515,15 +524,31 @@ final class MainManager: ObservableObject {
     }
   }
 
+  private func playRecordingStartCue() {
+    guard appSettings.recordingSoundsEnabled else { return }
+    recordingSoundPlayer.play(.start, volume: appSettings.recordingSoundVolume)
+  }
+
   /// Latency checkpoint: the recorder is live. hotkey → capture-start is the
   /// cold-start figure competitors market, so log it explicitly every session.
-  private func recordCaptureStart(for session: ActiveSession) {
-    session.captureStarted = Date()
+  /// The full start timeline (capture, streaming tap, cue) is recorded in
+  /// history so a clipped-start report can be diagnosed from the session alone.
+  private func recordCaptureStart(for session: ActiveSession, timeline: RecordingStartTimeline) {
+    session.captureStarted = timeline.timestamp(of: .captureReady) ?? Date()
     if let coldStartMs = SessionLatencyMetrics.milliseconds(
       from: session.recordingStarted, to: session.captureStarted
     ) {
       self.logger.info("Latency: capture started \(coldStartMs)ms after trigger (cold start)")
     }
+    let summary = timeline.diagnosticSummary
+    guard !summary.isEmpty else { return }
+    self.logger.info("Recording start timeline: \(summary, privacy: .public)")
+    session.events.append(
+      HistoryEvent(
+        kind: .recordingStarted,
+        description: "Start timeline — \(summary)"
+      )
+    )
   }
 
   // swiftlint:disable cyclomatic_complexity function_body_length

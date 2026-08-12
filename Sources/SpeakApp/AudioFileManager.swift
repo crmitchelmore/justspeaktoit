@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import os.log
 
 // @Implement: This file manages the audio recording bit rate and other audio settings. It also depends on app settings to know where to write the audio files to. It never loses any data during recording. It also has the ability to manager audio files e.g. listing, deleting, accessing etc.
 
@@ -17,6 +18,7 @@ enum AudioFileManagerError: LocalizedError {
   case microphonePermissionMissing
   case failedToConfigureSession
   case failedToCreateRecorder
+  case failedToStartCapture
 
   var errorDescription: String? {
     switch self {
@@ -30,6 +32,8 @@ enum AudioFileManagerError: LocalizedError {
       return "Failed to configure the audio session."
     case .failedToCreateRecorder:
       return "Could not create the audio recorder."
+    case .failedToStartCapture:
+      return "The microphone did not start capturing. Check the input device and try again."
     }
   }
 }
@@ -44,6 +48,7 @@ actor AudioFileManager {
   private var currentRecordingID: UUID?
   private var currentRecordingStart: Date?
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
+  private let logger = Logger(subsystem: "com.github.speakapp", category: "AudioFileManager")
 
   init(
     appSettings: AppSettings,
@@ -109,12 +114,25 @@ actor AudioFileManager {
       let newRecorder = try AVAudioRecorder(url: fileURL, settings: settings)
       newRecorder.isMeteringEnabled = true
       newRecorder.prepareToRecord()
-      newRecorder.record()
+      // Issue #641: the caller plays the start cue on the strength of this
+      // return, so only claim readiness once the recorder says it is capturing.
+      // `record()` answering false (or a recorder that never flips to
+      // `isRecording`) used to be swallowed, leaving the user speaking into a
+      // microphone that was not running.
+      guard newRecorder.record(), newRecorder.isRecording else {
+        newRecorder.stop()
+        await audioDeviceManager.endUsingPreferredInput(session: sessionContext)
+        throw AudioFileManagerError.failedToStartCapture
+      }
+      let readyDelay = Date().timeIntervalSince(startDate)
+      logger.info("Audio capture confirmed live \(Int(readyDelay * 1000))ms after start request")
       recorder = newRecorder
       currentRecordingID = id
       currentRecordingStart = startDate
       activeInputSession = sessionContext
       return fileURL
+    } catch let error as AudioFileManagerError {
+      throw error
     } catch {
       await audioDeviceManager.endUsingPreferredInput(session: sessionContext)
       throw AudioFileManagerError.failedToCreateRecorder

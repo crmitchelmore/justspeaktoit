@@ -28,6 +28,10 @@ public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Se
     private var isStopping = false
     private var accumulatedFinalText = ""
 
+    /// Holds audio captured between the recording cue and the socket reaching
+    /// `.running`, then replays it in order (issue #641).
+    let preroll: StreamingAudioPreroll
+
     public init(
         apiKey: String,
         model: String = "stt-rt-v5",
@@ -40,6 +44,7 @@ public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Se
         self.language = language
         self.sampleRate = sampleRate
         self.session = session
+        self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
     }
 
     public func start(
@@ -52,11 +57,39 @@ public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Se
             self.onTranscript = onTranscript
             self.onError = onError
         }
+        preroll.reset()
         connectWebSocket()
     }
 
+    /// Sends raw PCM Int16 audio data to Soniox.
+    ///
+    /// Audio captured before the socket is running is parked in the pre-roll
+    /// buffer and replayed, in order, on the first send that finds a live
+    /// transport — so speech that starts with the cue is never dropped.
     public func sendAudio(_ audioData: Data) {
-        guard let task = currentWebSocketTask(), task.state == .running else { return }
+        guard let task = currentWebSocketTask(), task.state == .running else {
+            guard !isStoppingState() else { return }
+            preroll.append(audioData)
+            return
+        }
+        for chunk in drainPreroll() {
+            transmit(chunk, on: task)
+        }
+        transmit(audioData, on: task)
+    }
+
+    private func drainPreroll() -> [Data] {
+        let held = preroll.drain()
+        guard !held.isEmpty else { return held }
+        let bytes = held.reduce(0) { $0 + $1.count }
+        let leadingMilliseconds = Int((Double(bytes) / 2.0 / Double(max(sampleRate, 1))) * 1000)
+        logger.info(
+            "Soniox: replaying \(held.count) pre-roll chunks (\(leadingMilliseconds) ms of leading audio)"
+        )
+        return held
+    }
+
+    private func transmit(_ audioData: Data, on task: URLSessionWebSocketTask) {
         let sendGroup = pendingSendGroup
         sendGroup.enter()
         task.send(.data(audioData)) { [weak self] error in
@@ -71,6 +104,9 @@ public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Se
         // Best-effort finalize: ask Soniox to commit in-flight tokens and flush
         // before closing so trailing words aren't lost.
         if let task = currentWebSocketTask(), task.state == .running {
+            for chunk in drainPreroll() {
+                transmit(chunk, on: task)
+            }
             task.send(.string(#"{"type":"finalize"}"#)) { _ in }
             task.send(.data(Data())) { _ in }
         }
@@ -79,6 +115,13 @@ public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Se
             isStopping = true
             return webSocketTask
         }
+        let unsentPreroll = preroll.snapshot
+        if unsentPreroll.byteCount > 0 {
+            logger.warning(
+                "Soniox: discarding \(unsentPreroll.chunkCount) pre-roll chunks — transport never became ready"
+            )
+        }
+        preroll.reset()
         guard let task else { return }
         if task.state == .running {
             task.cancel(with: .normalClosure, reason: nil)

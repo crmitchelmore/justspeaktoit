@@ -10,7 +10,7 @@ public actor AutoCorrectionStore {
   private let encoder: JSONEncoder
   private let decoder: JSONDecoder
   private let fileManager: FileManager
-  private let log = Logger(subsystem: "com.github.speakapp", category: "AutoCorrectionStore")
+  private let log = SpeakLogger.logger(category: "AutoCorrectionStore")
 
   public init(fileManager: FileManager = .default, baseDirectory: URL? = nil) {
     self.fileManager = fileManager

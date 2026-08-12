@@ -20,7 +20,7 @@ public final class DeepgramTTSClient: ObservableObject {
 
     private var audioPlayer: AVAudioPlayer?
     private let api: DeepgramTTSAPI
-    private let logger = Logger(subsystem: "com.justspeaktoit.ios", category: "DeepgramTTS")
+    private let logger = SpeakLogger.logger(category: "DeepgramTTS")
 
     // MARK: - Configuration
 

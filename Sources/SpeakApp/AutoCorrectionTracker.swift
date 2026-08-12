@@ -19,7 +19,7 @@ final class AutoCorrectionTracker: ObservableObject {
 
   private let engine: AutoCorrectionEngine
   private let appSettings: AppSettings
-  private let log = Logger(subsystem: "com.github.speakapp", category: "AutoCorrectionTracker")
+  private let log = SpeakLogger.logger(category: "AutoCorrectionTracker")
   private var engineChanges: AnyCancellable?
 
   private var monitoringTask: Task<Void, Never>?

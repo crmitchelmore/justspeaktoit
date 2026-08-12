@@ -121,6 +121,9 @@ actor AudioFileManager {
       // microphone that was not running.
       guard newRecorder.record(), newRecorder.isRecording else {
         newRecorder.stop()
+        // `prepareToRecord()` already created the destination file; nothing owns
+        // it once we bail out, so remove it rather than leaking an empty file.
+        try? FileManager.default.removeItem(at: fileURL)
         await audioDeviceManager.endUsingPreferredInput(session: sessionContext)
         throw AudioFileManagerError.failedToStartCapture
       }

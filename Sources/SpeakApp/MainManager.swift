@@ -508,7 +508,7 @@ final class MainManager: ObservableObject {
           self.startAudioLevelMonitoring()
         },
         startStream: startStream,
-        playCue: { [weak self] in self?.playRecordingStartCue() }
+        playCue: { [weak self] in self?.playRecordingStartCue(for: session) }
       )
       let timeline = try await sequencer.run()
       recordCaptureStart(for: session, timeline: timeline)
@@ -524,7 +524,14 @@ final class MainManager: ObservableObject {
     }
   }
 
-  private func playRecordingStartCue() {
+  /// Plays the "recording started" cue, unless the user already stopped (or a
+  /// newer session replaced this one) while capture was coming up — a late cue
+  /// after the stop cue would be worse than no cue at all.
+  private func playRecordingStartCue(for session: ActiveSession) {
+    guard self.activeSession === session, self.state == .recording else {
+      self.logger.info("Skipping start cue: session ended before capture was ready")
+      return
+    }
     guard appSettings.recordingSoundsEnabled else { return }
     recordingSoundPlayer.play(.start, volume: appSettings.recordingSoundVolume)
   }

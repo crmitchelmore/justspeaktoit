@@ -135,14 +135,14 @@ public final class iOSHistoryManager: ObservableObject {
         }
     }
 
-    /// Persists any debounced remote sync changes immediately. Called from the
-    /// lifecycle observers; safe to call at any time.
     /// Forces the lazy disk load so out-of-UI readers (App Intents) see the
     /// persisted history instead of the empty pre-load state.
     public func ensureLoaded() {
         loadHistoryFromDiskIfNeeded()
     }
 
+    /// Persists any debounced remote sync changes immediately. Called from the
+    /// lifecycle observers; safe to call at any time.
     public func flushPendingChanges() {
         commitRemoteChangesNow()
     }

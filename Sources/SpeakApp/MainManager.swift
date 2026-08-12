@@ -284,10 +284,12 @@ final class MainManager: ObservableObject {
   }
 
   /// Starts a dictation session on behalf of a Shortcuts action, reusing the
-  /// exact hotkey/UI session pipeline. Callers inspect `state` afterwards to
-  /// surface start failures.
-  func startDictationFromAutomation() async {
+  /// exact hotkey/UI session pipeline. Returns false when no session started;
+  /// `state` and `missingLiveAPIKeyAlert` carry the reason.
+  @discardableResult
+  func startDictationFromAutomation() async -> Bool {
     await startSession(trigger: .automation)
+    return activeSession != nil
   }
 
   /// Ends the active dictation session on behalf of a Shortcuts action and

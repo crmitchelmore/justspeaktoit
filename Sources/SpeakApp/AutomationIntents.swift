@@ -73,9 +73,13 @@ struct StartDictationIntent: AppIntent {
     guard !environment.main.isDictationSessionActive else {
       throw AutomationIntentError.alreadyRecording
     }
-    await environment.main.startDictationFromAutomation()
+    let started = await environment.main.startDictationFromAutomation()
     if case .failed(let message) = environment.main.state {
       throw AutomationIntentError.sessionFailed(message)
+    }
+    guard started else {
+      let reason = environment.main.missingLiveAPIKeyAlert?.message ?? "Dictation could not start."
+      throw AutomationIntentError.sessionFailed(reason)
     }
     return .result(dialog: "Dictation started. Run \"Stop Dictation\" to finish.")
   }
@@ -102,11 +106,13 @@ struct StopDictationIntent: AppIntent {
       }
       throw AutomationIntentError.emptyTranscript
     }
-    let text = AutomationIntentSupport.bestTranscript(
+    guard let text = AutomationIntentSupport.bestTranscript(
       raw: item.rawTranscription,
       polished: item.postProcessedTranscription
-    )
-    return .result(value: text ?? "")
+    ) else {
+      throw AutomationIntentError.emptyTranscript
+    }
+    return .result(value: text)
   }
 }
 

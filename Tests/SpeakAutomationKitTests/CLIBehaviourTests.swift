@@ -115,7 +115,7 @@ final class CLIBehaviourTests: XCTestCase {
             CLIJSONEnvelope.self,
             from: Data(output.stdout.utf8)
         )
-        XCTAssertEqual(envelope.schemaVersion, SpeakAutomationSchemaVersion)
+        XCTAssertEqual(envelope.schemaVersion, AutomationSchema.currentVersion)
         XCTAssertTrue(envelope.ok)
         XCTAssertEqual(envelope.command, "transcribe_file")
         XCTAssertEqual(envelope.data?.text, "hi")

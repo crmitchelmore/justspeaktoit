@@ -19,7 +19,7 @@ final class AutomationTransportTests: XCTestCase {
         let data = try AutomationCoding.encoder().encode(request)
         let decoded = try AutomationCoding.decoder().decode(AutomationRequest.self, from: data)
         XCTAssertEqual(decoded, request)
-        XCTAssertEqual(decoded.schemaVersion, SpeakAutomationSchemaVersion)
+        XCTAssertEqual(decoded.schemaVersion, AutomationSchema.currentVersion)
     }
 
     func testResponse_roundTripsWithISO8601Dates() throws {

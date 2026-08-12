@@ -2,12 +2,14 @@ import Foundation
 
 // MARK: - Automation Protocol
 
-/// Schema version for automation (CLI / MCP) requests and responses.
-///
-/// Bumped only for breaking payload changes. Clients send the version they were
-/// built against and the app rejects anything it cannot speak, so a stale `speak`
-/// binary fails loudly instead of silently misreading a newer payload.
-public let SpeakAutomationSchemaVersion = 1
+/// Schema identity for automation (CLI / MCP) requests and responses.
+public enum AutomationSchema {
+    /// Bumped only for breaking payload changes. Clients send the version they
+    /// were built against and the app rejects anything it cannot speak, so a
+    /// stale `speak` binary fails loudly instead of silently misreading a newer
+    /// payload.
+    public static let currentVersion = 1
+}
 
 /// Bounds applied to every automation payload on both sides of the socket.
 ///
@@ -100,7 +102,7 @@ public struct AutomationRequest: Codable, Sendable, Equatable {
     public var timeout: TimeInterval?
 
     public init(
-        schemaVersion: Int = SpeakAutomationSchemaVersion,
+        schemaVersion: Int = AutomationSchema.currentVersion,
         id: String = UUID().uuidString,
         command: AutomationCommand,
         path: String? = nil,
@@ -134,11 +136,11 @@ public struct AutomationRequest: Codable, Sendable, Equatable {
     /// Runs on both ends: the CLI fails fast without a round trip, and the app
     /// re-checks because any local process can write to the socket.
     public func validated() throws -> AutomationRequest {
-        guard self.schemaVersion == SpeakAutomationSchemaVersion else {
+        guard self.schemaVersion == AutomationSchema.currentVersion else {
             throw AutomationError(
                 code: .schemaMismatch,
                 message: "Automation schema v\(self.schemaVersion) is not supported "
-                    + "(this build speaks v\(SpeakAutomationSchemaVersion)). Update the app or the speak CLI."
+                    + "(this build speaks v\(AutomationSchema.currentVersion)). Update the app or the speak CLI."
             )
         }
         guard !self.id.isEmpty, self.id.count <= AutomationLimits.maxIdentifierLength else {
@@ -257,7 +259,7 @@ public struct AutomationResponse: Codable, Sendable, Equatable {
     public var error: AutomationError?
 
     public init(
-        schemaVersion: Int = SpeakAutomationSchemaVersion,
+        schemaVersion: Int = AutomationSchema.currentVersion,
         id: String,
         command: AutomationCommand,
         ok: Bool,

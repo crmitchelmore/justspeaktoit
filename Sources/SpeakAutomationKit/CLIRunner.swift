@@ -99,7 +99,7 @@ public struct CLIRunner {
     private func render(success result: AutomationResult, plan: CLIPlan) -> CLIOutput {
         guard !plan.json else {
             let envelope = CLIJSONEnvelope(
-                schemaVersion: SpeakAutomationSchemaVersion,
+                schemaVersion: AutomationSchema.currentVersion,
                 ok: true,
                 command: plan.command.rawValue,
                 data: result,
@@ -114,7 +114,7 @@ public struct CLIRunner {
         let exitCode = error.code == .appUnavailable ? CLIExitCode.appUnavailable : CLIExitCode.failed
         guard !plan.json else {
             let envelope = CLIJSONEnvelope(
-                schemaVersion: SpeakAutomationSchemaVersion,
+                schemaVersion: AutomationSchema.currentVersion,
                 ok: false,
                 command: plan.command.rawValue,
                 data: nil,
@@ -152,7 +152,7 @@ public struct CLIRunner {
         guard let data = try? AutomationCoding.encoder().encode(envelope),
               let text = String(data: data, encoding: .utf8) else {
             let fields = [
-                "\"schemaVersion\":\(SpeakAutomationSchemaVersion)",
+                "\"schemaVersion\":\(AutomationSchema.currentVersion)",
                 "\"ok\":false",
                 "\"command\":\"\(envelope.command)\"",
                 "\"error\":{\"code\":\"internal_error\","

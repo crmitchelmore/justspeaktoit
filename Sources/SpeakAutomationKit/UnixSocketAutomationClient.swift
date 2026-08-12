@@ -36,11 +36,11 @@ public struct UnixSocketAutomationClient: AutomationRequesting {
 
         do {
             let response = try AutomationCoding.decoder().decode(AutomationResponse.self, from: body)
-            guard response.schemaVersion == SpeakAutomationSchemaVersion else {
+            guard response.schemaVersion == AutomationSchema.currentVersion else {
                 throw AutomationError(
                     code: .schemaMismatch,
                     message: "The app replied with automation schema v\(response.schemaVersion); "
-                        + "this speak build understands v\(SpeakAutomationSchemaVersion). Update the CLI."
+                        + "this speak build understands v\(AutomationSchema.currentVersion). Update the CLI."
                 )
             }
             return response

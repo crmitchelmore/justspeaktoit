@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build the `speak` automation CLI and embed it inside JustSpeakToIt.app.
 #
-# Usage: ./Scripts/build-speak-cli.sh <path-to-JustSpeakToIt.app> [signing-identity]
+# Usage: ./scripts/build-speak-cli.sh <path-to-JustSpeakToIt.app> [signing-identity]
 #
 # The CLI is a thin client for the automation socket the app exposes, so it must
 # ship with the app rather than as an independent download: the Homebrew cask

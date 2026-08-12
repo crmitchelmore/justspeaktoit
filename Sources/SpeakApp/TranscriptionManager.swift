@@ -114,10 +114,6 @@ final class TranscriptionManager: ObservableObject {
   @Published private(set) var isLiveTranscribing: Bool = false
   @Published private(set) var utteranceBoundaryText: String?
 
-  var livePartialText: String { liveTranscript.text }
-  var liveTextIsFinal: Bool { liveTranscript.isFinal }
-  var liveTextConfidence: Double? { liveTranscript.confidence }
-
   /// Owns the identity of the recording whose transcript is on screen.
   let displayScope = LiveTranscriptDisplayScope()
 
@@ -166,40 +162,6 @@ final class TranscriptionManager: ObservableObject {
         self.displayScope.unbind()
       }
     }
-  }
-
-  /// Opens a live-transcript display session, clearing the previous
-  /// recording's text before any new partial can arrive.
-  ///
-  /// `source` is the controller that owns the session; production binds it via
-  /// `SwitchingLiveTranscriber.sessionSourceDidChange` as the controller starts.
-  func beginLiveTranscriptDisplaySession(source: AnyObject? = nil) {
-    let sessionID = displayScope.begin()
-    if let source {
-      displayScope.bind(source: source)
-    }
-    liveTranscript = LiveTranscriptSnapshot(
-      sessionID: sessionID,
-      text: "",
-      isFinal: true,
-      confidence: nil
-    )
-    utteranceBoundaryText = nil
-  }
-
-  /// Detaches the live-transcript display session. The final text stays on
-  /// screen; further updates from the finished session are ignored.
-  func endLiveTranscriptDisplaySession() {
-    displayScope.end()
-  }
-
-  /// Clears the live transcript entirely. Called when a recording starts so
-  /// batch modes — which never open a live session — cannot show the previous
-  /// recording's text.
-  func resetLiveTranscriptDisplay() {
-    displayScope.end()
-    liveTranscript = .empty
-    utteranceBoundaryText = nil
   }
 
   func startLiveTranscription() async throws {
@@ -437,6 +399,50 @@ final class TranscriptionManager: ObservableObject {
 
   private func hasAPIKey(for metadata: TranscriptionProviderMetadata) async -> Bool {
     await secureStorage.hasSecret(identifier: metadata.apiKeyIdentifier)
+  }
+}
+
+/// Live-transcript display state, scoped to the recording that owns it.
+///
+/// Kept out of the main class body so the gate and its accessors read as one
+/// unit (issue #643).
+extension TranscriptionManager {
+  var livePartialText: String { liveTranscript.text }
+  var liveTextIsFinal: Bool { liveTranscript.isFinal }
+  var liveTextConfidence: Double? { liveTranscript.confidence }
+
+  /// Opens a live-transcript display session, clearing the previous
+  /// recording's text before any new partial can arrive.
+  ///
+  /// `source` is the controller that owns the session; production binds it via
+  /// `SwitchingLiveTranscriber.sessionSourceDidChange` as the controller starts.
+  func beginLiveTranscriptDisplaySession(source: AnyObject? = nil) {
+    let sessionID = displayScope.begin()
+    if let source {
+      displayScope.bind(source: source)
+    }
+    liveTranscript = LiveTranscriptSnapshot(
+      sessionID: sessionID,
+      text: "",
+      isFinal: true,
+      confidence: nil
+    )
+    utteranceBoundaryText = nil
+  }
+
+  /// Detaches the live-transcript display session. The final text stays on
+  /// screen; further updates from the finished session are ignored.
+  func endLiveTranscriptDisplaySession() {
+    displayScope.end()
+  }
+
+  /// Clears the live transcript entirely. Called when a recording starts so
+  /// batch modes — which never open a live session — cannot show the previous
+  /// recording's text.
+  func resetLiveTranscriptDisplay() {
+    displayScope.end()
+    liveTranscript = .empty
+    utteranceBoundaryText = nil
   }
 }
 

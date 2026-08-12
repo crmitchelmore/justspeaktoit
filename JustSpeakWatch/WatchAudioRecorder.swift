@@ -111,6 +111,20 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
         store.enqueue(finished)
     }
 
+    /// Terminal failure path for recorder errors the user did not initiate:
+    /// clears the recording state so the UI cannot stay stuck in the
+    /// recording pose, and discards the unusable partial file.
+    private func abortRecording(message: String) {
+        guard isRecording else { return }
+        lastError = message
+        recorder?.stop()
+        recorder = nil
+        isRecording = false
+        startedAt = nil
+        deactivateSession()
+        try? FileManager.default.removeItem(at: Self.fileURL(for: currentID))
+    }
+
     private func deactivateSession() {
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
@@ -121,6 +135,16 @@ extension WatchAudioRecorder: AVAudioRecorderDelegate {
         let message = error?.localizedDescription ?? "Audio encoding failed"
         Task { @MainActor in
             self.lastError = message
+            self.abortRecording(message: message)
+        }
+    }
+
+    nonisolated func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
+        // A user-initiated stop clears the state itself; only unsuccessful
+        // finishes (interruption, encoder failure) need the terminal path.
+        guard !flag else { return }
+        Task { @MainActor in
+            self.abortRecording(message: "Recording stopped unexpectedly.")
         }
     }
 }

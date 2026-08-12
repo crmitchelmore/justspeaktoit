@@ -115,6 +115,17 @@ final class WatchCaptureReceiver: NSObject {
     }
 }
 
+enum WatchCaptureReceiverError: LocalizedError {
+    case undecodableEnvelope
+
+    var errorDescription: String? {
+        switch self {
+        case .undecodableEnvelope:
+            return "Watch capture rejected: file transfer carried no decodable capture metadata."
+        }
+    }
+}
+
 // MARK: - WCSessionDelegate
 
 extension WatchCaptureReceiver: WCSessionDelegate {
@@ -138,8 +149,17 @@ extension WatchCaptureReceiver: WCSessionDelegate {
     func session(_ session: WCSession, didReceive file: WCSessionFile) {
         // The system deletes `file.fileURL` when this method returns, so the
         // move must happen synchronously — everything after is async.
-        let envelope = WatchCaptureEnvelope.from(metadata: file.metadata)
-            ?? WatchCaptureEnvelope(duration: 0, fileExtension: file.fileURL.pathExtension)
+        guard let envelope = WatchCaptureEnvelope.from(metadata: file.metadata) else {
+            // Without a decodable envelope there is no capture identity to
+            // acknowledge, so importing would ack an id the watch never sent.
+            // Reject the delivery (the system reclaims the inbox file) and let
+            // the watch retry.
+            SpeakLogger.logError(
+                WatchCaptureReceiverError.undecodableEnvelope,
+                context: "WatchCaptureReceiver.didReceiveFile"
+            )
+            return
+        }
 
         let destination = Self.inboxDirectory
             .appendingPathComponent(envelope.id.uuidString)

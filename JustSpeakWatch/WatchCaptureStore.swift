@@ -25,8 +25,16 @@ final class WatchCaptureStore: NSObject, ObservableObject {
     /// Terminal captures beyond this count are pruned oldest-first.
     static let maxTrackedCaptures = 30
 
+    /// Bounded in-process retries for a transfer that fails while the app is
+    /// still running (activation-time `retryPending()` covers process death).
+    static let maxTransferRetries = 3
+
     private let fileURL: URL
     private var activated = false
+    private var retryAttempts: [UUID: Int] = [:]
+    /// Acks that arrived before WatchConnectivity confirmed delivery, keyed by
+    /// capture id, applied once the transfer completes.
+    private var pendingAcks: [UUID: WatchCaptureAck] = [:]
 
     override private init() {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -111,17 +119,49 @@ final class WatchCaptureStore: NSObject, ObservableObject {
     private func handleTransferFinished(id: UUID, error: Error?) {
         if let error {
             transition(id, to: .failed, message: error.localizedDescription)
+            scheduleRetry(for: id)
             return
         }
+        retryAttempts[id] = nil
         // Delivery confirmed at the WatchConnectivity layer — the local audio
         // copy is no longer needed.
         transition(id, to: .delivered)
         try? FileManager.default.removeItem(at: WatchAudioRecorder.fileURL(for: id))
+        if let ack = pendingAcks.removeValue(forKey: id) {
+            apply(ack)
+        }
+    }
+
+    /// Re-queues a transfer that failed while the process is still running.
+    /// `retryPending()` only runs on activation, so without this a mid-session
+    /// failure would stay failed until the app is relaunched.
+    private func scheduleRetry(for id: UUID) {
+        let attempt = (retryAttempts[id] ?? 0) + 1
+        guard attempt <= Self.maxTransferRetries else { return }
+        retryAttempts[id] = attempt
+        let delay = pow(2.0, Double(attempt))
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            self?.startTransfer(for: id)
+        }
     }
 
     private func handleAck(_ ack: WatchCaptureAck) {
+        guard let capture = captures.first(where: { $0.id == ack.id }) else { return }
+        // `transferUserInfo` can outrun the file-transfer completion callback.
+        // The state machine rejects transferring → transcribed, so hold the
+        // ack and replay it once delivery lands.
+        guard capture.status != .transferring else {
+            pendingAcks[ack.id] = ack
+            return
+        }
+        apply(ack)
+    }
+
+    private func apply(_ ack: WatchCaptureAck) {
         switch ack.outcome {
         case .transcribed:
+            retryAttempts[ack.id] = nil
             transition(ack.id, to: .transcribed)
         case .failed:
             transition(ack.id, to: .failed, message: ack.message ?? "Transcription failed on iPhone")
@@ -175,6 +215,11 @@ extension WatchCaptureStore: WCSessionDelegate {
         let reachable = session.isReachable
         Task { @MainActor in
             self.isReachable = reachable
+            if reachable {
+                // Connectivity came back — re-queue anything that failed while
+                // the phone was away.
+                self.retryPending()
+            }
         }
     }
 

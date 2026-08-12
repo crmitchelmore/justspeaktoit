@@ -38,6 +38,13 @@ final class KeyboardHandoffController: ObservableObject {
     private var pollTask: Task<Void, Never>?
     private var insertText: ((String) -> Void)?
 
+    /// Poll cadence while a handoff request is in flight; the keyboard mirrors
+    /// interim text from the App Group record at this rate.
+    private static let activePollInterval = Duration.milliseconds(120)
+    /// Slower cadence while nothing is in flight, so an idle keyboard stays
+    /// well inside the extension CPU budget.
+    private static let idlePollInterval = Duration.milliseconds(500)
+
     init(
         store: KeyboardHandoffStore = .shared,
         instantSessionStore: KeyboardInstantDictationStore = .shared
@@ -151,8 +158,16 @@ final class KeyboardHandoffController: ObservableObject {
         guard pollTask == nil else { return }
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
-                self?.refresh()
-                try? await Task.sleep(for: .milliseconds(120))
+                let interval: Duration
+                if let self {
+                    self.refresh()
+                    interval = self.requestID == nil
+                        ? Self.idlePollInterval
+                        : Self.activePollInterval
+                } else {
+                    return
+                }
+                try? await Task.sleep(for: interval)
             }
         }
     }

@@ -106,10 +106,12 @@ public struct KeyboardSetupView: View {
                 .accessibilityIdentifier("keyboardInstantDictationButton")
 
                 Text(
-                    "Only needed if the keyboard can't use the microphone itself (for example, if you "
-                        + "declined its permission). Just Speak then keeps a ready microphone session and the "
-                        + "keyboard hands recording to the app — still without leaving the app you're typing in. "
-                        + "Idle audio is discarded immediately and never saved or sent."
+                    "Only needed if the keyboard can't record itself — for example if you declined its "
+                        + "microphone or speech-recognition permission, your language has no speech "
+                        + "recogniser, or in-keyboard capture fails. Just Speak then keeps a ready "
+                        + "microphone session and the keyboard hands recording to the app — still without "
+                        + "leaving the app you're typing in. Idle audio is discarded immediately and never "
+                        + "saved or sent."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -135,9 +137,10 @@ public struct KeyboardSetupView: View {
                     systemImage: "lock.open"
                 )
                 Text(
-                    "The keyboard never reads, stores, or transmits what you type. It records only while "
-                        + "the mic key is active, prefers on-device Apple speech, and shares state with "
-                        + "Just Speak solely through the private App Group."
+                    "The keyboard reads the text just before the cursor only to place dictated words "
+                        + "correctly, and never stores or transmits it. It records only while the mic key "
+                        + "is active, prefers on-device Apple speech, and shares state with Just Speak "
+                        + "solely through the private App Group."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)

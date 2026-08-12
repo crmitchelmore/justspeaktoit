@@ -175,6 +175,12 @@ final class DistributionBuildIdentityTests: XCTestCase {
             ),
             encoding: .utf8
         )
+        let engine = try String(
+            contentsOf: repositoryRoot.appendingPathComponent(
+                "JustSpeakKeyboard/KeyboardDictationEngine.swift"
+            ),
+            encoding: .utf8
+        )
 
         for source in [controller, handoff, rootView] {
             XCTAssertFalse(source.contains("extensionContext.open"))
@@ -185,6 +191,8 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(rootView.contains("keyboardLiveTranscript"))
         XCTAssertFalse(rootView.contains("Results are deleted after insertion"))
         XCTAssertTrue(instantCoordinator.contains("input.installTap"))
+        XCTAssertTrue(engine.contains("input.installTap"))
+        XCTAssertTrue(engine.contains("try session.setCategory(.record"))
         XCTAssertTrue(instantCoordinator.contains("requiresLiveActivity: false"))
         XCTAssertTrue(instantCoordinator.contains("updateInterim"))
         XCTAssertFalse(instantCoordinator.contains(".write("))

@@ -140,6 +140,5 @@ public final class KeyboardDictationPreferencesStore {
     private func writeUnlocked(_ selection: KeyboardLanguageSelection) {
         guard let defaults, let data = try? encoder.encode(selection) else { return }
         defaults.set(data, forKey: Self.selectionKey)
-        defaults.synchronize()
     }
 }

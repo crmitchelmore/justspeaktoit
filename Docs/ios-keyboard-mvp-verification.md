@@ -25,7 +25,10 @@ typing. Two capture paths exist behind `KeyboardCapturePlanner`:
   extension cannot run the microphone or speech recognition.
 
 Both paths require Full Access; without it the keyboard shows setup guidance
-and creates no state.
+and creates no dictation state. The one write it still makes is the observation
+record (last seen, `hadFullAccess: false`) that the app's setup screen reads to
+show whether the keyboard has ever run — no handoff request, transcript, or
+audio.
 
 ## Simulator verification
 
@@ -41,11 +44,15 @@ xcodebuild test \
   -only-testing:SpeakiOSUITests
 ```
 
-State-machine, streaming-edit, planner, and language-preference logic are pure
-SpeakCore types; run their tests with:
+`SpeakiOSTests` and `SpeakiOSUITests` are the only generated Tuist test targets
+(sourced from `Tests/SpeakiOSTests/**` and `Tests/SpeakiOSUITests/**`), so they
+do not contain the new keyboard suites. State-machine, streaming-edit, planner,
+and language-preference logic are pure SpeakCore types, and the keyboard
+distribution guards live in `Tests/SpeakAppTests`; run both through SwiftPM:
 
 ```bash
 swift test --filter Keyboard
+swift test --filter DistributionBuildIdentityTests
 ```
 
 Verify the installed app contains both extensions:
@@ -72,7 +79,9 @@ TestFlight workflow needs a provisioning profile for bundle ID
 2. Follow the three setup steps (add keyboard, Allow Full Access, first mic
    tap).
 3. With Full Access **off**, verify the keyboard shows the explanatory blocked
-   state, creates no App Group state, and never claims it can record.
+   state, never claims it can record, and writes no handoff request or
+   transcript. The observation record marked "Observed off" may appear in the
+   app's setup screen; that is the only permitted write.
 4. With Full Access on, verify the observed-status rows update after opening
    the keyboard once.
 
@@ -84,7 +93,8 @@ TestFlight workflow needs a provisioning profile for bundle ID
    prompts inside the keyboard.** This is the load-bearing platform
    assumption; note OS version and device.
 3. Grant both → recording must start with a visible red stop state.
-4. Repeat on a second install and **deny** the microphone → the keyboard must
+4. With Instant Dictation enabled in the app (Settings › Set Up Keyboard),
+   repeat on a second install and **deny** the microphone → the keyboard must
    surface the failure and degrade to the Instant Dictation fallback without
    hanging.
 5. Revoke permissions in Settings afterwards and confirm the keyboard plans
@@ -123,9 +133,12 @@ TestFlight workflow needs a provisioning profile for bundle ID
 2. Switch to a different text field or app mid-dictation → capture cancels,
    already-streamed text stays in the original field, nothing streams into
    the new target.
-3. Move the cursor elsewhere in the same field mid-dictation (known risk):
-   record observed behaviour; tail replacements must at worst touch text near
-   the new cursor, never beyond the streamed tail length.
+3. Stop or cancel dictation **before** moving the cursor elsewhere in the same
+   field: the streamer's tail bound only holds while the selection stays where
+   it left it. Then assert that unrelated text in the field is unchanged.
+   Moving the cursor mid-dictation is a known risk — if you do it, record the
+   observed behaviour; edits must at worst touch text within the streamed tail
+   length of the new cursor, never beyond it.
 4. Dismiss the keyboard mid-dictation → audio session releases (no stuck
    orange indicator).
 
@@ -167,11 +180,17 @@ dictation), and touch targets of at least 44 points.
 
 ## App Review and privacy evidence
 
-- `RequestsOpenAccess` is declared for the audio session, Apple Speech, the
-  App Group, and user-selected cloud transcription in the fallback path.
-- The extension declares `NSMicrophoneUsageDescription` and
-  `NSSpeechRecognitionUsageDescription`; it records only while the mic key is
-  active and prefers on-device recognition.
+- `RequestsOpenAccess` is declared so the extension can reach the App Group and
+  the network (Apple's server dictation for locales without on-device support,
+  and the fallback path's user-selected cloud transcription).
+- Microphone capture and Apple Speech inside the extension are *not* granted by
+  Full Access. The extension declares `NSMicrophoneUsageDescription` and
+  `NSSpeechRecognitionUsageDescription`, and the user must authorise both.
+  Whether iOS presents those prompts to a keyboard extension — and honours the
+  grants — is the unverified platform assumption tracked in "Direct path:
+  permissions" above; the handoff path covers devices that refuse.
+- The extension records only while the mic key is active and prefers on-device
+  recognition.
 - The keyboard does not read, persist, or transmit surrounding host text.
 - The App Group contains: versioned handoff records (schema version, request
   UUID, document identifier, timestamps, phase, safe failure enum, throttled

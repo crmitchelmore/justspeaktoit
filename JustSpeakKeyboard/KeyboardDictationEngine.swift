@@ -141,7 +141,7 @@ final class KeyboardDictationEngine {
 
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playAndRecord, mode: .measurement, options: [.allowBluetoothHFP])
+            try session.setCategory(.record, mode: .measurement, options: [.allowBluetoothHFP])
             try session.setActive(true)
         } catch {
             fail(.microphoneUnavailable)

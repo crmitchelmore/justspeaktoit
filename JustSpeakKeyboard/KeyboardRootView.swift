@@ -41,6 +41,8 @@ struct KeyboardRootView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.updatesFrequently)
+                .accessibilityLabel(stripAccessibilityLabel)
                 .accessibilityIdentifier("keyboardLiveTranscript")
             if showsCancel {
                 Button("Cancel") {
@@ -253,6 +255,32 @@ struct KeyboardRootView: View {
             return "The handoff ended safely. Tap the mic to retry."
         case .targetChanged:
             return "The destination changed, so nothing was inserted. Tap the mic to retry."
+        }
+    }
+
+    /// The status symbol is hidden from assistive technology, so VoiceOver
+    /// reads the strip as status plus content.
+    private var stripAccessibilityLabel: String {
+        guard stripShowsLiveText else { return stripText }
+        return "\(liveStatusDescription). \(stripText)"
+    }
+
+    private var liveStatusDescription: String {
+        switch model.mode {
+        case .direct:
+            switch model.directState {
+            case .stopping: return "Finishing dictation"
+            case .finished: return "Dictation inserted"
+            default: return "Dictating"
+            }
+        case .handoff:
+            switch model.handoff.presentation {
+            case .transcribing: return "Finishing dictation"
+            case .inserted: return "Dictation inserted"
+            default: return "Dictating"
+            }
+        case .blocked:
+            return "Dictation unavailable"
         }
     }
 

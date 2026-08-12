@@ -29,16 +29,19 @@ That architecture worked, but its costs were structural, not cosmetic:
   wakeups added many failure states (the v1 controller surfaced 13).
 - **A 300 pt keyboard** dominated by status copy rather than a compact strip.
 
-The premise itself is outdated. On modern iOS a keyboard extension with
-`RequestsOpenAccess` **and user-granted Full Access can activate an audio
-session and use the Speech framework** — this is exactly how competing
-dictation keyboards (Wispr Flow, Superwhisper, Spokenly) record without an app
-switch. Apple's current review guidelines do not forbid it; the extension must
-declare `NSMicrophoneUsageDescription`/`NSSpeechRecognitionUsageDescription`
-and the user must grant both. Because Apple's documentation is ambiguous here,
-**first-run permission behaviour on physical devices is a mandatory
-verification item**, and the architecture keeps a full fallback if a device
-refuses.
+The premise itself is worth retesting, but the replacement capability is not a
+documented one. Competing dictation keyboards (Wispr Flow, Superwhisper,
+Spokenly) record without an app switch, which indicates that a keyboard
+extension with `RequestsOpenAccess` and user-granted Full Access **can** in
+practice activate an audio session and use the Speech framework. Apple
+documents Full Access as gating shared containers and network access, not
+microphone capture, and does not state that extensions may record; the
+extension must separately declare `NSMicrophoneUsageDescription`/
+`NSSpeechRecognitionUsageDescription` and the user must grant both. **Treat
+in-extension capture as an unverified platform assumption** until the
+physical-device matrix signs it off: first-run permission behaviour on real
+devices is a mandatory verification item, and the architecture keeps a full
+fallback for devices that refuse.
 
 ## Decision
 
@@ -54,6 +57,12 @@ Note: issue #610 sketched "handoff when Full Access is off", but Full Access
 also gates the App Group container, so the handoff cannot run without it
 either. The fallback tier therefore keys on *microphone/speech availability in
 the extension*, with Full Access a hard requirement for both paths.
+
+The **Direct** row is conditional, not a guarantee: the planner only *attempts*
+direct capture when nothing is known to block it. Extension microphone and
+Speech support is unverified on device (see above), so any denied prompt,
+missing recogniser, or capture failure degrades to **Handoff** at runtime
+(`fallBackToHandoffIfDirectCaptureIsImpossible`).
 
 ### Direct path (primary)
 
@@ -76,7 +85,11 @@ the extension*, with Full Access a hard requirement for both paths.
   (`deleteCount` + `insertion`) against the document proxy. Words that survive
   one revision are committed at word boundaries and never rewritten; the final
   two words stay volatile (engines revise those most). Structural invariant:
-  deletes can never exceed the volatile tail, so host-app text is never eaten.
+  deletes never exceed the volatile tail, so **while the selection stays where
+  the streamer left it** host-app text is never eaten. If the user moves the
+  cursor mid-dictation the tail no longer maps to the streamed text, so the
+  verification matrix requires stopping dictation before editing elsewhere in
+  the same field and records observed behaviour when it is not.
   Text therefore **streams into the field as the user speaks**, with the same
   live text mirrored in the keyboard strip.
 - Language quick-switch chip: `KeyboardDictationPreferencesStore` (App Group)

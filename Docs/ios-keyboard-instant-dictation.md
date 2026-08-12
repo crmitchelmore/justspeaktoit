@@ -25,9 +25,11 @@ reconnects the persisted Instant Dictation preference.
 
 In this fallback path the keyboard extension never opens the microphone: the
 containing app owns the foreground-consented audio session and stays alive with
-the `audio` background mode. (The v2 primary path *does* record inside the
-extension with Full Access plus user-granted microphone and speech permissions;
-this handoff exists precisely for devices and users where that is refused.)
+the `audio` background mode. (The v2 primary path *attempts* to record inside
+the extension with Full Access plus user-granted microphone and speech
+permissions; that capability is an unverified platform assumption, and this
+handoff exists precisely for devices and users where it is refused or
+unavailable.)
 App-owned capture remains the only route to zero-tap recording the moment the
 keyboard appears, since the extension cannot start its session before the user
 interacts.

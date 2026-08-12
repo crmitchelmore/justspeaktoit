@@ -195,10 +195,34 @@ final class KeyboardViewModel: ObservableObject {
     private func apply(_ edit: KeyboardTranscriptEdit) {
         guard let proxyInsert, let proxyDeleteBackward else { return }
         for _ in 0..<edit.deleteCount {
-            proxyDeleteBackward()
+            deleteOneUserPerceivedCharacter(using: proxyDeleteBackward)
         }
         if !edit.insertion.isEmpty {
             proxyInsert(edit.insertion)
+        }
+    }
+
+    /// `KeyboardTranscriptEdit.deleteCount` counts user-perceived characters,
+    /// but `UITextDocumentProxy.deleteBackward()` can remove a single Unicode
+    /// scalar of a composed cluster (an emoji ZWJ sequence, for example),
+    /// leaving a fragment behind. Extra deletes are issued only while the
+    /// document context confirms the tail is still a shrinking fragment of the
+    /// cluster we set out to remove, so this can never eat host text.
+    private func deleteOneUserPerceivedCharacter(using deleteBackward: () -> Void) {
+        guard let cluster = contextBeforeInput?()?.last, cluster.unicodeScalars.count > 1 else {
+            deleteBackward()
+            return
+        }
+        var remainingScalars = cluster.unicodeScalars.count
+        while remainingScalars > 0 {
+            deleteBackward()
+            remainingScalars -= 1
+            guard remainingScalars > 0,
+                  let tail = contextBeforeInput?()?.last,
+                  tail.unicodeScalars.count == remainingScalars,
+                  String(cluster).unicodeScalars.starts(with: tail.unicodeScalars) else {
+                return
+            }
         }
     }
 

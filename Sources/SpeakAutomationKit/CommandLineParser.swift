@@ -97,6 +97,15 @@ public enum CommandLineParser {
       0 success   1 command failed   2 usage error   3 app not running
     """
 
+    /// Verbs that map straight onto a command plus the options they accept.
+    /// Table-driven so adding a verb is data, not another branch.
+    private static let verbs: [String: (command: AutomationCommand, options: Set<Option>)] = [
+        "listen": (.startDictation, [.json, .provider, .profile]),
+        "stop": (.stopDictation, [.json]),
+        "history": (.history, [.json, .last]),
+        "status": (.status, [.json])
+    ]
+
     public static func parse(_ arguments: [String]) throws -> CLIInvocation {
         var remaining = arguments
         guard let verb = remaining.first else { return .help }
@@ -116,24 +125,13 @@ public enum CommandLineParser {
             return .mcpServer
         case "transcribe":
             return .run(try self.parseTranscribe(remaining))
-        case "listen":
-            var plan = CLIPlan(command: .startDictation)
-            try self.rejectPositional(&plan, arguments: remaining, allowed: [.json, .provider, .profile], verb: verb)
-            return .run(plan)
-        case "stop":
-            var plan = CLIPlan(command: .stopDictation)
-            try self.rejectPositional(&plan, arguments: remaining, allowed: [.json], verb: verb)
-            return .run(plan)
-        case "history":
-            var plan = CLIPlan(command: .history)
-            try self.rejectPositional(&plan, arguments: remaining, allowed: [.json, .last], verb: verb)
-            return .run(plan)
-        case "status":
-            var plan = CLIPlan(command: .status)
-            try self.rejectPositional(&plan, arguments: remaining, allowed: [.json], verb: verb)
-            return .run(plan)
         default:
-            throw CLIUsageError(message: "Unknown command \"\(verb)\". Run `speak --help`.")
+            guard let entry = self.verbs[verb] else {
+                throw CLIUsageError(message: "Unknown command \"\(verb)\". Run `speak --help`.")
+            }
+            var plan = CLIPlan(command: entry.command)
+            try self.rejectPositional(&plan, arguments: remaining, allowed: entry.options, verb: verb)
+            return .run(plan)
         }
     }
 

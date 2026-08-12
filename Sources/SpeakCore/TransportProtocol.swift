@@ -26,11 +26,11 @@ public enum TransportMessage: Codable {
     /// there is one message contract for every non-UI client.
     case automationRequest(AutomationRequest)
     case automationResponse(AutomationResponse)
-    
+
     private enum CodingKeys: String, CodingKey {
         case type, payload
     }
-    
+
     private enum MessageType: String, Codable {
         case hello, authenticate, authResult
         case sessionStart, sessionEnd
@@ -38,11 +38,14 @@ public enum TransportMessage: Codable {
         case ping, pong
         case automationRequest, automationResponse
     }
-    
+
+    // Exhaustive Codable mapping: one case per wire type, so complexity tracks
+    // the message count rather than any real branching logic.
+    // swiftlint:disable:next cyclomatic_complexity
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let type = try container.decode(MessageType.self, forKey: .type)
-        
+
         switch type {
         case .hello:
             self = .hello(try container.decode(HelloMessage.self, forKey: .payload))
@@ -70,10 +73,11 @@ public enum TransportMessage: Codable {
             self = .automationResponse(try container.decode(AutomationResponse.self, forKey: .payload))
         }
     }
-    
+
+    // swiftlint:disable:next cyclomatic_complexity
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        
+
         switch self {
         case .hello(let msg):
             try container.encode(MessageType.hello, forKey: .type)
@@ -150,33 +154,10 @@ public struct HelloMessage: Codable {
     }
 }
 
-/// Optional transport features, negotiated in `HelloMessage`.
-///
-/// Decoded leniently: an unknown capability from a newer peer maps to `.unknown`
-/// rather than failing the whole handshake.
-public enum TransportCapability: RawRepresentable, Codable, Sendable, Equatable {
-    case automation
-    case unknown(String)
-
-    public init(rawValue: String) {
-        switch rawValue {
-        case "automation": self = .automation
-        default: self = .unknown(rawValue)
-        }
-    }
-
-    public var rawValue: String {
-        switch self {
-        case .automation: return "automation"
-        case .unknown(let value): return value
-        }
-    }
-}
-
 public struct AuthenticateMessage: Codable {
     public var pairingCode: String
     public var timestamp: Date
-    
+
     public init(pairingCode: String, timestamp: Date = Date()) {
         self.pairingCode = pairingCode
         self.timestamp = timestamp
@@ -187,7 +168,7 @@ public struct AuthResultMessage: Codable {
     public var success: Bool
     public var sessionToken: String?
     public var errorMessage: String?
-    
+
     public init(success: Bool, sessionToken: String? = nil, errorMessage: String? = nil) {
         self.success = success
         self.sessionToken = sessionToken
@@ -199,7 +180,7 @@ public struct SessionStartMessage: Codable {
     public var sessionId: String
     public var model: String
     public var language: String
-    
+
     public init(sessionId: String, model: String, language: String = "en-US") {
         self.sessionId = sessionId
         self.model = model
@@ -212,7 +193,7 @@ public struct SessionEndMessage: Codable {
     public var finalText: String
     public var duration: TimeInterval
     public var wordCount: Int
-    
+
     public init(sessionId: String, finalText: String, duration: TimeInterval, wordCount: Int) {
         self.sessionId = sessionId
         self.finalText = finalText
@@ -227,7 +208,7 @@ public struct TranscriptChunkMessage: Codable {
     public var text: String
     public var isFinal: Bool
     public var timestamp: Date
-    
+
     public init(sessionId: String, sequenceNumber: Int, text: String, isFinal: Bool, timestamp: Date = Date()) {
         self.sessionId = sessionId
         self.sequenceNumber = sequenceNumber
@@ -239,7 +220,7 @@ public struct TranscriptChunkMessage: Codable {
 
 public struct AckMessage: Codable {
     public var sequenceNumber: Int
-    
+
     public init(sequenceNumber: Int) {
         self.sequenceNumber = sequenceNumber
     }
@@ -248,12 +229,12 @@ public struct AckMessage: Codable {
 public struct ErrorMessage: Codable, Sendable {
     public var code: Int
     public var message: String
-    
+
     public init(code: Int, message: String) {
         self.code = code
         self.message = message
     }
-    
+
     public static let authenticationFailed = ErrorMessage(code: 401, message: "Authentication failed")
     public static let protocolMismatch = ErrorMessage(code: 400, message: "Protocol version mismatch")
     public static let sessionNotFound = ErrorMessage(code: 404, message: "Session not found")
@@ -381,7 +362,7 @@ public struct DeviceIdentity {
             IOServiceMatching("IOPlatformExpertDevice")
         )
         defer { IOObjectRelease(platformExpert) }
-        
+
         if let serialNumber = IORegistryEntryCreateCFProperty(
             platformExpert,
             kIOPlatformUUIDKey as CFString,
@@ -393,7 +374,7 @@ public struct DeviceIdentity {
         return UUID().uuidString
         #endif
     }
-    
+
     public static var deviceName: String {
         #if os(iOS)
         return UIDevice.current.name

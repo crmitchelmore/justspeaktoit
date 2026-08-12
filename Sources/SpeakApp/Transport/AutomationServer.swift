@@ -41,7 +41,29 @@ final class AutomationServer {
     guard !self.isRunning else { return }
     self.handler = handler
 
-    let directory = (self.socketPath as NSString).deletingLastPathComponent
+    let descriptor = try Self.makeListeningSocket(at: self.socketPath)
+    let source = DispatchSource.makeReadSource(fileDescriptor: descriptor, queue: self.queue)
+    source.setEventHandler { [weak self] in
+      guard let self else { return }
+      let client = accept(descriptor, nil, nil)
+      guard client >= 0 else { return }
+      Self.applyReceiveTimeout(to: client)
+      self.serve(client: client)
+    }
+    source.setCancelHandler {
+      close(descriptor)
+    }
+    source.resume()
+
+    self.listeningSource = source
+    self.listeningDescriptor = descriptor
+    self.isRunning = true
+    SpeakLogger.transport.info("Automation socket listening")
+  }
+
+  /// Creates, binds and listens on the owner-only automation socket.
+  private nonisolated static func makeListeningSocket(at socketPath: String) throws -> Int32 {
+    let directory = (socketPath as NSString).deletingLastPathComponent
     try FileManager.default.createDirectory(
       atPath: directory,
       withIntermediateDirectories: true,
@@ -49,7 +71,7 @@ final class AutomationServer {
     )
     // A socket file survives a crash, and bind() fails on an existing path, so
     // clear any stale one before binding.
-    try? FileManager.default.removeItem(atPath: self.socketPath)
+    try? FileManager.default.removeItem(atPath: socketPath)
 
     let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
     guard descriptor >= 0 else {
@@ -58,7 +80,7 @@ final class AutomationServer {
 
     var address = sockaddr_un()
     address.sun_family = sa_family_t(AF_UNIX)
-    let pathBytes = Array(self.socketPath.utf8)
+    let pathBytes = Array(socketPath.utf8)
     let capacity = MemoryLayout.size(ofValue: address.sun_path)
     guard pathBytes.count < capacity else {
       close(descriptor)
@@ -87,30 +109,13 @@ final class AutomationServer {
       throw AutomationError(code: .internalError, message: "Could not bind the automation socket.")
     }
     // Owner-only: any other local user must not be able to drive dictation.
-    chmod(self.socketPath, 0o600)
+    chmod(socketPath, 0o600)
 
     guard listen(descriptor, 8) == 0 else {
       close(descriptor)
       throw AutomationError(code: .internalError, message: "Could not listen on the automation socket.")
     }
-
-    let source = DispatchSource.makeReadSource(fileDescriptor: descriptor, queue: self.queue)
-    source.setEventHandler { [weak self] in
-      guard let self else { return }
-      let client = accept(descriptor, nil, nil)
-      guard client >= 0 else { return }
-      Self.applyReceiveTimeout(to: client)
-      self.serve(client: client)
-    }
-    source.setCancelHandler {
-      close(descriptor)
-    }
-    source.resume()
-
-    self.listeningSource = source
-    self.listeningDescriptor = descriptor
-    self.isRunning = true
-    SpeakLogger.transport.info("Automation socket listening")
+    return descriptor
   }
 
   func stop() {

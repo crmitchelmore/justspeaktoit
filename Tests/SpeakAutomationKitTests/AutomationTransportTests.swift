@@ -37,8 +37,9 @@ final class AutomationTransportTests: XCTestCase {
             result: AutomationResult(entries: [entry])
         )
         let data = try AutomationCoding.encoder().encode(response)
+        let wire = try XCTUnwrap(String(bytes: data, encoding: .utf8))
         XCTAssertTrue(
-            String(decoding: data, as: UTF8.self).contains("2023-11-14T"),
+            wire.contains("2023-11-14T"),
             "Dates must be ISO-8601 strings so shell consumers can read them"
         )
         let decoded = try AutomationCoding.decoder().decode(AutomationResponse.self, from: data)
@@ -186,7 +187,8 @@ final class AutomationTransportTests: XCTestCase {
             command: .transcribeFile,
             result: AutomationResult(text: "hello", model: "nova-3", durationSeconds: 1)
         )
-        let json = String(decoding: try AutomationCoding.encoder().encode(response), as: UTF8.self).lowercased()
+        let encoded = try AutomationCoding.encoder().encode(response)
+        let json = try XCTUnwrap(String(bytes: encoded, encoding: .utf8)).lowercased()
         for forbidden in ["apikey", "api_key", "token", "secret", "authorization"] {
             XCTAssertFalse(json.contains(forbidden), "Automation payloads must never carry \(forbidden)")
         }

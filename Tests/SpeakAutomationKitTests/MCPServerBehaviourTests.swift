@@ -14,7 +14,8 @@ final class MCPServerBehaviourTests: XCTestCase {
         _ message: [String: Any]
     ) throws -> [String: Any]? {
         let data = try JSONSerialization.data(withJSONObject: message)
-        guard let line = handler.handle(line: String(decoding: data, as: UTF8.self)) else { return nil }
+        let request = try XCTUnwrap(String(bytes: data, encoding: .utf8))
+        guard let line = handler.handle(line: request) else { return nil }
         let object = try JSONSerialization.jsonObject(with: Data(line.utf8))
         return try XCTUnwrap(object as? [String: Any])
     }
@@ -230,6 +231,6 @@ final class MCPServerBehaviourTests: XCTestCase {
 
         let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
         wait(for: [finished], timeout: 5)
-        return String(decoding: data, as: UTF8.self)
+        return String(bytes: data, encoding: .utf8) ?? ""
     }
 }

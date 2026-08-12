@@ -391,9 +391,17 @@ public final class iOSLiveTranscriber: ObservableObject {
         SpeakLogger.transcription.info("Cancelling transcription")
 
         isShuttingDownRecognitionTask = true
-        recognitionRequest?.endAudio()
+
+        // Stop input first, then drain the queue so tap work already enqueued
+        // cannot write to the recorder or feed the analyser after they have been
+        // torn down below. `sync` (not `await`) keeps cancellation atomic on the
+        // main actor; the queued work never waits on the main actor, so it
+        // cannot deadlock.
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
+        audioProcessingQueue.sync {}
+
+        recognitionRequest?.endAudio()
         recognitionTask?.cancel()
 
         // Cancel persistent recording (keeps partial file by default)

@@ -206,9 +206,11 @@ public enum AppleSpeechAnalyzerTranscriber {
             switch await AssetInventory.status(forModules: modules) {
             case .installed:
                 return true
-            case .downloading:
+            case .downloading, .supported:
+                // `.supported` is transient right after `downloadAndInstall()` returns —
+                // the inventory can report it before flipping to `.downloading`/`.installed`.
                 try await Task.sleep(for: .milliseconds(250))
-            case .supported, .unsupported:
+            case .unsupported:
                 return false
             @unknown default:
                 return false
@@ -296,7 +298,16 @@ public final class AppleSpeechAnalyzerLiveSession: @unchecked Sendable {
             onUpdate: onUpdate
         )
 
-        try await analyzer.start(inputSequence: inputSequence)
+        do {
+            try await analyzer.start(inputSequence: inputSequence)
+        } catch {
+            // The result task is already consuming the module stream — leaving it
+            // running would strand it on a stream that never finishes.
+            continuation.finish()
+            await analyzer.cancelAndFinishNow()
+            self.resultTask.cancel()
+            throw error
+        }
     }
 
     private static func makeResultTask(

@@ -482,6 +482,14 @@ enum WireUp {
     settings: AppSettings,
     secureStorage: SecureAppStorage
   ) {
+    // Restore an existing subscription at launch so paid routing works without
+    // opening Settings first. This reads the Keychain and returns immediately
+    // when no session is stored, so users who never subscribed do no network
+    // work at all.
+    Task { @MainActor in
+      await environment.paidAccess.refreshEntitlement()
+    }
+
     environment.transportServer.onTranscriptReceived = { _, text in
       Task { @MainActor in
         environment.liveTextInserter.update(with: text)

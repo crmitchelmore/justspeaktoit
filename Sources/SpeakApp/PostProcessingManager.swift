@@ -284,7 +284,8 @@ final class PostProcessingManager: ObservableObject {
     _ client: OpenRouterAPIClient,
     model: String
   ) async -> Bool {
-    if await !client.requiresRemoteAccess(for: model) {
+    let requiresRemote = await client.requiresRemoteAccess(for: model)
+    if !requiresRemote {
       return true
     }
     return await client.hasStoredAPIKey()

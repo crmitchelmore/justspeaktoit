@@ -114,16 +114,16 @@ actor PaidAccessProxyClient: StreamingChatLLMClient, BatchTranscriptionClient {
     temperature: Double
   ) -> AsyncThrowingStream<String, Error> {
     AsyncThrowingStream { continuation in
-      Task {
+      let task = Task {
         do {
           let resolved = try await self.paidRoute(
             for: .postProcessing,
             configuredModel: model
           )
           guard resolved != nil else {
-            // Not entitled: hand the caller the real streaming client so live
-            // typing behaviour is unchanged.
-            for try await chunk in self.fallbackStream(
+            // Not entitled: stream straight from the user's own client so live
+            // typing behaviour is byte-for-byte what it was before paid access.
+            for try await chunk in self.fallback.sendChatStreaming(
               systemPrompt: systemPrompt,
               messages: messages,
               model: model,
@@ -151,32 +151,10 @@ actor PaidAccessProxyClient: StreamingChatLLMClient, BatchTranscriptionClient {
           continuation.finish(throwing: error)
         }
       }
-    }
-  }
 
-  private nonisolated func fallbackStream(
-    systemPrompt: String?,
-    messages: [ChatMessage],
-    model: String,
-    temperature: Double
-  ) -> AsyncThrowingStream<String, Error> {
-    AsyncThrowingStream { continuation in
-      Task {
-        do {
-          let stream = self.fallback.sendChatStreaming(
-            systemPrompt: systemPrompt,
-            messages: messages,
-            model: model,
-            temperature: temperature
-          )
-          for try await chunk in stream {
-            continuation.yield(chunk)
-          }
-          continuation.finish()
-        } catch {
-          continuation.finish(throwing: error)
-        }
-      }
+      // Without this, cancelling cleanup would leave the upstream request
+      // running — a regression for subscribers and non-subscribers alike.
+      continuation.onTermination = { _ in task.cancel() }
     }
   }
 

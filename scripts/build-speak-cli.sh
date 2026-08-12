@@ -23,8 +23,11 @@ if [[ ! -d "$APP_PATH" ]]; then
     exit 1
 fi
 
-cd "$ROOT_DIR"
+# Resolve before the cd below, so a relative app path keeps pointing at the
+# bundle the caller meant.
+APP_PATH="$(cd "$APP_PATH" && pwd -P)"
 
+cd "$ROOT_DIR"
 echo "==> Building speak (release, arm64+x86_64)"
 swift build --product speak --configuration release \
     --arch arm64 --arch x86_64
@@ -49,6 +52,15 @@ if [[ -n "$SIGN_IDENTITY" ]]; then
         "$DESTINATION"
     codesign -dv --verbose=4 "$DESTINATION" 2>&1 | grep -q "runtime"
     echo "==> Hardened runtime confirmed for embedded CLI"
+
+    # Copying into Contents/MacOS invalidates the bundle signature, so re-sign the
+    # app itself last. The release workflow re-signs afterwards too; doing it here
+    # keeps the script correct for standalone use.
+    echo "==> Re-signing $APP_PATH after embedding"
+    codesign --force --timestamp --options runtime \
+        --sign "$SIGN_IDENTITY" \
+        --entitlements "$ROOT_DIR/Config/SpeakMacOS.entitlements" \
+        "$APP_PATH"
 else
     echo "==> Skipping codesign (no identity supplied)"
 fi

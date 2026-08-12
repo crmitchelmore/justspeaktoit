@@ -127,7 +127,8 @@ final class MCPServerBehaviourTests: XCTestCase {
             client.sentRequests[1].id,
             "A retried call must reuse the idempotency key so the app can dedupe it"
         )
-        XCTAssertEqual(client.sentRequests[0].id, "mcp-abc")
+        XCTAssertTrue(client.sentRequests[0].id.hasPrefix("mcp-"))
+        XCTAssertTrue(client.sentRequests[0].id.hasSuffix("-abc"))
     }
 
     func testAppNotRunning_isReportedAsToolErrorNotProtocolError() throws {

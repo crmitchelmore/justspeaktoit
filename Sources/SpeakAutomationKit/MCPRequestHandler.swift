@@ -116,18 +116,6 @@ public struct MCPRequestHandler {
             }
             request.path = CommandLineParser.absolutePath(for: path)
         }
-        if let provider = arguments["provider"] {
-            guard let provider = provider as? String else {
-                throw AutomationError(code: .invalidArgument, message: "\"provider\" must be a string.")
-            }
-            request.provider = provider
-        }
-        if let profile = arguments["profile"] {
-            guard let profile = profile as? String else {
-                throw AutomationError(code: .invalidArgument, message: "\"profile\" must be a string.")
-            }
-            request.profile = profile
-        }
         if let limit = arguments["limit"] {
             guard let limit = limit as? Int else {
                 throw AutomationError(code: .invalidArgument, message: "\"limit\" must be an integer.")
@@ -146,6 +134,12 @@ public struct MCPRequestHandler {
         return try request.validated()
     }
 
+    /// Distinguishes this MCP server process from every other client of the
+    /// socket. JSON-RPC call ids restart at `1` for each agent session, so
+    /// without a per-process scope two unrelated sessions would collide on the
+    /// app's idempotency cache.
+    private static let processScope = String(UUID().uuidString.prefix(8))
+
     /// Derives the idempotency key from the JSON-RPC call id, so an agent that
     /// retries a timed-out `start_dictation` cannot open a second session.
     static func requestID(for callID: Any?) -> String {
@@ -156,7 +150,7 @@ public struct MCPRequestHandler {
         case let number as Double: raw = String(number)
         default: raw = UUID().uuidString
         }
-        let scoped = "mcp-" + raw
+        let scoped = "mcp-" + Self.processScope + "-" + raw
         return String(scoped.prefix(AutomationLimits.maxIdentifierLength))
     }
 
@@ -197,8 +191,6 @@ public struct MCPRequestHandler {
                 "type": "object",
                 "properties": [
                     "path": ["type": "string", "description": "Absolute path to an audio file."],
-                    "provider": ["type": "string", "description": "Override the transcription provider id."],
-                    "profile": ["type": "string", "description": "Dictation profile name to apply."],
                     "timeout_seconds": ["type": "number", "description": "Deadline in seconds."]
                 ],
                 "required": ["path"]
@@ -222,13 +214,7 @@ public struct MCPRequestHandler {
         [
             "name": AutomationCommand.startDictation.rawValue,
             "description": "Start a dictation session in the app. Idempotent per call id.",
-            "inputSchema": [
-                "type": "object",
-                "properties": [
-                    "provider": ["type": "string", "description": "Override the transcription provider id."],
-                    "profile": ["type": "string", "description": "Dictation profile name to apply."]
-                ]
-            ]
+            "inputSchema": ["type": "object", "properties": [:]]
         ],
         [
             "name": AutomationCommand.stopDictation.rawValue,

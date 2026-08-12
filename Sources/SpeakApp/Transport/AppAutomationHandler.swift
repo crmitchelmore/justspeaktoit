@@ -36,6 +36,7 @@ final class AppAutomationHandler: AutomationCommandHandling {
 
     func handle(_ request: AutomationRequest) async -> AutomationResponse {
         do {
+            try Self.rejectUnappliedOptions(in: request)
             switch request.command {
             case .status:
                 return .success(id: request.id, command: request.command, result: self.status())
@@ -71,6 +72,28 @@ final class AppAutomationHandler: AutomationCommandHandling {
 
     // MARK: - Commands
 
+    /// Fails loudly for wire fields this build cannot honour.
+    ///
+    /// `provider` and `profile` are part of the schema so a later app version can
+    /// apply them without a breaking change, but accepting them silently would
+    /// report success for an override that never took effect.
+    private static func rejectUnappliedOptions(in request: AutomationRequest) throws {
+        if request.provider != nil {
+            throw AutomationError(
+                code: .invalidArgument,
+                message: "This app version cannot override the transcription provider per request. "
+                    + "Change the provider in Settings."
+            )
+        }
+        if request.profile != nil {
+            throw AutomationError(
+                code: .invalidArgument,
+                message: "This app version cannot select a dictation profile per request. "
+                    + "Choose the profile in the app."
+            )
+        }
+    }
+
     private func status() -> AutomationResult {
         AutomationResult(
             sessionActive: self.main.activeSession != nil,
@@ -80,9 +103,7 @@ final class AppAutomationHandler: AutomationCommandHandling {
 
     private func historyEntries(limit: Int) -> [AutomationHistoryEntry] {
         self.history.items.prefix(limit).map { item in
-            let text = item.postProcessedTranscription?.isEmpty == false
-                ? item.postProcessedTranscription ?? ""
-                : item.rawTranscription ?? ""
+            let text = Self.transcript(of: item)
             return AutomationHistoryEntry(
                 id: item.id.uuidString,
                 text: text,
@@ -132,6 +153,9 @@ final class AppAutomationHandler: AutomationCommandHandling {
                 message: "A dictation session is already running. Stop it before starting another."
             )
         }
+        // `toggleRecordingFromUI` does not clear `state`, so a `.failed` left by the
+        // previous session must not be read as this session failing.
+        let staleFailure = Self.failureMessage(from: self.main.state)
         self.main.toggleRecordingFromUI()
 
         let deadline = Date().addingTimeInterval(Self.startConfirmationTimeout)
@@ -139,10 +163,16 @@ final class AppAutomationHandler: AutomationCommandHandling {
             if self.main.activeSession != nil {
                 return AutomationResult(sessionActive: true)
             }
-            if case .failed(let message) = self.main.state {
+            if let message = Self.failureMessage(from: self.main.state), message != staleFailure {
                 throw AutomationError(code: .transcriptionFailed, message: message)
             }
             try? await Task.sleep(for: Self.startPollInterval)
+        }
+        // The session may still be coming up. Stop it so the caller's view ("nothing
+        // started") matches the app, instead of leaving a session that makes the
+        // next attempt fail with `already_recording`.
+        if self.main.activeSession != nil {
+            await self.main.endSession(trigger: .uiButton)
         }
         throw AutomationError(
             code: .timedOut,
@@ -151,19 +181,22 @@ final class AppAutomationHandler: AutomationCommandHandling {
         )
     }
 
+    private static func failureMessage(from state: MainManager.State) -> String? {
+        guard case .failed(let message) = state else { return nil }
+        return message
+    }
+
     private func stopDictation() async throws -> AutomationResult {
-        guard self.main.activeSession != nil else {
+        guard let session = self.main.activeSession else {
             throw AutomationError(code: .notRecording, message: "No dictation session is running.")
         }
+        let sessionID = session.id
         await self.main.endSession(trigger: .uiButton)
 
         switch self.main.state {
         case .completed(let item):
-            let text = item.postProcessedTranscription?.isEmpty == false
-                ? item.postProcessedTranscription ?? ""
-                : item.rawTranscription ?? ""
             return AutomationResult(
-                text: text,
+                text: Self.transcript(of: item),
                 model: item.modelUsages.first?.modelIdentifier ?? item.modelsUsed.first,
                 durationSeconds: item.recordingDuration,
                 sessionActive: false
@@ -171,12 +204,23 @@ final class AppAutomationHandler: AutomationCommandHandling {
         case .failed(let message):
             throw AutomationError(code: .transcriptionFailed, message: message)
         default:
-            // Delivery can still be in flight; the transcript is already in history.
+            // Delivery can still be in flight. Only this session's own item counts —
+            // the newest history entry may belong to an earlier session.
+            let item = self.history.items.first { $0.id == sessionID }
             return AutomationResult(
-                text: self.history.items.first?.rawTranscription ?? "",
+                text: item.map(Self.transcript(of:)) ?? "",
+                model: item?.modelUsages.first?.modelIdentifier ?? item?.modelsUsed.first,
+                durationSeconds: item?.recordingDuration,
                 sessionActive: self.main.activeSession != nil
             )
         }
+    }
+
+    /// Post-processed text when there is any, matching what History shows.
+    private static func transcript(of item: HistoryItem) -> String {
+        item.postProcessedTranscription?.isEmpty == false
+            ? item.postProcessedTranscription ?? ""
+            : item.rawTranscription ?? ""
     }
 }
 #endif

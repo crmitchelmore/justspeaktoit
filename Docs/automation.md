@@ -6,7 +6,7 @@ stay in one place — no automation surface ever sees an API key.
 
 | Surface | Use it for | Status |
 | --- | --- | --- |
-| Shortcuts / App Intents | Mac and iOS Shortcuts, Spotlight | See the App Intents section below |
+| Shortcuts / App Intents | Mac and iOS Shortcuts, Spotlight | Planned — tracked in issue #637 |
 | `speak` CLI | Terminal, scripts, CI-style batch work | This document |
 | MCP server | Claude Code and other MCP agents | This document (`speak mcp`) |
 
@@ -40,9 +40,9 @@ To use a binary directly from the app bundle:
 
 ### Commands
 
-```
-speak transcribe <file> [--json] [--provider <id>] [--profile <name>] [--timeout <seconds>]
-speak listen [--provider <id>] [--profile <name>] [--json]
+```text
+speak transcribe <file> [--json] [--timeout <seconds>]
+speak listen [--json]
 speak stop [--json]
 speak history [--last <n>] [--json]
 speak status [--json]
@@ -61,7 +61,7 @@ speak transcribe ~/Downloads/memo.m4a | pbcopy
 Dictate a commit message:
 
 ```bash
-speak listen --profile code
+speak listen
 # ... talk ...
 git commit -m "$(speak stop)"
 ```
@@ -152,9 +152,9 @@ Or in an MCP client config file:
 
 | Tool | Arguments | Returns |
 | --- | --- | --- |
-| `transcribe_file` | `path` (required), `provider`, `profile`, `timeout_seconds` | Transcript text |
+| `transcribe_file` | `path` (required), `timeout_seconds` | Transcript text |
 | `get_history` | `limit` (1–200, default 10) | Recent transcriptions, newest first |
-| `start_dictation` | `provider`, `profile` | Confirmation once the session is live |
+| `start_dictation` | — | Confirmation once the session is live |
 | `stop_dictation` | — | Transcript of the finished session |
 
 Every tool also returns `structuredContent` with the same fields as the CLI's
@@ -175,10 +175,10 @@ Every tool also returns `structuredContent` with the same fields as the CLI's
 
 ## App Intents / Shortcuts
 
-Shortcuts actions (Start Dictation, Stop & Get Text, Transcribe Audio File, Get
-Last Transcription, Polish Text) are provided by the App Intents surface on macOS
-and iOS. They share the same managers as the CLI and MCP paths, so behaviour is
-identical whichever surface starts a session.
+Not shipped yet. Shortcuts actions (Start Dictation, Stop & Get Text, Transcribe
+Audio File, Get Last Transcription, Polish Text) are tracked separately in issue
+#637 and will reuse the managers the CLI and MCP paths already drive, so
+behaviour will be identical whichever surface starts a session.
 
 ## Troubleshooting
 

@@ -16,8 +16,6 @@ public enum CLIInvocation: Equatable {
 public struct CLIPlan: Equatable {
     public var command: AutomationCommand
     public var path: String?
-    public var profile: String?
-    public var provider: String?
     public var limit: Int?
     public var timeout: TimeInterval?
     public var json: Bool
@@ -25,16 +23,12 @@ public struct CLIPlan: Equatable {
     public init(
         command: AutomationCommand,
         path: String? = nil,
-        profile: String? = nil,
-        provider: String? = nil,
         limit: Int? = nil,
         timeout: TimeInterval? = nil,
         json: Bool = false
     ) {
         self.command = command
         self.path = path
-        self.profile = profile
-        self.provider = provider
         self.limit = limit
         self.timeout = timeout
         self.json = json
@@ -47,8 +41,6 @@ public struct CLIPlan: Equatable {
             id: id,
             command: self.command,
             path: self.path,
-            profile: self.profile,
-            provider: self.provider,
             limit: self.limit,
             timeout: self.timeout
         )
@@ -72,8 +64,8 @@ public enum CommandLineParser {
     speak — automation CLI for Just Speak To It
 
     USAGE
-      speak transcribe <file> [--json] [--provider <id>] [--profile <name>] [--timeout <seconds>]
-      speak listen [--provider <id>] [--profile <name>] [--json]
+      speak transcribe <file> [--json] [--timeout <seconds>]
+      speak listen [--json]
       speak stop [--json]
       speak history [--last <n>] [--json]
       speak status [--json]
@@ -100,7 +92,7 @@ public enum CommandLineParser {
     /// Verbs that map straight onto a command plus the options they accept.
     /// Table-driven so adding a verb is data, not another branch.
     private static let verbs: [String: (command: AutomationCommand, options: Set<Option>)] = [
-        "listen": (.startDictation, [.json, .provider, .profile]),
+        "listen": (.startDictation, [.json]),
         "stop": (.stopDictation, [.json]),
         "history": (.history, [.json, .last]),
         "status": (.status, [.json])
@@ -140,7 +132,7 @@ public enum CommandLineParser {
         let positional = try self.applyOptions(
             &plan,
             arguments: arguments,
-            allowed: [.json, .provider, .profile, .timeout]
+            allowed: [.json, .timeout]
         )
         guard let file = positional.first else {
             throw CLIUsageError(message: "`speak transcribe` requires an audio file path.")
@@ -158,8 +150,6 @@ public enum CommandLineParser {
 
     private enum Option: String, CaseIterable {
         case json = "--json"
-        case provider = "--provider"
-        case profile = "--profile"
         case timeout = "--timeout"
         case last = "--last"
 
@@ -199,8 +189,12 @@ public enum CommandLineParser {
                 positional.append(token)
                 continue
             }
-            // Support --flag=value as well as --flag value.
-            let parts = token.split(separator: "=", maxSplits: 1).map(String.init)
+            // Support --flag=value as well as --flag value. Empty subsequences are
+            // kept so `--timeout=` fails as a missing value instead of silently
+            // swallowing the next argument.
+            let parts = token
+                .split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+                .map(String.init)
             guard let option = Option(rawValue: parts[0]) else {
                 throw CLIUsageError(message: "Unknown option \"\(parts[0])\".")
             }
@@ -234,10 +228,6 @@ public enum CommandLineParser {
         switch option {
         case .json:
             plan.json = true
-        case .provider:
-            plan.provider = try self.nonEmpty(value, option: option)
-        case .profile:
-            plan.profile = try self.nonEmpty(value, option: option)
         case .timeout:
             guard let seconds = TimeInterval(value), seconds > 0 else {
                 throw CLIUsageError(message: "--timeout must be a positive number of seconds.")
@@ -251,16 +241,6 @@ public enum CommandLineParser {
             }
             plan.limit = count
         }
-    }
-
-    private static func nonEmpty(_ value: String, option: Option) throws -> String {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, trimmed.count <= AutomationLimits.maxIdentifierLength else {
-            throw CLIUsageError(
-                message: "\(option.rawValue) must be 1-\(AutomationLimits.maxIdentifierLength) characters."
-            )
-        }
-        return trimmed
     }
 
     /// The app resolves paths in its own working directory, so relative paths are

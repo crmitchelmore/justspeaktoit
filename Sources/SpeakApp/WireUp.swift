@@ -34,6 +34,7 @@ final class AppEnvironment: ObservableObject { // swiftlint:disable:this type_bo
   /// handler is attached in `configureServices` once the managers exist.
   let automationServer = AutomationServer()
   fileprivate var automationHandler: AppAutomationHandler?
+  fileprivate var automationTerminationObserver: NSObjectProtocol?
   private let hudPresenter: HUDWindowPresenter
 
   /// Coordinator state for cross-view navigation. When set, MainView selects
@@ -544,9 +545,20 @@ enum WireUp {
     environment.automationHandler = handler
     do {
       try environment.automationServer.start(handler: handler)
-    } catch {
-      SpeakLogger.logError(error, context: "Automation socket startup", logger: SpeakLogger.transport)
+    // Leave no stale socket file behind: a client that connects to one gets a
+    // confusing failure instead of the "app is not running" error.
+    environment.automationTerminationObserver = NotificationCenter.default.addObserver(
+      forName: NSApplication.willTerminateNotification,
+      object: nil,
+      queue: .main
+    ) { [weak environment] _ in
+      MainActor.assumeIsolated {
+        environment?.automationServer.stop()
+      }
     }
+  } catch {
+    SpeakLogger.logError(error, context: "Automation socket startup", logger: SpeakLogger.transport)
+  }
   }
 
   // MARK: - TTS Factory

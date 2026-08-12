@@ -81,6 +81,10 @@ public struct UnixSocketAutomationClient: AutomationRequesting {
         }
 
         self.applyTimeout(timeout, to: descriptor)
+        // Without SO_NOSIGPIPE a write to an app that has just quit kills `speak`
+        // with SIGPIPE instead of reporting that the app is unavailable.
+        var noSignal: Int32 = 1
+        setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout<Int32>.size))
 
         let size = socklen_t(MemoryLayout<sockaddr_un>.size)
         let result = withUnsafePointer(to: &address) { pointer in
@@ -154,6 +158,11 @@ public struct UnixSocketAutomationClient: AutomationRequesting {
                 code: .timedOut,
                 message: "Timed out \(context). Use --timeout to allow longer, or check the app is responsive."
             )
+        }
+        if errno == EPIPE || errno == ECONNRESET {
+            // The app closed the socket mid-exchange, which is the same situation
+            // for the caller as the app not running at all.
+            return AutomationError.appUnavailable(socketPath: self.socketPath)
         }
         return AutomationError(code: .internalError, message: "Automation socket failed while \(context).")
     }

@@ -26,36 +26,49 @@ public struct MCPStdioServer {
     /// ordering predictable.
     public func serve() {
         var buffer = Data()
+        var skippingOversizedLine = false
         while true {
             let chunk = self.input.availableData
             if chunk.isEmpty {
-                self.drain(&buffer, isFinal: true)
+                self.drain(&buffer, skipping: &skippingOversizedLine, isFinal: true)
                 return
             }
             buffer.append(chunk)
-            // Guard against a client that never sends a newline.
+            self.drain(&buffer, skipping: &skippingOversizedLine, isFinal: false)
+            // Guard against a client that never sends a newline. Complete messages
+            // have already been answered above, so only an unterminated line can be
+            // this large: report it once and resync on the next newline instead of
+            // emitting an error for every following fragment.
             if buffer.count > AutomationLimits.maxFrameBytes {
-                self.write(MCPRequestHandler.encode(MCPRequestHandler.errorResponse(
-                    id: nil,
-                    code: -32600,
-                    message: "Request exceeds the size limit."
-                )))
+                if !skippingOversizedLine {
+                    self.write(MCPRequestHandler.encode(MCPRequestHandler.errorResponse(
+                        id: nil,
+                        code: -32600,
+                        message: "Request exceeds the size limit."
+                    )))
+                }
                 buffer.removeAll(keepingCapacity: false)
-                continue
+                skippingOversizedLine = true
             }
-            self.drain(&buffer, isFinal: false)
         }
     }
 
-    private func drain(_ buffer: inout Data, isFinal: Bool) {
+    private func drain(_ buffer: inout Data, skipping: inout Bool, isFinal: Bool) {
         let newline = UInt8(ascii: "\n")
         while let index = buffer.firstIndex(of: newline) {
             let lineData = buffer[buffer.startIndex..<index]
             buffer = buffer[buffer.index(after: index)...]
+            guard !skipping else {
+                // Tail of an oversized line: it has already been reported.
+                skipping = false
+                continue
+            }
             self.dispatch(lineData)
         }
         if isFinal, !buffer.isEmpty {
-            self.dispatch(buffer)
+            if !skipping {
+                self.dispatch(buffer)
+            }
             buffer.removeAll(keepingCapacity: false)
         }
     }

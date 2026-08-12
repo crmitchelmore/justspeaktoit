@@ -20,21 +20,16 @@ final class CLIBehaviourTests: XCTestCase {
 
     func testTranscribe_withOptions_buildsBoundedRequest() throws {
         let plan = try XCTUnwrap(self.plan(from: ["transcribe", "/tmp/a.m4a",
-                                                 "--provider", "deepgram", "--profile", "code",
                                                  "--timeout", "42", "--json"]))
         XCTAssertEqual(plan.command, .transcribeFile)
         XCTAssertEqual(plan.path, "/tmp/a.m4a")
-        XCTAssertEqual(plan.provider, "deepgram")
-        XCTAssertEqual(plan.profile, "code")
         XCTAssertEqual(plan.timeout, 42)
         XCTAssertTrue(plan.json)
     }
 
     func testListen_matchesIssueInvocation() throws {
-        let plan = try XCTUnwrap(self.plan(from: ["listen", "--provider", "deepgram", "--profile", "code"]))
+        let plan = try XCTUnwrap(self.plan(from: ["listen"]))
         XCTAssertEqual(plan.command, .startDictation)
-        XCTAssertEqual(plan.provider, "deepgram")
-        XCTAssertEqual(plan.profile, "code")
         XCTAssertFalse(plan.json)
     }
 
@@ -83,7 +78,7 @@ final class CLIBehaviourTests: XCTestCase {
         XCTAssertTrue(output.stderr.contains("requires an audio file path"))
     }
 
-    func testOptionRejectedForCommand() throws {
+    func testOption_rejectedForCommand_exitsWithUsageCode() throws {
         let output = try self.output(self.runner(StubAutomationClient(result: AutomationResult())).run(
             arguments: ["status", "--last", "5"]
         ))

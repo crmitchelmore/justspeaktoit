@@ -154,6 +154,15 @@ final class AutomationTransportTests: XCTestCase {
     func testSocketPath_defaultsUnderApplicationSupport() {
         let path = AutomationEndpoint.socketPath(environment: [:])
         XCTAssertTrue(path.hasSuffix("SpeakApp/Automation/automation.sock"))
+    }
+
+    func testSocketPath_fitsThePlatformLimitForATypicalHome() {
+        // Asserting against the real home directory would fail on a long CI or
+        // sandbox container path for reasons unrelated to the code under test.
+        let path = AutomationEndpoint.socketPath(
+            environment: [:],
+            fileManager: FixedSupportDirectoryFileManager(base: "/Users/example/Library/Application Support")
+        )
         XCTAssertLessThan(path.utf8.count, 104, "UNIX socket paths are capped by the platform")
     }
 
@@ -192,5 +201,21 @@ final class AutomationTransportTests: XCTestCase {
         for forbidden in ["apikey", "api_key", "token", "secret", "authorization"] {
             XCTAssertFalse(json.contains(forbidden), "Automation payloads must never carry \(forbidden)")
         }
+    }
+}
+
+/// Pins the Application Support directory so socket-path tests do not depend on
+/// the length of the running user's home directory.
+private final class FixedSupportDirectoryFileManager: FileManager {
+    private let base: String
+
+    init(base: String) {
+        self.base = base
+        super.init()
+    }
+
+    override func urls(for directory: FileManager.SearchPathDirectory, in domainMask: FileManager.SearchPathDomainMask)
+        -> [URL] {
+        [URL(fileURLWithPath: self.base, isDirectory: true)]
     }
 }

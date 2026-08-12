@@ -24,12 +24,26 @@ final class AutomationServer {
     private weak var handler: (any AutomationCommandHandling)?
     private var listeningSource: DispatchSourceRead?
     private var listeningDescriptor: Int32 = -1
-    private nonisolated let queue = DispatchQueue(label: "com.justspeaktoit.automation", qos: .userInitiated)
-    /// Replayed responses keyed by request id, so a client that retries after a
-    /// timeout re-reads its result instead of starting a second dictation session.
-    private var completedRequests: [String: AutomationResponse] = [:]
-    private var completionOrder: [String] = []
+    private nonisolated let queue = DispatchQueue(
+        label: "com.justspeaktoit.automation",
+        qos: .userInitiated,
+        attributes: .concurrent
+    )
+    /// Replayed responses keyed by request id *and* command, so a client that
+    /// retries after a timeout re-reads its result instead of starting a second
+    /// dictation session — and a client that reuses an id for a different command
+    /// never receives the earlier command's answer.
+    private var completedRequests: [CompletedKey: AutomationResponse] = [:]
+    private var completionOrder: [CompletedKey] = []
+    /// Commands still running, so a retry joins the original run instead of
+    /// starting a second one.
+    private var inFlight: [CompletedKey: Task<AutomationResponse, Never>] = [:]
     private static let maxRememberedRequests = 64
+
+    private struct CompletedKey: Hashable {
+        let id: String
+        let command: AutomationCommand
+    }
 
     private(set) var isRunning = false
 
@@ -69,6 +83,10 @@ final class AutomationServer {
             withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700]
         )
+        // `attributes` is ignored when the directory already exists, so an
+        // Application Support folder created earlier with a wider mode would leave
+        // the socket parent readable by other local users.
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory)
         // A socket file survives a crash, and bind() fails on an existing path, so
         // clear any stale one before binding.
         try? FileManager.default.removeItem(atPath: socketPath)
@@ -99,11 +117,15 @@ final class AutomationServer {
         }
 
         let size = socklen_t(MemoryLayout<sockaddr_un>.size)
+        // bind() creates the socket with umask-derived permissions, so narrow the
+        // umask across the call rather than widening the window until chmod runs.
+        let previousMask = umask(0o177)
         let bound = withUnsafePointer(to: &address) { pointer in
             pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
                 bind(descriptor, sockaddrPointer, size)
             }
         }
+        umask(previousMask)
         guard bound == 0 else {
             close(descriptor)
             throw AutomationError(code: .internalError, message: "Could not bind the automation socket.")
@@ -186,32 +208,80 @@ final class AutomationServer {
     }
 
     private func respond(to request: AutomationRequest) async -> AutomationResponse {
-        if let cached = self.completedRequests[request.id] {
+        let key = CompletedKey(id: request.id, command: request.command)
+        if let cached = self.completedRequests[key] {
             return cached
         }
-        let response: AutomationResponse
-        do {
-            let validated = try request.validated()
-            guard let handler = self.handler else {
-                throw AutomationError(code: .internalError, message: "Automation is not wired up in this build.")
+
+        let work: Task<AutomationResponse, Never>
+        if let existing = self.inFlight[key] {
+            // A retry of a command that is still running joins the original run
+            // rather than starting a second dictation session.
+            work = existing
+        } else {
+            let validated: AutomationRequest
+            do {
+                validated = try request.validated()
+            } catch let error as AutomationError {
+                return .failure(id: request.id, command: request.command, error: error)
+            } catch {
+                return .failure(
+                    id: request.id,
+                    command: request.command,
+                    error: AutomationError(code: .invalidArgument, message: "Automation request was rejected.")
+                )
             }
-            response = await handler.handle(validated)
-        } catch let error as AutomationError {
-            response = .failure(id: request.id, command: request.command, error: error)
-        } catch {
-            response = .failure(
-                id: request.id,
-                command: request.command,
-                error: AutomationError(code: .internalError, message: "Automation command failed.")
-            )
+            guard let handler = self.handler else {
+                return .failure(
+                    id: request.id,
+                    command: request.command,
+                    error: AutomationError(code: .internalError, message: "Automation is not wired up in this build.")
+                )
+            }
+            work = Task { @MainActor [weak self] in
+                let response = await handler.handle(validated)
+                self?.finish(key: key, response: response)
+                return response
+            }
+            self.inFlight[key] = work
         }
-        self.remember(response)
-        return response
+
+        return await Self.value(of: work, within: request.resolvedTimeout, id: request.id, command: request.command)
     }
 
-    private func remember(_ response: AutomationResponse) {
-        self.completedRequests[response.id] = response
-        self.completionOrder.append(response.id)
+    /// Stops waiting once the caller's deadline passes. The command keeps running —
+    /// it owns app state that cannot be abandoned mid-flight — so a retry with the
+    /// same request id joins it and collects the result.
+    private static func value(
+        of work: Task<AutomationResponse, Never>,
+        within seconds: TimeInterval,
+        id: String,
+        command: AutomationCommand
+    ) async -> AutomationResponse {
+        await withTaskGroup(of: AutomationResponse?.self) { group in
+            group.addTask { await work.value }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(seconds))
+                return nil
+            }
+            let completed: AutomationResponse? = await group.next().flatMap { $0 }
+            group.cancelAll()
+            return completed ?? .failure(
+                id: id,
+                command: command,
+                error: AutomationError(
+                    code: .timedOut,
+                    message: "\(command.rawValue) did not finish within \(Int(seconds))s. "
+                        + "Retry with the same request id to collect the result."
+                )
+            )
+        }
+    }
+
+    private func finish(key: CompletedKey, response: AutomationResponse) {
+        self.inFlight.removeValue(forKey: key)
+        self.completedRequests[key] = response
+        self.completionOrder.append(key)
         while self.completionOrder.count > Self.maxRememberedRequests {
             let evicted = self.completionOrder.removeFirst()
             self.completedRequests.removeValue(forKey: evicted)
@@ -232,10 +302,14 @@ final class AutomationServer {
         setsockopt(descriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
         setsockopt(descriptor, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
     }
+}
 
-    // MARK: - Socket IO
+// MARK: - Socket IO
 
-    private nonisolated static func readExactly(descriptor: Int32, count: Int) throws -> Data {
+/// Blocking descriptor helpers, kept out of the class body: they touch no state
+/// and only ever run on the serving queue.
+private extension AutomationServer {
+    nonisolated static func readExactly(descriptor: Int32, count: Int) throws -> Data {
         var buffer = [UInt8](repeating: 0, count: count)
         var received = 0
         while received < count {
@@ -253,7 +327,7 @@ final class AutomationServer {
         return Data(buffer)
     }
 
-    private nonisolated static func write(descriptor: Int32, data: Data) throws {
+    nonisolated static func write(descriptor: Int32, data: Data) throws {
         var sent = 0
         try data.withUnsafeBytes { buffer in
             guard let base = buffer.baseAddress else { return }

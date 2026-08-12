@@ -274,6 +274,7 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
           TextField("Search", text: $searchText)
             .textFieldStyle(.plain)
             .frame(minWidth: 120, idealWidth: 180, maxWidth: 240)
+            .accessibilityIdentifier("historySearchField")
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
@@ -288,6 +289,7 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
         .toggleStyle(.button)
         .controlSize(.small)
         .speakTooltip("Show sessions with errors")
+        .accessibilityIdentifier("historyErrorsOnlyToggle")
 
         Toggle(isOn: $dateRangeEnabled) {
           Label("Date range", systemImage: dateRangeEnabled ? "calendar.badge.checkmark" : "calendar")
@@ -338,6 +340,7 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
         .speakTooltip("Import audio")
         .accessibilityLabel("Import audio")
         .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("historyImportButton")
 
         Button {
           showClearAllConfirmation = true
@@ -352,6 +355,7 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
         .accessibilityLabel("Clear all history")
         .accessibilityHint("Opens a confirmation before deleting all history items")
         .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("historyClearAllButton")
       }
 
       HStack(spacing: density.groupSpacing) {
@@ -421,6 +425,7 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
             .textFieldStyle(.plain)
             .foregroundColor(.white)
             .speakTooltip("Search your past sessions by transcript, model, or keyword so you can quickly revisit the right moment.")
+            .accessibilityIdentifier("historySearchField")
         }
         .padding(.vertical, 12)
         .padding(.horizontal, 16)
@@ -434,6 +439,7 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
           .tint(.brandAccentWarm)
           .foregroundStyle(.white)
           .speakTooltip("Show only sessions where Speak spotted issues, making it easy to focus on what needs attention.")
+          .accessibilityIdentifier("historyErrorsOnlyToggle")
 
         Toggle("Date range", isOn: $dateRangeEnabled)
           .toggleStyle(.switch)
@@ -480,6 +486,7 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
         .foregroundStyle(Color.brandAccentDeep)
         .disabled(isClearingAll || isImportingFiles || environment.main.isBusy)
         .speakTooltip("Import existing audio files into history and transcribe them with your current settings.")
+        .accessibilityIdentifier("historyImportButton")
 
         Button {
           showClearAllConfirmation = true
@@ -491,6 +498,7 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
         .foregroundStyle(Color.brandAccentDeep)
         .disabled(historyItems.isEmpty || isClearingAll || isImportingFiles)
         .speakTooltip("Clear every saved session entry from this history view.")
+        .accessibilityIdentifier("historyClearAllButton")
       }
 
       HStack(spacing: 16) {
@@ -541,6 +549,7 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
       }
       .buttonStyle(.borderedProminent)
       .disabled(environment.main.isBusy)
+      .accessibilityIdentifier("historyStartRecordingButton")
     }
     .frame(maxWidth: .infinity)
     .padding(density.isCompact ? 12 : 40)

@@ -1,6 +1,5 @@
 import CryptoKit
 import Foundation
-import SpeakCore
 import OSLog
 import SpeakCore
 

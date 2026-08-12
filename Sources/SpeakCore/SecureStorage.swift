@@ -529,10 +529,11 @@ public actor SecureStorage {
     // `key=value;key=value`, no encoding), which is still parsed transparently; the next
     // save rewrites the item in the current format.
 
-    /// Prefix identifying the current payload format. A legacy payload starts with its
-    /// first (sorted) identifier, so it can only collide with this marker if an API-key
-    /// identifier itself started with `v2:` — which percent-encoding now prevents anyway.
-    static let payloadVersionPrefix = "v2:"
+    /// Prefix identifying the current payload format. The trailing `;` makes the marker
+    /// unforgeable by the legacy serializer: a legacy payload always begins with an
+    /// identifier followed by `=`, so it can never start with `v2:;`. A legacy identifier
+    /// that merely starts with `v2:` therefore still parses as legacy data.
+    static let payloadVersionPrefix = "v2:;"
 
     /// Characters that may appear unescaped in an encoded payload key or value.
     /// The structural characters `;` and `=`, and the escape character `%`, are excluded.

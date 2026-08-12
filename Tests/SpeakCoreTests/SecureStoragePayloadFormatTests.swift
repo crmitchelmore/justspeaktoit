@@ -69,6 +69,11 @@ final class SecureStoragePayloadFormatTests: XCTestCase {
         XCTAssertEqual(parsed, ["openai": "sk=with=equals"])
     }
 
+    func testLegacyPayload_identifierWithVersionPrefix_parsesTransparently() {
+        let parsed = SecureStorage.parse(payload: "v2:openai=sk-123")
+        XCTAssertEqual(parsed, ["v2:openai": "sk-123"])
+    }
+
     func testLegacyPayload_reserializesInVersionedFormat() {
         let parsed = SecureStorage.parse(payload: "deepgram=dg-key;openai=sk-123")
         let rewritten = SecureStorage.serialize(cache: parsed)
@@ -121,6 +126,25 @@ final class SecureStoragePayloadFormatTests: XCTestCase {
         XCTAssertEqual(migrated, "dg-key")
         XCTAssertEqual(untouched, "sk-123")
         XCTAssertEqual(added, "el;evenlabs=key")
+    }
+
+    func testLegacyKeychainPayload_identifierWithVersionPrefix_survivesReloadAndSave() async throws {
+        let service = uniqueService()
+        defer { deleteKeychainItem(service: service) }
+
+        try addKeychainPayload("v2:openai=sk-123", service: service)
+
+        let storage = SecureStorage(configuration: SecureStorageConfiguration(service: service))
+        let legacyValue = try await storage.secret(identifier: "v2:openai")
+        XCTAssertEqual(legacyValue, "sk-123")
+
+        try await storage.storeSecret("dg-key", identifier: "deepgram")
+
+        let reloaded = SecureStorage(configuration: SecureStorageConfiguration(service: service))
+        let preserved = try await reloaded.secret(identifier: "v2:openai")
+        XCTAssertEqual(preserved, "sk-123")
+        let identifiers = await reloaded.knownIdentifiers()
+        XCTAssertEqual(identifiers, ["deepgram", "v2:openai"])
     }
 
     // MARK: - Helpers

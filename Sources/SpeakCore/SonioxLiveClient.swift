@@ -165,10 +165,12 @@ public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Se
             if webSocketTask === task { webSocketTask = nil }
         }
     }
+}
 
-    // MARK: - Private
+// MARK: - Private
 
-    private func connectWebSocket() {
+private extension SonioxLiveClient {
+    func connectWebSocket() {
         var components = URLComponents()
         components.scheme = "wss"
         components.host = Self.websocketHost
@@ -195,7 +197,7 @@ public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Se
         receiveMessages()
     }
 
-    private func sendInitialConfig() {
+    func sendInitialConfig() {
         guard let task = currentWebSocketTask() else { return }
         var payload: [String: Any] = [
             "api_key": apiKey,
@@ -218,7 +220,7 @@ public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Se
         }
     }
 
-    private func receiveMessages() {
+    func receiveMessages() {
         guard let task = currentWebSocketTask() else { return }
         task.receive { [weak self] result in
             guard let self else { return }
@@ -233,7 +235,7 @@ public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Se
         }
     }
 
-    private func handleMessage(_ message: URLSessionWebSocketTask.Message) {
+    func handleMessage(_ message: URLSessionWebSocketTask.Message) {
         switch message {
         case .string(let text):
             parseResponse(text)
@@ -244,7 +246,7 @@ public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Se
         }
     }
 
-    private func parseResponse(_ json: String) {
+    func parseResponse(_ json: String) {
         guard let data = json.data(using: .utf8),
               let response = try? JSONDecoder().decode(SonioxStreamResponse.self, from: data) else {
             return
@@ -290,7 +292,7 @@ public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Se
         if response.finished == true { flushFinal() }
     }
 
-    private func flushFinal() {
+    func flushFinal() {
         let text: String? = withStateLock {
             let snapshot = accumulatedFinalText.trimmingCharacters(in: .whitespacesAndNewlines)
             return snapshot.isEmpty ? nil : snapshot
@@ -298,7 +300,7 @@ public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Se
         if let text { currentOnTranscript()?(text, true) }
     }
 
-    private func mapConnectionError(_ error: Error) -> Error {
+    func mapConnectionError(_ error: Error) -> Error {
         let nsError = error as NSError
         let description = nsError.localizedDescription.lowercased()
         if nsError.code == 401 || nsError.code == 403
@@ -309,16 +311,16 @@ public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Se
         return error
     }
 
-    private func withStateLock<T>(_ block: () -> T) -> T {
+    func withStateLock<T>(_ block: () -> T) -> T {
         stateLock.lock()
         defer { stateLock.unlock() }
         return block()
     }
 
-    private func currentWebSocketTask() -> URLSessionWebSocketTask? { withStateLock { webSocketTask } }
-    private func isStoppingState() -> Bool { withStateLock { isStopping } }
-    private func currentOnTranscript() -> ((String, Bool) -> Void)? { withStateLock { onTranscript } }
-    private func currentOnError() -> ((Error) -> Void)? { withStateLock { onError } }
+    func currentWebSocketTask() -> URLSessionWebSocketTask? { withStateLock { webSocketTask } }
+    func isStoppingState() -> Bool { withStateLock { isStopping } }
+    func currentOnTranscript() -> ((String, Bool) -> Void)? { withStateLock { onTranscript } }
+    func currentOnError() -> ((Error) -> Void)? { withStateLock { onError } }
 }
 
 private struct SonioxStreamResponse: Decodable {

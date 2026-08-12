@@ -99,9 +99,14 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
       newTranscriber.finalizationDelegate = self
 
       newTranscriber.start(
-        onTranscript: { [weak self] text, isFinal in
-          Task { @MainActor [weak self] in
-            self?.handleTranscript(text: text, isFinal: isFinal)
+        onTranscript: { [weak self, weak newTranscriber] text, isFinal in
+          Task { @MainActor [weak self, weak newTranscriber] in
+            guard let self else { return }
+            // Cached controllers are reused between recordings, so a message
+            // queued by the previous stream can land here after the next
+            // recording started. Only the current stream owns this state.
+            guard LiveTranscriptionRun.isCurrent(newTranscriber, activeStream: self.transcriber) else { return }
+            self.handleTranscript(text: text, isFinal: isFinal)
           }
         },
         onError: { [weak self] error in

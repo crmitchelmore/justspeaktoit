@@ -33,12 +33,21 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     activeController?.isRunning ?? false
   }
 
+  /// Notified whenever ownership of the live session moves to another
+  /// controller (or is released on stop), so transcript display state can be
+  /// scoped to the controller that is actually recording (issue #643).
+  var sessionSourceDidChange: (((any LiveTranscriptionController)?) -> Void)?
+
   private let appSettings: AppSettings
   private let permissionsManager: PermissionsManager
   private let audioDeviceManager: AudioInputDeviceManager
   private let secureStorage: SecureAppStorage
   private let nowProvider: () -> Date
-  private var activeController: (any LiveTranscriptionController)?
+  private var activeController: (any LiveTranscriptionController)? {
+    didSet {
+      sessionSourceDidChange?(activeController)
+    }
+  }
   private var controllers: ControllerSet
   private var currentLanguage: String?
   private var currentModel: String?

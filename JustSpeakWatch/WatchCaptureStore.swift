@@ -73,26 +73,21 @@ final class WatchCaptureStore: NSObject, ObservableObject {
     /// process was killed mid-transfer). Skips ids WatchConnectivity is
     /// already transferring.
     func retryPending() {
-        let outstanding = Set(
-            WCSession.default.outstandingFileTransfers.compactMap {
-                WatchCaptureEnvelope.from(metadata: $0.file.metadata)?.id
-            }
-        )
         for capture in captures where capture.status == .recorded || capture.status == .failed {
-            guard !outstanding.contains(capture.id) else {
-                transition(capture.id, to: .transferring)
-                continue
-            }
-            guard FileManager.default.fileExists(atPath: WatchAudioRecorder.fileURL(for: capture.id).path) else {
-                continue
-            }
             startTransfer(for: capture.id)
         }
     }
 
     private func startTransfer(for id: UUID) {
         guard let capture = captures.first(where: { $0.id == id }) else { return }
+        // Only a capture that is not already in flight may be queued; anything
+        // else would hand WatchConnectivity a second copy of the same audio.
+        guard capture.status == .recorded || capture.status == .failed else { return }
         guard WCSession.default.activationState == .activated else { return }
+        guard !hasOutstandingTransfer(for: id) else {
+            transition(id, to: .transferring)
+            return
+        }
 
         let envelope = WatchCaptureEnvelope(
             id: capture.id,
@@ -104,6 +99,14 @@ final class WatchCaptureStore: NSObject, ObservableObject {
 
         WCSession.default.transferFile(url, metadata: envelope.metadata())
         transition(capture.id, to: .transferring)
+    }
+
+    /// True while WatchConnectivity still holds a queued transfer for this
+    /// capture, so a second `transferFile` would deliver the audio twice.
+    private func hasOutstandingTransfer(for id: UUID) -> Bool {
+        WCSession.default.outstandingFileTransfers.contains {
+            WatchCaptureEnvelope.from(metadata: $0.file.metadata)?.id == id
+        }
     }
 
     // MARK: - State transitions

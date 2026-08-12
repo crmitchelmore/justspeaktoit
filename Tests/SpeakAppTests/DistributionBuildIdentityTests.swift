@@ -158,7 +158,7 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(settings.contains("if iOSKeyboardEnabled"))
     }
 
-    func testWatchAppIsAnExplicitOffByDefaultBuildFeature() throws {
+    func testWatchAppBuildFeature_isOffByDefault() throws {
         let manifest = try String(
             contentsOf: repositoryRoot.appendingPathComponent("Project.swift"),
             encoding: .utf8

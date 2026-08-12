@@ -8,10 +8,19 @@ import XCTest
 /// Snapshot tests for mac SwiftUI views that render deterministically headless.
 ///
 /// Determinism rules (CI runs these on GitHub's `macos-26-arm64` image):
-/// - Every snapshot is rendered at a pinned point size into a 1x bitmap, so
-///   Retina development machines and 1x CI displays produce identical pixels.
-/// - Appearance is pinned to Aqua (light) so the host's dark-mode setting is
-///   irrelevant.
+/// - Views are rasterised with SwiftUI's `ImageRenderer` at a pinned 1x scale
+///   rather than through an off-screen `NSWindow`. Window-backed rendering
+///   inherits the host's backing scale factor and needs the window server for
+///   compositor effects, which is why a Retina development Mac and a headless
+///   1x CI runner disagreed on shadows and translucency.
+/// - Font smoothing (stem dilation) is disabled on the drawing context. It is
+///   applied on 1x displays and skipped on Retina ones, so leaving it to the
+///   host makes every glyph edge host-dependent.
+/// - `colorScheme` is pinned to light so the host's dark-mode setting is
+///   irrelevant. `ImageRenderer` draws purely through Core Graphics, so
+///   window-server-backed effects (materials, vibrancy, Liquid Glass) are
+///   flattened identically on every host instead of depending on whether a
+///   display is attached.
 /// - Only static view states are snapshotted. HUD phases whose glyphs animate
 ///   via `TimelineView(.animation)` (recording/transcribing/failure) and views
 ///   that format `Date`/`Decimal` with `Locale.current` (history rows) are
@@ -109,72 +118,63 @@ final class ViewSnapshotTests: XCTestCase {
       )
     }
 
-    let controller = NSHostingController(
-      rootView: view.environment(\.colorScheme, .light)
-    )
+    let image = try Self.render(view, size: size)
     withSnapshotTesting(record: .never) {
       assertSnapshot(
-        of: controller.view,
-        as: .pinnedImage(size: size),
+        of: image,
+        as: .image(precision: 0.99, perceptualPrecision: 0.98),
         file: file,
         testName: testName,
         line: line
       )
     }
   }
-}
 
-extension Snapshotting where Value == NSView, Format == NSImage {
-  /// Renders an `NSView` at an exact point size into a 1x bitmap.
+  /// Rasterises a view at an exact point size into a 1x bitmap.
   ///
-  /// Unlike the built-in `.image` strategy this never inherits the host
-  /// screen's backing scale factor, so references recorded on a Retina
-  /// machine compare byte-for-byte on non-Retina CI displays. A small
-  /// perceptual tolerance absorbs GPU/anti-aliasing differences between
-  /// point releases of the same macOS major version.
-  static func pinnedImage(
-    size: CGSize,
-    precision: Float = 0.99,
-    perceptualPrecision: Float = 0.98
-  ) -> Snapshotting {
-    Snapshotting<NSImage, NSImage>
-      .image(precision: precision, perceptualPrecision: perceptualPrecision)
-      .pullback { view in
-        // Host in an offscreen window so materials, vibrancy, and SwiftUI
-        // layout behave as they do in the real app.
-        let window = NSWindow(
-          contentRect: CGRect(origin: .zero, size: size),
-          styleMask: [.borderless],
-          backing: .buffered,
-          defer: false
-        )
-        window.appearance = NSAppearance(named: .aqua)
-        window.colorSpace = .sRGB
-        window.contentView = view
-        view.frame = CGRect(origin: .zero, size: size)
-        view.layoutSubtreeIfNeeded()
+  /// Everything host-dependent is pinned here: the rasterisation scale (so a
+  /// Retina Mac cannot bake 2x content into the reference), font smoothing (so
+  /// glyph edges do not depend on the attached display), and the appearance.
+  /// `ImageRenderer` deliberately replaces the previous off-screen `NSWindow`:
+  /// window-backed rendering needs the window server for shadows and
+  /// translucency, which a headless CI runner draws differently.
+  private static func render(_ view: some View, size: CGSize) throws -> NSImage {
+    let renderer = ImageRenderer(
+      content: view
+        .environment(\.colorScheme, .light)
+        .frame(width: size.width, height: size.height)
+    )
+    renderer.scale = 1
+    renderer.isOpaque = false
 
-        guard
-          let rep = NSBitmapImageRep(
-            bitmapDataPlanes: nil,
-            pixelsWide: Int(size.width),
-            pixelsHigh: Int(size.height),
-            bitsPerSample: 8,
-            samplesPerPixel: 4,
-            hasAlpha: true,
-            isPlanar: false,
-            colorSpaceName: .calibratedRGB,
-            bytesPerRow: 0,
-            bitsPerPixel: 0
-          )
-        else {
-          fatalError("Could not create bitmap representation for snapshot")
-        }
-        view.cacheDisplay(in: view.bounds, to: rep)
+    let representation = try XCTUnwrap(
+      NSBitmapImageRep(
+        bitmapDataPlanes: nil,
+        pixelsWide: Int(size.width),
+        pixelsHigh: Int(size.height),
+        bitsPerSample: 8,
+        samplesPerPixel: 4,
+        hasAlpha: true,
+        isPlanar: false,
+        colorSpaceName: .calibratedRGB,
+        bytesPerRow: 0,
+        bitsPerPixel: 0
+      ),
+      "Could not create bitmap representation for snapshot"
+    )
+    let context = try XCTUnwrap(
+      NSGraphicsContext(bitmapImageRep: representation),
+      "Could not create drawing context for snapshot"
+    )
+    context.cgContext.setAllowsFontSmoothing(false)
+    context.cgContext.setShouldSmoothFonts(false)
 
-        let image = NSImage(size: size)
-        image.addRepresentation(rep)
-        return image
-      }
+    renderer.render(rasterizationScale: 1) { _, draw in
+      draw(context.cgContext)
+    }
+
+    let image = NSImage(size: size)
+    image.addRepresentation(representation)
+    return image
   }
 }

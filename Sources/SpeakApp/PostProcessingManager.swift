@@ -263,16 +263,31 @@ final class PostProcessingManager: ObservableObject {
       return true
     }
 
+    // Paid access wraps the OpenRouter client. When paid routing is actually
+    // serving this request no personal key is needed; otherwise fall through to
+    // the wrapped client so the "key required" warning stays truthful.
+    if let proxy = client as? PaidAccessProxyClient {
+      if await proxy.isPaidRoutingActive() {
+        return true
+      }
+      return await Self.hasOpenRouterAccess(proxy.fallback, model: resolvedModel)
+    }
+
     guard let openRouterClient = client as? OpenRouterAPIClient else {
       return true
     }
 
-    let requiresRemote = await openRouterClient.requiresRemoteAccess(for: resolvedModel)
-    if !requiresRemote {
+    return await Self.hasOpenRouterAccess(openRouterClient, model: resolvedModel)
+  }
+
+  private static func hasOpenRouterAccess(
+    _ client: OpenRouterAPIClient,
+    model: String
+  ) async -> Bool {
+    if await !client.requiresRemoteAccess(for: model) {
       return true
     }
-
-    return await openRouterClient.hasStoredAPIKey()
+    return await client.hasStoredAPIKey()
   }
 
   static func isLocalPostProcessingModel(_ model: String) -> Bool {

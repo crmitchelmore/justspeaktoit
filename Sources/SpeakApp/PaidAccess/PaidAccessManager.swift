@@ -412,31 +412,25 @@ final class PaidAccessManager: NSObject, ObservableObject {
 // MARK: - Sign in with Apple delegates
 
 extension PaidAccessManager: ASAuthorizationControllerDelegate {
-  nonisolated func authorizationController(
+  func authorizationController(
     controller: ASAuthorizationController,
     didCompleteWithAuthorization authorization: ASAuthorization
   ) {
-    Task { @MainActor in
-      self.resumeSignIn(with: .success(authorization))
-    }
+    self.resumeSignIn(with: .success(authorization))
   }
 
-  nonisolated func authorizationController(
+  func authorizationController(
     controller: ASAuthorizationController,
     didCompleteWithError error: Error
   ) {
-    Task { @MainActor in
-      self.resumeSignIn(with: .failure(error))
-    }
+    self.resumeSignIn(with: .failure(error))
   }
 }
 
 extension PaidAccessManager: ASAuthorizationControllerPresentationContextProviding {
-  nonisolated func presentationAnchor(
+  func presentationAnchor(
     for controller: ASAuthorizationController
   ) -> ASPresentationAnchor {
-    MainActor.assumeIsolated {
-      NSApplication.shared.keyWindow ?? NSApplication.shared.windows.first ?? NSWindow()
-    }
+    NSApplication.shared.keyWindow ?? NSApplication.shared.windows.first ?? NSWindow()
   }
 }

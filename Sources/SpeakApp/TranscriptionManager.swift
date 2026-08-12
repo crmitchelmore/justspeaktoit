@@ -435,7 +435,9 @@ extension TranscriptionManager: LiveTranscriptionSessionDelegate {
 }
 
 struct RemoteAudioTranscriber: BatchTranscriptionClient {
-  let client: OpenRouterAPIClient
+  /// Held as the protocol so paid access can wrap the OpenRouter client
+  /// without this type knowing which one it has.
+  let client: any BatchTranscriptionClient
 
   func transcribeFile(at url: URL, model: String, language: String?) async throws -> TranscriptionResult {
     try await client.transcribeFile(at: url, model: model, language: language)

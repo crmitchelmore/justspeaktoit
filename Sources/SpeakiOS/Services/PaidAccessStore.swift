@@ -334,33 +334,27 @@ public final class PaidAccessStore: NSObject, ObservableObject {
 // MARK: - Sign in with Apple delegates
 
 extension PaidAccessStore: ASAuthorizationControllerDelegate {
-    nonisolated public func authorizationController(
+    public func authorizationController(
         controller: ASAuthorizationController,
         didCompleteWithAuthorization authorization: ASAuthorization
     ) {
-        Task { @MainActor in
-            self.resumeSignIn(with: .success(authorization))
-        }
+        self.resumeSignIn(with: .success(authorization))
     }
 
-    nonisolated public func authorizationController(
+    public func authorizationController(
         controller: ASAuthorizationController,
         didCompleteWithError error: Error
     ) {
-        Task { @MainActor in
-            self.resumeSignIn(with: .failure(error))
-        }
+        self.resumeSignIn(with: .failure(error))
     }
 }
 
 extension PaidAccessStore: ASAuthorizationControllerPresentationContextProviding {
-    nonisolated public func presentationAnchor(
+    public func presentationAnchor(
         for controller: ASAuthorizationController
     ) -> ASPresentationAnchor {
-        MainActor.assumeIsolated {
-            let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene
-            return scene?.keyWindow ?? ASPresentationAnchor()
-        }
+        let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene
+        return scene?.keyWindow ?? ASPresentationAnchor()
     }
 }
 #endif

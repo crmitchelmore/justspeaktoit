@@ -12,13 +12,14 @@ import SpeakCore
 /// silently drops back to their own configuration rather than losing dictation.
 actor PaidAccessProxyClient: StreamingChatLLMClient, BatchTranscriptionClient {
 
-  private let fallback: any StreamingChatLLMClient & BatchTranscriptionClient
+  /// The bring-your-own-key client every non-paid request goes to.
+  nonisolated let fallback: OpenRouterAPIClient
   private let paidClient: any PaidAccessClienting
   private let sessionProvider: @Sendable () async -> PaidAccessSession?
   private let routerProvider: @Sendable () async -> PaidAccessRouter
 
   init(
-    fallback: any StreamingChatLLMClient & BatchTranscriptionClient,
+    fallback: OpenRouterAPIClient,
     paidClient: any PaidAccessClienting,
     sessionProvider: @escaping @Sendable () async -> PaidAccessSession?,
     routerProvider: @escaping @Sendable () async -> PaidAccessRouter
@@ -30,6 +31,23 @@ actor PaidAccessProxyClient: StreamingChatLLMClient, BatchTranscriptionClient {
   }
 
   // MARK: - Routing
+
+  /// Whether a paid route would currently be used for transcript cleanup.
+  ///
+  /// Callers use this to decide whether a personal API key is still required.
+  func isPaidRoutingActive() async -> Bool {
+    let router = await self.routerProvider()
+    guard
+      let decision = try? router.decide(
+        for: .postProcessing,
+        configuredModel: ModelCatalog.defaultPostProcessingModel
+      ),
+      decision.usesPaidService
+    else {
+      return false
+    }
+    return await self.sessionProvider() != nil
+  }
 
   /// Resolves the route for an operation, returning `nil` whenever the request
   /// should go through the user's own client.
@@ -145,7 +163,7 @@ actor PaidAccessProxyClient: StreamingChatLLMClient, BatchTranscriptionClient {
     AsyncThrowingStream { continuation in
       Task {
         do {
-          let stream = await self.fallback.sendChatStreaming(
+          let stream = self.fallback.sendChatStreaming(
             systemPrompt: systemPrompt,
             messages: messages,
             model: model,

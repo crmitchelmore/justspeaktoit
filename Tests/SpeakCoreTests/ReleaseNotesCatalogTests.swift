@@ -18,7 +18,8 @@ final class ReleaseNotesCatalogTests: XCTestCase {
           "version": "2.45.0",
           "tag": "mac-v2.45.0",
           "publishedAt": "2026-08-08T09:05:28Z",
-          "markdown": "## Overview\\n\\nParakeet v3 arrives.\\n\\n### Highlights\\n\\n- **Offline** transcription\\n  - 25 languages\\n"
+          "markdown": "## Overview\\n\\nParakeet v3 arrives.\\n\\n### Highlights\\n\\n\
+    - **Offline** transcription\\n  - 25 languages\\n"
         }
       ]
     }
@@ -50,8 +51,9 @@ final class ReleaseNotesCatalogTests: XCTestCase {
 
     func testDecode_readsPublicationDate() throws {
         let entry = try XCTUnwrap(makeCatalog().latest)
+        let published = try XCTUnwrap(entry.publishedDate)
 
-        XCTAssertEqual(entry.publishedDate?.timeIntervalSince1970, 1_786_525_528, accuracy: 1)
+        XCTAssertEqual(published.timeIntervalSince1970, 1_786_179_928, accuracy: 1)
     }
 
     func testDecode_rejectsMalformedPayload() {

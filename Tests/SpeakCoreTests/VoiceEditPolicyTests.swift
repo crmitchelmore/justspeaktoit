@@ -100,4 +100,11 @@ final class VoiceEditPolicyTests: XCTestCase {
     )
     XCTAssertEqual(VoiceEditPolicy.normalizedRewrite("Plain.", original: "original"), "Plain.")
   }
+
+  func testNormalizedRewrite_keepsUnpairedEdgeQuotesThatWrapNothing() {
+    XCTAssertEqual(
+      VoiceEditPolicy.normalizedRewrite("\"alpha\" and \"beta\"", original: "original"),
+      "\"alpha\" and \"beta\""
+    )
+  }
 }

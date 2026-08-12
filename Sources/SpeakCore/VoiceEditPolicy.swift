@@ -72,8 +72,11 @@ public enum VoiceEditPolicy {
         for (open, close) in pairs where first == open && last == close {
             let originalWrapped = original.first == open && original.last == close
             guard !originalWrapped else { continue }
-            return String(text.dropFirst().dropLast())
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let inner = String(text.dropFirst().dropLast())
+            // `"alpha" and "beta"` starts and ends with a quote without being wrapped in one,
+            // so only strip when the delimiter does not reappear inside.
+            guard !inner.contains(open), !inner.contains(close) else { continue }
+            return inner.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         return text
     }

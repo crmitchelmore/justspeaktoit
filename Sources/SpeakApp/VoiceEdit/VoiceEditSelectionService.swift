@@ -101,14 +101,25 @@ final class VoiceEditSelectionService {
 
   // MARK: - Replacement
 
-  func replace(_ capture: Capture, with rewrite: String) -> VoiceEditOrchestrator.ReplacementOutcome {
-    if replaceViaAccessibility(capture, rewrite: rewrite) {
+  func replace(
+    _ capture: Capture,
+    with rewrite: String
+  ) async -> VoiceEditOrchestrator.ReplacementOutcome {
+    if await replaceViaAccessibility(capture, rewrite: rewrite) {
       return .replaced
     }
     return pasteReplacement(rewrite, target: capture.target)
   }
 
-  private func replaceViaAccessibility(_ capture: Capture, rewrite: String) -> Bool {
+  /// Terminal fallback when no capture is available to replace: park the rewrite on the
+  /// clipboard so the HUD's "Press ⌘V to paste" guidance is accurate.
+  func leaveOnClipboard(_ rewrite: String) -> VoiceEditOrchestrator.ReplacementOutcome {
+    pasteboard.clearContents()
+    pasteboard.setString(rewrite, forType: .string)
+    return .leftOnClipboard
+  }
+
+  private func replaceViaAccessibility(_ capture: Capture, rewrite: String) async -> Bool {
     guard permissionsManager.status(for: .accessibility).isGranted,
           let element = focusedElement(for: capture.target)
     else { return false }
@@ -123,7 +134,7 @@ final class VoiceEditSelectionService {
       element, kAXSelectedTextAttribute as CFString, rewrite as CFTypeRef
     )
     guard status == .success else { return false }
-    return Self.verifyRewriteApplied(rewrite, in: element)
+    return await Self.verifyRewriteApplied(rewrite, in: element)
   }
 
   private func pasteReplacement(
@@ -241,8 +252,8 @@ final class VoiceEditSelectionService {
   /// Re-reads the field after a short delay to confirm the rewrite landed. Fields whose value
   /// cannot be read back (web areas, custom views) are trusted after a successful set call,
   /// because pasting on top of an already-applied rewrite would duplicate it.
-  private static func verifyRewriteApplied(_ rewrite: String, in element: AXUIElement) -> Bool {
-    Thread.sleep(forTimeInterval: 0.05)
+  private static func verifyRewriteApplied(_ rewrite: String, in element: AXUIElement) async -> Bool {
+    try? await Task.sleep(for: .milliseconds(50))
     guard let current = stringAttribute(kAXValueAttribute, of: element) else { return true }
     return current.contains(rewrite)
   }

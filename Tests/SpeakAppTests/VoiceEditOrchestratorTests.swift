@@ -23,6 +23,8 @@ final class VoiceEditOrchestratorTests: XCTestCase {
     var instructionResult: Result<String, Error> = .success("make this shorter")
     var rewriteResult: Result<String, Error> = .success("Quick fox, lazy dog.")
     var replacementOutcome: VoiceEditOrchestrator.ReplacementOutcome = .replaced
+    /// Suspends selection capture so tests can press the hotkey again mid-startup.
+    var captureGate: (() async -> Void)?
 
     private(set) var events: [VoiceEditOrchestrator.Event] = []
     private(set) var captureCount = 0
@@ -38,6 +40,7 @@ final class VoiceEditOrchestratorTests: XCTestCase {
         hasConfiguredLLM: { self.llmConfigured },
         captureSelection: {
           self.captureCount += 1
+          await self.captureGate?()
           return self.selection
         },
         startListening: {
@@ -265,5 +268,48 @@ final class VoiceEditOrchestratorTests: XCTestCase {
 
     XCTAssertEqual(harness.events.last, .listeningStarted(.clipboard))
     XCTAssertEqual(harness.orchestrator.phase, .listening)
+  }
+
+  func testSecondPressDuringStartup_doesNotStartAParallelSession() async {
+    let harness = Harness()
+    let captureEntered = expectation(description: "selection capture entered")
+    let gate = Gate()
+    harness.captureGate = {
+      captureEntered.fulfill()
+      await gate.wait()
+    }
+
+    let firstPress = Task { await harness.orchestrator.toggle() }
+    await fulfillment(of: [captureEntered], timeout: 2)
+
+    await harness.orchestrator.toggle()
+    XCTAssertEqual(harness.captureCount, 1)
+    XCTAssertEqual(harness.startCount, 0)
+
+    gate.open()
+    await firstPress.value
+
+    XCTAssertEqual(harness.captureCount, 1)
+    XCTAssertEqual(harness.startCount, 1)
+    XCTAssertEqual(harness.events, [.listeningStarted(.accessibility)])
+    XCTAssertEqual(harness.orchestrator.phase, .listening)
+  }
+}
+
+/// One-shot gate used to hold an orchestrator dependency at a suspension point.
+@MainActor
+private final class Gate {
+  private var continuation: CheckedContinuation<Void, Never>?
+  private var isOpen = false
+
+  func wait() async {
+    guard !self.isOpen else { return }
+    await withCheckedContinuation { self.continuation = $0 }
+  }
+
+  func open() {
+    self.isOpen = true
+    self.continuation?.resume()
+    self.continuation = nil
   }
 }

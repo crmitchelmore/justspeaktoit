@@ -83,8 +83,11 @@ final class VoiceEditController {
         )
       },
       applyReplacement: { [weak self] _, rewrittenText in
-        guard let self, let capture = self.pendingCapture else { return .leftOnClipboard }
-        return self.selectionService.replace(capture, with: rewrittenText)
+        guard let self else { return .leftOnClipboard }
+        guard let capture = self.pendingCapture else {
+          return self.selectionService.leaveOnClipboard(rewrittenText)
+        }
+        return await self.selectionService.replace(capture, with: rewrittenText)
       },
       onEvent: { [weak self] event in
         self?.handle(event)

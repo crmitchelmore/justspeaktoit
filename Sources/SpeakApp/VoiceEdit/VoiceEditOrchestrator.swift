@@ -109,18 +109,21 @@ final class VoiceEditOrchestrator {
       dependencies.onEvent(.failed(.dictationBusy))
       return
     }
+    // Claim the session before the first suspension point so a second hotkey press cannot
+    // start a parallel session and lose the first capture.
+    phase = .processing
     guard await dependencies.hasConfiguredLLM() else {
-      dependencies.onEvent(.failed(.noConfiguredLLM))
+      complete(with: .failed(.noConfiguredLLM))
       return
     }
     guard let captured = await dependencies.captureSelection(), !captured.text.isEmpty else {
-      dependencies.onEvent(.failed(.noSelection))
+      complete(with: .failed(.noSelection))
       return
     }
     do {
       try await dependencies.startListening()
     } catch {
-      dependencies.onEvent(.failed(.recordingFailed(error.localizedDescription)))
+      complete(with: .failed(.recordingFailed(error.localizedDescription)))
       return
     }
     selection = captured

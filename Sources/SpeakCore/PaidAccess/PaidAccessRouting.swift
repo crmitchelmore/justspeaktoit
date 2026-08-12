@@ -160,13 +160,10 @@ public struct PaidAccessRouter: Sendable {
         configuredModel: String,
         now: Date = Date()
     ) throws -> PaidRoutingDecision {
-        let isLocal = ModelRouting.family(for: configuredModel).isDownloadedLocal
-            || AppleLocalModels.isAppleSpeechModel(configuredModel)
-
         // An explicit on-device selection stays on device. Paid access is a
-        // convenience over remote keys, never an opt-in to uploading audio that
-        // the user asked to keep local.
-        if isLocal {
+        // convenience over remote keys, never an opt-in to uploading audio or
+        // transcripts the user asked to keep local.
+        if Self.runsOnDevice(configuredModel) {
             return .localModel(model: configuredModel)
         }
 
@@ -178,5 +175,20 @@ public struct PaidAccessRouter: Sendable {
             throw PaidAccessError.unsupportedOperation(operation)
         }
         return .paidService(route)
+    }
+
+    /// Whether the selected model runs entirely on the device.
+    ///
+    /// Covers Apple's on-device speech and Foundation models, downloaded
+    /// transcription models, and the local post-processing models, all of which
+    /// share the `local/` or `apple/local/` identifier prefixes.
+    static func runsOnDevice(_ identifier: String) -> Bool {
+        let trimmed = identifier
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return trimmed.hasPrefix("local/")
+            || trimmed.hasPrefix("apple/local/")
+            || ModelRouting.family(for: identifier).isDownloadedLocal
+            || AppleLocalModels.isAppleSpeechModel(identifier)
     }
 }

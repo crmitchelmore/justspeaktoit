@@ -396,7 +396,10 @@ final class PaidAccessErrorTests: XCTestCase {
             .entitlementRequired,
             .paidRoutingDisabled,
             .serviceUnavailable(statusCode: 503),
-            .network("offline")
+            .network("offline"),
+            // Running out of included usage is not a failure of the user's own
+            // setup, and the message promises their own keys still work.
+            .quotaExceeded
         ]
         for error in fallbackable {
             XCTAssertTrue(error.permitsSilentFallback, "\(error) should fall back quietly")
@@ -405,7 +408,6 @@ final class PaidAccessErrorTests: XCTestCase {
 
     func testUserActionableFailures_areSurfacedRatherThanHidden() {
         let surfaced: [PaidAccessError] = [
-            .quotaExceeded,
             .tooManySessions,
             .unsupportedOperation(.liveTranscription),
             .invalidResponse

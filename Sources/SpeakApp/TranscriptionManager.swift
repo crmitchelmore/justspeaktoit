@@ -107,11 +107,19 @@ func audioInputStartErrorIsBadDevice(_ error: Error) -> Bool {
 
 @MainActor
 final class TranscriptionManager: ObservableObject {
-  @Published private(set) var livePartialText: String = ""
-  @Published private(set) var liveTextIsFinal: Bool = true
-  @Published private(set) var liveTextConfidence: Double?
+  /// Live transcript display state for the current recording. Published as one
+  /// value so text, finality, confidence and the owning session can never be
+  /// observed out of step with each other (issue #643).
+  @Published private(set) var liveTranscript: LiveTranscriptSnapshot = .empty
   @Published private(set) var isLiveTranscribing: Bool = false
   @Published private(set) var utteranceBoundaryText: String?
+
+  var livePartialText: String { liveTranscript.text }
+  var liveTextIsFinal: Bool { liveTranscript.isFinal }
+  var liveTextConfidence: Double? { liveTranscript.confidence }
+
+  /// Owns the identity of the recording whose transcript is on screen.
+  let displayScope = LiveTranscriptDisplayScope()
 
   private let appSettings: AppSettings
   private let liveController: SwitchingLiveTranscriber
@@ -147,6 +155,51 @@ final class TranscriptionManager: ObservableObject {
     self.openRouter = openRouter
     self.secureStorage = secureStorage
     self.liveController.delegate = self
+    // Scope the on-screen transcript to whichever controller owns the current
+    // live session, so a reused controller's late callbacks can be told apart
+    // from the session that is actually recording.
+    self.liveController.sessionSourceDidChange = { [weak self] source in
+      guard let self else { return }
+      if let source {
+        self.displayScope.bind(source: source)
+      } else {
+        self.displayScope.unbind()
+      }
+    }
+  }
+
+  /// Opens a live-transcript display session, clearing the previous
+  /// recording's text before any new partial can arrive.
+  ///
+  /// `source` is the controller that owns the session; production binds it via
+  /// `SwitchingLiveTranscriber.sessionSourceDidChange` as the controller starts.
+  func beginLiveTranscriptDisplaySession(source: AnyObject? = nil) {
+    let sessionID = displayScope.begin()
+    if let source {
+      displayScope.bind(source: source)
+    }
+    liveTranscript = LiveTranscriptSnapshot(
+      sessionID: sessionID,
+      text: "",
+      isFinal: true,
+      confidence: nil
+    )
+    utteranceBoundaryText = nil
+  }
+
+  /// Detaches the live-transcript display session. The final text stays on
+  /// screen; further updates from the finished session are ignored.
+  func endLiveTranscriptDisplaySession() {
+    displayScope.end()
+  }
+
+  /// Clears the live transcript entirely. Called when a recording starts so
+  /// batch modes — which never open a live session — cannot show the previous
+  /// recording's text.
+  func resetLiveTranscriptDisplay() {
+    displayScope.end()
+    liveTranscript = .empty
+    utteranceBoundaryText = nil
   }
 
   func startLiveTranscription() async throws {
@@ -154,12 +207,19 @@ final class TranscriptionManager: ObservableObject {
     let model = try liveTranscriptionModelForCurrentMode()
     let language = appSettings.preferredModelLanguage
     print("[TranscriptionManager] startLiveTranscription - model: \(model), language: \(language ?? "automatic")")
+    // Opened before the controller starts: the first partial can arrive while
+    // `start()` is still awaiting, and it must land in the new session.
+    beginLiveTranscriptDisplaySession()
     liveController.configure(
       language: language,
       model: model
     )
-    try await liveController.start()
-    livePartialText = ""
+    do {
+      try await liveController.start()
+    } catch {
+      endLiveTranscriptDisplaySession()
+      throw error
+    }
     pendingError = nil
     isLiveTranscribing = true
   }
@@ -170,6 +230,7 @@ final class TranscriptionManager: ObservableObject {
     if let error = pendingError {
       pendingError = nil
       isLiveTranscribing = false
+      endLiveTranscriptDisplaySession()
       Task { await liveController.stop() }
       throw error
     }
@@ -195,6 +256,7 @@ final class TranscriptionManager: ObservableObject {
         self.continuation = nil
         self.stopTimeoutTask = nil
         self.isLiveTranscribing = false
+        self.endLiveTranscriptDisplaySession()
         cont.resume(throwing: TranscriptionManagerError.liveSessionNotRunning)
       }
     }
@@ -215,7 +277,7 @@ final class TranscriptionManager: ObservableObject {
       await liveController.stop()
     }
     isLiveTranscribing = false
-    livePartialText = ""
+    resetLiveTranscriptDisplay()
   }
 
   /// Marks the live controller cache as stale so it re-reads credentials on next start.
@@ -379,17 +441,43 @@ final class TranscriptionManager: ObservableObject {
 }
 
 extension TranscriptionManager: LiveTranscriptionSessionDelegate {
+  /// Admits a display update only from the controller that owns the active
+  /// session. Late or out-of-order events from a superseded recording are
+  /// dropped rather than repainting the live view (issue #643).
+  private func applyLiveDisplayUpdate(
+    from session: any LiveTranscriptionController,
+    text: String,
+    isFinal: Bool,
+    confidence: Double?
+  ) {
+    guard displayScope.accepts(session) else { return }
+    liveTranscript = LiveTranscriptSnapshot(
+      sessionID: displayScope.activeSessionID,
+      text: text,
+      isFinal: isFinal,
+      confidence: confidence
+    )
+  }
+
   func liveTranscriber(_ session: any LiveTranscriptionController, didUpdatePartial text: String) {
-    livePartialText = text
+    applyLiveDisplayUpdate(
+      from: session,
+      text: text,
+      isFinal: liveTranscript.isFinal,
+      confidence: liveTranscript.confidence
+    )
   }
 
   func liveTranscriber(
     _ session: any LiveTranscriptionController,
     didUpdateWith update: LiveTranscriptionUpdate
   ) {
-    livePartialText = update.text
-    liveTextIsFinal = update.isFinal
-    liveTextConfidence = update.confidence
+    applyLiveDisplayUpdate(
+      from: session,
+      text: update.text,
+      isFinal: update.isFinal,
+      confidence: update.confidence
+    )
   }
 
   func liveTranscriber(
@@ -406,9 +494,8 @@ extension TranscriptionManager: LiveTranscriptionSessionDelegate {
     cancelStopTimeout()
     continuation = nil
     isLiveTranscribing = false
-    livePartialText = result.text
-    liveTextIsFinal = true
-    liveTextConfidence = result.confidence
+    applyLiveDisplayUpdate(from: session, text: result.text, isFinal: true, confidence: result.confidence)
+    endLiveTranscriptDisplaySession()
     cont.resume(returning: result)
   }
 
@@ -418,6 +505,7 @@ extension TranscriptionManager: LiveTranscriptionSessionDelegate {
       cancelStopTimeout()
       continuation = nil
       isLiveTranscribing = false
+      endLiveTranscriptDisplaySession()
       cont.resume(throwing: error)
     } else {
       // Error happened mid-session - store it for when stop is called
@@ -430,6 +518,7 @@ extension TranscriptionManager: LiveTranscriptionSessionDelegate {
     _ session: any LiveTranscriptionController,
     didDetectUtteranceBoundary utterance: String
   ) {
+    guard displayScope.accepts(session) else { return }
     utteranceBoundaryText = utterance
   }
 }

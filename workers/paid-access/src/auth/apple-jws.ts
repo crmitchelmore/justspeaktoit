@@ -13,11 +13,15 @@
  * (P-256/SHA-256 leaf and intermediate, P-384/SHA-384 root) and rejects
  * anything else rather than trying to be a general X.509 implementation.
  *
- * Out of scope, and accepted knowingly: OCSP and CRL revocation checking. The
- * root is pinned by exact DER bytes and every certificate carries a short
- * validity window, so a revoked intermediate would still need Apple's private
- * key to produce a payload we accept. Revocation would add a network dependency
- * on the hot path of every purchase verification for that marginal gain.
+ * Out of scope, and accepted knowingly: OCSP and CRL revocation checking. This
+ * is a deliberate security and availability trade-off, not a proof of safety.
+ * A compromised intermediate is genuinely accepted here: its key can sign a
+ * forged leaf carrying the receipt-signing extension, and that chain still
+ * links back to the pinned root, so Apple's own root key is not required to
+ * produce a payload we accept. What buys the trade-off is that revocation
+ * checking would put a third-party network call on the hot path of every
+ * purchase verification, and Apple publishes intermediate compromises through
+ * channels we would act on well inside these certificates' validity windows.
  */
 
 import { base64ToBytes, base64UrlToBytes } from '../crypto.js';

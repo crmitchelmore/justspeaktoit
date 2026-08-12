@@ -32,7 +32,16 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
   private let settings: AppSettings
   private var transactionListener: Task<Void, Never>?
   private var refreshTask: Task<PaidAccessSession?, Never>?
+  private var launchRestore: Task<Void, Never>?
+  private var hasFinishedLaunchRestore = false
+  private var launchRestoreWaiters: [CheckedContinuation<Void, Never>] = []
   private var signInContinuation: CheckedContinuation<ASAuthorization, Error>?
+
+  /// How long a request will wait for the launch-time entitlement restore
+  /// before proceeding without it. Long enough for a Keychain read and one
+  /// round trip on a normal connection, short enough that a subscriber on a
+  /// dead network still dictates promptly through their own configuration.
+  private static let launchRestoreGrace: TimeInterval = 3
 
   /// Subscription products offered by App Store builds.
   static let subscriptionProductIDs = [
@@ -162,7 +171,52 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
           isPaidRoutingPreferred: false
         )
       }
+      await self.awaitLaunchRestore()
       return await self.router
+    }
+  }
+
+  // MARK: - Launch restore
+
+  /// Loads a stored subscription once, at launch, so paid routing works without
+  /// opening Settings first. Reads the Keychain and returns immediately when no
+  /// session is stored, so users who never subscribed do no network work.
+  func restoreEntitlementAtLaunch() {
+    guard self.launchRestore == nil else { return }
+    self.launchRestore = Task { [weak self] in
+      await self?.refreshEntitlement()
+      self?.finishLaunchRestore()
+    }
+  }
+
+  /// Holds the first routing decision after launch until the stored entitlement
+  /// has loaded. Without this a subscriber's first dictation races the restore
+  /// and falls back to their own key, which they may not have configured.
+  ///
+  /// Bounded on purpose: paid access is an alternative to the user's own keys,
+  /// never a prerequisite, so a slow or failed restore gives up rather than
+  /// holding dictation open.
+  private func awaitLaunchRestore() async {
+    guard self.launchRestore != nil, !self.hasFinishedLaunchRestore else { return }
+
+    let expiry = Task { [weak self] in
+      try? await Task.sleep(for: .seconds(Self.launchRestoreGrace))
+      guard !Task.isCancelled else { return }
+      self?.finishLaunchRestore()
+    }
+    await withCheckedContinuation { continuation in
+      self.launchRestoreWaiters.append(continuation)
+    }
+    expiry.cancel()
+  }
+
+  private func finishLaunchRestore() {
+    guard !self.hasFinishedLaunchRestore else { return }
+    self.hasFinishedLaunchRestore = true
+    let waiters = self.launchRestoreWaiters
+    self.launchRestoreWaiters = []
+    for waiter in waiters {
+      waiter.resume()
     }
   }
 

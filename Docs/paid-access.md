@@ -212,7 +212,7 @@ npx wrangler d1 execute paid-access --remote \
   --command "select provider, event_type, status, received_at from webhook_events order by received_at desc limit 10"
 ```
 
-A test notification that returns 401 usually means the pinned root check failed, which in practice means someone set `APPSTORE_ROOT_CA_G3_BASE64` in a non-test environment. Unset it.
+A test notification that returns 401 means the signed payload was rejected. Read the correlation ID from the response and find the verifier error in the logs before changing anything: an invalid signature, a broken or reordered certificate chain, a certificate outside its validity window, a wrong audience or bundle identifier, and a misconfigured production trust root all surface as the same 401. Only once the logged error names the pinned root check should you look at `APPSTORE_ROOT_CA_G3_BASE64`, and then only to confirm nobody set it outside a test environment — if it is set there, unset it.
 
 ## Live transcription session lifecycle
 

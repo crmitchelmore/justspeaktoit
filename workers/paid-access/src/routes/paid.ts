@@ -387,19 +387,26 @@ export async function handleLiveTranscription(
     model: route.catalogueModelId,
   });
 
+  // The client must echo this back to `/v1/paid/transcribe/live/finalise`;
+  // without it the finalise call cannot address this session's Durable Object
+  // and the reservation would be held until its lease expired.
   return new Response(response.body, {
     status: 101,
     webSocket: response.webSocket,
-    headers: { 'x-correlation-id': context.correlationId },
+    headers: {
+      'x-correlation-id': context.correlationId,
+      'x-session-id': reservation.reservationId,
+    },
   });
 }
 
 /**
  * Reconciles a finished live session.
  *
- * The client calls this when its socket closes; the Durable Object is the
- * source of truth for the measured duration, so a client that never calls it
- * simply keeps its reservation until the lease expires — it can never under-report.
+ * `session_id` is the value returned in the `x-session-id` header when the
+ * socket was opened. The Durable Object is the source of truth for the measured
+ * duration, so a client that never calls this simply keeps its reservation
+ * until the lease expires — it can never under-report.
  */
 export async function handleLiveTranscriptionFinalise(
   request: Request,

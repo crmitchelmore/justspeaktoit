@@ -83,6 +83,31 @@ function utcTime(date: Date): Uint8Array {
 const OID_ECDSA_SHA256 = '2a8648ce3d040302';
 const OID_ECDSA_SHA384 = '2a8648ce3d040303';
 const OID_COMMON_NAME = '550403';
+const OID_BASIC_CONSTRAINTS = '551d13';
+export const OID_APPLE_RECEIPT_SIGNING = '2a864886f76364060b01';
+export const OID_APPLE_WWDR = '2a864886f76364060201';
+
+/** `Extension ::= SEQUENCE { extnID, critical DEFAULT FALSE, extnValue OCTET STRING }` */
+function extension(oid: string, value: Uint8Array, critical = false): Uint8Array {
+  const parts = [objectIdentifier(oid)];
+  if (critical) {
+    parts.push(tagged(0x01, new Uint8Array([0xff])));
+  }
+  parts.push(tagged(0x04, value));
+  return sequence(...parts);
+}
+
+function basicConstraints(isCertificateAuthority: boolean): Uint8Array {
+  const inner = isCertificateAuthority
+    ? sequence(tagged(0x01, new Uint8Array([0xff])))
+    : sequence();
+  return extension(OID_BASIC_CONSTRAINTS, inner, true);
+}
+
+/** A marker extension with an empty value, which is how Apple's OIDs appear. */
+function markerExtension(oid: string): Uint8Array {
+  return extension(oid, new Uint8Array(0));
+}
 
 function commonName(value: string): Uint8Array {
   return sequence(derSet(sequence(objectIdentifier(OID_COMMON_NAME), utf8String(value))));
@@ -121,6 +146,9 @@ export interface CertificateOptions {
   readonly notBefore: Date;
   readonly notAfter: Date;
   readonly serial?: number;
+  readonly isCertificateAuthority?: boolean;
+  /** Extra marker OIDs, e.g. Apple's receipt-signing or WWDR identifiers. */
+  readonly markerOids?: readonly string[];
 }
 
 export async function buildCertificate(options: CertificateOptions): Promise<Uint8Array> {
@@ -131,6 +159,11 @@ export async function buildCertificate(options: CertificateOptions): Promise<Uin
   const hash = options.issuerKey.curve === 'P-384' ? 'SHA-384' : 'SHA-256';
   const algorithm = sequence(objectIdentifier(signatureOid));
 
+  const extensions = [
+    basicConstraints(options.isCertificateAuthority ?? false),
+    ...(options.markerOids ?? []).map(markerExtension),
+  ];
+
   const tbs = sequence(
     tagged(0xa0, smallInteger(2)),
     smallInteger(options.serial ?? 1),
@@ -139,6 +172,7 @@ export async function buildCertificate(options: CertificateOptions): Promise<Uin
     sequence(utcTime(options.notBefore), utcTime(options.notAfter)),
     commonName(options.subject),
     spki,
+    tagged(0xa3, sequence(...extensions)),
   );
 
   const raw = new Uint8Array(
@@ -172,6 +206,9 @@ export interface TestChain {
 export async function buildTestChain(options?: {
   leafNotBefore?: Date;
   leafNotAfter?: Date;
+  omitLeafMarkerOid?: boolean;
+  omitIntermediateMarkerOid?: boolean;
+  intermediateIsNotCA?: boolean;
 }): Promise<TestChain> {
   const now = Date.now();
   const rootKey = await generateKeyPair('P-384');
@@ -189,6 +226,7 @@ export async function buildTestChain(options?: {
     notBefore,
     notAfter,
     serial: 1,
+    isCertificateAuthority: true,
   });
   const intermediateDer = await buildCertificate({
     subject: 'Test Intermediate CA',
@@ -198,6 +236,8 @@ export async function buildTestChain(options?: {
     notBefore,
     notAfter,
     serial: 2,
+    isCertificateAuthority: options?.intermediateIsNotCA !== true,
+    markerOids: options?.omitIntermediateMarkerOid === true ? [] : [OID_APPLE_WWDR],
   });
   const leafDer = await buildCertificate({
     subject: 'Test Leaf',
@@ -207,6 +247,7 @@ export async function buildTestChain(options?: {
     notBefore: options?.leafNotBefore ?? notBefore,
     notAfter: options?.leafNotAfter ?? notAfter,
     serial: 3,
+    markerOids: options?.omitLeafMarkerOid === true ? [] : [OID_APPLE_RECEIPT_SIGNING],
   });
 
   return {

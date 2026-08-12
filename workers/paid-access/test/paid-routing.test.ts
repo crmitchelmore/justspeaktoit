@@ -272,6 +272,30 @@ describe('paid routing request validation', () => {
     expect(response.status).toBe(400);
   });
 
+  it('rejects a finalise call for a session that never existed', async () => {
+    const userId = await seedEntitledUser();
+    const response = await SELF.fetch(
+      'https://api.test/v1/paid/transcribe/live/finalise',
+      {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${await tokenFor(userId)}`,
+          'content-type': 'application/json',
+          'idempotency-key': IDEMPOTENCY_KEY,
+        },
+        body: JSON.stringify({ session_id: 'never-opened' }),
+      },
+    );
+    expect(response.status).toBe(404);
+
+    const usage = await env.DB.prepare(
+      'SELECT COUNT(*) AS total FROM usage_ledger WHERE user_id = ?1',
+    )
+      .bind(userId)
+      .first<{ total: number }>();
+    expect(usage?.total).toBe(0);
+  });
+
   it('rejects an unsupported sample rate on live transcription', async () => {
     const userId = await seedEntitledUser();
     const response = await SELF.fetch(

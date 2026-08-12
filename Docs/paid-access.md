@@ -214,6 +214,18 @@ npx wrangler d1 execute paid-access --remote \
 
 A test notification that returns 401 usually means the pinned root check failed, which in practice means someone set `APPSTORE_ROOT_CA_G3_BASE64` in a non-test environment. Unset it.
 
+## Live transcription session lifecycle
+
+Opening `GET /v1/paid/transcribe/live` reserves quota for the maximum session
+length and returns an `x-session-id` header on the 101 upgrade response. The
+client must send that value back as `session_id` to
+`POST /v1/paid/transcribe/live/finalise` when the socket closes, which commits
+the measured duration and releases the remainder of the reservation.
+
+If the client never finalises, the reservation is reclaimed when its lease
+expires (`MAX_LIVE_SESSION_SECONDS` plus a minute), so a crashed client cannot
+hold a concurrency slot indefinitely and cannot under-report usage.
+
 ## Quotas
 
 Quotas are enforced by `QuotaDurableObject` with a reserve → finalise/release lease lifecycle, one instance per user.

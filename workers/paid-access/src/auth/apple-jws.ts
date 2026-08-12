@@ -12,6 +12,12 @@
  * Deliberately narrow: it supports exactly the ECDSA profile Apple uses
  * (P-256/SHA-256 leaf and intermediate, P-384/SHA-384 root) and rejects
  * anything else rather than trying to be a general X.509 implementation.
+ *
+ * Out of scope, and accepted knowingly: OCSP and CRL revocation checking. The
+ * root is pinned by exact DER bytes and every certificate carries a short
+ * validity window, so a revoked intermediate would still need Apple's private
+ * key to produce a payload we accept. Revocation would add a network dependency
+ * on the hot path of every purchase verification for that marginal gain.
  */
 
 import { base64ToBytes, base64UrlToBytes } from '../crypto.js';
@@ -96,6 +102,11 @@ const OID_ECDSA_SHA384 = '2a8648ce3d040303';
 const OID_EC_PUBLIC_KEY = '2a8648ce3d0201';
 const OID_P256 = '2a8648ce3d030107';
 const OID_P384 = '2b81040022';
+const OID_BASIC_CONSTRAINTS = '551d13';
+/** Apple's "Mac App Store receipt signing" OID, required on the leaf. */
+const OID_APPLE_RECEIPT_SIGNING = '2a864886f76364060b01';
+/** Apple's WWDR OID, required on the intermediate. */
+const OID_APPLE_WWDR = '2a864886f76364060201';
 
 interface SignatureProfile {
   readonly hash: 'SHA-256' | 'SHA-384';
@@ -149,6 +160,12 @@ export interface ParsedCertificate {
   readonly namedCurve: 'P-256' | 'P-384';
   readonly notBeforeMs: number;
   readonly notAfterMs: number;
+  /** Raw DER of the issuer and subject names, compared to chain certificates. */
+  readonly issuerDer: Uint8Array;
+  readonly subjectDer: Uint8Array;
+  /** Extension OIDs present on the certificate, hex encoded. */
+  readonly extensionOids: ReadonlySet<string>;
+  readonly isCertificateAuthority: boolean;
 }
 
 export function parseCertificate(der: Uint8Array): ParsedCertificate {
@@ -204,6 +221,14 @@ export function parseCertificate(der: Uint8Array): ParsedCertificate {
     throw new CertificateError(`Unsupported named curve: ${curveOid}`);
   }
 
+  const issuerNode = tbsChildren[hasVersion ? 3 : 2];
+  const subjectNode = tbsChildren[hasVersion ? 5 : 4];
+  if (!issuerNode || !subjectNode) {
+    throw new CertificateError('Certificate is missing issuer or subject');
+  }
+
+  const extensions = parseExtensions(der, tbsChildren);
+
   return {
     der,
     tbs: nodeBytes(der, tbsNode),
@@ -213,7 +238,54 @@ export function parseCertificate(der: Uint8Array): ParsedCertificate {
     namedCurve,
     notBeforeMs: parseAsn1Time(der, notBeforeNode),
     notAfterMs: parseAsn1Time(der, notAfterNode),
+    issuerDer: nodeBytes(der, issuerNode),
+    subjectDer: nodeBytes(der, subjectNode),
+    extensionOids: extensions.oids,
+    isCertificateAuthority: extensions.isCertificateAuthority,
   };
+}
+
+/**
+ * Reads the optional `[3] EXPLICIT Extensions` field.
+ *
+ * Only the two things we act on are decoded: which extension OIDs are present,
+ * and whether basicConstraints marks the certificate as a CA.
+ */
+function parseExtensions(
+  bytes: Uint8Array,
+  tbsChildren: readonly DerNode[],
+): { oids: ReadonlySet<string>; isCertificateAuthority: boolean } {
+  const container = tbsChildren.find((child) => child.tag === 0xa3);
+  const oids = new Set<string>();
+  if (container === undefined) {
+    return { oids, isCertificateAuthority: false };
+  }
+
+  const [sequence] = childNodes(bytes, container);
+  if (!sequence || sequence.tag !== 0x30) {
+    return { oids, isCertificateAuthority: false };
+  }
+
+  let isCertificateAuthority = false;
+  for (const extension of childNodes(bytes, sequence)) {
+    const parts = childNodes(bytes, extension);
+    const oidNode = parts[0];
+    if (!oidNode || oidNode.tag !== 0x06) continue;
+    const oid = oidHex(bytes, oidNode);
+    oids.add(oid);
+
+    if (oid === OID_BASIC_CONSTRAINTS) {
+      const valueNode = parts[parts.length - 1];
+      if (valueNode === undefined || valueNode.tag !== 0x04) continue;
+      const [constraints] = childNodes(bytes, valueNode);
+      if (!constraints || constraints.tag !== 0x30) continue;
+      const [caFlag] = childNodes(bytes, constraints);
+      isCertificateAuthority =
+        caFlag !== undefined && caFlag.tag === 0x01 && bytes[caFlag.contentStart] !== 0x00;
+    }
+  }
+
+  return { oids, isCertificateAuthority };
 }
 
 /** Converts a DER `SEQUENCE { r INTEGER, s INTEGER }` into WebCrypto's raw r||s form. */
@@ -332,12 +404,33 @@ export async function verifyAppleSignedJws<T>(
   for (let index = 0; index < chain.length - 1; index += 1) {
     const child = chain[index] as ParsedCertificate;
     const issuer = chain[index + 1] as ParsedCertificate;
+
+    // Names must chain. Without this a valid signature from an unrelated Apple
+    // certificate would be accepted as if it had issued this one.
+    if (!sameBytes(child.issuerDer, issuer.subjectDer)) {
+      throw new CertificateError('Certificate issuer does not match the next certificate subject');
+    }
+    if (!issuer.isCertificateAuthority) {
+      throw new CertificateError('Certificate chain contains a non-CA issuer');
+    }
     if (!(await verifyCertificateSignature(child, issuer))) {
       throw new CertificateError('Certificate chain signature verification failed');
     }
   }
 
   const leaf = chain[0] as ParsedCertificate;
+
+  // Apple requires the marker OIDs that identify these certificates as issued
+  // for App Store receipt signing. Checking them stops any other certificate
+  // that legitimately chains to the Apple root from signing our payloads.
+  if (!leaf.extensionOids.has(OID_APPLE_RECEIPT_SIGNING)) {
+    throw new CertificateError('Leaf certificate is not an App Store receipt-signing certificate');
+  }
+  const intermediate = chain[1] as ParsedCertificate;
+  if (!intermediate.extensionOids.has(OID_APPLE_WWDR)) {
+    throw new CertificateError('Intermediate certificate is not an Apple WWDR certificate');
+  }
+
   if (leaf.namedCurve !== 'P-256') {
     throw new CertificateError('Leaf certificate does not use P-256');
   }

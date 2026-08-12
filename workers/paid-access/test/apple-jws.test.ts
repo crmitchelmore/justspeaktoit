@@ -7,7 +7,13 @@ import {
   StoreKitError,
   APPLE_ROOT_CA_G3_BASE64,
 } from '../src/auth/storekit.js';
-import { buildTestChain, signJws, generateKeyPair, buildCertificate } from './helpers/x509.js';
+import {
+  buildTestChain,
+  signJws,
+  generateKeyPair,
+  buildCertificate,
+  OID_APPLE_WWDR,
+} from './helpers/x509.js';
 import { sha256Hex } from '../src/crypto.js';
 
 const NOW_MS = Date.now();
@@ -113,6 +119,60 @@ describe('Apple signed JWS verification', () => {
   it('rejects a self-signed single-certificate chain', async () => {
     const chain = await buildTestChain();
     const jws = await signJws({ hello: 'world' }, chain, { x5c: [chain.chainBase64[0]] });
+    await expect(verifyAppleSignedJws(jws, chain.rootDer, NOW_MS)).rejects.toBeInstanceOf(
+      CertificateError,
+    );
+  });
+
+  it('rejects a leaf without Apple\'s receipt-signing marker OID', async () => {
+    // A certificate can chain to the Apple root without being issued for App
+    // Store receipt signing; Apple requires this marker specifically.
+    const chain = await buildTestChain({ omitLeafMarkerOid: true });
+    const jws = await signJws({ hello: 'world' }, chain);
+    await expect(verifyAppleSignedJws(jws, chain.rootDer, NOW_MS)).rejects.toBeInstanceOf(
+      CertificateError,
+    );
+  });
+
+  it('rejects an intermediate without the Apple WWDR marker OID', async () => {
+    const chain = await buildTestChain({ omitIntermediateMarkerOid: true });
+    const jws = await signJws({ hello: 'world' }, chain);
+    await expect(verifyAppleSignedJws(jws, chain.rootDer, NOW_MS)).rejects.toBeInstanceOf(
+      CertificateError,
+    );
+  });
+
+  it('rejects a chain whose intermediate is not marked as a CA', async () => {
+    const chain = await buildTestChain({ intermediateIsNotCA: true });
+    const jws = await signJws({ hello: 'world' }, chain);
+    await expect(verifyAppleSignedJws(jws, chain.rootDer, NOW_MS)).rejects.toBeInstanceOf(
+      CertificateError,
+    );
+  });
+
+  it('rejects a chain whose issuer and subject names do not line up', async () => {
+    const chain = await buildTestChain();
+    const rootKey = await generateKeyPair('P-384');
+    const intermediateKey = await generateKeyPair('P-256');
+    // Correctly signed by a CA, but naming a different issuer than it has.
+    const mismatched = await buildCertificate({
+      subject: 'Someone Else CA',
+      issuer: 'Test Root CA',
+      subjectKey: intermediateKey,
+      issuerKey: rootKey,
+      notBefore: new Date(NOW_MS - 86_400_000),
+      notAfter: new Date(NOW_MS + 86_400_000),
+      isCertificateAuthority: true,
+      markerOids: [OID_APPLE_WWDR],
+    });
+    let binary = '';
+    for (const byte of mismatched) binary += String.fromCharCode(byte);
+
+    const tampered = {
+      ...chain,
+      chainBase64: [chain.chainBase64[0]!, btoa(binary), chain.chainBase64[2]!],
+    };
+    const jws = await signJws({ hello: 'world' }, tampered);
     await expect(verifyAppleSignedJws(jws, chain.rootDer, NOW_MS)).rejects.toBeInstanceOf(
       CertificateError,
     );

@@ -64,5 +64,12 @@
 	<!-- CloudKit silent push for sync -->
 	<key>aps-environment</key>
 	<string>production</string>
+
+	<!-- Sign in with Apple - identity for the Paid Access subscription, shared
+	     with the iPhone app through the same Apple account. -->
+	<key>com.apple.developer.applesignin</key>
+	<array>
+		<string>Default</string>
+	</array>
 </dict>
 </plist>

@@ -1,106 +1,156 @@
 {
-  "identifier" : "Configuration",
-  "nonRenewingSubscriptions" : [],
-  "products" : [
+  "identifier": "Configuration",
+  "nonRenewingSubscriptions": [],
+  "products": [
     {
-      "displayPrice" : "2.99",
-      "familyShareable" : false,
-      "internalID" : "tip_small",
-      "localizations" : [
+      "displayPrice": "2.99",
+      "familyShareable": false,
+      "internalID": "tip_small",
+      "localizations": [
         {
-          "description" : "A small token of appreciation",
-          "displayName" : "Buy me a coffee ☕",
-          "locale" : "en_US"
+          "description": "A small token of appreciation",
+          "displayName": "Buy me a coffee \u2615",
+          "locale": "en_US"
         }
       ],
-      "productID" : "com.justspeaktoit.tip.small",
-      "referenceName" : "Small Tip",
-      "type" : "Consumable"
+      "productID": "com.justspeaktoit.tip.small",
+      "referenceName": "Small Tip",
+      "type": "Consumable"
     },
     {
-      "displayPrice" : "4.99",
-      "familyShareable" : false,
-      "internalID" : "tip_medium",
-      "localizations" : [
+      "displayPrice": "4.99",
+      "familyShareable": false,
+      "internalID": "tip_medium",
+      "localizations": [
         {
-          "description" : "Help fuel development",
-          "displayName" : "Buy me lunch 🍔",
-          "locale" : "en_US"
+          "description": "Help fuel development",
+          "displayName": "Buy me lunch \ud83c\udf54",
+          "locale": "en_US"
         }
       ],
-      "productID" : "com.justspeaktoit.tip.medium",
-      "referenceName" : "Medium Tip",
-      "type" : "Consumable"
+      "productID": "com.justspeaktoit.tip.medium",
+      "referenceName": "Medium Tip",
+      "type": "Consumable"
     },
     {
-      "displayPrice" : "9.99",
-      "familyShareable" : false,
-      "internalID" : "tip_large",
-      "localizations" : [
+      "displayPrice": "9.99",
+      "familyShareable": false,
+      "internalID": "tip_large",
+      "localizations": [
         {
-          "description" : "Super supporter!",
-          "displayName" : "Generous support 💪",
-          "locale" : "en_US"
+          "description": "Super supporter!",
+          "displayName": "Generous support \ud83d\udcaa",
+          "locale": "en_US"
         }
       ],
-      "productID" : "com.justspeaktoit.tip.large",
-      "referenceName" : "Large Tip",
-      "type" : "Consumable"
+      "productID": "com.justspeaktoit.tip.large",
+      "referenceName": "Large Tip",
+      "type": "Consumable"
     }
   ],
-  "settings" : {
-    "_storefront" : "USA",
-    "_storeKitErrors" : [
+  "settings": {
+    "_storefront": "USA",
+    "_storeKitErrors": [
       {
-        "current" : null,
-        "enabled" : false,
-        "name" : "Load Products"
+        "current": null,
+        "enabled": false,
+        "name": "Load Products"
       },
       {
-        "current" : null,
-        "enabled" : false,
-        "name" : "Purchase"
+        "current": null,
+        "enabled": false,
+        "name": "Purchase"
       },
       {
-        "current" : null,
-        "enabled" : false,
-        "name" : "Verification"
+        "current": null,
+        "enabled": false,
+        "name": "Verification"
       },
       {
-        "current" : null,
-        "enabled" : false,
-        "name" : "App Store Sync"
+        "current": null,
+        "enabled": false,
+        "name": "App Store Sync"
       },
       {
-        "current" : null,
-        "enabled" : false,
-        "name" : "Subscription Status"
+        "current": null,
+        "enabled": false,
+        "name": "Subscription Status"
       },
       {
-        "current" : null,
-        "enabled" : false,
-        "name" : "App Transaction"
+        "current": null,
+        "enabled": false,
+        "name": "App Transaction"
       },
       {
-        "current" : null,
-        "enabled" : false,
-        "name" : "Manage Subscriptions Sheet"
+        "current": null,
+        "enabled": false,
+        "name": "Manage Subscriptions Sheet"
       },
       {
-        "current" : null,
-        "enabled" : false,
-        "name" : "Refund Request Sheet"
+        "current": null,
+        "enabled": false,
+        "name": "Refund Request Sheet"
       },
       {
-        "current" : null,
-        "enabled" : false,
-        "name" : "Offer Code Redeem Sheet"
+        "current": null,
+        "enabled": false,
+        "name": "Offer Code Redeem Sheet"
       }
     ]
   },
-  "subscriptionGroups" : [],
-  "version" : {
-    "major" : 3,
-    "minor" : 0
+  "subscriptionGroups": [
+    {
+      "id": "21598374",
+      "localizations": [],
+      "name": "Just Speak to It Paid Access",
+      "subscriptions": [
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "6.99",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "paid_monthly",
+          "introductoryOffer": null,
+          "localizations": [
+            {
+              "description": "Best models with no API keys to manage. On-device models and your own keys stay free.",
+              "displayName": "Paid Access (Monthly)",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.justspeaktoit.paid.monthly",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Paid Access Monthly",
+          "subscriptionGroupID": "21598374",
+          "type": "RecurringSubscription"
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "59.99",
+          "familyShareable": false,
+          "groupNumber": 2,
+          "internalID": "paid_yearly",
+          "introductoryOffer": null,
+          "localizations": [
+            {
+              "description": "Best models with no API keys to manage, billed yearly. On-device models and your own keys stay free.",
+              "displayName": "Paid Access (Yearly)",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.justspeaktoit.paid.yearly",
+          "recurringSubscriptionPeriod": "P1Y",
+          "referenceName": "Paid Access Yearly",
+          "subscriptionGroupID": "21598374",
+          "type": "RecurringSubscription"
+        }
+      ]
+    }
+  ],
+  "version": {
+    "major": 3,
+    "minor": 0
   }
 }

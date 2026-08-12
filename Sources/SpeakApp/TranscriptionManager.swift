@@ -494,8 +494,13 @@ extension TranscriptionManager: LiveTranscriptionSessionDelegate {
     cancelStopTimeout()
     continuation = nil
     isLiveTranscribing = false
-    applyLiveDisplayUpdate(from: session, text: result.text, isFinal: true, confidence: result.confidence)
-    endLiveTranscriptDisplaySession()
+    // Only the controller that owns the on-screen session may publish its
+    // final text or close the session; a late finish from a superseded
+    // recording must leave the current session alone (issue #643).
+    if displayScope.accepts(session) {
+      applyLiveDisplayUpdate(from: session, text: result.text, isFinal: true, confidence: result.confidence)
+      endLiveTranscriptDisplaySession()
+    }
     cont.resume(returning: result)
   }
 
@@ -505,7 +510,9 @@ extension TranscriptionManager: LiveTranscriptionSessionDelegate {
       cancelStopTimeout()
       continuation = nil
       isLiveTranscribing = false
-      endLiveTranscriptDisplaySession()
+      if displayScope.accepts(session) {
+        endLiveTranscriptDisplaySession()
+      }
       cont.resume(throwing: error)
     } else {
       // Error happened mid-session - store it for when stop is called

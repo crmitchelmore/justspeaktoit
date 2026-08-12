@@ -261,7 +261,10 @@ public enum ConfigTransferCode {
 }
 
 /// Handles encoding/decoding of configuration for QR transfer.
-public final class ConfigTransferManager {
+///
+/// Sendable: the only stored property is an immutable `Int`; JSON coders are
+/// created per call (QR transfer is rare, so the allocation is irrelevant).
+public final class ConfigTransferManager: Sendable {
     public static let shared = ConfigTransferManager()
 
     /// How long a generated QR code stays importable. Checked with an absolute
@@ -283,17 +286,25 @@ public final class ConfigTransferManager {
     /// that only exercise the surrounding logic.
     let pbkdf2Iterations: Int
 
-    private let encoder = JSONEncoder()
-    private let decoder = JSONDecoder()
-    private let envelopeEncoder = JSONEncoder()
-    private let envelopeDecoder = JSONDecoder()
+    private var encoder: JSONEncoder { Self.makeCoderEncoder() }
+    private var decoder: JSONDecoder { Self.makeCoderDecoder() }
+    private var envelopeEncoder: JSONEncoder { Self.makeCoderEncoder() }
+    private var envelopeDecoder: JSONDecoder { Self.makeCoderDecoder() }
+
+    private static func makeCoderEncoder() -> JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return encoder
+    }
+
+    private static func makeCoderDecoder() -> JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }
 
     init(pbkdf2Iterations: Int = ConfigTransferManager.productionPBKDF2Iterations) {
         self.pbkdf2Iterations = pbkdf2Iterations
-        encoder.dateEncodingStrategy = .iso8601
-        decoder.dateDecodingStrategy = .iso8601
-        envelopeEncoder.dateEncodingStrategy = .iso8601
-        envelopeDecoder.dateDecodingStrategy = .iso8601
     }
 
     /// API-key identifiers included in a device-to-device transfer: the union

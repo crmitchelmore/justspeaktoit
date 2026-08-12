@@ -112,7 +112,9 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
         task.send(message) { [weak self] error in
             guard let self else { return }
 
-            var returnBuffer = buffer
+            // Capture the immutable copy: a captured `var` in this @Sendable
+            // completion would be a strict-concurrency violation.
+            var returnBuffer = dataToSend
             self.bufferPool.returnBuffer(&returnBuffer)
 
             if let error {
@@ -155,7 +157,9 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
         task.send(message) { [weak self] error in
             guard let self else { return }
 
-            var returnBuffer = buffer
+            // Capture the immutable copy: a captured `var` in this @Sendable
+            // completion would be a strict-concurrency violation.
+            var returnBuffer = dataToSend
             self.bufferPool.returnBuffer(&returnBuffer)
 
             if let error {
@@ -300,6 +304,7 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
 
     private func fullTranscript() -> String? { withStateLock { accumulated.transcriptOrNil } }
 
+    @discardableResult
     private func withStateLock<T>(_ block: () -> T) -> T {
         stateLock.lock()
         defer { stateLock.unlock() }

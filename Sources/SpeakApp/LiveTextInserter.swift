@@ -10,7 +10,7 @@ private let logger = SpeakLogger.logger(category: "LiveTextInserter")
 /// Tracks what's been inserted and handles updates/replacements.
 /// Falls back to clipboard mode if accessibility insertion isn't available.
 @MainActor
-final class LiveTextInserter: ObservableObject {
+final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_body_length
   enum FinalizationResult {
     case applied
     case deferred
@@ -44,6 +44,10 @@ final class LiveTextInserter: ObservableObject {
   /// Whether an accessibility write has already succeeded, even if verification later failed.
   private var hasPerformedAccessibilityWrite: Bool = false
 
+  /// Timestamp of the first successful accessibility write in this session
+  /// (latency checkpoint: first character visible in the target app).
+  private(set) var firstInsertionAt: Date?
+
   /// Whether incremental live updates should pause until finalization.
   private var shouldPauseIncrementalUpdates: Bool = false
 
@@ -68,6 +72,7 @@ final class LiveTextInserter: ObservableObject {
     confirmedCharCount = 0
     firstInsertionVerified = false
     hasPerformedAccessibilityWrite = false
+    self.firstInsertionAt = nil
     shouldPauseIncrementalUpdates = false
     usingClipboardFallback = false
     isActive = true
@@ -93,6 +98,7 @@ final class LiveTextInserter: ObservableObject {
     confirmedCharCount = 0
     firstInsertionVerified = false
     hasPerformedAccessibilityWrite = false
+    self.firstInsertionAt = nil
     shouldPauseIncrementalUpdates = false
     usingClipboardFallback = false
     isActive = false
@@ -151,6 +157,15 @@ final class LiveTextInserter: ObservableObject {
     !hasPerformedAccessibilityWrite
   }
 
+  /// Records a successful accessibility write, stamping the first-insert
+  /// latency checkpoint the first time text lands in the target app.
+  private func recordAccessibilityWrite() {
+    hasPerformedAccessibilityWrite = true
+    if self.firstInsertionAt == nil {
+      self.firstInsertionAt = Date()
+    }
+  }
+
   private func deferToStandardDelivery(reason: String, error: Error? = nil) {
     if let error {
       lastError = error
@@ -193,7 +208,7 @@ final class LiveTextInserter: ObservableObject {
     )
 
     if setResult == .success {
-      hasPerformedAccessibilityWrite = true
+      recordAccessibilityWrite()
 
       // Verify first insertion to ensure accessibility is actually working
       if !firstInsertionVerified {
@@ -255,7 +270,7 @@ final class LiveTextInserter: ObservableObject {
     )
 
     if setResult == .success {
-      hasPerformedAccessibilityWrite = true
+      recordAccessibilityWrite()
       insertedText = newText
       confirmedCharCount = insertedText.count
       return .applied
@@ -295,7 +310,7 @@ final class LiveTextInserter: ObservableObject {
     )
 
     if setResult == .success {
-      hasPerformedAccessibilityWrite = true
+      recordAccessibilityWrite()
       insertedText = text
       confirmedCharCount = text.count
       return .applied

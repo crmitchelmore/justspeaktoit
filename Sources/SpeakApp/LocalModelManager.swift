@@ -54,6 +54,13 @@ final class LocalModelManager: ObservableObject {
 
   static let recommendedStreamingModelSources: [LocalStreamingModelSource] = [
     LocalStreamingModelSource(
+      repoID: ParakeetLocalModels.tdtV3Int8RepoID,
+      modelName: ParakeetLocalModels.tdtV3Int8ModelName,
+      runtime: "sherpa-onnx streaming runtime",
+      approximateSizeMB: ParakeetLocalModels.tdtV3Int8DownloadSizeMB,
+      archiveURL: ParakeetLocalModels.tdtV3Int8ArchiveURL
+    ),
+    LocalStreamingModelSource(
       repoID: "k2-fsa/sherpa-onnx",
       modelName: "sherpa-onnx-nemotron-speech-streaming-en-0.6b-1120ms-int8-2026-04-25",
       runtime: "sherpa-onnx streaming runtime",
@@ -496,6 +503,9 @@ final class LocalModelManager: ObservableObject {
 
   nonisolated static func streamingApproximateSizeMB(repoID: String, modelName: String) -> Int? {
     let searchText = "\(repoID) \(modelName)".lowercased()
+    if searchText.contains("parakeet-tdt-0.6b-v3") {
+      return ParakeetLocalModels.tdtV3Int8DownloadSizeMB
+    }
     if searchText.contains("en-kroko-2025-08-06") {
       return 71
     }
@@ -516,11 +526,14 @@ final class LocalModelManager: ObservableObject {
 
   nonisolated static func isSupportedStreamingSource(_ source: LocalStreamingModelSource) -> Bool {
     let text = "\(source.id) \(source.repoID) \(source.modelName) \(source.runtime)".lowercased()
+    // Only sherpa-onnx exports are runnable; raw NeMo checkpoints from
+    // nvidia/* repos are not. Parakeet is supported solely as the sherpa-onnx
+    // nemo-parakeet-tdt-0.6b-v3 conversion.
+    guard text.contains("sherpa"), !text.contains("nvidia") else { return false }
     let isNemotron = text.contains("nemotron")
-    guard !text.contains("parakeet"), !text.contains("nvidia"), isNemotron || !text.contains("nemo") else {
-      return false
-    }
-    return text.contains("sherpa") && (text.contains("zipformer") || text.contains("nemotron"))
+    let isSherpaParakeetV3 = text.contains("nemo-parakeet-tdt-0.6b-v3")
+    guard isNemotron || isSherpaParakeetV3 || !text.contains("nemo") else { return false }
+    return text.contains("zipformer") || isNemotron || isSherpaParakeetV3
   }
   #endif
 

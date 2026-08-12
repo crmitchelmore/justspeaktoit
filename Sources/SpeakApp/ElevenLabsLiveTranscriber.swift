@@ -6,7 +6,7 @@ import SpeakCore
 
 // MARK: - Errors
 
-enum ElevenLabsLiveError: LocalizedError {
+enum ElevenLabsTranscriberError: LocalizedError {
     case missingAPIKey
     case invalidURLComponents
     case connectionFailed
@@ -276,7 +276,7 @@ final class ElevenLabsLiveTranscriber: @unchecked Sendable {
         ]
 
         guard let url = urlComponents.url else {
-            currentOnError()?(ElevenLabsLiveError.invalidURLComponents)
+            currentOnError()?(ElevenLabsTranscriberError.invalidURLComponents)
             return
         }
 
@@ -364,7 +364,7 @@ final class ElevenLabsLiveTranscriber: @unchecked Sendable {
 
             case "auth_error":
                 logger.error("ElevenLabs auth error: \(json.prefix(200), privacy: .public)")
-                currentOnError()?(ElevenLabsLiveError.invalidAPIKeyOrMissingScribeAccess)
+                currentOnError()?(ElevenLabsTranscriberError.invalidAPIKeyOrMissingScribeAccess)
 
             case "input_error", "transcriber_error", "rate_limited",
                  "quota_exceeded", "queue_overflow", "resource_exhausted",
@@ -393,14 +393,14 @@ final class ElevenLabsLiveTranscriber: @unchecked Sendable {
     private func mapConnectionError(_ error: Error) -> Error {
         let nsError = error as NSError
         if nsError.code == 401 || nsError.code == 403 {
-            return ElevenLabsLiveError.invalidAPIKeyOrMissingScribeAccess
+            return ElevenLabsTranscriberError.invalidAPIKeyOrMissingScribeAccess
         }
         let description = nsError.localizedDescription.lowercased()
         if description.contains("401")
             || description.contains("unauthorized")
             || description.contains("403")
             || description.contains("forbidden") {
-            return ElevenLabsLiveError.invalidAPIKeyOrMissingScribeAccess
+            return ElevenLabsTranscriberError.invalidAPIKeyOrMissingScribeAccess
         }
         return error
     }

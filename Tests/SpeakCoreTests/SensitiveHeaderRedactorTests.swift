@@ -153,4 +153,109 @@ final class SensitiveHeaderRedactorTests: XCTestCase {
         XCTAssertFalse(redacted.contains(apiKey.prefix(3)))
         XCTAssertFalse(redacted.contains(apiKey.suffix(4)))
     }
+
+    // MARK: - Exact redaction format
+
+    func testRedactValue_exactFormat_first3AndLast4() {
+        let apiKey = "sk-1234567890abcdefghijklmnopqrstuvwxyz"
+        let redacted = SensitiveHeaderRedactor.redactValue(apiKey)
+
+        XCTAssertEqual(redacted, "sk-...wxyz", "OpenAI-style key should show prefix and suffix")
+        XCTAssertFalse(redacted.contains("1234567890"), "Redacted value should not contain middle chars")
+    }
+
+    func testRedactValue_trimsWhitespaceBeforeRedacting() {
+        let apiKey = "  sk-1234567890abcdefghijklmnopqrstuvwxyz  "
+        let redacted = SensitiveHeaderRedactor.redactValue(apiKey)
+
+        XCTAssertEqual(redacted, "sk-...wxyz", "Whitespace should be trimmed before redaction")
+    }
+
+    func testRedactSensitiveHeaders_basicCredential_redactedByKey() {
+        let headers = [
+            "Authorization": "Basic user:pass",  // Redacted because the key is sensitive
+            "Content-Type": "text/plain",        // Untouched
+            "Custom-Header": "short"             // Untouched (non-sensitive key, short value)
+        ]
+
+        let redacted = SensitiveHeaderRedactor.redactSensitiveHeaders(headers)
+
+        XCTAssertEqual(redacted["Authorization"], "Bas...pass", "Authorization should be redacted (sensitive key)")
+        XCTAssertEqual(redacted["Content-Type"], "text/plain", "Non-sensitive header should not change")
+        XCTAssertEqual(redacted["Custom-Header"], "short", "Short non-pattern value should not change")
+    }
+
+    func testRedactSensitiveHeaders_sensitiveKeyWithShortValue_fullyRedacted() {
+        // Sensitive keys must be redacted regardless of value length/pattern.
+        let headers = [
+            "Authorization": "short",
+            "x-api-key": "tiny",
+            "token": "test123",
+            "Content-Type": "application/json"
+        ]
+
+        let redacted = SensitiveHeaderRedactor.redactSensitiveHeaders(headers)
+
+        XCTAssertEqual(redacted["Authorization"], "[REDACTED]", "Authorization should be redacted (sensitive key)")
+        XCTAssertEqual(redacted["x-api-key"], "[REDACTED]", "x-api-key should be redacted (sensitive key)")
+        XCTAssertEqual(redacted["token"], "[REDACTED]", "token should be redacted (sensitive key)")
+        XCTAssertEqual(redacted["Content-Type"], "application/json", "Non-sensitive header should not change")
+    }
+
+    // MARK: - Integration with APIKeyValidationDebugSnapshot
+
+    func testAPIKeyValidationDebugSnapshotRedactsHeaders() {
+        let requestHeaders = [
+            "Authorization": "Bearer sk-proj-1234567890abcdefghijklmnopqrstuvwxyz",
+            "Content-Type": "application/json"
+        ]
+
+        let responseHeaders = [
+            "x-api-key": "AbCd1234567890XyZ9876543210MnOpQrSt",
+            "Content-Type": "application/json"
+        ]
+
+        let snapshot = APIKeyValidationDebugSnapshot(
+            url: "https://api.example.com/test",
+            method: "POST",
+            requestHeaders: requestHeaders,
+            requestBody: nil,
+            statusCode: 200,
+            responseHeaders: responseHeaders,
+            responseBody: nil,
+            errorDescription: nil
+        )
+
+        // Snapshots redact sensitive headers outright: no fragment of the
+        // credential is retained, only the auth scheme.
+        XCTAssertEqual(
+            snapshot.requestHeaders["Authorization"],
+            "Bearer [REDACTED]",
+            "Request Authorization header should be fully redacted"
+        )
+        XCTAssertEqual(
+            snapshot.responseHeaders["x-api-key"],
+            "[REDACTED]",
+            "Response x-api-key header should be fully redacted"
+        )
+
+        // Verify non-sensitive headers are preserved
+        XCTAssertEqual(
+            snapshot.requestHeaders["Content-Type"],
+            "application/json",
+            "Non-sensitive request headers should be preserved"
+        )
+        XCTAssertEqual(
+            snapshot.responseHeaders["Content-Type"],
+            "application/json",
+            "Non-sensitive response headers should be preserved"
+        )
+
+        // Verify original headers are not modified (immutability check)
+        XCTAssertEqual(
+            requestHeaders["Authorization"],
+            "Bearer sk-proj-1234567890abcdefghijklmnopqrstuvwxyz",
+            "Original request headers should not be modified"
+        )
+    }
 }

@@ -46,8 +46,12 @@ public actor DefaultKeychainPermissions: KeychainPermissionsChecking {
 // MARK: - Protocol for Settings Integration
 
 /// Protocol for registering known API key identifiers with app settings.
+///
+/// `Sendable` so the existential can be stored on the `SecureStorage` actor and
+/// hopped to the main actor for registry updates. Conformers are `@MainActor`
+/// classes (e.g. `AppSettings`), which are implicitly Sendable.
 @MainActor
-public protocol APIKeyIdentifierRegistry: AnyObject {
+public protocol APIKeyIdentifierRegistry: AnyObject, Sendable {
     func registerAPIKeyIdentifier(_ identifier: String)
     func removeAPIKeyIdentifier(_ identifier: String)
     func reconcileAPIKeyIdentifiers(_ identifiers: [String])

@@ -76,7 +76,7 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
         channels: 1,
         interleaved: true
       ) else {
-        throw ElevenLabsLiveError.connectionFailed
+        throw ElevenLabsTranscriberError.connectionFailed
       }
       targetFormat = outputFormat
 
@@ -335,13 +335,13 @@ private extension ElevenLabsLiveController {
       let apiKey = try await secureStorage.secret(identifier: "elevenlabs.apiKey")
       guard !apiKey.isEmpty else {
         logger.error("ElevenLabs API key is empty")
-        throw ElevenLabsLiveError.missingAPIKey
+        throw ElevenLabsTranscriberError.missingAPIKey
       }
       return apiKey
     } catch let error as SecureAppStorageError {
       if case .valueNotFound = error {
         logger.error("ElevenLabs API key not found in keychain")
-        throw ElevenLabsLiveError.missingAPIKey
+        throw ElevenLabsTranscriberError.missingAPIKey
       }
       throw error
     }

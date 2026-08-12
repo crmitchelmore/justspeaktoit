@@ -9,6 +9,7 @@ struct DashboardView: View {
   @Environment(\.appVisualDensity) private var density
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @State private var requestingPermission: PermissionType?
+  @StateObject private var speechInsights = SpeechInsightsModel()
 
   var body: some View {
     ScrollView {
@@ -218,8 +219,13 @@ struct DashboardView: View {
         recentSection
       }
 
+      // Speech analytics (computed locally from raw transcripts)
+      speechInsightsSection
+
       // Usage Charts
       dailyUsageChartSection
+
+      latencySection
 
       LazyVGrid(
         columns: [GridItem(.adaptive(minimum: density.gridMinimumWidth), spacing: density.sectionSpacing)],
@@ -634,11 +640,30 @@ struct DashboardView: View {
     )
   }
 
+  private var speechInsightsSection: some View {
+    SpeechInsightsSection(model: speechInsights)
+      .task(id: history.statistics) {
+        speechInsights.refresh(using: history.allItems)
+      }
+  }
+
   private var dailyUsageChartSection: some View {
     DashboardCard(title: "Daily Usage", systemImage: "chart.bar.fill", tint: Color.brandLagoon) {
       DailyRecordingsChart(data: history.allItems.dailyUsageForLastMonth())
     }
     .speakTooltip("See when you rely on Speak the most so you can plan deep work and reviews thoughtfully.")
+  }
+
+  private var latencySection: some View {
+    DashboardCard(title: "Latency", systemImage: "bolt.badge.clock", tint: Color.brandLagoonDeep) {
+      LatencyInsightsView(
+        providers: history.allItems.latencyInsightsByProvider(),
+        overview: history.allItems.latencyOverview()
+      )
+    }
+    .speakTooltip(
+      "How fast dictation feels: cold start, time to first words, and stop-to-inserted latency per provider (p50/p95)."
+    )
   }
 
   private var transcriptionModelChartSection: some View {

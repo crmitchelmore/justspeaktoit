@@ -84,7 +84,8 @@ final class VoiceEditSelectionService {
     guard Self.postCopyShortcut(destination: destination) else { return nil }
 
     // Give the target app a moment to service the copy; bail out early once it lands.
-    for _ in 0..<10 where pasteboard.changeCount == baseline {
+    for _ in 0..<10 {
+      guard pasteboard.changeCount == baseline else { break }
       try? await Task.sleep(nanoseconds: 40_000_000)
     }
     guard pasteboard.changeCount != baseline else { return nil }

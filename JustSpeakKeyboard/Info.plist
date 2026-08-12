@@ -20,6 +20,10 @@
     <string>$(MARKETING_VERSION)</string>
     <key>CFBundleVersion</key>
     <string>$(CURRENT_PROJECT_VERSION)</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>The Just Speak keyboard records audio only while you dictate, to type what you say.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Apple speech recognition turns your dictation into text inside the keyboard.</string>
     <key>NSExtension</key>
     <dict>
         <key>NSExtensionAttributes</key>

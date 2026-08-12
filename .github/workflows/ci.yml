@@ -37,6 +37,25 @@ jobs:
       - name: Test (Debug)
         run: swift test --enable-code-coverage
 
+      # Snapshot mismatches write the freshly rendered PNG to the process
+      # temporary directory. Publishing it is the only way to inspect a CI-only
+      # rendering difference, since the runner is discarded after the job.
+      - name: Collect snapshot failures
+        if: failure()
+        run: |
+          mkdir -p "$RUNNER_TEMP/snapshot-failures"
+          find "${TMPDIR:-/tmp}" -maxdepth 3 -path '*SnapshotTests*' -name '*.png' \
+            -exec cp {} "$RUNNER_TEMP/snapshot-failures/" \; 2>/dev/null || true
+          ls -la "$RUNNER_TEMP/snapshot-failures" || true
+
+      - name: Upload snapshot failures
+        if: failure()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: snapshot-failures
+          path: ${{ runner.temp }}/snapshot-failures
+          if-no-files-found: ignore
+
       # Release-configuration tests run as the release gate in release-mac.yml;
       # running them here too effectively doubled test time on 10x-billed macOS runners.
 
@@ -87,6 +106,11 @@ jobs:
           echo "SIMULATOR_ID=$SIMULATOR_ID" >> "$GITHUB_ENV"
 
       - name: Generate iOS App Project
+        # Internal CI builds include the flagged-off keyboard extension so it
+        # keeps compiling and its flag-gated tests run. Release and TestFlight
+        # builds stay gated behind the manual `include_keyboard` input.
+        env:
+          TUIST_IOS_KEYBOARD: "1"
         run: tuist generate --no-open
 
       - name: Test iOS App and Action Button Settings

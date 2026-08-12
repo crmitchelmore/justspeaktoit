@@ -3,7 +3,7 @@
 Just Speak to It exposes its dictation pipeline to automation. This page covers
 the **Shortcuts (App Intents)** surface, available on both macOS and iOS. A CLI
 (`speak`) and an MCP server are planned follow-ups on the same roadmap
-(issue #613); they are not shipped yet.
+(issue #613, tracked as #655 and #656); they are not shipped yet.
 
 ## Shortcuts actions
 
@@ -89,8 +89,8 @@ to It".
 
 - **CLI (`speak`)** — `speak transcribe file.m4a`, `speak listen`,
   `speak history --last 5 --json`, talking to the running app over the local
-  transport so keys and configuration stay in one place.
+  transport so keys and configuration stay in one place. Tracked in #655.
 - **MCP server** — `transcribe_file`, `get_history`, `start/stop_dictation`
-  exposed as MCP tools for Claude and other agents.
+  exposed as MCP tools for Claude and other agents. Tracked in #656.
 
-Both are tracked in issue #613.
+Both roll up to issue #613, which stays open until all three surfaces ship.

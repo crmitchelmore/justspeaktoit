@@ -682,6 +682,12 @@ public struct SettingsView: View {
 
     public init() {}
 
+    /// Whether the model pickers should be hidden because Simple model choices
+    /// is on and paid routing is actually available.
+    private var hidesModelSelection: Bool {
+        PaidAccessStore.shared.simpleModelChoicesPolicy.hidesModelSelection
+    }
+
     public var body: some View {
         Form {
             Section("Appearance") {
@@ -730,7 +736,13 @@ public struct SettingsView: View {
                 .pickerStyle(.segmented)
                 .accessibilityIdentifier("transcriptionLocationPicker")
 
-                if transcriptionLocationBinding.wrappedValue == .local {
+                if hidesModelSelection {
+                    Text(PaidAccessStore.shared.simpleModelChoicesPolicy.explanation)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if transcriptionLocationBinding.wrappedValue == .local, !hidesModelSelection {
                     Picker("Apple On-Device Model", selection: selectedModelBinding) {
                         ForEach(ModelCatalog.onDeviceLiveTranscription) { option in
                             HStack {
@@ -765,7 +777,7 @@ public struct SettingsView: View {
                     .pickerStyle(.segmented)
                     .accessibilityIdentifier("remoteTranscriptionModePicker")
 
-                    if settings.transcriptionMode == .streaming {
+                    if settings.transcriptionMode == .streaming, !hidesModelSelection {
                         Picker("Remote Streaming Model", selection: selectedModelBinding) {
                             ForEach(LiveModelGroup.grouped(AppSettings.supportedLiveModels)) { group in
                                 Section(group.title) {
@@ -789,7 +801,7 @@ public struct SettingsView: View {
                         }
                         .pickerStyle(.navigationLink)
                         .accessibilityIdentifier("remoteStreamingModelPicker")
-                    } else {
+                    } else if !hidesModelSelection {
                         Picker("Remote Batch Model", selection: $settings.batchTranscriptionModel) {
                             ForEach(BatchModelGroup.grouped(AppSettings.supportedBatchModels)) { group in
                                 Section(group.title) {
@@ -949,6 +961,20 @@ public struct SettingsView: View {
                     Label("OpenRouter API key required", systemImage: "exclamationmark.triangle")
                         .font(.caption)
                         .foregroundStyle(.orange)
+                }
+            }
+
+            Section("Subscription") {
+                NavigationLink {
+                    PaidAccessSettingsView()
+                } label: {
+                    HStack {
+                        Label("Paid Access", systemImage: "creditcard")
+                        Spacer()
+                        Text(PaidAccessStore.shared.entitlement.status.displayName)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
             }
 

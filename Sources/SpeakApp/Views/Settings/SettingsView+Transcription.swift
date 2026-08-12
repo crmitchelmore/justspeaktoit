@@ -265,7 +265,11 @@ extension SettingsView {
         .speakTooltip("Configure automatic recording stop based on silence detection.")
       }
 
-      if isRemoteStreamingTranscriptionSelected {
+      if hidesModelSelection {
+        simpleModelChoicesNotice
+      }
+
+      if isRemoteStreamingTranscriptionSelected, !hidesModelSelection {
         SettingsCard(title: "Remote Streaming model", systemImage: "mic.fill", tint: Color.brandAccentDeep) {
           VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
@@ -302,7 +306,7 @@ extension SettingsView {
         .speakTooltip("Pick the remote model that transcribes as you speak during streaming recording.")
       }
 
-      if settings.transcriptionMode == .batchRemote {
+      if settings.transcriptionMode == .batchRemote, !hidesModelSelection {
         SettingsCard(
           title: "Remote Batch model", systemImage: "folder.badge.clock", tint: Color.brandLagoon
         ) {
@@ -366,7 +370,7 @@ extension SettingsView {
         .speakTooltip("Tell Speak which cloud transcription model should polish the full recording.")
       }
 
-      if isAppleOnDeviceTranscriptionSelected {
+      if isAppleOnDeviceTranscriptionSelected, !hidesModelSelection {
         SettingsCard(
           title: "Apple on-device transcription",
           systemImage: "apple.logo",
@@ -393,7 +397,7 @@ extension SettingsView {
         .speakTooltip("Choose an on-device Apple transcription engine.")
       }
 
-      if settings.transcriptionMode == .localModel {
+      if settings.transcriptionMode == .localModel, !hidesModelSelection {
         SettingsCard(
           title: "Local transcription models",
           systemImage: "externaldrive.badge.checkmark",

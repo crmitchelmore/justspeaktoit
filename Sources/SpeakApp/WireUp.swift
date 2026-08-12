@@ -21,6 +21,7 @@ final class AppEnvironment: ObservableObject { // swiftlint:disable:this type_bo
   let tts: TextToSpeechManager
   let secureStorage: SecureAppStorage
   let openRouter: OpenRouterAPIClient
+  let paidAccess: PaidAccessManager
   let personalLexicon: PersonalLexiconService
   let pronunciationManager: PronunciationManager
   let livePolish: LivePolishManager
@@ -64,6 +65,7 @@ final class AppEnvironment: ObservableObject { // swiftlint:disable:this type_bo
     tts: TextToSpeechManager,
     secureStorage: SecureAppStorage,
     openRouter: OpenRouterAPIClient,
+    paidAccess: PaidAccessManager,
     personalLexicon: PersonalLexiconService,
     pronunciationManager: PronunciationManager,
     livePolish: LivePolishManager,
@@ -87,6 +89,7 @@ final class AppEnvironment: ObservableObject { // swiftlint:disable:this type_bo
     self.tts = tts
     self.secureStorage = secureStorage
     self.openRouter = openRouter
+    self.paidAccess = paidAccess
     self.personalLexicon = personalLexicon
     self.pronunciationManager = pronunciationManager
     self.livePolish = livePolish
@@ -371,11 +374,28 @@ enum WireUp {
         ?? "com.github.speakapp.credentials"
     )
     let openRouter = OpenRouterAPIClient(secureStorage: secureStorage)
+
+    // Paid access wraps, rather than replaces, the bring-your-own-key client.
+    // Without a verified entitlement every request goes straight through to
+    // `openRouter`, so subscribers and non-subscribers share one code path and
+    // an outage degrades to the user's own keys instead of breaking dictation.
+    let paidAccess = PaidAccessManager(
+      client: PaidAccessHTTPClient(),
+      sessionStore: AppSecureStorageSessionStore(storage: secureStorage),
+      settings: settings
+    )
+    let routedClient = PaidAccessProxyClient(
+      fallback: openRouter,
+      paidClient: PaidAccessHTTPClient(),
+      sessionProvider: paidAccess.sessionProvider(),
+      routerProvider: paidAccess.routerProvider()
+    )
+
     let transcription = TranscriptionManager(
       appSettings: settings,
       permissionsManager: permissions,
       audioDeviceManager: audioDevices,
-      batchClient: RemoteAudioTranscriber(client: openRouter),
+      batchClient: RemoteAudioTranscriber(client: routedClient),
       openRouter: openRouter,
       secureStorage: secureStorage
     )
@@ -383,7 +403,7 @@ enum WireUp {
     let personalLexicon = PersonalLexiconService(store: personalLexiconStore)
     let pronunciationManager = PronunciationManager()
     let postProcessing = PostProcessingManager(
-      client: openRouter,
+      client: routedClient,
       settings: settings,
       personalLexicon: personalLexicon
     )
@@ -439,6 +459,7 @@ enum WireUp {
       tts: tts,
       secureStorage: secureStorage,
       openRouter: openRouter,
+      paidAccess: paidAccess,
       personalLexicon: personalLexicon,
       pronunciationManager: pronunciationManager,
       livePolish: livePolish,

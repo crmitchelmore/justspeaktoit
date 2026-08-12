@@ -335,6 +335,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     case modulatePIIPhiTagging
     case accessibilityInsertionMode
     case selectedHotKey
+    case paidAccessRoutingEnabled
+    case simpleModelChoices
   }
 
   private static let defaultLocalTranscriptionModel = "local/whisperkit/tiny"
@@ -739,6 +741,24 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     didSet { store(voiceCommandsEnabled, key: .voiceCommandsEnabled) }
   }
 
+  // MARK: - Paid Access
+
+  /// Routes transcription and cleanup through the paid subscription service
+  /// instead of your own API keys.
+  ///
+  /// Defaults to `false`, and is additionally ignored unless an entitlement has
+  /// actually been verified, so enabling paid access cannot change behaviour for
+  /// anyone who has not subscribed.
+  @Published var paidAccessRoutingEnabled: Bool {
+    didSet { store(paidAccessRoutingEnabled, key: .paidAccessRoutingEnabled) }
+  }
+
+  /// Hides the model pickers and lets the subscription choose the best model
+  /// for each task. Only takes effect while paid routing is available.
+  @Published var simpleModelChoices: Bool {
+    didSet { store(simpleModelChoices, key: .simpleModelChoices) }
+  }
+
   /// Custom triggers for clipboard insertion (comma-separated), in addition to built-in triggers
   @Published var clipboardInsertionTriggers: String {
     didSet { store(clipboardInsertionTriggers, key: .clipboardInsertionTriggers) }
@@ -1040,6 +1060,12 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       defaults.object(forKey: DefaultsKey.voiceCommandsEnabled.rawValue) as? Bool ?? true
     clipboardInsertionTriggers =
       defaults.string(forKey: DefaultsKey.clipboardInsertionTriggers.rawValue) ?? ""
+
+    // Paid Access — both off by default so existing setups are untouched.
+    paidAccessRoutingEnabled =
+      defaults.object(forKey: DefaultsKey.paidAccessRoutingEnabled.rawValue) as? Bool ?? false
+    simpleModelChoices =
+      defaults.object(forKey: DefaultsKey.simpleModelChoices.rawValue) as? Bool ?? false
 
     // Transport Settings
     enableSendToMac =

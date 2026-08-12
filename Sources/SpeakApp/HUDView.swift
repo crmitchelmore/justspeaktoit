@@ -17,6 +17,7 @@ struct HUDOverlay: View {
         .padding(.bottom, 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .ignoresSafeArea()
+        .accessibilityIdentifier("hudOverlay")
     }
   }
 

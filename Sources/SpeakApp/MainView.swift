@@ -91,6 +91,7 @@ struct MainView: View {
       .accessibilityLabel(accessibilityLabelForRecordButton)
       .accessibilityHint(accessibilityHintForRecordButton)
       .accessibilityAddTraits(accessibilityTraitsForRecordButton)
+      .accessibilityIdentifier("toolbarRecordToggleButton")
       .disabled(isRecordButtonDisabled)
     }
     if !settings.visualDensity.isCompact {

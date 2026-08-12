@@ -7,7 +7,7 @@ import SpeakSync
 // swiftlint:disable file_length
 
 @MainActor
-final class AppEnvironment: ObservableObject { // swiftlint:disable:this type_body_length
+final class AppEnvironment: ObservableObject {
   let settings: AppSettings
   let permissions: PermissionsManager
   let history: HistoryManager

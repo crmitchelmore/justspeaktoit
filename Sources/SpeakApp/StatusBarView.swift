@@ -27,6 +27,7 @@ final class StatusBarController {
 
     statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     statusItem.button?.appearsDisabled = false
+    statusItem.button?.setAccessibilityIdentifier("statusBarButton")
     updateButton(for: mainManager.state)
     statusItem.menu = buildMenu()
 
@@ -172,6 +173,7 @@ final class StatusBarController {
       keyEquivalent: ""
     )
     toggleItem.target = self
+    toggleItem.setAccessibilityIdentifier("statusBarToggleRecordingItem")
     menu.addItem(toggleItem)
 
     let reconnectItem = NSMenuItem(
@@ -188,6 +190,7 @@ final class StatusBarController {
       keyEquivalent: ""
     )
     openItem.target = self
+    openItem.setAccessibilityIdentifier("statusBarOpenAppItem")
     menu.addItem(openItem)
 
     menu.addItem(NSMenuItem.separator())
@@ -198,6 +201,7 @@ final class StatusBarController {
       keyEquivalent: "q"
     )
     quitItem.target = self
+    quitItem.setAccessibilityIdentifier("statusBarQuitItem")
     menu.addItem(quitItem)
 
     return menu

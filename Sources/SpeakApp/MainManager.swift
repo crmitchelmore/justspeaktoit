@@ -58,10 +58,21 @@ final class MainManager: ObservableObject {
   let liveTextInserter: LiveTextInserter
   let textProcessor: TranscriptionTextProcessor
   let autoCorrectionTracker: AutoCorrectionTracker
+  let profileStore: DictationProfileStore
   let logger = Logger(subsystem: "com.github.speakapp", category: "MainManager")
   private let recordingSoundPlayer = RecordingSoundPlayer()
+  /// Applies/reverts per-app dictation profile overrides for a session.
+  private let profileApplier = SessionProfileApplier()
 
-  var activeSession: ActiveSession?
+  var activeSession: ActiveSession? {
+    didSet {
+      // Every session-teardown path clears `activeSession`, so this is the one
+      // place profile overrides are reverted back to the user's own settings.
+      if activeSession == nil {
+        profileApplier.end(settings: appSettings, postProcessing: postProcessingManager)
+      }
+    }
+  }
   /// Guards against re-entrant calls to endSession (e.g. silence detection + user hotkey racing).
   var isEndingSession = false
   let recordingStopTimeout: TimeInterval = 8
@@ -116,7 +127,8 @@ final class MainManager: ObservableObject {
     livePolishManager: LivePolishManager,
     liveTextInserter: LiveTextInserter,
     textProcessor: TranscriptionTextProcessor,
-    autoCorrectionTracker: AutoCorrectionTracker
+    autoCorrectionTracker: AutoCorrectionTracker,
+    profileStore: DictationProfileStore
   ) {
     self.appSettings = appSettings
     self.permissionsManager = permissionsManager
@@ -133,6 +145,7 @@ final class MainManager: ObservableObject {
     self.liveTextInserter = liveTextInserter
     self.textProcessor = textProcessor
     self.autoCorrectionTracker = autoCorrectionTracker
+    self.profileStore = profileStore
 
     recordingSoundPlayer.profile = appSettings.recordingSoundProfile
     appSettings.$recordingSoundProfile
@@ -217,6 +230,17 @@ final class MainManager: ObservableObject {
   /// Handle live text updates and trigger live polish if enabled
   private func handleLiveTextUpdate(_ text: String) {
     livePreview = text
+
+    // Latency checkpoint: first non-empty partial while still recording.
+    if self.state == .recording, !text.isEmpty,
+       let session = self.activeSession, session.firstPartialReceived == nil {
+      session.firstPartialReceived = Date()
+      if let firstPartialMs = SessionLatencyMetrics.milliseconds(
+        from: session.captureStarted, to: session.firstPartialReceived
+      ) {
+        self.logger.info("Latency: first partial \(firstPartialMs)ms after capture start")
+      }
+    }
 
     // Live insertion during recording (for streaming + accessibility mode)
     if state == .recording && liveInsertionEnabled {
@@ -423,9 +447,26 @@ final class MainManager: ObservableObject {
   // swiftlint:disable:next function_body_length
   private func startSession(trigger: SessionTriggerSource) async {
     guard activeSession == nil else { return }
-    if await presentMissingLiveAPIKeyAlertIfNeeded() { return }
+
+    // Per-app dictation profile: resolve the frontmost app and apply its
+    // overrides for this session only. Applied before the API-key check so the
+    // check sees the profile's provider. Reverted whenever `activeSession`
+    // returns to nil; the early-exit paths below revert explicitly because no
+    // session was created yet.
+    profileApplier.begin(
+      settings: appSettings,
+      postProcessing: postProcessingManager,
+      profiles: profileStore.profiles,
+      frontmostBundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+    )
+
+    if await presentMissingLiveAPIKeyAlertIfNeeded() {
+      profileApplier.end(settings: appSettings, postProcessing: postProcessingManager)
+      return
+    }
 
     if audioInputDeviceManager.devices.isEmpty {
+      profileApplier.end(settings: appSettings, postProcessing: postProcessingManager)
       let message = "No microphone connected. Plug in a USB or Bluetooth microphone and try again."
       state = .failed(message)
       lastErrorMessage = message
@@ -478,11 +519,12 @@ final class MainManager: ObservableObject {
     if appSettings.showHUDDuringSessions {
       permissionsManager.refresh(.microphone)
       hudManager.updateCaptureHealth(buildCaptureHealthSnapshot())
-      hudManager.beginRecording()
+      hudManager.beginRecording(profileName: profileApplier.activeProfileName)
     }
 
     do {
       _ = try await audioFileManager.startRecording()
+      recordCaptureStart(for: session)
       startAudioLevelMonitoring()
       if isStreamingTranscriptionMode {
         try await transcriptionManager.startLiveTranscription()
@@ -499,12 +541,26 @@ final class MainManager: ObservableObject {
     }
   }
 
+  /// Latency checkpoint: the recorder is live. hotkey → capture-start is the
+  /// cold-start figure competitors market, so log it explicitly every session.
+  private func recordCaptureStart(for session: ActiveSession) {
+    session.captureStarted = Date()
+    if let coldStartMs = SessionLatencyMetrics.milliseconds(
+      from: session.recordingStarted, to: session.captureStarted
+    ) {
+      self.logger.info("Latency: capture started \(coldStartMs)ms after trigger (cold start)")
+    }
+  }
+
   // swiftlint:disable cyclomatic_complexity function_body_length
   func endSession(trigger: SessionTriggerSource) async {
     guard !isEndingSession else { return }
     guard let session = activeSession else { return }
     isEndingSession = true
     defer { isEndingSession = false }
+
+    // Latency checkpoint: user asked to stop (before the optional tail sleep).
+    session.stopRequested = Date()
 
     stopAudioLevelMonitoring()
 
@@ -821,6 +877,9 @@ final class MainManager: ObservableObject {
         liveFinalizationResult = liveTextInserter.applyPolishedFinal(finalText)
         liveTextInserter.end()
       }
+      // Latency checkpoint: when the first character actually reached the target
+      // app via live insertion (nil when the session never streamed text).
+      session.firstInsertion = self.liveTextInserter.firstInsertionAt
 
       switch liveFinalizationResult {
       case .applied:
@@ -894,7 +953,15 @@ final class MainManager: ObservableObject {
         lastErrorMessage = notice.message
         state = .failed(notice.message)
       } else {
-        hudManager.finishSuccess(message: "Delivered")
+        if let stopToFinalMs = SessionLatencyMetrics.milliseconds(
+          from: session.stopRequested, to: session.outputDelivered
+        ) {
+          hudManager.finishSuccess(
+            message: "Delivered in \(SessionLatencyMetrics.formattedMilliseconds(stopToFinalMs))"
+          )
+        } else {
+          hudManager.finishSuccess(message: "Delivered")
+        }
         state = .completed(historyItem)
       }
 

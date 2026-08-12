@@ -7,7 +7,7 @@ import SpeakSync
 // swiftlint:disable file_length
 
 @MainActor
-final class AppEnvironment: ObservableObject {
+final class AppEnvironment: ObservableObject { // swiftlint:disable:this type_body_length
   /// Process-wide access point for the App Intents (Shortcuts) surface, set at
   /// bootstrap. Intents can fire before the SwiftUI scene has bootstrapped the
   /// environment (e.g. when Shortcuts launches the app), so it is optional and
@@ -32,6 +32,7 @@ final class AppEnvironment: ObservableObject {
   let livePolish: LivePolishManager
   let liveTextInserter: LiveTextInserter
   let autoCorrectionTracker: AutoCorrectionTracker
+  let profiles: DictationProfileStore
   let main: MainManager
   let transportServer: TransportServer
   private let hudPresenter: HUDWindowPresenter
@@ -74,6 +75,7 @@ final class AppEnvironment: ObservableObject {
     livePolish: LivePolishManager,
     liveTextInserter: LiveTextInserter,
     autoCorrectionTracker: AutoCorrectionTracker,
+    profiles: DictationProfileStore,
     main: MainManager,
     transportServer: TransportServer,
     hudPresenter: HUDWindowPresenter
@@ -96,6 +98,7 @@ final class AppEnvironment: ObservableObject {
     self.livePolish = livePolish
     self.liveTextInserter = liveTextInserter
     self.autoCorrectionTracker = autoCorrectionTracker
+    self.profiles = profiles
     self.main = main
     self.transportServer = transportServer
     self.hudPresenter = hudPresenter
@@ -237,6 +240,7 @@ final class AppEnvironment: ObservableObject {
       .openSettings: .settings(.general),
       .openTranscriptionSettings: .settings(.transcription),
       .openPostProcessingSettings: .settings(.postProcessing),
+      .openProfilesSettings: .settings(.profiles),
       .openVoiceOutputSettings: .settings(.voiceOutput),
       .openPronunciationSettings: .settings(.pronunciation),
       .openAPIKeysSettings: .settings(.apiKeys),
@@ -402,6 +406,7 @@ enum WireUp {
       lexiconService: personalLexicon,
       appSettings: settings
     )
+    let profiles = DictationProfileStore()
     let main = MainManager(
       appSettings: settings,
       permissionsManager: permissions,
@@ -417,7 +422,8 @@ enum WireUp {
       livePolishManager: livePolish,
       liveTextInserter: liveTextInserter,
       textProcessor: textProcessor,
-      autoCorrectionTracker: autoCorrectionTracker
+      autoCorrectionTracker: autoCorrectionTracker,
+      profileStore: profiles
     )
     let hudPresenter = HUDWindowPresenter(manager: hud, settings: settings)
     let shortcuts = ShortcutManager(permissionsManager: permissions)
@@ -444,6 +450,7 @@ enum WireUp {
       livePolish: livePolish,
       liveTextInserter: liveTextInserter,
       autoCorrectionTracker: autoCorrectionTracker,
+      profiles: profiles,
       main: main,
       transportServer: transportServer,
       hudPresenter: hudPresenter

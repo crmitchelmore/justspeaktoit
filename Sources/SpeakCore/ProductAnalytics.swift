@@ -332,15 +332,21 @@ public actor ProductAnalyticsController {
 
     public func consentState() -> AnalyticsConsentState { consent }
 
+    /// Applies a consent transition fail-closed: collection is only ever enabled after the new state is persisted,
+    /// and every opt-out cleanup step is attempted even when an earlier step fails.
     public func setConsent(_ newConsent: AnalyticsConsentState) async throws {
-        consent = newConsent
-        try stateStore.saveConsent(newConsent)
-        guard newConsent == .optedIn else {
-            try await sink.purge()
-            try stateStore.deleteInstallationID()
-            await sink.close()
+        guard newConsent != .optedIn else {
+            try stateStore.saveConsent(newConsent)
+            consent = newConsent
             return
         }
+        consent = newConsent
+        var firstFailure: Error?
+        do { try stateStore.saveConsent(newConsent) } catch { firstFailure = firstFailure ?? error }
+        do { try await sink.purge() } catch { firstFailure = firstFailure ?? error }
+        do { try stateStore.deleteInstallationID() } catch { firstFailure = firstFailure ?? error }
+        await sink.close()
+        if let firstFailure { throw firstFailure }
     }
 
     public func capture(_ event: ProductAnalyticsEvent) async throws {

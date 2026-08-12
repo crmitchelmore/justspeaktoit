@@ -3,7 +3,7 @@ import Foundation
 import XCTest
 
 final class ProductAnalyticsTests: XCTestCase {
-    func testUnknownConsentSendsNothingAndDoesNotCreateIdentity() async throws {
+    func testUnknownConsent_SendsNothingAndDoesNotCreateIdentity() async throws {
         let fixture = try Fixture()
         try await fixture.controller.capture(.appActiveDaily)
         let payloads = await fixture.sink.payloads
@@ -11,7 +11,7 @@ final class ProductAnalyticsTests: XCTestCase {
         XCTAssertNil(try fixture.store.loadInstallationID())
     }
 
-    func testOptedOutConsentSendsNothing() async throws {
+    func testOptedOutConsent_SendsNothing() async throws {
         let fixture = try Fixture()
         try await fixture.controller.setConsent(.optedOut)
         try await fixture.controller.capture(.appActiveDaily)
@@ -19,7 +19,7 @@ final class ProductAnalyticsTests: XCTestCase {
         XCTAssertTrue(payloads.isEmpty)
     }
 
-    func testOptInCapturesOnlyTypedAllowlistedProperties() async throws {
+    func testOptIn_CapturesOnlyTypedAllowlistedProperties() async throws {
         let fixture = try Fixture()
         try await fixture.controller.setConsent(.optedIn)
         try await fixture.controller.capture(.firstTranscriptionSucceeded(
@@ -36,7 +36,7 @@ final class ProductAnalyticsTests: XCTestCase {
         XCTAssertEqual(Set(payload.properties.keys), Self.allowedFirstSuccessKeys)
     }
 
-    func testOptOutPurgesQueueDeletesIdentityAndClosesSink() async throws {
+    func testOptOut_PurgesQueueDeletesIdentityAndClosesSink() async throws {
         let fixture = try Fixture()
         try await fixture.controller.setConsent(.optedIn)
         try await fixture.controller.capture(.appActiveDaily)
@@ -49,15 +49,16 @@ final class ProductAnalyticsTests: XCTestCase {
         XCTAssertEqual(closeCount, 1)
     }
 
-    func testForceDisabledKillSwitchOverridesOptIn() async throws {
+    func testForceDisabledKillSwitch_OverridesOptIn() async throws {
         let fixture = try Fixture(forceDisabled: true)
         try await fixture.controller.setConsent(.optedIn)
         try await fixture.controller.capture(.appActiveDaily)
         let payloads = await fixture.sink.payloads
         XCTAssertTrue(payloads.isEmpty)
+        XCTAssertNil(try fixture.store.loadInstallationID())
     }
 
-    func testPreviewUsesTheSameAllowlistedPayloadEncoder() async throws {
+    func testPreview_UsesTheSameAllowlistedPayloadEncoder() async throws {
         let fixture = try Fixture()
         let data = try await fixture.controller.preview(.onboardingStarted(entryPoint: .freshInstall))
         let payload = try JSONDecoder().decode(ProductAnalyticsPayload.self, from: data)
@@ -65,7 +66,7 @@ final class ProductAnalyticsTests: XCTestCase {
         XCTAssertEqual(payload.properties["entry_point"], "fresh_install")
     }
 
-    func testDetailedTranscriptionEventBucketsRawMeasurementsLocally() async throws {
+    func testDetailedTranscriptionEvent_BucketsRawMeasurementsLocally() async throws {
         let fixture = try Fixture()
         try await fixture.controller.setConsent(.optedIn)
         let dimensions = AnalyticsTranscriptionDimensions(
@@ -94,7 +95,7 @@ final class ProductAnalyticsTests: XCTestCase {
         XCTAssertNil(payload.properties["word_count"])
     }
 
-    func testAnonymousCounterNeverReceivesInstallationIdentity() async throws {
+    func testAnonymousCounter_NeverReceivesInstallationIdentity() async throws {
         let fixture = try Fixture()
         try await fixture.controller.setConsent(.optedIn)
         try await fixture.controller.capture(.correctionApplied(rulesMatched: .twoToFive))
@@ -106,7 +107,7 @@ final class ProductAnalyticsTests: XCTestCase {
         XCTAssertNil(try fixture.store.loadInstallationID())
     }
 
-    func testUnboundedModelFamilyFallsBackWithoutLeakingContent() {
+    func testUnboundedModelFamily_FallsBackWithoutLeakingContent() {
         let dimensions = AnalyticsTranscriptionDimensions(
             mode: .batch,
             engine: .onDevice,
@@ -119,6 +120,68 @@ final class ProductAnalyticsTests: XCTestCase {
         XCTAssertEqual(dimensions.languageCode, "other")
     }
 
+    func testOptInPersistenceFailure_LeavesCollectionDisabled() async throws {
+        let store = StubStore()
+        store.saveConsentError = StubError()
+        let sink = SpySink()
+        let controller = try Self.makeController(sink: sink, store: store)
+
+        do {
+            try await controller.setConsent(.optedIn)
+            XCTFail("Expected the failed consent write to propagate")
+        } catch is StubError {}
+
+        let state = await controller.consentState()
+        XCTAssertEqual(state, .unknown)
+        try await controller.capture(.appActiveDaily)
+        let payloads = await sink.payloads
+        XCTAssertTrue(payloads.isEmpty)
+        XCTAssertNil(store.installationID)
+    }
+
+    func testOptOutPurgeFailure_StillDeletesIdentityAndClosesSink() async throws {
+        let store = StubStore()
+        store.consent = .optedIn
+        store.installationID = UUID()
+        let sink = SpySink(purgeError: StubError())
+        let controller = try Self.makeController(sink: sink, store: store)
+
+        do {
+            try await controller.setConsent(.optedOut)
+            XCTFail("Expected the failed purge to propagate")
+        } catch is StubError {}
+
+        let state = await controller.consentState()
+        XCTAssertEqual(state, .optedOut)
+        XCTAssertEqual(store.consent, .optedOut)
+        XCTAssertNil(store.installationID)
+        let closeCount = await sink.closeCount
+        XCTAssertEqual(closeCount, 1)
+    }
+
+    func testOptOutIdentityDeletionFailure_StillPurgesAndClosesSink() async throws {
+        let store = StubStore()
+        store.consent = .optedIn
+        store.deleteInstallationIDError = StubError()
+        let sink = SpySink()
+        let controller = try Self.makeController(sink: sink, store: store)
+
+        do {
+            try await controller.setConsent(.optedOut)
+            XCTFail("Expected the failed identity deletion to propagate")
+        } catch is StubError {}
+
+        let state = await controller.consentState()
+        XCTAssertEqual(state, .optedOut)
+        let purgeCount = await sink.purgeCount
+        let closeCount = await sink.closeCount
+        XCTAssertEqual(purgeCount, 1)
+        XCTAssertEqual(closeCount, 1)
+        try await controller.capture(.appActiveDaily)
+        let payloads = await sink.payloads
+        XCTAssertTrue(payloads.isEmpty)
+    }
+
     private static let allowedFirstSuccessKeys: Set<String> = [
         "provider_type", "engine_type", "days_since_install_bucket", "platform", "app_version", "build",
         "os_major_minor", "distribution_channel", "locale_language_code", "architecture", "analytics_schema_version"
@@ -126,6 +189,53 @@ final class ProductAnalyticsTests: XCTestCase {
 }
 
 private extension ProductAnalyticsTests {
+    static let context = ProductAnalyticsContext(
+        platform: .macOS,
+        appVersion: "1.2.3",
+        build: "42",
+        osMajorMinor: "15.6",
+        distributionChannel: .development,
+        localeLanguageCode: "en",
+        architecture: "arm64"
+    )
+
+    static func makeController(
+        sink: any ProductAnalyticsSink,
+        store: any ProductAnalyticsStateStore,
+        forceDisabled: Bool = false
+    ) throws -> ProductAnalyticsController {
+        try ProductAnalyticsController(
+            context: context,
+            sink: sink,
+            stateStore: store,
+            forceDisabled: { forceDisabled }
+        )
+    }
+
+    struct StubError: Error {}
+
+    final class StubStore: ProductAnalyticsStateStore, @unchecked Sendable {
+        var consent: AnalyticsConsentState = .unknown
+        var installationID: UUID?
+        var saveConsentError: Error?
+        var deleteInstallationIDError: Error?
+
+        func loadConsent() throws -> AnalyticsConsentState { consent }
+
+        func saveConsent(_ consent: AnalyticsConsentState) throws {
+            if let saveConsentError { throw saveConsentError }
+            self.consent = consent
+        }
+
+        func loadInstallationID() throws -> UUID? { installationID }
+        func saveInstallationID(_ id: UUID) throws { installationID = id }
+
+        func deleteInstallationID() throws {
+            if let deleteInstallationIDError { throw deleteInstallationIDError }
+            installationID = nil
+        }
+    }
+
     struct Fixture {
         let sink: SpySink
         let store: FileProductAnalyticsStateStore
@@ -136,19 +246,10 @@ private extension ProductAnalyticsTests {
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
             store = FileProductAnalyticsStateStore(fileURL: directory.appendingPathComponent("analytics.json"))
             sink = SpySink()
-            controller = try ProductAnalyticsController(
-                context: ProductAnalyticsContext(
-                    platform: .macOS,
-                    appVersion: "1.2.3",
-                    build: "42",
-                    osMajorMinor: "15.6",
-                    distributionChannel: .development,
-                    localeLanguageCode: "en",
-                    architecture: "arm64"
-                ),
+            controller = try ProductAnalyticsTests.makeController(
                 sink: sink,
-                stateStore: store,
-                forceDisabled: { forceDisabled }
+                store: store,
+                forceDisabled: forceDisabled
             )
         }
     }
@@ -157,8 +258,18 @@ private extension ProductAnalyticsTests {
         var payloads: [ProductAnalyticsPayload] = []
         var purgeCount = 0
         var closeCount = 0
+        private let purgeError: Error?
+
+        init(purgeError: Error? = nil) { self.purgeError = purgeError }
+
         func capture(_ payload: ProductAnalyticsPayload) async throws { payloads.append(payload) }
-        func purge() async throws { purgeCount += 1; payloads.removeAll() }
+
+        func purge() async throws {
+            purgeCount += 1
+            payloads.removeAll()
+            if let purgeError { throw purgeError }
+        }
+
         func close() async { closeCount += 1 }
     }
 }

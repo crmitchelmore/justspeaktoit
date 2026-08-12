@@ -117,6 +117,9 @@ TestFlight workflow needs a provisioning profile for bundle ID
    works offline. A server-only locale must fail gracefully.
 7. Delete and return keys work when idle and are disabled while capturing;
    globe switches keyboards at all times.
+8. Dictate text that a later revision must rewrite while a composed emoji
+   (for example 👨‍👩‍👧‍👦) sits inside the volatile tail → the emoji is removed
+   whole, leaving no fragment behind, and text before the tail is untouched.
 
 ### Direct path: language quick-switch
 

@@ -38,12 +38,18 @@ public enum StreamingTextReconciler {
     /// retraction (target shorter), and corrections that rewrite earlier words
     /// (stable prefix shrinks). The boundary always falls on a grapheme-cluster
     /// edge in both strings.
+    ///
+    /// Grapheme clusters are compared by their exact Unicode scalars rather than
+    /// by canonical equivalence: `"e\u{301}"` and `"é"` render identically but
+    /// occupy a different number of UTF-16 code units, so treating them as a
+    /// stable prefix would desynchronise every later replacement offset from the
+    /// text actually sitting in the target field.
     public static func diff(from current: String, to target: String) -> StreamingTextDiff {
         var currentIndex = current.startIndex
         var targetIndex = target.startIndex
         while currentIndex < current.endIndex,
               targetIndex < target.endIndex,
-              current[currentIndex] == target[targetIndex] {
+              current[currentIndex].unicodeScalars.elementsEqual(target[targetIndex].unicodeScalars) {
             current.formIndex(after: &currentIndex)
             target.formIndex(after: &targetIndex)
         }

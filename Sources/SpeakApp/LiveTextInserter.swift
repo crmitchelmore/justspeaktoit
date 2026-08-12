@@ -69,6 +69,12 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
   /// selection exactly like the standard insertion path does.
   private var streamingPendingSelectionUTF16: Int = 0
 
+  /// The target field's contents captured when the streamed region was anchored,
+  /// before this session wrote anything. It is the only evidence available for
+  /// proving that streamed text is genuinely absent (rather than merely altered
+  /// by the app) and for rejecting a re-anchor onto identical pre-existing text.
+  private var streamingBaselineFieldText: String?
+
   /// Whether incremental live updates should pause until finalization.
   private var shouldPauseIncrementalUpdates: Bool = false
 
@@ -97,6 +103,7 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
     self.strategy = strategy
     self.streamingAnchorUTF16 = nil
     self.streamingPendingSelectionUTF16 = 0
+    self.streamingBaselineFieldText = nil
     shouldPauseIncrementalUpdates = false
     usingClipboardFallback = false
     isActive = true
@@ -127,6 +134,7 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
     self.strategy = .fullValue
     self.streamingAnchorUTF16 = nil
     self.streamingPendingSelectionUTF16 = 0
+    self.streamingBaselineFieldText = nil
     shouldPauseIncrementalUpdates = false
     usingClipboardFallback = false
     isActive = false
@@ -434,6 +442,7 @@ extension LiveTextInserter {
       }
       self.streamingAnchorUTF16 = selection.location
       self.streamingPendingSelectionUTF16 = max(0, selection.length)
+      self.streamingBaselineFieldText = Self.fieldText(of: element)
     } else if !insertedText.isEmpty {
       // Re-validate the region before every patch: another edit may have moved
       // or removed the streamed text since the last update.
@@ -593,10 +602,10 @@ extension LiveTextInserter {
   }
 
   /// State of the streamed region as observed in the live target field.
-  private enum StreamingRegionState {
-    /// The streamed text is present; the anchor now points at it.
-    case matched
-    /// The field was read successfully and holds none of the streamed text.
+  enum StreamingRegionState: Equatable {
+    /// The streamed text is present at the given UTF-16 offset.
+    case matched(anchor: Int)
+    /// The field was read successfully and provably holds none of the streamed text.
     case absent
     /// The field could not be read, or the streamed text is ambiguous.
     case unknown
@@ -608,31 +617,63 @@ extension LiveTextInserter {
   /// safe; `.unknown` means no write may be attempted.
   private func inspectStreamingRegion(on element: AXUIElement) -> StreamingRegionState {
     guard let anchor = self.streamingAnchorUTF16 else { return .unknown }
+    guard let fieldText = Self.fieldText(of: element) else { return .unknown }
 
-    var currentValue: CFTypeRef?
-    let getStatus = AXUIElementCopyAttributeValue(
-      element, kAXValueAttribute as CFString, &currentValue
+    let state = Self.resolveStreamingRegion(
+      fieldText: fieldText,
+      expected: insertedText,
+      anchor: anchor,
+      baselineFieldText: self.streamingBaselineFieldText
     )
-    guard getStatus == .success, let fieldText = currentValue as? String else { return .unknown }
+    if case let .matched(resolvedAnchor) = state, resolvedAnchor != anchor {
+      self.streamingAnchorUTF16 = resolvedAnchor
+      print("[LiveTextInserter] Streaming anchor re-synced to \(resolvedAnchor)")
+    }
+    return state
+  }
 
-    let expected = insertedText
+  /// Pure decision behind `inspectStreamingRegion`, kept separate so the
+  /// never-duplicate and never-overwrite rules are unit-testable without AX.
+  ///
+  /// - `.absent` is returned only when the field cannot be hiding an altered
+  ///   copy of the streamed text: the field is empty, or it has not grown since
+  ///   the region was anchored. Anything else (an app that autocorrected,
+  ///   reformatted or smart-quoted the streamed text) is `.unknown`, because
+  ///   handing such a session back to the standard delivery would duplicate it.
+  /// - Re-anchoring on a unique occurrence is refused when the field already
+  ///   contained that text before this session wrote anything, since the match
+  ///   may be unrelated pre-existing content.
+  static func resolveStreamingRegion(
+    fieldText: String,
+    expected: String,
+    anchor: Int,
+    baselineFieldText: String?
+  ) -> StreamingRegionState {
     guard !expected.isEmpty else {
-      return anchor <= fieldText.utf16.count ? .matched : .unknown
+      return anchor <= fieldText.utf16.count ? .matched(anchor: anchor) : .unknown
     }
 
-    if Self.utf16Substring(of: fieldText, location: anchor, length: expected.utf16.count) == expected {
-      return .matched
+    if self.utf16Substring(of: fieldText, location: anchor, length: expected.utf16.count) == expected {
+      return .matched(anchor: anchor)
     }
 
     // The app shifted the text (autocorrect, an edit above the region, …).
-    // Re-anchor only when the streamed text appears exactly once.
-    let offsets = Self.utf16Offsets(of: expected, in: fieldText, limit: 2)
-    guard offsets.count == 1, let offset = offsets.first else {
-      return offsets.isEmpty ? .absent : .unknown
+    // Re-anchor only when the streamed text appears exactly once and cannot be
+    // confused with content that was already in the field.
+    let offsets = self.utf16Offsets(of: expected, in: fieldText, limit: 2)
+    if offsets.count == 1, let offset = offsets.first {
+      if let baseline = baselineFieldText, baseline.range(of: expected) != nil {
+        return .unknown
+      }
+      return .matched(anchor: offset)
     }
-    self.streamingAnchorUTF16 = offset
-    print("[LiveTextInserter] Streaming anchor re-synced to \(offset)")
-    return .matched
+    guard offsets.isEmpty else { return .unknown }
+
+    if fieldText.isEmpty { return .absent }
+    guard let baseline = baselineFieldText, fieldText.utf16.count <= baseline.utf16.count else {
+      return .unknown
+    }
+    return .absent
   }
 
   /// Stops incremental patching; finalization performs a single clean pass.
@@ -671,6 +712,16 @@ extension LiveTextInserter {
     var range = CFRange()
     guard AXValueGetValue(axValue, .cfRange, &range) else { return nil }
     return range
+  }
+
+  /// Reads the whole value of a text element, or `nil` when it cannot be read.
+  private static func fieldText(of element: AXUIElement) -> String? {
+    var currentValue: CFTypeRef?
+    let getStatus = AXUIElementCopyAttributeValue(
+      element, kAXValueAttribute as CFString, &currentValue
+    )
+    guard getStatus == .success, let text = currentValue as? String else { return nil }
+    return text
   }
 
   /// UTF-16 based substring with bounds checks; `nil` when the range is out of

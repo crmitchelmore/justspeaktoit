@@ -47,4 +47,116 @@ final class LiveTextInserterStreamingHelpersTests: XCTestCase {
         XCTAssertTrue(LiveTextInserter.utf16Offsets(of: "missing", in: "other text", limit: 2).isEmpty)
         XCTAssertTrue(LiveTextInserter.utf16Offsets(of: "", in: "other text", limit: 2).isEmpty)
     }
+
+    // MARK: - Region resolution (never duplicate, never overwrite)
+
+    @MainActor
+    func testResolveRegion_MatchesStreamedTextAtAnchor() {
+        let state = LiveTextInserter.resolveStreamingRegion(
+            fieldText: "before hello world",
+            expected: "hello world",
+            anchor: 7,
+            baselineFieldText: "before "
+        )
+        XCTAssertEqual(state, .matched(anchor: 7))
+    }
+
+    @MainActor
+    func testResolveRegion_ReAnchorsWhenTextMovedAndBaselineCannotExplainIt() {
+        let state = LiveTextInserter.resolveStreamingRegion(
+            fieldText: "typed above\nhello world",
+            expected: "hello world",
+            anchor: 0,
+            baselineFieldText: ""
+        )
+        XCTAssertEqual(state, .matched(anchor: 12))
+    }
+
+    @MainActor
+    func testResolveRegion_RefusesReAnchorOntoPreExistingIdenticalText() {
+        // The field already contained "foo" before streaming started, so a single
+        // remaining "foo" is no proof of where this session's text went.
+        let state = LiveTextInserter.resolveStreamingRegion(
+            fieldText: "foo",
+            expected: "foo",
+            anchor: 3,
+            baselineFieldText: "foo"
+        )
+        XCTAssertEqual(state, .unknown)
+    }
+
+    @MainActor
+    func testResolveRegion_TreatsAlteredStreamedTextAsUnknownNotAbsent() {
+        // The app autocorrected the streamed text; declaring it absent would let
+        // the standard delivery paste a second copy.
+        let state = LiveTextInserter.resolveStreamingRegion(
+            fieldText: "Hello world",
+            expected: "hello world",
+            anchor: 0,
+            baselineFieldText: ""
+        )
+        XCTAssertEqual(state, .unknown)
+    }
+
+    @MainActor
+    func testResolveRegion_ProvesAbsenceWhenFieldDidNotGrow() {
+        // Nothing landed: the field still holds exactly what it held at anchor
+        // time, so a single standard delivery is safe.
+        let state = LiveTextInserter.resolveStreamingRegion(
+            fieldText: "untouched",
+            expected: "hello world",
+            anchor: 9,
+            baselineFieldText: "untouched"
+        )
+        XCTAssertEqual(state, .absent)
+    }
+
+    @MainActor
+    func testResolveRegion_ProvesAbsenceForEmptyField() {
+        let state = LiveTextInserter.resolveStreamingRegion(
+            fieldText: "",
+            expected: "hello",
+            anchor: 0,
+            baselineFieldText: nil
+        )
+        XCTAssertEqual(state, .absent)
+    }
+
+    @MainActor
+    func testResolveRegion_WithoutBaselineCannotProveAbsenceInNonEmptyField() {
+        let state = LiveTextInserter.resolveStreamingRegion(
+            fieldText: "some unrelated content",
+            expected: "hello",
+            anchor: 0,
+            baselineFieldText: nil
+        )
+        XCTAssertEqual(state, .unknown)
+    }
+
+    @MainActor
+    func testResolveRegion_AmbiguousOccurrencesAreUnknown() {
+        let state = LiveTextInserter.resolveStreamingRegion(
+            fieldText: "ab ab",
+            expected: "ab",
+            anchor: 99,
+            baselineFieldText: ""
+        )
+        XCTAssertEqual(state, .unknown)
+    }
+
+    @MainActor
+    func testResolveRegion_EmptyExpectedTextOnlyNeedsAnchorInBounds() {
+        XCTAssertEqual(
+            LiveTextInserter.resolveStreamingRegion(
+                fieldText: "hello", expected: "", anchor: 5, baselineFieldText: "hello"
+            ),
+            .matched(anchor: 5)
+        )
+        XCTAssertEqual(
+            LiveTextInserter.resolveStreamingRegion(
+                fieldText: "hello", expected: "", anchor: 6, baselineFieldText: "hello"
+            ),
+            .unknown
+        )
+    }
 }

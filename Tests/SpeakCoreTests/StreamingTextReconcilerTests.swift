@@ -158,6 +158,38 @@ final class StreamingTextReconcilerTests: XCTestCase {
         )
     }
 
+    // MARK: - Unicode normalisation
+
+    func testDiff_NormalisationChangeIsRewrittenNotTreatedAsStablePrefix() {
+        // "café" decomposed (5 UTF-16 units) then precomposed with an append
+        // (5 UTF-16 units). Canonical equality would keep a 5-unit "stable"
+        // prefix that is only 4 units long in the target, desynchronising every
+        // later offset from the text actually in the field.
+        let decomposed = "cafe\u{301}"
+        let precomposedWithTail = "caf\u{e9}s"
+
+        let diff = StreamingTextReconciler.diff(from: decomposed, to: precomposedWithTail)
+        XCTAssertEqual(diff.replaceLocationUTF16, 3)
+        XCTAssertEqual(diff.replaceLengthUTF16, 2)
+        XCTAssertEqual(diff.replacement, "\u{e9}s")
+
+        let applied = StreamingTextReconciler.apply(diff, to: decomposed)
+        XCTAssertNotNil(applied)
+        XCTAssertTrue(
+            applied?.unicodeScalars.elementsEqual(precomposedWithTail.unicodeScalars) ?? false,
+            "the patched field must hold the exact scalars the tracker believes it holds"
+        )
+        XCTAssertEqual(applied?.utf16.count, precomposedWithTail.utf16.count)
+    }
+
+    func testDiff_NormalisationOnlyChangeStillProducesAWrite() {
+        let diff = StreamingTextReconciler.diff(from: "e\u{301}", to: "\u{e9}")
+        XCTAssertFalse(diff.isNoOp)
+        XCTAssertEqual(diff.replaceLocationUTF16, 0)
+        XCTAssertEqual(diff.replaceLengthUTF16, 2)
+        XCTAssertEqual(StreamingTextReconciler.apply(diff, to: "e\u{301}")?.utf16.count, 1)
+    }
+
     // MARK: - Snapshot-sequence simulation
 
     func testDiff_TypicalProviderSnapshotSequenceReconstructsEachStep() {

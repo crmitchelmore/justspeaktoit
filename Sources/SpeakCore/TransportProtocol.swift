@@ -22,6 +22,10 @@ public enum TransportMessage: Codable {
     case error(ErrorMessage)
     case ping
     case pong
+    /// Local automation (CLI / MCP) command, carried over the same envelope so
+    /// there is one message contract for every non-UI client.
+    case automationRequest(AutomationRequest)
+    case automationResponse(AutomationResponse)
     
     private enum CodingKeys: String, CodingKey {
         case type, payload
@@ -32,6 +36,7 @@ public enum TransportMessage: Codable {
         case sessionStart, sessionEnd
         case transcriptChunk, ack, error
         case ping, pong
+        case automationRequest, automationResponse
     }
     
     public init(from decoder: Decoder) throws {
@@ -59,6 +64,10 @@ public enum TransportMessage: Codable {
             self = .ping
         case .pong:
             self = .pong
+        case .automationRequest:
+            self = .automationRequest(try container.decode(AutomationRequest.self, forKey: .payload))
+        case .automationResponse:
+            self = .automationResponse(try container.decode(AutomationResponse.self, forKey: .payload))
         }
     }
     
@@ -94,6 +103,12 @@ public enum TransportMessage: Codable {
             try container.encode(MessageType.ping, forKey: .type)
         case .pong:
             try container.encode(MessageType.pong, forKey: .type)
+        case .automationRequest(let msg):
+            try container.encode(MessageType.automationRequest, forKey: .type)
+            try container.encode(msg, forKey: .payload)
+        case .automationResponse(let msg):
+            try container.encode(MessageType.automationResponse, forKey: .type)
+            try container.encode(msg, forKey: .payload)
         }
     }
 }
@@ -104,11 +119,26 @@ public struct HelloMessage: Codable {
     public var protocolVersion: Int
     public var deviceName: String
     public var deviceId: String
+    /// Optional feature flags this endpoint supports beyond the base protocol.
+    ///
+    /// Optional (and additive) on purpose: older builds omit the key entirely and
+    /// still decode, so advertising a capability never breaks an existing client.
+    public var capabilities: [TransportCapability]?
 
-    public init(protocolVersion: Int = SpeakTransportProtocolVersion, deviceName: String, deviceId: String) {
+    public init(
+        protocolVersion: Int = SpeakTransportProtocolVersion,
+        deviceName: String,
+        deviceId: String,
+        capabilities: [TransportCapability]? = nil
+    ) {
         self.protocolVersion = protocolVersion
         self.deviceName = deviceName
         self.deviceId = deviceId
+        self.capabilities = capabilities
+    }
+
+    public func supports(_ capability: TransportCapability) -> Bool {
+        self.capabilities?.contains(capability) ?? false
     }
 
     /// Whether this hello's protocol version is compatible with the running build.
@@ -117,6 +147,29 @@ public struct HelloMessage: Codable {
     /// need to support version skew yet; a range check can replace this if that changes.
     public var isProtocolVersionCompatible: Bool {
         self.protocolVersion == SpeakTransportProtocolVersion
+    }
+}
+
+/// Optional transport features, negotiated in `HelloMessage`.
+///
+/// Decoded leniently: an unknown capability from a newer peer maps to `.unknown`
+/// rather than failing the whole handshake.
+public enum TransportCapability: RawRepresentable, Codable, Sendable, Equatable {
+    case automation
+    case unknown(String)
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "automation": self = .automation
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .automation: return "automation"
+        case .unknown(let value): return value
+        }
     }
 }
 

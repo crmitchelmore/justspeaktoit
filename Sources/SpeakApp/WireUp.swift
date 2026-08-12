@@ -29,6 +29,11 @@ final class AppEnvironment: ObservableObject { // swiftlint:disable:this type_bo
   let profiles: DictationProfileStore
   let main: MainManager
   let transportServer: TransportServer
+  /// Local automation socket for the `speak` CLI and the bundled MCP server.
+  /// Created here (not injected) because it has no dependencies of its own; its
+  /// handler is attached in `configureServices` once the managers exist.
+  let automationServer = AutomationServer()
+  fileprivate var automationHandler: AppAutomationHandler?
   private let hudPresenter: HUDWindowPresenter
 
   /// Coordinator state for cross-view navigation. When set, MainView selects
@@ -489,6 +494,8 @@ enum WireUp {
       }
     }
 
+    Self.startAutomationServer(environment: environment)
+
     #if APP_STORE
     NSApp.registerForRemoteNotifications()
     #endif
@@ -515,6 +522,31 @@ enum WireUp {
     }
 
     print("[WireUp] AppEnvironment.bootstrap complete")
+  }
+
+  // MARK: - Automation
+
+  /// Starts the local automation socket that backs the `speak` CLI and the
+  /// bundled MCP server.
+  ///
+  /// Best-effort: automation is an additive surface, so a socket that cannot bind
+  /// (sandbox denial, unwritable Application Support) is logged and skipped
+  /// rather than failing app launch. Clients get an explicit "app not running"
+  /// error, which is the same thing they see when the app is genuinely closed.
+  private static func startAutomationServer(environment: AppEnvironment) {
+    let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+    let handler = AppAutomationHandler(
+      main: environment.main,
+      history: environment.history,
+      transcription: environment.transcription,
+      appVersion: version ?? "unknown"
+    )
+    environment.automationHandler = handler
+    do {
+      try environment.automationServer.start(handler: handler)
+    } catch {
+      SpeakLogger.logError(error, context: "Automation socket startup", logger: SpeakLogger.transport)
+    }
   }
 
   // MARK: - TTS Factory

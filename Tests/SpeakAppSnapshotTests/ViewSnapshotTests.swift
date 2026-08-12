@@ -29,6 +29,12 @@ import XCTest
 /// - Tests skip (not fail) on any macOS major version other than the one the
 ///   references were recorded on, so a runner-image upgrade prompts a
 ///   re-record instead of flaking PR CI.
+///
+/// Re-recording: run the suite with `withSnapshotTesting(record: .all)` and
+/// commit the regenerated PNGs. If a reference ever disagrees with CI only,
+/// the `Build & Test (macOS)` job publishes the render it produced as the
+/// `snapshot-failures` artifact, which can be compared with (or adopted as)
+/// the committed reference.
 @MainActor
 final class ViewSnapshotTests: XCTestCase {
     /// macOS major version the committed references were recorded on.

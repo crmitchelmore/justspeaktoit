@@ -205,22 +205,28 @@ final class KeyboardViewModel: ObservableObject {
     /// `KeyboardTranscriptEdit.deleteCount` counts user-perceived characters,
     /// but `UITextDocumentProxy.deleteBackward()` can remove a single Unicode
     /// scalar of a composed cluster (an emoji ZWJ sequence, for example),
-    /// leaving a fragment behind. Extra deletes are issued only while the
-    /// document context confirms the tail is still a shrinking fragment of the
-    /// cluster we set out to remove, so this can never eat host text.
+    /// leaving a fragment behind. Extra deletes are issued only while the whole
+    /// visible document context matches exactly what a partial, scalar-by-scalar
+    /// deletion would leave; any other outcome — including a host that removed
+    /// the cluster whole, or a truncated context window — stops immediately, so
+    /// this can never eat host text.
     private func deleteOneUserPerceivedCharacter(using deleteBackward: () -> Void) {
-        guard let cluster = contextBeforeInput?()?.last, cluster.unicodeScalars.count > 1 else {
+        guard let contextBefore = contextBeforeInput?(),
+              let cluster = contextBefore.last,
+              cluster.unicodeScalars.count > 1 else {
             deleteBackward()
             return
         }
-        var remainingScalars = cluster.unicodeScalars.count
-        while remainingScalars > 0 {
+        let scalarsInCluster = cluster.unicodeScalars.count
+        var removedScalars = 0
+        while removedScalars < scalarsInCluster {
             deleteBackward()
-            remainingScalars -= 1
-            guard remainingScalars > 0,
-                  let tail = contextBeforeInput?()?.last,
-                  tail.unicodeScalars.count == remainingScalars,
-                  String(cluster).unicodeScalars.starts(with: tail.unicodeScalars) else {
+            removedScalars += 1
+            guard removedScalars < scalarsInCluster,
+                  let context = contextBeforeInput?(),
+                  context.unicodeScalars.elementsEqual(
+                      contextBefore.unicodeScalars.dropLast(removedScalars)
+                  ) else {
                 return
             }
         }

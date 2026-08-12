@@ -83,6 +83,24 @@ enum SidebarItem: Hashable, Identifiable {
     }
   }
 
+  /// Stable identifier for UI tests and assistive technologies.
+  var accessibilityID: String {
+    switch self {
+    case .dashboard:
+      return "sidebarDashboard"
+    case .history:
+      return "sidebarHistory"
+    case .voiceOutput:
+      return "sidebarVoiceOutput"
+    case .corrections:
+      return "sidebarCorrections"
+    case .troubleshooting:
+      return "sidebarTroubleshooting"
+    case .settings(let tab):
+      return "sidebarSettings-\(tab.rawValue)"
+    }
+  }
+
   var shortcutAction: ShortcutAction {
     switch self {
     case .dashboard:
@@ -147,6 +165,7 @@ struct SideBarView: View {
           .accessibilityHint(accessibilityHint(for: item))
           .accessibilityAddTraits(selection == item ? [.isButton, .isSelected] : .isButton)
           .accessibilityValue(selection == item ? "Selected" : "")
+          .accessibilityIdentifier(item.accessibilityID)
         }
       } header: {
         sidebarSectionHeader("Speak")
@@ -190,6 +209,7 @@ struct SideBarView: View {
           .accessibilityHint(accessibilityHint(for: item))
           .accessibilityAddTraits(selection == item ? [.isButton, .isSelected] : .isButton)
           .accessibilityValue(selection == item ? "Selected" : "")
+          .accessibilityIdentifier(item.accessibilityID)
         }
       } header: {
         sidebarSectionHeader("Settings")

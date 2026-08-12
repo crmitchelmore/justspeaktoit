@@ -159,6 +159,7 @@ struct HistoryItemRow: View {
                     .buttonStyle(.plain)
                     .frame(minWidth: 44, minHeight: 44)
                     .accessibilityLabel(isExpanded ? "Show less" : "Show more")
+                    .accessibilityIdentifier("historyRowExpandButton-\(item.id)")
                 }
             }
             .font(.caption2)
@@ -196,6 +197,7 @@ struct HistoryItemRow: View {
                         Text(isExpanded ? "Show less" : "Show more")
                             .font(.caption)
                     }
+                    .accessibilityIdentifier("historyRowExpandButton-\(item.id)")
                 }
             }
         }

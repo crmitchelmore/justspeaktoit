@@ -113,12 +113,12 @@ public struct PaidAccessHTTPClient: PaidAccessClienting { // swiftlint:disable:t
         }
     }
 
-    private struct ErrorEnvelope: Decodable {
-        struct Payload: Decodable {
-            let code: String
-        }
+    private struct ErrorPayload: Decodable {
+        let code: String
+    }
 
-        let error: Payload
+    private struct ErrorEnvelope: Decodable {
+        let error: ErrorPayload
     }
 
     private func encodeBody(_ value: [String: Any], into request: inout URLRequest) throws {

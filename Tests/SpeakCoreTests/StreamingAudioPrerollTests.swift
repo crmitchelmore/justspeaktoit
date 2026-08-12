@@ -143,4 +143,18 @@ final class StreamingAudioPrerollTests: XCTestCase {
         // Assert
         XCTAssertTrue(client.preroll.isEmpty)
     }
+
+    func testSoniox_StopsBufferingOnceTheSessionIsStopping() {
+        // Arrange
+        let client = SonioxLiveClient(apiKey: "k")
+        client.sendAudio(self.chunk(1))
+
+        // Act: stopping without a transport discards what could never be sent
+        // and refuses to hold anything for the dead session.
+        client.stop()
+        client.sendAudio(self.chunk(2))
+
+        // Assert
+        XCTAssertTrue(client.preroll.isEmpty)
+    }
 }

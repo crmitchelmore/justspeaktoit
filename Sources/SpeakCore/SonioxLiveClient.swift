@@ -21,6 +21,9 @@ public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Se
     private let logger = Logger(subsystem: "com.justspeaktoit", category: "SonioxLiveClient")
     private let stateLock = NSLock()
     private let pendingSendGroup = DispatchGroup()
+    /// Upper bound on how long a close waits for queued frames to reach the
+    /// transport; a wedged send must never leave the socket open forever.
+    private static let stopFlushBudget: DispatchTimeInterval = .milliseconds(750)
 
     private var webSocketTask: URLSessionWebSocketTask?
     private var onTranscript: ((String, Bool) -> Void)?
@@ -90,9 +93,16 @@ public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Se
     }
 
     private func transmit(_ audioData: Data, on task: URLSessionWebSocketTask) {
+        transmit(.data(audioData), on: task)
+    }
+
+    /// Every frame — audio, replayed pre-roll and the finalize handshake — goes
+    /// through here so `stop()` can wait for the transport to take them before
+    /// cancelling the socket.
+    private func transmit(_ message: URLSessionWebSocketTask.Message, on task: URLSessionWebSocketTask) {
         let sendGroup = pendingSendGroup
         sendGroup.enter()
-        task.send(.data(audioData)) { [weak self] error in
+        task.send(message) { [weak self] error in
             defer { sendGroup.leave() }
             guard let self, let error else { return }
             if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
@@ -101,20 +111,26 @@ public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Se
     }
 
     public func stop() {
-        // Best-effort finalize: ask Soniox to commit in-flight tokens and flush
-        // before closing so trailing words aren't lost.
-        if let task = currentWebSocketTask(), task.state == .running {
-            for chunk in drainPreroll() {
-                transmit(chunk, on: task)
-            }
-            task.send(.string(#"{"type":"finalize"}"#)) { _ in }
-            task.send(.data(Data())) { _ in }
-        }
         let task = withStateLock { () -> URLSessionWebSocketTask? in
             guard !isStopping else { return nil }
             isStopping = true
             return webSocketTask
         }
+        guard let task else {
+            preroll.reset()
+            return
+        }
+
+        // Best-effort finalize: ask Soniox to commit in-flight tokens and flush
+        // before closing so trailing words aren't lost.
+        if task.state == .running {
+            for chunk in drainPreroll() {
+                transmit(chunk, on: task)
+            }
+            transmit(.string(#"{"type":"finalize"}"#), on: task)
+            transmit(.data(Data()), on: task)
+        }
+
         let unsentPreroll = preroll.snapshot
         if unsentPreroll.byteCount > 0 {
             logger.warning(
@@ -122,10 +138,29 @@ public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Se
             )
         }
         preroll.reset()
-        guard let task else { return }
-        if task.state == .running {
-            task.cancel(with: .normalClosure, reason: nil)
+        closeAfterPendingSends(task)
+    }
+
+    /// `cancel(with:reason:)` fails whatever URLSession has not yet handed to
+    /// the network, so the close waits (bounded) for the replayed pre-roll and
+    /// the finalize frames to land before the socket goes away.
+    private func closeAfterPendingSends(_ task: URLSessionWebSocketTask) {
+        let sendGroup = pendingSendGroup
+        let logger = self.logger
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            if sendGroup.wait(timeout: .now() + Self.stopFlushBudget) == .timedOut {
+                logger.warning("Soniox: closing with sends still in flight after the stop flush budget")
+            }
+            if task.state == .running {
+                task.cancel(with: .normalClosure, reason: nil)
+            }
+            self?.clearWebSocketTask(task)
         }
+    }
+
+    /// Only the task this stop owns may be cleared: a newer session may already
+    /// have published its own socket.
+    private func clearWebSocketTask(_ task: URLSessionWebSocketTask) {
         withStateLock {
             if webSocketTask === task { webSocketTask = nil }
         }

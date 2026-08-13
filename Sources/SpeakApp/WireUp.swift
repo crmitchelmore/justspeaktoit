@@ -33,8 +33,6 @@ final class AppEnvironment: ObservableObject {
   /// Created here (not injected) because it has no dependencies of its own; its
   /// handler is attached in `configureServices` once the managers exist.
   let automationServer = AutomationServer()
-  fileprivate var automationHandler: AppAutomationHandler?
-  fileprivate var automationTerminationObserver: NSObjectProtocol?
   private let hudPresenter: HUDWindowPresenter
 
   /// Coordinator state for cross-view navigation. When set, MainView selects
@@ -344,6 +342,48 @@ extension AppEnvironment {
   }
 }
 
+// MARK: - Automation
+
+extension AppEnvironment {
+  /// Opens the local automation socket when the user has opted in.
+  ///
+  /// Off by default: the socket lets any process running as this user start the
+  /// microphone and read past transcripts, so it stays closed until asked for.
+  /// Best-effort at launch — a socket that cannot bind puts the preference back
+  /// to off rather than failing startup, exactly as "Send to Mac" does.
+  func startAutomationServerIfEnabled() {
+    guard settings.enableAutomationServer else { return }
+    do {
+      try startAutomationServer()
+    } catch {
+      SpeakLogger.logError(error, context: "Automation socket startup", logger: SpeakLogger.transport)
+      settings.enableAutomationServer = false
+    }
+  }
+
+  /// Opens the socket, wiring it onto the same managers the UI drives.
+  ///
+  /// Throws rather than logging so the Settings toggle can put the stored
+  /// preference back in step with reality.
+  func startAutomationServer() throws {
+    let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+    try automationServer.start(
+      handler: AppAutomationHandler(
+        main: main,
+        history: history,
+        transcription: transcription,
+        appVersion: version ?? "unknown"
+      )
+    )
+  }
+
+  /// Closes the socket, so nothing local can drive dictation once the user
+  /// turns automation off.
+  func stopAutomationServer() {
+    automationServer.stop()
+  }
+}
+
 @MainActor
 enum WireUp {
 
@@ -500,7 +540,7 @@ enum WireUp {
       }
     }
 
-    Self.startAutomationServer(environment: environment)
+    environment.startAutomationServerIfEnabled()
 
     #if APP_STORE
     NSApp.registerForRemoteNotifications()
@@ -528,42 +568,6 @@ enum WireUp {
     }
 
     print("[WireUp] AppEnvironment.bootstrap complete")
-  }
-
-  // MARK: - Automation
-
-  /// Starts the local automation socket that backs the `speak` CLI and the
-  /// bundled MCP server.
-  ///
-  /// Best-effort: automation is an additive surface, so a socket that cannot bind
-  /// (sandbox denial, unwritable Application Support) is logged and skipped
-  /// rather than failing app launch. Clients get an explicit "app not running"
-  /// error, which is the same thing they see when the app is genuinely closed.
-  private static func startAutomationServer(environment: AppEnvironment) {
-    let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
-    let handler = AppAutomationHandler(
-      main: environment.main,
-      history: environment.history,
-      transcription: environment.transcription,
-      appVersion: version ?? "unknown"
-    )
-    environment.automationHandler = handler
-    do {
-      try environment.automationServer.start(handler: handler)
-    // Leave no stale socket file behind: a client that connects to one gets a
-    // confusing failure instead of the "app is not running" error.
-    environment.automationTerminationObserver = NotificationCenter.default.addObserver(
-      forName: NSApplication.willTerminateNotification,
-      object: nil,
-      queue: .main
-    ) { [weak environment] _ in
-      MainActor.assumeIsolated {
-        environment?.automationServer.stop()
-      }
-    }
-  } catch {
-    SpeakLogger.logError(error, context: "Automation socket startup", logger: SpeakLogger.transport)
-  }
   }
 
   // MARK: - TTS Factory

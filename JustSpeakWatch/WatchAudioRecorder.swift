@@ -6,6 +6,11 @@ import Foundation
 /// Recording is buffered entirely on-device; hand-off to the iPhone is the
 /// `WatchCaptureStore`'s job, so a capture survives the phone being out of
 /// range (or the transfer failing) without losing audio.
+///
+/// Runtime past the screen turning off comes from `WatchRecordingRuntime`.
+/// Every way a recording can end — a tap, an interruption, watchOS pulling the
+/// runtime — funnels through `finish(reason:)`, so a capture cut short is
+/// queued for the iPhone rather than dropped.
 @MainActor
 final class WatchAudioRecorder: NSObject, ObservableObject {
     struct FinishedRecording {
@@ -19,8 +24,22 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
     @Published private(set) var startedAt: Date?
     @Published private(set) var lastError: String?
 
+    private let store: WatchCaptureStore
+    private let runtime: WatchRecordingRuntime
     private var recorder: AVAudioRecorder?
     private var currentID = UUID()
+
+    init(
+        store: WatchCaptureStore = WatchCaptureStore.shared,
+        runtime: WatchRecordingRuntime = WatchRecordingRuntime()
+    ) {
+        self.store = store
+        self.runtime = runtime
+        super.init()
+        runtime.onRuntimeEnd = { [weak self] reason in
+            self?.finish(reason: reason)
+        }
+    }
 
     /// Directory holding not-yet-transferred capture audio.
     static var capturesDirectory: URL {
@@ -34,9 +53,9 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
             .appendingPathExtension("m4a")
     }
 
-    func toggle(store: WatchCaptureStore) async {
+    func toggle() async {
         if isRecording {
-            stop(store: store)
+            stop()
         } else {
             await start()
         }
@@ -52,9 +71,10 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
         }
 
         do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playAndRecord, mode: .default)
-            try session.setActive(true)
+            // Activating the audio session in the foreground is what buys the
+            // background runtime; watchOS will not let a recording start once
+            // the app is already backgrounded.
+            try runtime.begin()
 
             try FileManager.default.createDirectory(
                 at: Self.capturesDirectory,
@@ -83,68 +103,68 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
             isRecording = true
         } catch {
             lastError = error.localizedDescription
-            deactivateSession()
+            runtime.end()
         }
     }
 
-    func stop(store: WatchCaptureStore) {
+    /// User-initiated stop.
+    func stop() {
+        finish(reason: .userStopped)
+    }
+
+    /// Single exit path for a recording. Stops the recorder, releases the
+    /// runtime, then lets `WatchRecordingEndPolicy` decide whether the audio
+    /// captured so far is worth sending to the iPhone.
+    private func finish(reason: WatchRecordingEndReason) {
         guard isRecording, let recorder else { return }
         let createdAt = startedAt ?? Date()
+        // `currentTime` reads zero once the recorder is stopped.
         let duration = recorder.currentTime
         recorder.stop()
         self.recorder = nil
         isRecording = false
         startedAt = nil
-        deactivateSession()
+        runtime.end()
 
-        let finished = FinishedRecording(
-            id: currentID,
-            url: Self.fileURL(for: currentID),
-            createdAt: createdAt,
-            duration: duration
+        let url = Self.fileURL(for: currentID)
+        let outcome = WatchRecordingEndPolicy.outcome(
+            for: reason,
+            duration: duration,
+            hasAudioFile: FileManager.default.fileExists(atPath: url.path)
         )
-        guard duration > 0.2, FileManager.default.fileExists(atPath: finished.url.path) else {
-            // Accidental tap — do not queue an empty capture.
-            try? FileManager.default.removeItem(at: finished.url)
-            return
+        lastError = outcome.message
+
+        switch outcome.disposition {
+        case .discard:
+            try? FileManager.default.removeItem(at: url)
+        case .enqueue:
+            store.enqueue(
+                FinishedRecording(
+                    id: currentID,
+                    url: url,
+                    createdAt: createdAt,
+                    duration: duration
+                )
+            )
         }
-        store.enqueue(finished)
-    }
-
-    /// Terminal failure path for recorder errors the user did not initiate:
-    /// clears the recording state so the UI cannot stay stuck in the
-    /// recording pose, and discards the unusable partial file.
-    private func abortRecording(message: String) {
-        guard isRecording else { return }
-        lastError = message
-        recorder?.stop()
-        recorder = nil
-        isRecording = false
-        startedAt = nil
-        deactivateSession()
-        try? FileManager.default.removeItem(at: Self.fileURL(for: currentID))
-    }
-
-    private func deactivateSession() {
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 }
 
 extension WatchAudioRecorder: AVAudioRecorderDelegate {
     nonisolated func audioRecorderEncodeErrorDidOccur(_ recorder: AVAudioRecorder, error: Error?) {
-        let message = error?.localizedDescription ?? "Audio encoding failed"
+        let detail = error?.localizedDescription
         Task { @MainActor in
-            self.lastError = message
-            self.abortRecording(message: message)
+            self.finish(reason: .encodingFailed(reason: detail))
         }
     }
 
     nonisolated func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
-        // A user-initiated stop clears the state itself; only unsuccessful
-        // finishes (interruption, encoder failure) need the terminal path.
+        // A user-initiated stop has already cleared the state, so `finish` is a
+        // no-op there. An unsuccessful finish means the system stopped the
+        // recorder under us — treat it as lost runtime and keep the partial.
         guard !flag else { return }
         Task { @MainActor in
-            self.abortRecording(message: "Recording stopped unexpectedly.")
+            self.finish(reason: .runtimeInvalidated(reason: nil))
         }
     }
 }

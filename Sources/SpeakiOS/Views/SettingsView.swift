@@ -217,6 +217,9 @@ public final class AppSettings: ObservableObject {
     @Published public var preferredLocaleIdentifier: String {
         didSet {
             UserDefaults.standard.set(preferredLocaleIdentifier, forKey: "preferredLocale")
+            KeyboardDictationPreferencesStore.shared.mirrorAppPreference(
+                selectedIdentifier: preferredLocaleIdentifier
+            )
             publishKeyboardProfileSelection()
         }
     }

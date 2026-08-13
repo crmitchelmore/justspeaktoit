@@ -50,6 +50,13 @@ final class KeyboardProfileGuardTests: XCTestCase {
             let suffix = settings[propertyRange.lowerBound...].prefix(700)
             XCTAssertTrue(suffix.contains("publishKeyboardProfileSelection()"), "\(property) is not mirrored")
         }
+        guard let languageRange = settings.range(of: "@Published public var preferredLocaleIdentifier") else {
+            return XCTFail("Missing preferredLocaleIdentifier")
+        }
+        XCTAssertTrue(
+            settings[languageRange.lowerBound...].prefix(700).contains("mirrorAppPreference"),
+            "preferredLocaleIdentifier does not refresh the keyboard language ring"
+        )
         XCTAssertTrue(coordinator.contains("AppSettings.shared.publishKeyboardProfileSelection()"))
     }
 }

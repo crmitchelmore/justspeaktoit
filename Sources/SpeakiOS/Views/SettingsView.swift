@@ -1581,7 +1581,8 @@ struct APIKeysView: View {
                 id: "cartesia", title: "Cartesia", category: "Transcription", isStored: settings.hasCartesiaKey
             ),
             APIKeyListEntry(
-                id: "soniox", title: "Soniox", category: "Transcription", isStored: settings.hasSonioxKey
+                id: "soniox", title: "Soniox", category: "Transcription & Voice Output",
+                isStored: settings.hasSonioxKey
             ),
             APIKeyListEntry(
                 id: "modulate", title: "Modulate", category: "Transcription", isStored: settings.hasModulateKey
@@ -1844,11 +1845,11 @@ struct APIKeysView: View {
                 messages.append("✓ Cartesia key saved")
             }
 
-            // Save Soniox key (no cheap validation endpoint)
+            // The same Soniox credential powers transcription and voice output.
             if !sonioxKey.isEmpty {
                 settings.sonioxAPIKey = sonioxKey
                 sonioxKey = ""
-                messages.append("✓ Soniox key saved")
+                messages.append("✓ Soniox key saved for transcription and voice output")
             }
 
             // Save Modulate key (no cheap validation endpoint)

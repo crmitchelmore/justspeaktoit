@@ -10,12 +10,15 @@ import Foundation
 /// a user who already dictates with Soniox gets voices with no extra setup.
 actor SonioxTTSClient: TextToSpeechClient {
   let provider: TTSProvider = .soniox
-  private let api: SonioxTTSAPI
+  private let session: URLSession
   private let secureStorage: SecureAppStorage
+  private let appSettings: AppSettings
+  private let voiceNameDefaultsKey = "soniox.tts.lastKnownVoiceNames"
 
-  init(secureStorage: SecureAppStorage, session: URLSession = .shared) {
+  init(secureStorage: SecureAppStorage, appSettings: AppSettings, session: URLSession = .shared) {
     self.secureStorage = secureStorage
-    self.api = SonioxTTSAPI(session: session)
+    self.appSettings = appSettings
+    self.session = session
   }
 
   func synthesize(text: String, voice: String, settings: TTSSettings) async throws -> TTSResult {
@@ -25,15 +28,14 @@ actor SonioxTTSClient: TextToSpeechClient {
       throw TTSError.apiKeyMissing(provider)
     }
 
-    let selection = SonioxTTSCatalog.resolvedSelection(modelID: nil, voiceID: voice)
-    let request = SonioxTTSRequest(
-      model: selection.model,
-      language: SonioxTTSCatalog.languageCode(forLocaleIdentifier: settings.language),
-      voice: selection.voice,
-      audioFormat: audioFormat(for: settings.format),
-      sampleRate: sampleRate(for: settings.quality),
-      speed: settings.speed
+    let api = SonioxTTSAPI(session: session, region: settings.sonioxRegion)
+    let accountVoices = try await accountVoicesIfNeeded(for: voice, apiKey: apiKey, api: api)
+    let resolution = SonioxTTSCatalog.resolvedVoice(
+      voiceID: voice,
+      accountVoices: accountVoices,
+      lastKnownName: lastKnownVoiceNames()[unscopedVoiceID(voice)]
     )
+    let request = makeRequest(text: text, resolution: resolution, settings: settings)
 
     let data: Data
     do {
@@ -48,7 +50,7 @@ actor SonioxTTSClient: TextToSpeechClient {
     return TTSResult(
       audioURL: outputURL,
       provider: provider,
-      voice: selection.voice.providerVoiceID,
+      voice: resolution.providerVoiceID,
       duration: duration,
       characterCount: text.count,
       // Soniox bills the generated audio, so the measured duration is a closer
@@ -58,11 +60,28 @@ actor SonioxTTSClient: TextToSpeechClient {
   }
 
   func listVoices() async throws -> [TTSVoice] {
-    VoiceCatalog.sonioxVoices
+    guard let apiKey = try? await secureStorage.secret(identifier: provider.apiKeyIdentifier),
+      !apiKey.isEmpty else {
+      return VoiceCatalog.sonioxVoices
+    }
+    let region = await MainActor.run { appSettings.sonioxTTSRegion }
+    let accountVoices = try await SonioxTTSAPI(session: session, region: region)
+      .listAccountVoices(apiKey: apiKey)
+    rememberVoiceNames(accountVoices)
+    return VoiceCatalog.sonioxVoices + accountVoices.map { voice in
+      TTSVoice(
+        id: voice.providerVoiceID,
+        name: voice.name,
+        provider: .soniox,
+        traits: [.multilingual],
+        previewURL: nil
+      )
+    }
   }
 
   func validateAPIKey(_ key: String) async -> APIKeyValidationResult {
-    await api.validateAPIKey(key)
+    let region = await MainActor.run { appSettings.sonioxTTSRegion }
+    return await SonioxTTSAPI(session: session, region: region).validateAPIKey(key)
   }
 
   // MARK: - Private Helpers
@@ -79,7 +98,71 @@ actor SonioxTTSClient: TextToSpeechClient {
       return TTSError.synthesisFailure(
         "Soniox accepts up to \(limit) characters per request (this text is \(characterCount))"
       )
+    case .apiFailure(let failure):
+      switch failure.type {
+      case .unauthenticated:
+        return TTSError.apiKeyMissing(provider)
+      case .voiceNotFound, .voiceNotReady:
+        return TTSError.invalidVoice(failure.message)
+      default:
+        let requestSuffix = failure.requestID.map { " (request \($0))" } ?? ""
+        return TTSError.synthesisFailure("\(failure.message)\(requestSuffix)")
+      }
     }
+  }
+
+  private func makeRequest(
+    text: String,
+    resolution: SonioxTTSResolvedVoice,
+    settings: TTSSettings
+  ) -> SonioxTTSRequest {
+    let language = SonioxTTSCatalog.languageCode(
+      forVoiceOutputIdentifier: settings.language,
+      content: text
+    )
+    if let accountVoice = resolution.accountVoice {
+      return SonioxTTSRequest(
+        language: language,
+        accountVoice: accountVoice,
+        audioFormat: audioFormat(for: settings.format),
+        sampleRate: sampleRate(for: settings.quality),
+        speed: settings.speed
+      )
+    }
+    let voice = SonioxTTSCatalog.voice(forID: resolution.providerVoiceID)
+      ?? SonioxTTSCatalog.defaultVoice(for: SonioxTTSCatalog.defaultModel)
+    return SonioxTTSRequest(
+      language: language,
+      voice: voice,
+      audioFormat: audioFormat(for: settings.format),
+      sampleRate: sampleRate(for: settings.quality),
+      speed: settings.speed
+    )
+  }
+
+  private func accountVoicesIfNeeded(
+    for voiceID: String,
+    apiKey: String,
+    api: SonioxTTSAPI
+  ) async throws -> [SonioxTTSAccountVoice] {
+    guard SonioxTTSCatalog.voice(forID: voiceID) == nil else { return [] }
+    let voices = try await api.listAccountVoices(apiKey: apiKey)
+    rememberVoiceNames(voices)
+    return voices
+  }
+
+  private func rememberVoiceNames(_ voices: [SonioxTTSAccountVoice]) {
+    var names = lastKnownVoiceNames()
+    for voice in voices { names[voice.id] = voice.name }
+    UserDefaults.standard.set(names, forKey: voiceNameDefaultsKey)
+  }
+
+  private func lastKnownVoiceNames() -> [String: String] {
+    UserDefaults.standard.dictionary(forKey: voiceNameDefaultsKey) as? [String: String] ?? [:]
+  }
+
+  private func unscopedVoiceID(_ voiceID: String) -> String {
+    voiceID.hasPrefix("soniox/") ? String(voiceID.dropFirst("soniox/".count)) : voiceID
   }
 
   private func audioFormat(for format: AudioFormat) -> SonioxTTSAudioFormat {

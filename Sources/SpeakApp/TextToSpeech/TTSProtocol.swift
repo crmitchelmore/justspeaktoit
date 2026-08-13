@@ -120,6 +120,7 @@ struct TTSSettings {
   /// when they have not chosen one. Providers that need an explicit spoken
   /// language resolve it themselves; the rest ignore it.
   var language: String?
+  var sonioxRegion: SonioxTTSRegion
 
   init(
     speed: Double = 1.0,
@@ -127,7 +128,8 @@ struct TTSSettings {
     quality: TTSQuality = .high,
     format: AudioFormat = .mp3,
     useSSML: Bool = false,
-    language: String? = nil
+    language: String? = nil,
+    sonioxRegion: SonioxTTSRegion = .unitedStates
   ) {
     self.speed = speed
     self.pitch = pitch
@@ -135,6 +137,7 @@ struct TTSSettings {
     self.format = format
     self.useSSML = useSSML
     self.language = language
+    self.sonioxRegion = sonioxRegion
   }
 }
 

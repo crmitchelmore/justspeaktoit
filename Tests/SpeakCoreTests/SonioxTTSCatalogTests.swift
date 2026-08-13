@@ -67,13 +67,102 @@ final class SonioxTTSCatalogTests: XCTestCase {
         }
     }
 
-    func testLanguageCode_ReducesLocalePreferencesAndDefaultsToEnglish() {
+    func testLanguageCode_ReducesExplicitLocalePreferences() {
         XCTAssertEqual(SonioxTTSCatalog.languageCode(forLocaleIdentifier: "en_GB"), "en")
         XCTAssertEqual(SonioxTTSCatalog.languageCode(forLocaleIdentifier: "pt-BR"), "pt")
         XCTAssertEqual(SonioxTTSCatalog.languageCode(forLocaleIdentifier: "de"), "de")
+    }
 
-        for identifier in [nil, "", "   ", "automatic"] as [String?] {
-            XCTAssertEqual(SonioxTTSCatalog.languageCode(forLocaleIdentifier: identifier), "en")
+    func testAutomaticLanguage_PrefersContentThenDeviceLocale() {
+        XCTAssertEqual(
+            VoiceOutputLanguageCatalog.automaticLanguageCode(
+                contentLanguageCode: "es-MX",
+                deviceLocaleIdentifier: "ja_JP"
+            ),
+            "es"
+        )
+        XCTAssertEqual(
+            VoiceOutputLanguageCatalog.automaticLanguageCode(
+                contentLanguageCode: nil,
+                deviceLocaleIdentifier: "ja_JP"
+            ),
+            "ja"
+        )
+    }
+
+    func testRegions_ProvideMatchingValidationRESTAndWebSocketHosts() {
+        let expectedHosts: [SonioxTTSRegion: (String, String)] = [
+            .unitedStates: ("api.soniox.com", "tts-rt.soniox.com"),
+            .europe: ("api.eu.soniox.com", "tts-rt.eu.soniox.com"),
+            .japan: ("api.jp.soniox.com", "tts-rt.jp.soniox.com")
+        ]
+
+        for (region, hosts) in expectedHosts {
+            XCTAssertEqual(region.modelsEndpoint.host, hosts.0)
+            XCTAssertEqual(region.voicesEndpoint.host, hosts.0)
+            XCTAssertEqual(region.speakEndpoint.host, hosts.1)
+            XCTAssertEqual(region.webSocketEndpoint.host, hosts.1)
+            XCTAssertEqual(region.webSocketEndpoint.scheme, "wss")
         }
+    }
+
+    func testRegionMigration_DefaultsLegacyGlobalAndUnknownValuesToUS() {
+        XCTAssertEqual(SonioxTTSRegion.migrated(from: nil), .unitedStates)
+        XCTAssertEqual(SonioxTTSRegion.migrated(from: "global"), .unitedStates)
+        XCTAssertEqual(SonioxTTSRegion.migrated(from: "EUROPE"), .europe)
+        XCTAssertEqual(SonioxTTSRegion.migrated(from: "jp"), .japan)
+        XCTAssertEqual(SonioxTTSRegion.migrated(from: "unsupported"), .unitedStates)
+    }
+
+    func testAccountClone_ResolvesOnlyWhenReadyForV2() {
+        let ready = accountVoice(id: "clone-id", name: "My Voice", status: "ready")
+        let resolution = SonioxTTSCatalog.resolvedVoice(
+            voiceID: "soniox/clone-id",
+            accountVoices: [ready],
+            lastKnownName: "Old Name"
+        )
+
+        XCTAssertEqual(resolution.apiVoiceID, "clone-id")
+        XCTAssertEqual(resolution.providerVoiceID, "soniox/clone-id")
+        XCTAssertEqual(resolution.displayName, "My Voice")
+        XCTAssertNil(resolution.fallbackReason)
+    }
+
+    func testDeletedOrUnpreparedClone_FallsBackWithinSoniox() {
+        let unprepared = accountVoice(id: "clone-id", name: "My Voice", status: "not_computed")
+        let notReady = SonioxTTSCatalog.resolvedVoice(
+            voiceID: "soniox/clone-id",
+            accountVoices: [unprepared],
+            lastKnownName: "Old Name"
+        )
+        let deleted = SonioxTTSCatalog.resolvedVoice(
+            voiceID: "soniox/deleted-id",
+            accountVoices: [],
+            lastKnownName: "Remembered Voice"
+        )
+
+        XCTAssertEqual(notReady.providerVoiceID, "soniox/Maya")
+        XCTAssertEqual(notReady.fallbackReason, .cloneNotReady(lastKnownName: "My Voice"))
+        XCTAssertEqual(deleted.providerVoiceID, "soniox/Maya")
+        XCTAssertEqual(
+            deleted.fallbackReason,
+            .missingOrDeletedClone(lastKnownName: "Remembered Voice")
+        )
+    }
+
+    private func accountVoice(id: String, name: String, status: String) -> SonioxTTSAccountVoice {
+        SonioxTTSAccountVoice(
+            id: id,
+            name: name,
+            filename: "voice.wav",
+            models: [
+                SonioxTTSAccountVoiceModel(
+                    model: SonioxTTSCatalog.defaultModel.rawValue,
+                    status: status,
+                    errorType: nil,
+                    errorMessage: nil
+                )
+            ]
+        )
     }
 }

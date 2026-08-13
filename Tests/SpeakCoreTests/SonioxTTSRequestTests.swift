@@ -30,6 +30,17 @@ final class SonioxTTSRequestTests: XCTestCase {
         XCTAssertEqual(tooFast.speed, SonioxTTSAPI.speedRange.upperBound)
     }
 
+    func testLanguage_IsAlwaysRequiredAndReducedToABaseCode() {
+        XCTAssertEqual(
+            SonioxTTSRequest(language: "", voice: voice, audioFormat: .wav).language,
+            "en"
+        )
+        XCTAssertEqual(
+            SonioxTTSRequest(language: "pt-BR", voice: voice, audioFormat: .wav).language,
+            "pt"
+        )
+    }
+
     func testUnsupportedSampleRate_IsDroppedRatherThanSent() {
         let request = SonioxTTSRequest(
             language: "en",
@@ -63,6 +74,41 @@ final class SonioxTTSRequestTests: XCTestCase {
         let payload = Data(#"{"error_message":"invalid voice","request_id":"abc"}"#.utf8)
 
         XCTAssertEqual(SonioxTTSAPI.errorMessage(from: payload), "invalid voice")
-        XCTAssertEqual(SonioxTTSAPI.errorMessage(from: Data("boom".utf8)), "boom")
+        XCTAssertEqual(SonioxTTSAPI.errorMessage(from: Data("boom".utf8)), "Unknown Soniox error")
+    }
+
+    func testStableErrorTypeAndRequestID_AreDecodedWithoutRawRequestContent() {
+        let payload = Data(
+            #"{"error_type":"voice_not_ready","message":"Voice is unavailable","request_id":"request-1"}"#.utf8
+        )
+        let failure = SonioxTTSAPI.failure(from: payload, statusCode: 400)
+
+        XCTAssertEqual(failure.type, .voiceNotReady)
+        XCTAssertEqual(failure.message, "Voice is unavailable")
+        XCTAssertEqual(failure.requestID, "request-1")
+    }
+
+    func testAccountVoiceRequest_UsesCloneID() {
+        let accountVoice = SonioxTTSAccountVoice(
+            id: "clone-id",
+            name: "Project Voice",
+            filename: nil,
+            models: [
+                SonioxTTSAccountVoiceModel(
+                    model: "tts-rt-v2",
+                    status: "ready",
+                    errorType: nil,
+                    errorMessage: nil
+                )
+            ]
+        )
+        let request = SonioxTTSRequest(
+            language: "en",
+            accountVoice: accountVoice,
+            audioFormat: .mp3
+        )
+
+        XCTAssertEqual(request.apiVoiceID, "clone-id")
+        XCTAssertEqual(request.jsonBody(text: "Hello")["voice"] as? String, "clone-id")
     }
 }

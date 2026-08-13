@@ -101,6 +101,13 @@ final class ModelCredentialResolverTests: XCTestCase {
         )
         XCTAssertEqual(
             ModelCredentialResolver.requirement(
+                for: "soniox/Maya",
+                purpose: .voiceOutput
+            ),
+            .apiKey(identifier: "soniox.apiKey", providerName: "Soniox")
+        )
+        XCTAssertEqual(
+            ModelCredentialResolver.requirement(
                 for: "system/default",
                 purpose: .voiceOutput
             ),

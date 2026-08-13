@@ -67,6 +67,103 @@ public struct SonioxTTSSelection: Equatable, Sendable {
     public let voice: SonioxTTSVoice
 }
 
+/// Soniox processing region. A regional project key must only be sent to its matching hosts.
+public enum SonioxTTSRegion: String, CaseIterable, Codable, Hashable, Identifiable, Sendable {
+    case unitedStates = "us"
+    case europe = "eu"
+    case japan = "jp"
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .unitedStates: "United States"
+        case .europe: "European Union"
+        case .japan: "Japan"
+        }
+    }
+
+    public var apiHost: String {
+        switch self {
+        case .unitedStates: "api.soniox.com"
+        case .europe: "api.eu.soniox.com"
+        case .japan: "api.jp.soniox.com"
+        }
+    }
+
+    public var ttsHost: String {
+        switch self {
+        case .unitedStates: "tts-rt.soniox.com"
+        case .europe: "tts-rt.eu.soniox.com"
+        case .japan: "tts-rt.jp.soniox.com"
+        }
+    }
+
+    public var modelsEndpoint: URL { URL(string: "https://\(apiHost)/v1/tts-models")! }
+    public var voicesEndpoint: URL { URL(string: "https://\(apiHost)/v1/voices")! }
+    public var speakEndpoint: URL { URL(string: "https://\(ttsHost)/tts")! }
+    public var webSocketEndpoint: URL { URL(string: "wss://\(ttsHost)/tts-websocket")! }
+
+    public static func migrated(from identifier: String?) -> SonioxTTSRegion {
+        switch identifier?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "eu", "europe", "european-union": .europe
+        case "jp", "japan": .japan
+        case "us", "usa", "united-states", "global", nil, "": .unitedStates
+        default: .unitedStates
+        }
+    }
+}
+
+public enum SonioxTTSAccountVoiceStatus: String, Codable, Hashable, Sendable {
+    case ready
+    case notComputed = "not_computed"
+    case failed
+    case unknown
+}
+
+public struct SonioxTTSAccountVoiceModel: Codable, Hashable, Sendable {
+    public let model: String
+    public let status: String
+    public let errorType: String?
+    public let errorMessage: String?
+
+    enum CodingKeys: String, CodingKey {
+        case model, status
+        case errorType = "error_type"
+        case errorMessage = "error_message"
+    }
+}
+
+/// A project-owned cloned voice returned by `GET /v1/voices`.
+public struct SonioxTTSAccountVoice: Identifiable, Codable, Hashable, Sendable {
+    public let id: String
+    public let name: String
+    public let filename: String?
+    public let models: [SonioxTTSAccountVoiceModel]
+
+    public var providerVoiceID: String { "soniox/\(id)" }
+
+    public func status(for model: SonioxTTSModel) -> SonioxTTSAccountVoiceStatus {
+        guard let rawStatus = models.first(where: { $0.model == model.rawValue })?.status.lowercased() else {
+            return .notComputed
+        }
+        return SonioxTTSAccountVoiceStatus(rawValue: rawStatus) ?? .unknown
+    }
+}
+
+public enum SonioxTTSVoiceFallbackReason: Equatable, Sendable {
+    case missingOrDeletedClone(lastKnownName: String?)
+    case cloneNotReady(lastKnownName: String?)
+}
+
+public struct SonioxTTSResolvedVoice: Equatable, Sendable {
+    public let apiVoiceID: String
+    public let providerVoiceID: String
+    public let displayName: String
+    public let accountVoice: SonioxTTSAccountVoice?
+    public let fallbackReason: SonioxTTSVoiceFallbackReason?
+}
+
 /// Canonical Soniox speech-generation catalogue, defaults and legacy migrations.
 ///
 /// Soniox voices are language-independent: every voice speaks all supported
@@ -77,26 +174,34 @@ public enum SonioxTTSCatalog {
     public static let models = SonioxTTSModel.allCases
     public static let voices = builtInVoices
     public static let defaultVoiceID = "Maya"
-    /// Used whenever the app has no explicit language preference.
+    /// Used only when neither content nor device locale yields a usable language.
     public static let defaultLanguageCode = "en"
 
-    /// Reduces an app locale preference (`en_US`, `pt-BR`, `automatic`, `nil`)
-    /// to the bare language code Soniox expects.
-    ///
-    /// Soniox requires a language on every request, so Automatic resolves to
-    /// English rather than being forwarded as provider-side detection.
+    /// Compatibility entry point. Automatic now follows the device locale rather than transcription.
     public static func languageCode(forLocaleIdentifier identifier: String?) -> String {
-        let normalized = TranscriptionLanguageCatalog.normalizedIdentifier(identifier)
-        guard normalized != TranscriptionLanguageCatalog.automaticIdentifier else {
-            return defaultLanguageCode
-        }
-        let code = normalized
+        VoiceOutputLanguageCatalog.languageCode(for: identifier, content: "")
+    }
+
+    public static func languageCode(
+        forVoiceOutputIdentifier identifier: String?,
+        content: String,
+        deviceLocaleIdentifier: String = Locale.current.identifier
+    ) -> String {
+        VoiceOutputLanguageCatalog.languageCode(
+            for: identifier,
+            content: content,
+            deviceLocaleIdentifier: deviceLocaleIdentifier
+        )
+    }
+
+    public static func requiredLanguageCode(_ code: String) -> String {
+        let normalized = code.trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
             .split(whereSeparator: { $0 == "_" || $0 == "-" })
             .first
             .map(String.init)
-        guard let code, !code.isEmpty else { return defaultLanguageCode }
-        return code
+        guard let normalized, !normalized.isEmpty else { return defaultLanguageCode }
+        return normalized
     }
 
     /// Maps stored or superseded model identifiers onto a current model.
@@ -140,10 +245,61 @@ public enum SonioxTTSCatalog {
         return SonioxTTSSelection(model: resolvedModel, voice: voice)
     }
 
+    /// Resolves built-in and account voices without ever changing provider.
+    /// Missing, deleted, failed and not-yet-computed clones explicitly fall back to Maya.
+    public static func resolvedVoice(
+        voiceID: String?,
+        accountVoices: [SonioxTTSAccountVoice],
+        lastKnownName: String? = nil
+    ) -> SonioxTTSResolvedVoice {
+        if let voiceID, let builtIn = voice(forID: voiceID) {
+            return SonioxTTSResolvedVoice(
+                apiVoiceID: builtIn.apiVoiceName,
+                providerVoiceID: builtIn.providerVoiceID,
+                displayName: builtIn.displayName,
+                accountVoice: nil,
+                fallbackReason: nil
+            )
+        }
+
+        let requestedID = voiceID.map(normalizedUnscopedVoiceID)
+        if let requestedID,
+           let accountVoice = accountVoices.first(where: { $0.id.caseInsensitiveCompare(requestedID) == .orderedSame }) {
+            if accountVoice.status(for: defaultModel) == .ready {
+                return SonioxTTSResolvedVoice(
+                    apiVoiceID: accountVoice.id,
+                    providerVoiceID: accountVoice.providerVoiceID,
+                    displayName: accountVoice.name,
+                    accountVoice: accountVoice,
+                    fallbackReason: nil
+                )
+            }
+            return fallbackVoice(reason: .cloneNotReady(lastKnownName: accountVoice.name))
+        }
+
+        guard requestedID != nil else { return fallbackVoice(reason: nil) }
+        return fallbackVoice(reason: .missingOrDeletedClone(lastKnownName: lastKnownName))
+    }
+
     private static func normalizedVoiceID(_ id: String) -> String {
-        let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard trimmed.hasPrefix("soniox/") else { return trimmed }
+        normalizedUnscopedVoiceID(id).lowercased()
+    }
+
+    private static func normalizedUnscopedVoiceID(_ id: String) -> String {
+        let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.lowercased().hasPrefix("soniox/") else { return trimmed }
         return String(trimmed.dropFirst("soniox/".count))
+    }
+
+    private static func fallbackVoice(reason: SonioxTTSVoiceFallbackReason?) -> SonioxTTSResolvedVoice {
+        let voice = defaultVoice(for: defaultModel)
+        return SonioxTTSResolvedVoice(
+            apiVoiceID: voice.apiVoiceName,
+            providerVoiceID: voice.providerVoiceID,
+            displayName: voice.displayName,
+            accountVoice: nil,
+            fallbackReason: reason
+        )
     }
 
     // Voice names, genders and accents mirror Soniox's built-in voice list; the

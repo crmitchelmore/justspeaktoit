@@ -35,4 +35,9 @@ final class SonioxTTSCatalogParityTests: XCTestCase {
         XCTAssertTrue(TTSProvider.soniox.sharesTranscriptionCredential)
         XCTAssertTrue(TTSProvider.soniox.requiresAPIKey)
     }
+
+    func testVoiceOutputLanguageAndRegionDefaults_AreIndependentFromTranscription() {
+        XCTAssertEqual(VoiceOutputLanguageCatalog.normalizedIdentifier(nil), "automatic")
+        XCTAssertEqual(SonioxTTSRegion.migrated(from: nil), .unitedStates)
+    }
 }

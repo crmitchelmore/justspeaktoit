@@ -295,6 +295,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     case liveStopGracePeriod
     case preferredAudioInputUID
     case defaultTTSVoice
+    case ttsLanguage
+    case sonioxTTSRegion
     case ttsSpeed
     case ttsPitch
     case ttsQuality
@@ -623,6 +625,14 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   // TTS Settings
   @Published var defaultTTSVoice: String {
     didSet { store(defaultTTSVoice, key: .defaultTTSVoice) }
+  }
+
+  @Published var ttsLanguageIdentifier: String {
+    didSet { store(ttsLanguageIdentifier, key: .ttsLanguage) }
+  }
+
+  @Published var sonioxTTSRegion: SonioxTTSRegion {
+    didSet { store(sonioxTTSRegion.rawValue, key: .sonioxTTSRegion) }
   }
 
   @Published var ttsSpeed: Double {
@@ -996,6 +1006,12 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     // TTS Settings
     defaultTTSVoice =
       defaults.string(forKey: DefaultsKey.defaultTTSVoice.rawValue) ?? "openai/alloy"
+    ttsLanguageIdentifier = VoiceOutputLanguageCatalog.normalizedIdentifier(
+      defaults.string(forKey: DefaultsKey.ttsLanguage.rawValue)
+    )
+    sonioxTTSRegion = SonioxTTSRegion.migrated(
+      from: defaults.string(forKey: DefaultsKey.sonioxTTSRegion.rawValue)
+    )
     ttsSpeed = defaults.object(forKey: DefaultsKey.ttsSpeed.rawValue) as? Double ?? 1.0
     ttsPitch = defaults.object(forKey: DefaultsKey.ttsPitch.rawValue) as? Double ?? 0.0
     ttsQuality =

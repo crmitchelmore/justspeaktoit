@@ -1,4 +1,5 @@
 #if os(iOS)
+// swiftlint:disable file_length type_body_length
 import SpeakCore
 import SwiftUI
 
@@ -12,6 +13,7 @@ public struct OpenClawSettingsView: View {
     @State private var urlInput = ""
     @State private var testState: OpenClawConnectionTester.Outcome = .idle
     @State private var voiceTestState: VoiceTestState = .idle
+    @State private var sonioxAccountVoices: [SonioxTTSAccountVoice] = []
 
     enum VoiceTestState: Equatable {
         case idle
@@ -100,46 +102,66 @@ public struct OpenClawSettingsView: View {
                 }
 
                 if settings.ttsEnabled {
-                    Picker("Voice", selection: $settings.ttsVoice) {
-                        ForEach(
-                            DeepgramTTSCatalog.voices(forModelID: settings.ttsModel),
-                            id: \.id
-                        ) { voice in
-                            HStack {
-                                Text(voice.displayName)
-                                Spacer()
-                                IOSModelCredentialStatusView(
-                                    availability: ModelCredentialResolver.availability(
-                                        for: "deepgram/\(voice.id)",
-                                        purpose: .voiceOutput,
-                                        storedAPIKeyIdentifiers: appSettings.storedAPIKeyIdentifiers
-                                    )
-                                )
+                    Picker("Provider", selection: $settings.ttsProvider) {
+                        ForEach(VoiceOutputProvider.allCases) { provider in
+                            Text(provider.displayName).tag(provider)
+                        }
+                    }
+                    .onChange(of: settings.ttsProvider) { _ in
+                        settings.validateVoiceModelCombination()
+                        voiceTestState = .idle
+                    }
+
+                    if settings.ttsProvider == .deepgram {
+                        Picker("Voice", selection: $settings.ttsVoice) {
+                            ForEach(DeepgramTTSCatalog.voices(forModelID: settings.ttsModel)) { voice in
+                                voiceLabel(voice.displayName, credentialID: "deepgram/\(voice.id)")
+                                    .tag(voice.id)
                             }
-                            .accessibilityElement(children: .combine)
-                            .tag(voice.id)
+                        }
+                        .onChange(of: settings.ttsVoice) { _ in
+                            settings.validateVoiceModelCombination()
+                        }
+
+                        Picker("Model", selection: $settings.ttsModel) {
+                            ForEach(DeepgramTTSCatalog.models) { model in
+                                voiceLabel(model.displayName, credentialID: "deepgram/\(model.id)")
+                                    .tag(model.id)
+                            }
+                        }
+                        .onChange(of: settings.ttsModel) { _ in
+                            settings.validateVoiceModelCombination()
+                        }
+                    } else {
+                        Picker("Voice", selection: $settings.ttsVoice) {
+                            ForEach(OpenClawSettings.sonioxBuiltInVoices) { voice in
+                                voiceLabel(voice.displayName, credentialID: voice.providerVoiceID)
+                                    .tag(voice.providerVoiceID)
+                            }
+                            ForEach(readySonioxAccountVoices) { voice in
+                                voiceLabel("\(voice.name) (Cloned)", credentialID: voice.providerVoiceID)
+                                    .tag(voice.providerVoiceID)
+                            }
+                            if selectedSonioxVoiceIsUnavailable {
+                                Text("\(settings.ttsVoiceName) (Unavailable; uses Maya)")
+                                    .tag(settings.ttsVoice)
+                            }
+                        }
+                        .onChange(of: settings.ttsVoice) { _, voiceID in
+                            rememberSonioxVoiceName(voiceID)
+                        }
+
+                        Picker("Region", selection: $settings.sonioxRegion) {
+                            ForEach(SonioxTTSRegion.allCases) { region in
+                                Text(region.displayName).tag(region)
+                            }
                         }
                     }
 
-                    Picker("Model", selection: $settings.ttsModel) {
-                        ForEach(DeepgramTTSCatalog.models) { model in
-                            HStack {
-                                Text(model.displayName)
-                                Spacer()
-                                IOSModelCredentialStatusView(
-                                    availability: ModelCredentialResolver.availability(
-                                        for: model.id,
-                                        purpose: .voiceOutput,
-                                        storedAPIKeyIdentifiers: appSettings.storedAPIKeyIdentifiers
-                                    )
-                                )
-                            }
-                            .accessibilityElement(children: .combine)
-                            .tag(model.id)
+                    Picker("Language", selection: $settings.ttsLanguageIdentifier) {
+                        ForEach(VoiceOutputLanguageCatalog.options) { option in
+                            Text(option.displayName).tag(option.id)
                         }
-                    }
-                    .onChange(of: settings.ttsModel) { _ in
-                        settings.validateVoiceModelCombination()
                     }
 
                     VStack(alignment: .leading) {
@@ -149,12 +171,12 @@ public struct OpenClawSettingsView: View {
                             Text(String(format: "%.1f×", settings.ttsSpeed))
                                 .foregroundStyle(.secondary)
                         }
-                        Slider(value: $settings.ttsSpeed, in: 0.5...2.0, step: 0.1)
+                        Slider(value: $settings.ttsSpeed, in: settings.ttsProvider.speedRange, step: 0.1)
                     }
 
                     if !usesInlineDensityLayout {
                         Text(
-                            "Requires a Deepgram API key in the main app settings."
+                            "Requires a \(settings.ttsProvider.displayName) API key in the main app settings."
                         )
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -180,7 +202,7 @@ public struct OpenClawSettingsView: View {
                             }
                         }
                     }
-                    .disabled(!appSettings.hasDeepgramKey || voiceTestState == .testing)
+                    .disabled(!selectedProviderHasKey || voiceTestState == .testing)
                 }
 
                 Toggle(isOn: $settings.summariseResponses) {
@@ -252,10 +274,79 @@ public struct OpenClawSettingsView: View {
         .navigationTitle("OpenClaw Settings")
         .navigationBarTitleDisplayMode(.inline)
         .controlSize(appSettings.visualDensity.isCompact ? .small : .regular)
+        .task(id: sonioxDiscoveryID) {
+            await refreshSonioxAccountVoices()
+        }
     }
 
     private var usesInlineDensityLayout: Bool {
         appSettings.visualDensity.prefersInlineLayout(dynamicTypeSize: dynamicTypeSize)
+    }
+
+    private var readySonioxAccountVoices: [SonioxTTSAccountVoice] {
+        sonioxAccountVoices.filter { $0.status(for: SonioxTTSCatalog.defaultModel) == .ready }
+    }
+
+    private var selectedSonioxVoiceIsUnavailable: Bool {
+        guard settings.ttsProvider == .soniox,
+              SonioxTTSCatalog.voice(forID: settings.ttsVoice) == nil else {
+            return false
+        }
+        return !readySonioxAccountVoices.contains { $0.providerVoiceID == settings.ttsVoice }
+    }
+
+    private var selectedProviderHasKey: Bool {
+        switch settings.ttsProvider {
+        case .deepgram: appSettings.hasDeepgramKey
+        case .soniox: appSettings.hasSonioxKey
+        }
+    }
+
+    private var sonioxDiscoveryID: String {
+        "\(settings.ttsProvider.rawValue):\(settings.sonioxRegion.rawValue):\(appSettings.hasSonioxKey)"
+    }
+
+    @ViewBuilder
+    private func voiceLabel(_ title: String, credentialID: String) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            IOSModelCredentialStatusView(
+                availability: ModelCredentialResolver.availability(
+                    for: credentialID,
+                    purpose: .voiceOutput,
+                    storedAPIKeyIdentifiers: appSettings.storedAPIKeyIdentifiers
+                )
+            )
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func rememberSonioxVoiceName(_ voiceID: String) {
+        if let builtIn = SonioxTTSCatalog.voice(forID: voiceID) {
+            settings.ttsVoiceName = builtIn.displayName
+        } else if let account = readySonioxAccountVoices.first(where: { $0.providerVoiceID == voiceID }) {
+            settings.ttsVoiceName = account.name
+        }
+    }
+
+    private func refreshSonioxAccountVoices() async {
+        guard settings.ttsProvider == .soniox else { return }
+        await appSettings.ensureKeysLoaded()
+        guard appSettings.hasSonioxKey else {
+            sonioxAccountVoices = []
+            return
+        }
+        do {
+            let client = SonioxIOSVoiceOutputClient()
+            sonioxAccountVoices = try await client.listAccountVoices(
+                apiKey: appSettings.sonioxAPIKey,
+                region: settings.sonioxRegion
+            )
+            rememberSonioxVoiceName(settings.ttsVoice)
+        } catch {
+            sonioxAccountVoices = []
+        }
     }
 
     // MARK: - Connection Test
@@ -272,15 +363,20 @@ public struct OpenClawSettingsView: View {
 
     private func testVoice() async {
         voiceTestState = .testing
-        let tts = DeepgramTTSClient()
-        tts.model = settings.ttsModel
-        tts.voice = settings.ttsVoice
-        tts.speed = settings.ttsSpeed
+        let tts = VoiceOutputRouter()
 
         do {
             try await tts.speak(
                 text: "Hello, this is a voice test.",
-                apiKey: appSettings.deepgramAPIKey
+                provider: settings.ttsProvider,
+                model: settings.ttsModel,
+                voice: settings.ttsVoice,
+                lastKnownVoiceName: settings.ttsVoiceName,
+                speed: settings.ttsSpeed,
+                languageIdentifier: settings.ttsLanguageIdentifier,
+                sonioxRegion: settings.sonioxRegion,
+                deepgramAPIKey: appSettings.deepgramAPIKey,
+                sonioxAPIKey: appSettings.sonioxAPIKey
             )
             voiceTestState = .success
         } catch {

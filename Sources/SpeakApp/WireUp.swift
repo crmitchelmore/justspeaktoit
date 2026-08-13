@@ -534,7 +534,7 @@ enum WireUp {
       .openai: OpenAITTSClient(secureStorage: secureStorage),
       .azure: AzureSpeechClient(secureStorage: secureStorage, appSettings: settings),
       .deepgram: DeepgramTTSClient(secureStorage: secureStorage),
-      .soniox: SonioxTTSClient(secureStorage: secureStorage),
+      .soniox: SonioxTTSClient(secureStorage: secureStorage, appSettings: settings),
       .system: SystemTTSClient()
     ]
     return TextToSpeechManager(

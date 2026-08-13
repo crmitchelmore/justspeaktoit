@@ -110,7 +110,7 @@ public final class OpenClawChatCoordinator: ObservableObject {
     // MARK: - Dependencies
 
     let client = OpenClawClient()
-    let ttsClient = DeepgramTTSClient()
+    let ttsClient = VoiceOutputRouter()
     let summariser = VoiceSummariser()
     let store = ConversationStore.shared
     let settings = OpenClawSettings.shared

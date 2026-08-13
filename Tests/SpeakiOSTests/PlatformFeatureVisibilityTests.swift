@@ -52,5 +52,14 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
             AppSettings.openAIBatchModelIDs.contains(OpenAITranscriptionModels.gptTranscribeCatalogID)
         )
     }
+
+    func testOpenClawVoiceOutput_ExposesSharedSonioxCatalogueAndCredential() {
+        XCTAssertTrue(VoiceOutputProvider.allCases.contains(.soniox))
+        XCTAssertEqual(VoiceOutputProvider.soniox.apiKeyIdentifier, "soniox.apiKey")
+        XCTAssertEqual(
+            Set(OpenClawSettings.sonioxBuiltInVoices.map(\.providerVoiceID)),
+            Set(SonioxTTSCatalog.voices.map(\.providerVoiceID))
+        )
+    }
 }
 #endif

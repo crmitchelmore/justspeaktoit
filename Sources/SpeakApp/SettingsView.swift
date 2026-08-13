@@ -852,6 +852,22 @@ struct SettingsView: View {
               .font(.caption)
               .foregroundStyle(.secondary)
           }
+
+          Picker("Language", selection: settingsBinding(\AppSettings.ttsLanguageIdentifier)) {
+            ForEach(VoiceOutputLanguageCatalog.options) { option in
+              Text(option.displayName).tag(option.id)
+            }
+          }
+          .pickerStyle(.menu)
+
+          if TTSProvider.from(voiceID: settings.defaultTTSVoice) == .soniox {
+            Picker("Soniox Region", selection: settingsBinding(\AppSettings.sonioxTTSRegion)) {
+              ForEach(SonioxTTSRegion.allCases) { region in
+                Text(region.displayName).tag(region)
+              }
+            }
+            .pickerStyle(.segmented)
+          }
         }
       }
       .speakTooltip("Select which voice to use by default when generating speech from text.")

@@ -67,7 +67,8 @@ final class TextToSpeechManager: ObservableObject {
       quality: appSettings.ttsQuality,
       format: appSettings.ttsOutputFormat,
       useSSML: useSSML ?? appSettings.ttsUseSSML,
-      language: appSettings.preferredModelLanguage
+      language: appSettings.ttsLanguageIdentifier,
+      sonioxRegion: appSettings.sonioxTTSRegion
     )
 
     synthesisProgress = 0.5

@@ -150,6 +150,18 @@ final class SonioxTTSCatalogTests: XCTestCase {
         )
     }
 
+    func testBlankVoiceSelection_FallsBackWithoutADeletedCloneReason() {
+        for voiceID in [nil, "", "   "] as [String?] {
+            let resolution = SonioxTTSCatalog.resolvedVoice(
+                voiceID: voiceID,
+                accountVoices: []
+            )
+
+            XCTAssertEqual(resolution.providerVoiceID, "soniox/Maya")
+            XCTAssertNil(resolution.fallbackReason)
+        }
+    }
+
     private func accountVoice(id: String, name: String, status: String) -> SonioxTTSAccountVoice {
         SonioxTTSAccountVoice(
             id: id,

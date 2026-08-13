@@ -130,7 +130,10 @@ public final class SonioxIOSVoiceOutputClient: ObservableObject {
             player = preparedPlayer
             audioPlayer = preparedPlayer
             preparedPlayer.prepareToPlay()
-            isSpeaking = preparedPlayer.play()
+            guard preparedPlayer.play() else {
+                throw SonioxIOSVoiceOutputError.playbackFailed
+            }
+            isSpeaking = true
             while preparedPlayer.isPlaying {
                 try Task.checkCancellation()
                 guard activeOperationID == operationID, audioPlayer === preparedPlayer else {
@@ -160,12 +163,15 @@ public final class SonioxIOSVoiceOutputClient: ObservableObject {
 
 public enum SonioxIOSVoiceOutputError: LocalizedError {
     case missingAPIKey
+    case playbackFailed
     case api(SonioxTTSAPIError)
 
     public var errorDescription: String? {
         switch self {
         case .missingAPIKey:
             "Soniox API key is required for voice output"
+        case .playbackFailed:
+            "Soniox audio could not be played"
         case .api(let error):
             switch error {
             case .apiFailure(let failure):

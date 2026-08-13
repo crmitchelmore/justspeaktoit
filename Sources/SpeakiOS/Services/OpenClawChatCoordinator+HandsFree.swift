@@ -45,7 +45,7 @@ extension OpenClawChatCoordinator {
                 self.updateLiveActivityState()
 
                 // Summarise and speak if enabled
-                if self.settings.ttsEnabled && self.appSettings.hasDeepgramKey {
+                if self.settings.ttsEnabled && self.hasSelectedVoiceOutputKey {
                     await self.speakAssistantResponses(responseBatch)
                 }
                 self.isBufferingForTTS = false
@@ -65,6 +65,13 @@ extension OpenClawChatCoordinator {
                 self?.pendingAssistantResponses = []
                 self?.isBufferingForTTS = false
             }
+        }
+    }
+
+    var hasSelectedVoiceOutputKey: Bool {
+        switch settings.ttsProvider {
+        case .deepgram: appSettings.hasDeepgramKey
+        case .soniox: appSettings.hasSonioxKey
         }
     }
 

@@ -95,6 +95,28 @@ final class SonioxTTSAPIContractTests: XCTestCase {
         )
     }
 
+    func testAccountVoiceDiscovery_StopsWhenCursorRepeats() async throws {
+        let recorder = SonioxTTSRequestRecorder()
+        SonioxTTSMockURLProtocol.handler = { request in
+            await recorder.record(request)
+            return (
+                HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!,
+                Data(#"{"voices":[],"next_page_cursor":"repeated"}"#.utf8)
+            )
+        }
+
+        _ = try await SonioxTTSAPI(session: mockSession())
+            .listAccountVoices(apiKey: "placeholder")
+
+        let requests = await recorder.requests()
+        XCTAssertEqual(requests.count, 2)
+    }
+
     private func mockSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [SonioxTTSMockURLProtocol.self]

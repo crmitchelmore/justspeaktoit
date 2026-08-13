@@ -15,6 +15,7 @@ public struct OpenClawSettingsView: View {
     @State private var testState: OpenClawConnectionTester.Outcome = .idle
     @State private var voiceTestState: VoiceTestState = .idle
     @State private var sonioxAccountVoices: [SonioxTTSAccountVoice] = []
+    @State private var loadedSonioxDiscoveryID: String?
 
     enum VoiceTestState: Equatable {
         case idle
@@ -290,6 +291,7 @@ public struct OpenClawSettingsView: View {
 
     private var selectedSonioxVoiceIsUnavailable: Bool {
         guard settings.ttsProvider == .soniox,
+              loadedSonioxDiscoveryID == sonioxDiscoveryID,
               SonioxTTSCatalog.voice(forID: settings.ttsVoice) == nil else {
             return false
         }
@@ -332,22 +334,30 @@ public struct OpenClawSettingsView: View {
     }
 
     private func refreshSonioxAccountVoices() async {
+        let discoveryID = sonioxDiscoveryID
+        loadedSonioxDiscoveryID = nil
         guard settings.ttsProvider == .soniox else { return }
         await appSettings.ensureKeysLoaded()
+        guard !Task.isCancelled, discoveryID == sonioxDiscoveryID else { return }
         guard appSettings.hasSonioxKey else {
             sonioxAccountVoices = []
+            loadedSonioxDiscoveryID = discoveryID
             return
         }
         do {
             let client = SonioxIOSVoiceOutputClient()
-            sonioxAccountVoices = try await client.listAccountVoices(
+            let voices = try await client.listAccountVoices(
                 apiKey: appSettings.sonioxAPIKey,
                 region: settings.sonioxRegion
             )
+            guard !Task.isCancelled, discoveryID == sonioxDiscoveryID else { return }
+            sonioxAccountVoices = voices
             rememberSonioxVoiceName(settings.ttsVoice)
         } catch {
+            guard !Task.isCancelled, discoveryID == sonioxDiscoveryID else { return }
             sonioxAccountVoices = []
         }
+        loadedSonioxDiscoveryID = discoveryID
     }
 
     // MARK: - Connection Test

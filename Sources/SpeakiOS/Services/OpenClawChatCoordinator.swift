@@ -359,7 +359,7 @@ public final class OpenClawChatCoordinator: ObservableObject {
             accumulatedResponse = ""
             pendingAssistantResponses = []
 
-            if settings.ttsEnabled, appSettings.hasDeepgramKey {
+            if settings.ttsEnabled, hasSelectedVoiceOutputKey {
                 isBufferingForTTS = true
                 messageCountBeforeResponse = currentConversation?.messages.count ?? 0
             }

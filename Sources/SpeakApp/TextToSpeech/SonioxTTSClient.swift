@@ -68,7 +68,10 @@ actor SonioxTTSClient: TextToSpeechClient {
     let accountVoices = try await SonioxTTSAPI(session: session, region: region)
       .listAccountVoices(apiKey: apiKey)
     rememberVoiceNames(accountVoices)
-    return VoiceCatalog.sonioxVoices + accountVoices.map { voice in
+    let readyAccountVoices = accountVoices.filter {
+      $0.status(for: SonioxTTSCatalog.defaultModel) == .ready
+    }
+    return VoiceCatalog.sonioxVoices + readyAccountVoices.map { voice in
       TTSVoice(
         id: voice.providerVoiceID,
         name: voice.name,

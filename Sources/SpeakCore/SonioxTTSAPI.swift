@@ -133,6 +133,8 @@ public struct SonioxTTSAPI: Sendable {
     public static let modelsEndpoint = SonioxTTSRegion.unitedStates.modelsEndpoint
     /// Soniox rejects requests above this length.
     public static let maxTextLength = 5000
+    /// Safety bound for account-voice pagination.
+    private static let maxVoicePages = 20
     /// Speaking rates Soniox accepts.
     public static let speedRange: ClosedRange<Double> = 0.7...1.3
     /// Output sample rates Soniox accepts.
@@ -218,8 +220,12 @@ public struct SonioxTTSAPI: Sendable {
     public func listAccountVoices(apiKey: String) async throws -> [SonioxTTSAccountVoice] {
         var voices: [SonioxTTSAccountVoice] = []
         var cursor: String?
+        var seenCursors: Set<String> = []
+        var pageCount = 0
 
         repeat {
+            guard pageCount < Self.maxVoicePages else { break }
+            pageCount += 1
             guard var components = URLComponents(
                 url: region.voicesEndpoint,
                 resolvingAgainstBaseURL: false
@@ -243,7 +249,13 @@ public struct SonioxTTSAPI: Sendable {
 
             let page = try JSONDecoder().decode(AccountVoicePage.self, from: data)
             voices.append(contentsOf: page.voices)
-            cursor = page.nextPageCursor
+            if let nextCursor = page.nextPageCursor,
+               !nextCursor.isEmpty,
+               seenCursors.insert(nextCursor).inserted {
+                cursor = nextCursor
+            } else {
+                cursor = nil
+            }
         } while cursor?.isEmpty == false
 
         return voices

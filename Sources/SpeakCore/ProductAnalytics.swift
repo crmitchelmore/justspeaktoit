@@ -110,7 +110,7 @@ public enum ProductAnalyticsEvent: Sendable, Equatable {
     case historyAction(AnalyticsHistoryAction)
     case voiceOutputUsed(engine: AnalyticsEngineType, provider: AnalyticsProviderType)
     case sendToMacCompleted(success: Bool, latency: AnalyticsLatencyBucket)
-    case modelDownloadCompleted(modelFamily: String, size: AnalyticsModelSizeBucket, success: Bool)
+    case modelDownloadCompleted(modelFamily: AnalyticsModelFamily, size: AnalyticsModelSizeBucket, success: Bool)
     case keyboardEnabledState(enabled: Bool)
     case providerConfigured(provider: AnalyticsProviderType, method: AnalyticsProviderConfigurationMethod)
     case settingsChanged(setting: AnalyticsSettingID, category: AnalyticsSettingCategory)
@@ -200,14 +200,7 @@ public enum ProductAnalyticsEvent: Sendable, Equatable {
             ["success": String(success), "latency_bucket": latency.rawValue]
         case let .modelDownloadCompleted(modelFamily, size, success):
             [
-                "model_family": AnalyticsTranscriptionDimensions(
-                    mode: .batch,
-                    engine: .onDevice,
-                    provider: .local,
-                    modelFamily: modelFamily,
-                    languageCode: "other",
-                    trigger: .menuBar
-                ).modelFamily,
+                "model_family": modelFamily.rawValue,
                 "size_bucket": size.rawValue,
                 "success": String(success)
             ]

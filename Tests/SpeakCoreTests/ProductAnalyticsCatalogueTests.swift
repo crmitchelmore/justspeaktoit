@@ -28,7 +28,7 @@ final class ProductAnalyticsCatalogueTests: XCTestCase {
         mode: .live,
         engine: .cloud,
         provider: .deepgram,
-        modelFamily: "nova-3",
+        modelFamily: .nova,
         languageCode: "en-GB",
         trigger: .hotkey
     )
@@ -172,7 +172,7 @@ final class ProductAnalyticsCatalogueTests: XCTestCase {
                 privacyClass: .pseudonymous
             ),
             CatalogueEntry(
-                event: .modelDownloadCompleted(modelFamily: "parakeet-v3", size: .oneToFiveGB, success: true),
+                event: .modelDownloadCompleted(modelFamily: .parakeet, size: .oneToFiveGB, success: true),
                 name: "model_download_completed",
                 keys: ["model_family", "size_bucket", "success"],
                 privacyClass: .pseudonymous

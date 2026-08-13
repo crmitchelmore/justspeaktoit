@@ -88,11 +88,58 @@ public enum AnalyticsSettingCategory: String, Codable, Sendable {
     case transcription, output, privacy, history, voice
 }
 
+/// The closed set of transcription model families this app ships, plus an `other` escape hatch.
+///
+/// This is deliberately an enum rather than a sanitised `String`: a string-typed model family is a
+/// hole through which arbitrary user content could reach the wire, and no character-set filter can
+/// close it (`CharacterSet.alphanumerics` is Unicode-wide, so an entire CJK sentence passes it).
+/// Call sites must map their concrete model identifier onto a case here or report `.other`.
+public enum AnalyticsModelFamily: String, Codable, Sendable {
+    /// Apple's on-device `SpeechTranscriber` / Dictation.
+    case apple
+    /// OpenAI `whisper-1`, Groq Whisper, and every local WhisperKit variant.
+    case whisper
+    /// NVIDIA Parakeet TDT, both the sherpa-onnx and FluidAudio realtime builds.
+    case parakeet
+    /// NVIDIA Nemotron streaming speech, run locally through sherpa-onnx.
+    case nemotron
+    /// sherpa-onnx streaming Zipformer.
+    case zipformer
+    /// Deepgram Nova / Enhanced / Base.
+    case nova
+    /// Deepgram Flux streaming.
+    case flux
+    /// AssemblyAI Universal.
+    case universal
+    /// ElevenLabs Scribe.
+    case scribe
+    /// OpenAI GPT-4o / GPT-realtime transcription models.
+    case gptTranscribe = "gpt_transcribe"
+    /// Mistral Voxtral.
+    case voxtral
+    /// Soniox real-time and async speech-to-text.
+    case soniox
+    /// Modulate Velma.
+    case velma
+    /// Cartesia Ink.
+    case ink
+    /// Gladia Solaria.
+    case solaria
+    /// Speechmatics streaming and batch.
+    case speechmatics
+    /// Google Gemini audio models used as transcribers.
+    case gemini
+    /// Rev.ai.
+    case revAI = "rev_ai"
+    /// Anything not in the list above — never the caller's own identifier.
+    case other
+}
+
 public struct AnalyticsTranscriptionDimensions: Equatable, Sendable {
     public let mode: AnalyticsTranscriptionMode
     public let engine: AnalyticsEngineType
     public let provider: AnalyticsProviderType
-    public let modelFamily: String
+    public let modelFamily: AnalyticsModelFamily
     public let languageCode: String
     public let trigger: AnalyticsTriggerSource
 
@@ -100,14 +147,14 @@ public struct AnalyticsTranscriptionDimensions: Equatable, Sendable {
         mode: AnalyticsTranscriptionMode,
         engine: AnalyticsEngineType,
         provider: AnalyticsProviderType,
-        modelFamily: String,
+        modelFamily: AnalyticsModelFamily,
         languageCode: String,
         trigger: AnalyticsTriggerSource
     ) {
         self.mode = mode
         self.engine = engine
         self.provider = provider
-        self.modelFamily = Self.boundedIdentifier(modelFamily)
+        self.modelFamily = modelFamily
         self.languageCode = Self.boundedLanguageCode(languageCode)
         self.trigger = trigger
     }
@@ -117,21 +164,18 @@ public struct AnalyticsTranscriptionDimensions: Equatable, Sendable {
             "mode": mode.rawValue,
             "engine_type": engine.rawValue,
             "provider_type": provider.rawValue,
-            "model_family": modelFamily,
+            "model_family": modelFamily.rawValue,
             "language_code": languageCode,
             "trigger": trigger.rawValue
         ]
     }
 
-    private static func boundedIdentifier(_ value: String) -> String {
-        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_-"))
-        guard value.count <= 64, value.unicodeScalars.allSatisfy(allowed.contains) else { return "other" }
-        return value.lowercased()
-    }
-
+    /// Language codes are still free-form at the call site (they come from `Locale`), so they are
+    /// clamped to an explicit ASCII alphabet. `CharacterSet.lowercaseLetters` would admit any
+    /// lowercase script in Unicode, which is exactly the leak this boundary exists to prevent.
     private static func boundedLanguageCode(_ value: String) -> String {
         let normalized = value.lowercased().replacingOccurrences(of: "_", with: "-")
-        let allowed = CharacterSet.lowercaseLetters.union(CharacterSet(charactersIn: "-"))
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789_-")
         guard normalized.count <= 12, normalized.unicodeScalars.allSatisfy(allowed.contains) else { return "other" }
         return normalized
     }

@@ -73,7 +73,7 @@ final class ProductAnalyticsTests: XCTestCase {
             mode: .live,
             engine: .cloud,
             provider: .deepgram,
-            modelFamily: "nova-3",
+            modelFamily: .nova,
             languageCode: "en-GB",
             trigger: .hotkey
         )
@@ -107,17 +107,75 @@ final class ProductAnalyticsTests: XCTestCase {
         XCTAssertNil(try fixture.store.loadInstallationID())
     }
 
-    func testUnboundedModelFamily_FallsBackWithoutLeakingContent() {
+    func testUnboundedLanguageCode_FallsBackWithoutLeakingContent() {
         let dimensions = AnalyticsTranscriptionDimensions(
             mode: .batch,
             engine: .onDevice,
             provider: .local,
-            modelFamily: "private model name with spaces /Users/chris/model",
+            modelFamily: .other,
             languageCode: "not a language code 123",
             trigger: .menuBar
         )
-        XCTAssertEqual(dimensions.modelFamily, "other")
+        XCTAssertEqual(dimensions.modelFamily, .other)
         XCTAssertEqual(dimensions.languageCode, "other")
+    }
+
+    /// A transcript is not representable as a model family: the type is a closed enum, and the only
+    /// way a caller can turn arbitrary text into one is `init(rawValue:)`, which rejects it. This is
+    /// the regression guard for the previous `String` + `CharacterSet.alphanumerics` design, which
+    /// passed non-Latin sentences through verbatim because that character set is Unicode-wide.
+    func testNonLatinScript_CannotReachModelFamilyOrLanguageCode() async throws {
+        let transcript = "我的密码是秘密"
+        XCTAssertNil(AnalyticsModelFamily(rawValue: transcript))
+
+        let fixture = try Fixture()
+        try await fixture.controller.setConsent(.optedIn)
+        let dimensions = AnalyticsTranscriptionDimensions(
+            mode: .batch,
+            engine: .onDevice,
+            provider: .local,
+            modelFamily: AnalyticsModelFamily(rawValue: transcript) ?? .other,
+            languageCode: transcript,
+            trigger: .menuBar
+        )
+        try await fixture.controller.capture(.transcriptionStarted(dimensions))
+        try await fixture.controller.capture(.modelDownloadCompleted(
+            modelFamily: AnalyticsModelFamily(rawValue: transcript) ?? .other,
+            size: .oneToFiveGB,
+            success: true
+        ))
+
+        let payloads = await fixture.sink.payloads
+        XCTAssertEqual(payloads.count, 2)
+        for payload in payloads {
+            XCTAssertEqual(payload.properties["model_family"], AnalyticsModelFamily.other.rawValue)
+            XCTAssertFalse(payload.properties.values.contains { $0.contains(transcript) })
+        }
+        XCTAssertEqual(payloads.first?.properties["language_code"], "other")
+    }
+
+    /// A damaged state file must not wedge start-up, and must not be read as consent.
+    func testCorruptStateFile_StartsWithUnknownConsentAndRecovers() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let fileURL = directory.appendingPathComponent("analytics.json")
+        try Data("{\"consent\": not-json-at-all".utf8).write(to: fileURL)
+
+        let store = FileProductAnalyticsStateStore(fileURL: fileURL)
+        let sink = SpySink()
+        let controller = try Self.makeController(sink: sink, store: store)
+
+        let state = await controller.consentState()
+        XCTAssertEqual(state, .unknown)
+        XCTAssertNil(try store.loadInstallationID())
+
+        try await controller.capture(.appActiveDaily)
+        let payloads = await sink.payloads
+        XCTAssertTrue(payloads.isEmpty)
+
+        try await controller.setConsent(.optedIn)
+        XCTAssertEqual(try store.loadConsent(), .optedIn)
     }
 
     func testOptInPersistenceFailure_LeavesCollectionDisabled() async throws {

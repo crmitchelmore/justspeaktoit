@@ -608,6 +608,10 @@ final class SonioxLiveTranscriber: @unchecked Sendable {
     private var accumulatedFinalText: String = ""
     weak var finalizationDelegate: SonioxFinalizationDelegate?
 
+    /// Holds audio captured between the recording cue and the socket reaching
+    /// `.running`, then replays it in order (issue #641).
+    let preroll: StreamingAudioPreroll
+
     init(
         apiKey: String,
         model: String = "stt-rt-v5",
@@ -620,6 +624,7 @@ final class SonioxLiveTranscriber: @unchecked Sendable {
         self.language = language
         self.sampleRate = sampleRate
         self.session = session
+        self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
     }
 
     func start(
@@ -633,30 +638,30 @@ final class SonioxLiveTranscriber: @unchecked Sendable {
             self.onTranscript = onTranscript
             self.onError = onError
         }
+        preroll.reset()
         connectWebSocket()
     }
 
+    /// Sends raw PCM Int16 audio data to Soniox.
+    ///
+    /// Audio captured before the socket is running is parked in the pre-roll
+    /// buffer and replayed, in order, on the first send that finds a live
+    /// transport — so speech that starts with the cue is never dropped.
     func sendAudio(_ audioData: Data) {
-        guard let task = currentWebSocketTask(), task.state == .running else { return }
-        let sendGroup = pendingSendGroup
-        sendGroup.enter()
-        task.send(.data(audioData)) { [weak self] error in
-            defer { sendGroup.leave() }
-            guard let self else { return }
-            if let error {
-                if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
-                self.logger.error("Failed to send audio: \(error.localizedDescription)")
-                self.currentOnError()?(error)
-            }
+        guard let task = currentWebSocketTask(), task.state == .running else {
+            guard !isStoppingState() else { return }
+            preroll.append(audioData)
+            return
         }
+        flushPreroll(on: task)
+        transmit(.data(audioData), on: task)
     }
 
     /// Soniox graceful close: send an empty binary frame to flush the final tokens.
     func signalEndOfStream() {
         guard let task = currentWebSocketTask(), task.state == .running else { return }
-        let sendGroup = pendingSendGroup
-        sendGroup.enter()
-        task.send(.data(Data())) { _ in sendGroup.leave() }
+        flushPreroll(on: task)
+        transmit(.data(Data()), on: task)
     }
 
     /// Send Soniox `{"type":"finalize"}` to force any in-flight non-final tokens
@@ -664,10 +669,8 @@ final class SonioxLiveTranscriber: @unchecked Sendable {
     /// so the server has a chance to finalize before closing.
     func sendFinalize() {
         guard let task = currentWebSocketTask(), task.state == .running else { return }
-        let payload = #"{"type":"finalize"}"#
-        let sendGroup = pendingSendGroup
-        sendGroup.enter()
-        task.send(.string(payload)) { _ in sendGroup.leave() }
+        flushPreroll(on: task)
+        transmit(.string(#"{"type":"finalize"}"#), on: task)
     }
 
     func stop() {
@@ -676,13 +679,23 @@ final class SonioxLiveTranscriber: @unchecked Sendable {
             isStopping = true
             return webSocketTask
         }
-        guard let task else { return }
+        guard let task else {
+            preroll.reset()
+            return
+        }
         if task.state == .running {
             task.cancel(with: .normalClosure, reason: nil)
         }
         withStateLock {
             if webSocketTask === task { webSocketTask = nil }
         }
+        let unsentPreroll = preroll.snapshot
+        if unsentPreroll.byteCount > 0 {
+            logger.warning(
+                "Soniox: discarding \(unsentPreroll.chunkCount) pre-roll chunks — transport never became ready"
+            )
+        }
+        preroll.reset()
         logger.info("Soniox WebSocket connection closed")
     }
 
@@ -697,6 +710,35 @@ final class SonioxLiveTranscriber: @unchecked Sendable {
     }
 
     // MARK: - Private
+
+    /// Replays audio captured before the transport was ready, in capture order,
+    /// ahead of whatever frame prompted the flush.
+    private func flushPreroll(on task: URLSessionWebSocketTask) {
+        let held = preroll.drain()
+        guard !held.isEmpty else { return }
+        let bytes = held.reduce(0) { $0 + $1.count }
+        let leadingMilliseconds = Int((Double(bytes) / 2.0 / Double(max(sampleRate, 1))) * 1000)
+        logger.info(
+            "Soniox: replaying \(held.count) pre-roll chunks (\(leadingMilliseconds) ms of leading audio)"
+        )
+        for chunk in held {
+            transmit(.data(chunk), on: task)
+        }
+    }
+
+    /// Every frame — audio, replayed pre-roll and the finalize handshake — goes
+    /// through here so `waitForPendingSends()` covers it.
+    private func transmit(_ message: URLSessionWebSocketTask.Message, on task: URLSessionWebSocketTask) {
+        let sendGroup = pendingSendGroup
+        sendGroup.enter()
+        task.send(message) { [weak self] error in
+            defer { sendGroup.leave() }
+            guard let self, let error else { return }
+            if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
+            self.logger.error("Failed to send audio: \(error.localizedDescription)")
+            self.currentOnError()?(error)
+        }
+    }
 
     private func connectWebSocket() {
         var components = URLComponents()

@@ -117,8 +117,12 @@ final class TranscriptionManager: ObservableObject {
   /// Owns the identity of the recording whose transcript is on screen.
   let displayScope = LiveTranscriptDisplayScope()
 
+  /// Routes to whichever provider controller owns the current recording and
+  /// publishes that ownership through `sessionSourceDidChange`, which is what
+  /// binds `displayScope` to the recording actually on air.
+  let liveController: SwitchingLiveTranscriber
+
   private let appSettings: AppSettings
-  private let liveController: SwitchingLiveTranscriber
   private let batchClient: BatchTranscriptionClient
   private let openRouter: OpenRouterAPIClient
   private let secureStorage: SecureAppStorage
@@ -450,19 +454,25 @@ extension TranscriptionManager: LiveTranscriptionSessionDelegate {
   /// Admits a display update only from the controller that owns the active
   /// session. Late or out-of-order events from a superseded recording are
   /// dropped rather than repainting the live view (issue #643).
+  ///
+  /// Returns `true` when the update was published, so callers that also need to
+  /// act on ownership (e.g. closing the session on finish) can reuse the single
+  /// ownership check rather than repeating it.
+  @discardableResult
   private func applyLiveDisplayUpdate(
     from session: any LiveTranscriptionController,
     text: String,
     isFinal: Bool,
     confidence: Double?
-  ) {
-    guard displayScope.accepts(session) else { return }
+  ) -> Bool {
+    guard displayScope.accepts(session) else { return false }
     liveTranscript = LiveTranscriptSnapshot(
       sessionID: displayScope.activeSessionID,
       text: text,
       isFinal: isFinal,
       confidence: confidence
     )
+    return true
   }
 
   func liveTranscriber(_ session: any LiveTranscriptionController, didUpdatePartial text: String) {
@@ -503,8 +513,13 @@ extension TranscriptionManager: LiveTranscriptionSessionDelegate {
     // Only the controller that owns the on-screen session may publish its
     // final text or close the session; a late finish from a superseded
     // recording must leave the current session alone (issue #643).
-    if displayScope.accepts(session) {
-      applyLiveDisplayUpdate(from: session, text: result.text, isFinal: true, confidence: result.confidence)
+    let published = applyLiveDisplayUpdate(
+      from: session,
+      text: result.text,
+      isFinal: true,
+      confidence: result.confidence
+    )
+    if published {
       endLiveTranscriptDisplaySession()
     }
     cont.resume(returning: result)

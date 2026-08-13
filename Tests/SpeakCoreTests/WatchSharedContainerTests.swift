@@ -59,7 +59,7 @@ final class WatchSharedContainerTests: XCTestCase {
     }
 
     func testSnapshotAndRequest_travelThroughTheContainerTheWidgetReads() {
-        let snapshot = WatchComplicationSnapshot(state: .recording, pendingCount: 1)
+        let snapshot = WatchComplicationSnapshot(state: .recording, inFlightCount: 1)
         snapshot.save(in: container)
 
         XCTAssertEqual(WatchComplicationSnapshot.load(from: container).state, .recording)

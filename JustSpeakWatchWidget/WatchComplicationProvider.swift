@@ -17,8 +17,9 @@ struct WatchComplicationEntry: TimelineEntry {
 /// Reads the state the watch app publishes into the App Group container.
 ///
 /// The app reloads timelines on every state change, so the timeline itself is
-/// a single entry; the periodic refresh only covers the case where the app was
-/// terminated mid-flight and never got to publish a final state.
+/// a single entry. The periodic refresh keeps the face current when the app
+/// writes the container but cannot reload (for example the recording
+/// heartbeat), and it applies `settled()` again as time passes.
 struct WatchComplicationProvider: TimelineProvider {
     /// How long an in-flight state may sit on the face before the widget
     /// re-reads the container unprompted.
@@ -30,12 +31,13 @@ struct WatchComplicationProvider: TimelineProvider {
     }
 
     func getSnapshot(in context: Context, completion: @escaping (WatchComplicationEntry) -> Void) {
-        completion(WatchComplicationEntry(date: Date(), snapshot: currentSnapshot(isPreview: context.isPreview)))
+        let now = Date()
+        completion(WatchComplicationEntry(date: now, snapshot: currentSnapshot(isPreview: context.isPreview, now: now)))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<WatchComplicationEntry>) -> Void) {
         let now = Date()
-        let snapshot = currentSnapshot(isPreview: context.isPreview)
+        let snapshot = currentSnapshot(isPreview: context.isPreview, now: now)
         let refresh: TimeInterval = switch snapshot.state {
         case .recording, .sending: Self.inFlightRefresh
         case .idle, .inHistory, .failed: Self.settledRefresh
@@ -44,10 +46,11 @@ struct WatchComplicationProvider: TimelineProvider {
         completion(Timeline(entries: [entry], policy: .after(now.addingTimeInterval(refresh))))
     }
 
-    private func currentSnapshot(isPreview: Bool) -> WatchComplicationSnapshot {
+    private func currentSnapshot(isPreview: Bool, now: Date) -> WatchComplicationSnapshot {
         guard !isPreview else {
-            return WatchComplicationSnapshot(state: .idle, latestCaptureAt: Date(), pendingCount: 0)
+            return WatchComplicationSnapshot(state: .idle, latestCaptureAt: now)
         }
-        return WatchComplicationSnapshot.load()
+        // `settled()` drops a recording state that a stopped app left behind.
+        return WatchComplicationSnapshot.load().settled(now: now)
     }
 }

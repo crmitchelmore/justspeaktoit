@@ -84,5 +84,7 @@ Complication and Smart Stack (this feature):
       in the stack while a capture is recording or in flight
 - [ ] Complication state survives the watch app being terminated (it is read
       from the App Group container, not from the running app)
+- [ ] Stop the watch app during a recording. The face goes back to idle in
+      five minutes, because the recording heartbeat stops
 - [ ] With the App Group entitlement missing, recording still works and the
       complication shows idle rather than failing

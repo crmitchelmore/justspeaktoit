@@ -67,7 +67,7 @@ final class WatchComplicationStateTests: XCTestCase {
             state: .sending,
             updatedAt: wholeSecondDate,
             latestCaptureAt: wholeSecondDate,
-            pendingCount: 2
+            inFlightCount: 2
         )
 
         let data = try XCTUnwrap(snapshot.encoded())
@@ -92,7 +92,54 @@ final class WatchComplicationStateTests: XCTestCase {
     func testSnapshotIdle_isWhatAFaceShowsBeforeTheAppEverPublishes() {
         XCTAssertEqual(WatchComplicationSnapshot.idle.state, .idle)
         XCTAssertNil(WatchComplicationSnapshot.idle.latestCaptureAt)
-        XCTAssertEqual(WatchComplicationSnapshot.idle.pendingCount, 0)
+        XCTAssertEqual(WatchComplicationSnapshot.idle.inFlightCount, 0)
+    }
+
+    // MARK: - Stale recording clamp
+
+    func testSettled_keepsARecordingThatTheHeartbeatStillRefreshes() {
+        let snapshot = WatchComplicationSnapshot(state: .recording, updatedAt: wholeSecondDate, inFlightCount: 1)
+
+        // Anything within the clamp is a live recording: the app refreshes the
+        // timestamp every `recordingHeartbeat` seconds while it records.
+        for age in [0, 1, WatchComplicationSnapshot.recordingHeartbeat * 2] {
+            let settled = snapshot.settled(now: wholeSecondDate.addingTimeInterval(age))
+            XCTAssertEqual(settled.state, .recording, "a \(age)s old recording is still live")
+        }
+    }
+
+    func testSettled_clearsARecordingLeftBehindByAStoppedApp() {
+        let snapshot = WatchComplicationSnapshot(
+            state: .recording,
+            updatedAt: wholeSecondDate,
+            latestCaptureAt: wholeSecondDate,
+            inFlightCount: 1
+        )
+
+        let stale = WatchComplicationSnapshot.recordingStaleAfter + 1
+        let settled = snapshot.settled(now: wholeSecondDate.addingTimeInterval(stale))
+
+        XCTAssertEqual(settled.state, .idle)
+        // Only the disbelieved state changes; the rest of the payload stands.
+        XCTAssertEqual(settled.latestCaptureAt, snapshot.latestCaptureAt)
+        XCTAssertEqual(settled.inFlightCount, snapshot.inFlightCount)
+    }
+
+    func testSettled_leavesEveryOtherStateAlone() {
+        let ancient = wholeSecondDate.addingTimeInterval(WatchComplicationSnapshot.recordingStaleAfter * 10)
+        for state in WatchComplicationState.allCases where state != .recording {
+            let snapshot = WatchComplicationSnapshot(state: state, updatedAt: wholeSecondDate)
+
+            XCTAssertEqual(snapshot.settled(now: ancient).state, state, "\(state) does not go stale")
+        }
+    }
+
+    func testStaleClamp_sitsWellAboveTheRecordingHeartbeat() {
+        // A live recording must never trip the clamp between two heartbeats.
+        XCTAssertGreaterThan(
+            WatchComplicationSnapshot.recordingStaleAfter,
+            WatchComplicationSnapshot.recordingHeartbeat * 4
+        )
     }
 
     // MARK: - Record request

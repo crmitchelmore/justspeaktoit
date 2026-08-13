@@ -100,6 +100,15 @@ public struct WatchComplicationSnapshot: Codable, Equatable, Sendable {
     /// File name inside the shared container.
     public static let fileName = "watch-complication.json"
 
+    /// The app writes the snapshot again at this interval while it records.
+    /// The refreshed `updatedAt` shows that the recording continues.
+    public static let recordingHeartbeat: TimeInterval = 30
+
+    /// A `recording` snapshot older than this is not believable. Only a
+    /// stopped app can leave one, because a live recording sends a heartbeat
+    /// every `recordingHeartbeat` seconds.
+    public static let recordingStaleAfter: TimeInterval = 5 * 60
+
     /// What a face shows before the app has ever published anything.
     public static let idle = WatchComplicationSnapshot(
         state: .idle,
@@ -112,21 +121,37 @@ public struct WatchComplicationSnapshot: Codable, Equatable, Sendable {
     public let updatedAt: Date
     /// Start time of the newest capture, for the Smart Stack subtitle.
     public let latestCaptureAt: Date?
-    /// Captures still on their way to the iPhone.
-    public let pendingCount: Int
+    /// Captures that are recorded but not yet in history. Counts every status
+    /// the face calls "sending", so the headline and the subtitle agree.
+    public let inFlightCount: Int
 
     public init(
         state: WatchComplicationState,
         updatedAt: Date = Date(),
         latestCaptureAt: Date? = nil,
-        pendingCount: Int = 0,
+        inFlightCount: Int = 0,
         schemaVersion: Int = WatchComplicationSnapshot.currentSchemaVersion
     ) {
         self.schemaVersion = schemaVersion
         self.state = state
         self.updatedAt = updatedAt
         self.latestCaptureAt = latestCaptureAt
-        self.pendingCount = pendingCount
+        self.inFlightCount = inFlightCount
+    }
+
+    /// Clears a `recording` state that the app never got to replace. If the
+    /// app stops during a recording, the file keeps `recording` and no process
+    /// writes it again, so a face must not show that state forever.
+    public func settled(now: Date = Date()) -> WatchComplicationSnapshot {
+        guard self.state == .recording else { return self }
+        guard now.timeIntervalSince(self.updatedAt) > Self.recordingStaleAfter else { return self }
+        return WatchComplicationSnapshot(
+            state: .idle,
+            updatedAt: self.updatedAt,
+            latestCaptureAt: self.latestCaptureAt,
+            inFlightCount: self.inFlightCount,
+            schemaVersion: self.schemaVersion
+        )
     }
 
     public func encoded() -> Data? {

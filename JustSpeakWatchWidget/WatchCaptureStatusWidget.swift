@@ -52,8 +52,8 @@ struct WatchCaptureStatusView: View {
     /// Second line: how many captures are still on their way, or when the last
     /// one was taken. Nothing at all before the first capture.
     private var detail: String? {
-        if entry.snapshot.pendingCount > 1 {
-            return "\(entry.snapshot.pendingCount) captures queued"
+        if entry.snapshot.inFlightCount > 1 {
+            return "\(entry.snapshot.inFlightCount) captures in progress"
         }
         guard let latest = entry.snapshot.latestCaptureAt else { return nil }
         return latest.formatted(.relative(presentation: .numeric))

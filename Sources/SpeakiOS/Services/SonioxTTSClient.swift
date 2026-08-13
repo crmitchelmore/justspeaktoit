@@ -1,20 +1,23 @@
 #if os(iOS)
-import AVFoundation
+import Combine
 import Foundation
 import SpeakCore
 
-/// iOS REST playback client for Soniox. Real-time WebSocket playback is tracked separately.
+/// iOS Soniox voice-output client backed by the low-latency WebSocket transport.
 @MainActor
 public final class SonioxIOSVoiceOutputClient: ObservableObject {
     @Published private(set) public var isSpeaking = false
+    @Published private(set) public var firstAudioLatencySeconds: TimeInterval?
 
     private let session: URLSession
-    private var audioPlayer: AVAudioPlayer?
-    private var synthesisTask: Task<Data, Error>?
+    private let realtime: SonioxRealtimeTTSClient
     private var activeOperationID: UUID?
 
     public init(session: URLSession = .shared) {
         self.session = session
+        self.realtime = SonioxRealtimeTTSClient(session: session)
+        realtime.$isSpeaking.assign(to: &$isSpeaking)
+        realtime.$firstAudioLatencySeconds.assign(to: &$firstAudioLatencySeconds)
     }
 
     // swiftlint:disable:next function_body_length
@@ -36,6 +39,11 @@ public final class SonioxIOSVoiceOutputClient: ObservableObject {
         stop()
         let operationID = UUID()
         activeOperationID = operationID
+        defer {
+            if activeOperationID == operationID {
+                activeOperationID = nil
+            }
+        }
 
         let api = SonioxTTSAPI(session: session, region: region)
         let accountVoices: [SonioxTTSAccountVoice]
@@ -44,6 +52,8 @@ public final class SonioxIOSVoiceOutputClient: ObservableObject {
         } else {
             accountVoices = []
         }
+        try Task.checkCancellation()
+        guard activeOperationID == operationID else { throw CancellationError() }
         let resolution = SonioxTTSCatalog.resolvedVoice(
             voiceID: voiceID,
             accountVoices: accountVoices,
@@ -53,46 +63,20 @@ public final class SonioxIOSVoiceOutputClient: ObservableObject {
             forVoiceOutputIdentifier: languageIdentifier,
             content: trimmed
         )
-        let request: SonioxTTSRequest
-        if let accountVoice = resolution.accountVoice {
-            request = SonioxTTSRequest(
+        try await withTaskCancellationHandler {
+            try await realtime.speak(
+                text: trimmed,
+                apiKey: apiKey,
+                voice: resolution.apiVoiceID,
                 language: language,
-                accountVoice: accountVoice,
-                audioFormat: .mp3,
+                region: region,
                 speed: speed
             )
-        } else {
-            let voice = SonioxTTSCatalog.voice(forID: resolution.providerVoiceID)
-                ?? SonioxTTSCatalog.defaultVoice(for: SonioxTTSCatalog.defaultModel)
-            request = SonioxTTSRequest(
-                language: language,
-                voice: voice,
-                audioFormat: .mp3,
-                speed: speed
-            )
-        }
-
-        let task = Task { try await api.synthesize(text: trimmed, apiKey: apiKey, request: request) }
-        synthesisTask = task
-        defer {
-            if activeOperationID == operationID {
-                synthesisTask = nil
-                activeOperationID = nil
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                guard self?.activeOperationID == operationID else { return }
+                self?.stop()
             }
-        }
-        do {
-            let data = try await withTaskCancellationHandler {
-                try await task.value
-            } onCancel: {
-                task.cancel()
-            }
-            try Task.checkCancellation()
-            guard activeOperationID == operationID else { throw CancellationError() }
-            try await playAudio(data, operationID: operationID)
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch let error as SonioxTTSAPIError {
-            throw SonioxIOSVoiceOutputError.api(error)
         }
     }
 
@@ -106,72 +90,27 @@ public final class SonioxIOSVoiceOutputClient: ObservableObject {
 
     public func stop() {
         activeOperationID = nil
-        synthesisTask?.cancel()
-        synthesisTask = nil
-        audioPlayer?.stop()
-        audioPlayer = nil
-        isSpeaking = false
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-    }
-
-    private func playAudio(_ data: Data, operationID: UUID) async throws {
-        guard activeOperationID == operationID else { throw CancellationError() }
-        let audioSession = AVAudioSession.sharedInstance()
-        var player: AVAudioPlayer?
-        do {
-            try audioSession.setCategory(
-                .playAndRecord,
-                mode: .spokenAudio,
-                options: [.allowBluetooth, .defaultToSpeaker, .allowBluetoothA2DP]
-            )
-            try audioSession.setActive(true)
-            guard activeOperationID == operationID else { throw CancellationError() }
-            let preparedPlayer = try AVAudioPlayer(data: data)
-            player = preparedPlayer
-            audioPlayer = preparedPlayer
-            preparedPlayer.prepareToPlay()
-            guard preparedPlayer.play() else {
-                throw SonioxIOSVoiceOutputError.playbackFailed
-            }
-            isSpeaking = true
-            while preparedPlayer.isPlaying {
-                try Task.checkCancellation()
-                guard activeOperationID == operationID, audioPlayer === preparedPlayer else {
-                    throw CancellationError()
-                }
-                try await Task.sleep(for: .milliseconds(30))
-            }
-            finishPlayback(operationID: operationID, player: preparedPlayer)
-        } catch {
-            finishPlayback(operationID: operationID, player: player)
-            throw error
-        }
-    }
-
-    private func finishPlayback(operationID: UUID, player: AVAudioPlayer?) {
-        guard activeOperationID == operationID else { return }
-        player?.stop()
-        if let player, audioPlayer === player {
-            audioPlayer = nil
-        }
-        synthesisTask = nil
-        activeOperationID = nil
-        isSpeaking = false
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        realtime.stop()
     }
 }
 
 public enum SonioxIOSVoiceOutputError: LocalizedError {
     case missingAPIKey
-    case playbackFailed
+    case invalidWebSocketMessage
+    case invalidPCMData
+    case provider(SonioxTTSFailure)
     case api(SonioxTTSAPIError)
 
     public var errorDescription: String? {
         switch self {
         case .missingAPIKey:
             "Soniox API key is required for voice output"
-        case .playbackFailed:
-            "Soniox audio could not be played"
+        case .invalidWebSocketMessage:
+            "Soniox returned an invalid streaming response"
+        case .invalidPCMData:
+            "Soniox returned invalid PCM audio"
+        case .provider(let failure):
+            failure.requestID.map { "\(failure.message) (request \($0))" } ?? failure.message
         case .api(let error):
             switch error {
             case .apiFailure(let failure):

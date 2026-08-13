@@ -14,9 +14,12 @@ always-ready microphone behaviour is documented in
 ## Scope
 
 The Just Speak keyboard is transcription-first: a live transcript strip plus
-one control row (globe · language chip · mic/stop · delete · return). There is
-deliberately no QWERTY layer; the globe key returns to a system keyboard for
-typing. Two capture paths exist behind `KeyboardCapturePlanner`:
+one control row (globe · language chip · profile chip · mic/stop · delete ·
+return). Each chip appears only when it has somewhere to switch to, and the mic
+drops its "Speak"/"Stop" caption while both chips are present so the row stays
+one line at the same ~170 pt height. There is deliberately no QWERTY layer; the
+globe key returns to a system keyboard for typing. Two capture paths exist
+behind `KeyboardCapturePlanner`:
 
 - **Direct** (primary): the extension records via `AVAudioEngine` and
   transcribes with Apple Speech (on-device preferred), streaming text into the
@@ -129,6 +132,39 @@ TestFlight workflow needs a provisioning profile for bundle ID
 3. Dictate in the switched language and verify recognition uses it.
 4. Switch the app language, reopen the keyboard → chip follows the app.
 
+### Direct path: profile quick-switch
+
+The profile chip selects what happens to the transcript **after** Apple Speech
+returns it: `Raw` (Verbatim) inserts exactly what was recognised, `Tidy`
+(Clean-up) and `Chat` (Message) rewrite it with Apple's on-device foundation
+model. The extension holds no API keys and makes no network request for this,
+so the chip is hidden on devices where that model is unavailable — record the
+device and OS version when it does not appear.
+
+1. Open the keyboard on a device with Apple Intelligence available → the chip
+   shows the current profile (`Raw` unless the app's post-processing switch is
+   on, which mirrors as `Tidy`).
+2. Tap the chip → it advances one profile per tap and wraps, so every profile
+   is reachable in ≤2 taps. Chip is disabled while recording and while a
+   rewrite is running.
+3. With `Tidy` selected, dictate a sentence with filler words and no
+   punctuation → the streamed raw text is replaced in place once the rewrite
+   lands; only the differing suffix is deleted, and text the keyboard did not
+   insert is untouched.
+4. With `Chat` selected, repeat → the inserted text is tightened into message
+   wording without adding or answering content.
+5. With `Raw` selected → no rewrite happens and no polishing status appears.
+6. Move the caret elsewhere in the same field immediately after tapping stop
+   with `Tidy` selected → the rewrite is abandoned (raw text stands) rather
+   than editing at the new cursor.
+7. Tap Cancel while the strip shows "Applying …" → the raw transcript stays.
+8. Dismiss the keyboard or switch text field mid-rewrite → no edit lands in the
+   new destination.
+9. Kill and reopen the keyboard → the last chip selection is still shown.
+10. Toggle post-processing off in the app, reopen the keyboard → the chip is
+    back on `Raw`; toggle it on with `Chat` previously selected → `Chat` is
+    kept (the app decides *whether* to polish, the chip decides *how*).
+
 ### Direct path: interruptions and target changes
 
 1. Receive a call / trigger Siri mid-dictation → capture ends, words already
@@ -194,10 +230,15 @@ dictation), and touch targets of at least 44 points.
   permissions" above; the handoff path covers devices that refuse.
 - The extension records only while the mic key is active and prefers on-device
   recognition.
+- Dictation profiles post-process the finished transcript with Apple's
+  on-device foundation model only. The extension sends no transcript to a
+  server for this and holds no API keys; when that model is unavailable the
+  profile chip is hidden and the raw transcript stands.
 - The keyboard does not read, persist, or transmit surrounding host text.
 - The App Group contains: versioned handoff records (schema version, request
   UUID, document identifier, timestamps, phase, safe failure enum, throttled
-  interim text, short-lived final transcript) and the language selection.
+  interim text, short-lived final transcript), the language selection, and the
+  schema-versioned dictation-profile selection (a catalogue identifier only).
   Never audio or credentials.
 - No private settings URL, responder-chain workaround, Apple keyboard asset,
   or unsupported containing-app launch is used.

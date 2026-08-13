@@ -222,9 +222,12 @@ public struct KeyboardSetupView: View {
 
     private func refresh() {
         observation = KeyboardHandoffStore.shared.extensionObservation()
-        // Keep the keyboard's language chip in sync with the app preference.
+        // Keep the keyboard's chips in sync with the app preferences.
         KeyboardDictationPreferencesStore.shared.mirrorAppPreference(
             selectedIdentifier: AppSettings.shared.preferredLocaleIdentifier
+        )
+        KeyboardDictationPreferencesStore.shared.mirrorAppProfilePreference(
+            polishesTranscripts: AppSettings.shared.postProcessingEnabled
         )
     }
 }

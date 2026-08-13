@@ -230,4 +230,92 @@ final class KeyboardDictationMachineTests: XCTestCase {
         XCTAssertEqual(machine.handle(.captureStarted), [])
         XCTAssertEqual(machine.state, .idle)
     }
+
+    // MARK: - Profile post-processing
+
+    func testPolishRewritesTheFinishedTranscriptInPlace() {
+        var machine = finishedSession(finalTranscript: "send the report tomorow")
+
+        XCTAssertEqual(machine.handle(.polishStarted), [])
+        XCTAssertEqual(machine.state, .polishing)
+        XCTAssertTrue(machine.isBusy)
+        XCTAssertFalse(machine.isCapturing)
+
+        let effects = machine.handle(.polished("Send the report tomorrow."))
+
+        XCTAssertEqual(machine.state, .finished)
+        XCTAssertEqual(machine.liveText, "Send the report tomorrow.")
+        XCTAssertEqual(effects.count, 1)
+        guard case let .applyEdit(edit)? = effects.first else {
+            return XCTFail("Expected a document edit")
+        }
+        XCTAssertLessThanOrEqual(edit.deleteCount, "send the report tomorow".count)
+    }
+
+    func testFailedPolishKeepsTheDictatedText() {
+        var machine = finishedSession(finalTranscript: "as dictated")
+        _ = machine.handle(.polishStarted)
+
+        XCTAssertEqual(machine.handle(.polishFailed), [])
+        XCTAssertEqual(machine.state, .finished)
+        XCTAssertEqual(machine.liveText, "as dictated")
+        XCTAssertFalse(machine.isBusy)
+    }
+
+    func testEmptyPolishResultKeepsTheDictatedText() {
+        var machine = finishedSession(finalTranscript: "as dictated")
+        _ = machine.handle(.polishStarted)
+
+        XCTAssertEqual(machine.handle(.polished("   ")), [])
+        XCTAssertEqual(machine.state, .finished)
+        XCTAssertEqual(machine.liveText, "as dictated")
+    }
+
+    func testPolishResultArrivingOutsideAPolishIsIgnored() {
+        var machine = finishedSession(finalTranscript: "as dictated")
+
+        XCTAssertEqual(machine.handle(.polished("late rewrite")), [])
+        XCTAssertEqual(machine.liveText, "as dictated")
+
+        _ = machine.handle(.micTapped)
+        XCTAssertEqual(machine.handle(.polished("later still")), [])
+        XCTAssertEqual(machine.state, .starting)
+    }
+
+    func testPolishCannotStartMidCapture() {
+        var machine = KeyboardDictationMachine()
+        _ = machine.handle(.micTapped)
+        _ = machine.handle(.captureStarted)
+
+        XCTAssertEqual(machine.handle(.polishStarted), [])
+        XCTAssertEqual(machine.state, .recording)
+    }
+
+    func testMicTapsAreIgnoredWhilePolishing() {
+        var machine = finishedSession(finalTranscript: "as dictated")
+        _ = machine.handle(.polishStarted)
+
+        XCTAssertEqual(machine.handle(.micTapped), [])
+        XCTAssertEqual(machine.handle(.stopTapped), [])
+        XCTAssertEqual(machine.state, .polishing)
+    }
+
+    func testDismissalDuringPolishResetsWithoutCancellingCapture() {
+        var machine = finishedSession(finalTranscript: "as dictated")
+        _ = machine.handle(.polishStarted)
+
+        XCTAssertEqual(machine.handle(.dismissed), [])
+        XCTAssertEqual(machine.state, .idle)
+        XCTAssertEqual(machine.liveText, "")
+    }
+
+    private func finishedSession(finalTranscript: String) -> KeyboardDictationMachine {
+        var machine = KeyboardDictationMachine()
+        _ = machine.handle(.micTapped)
+        _ = machine.handle(.captureStarted)
+        _ = machine.handle(.stopTapped)
+        _ = machine.handle(.finalized(finalTranscript))
+        XCTAssertEqual(machine.state, .finished)
+        return machine
+    }
 }

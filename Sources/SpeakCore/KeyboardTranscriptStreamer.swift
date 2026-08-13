@@ -81,6 +81,20 @@ public struct KeyboardTranscriptStreamer: Equatable, Sendable {
         return edit
     }
 
+    /// Replaces everything this streamer has inserted with `text` and returns
+    /// the minimal edit that performs the swap. Used by post-processing
+    /// profiles, which rewrite a finished transcript in place.
+    ///
+    /// The emitted `deleteCount` can never exceed the streamer's own inserted
+    /// text, so — as long as the caller has confirmed the cursor still sits at
+    /// the end of that text — this cannot reach host content.
+    public mutating func replaceInserted(with text: String) -> KeyboardTranscriptEdit {
+        let edit = Self.edit(from: insertedText, to: text)
+        committedText = text
+        volatileTail = ""
+        return edit
+    }
+
     /// Forgets all session state without touching the document.
     public mutating func reset() {
         committedText = ""

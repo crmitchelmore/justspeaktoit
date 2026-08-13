@@ -47,10 +47,14 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
 
     public func activate() {
         ensureSignalObservation()
-        // Keep the keyboard's language quick-switch in sync with the app's
-        // spoken-language preference on every foreground activation.
+        // Keep the keyboard's quick-switch chips in sync with the app's spoken
+        // language and post-processing preferences on every foreground
+        // activation.
         KeyboardDictationPreferencesStore.shared.mirrorAppPreference(
             selectedIdentifier: AppSettings.shared.preferredLocaleIdentifier
+        )
+        KeyboardDictationPreferencesStore.shared.mirrorAppProfilePreference(
+            polishesTranscripts: AppSettings.shared.postProcessingEnabled
         )
         session = sessionStore.activeSession(clearingStaleRecord: true)
         guard sessionStore.isEnabled,

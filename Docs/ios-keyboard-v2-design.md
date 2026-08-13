@@ -95,6 +95,19 @@ missing recogniser, or capture failure degrades to **Handoff** at runtime
 - Language quick-switch chip: `KeyboardDictationPreferencesStore` (App Group)
   mirrors the app's spoken-language preference and keeps a ring of up to four
   recent languages; the chip cycles the ring in one tap (≤2 taps requirement).
+- Profile quick-switch chip: the same store holds a schema-versioned
+  `KeyboardProfileSelection`. Apple Speech is the only in-extension recogniser,
+  so a profile selects *post-processing* rather than a provider: the shared
+  `KeyboardDictationProfileCatalog` (Verbatim · Clean-up · Message) supplies the
+  ring, and the ring **is** the catalogue, so every profile stays within the
+  ≤2-tap budget and no platform keeps its own list. A polishing profile rewrites
+  the finished transcript in place through
+  `KeyboardTranscriptStreamer.replaceInserted(with:)`, using Apple's on-device
+  foundation model only — the extension holds no API keys and makes no network
+  request for it. The rewrite is abandoned unless the caret still sits at the
+  end of the dictated text, and the chip is hidden where that model is
+  unavailable. The app's post-processing switch decides *whether* the keyboard
+  polishes; the chip decides *how*.
 - Guardrails: a `documentIdentifier` change mid-session cancels capture and
   commits what was already streamed (never streams into the wrong field);
   audio interruptions finish gracefully, keeping inserted words.
@@ -114,9 +127,12 @@ One compact layout (~170 pt portrait iPhone; v1 was 300 pt):
 
 - **Strip:** live partial transcript while dictating; state/setup copy
   otherwise; inline Cancel while capturing.
-- **Control row:** globe (when required) · language chip · mic/stop ·
-  delete · return. Deliberately no QWERTY — the globe key returns to the
-  system keyboard for typing, per the v1 correction-UX decision which stands.
+- **Control row:** globe (when required) · language chip · profile chip ·
+  mic/stop · delete · return. Each chip appears only when it has somewhere to
+  switch to, and the mic drops its caption while both are present so the row
+  stays one line at the same height. Deliberately no QWERTY — the globe key
+  returns to the system keyboard for typing, per the v1 correction-UX decision
+  which stands.
 
 ## What was kept vs redone
 
@@ -127,7 +143,7 @@ One compact layout (~170 pt portrait iPhone; v1 was 300 pt):
 | `KeyboardLaunchPolicy` | Kept; feeds the new planner |
 | `KeyboardCorrectionPlan` (safe undo) | Kept in SpeakCore; the v2 surface drops the undo/cursor row in favour of delete + re-dictation |
 | `KeyboardViewController` monolith (~800 lines incl. UI) | Split: shell controller, `KeyboardViewModel`, `KeyboardRootView`, `KeyboardDictationEngine`, `KeyboardHandoffController` |
-| 13-state single presentation enum | Direct machine (6 states) + handoff presentation (10), unified in one strip |
+| 13-state single presentation enum | Direct machine (7 states, incl. profile polishing) + handoff presentation (10), unified in one strip |
 
 ## Privacy and review posture
 

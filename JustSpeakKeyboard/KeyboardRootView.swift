@@ -5,7 +5,9 @@ import UIKit
 /// Compact dictation-first keyboard surface.
 ///
 /// Layout is a live transcript strip above one control row:
-/// globe · language chip · mic/stop · delete · return. There is deliberately
+/// globe · language chip · profile chip · mic/stop · delete · return. Each chip
+/// appears only when it has somewhere to switch to, and the mic drops its
+/// caption once both are present so the row never wraps. There is deliberately
 /// no QWERTY layer — the globe key returns to the system keyboard for typing.
 struct KeyboardRootView: View {
     @ObservedObject var model: KeyboardViewModel
@@ -72,18 +74,21 @@ struct KeyboardRootView: View {
             }
 
             if let chip = model.languageChipLabel, model.mode == .direct {
-                Button {
-                    model.cycleLanguage()
-                } label: {
-                    Text(chip)
-                        .font(.footnote.weight(.semibold))
-                        .padding(.horizontal, 10)
-                        .frame(height: 46)
-                }
-                .background(keyBackground)
-                .disabled(model.isCapturing)
-                .accessibilityLabel("Dictation language \(chip). Tap to switch.")
-                .accessibilityIdentifier("keyboardLanguageChip")
+                chipButton(
+                    label: chip,
+                    accessibilityLabel: "Dictation language \(chip). Tap to switch.",
+                    identifier: "keyboardLanguageChip",
+                    action: model.cycleLanguage
+                )
+            }
+
+            if let chip = model.profileChipLabel, model.mode == .direct {
+                chipButton(
+                    label: chip,
+                    accessibilityLabel: "Dictation profile \(model.profileDisplayName). Tap to switch.",
+                    identifier: "keyboardProfileChip",
+                    action: model.cycleProfile
+                )
             }
 
             micButton
@@ -113,6 +118,27 @@ struct KeyboardRootView: View {
             .accessibilityIdentifier("keyboardReturnButton")
         }
         .foregroundStyle(.primary)
+    }
+
+    /// One quick-switch chip: a key-sized button whose single tap advances the
+    /// preference ring, disabled while capture or post-processing runs.
+    private func chipButton(
+        label: String,
+        accessibilityLabel: String,
+        identifier: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.footnote.weight(.semibold))
+                .lineLimit(1)
+                .padding(.horizontal, 8)
+                .frame(minWidth: 44, minHeight: 46)
+        }
+        .background(keyBackground)
+        .disabled(model.isBusy)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityIdentifier(identifier)
     }
 
     private var micButton: some View {
@@ -182,6 +208,8 @@ struct KeyboardRootView: View {
                 return "Listening…"
             case .stopping:
                 return "Finishing…"
+            case .polishing:
+                return "Applying \(model.profileDisplayName)…"
             case .finished:
                 return "Inserted. Tap the mic to dictate more."
             case let .failed(failure):
@@ -270,6 +298,7 @@ struct KeyboardRootView: View {
         case .direct:
             switch model.directState {
             case .stopping: return "Finishing dictation"
+            case .polishing: return "Applying \(model.profileDisplayName)"
             case .finished: return "Dictation inserted"
             default: return "Dictating"
             }
@@ -289,6 +318,7 @@ struct KeyboardRootView: View {
         case .direct:
             switch model.directState {
             case .recording, .stopping: return "waveform"
+            case .polishing: return "wand.and.sparkles"
             case .finished: return "checkmark.circle.fill"
             case .failed: return "exclamationmark.triangle.fill"
             default: return "mic"
@@ -311,6 +341,7 @@ struct KeyboardRootView: View {
         case "checkmark.circle.fill": return .green
         case "exclamationmark.triangle.fill", "lock.trianglebadge.exclamationmark": return .orange
         case "waveform": return .red
+        case "wand.and.sparkles": return .blue
         default: return .secondary
         }
     }
@@ -331,7 +362,11 @@ struct KeyboardRootView: View {
         return micDisabled ? Color.gray.opacity(0.5) : .blue
     }
 
+    /// The caption is dropped once both quick-switch chips are on the row, so
+    /// the single control row keeps a full-size mic key on the narrowest
+    /// supported iPhone instead of wrapping or truncating.
     private var micCaption: String? {
+        guard model.languageChipLabel == nil || model.profileChipLabel == nil else { return nil }
         if isActivelyCapturing {
             return "Stop"
         }
@@ -347,6 +382,7 @@ struct KeyboardRootView: View {
         switch model.mode {
         case .direct:
             return model.directState == .starting || model.directState == .stopping
+                || model.directState == .polishing
         case .handoff:
             let presentation = model.handoff.presentation
             return presentation == .starting || presentation == .transcribing
@@ -369,7 +405,7 @@ struct KeyboardRootView: View {
     private var micDisabled: Bool {
         switch model.mode {
         case .direct:
-            return model.directState == .stopping
+            return model.directState == .stopping || model.directState == .polishing
         case .handoff:
             let presentation = model.handoff.presentation
             return presentation == .transcribing || presentation == .waitingForApp
@@ -385,7 +421,7 @@ struct KeyboardRootView: View {
     private var controlsDisabled: Bool {
         switch model.mode {
         case .direct:
-            return model.isCapturing
+            return model.isBusy
         case .handoff:
             let presentation = model.handoff.presentation
             return presentation == .recording || presentation == .transcribing
@@ -398,6 +434,7 @@ struct KeyboardRootView: View {
         switch model.mode {
         case .direct:
             return model.directState == .recording || model.directState == .starting
+                || model.directState == .polishing
         case .handoff:
             let presentation = model.handoff.presentation
             return presentation == .starting || presentation == .recording

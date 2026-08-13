@@ -10,6 +10,9 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
     private let apiKey: String
     private let modelID: String
     private let language: String?
+    /// PCM16 rate of the audio the caller streams in; only used to size and
+    /// report the pre-roll, since the endpoint takes the rate from the stream.
+    private let sampleRate: Int
     private let session: URLSession
     private let bufferPool: AudioBufferPool
     private let logger = Logger(subsystem: "com.speak.app", category: "ElevenLabsLiveClient")
@@ -34,22 +37,26 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
     private static let finishDrainBudget: TimeInterval = 1.0
 
     /// Holds audio captured between the recording cue and the socket reaching
-    /// `.running`, then replays it in order (issue #641). The streaming
-    /// endpoint takes 16kHz PCM16.
-    let preroll = StreamingAudioPreroll(sampleRate: 16_000)
+    /// `.running`, then replays it in order (issue #641). Sized from the rate
+    /// the caller is actually feeding us, so the budget is the intended
+    /// duration rather than a guess.
+    let preroll: StreamingAudioPreroll
 
     public init(
         apiKey: String,
         modelID: String = "scribe_v1",
         language: String? = nil,
+        sampleRate: Int = LiveTranscriptionProviderID.elevenlabs.expectedSampleRate,
         session: URLSession = .shared,
         bufferPool: AudioBufferPool = AudioBufferPool(poolSize: 10, bufferSize: 4096)
     ) {
         self.apiKey = apiKey
         self.modelID = modelID
         self.language = language
+        self.sampleRate = sampleRate
         self.session = session
         self.bufferPool = bufferPool
+        self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
     }
 
     /// Starts a live transcription session.
@@ -130,7 +137,7 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
         let held = preroll.drain()
         guard !held.isEmpty else { return }
         let bytes = held.reduce(0) { $0 + $1.count }
-        let leadingMilliseconds = Int((Double(bytes) / 2.0 / 16_000.0) * 1000)
+        let leadingMilliseconds = Int((Double(bytes) / 2.0 / Double(max(sampleRate, 1))) * 1000)
         logger.info(
             "ElevenLabs: replaying \(held.count) pre-roll chunks (\(leadingMilliseconds) ms of leading audio)"
         )

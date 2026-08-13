@@ -20,7 +20,15 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
         let duration: TimeInterval
     }
 
-    @Published private(set) var isRecording = false
+    /// Every path that starts, stops or aborts a recording goes through this
+    /// property, so publishing here keeps the watch-face complication honest
+    /// without each call site remembering to.
+    @Published private(set) var isRecording = false {
+        didSet {
+            guard oldValue != self.isRecording else { return }
+            WatchComplicationPublisher.shared.update(isRecording: self.isRecording)
+        }
+    }
     @Published private(set) var startedAt: Date?
     @Published private(set) var lastError: String?
 

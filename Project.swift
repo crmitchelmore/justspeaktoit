@@ -14,6 +14,7 @@ let appProfileName = ProcessInfo.processInfo.environment["APP_PROFILE_NAME"]
 let widgetProfileName = ProcessInfo.processInfo.environment["WIDGET_PROFILE_NAME"]
 let keyboardProfileName = ProcessInfo.processInfo.environment["KEYBOARD_PROFILE_NAME"]
 let watchProfileName = ProcessInfo.processInfo.environment["WATCH_PROFILE_NAME"]
+let watchWidgetProfileName = ProcessInfo.processInfo.environment["WATCH_WIDGET_PROFILE_NAME"]
 let macAppStoreProfileName = ProcessInfo.processInfo.environment["TUIST_MAC_PROFILE_NAME"]
     ?? ProcessInfo.processInfo.environment["MAC_PROFILE_NAME"]
 
@@ -114,6 +115,17 @@ var watchAppSettings: [String: SettingValue] = [
     "MARKETING_VERSION": "\(version)"
 ]
 
+// The watch widget extension shares source with the watch app (the record
+// intent and the shared-container payloads); `WATCH_WIDGET_EXTENSION` selects
+// the extension-side branch of `StartWatchRecordingIntent`, which cannot touch
+// the microphone from a widget process.
+var watchWidgetSettings: [String: SettingValue] = [
+    "CURRENT_PROJECT_VERSION": "1",
+    "MARKETING_VERSION": "\(version)",
+    "SKIP_INSTALL": "YES",
+    "SWIFT_ACTIVE_COMPILATION_CONDITIONS": "$(inherited) WATCH_WIDGET_EXTENSION"
+]
+
 func configureManualSigning(for settings: inout [String: SettingValue], profileName: String) {
     settings["PROVISIONING_PROFILE_SPECIFIER"] = .string(profileName)
     settings["CODE_SIGN_STYLE"] = "Manual"
@@ -134,6 +146,10 @@ if let keyboardProfileName {
 
 if let watchProfileName {
     configureManualSigning(for: &watchAppSettings, profileName: watchProfileName)
+}
+
+if let watchWidgetProfileName {
+    configureManualSigning(for: &watchWidgetSettings, profileName: watchWidgetProfileName)
 }
 
 if isAppStoreBuild {
@@ -283,13 +299,44 @@ let watchAppTarget: Target = .target(
     // The watch target cannot depend on the SpeakCore package product
     // (several transitive package manifests do not declare watchOS support),
     // so it compiles the shared watch files directly. Pure Foundation;
-    // unit-tested via SpeakCoreTests.
+    // unit-tested via SpeakCoreTests. `JustSpeakWatchShared` is the source the
+    // watch app and its widget extension both compile.
     sources: [
         "JustSpeakWatch/**",
+        "JustSpeakWatchShared/**",
         "Sources/SpeakCore/WatchCaptureProtocol.swift",
-        "Sources/SpeakCore/WatchRecordingLifecycle.swift"
+        "Sources/SpeakCore/WatchComplicationState.swift",
+        "Sources/SpeakCore/WatchRecordingLifecycle.swift",
+        "Sources/SpeakCore/WatchSharedContainer.swift"
+    ],
+    entitlements: .file(path: "JustSpeakWatch/JustSpeakWatch.entitlements"),
+    dependencies: [
+        .target(name: "JustSpeakWatchWidgetExtension")
     ],
     settings: .settings(base: watchAppSettings)
+)
+
+// Watch-face complication + Smart Stack entry. Embedded in the watch app, so
+// it is gated by the same `TUIST_WATCH_APP` flag: the complication bundle id
+// needs its own provisioning profile and the App Group must be registered for
+// both watch bundle ids (see Docs/watch-provisioning.md).
+let watchWidgetTarget: Target = .target(
+    name: "JustSpeakWatchWidgetExtension",
+    destinations: [.appleWatch],
+    product: .appExtension,
+    // Extension bundle ids must be prefixed with the containing watch app's.
+    bundleId: "com.justspeaktoit.ios.watchkitapp.complication",
+    deploymentTargets: .watchOS("10.0"),
+    infoPlist: .file(path: "JustSpeakWatchWidget/Info.plist"),
+    sources: [
+        "JustSpeakWatchWidget/**",
+        "JustSpeakWatchShared/**",
+        "Sources/SpeakCore/WatchCaptureProtocol.swift",
+        "Sources/SpeakCore/WatchComplicationState.swift",
+        "Sources/SpeakCore/WatchSharedContainer.swift"
+    ],
+    entitlements: .file(path: "JustSpeakWatchWidget/JustSpeakWatchWidget.entitlements"),
+    settings: .settings(base: watchWidgetSettings)
 )
 
 let keyboardTarget: Target = .target(
@@ -368,6 +415,7 @@ let iosTestsTarget: Target = .target(
 var projectTargets: [Target] = [macAppTarget, iosAppTarget]
 if isWatchAppEnabled {
     projectTargets.append(watchAppTarget)
+    projectTargets.append(watchWidgetTarget)
 }
 if isIOSKeyboardEnabled {
     projectTargets.append(keyboardTarget)

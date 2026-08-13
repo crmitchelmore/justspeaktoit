@@ -194,6 +194,37 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(watchTarget.contains("\"Sources/SpeakCore/WatchCaptureProtocol.swift\""))
     }
 
+    func testWatchComplication_shipsOnlyWithTheWatchAppFeatureFlag() throws {
+        let root = repositoryRoot
+        let manifest = try String(contentsOf: root.appendingPathComponent("Project.swift"), encoding: .utf8)
+        let releaseWorkflow = try String(
+            contentsOf: root.appendingPathComponent(".github/workflows/release-ios.yml"),
+            encoding: .utf8
+        )
+        let entitlements = try String(
+            contentsOf: root.appendingPathComponent("JustSpeakWatchWidget/JustSpeakWatchWidget.entitlements"),
+            encoding: .utf8
+        )
+        let widgetTarget = try targetBlock(named: "JustSpeakWatchWidgetExtension", in: manifest)
+        let watchTarget = try targetBlock(named: "JustSpeakWatchApp", in: manifest)
+
+        // The complication rides on the watch app's flag: it is embedded in
+        // the watch app and needs its own provisioning before release signing.
+        XCTAssertTrue(manifest.contains("projectTargets.append(watchWidgetTarget)"))
+        XCTAssertFalse(releaseWorkflow.contains("JustSpeakWatchWidget"))
+        XCTAssertTrue(widgetTarget.contains("bundleId: \"com.justspeaktoit.ios.watchkitapp.complication\""))
+        XCTAssertTrue(widgetTarget.contains("product: .appExtension"))
+        XCTAssertTrue(watchTarget.contains(".target(name: \"JustSpeakWatchWidgetExtension\")"))
+        // Both watch targets compile the shared intent and read the same
+        // App Group container.
+        for target in [widgetTarget, watchTarget] {
+            XCTAssertTrue(target.contains("\"JustSpeakWatchShared/**\""))
+            XCTAssertTrue(target.contains("\"Sources/SpeakCore/WatchSharedContainer.swift\""))
+        }
+        XCTAssertTrue(manifest.contains("\"$(inherited) WATCH_WIDGET_EXTENSION\""))
+        XCTAssertTrue(entitlements.contains("<string>group.com.justspeaktoit.watch</string>"))
+    }
+
     func testIOSKeyboardUsesInstantSessionLivePreviewAndRetainsHistory() throws {
         // Keyboard v2 splits the extension into controller + model + view +
         // engine + handoff files; the fallback handoff invariants from v1 must
@@ -343,37 +374,4 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(iosTarget.contains("\"UIBackgroundModes\": [\"audio\", \"remote-notification\"]"))
     }
 
-    private func targetBlock(named name: String, in manifest: String) throws -> Substring {
-        // Targets are declared as top-level `let xTarget: Target = .target(...)`
-        // statements (the manifest exceeded the type-checker's limit when the
-        // conditional targets were assembled inline in one array literal).
-        let topLevelMarker = ".target(\n    name: \"\(name)\""
-        let nestedMarker = ".target(\n            name: \"\(name)\""
-        let start = try XCTUnwrap(
-            manifest.range(of: topLevelMarker)?.lowerBound
-                ?? manifest.range(of: nestedMarker)?.lowerBound,
-            "No target block found for \(name)"
-        )
-        let remainder = manifest[start...]
-        let end = ["\n)\n", "\n        .target("]
-            .compactMap { remainder.range(of: $0)?.upperBound }
-            .min() ?? manifest.endIndex
-        return manifest[start..<end]
-    }
-
-    /// The declaration of a target-dependency array plus the conditional
-    /// `append` statements that extend it, which together determine what a
-    /// target links.
-    private func dependencyBlock(named name: String, in manifest: String) throws -> Substring {
-        let start = try XCTUnwrap(
-            manifest.range(of: "var \(name): [TargetDependency] = [")?.lowerBound,
-            "No dependency list found for \(name)"
-        )
-        let remainder = manifest[start...]
-        // The list ends at the next top-level declaration.
-        let end = ["\nlet ", "\nvar "]
-            .compactMap { remainder.range(of: $0)?.lowerBound }
-            .min() ?? manifest.endIndex
-        return manifest[start..<end]
-    }
 }

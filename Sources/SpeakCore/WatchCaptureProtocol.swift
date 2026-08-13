@@ -165,4 +165,18 @@ enum WatchCaptureCoding {
         guard let data = json.data(using: .utf8) else { return nil }
         return try? decoder.decode(Value.self, from: data)
     }
+
+    /// Same stable date strategy for payloads written to the shared watch
+    /// container (complication snapshot, record request, capture queue).
+    static func encode<Value: Encodable>(_ value: Value) -> Data? {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return try? encoder.encode(value)
+    }
+
+    static func decode<Value: Decodable>(from data: Data) -> Value? {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try? decoder.decode(Value.self, from: data)
+    }
 }

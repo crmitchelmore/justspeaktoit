@@ -17,7 +17,7 @@ func targetBlock(named name: String, in manifest: String) throws -> Substring {
         "No target block found for \(name)"
     )
     let remainder = manifest[start...]
-    let end = ["\n)\n", "\n        .target("]
+    let end = ["\n)\n"]
         .compactMap { remainder.range(of: $0)?.upperBound }
         .min() ?? manifest.endIndex
     return manifest[start..<end]

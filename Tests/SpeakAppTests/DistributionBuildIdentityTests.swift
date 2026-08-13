@@ -211,6 +211,10 @@ final class DistributionBuildIdentityTests: XCTestCase {
         // The complication rides on the watch app's flag: it is embedded in
         // the watch app and needs its own provisioning before release signing.
         XCTAssertTrue(manifest.contains("projectTargets.append(watchWidgetTarget)"))
+        XCTAssertTrue(manifest.contains("environment[\"TUIST_WATCH_PROFILE_NAME\"]"))
+        XCTAssertTrue(manifest.contains("environment[\"TUIST_WATCH_WIDGET_PROFILE_NAME\"]"))
+        XCTAssertFalse(manifest.contains("environment[\"WATCH_PROFILE_NAME\"]"))
+        XCTAssertFalse(manifest.contains("environment[\"WATCH_WIDGET_PROFILE_NAME\"]"))
         XCTAssertFalse(releaseWorkflow.contains("JustSpeakWatchWidget"))
         XCTAssertTrue(widgetTarget.contains("bundleId: \"com.justspeaktoit.ios.watchkitapp.complication\""))
         XCTAssertTrue(widgetTarget.contains("product: .appExtension"))

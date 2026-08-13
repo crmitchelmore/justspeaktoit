@@ -13,8 +13,8 @@ let version: String = {
 let appProfileName = ProcessInfo.processInfo.environment["APP_PROFILE_NAME"]
 let widgetProfileName = ProcessInfo.processInfo.environment["WIDGET_PROFILE_NAME"]
 let keyboardProfileName = ProcessInfo.processInfo.environment["KEYBOARD_PROFILE_NAME"]
-let watchProfileName = ProcessInfo.processInfo.environment["WATCH_PROFILE_NAME"]
-let watchWidgetProfileName = ProcessInfo.processInfo.environment["WATCH_WIDGET_PROFILE_NAME"]
+let watchProfileName = ProcessInfo.processInfo.environment["TUIST_WATCH_PROFILE_NAME"]
+let watchWidgetProfileName = ProcessInfo.processInfo.environment["TUIST_WATCH_WIDGET_PROFILE_NAME"]
 let macAppStoreProfileName = ProcessInfo.processInfo.environment["TUIST_MAC_PROFILE_NAME"]
     ?? ProcessInfo.processInfo.environment["MAC_PROFILE_NAME"]
 

@@ -71,6 +71,22 @@ public struct WatchSharedContainer: Sendable {
         try? FileManager.default.removeItem(at: self.url(named: name))
     }
 
+    /// Atomically moves one payload to another name in the same container.
+    /// A successful move transfers ownership to the caller before it reads,
+    /// so a producer can safely recreate the original path immediately.
+    func claim(named name: String, as claimedName: String) -> Bool {
+        try? FileManager.default.createDirectory(at: self.directory, withIntermediateDirectories: true)
+        do {
+            try FileManager.default.moveItem(
+                at: self.url(named: name),
+                to: self.url(named: claimedName)
+            )
+            return true
+        } catch {
+            return false
+        }
+    }
+
     // MARK: - Migration
 
     /// Moves a file left behind in the app-local container into the shared

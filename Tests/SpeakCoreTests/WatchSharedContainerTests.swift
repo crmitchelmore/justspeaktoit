@@ -79,6 +79,21 @@ final class WatchSharedContainerTests: XCTestCase {
         XCTAssertNil(container.read(named: WatchRecordingRequest.fileName))
     }
 
+    func testRequestClaim_doesNotRemoveARequestPostedDuringConsumption() throws {
+        let first = WatchRecordingRequest()
+        first.post(in: container)
+
+        // Claim moves the canonical file before it is read. This post models a
+        // second process writing in the old read-then-remove race window.
+        let claim = try XCTUnwrap(WatchRecordingRequest.claim(from: container))
+        let second = WatchRecordingRequest()
+        second.post(in: container)
+
+        XCTAssertEqual(WatchRecordingRequest.consume(claim, from: container)?.id, first.id)
+        XCTAssertEqual(WatchRecordingRequest.consume(from: container)?.id, second.id)
+        XCTAssertNil(WatchRecordingRequest.consume(from: container))
+    }
+
     func testSnapshotLoad_isIdleWhenNothingHasBeenPublishedOrThePayloadIsJunk() {
         XCTAssertEqual(WatchComplicationSnapshot.load(from: container), .idle)
 

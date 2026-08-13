@@ -27,7 +27,10 @@ final class WatchRecordingCoordinator {
     /// running. Called when the app becomes active; stale requests are dropped
     /// by `WatchRecordingRequest.consume`.
     func performPendingWatchFaceRequest() async {
-        guard WatchRecordingRequest.consume() != nil else { return }
-        await self.toggleRecording()
+        while let claim = WatchRecordingRequest.claim() {
+            if WatchRecordingRequest.consume(claim) != nil {
+                await self.toggleRecording()
+            }
+        }
     }
 }

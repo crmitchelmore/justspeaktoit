@@ -240,6 +240,13 @@ public struct WatchRecordingRequest: Codable, Equatable, Sendable {
     /// A request older than this is discarded unperformed.
     public static let freshnessWindow: TimeInterval = 30
 
+    /// Ownership of one request moved away from the producer's canonical path.
+    /// Internal so only the hand-off implementation and its tests can handle a
+    /// claim without consuming it.
+    struct Claim: Sendable {
+        fileprivate let fileName: String
+    }
+
     public let schemaVersion: Int
     /// Identity so the app can tell a re-read of the same tap from a new one.
     public let id: UUID
@@ -278,15 +285,34 @@ public struct WatchRecordingRequest: Codable, Equatable, Sendable {
         container.write(data, named: Self.fileName)
     }
 
-    /// Takes the pending request, removing it so it is performed at most once.
-    /// Returns nil when there is none or it has gone stale.
+    /// Atomically takes ownership of the pending path. New posts can recreate
+    /// the canonical path without being removed when this claim is consumed.
+    static func claim(from container: WatchSharedContainer = .shared) -> Claim? {
+        let claimedName = "\(fileName).processing-\(UUID().uuidString)"
+        guard container.claim(named: fileName, as: claimedName) else { return nil }
+        return Claim(fileName: claimedName)
+    }
+
+    /// Decodes and removes one previously claimed request.
+    static func consume(
+        _ claim: Claim,
+        now: Date = Date(),
+        from container: WatchSharedContainer = .shared
+    ) -> WatchRecordingRequest? {
+        guard let data = container.read(named: claim.fileName) else { return nil }
+        container.remove(named: claim.fileName)
+        guard let request = decode(from: data), request.isFresh(now: now) else { return nil }
+        return request
+    }
+
+    /// Takes the pending request, removing only the claimed path so it is
+    /// performed at most once. A request posted during consumption remains at
+    /// the canonical path for the next consume call.
     public static func consume(
         now: Date = Date(),
         from container: WatchSharedContainer = .shared
     ) -> WatchRecordingRequest? {
-        guard let data = container.read(named: fileName) else { return nil }
-        container.remove(named: fileName)
-        guard let request = decode(from: data), request.isFresh(now: now) else { return nil }
-        return request
+        guard let claim = self.claim(from: container) else { return nil }
+        return self.consume(claim, now: now, from: container)
     }
 }

@@ -21,7 +21,7 @@ means re-registering all of them.
 The complication runs in its own process, so it cannot see the watch app's
 container. Both watch targets therefore declare:
 
-```
+```text
 group.com.justspeaktoit.watch
 ```
 
@@ -51,7 +51,7 @@ available.
 5. App Store / TestFlight: create App Store provisioning profiles for both
    watch ids, add them as repo secrets, and extend `release-ios.yml` the way
    the widget/keyboard profiles are handled. The manifest hooks already exist:
-   `WATCH_PROFILE_NAME` and `WATCH_WIDGET_PROFILE_NAME` feed
+   `TUIST_WATCH_PROFILE_NAME` and `TUIST_WATCH_WIDGET_PROFILE_NAME` feed
    `configureManualSigning` in `Project.swift`. Add `TUIST_WATCH_APP=1` to the
    release generate step at that point.
 6. A watch `AppIcon` asset catalog is still needed for App Store submission

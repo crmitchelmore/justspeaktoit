@@ -11,6 +11,7 @@ public final class SonioxIOSVoiceOutputClient: ObservableObject {
     private let session: URLSession
     private var audioPlayer: AVAudioPlayer?
     private var synthesisTask: Task<Data, Error>?
+    private var activeOperationID: UUID?
 
     public init(session: URLSession = .shared) {
         self.session = session
@@ -30,6 +31,10 @@ public final class SonioxIOSVoiceOutputClient: ObservableObject {
         guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw SonioxIOSVoiceOutputError.missingAPIKey
         }
+
+        stop()
+        let operationID = UUID()
+        activeOperationID = operationID
 
         let api = SonioxTTSAPI(session: session, region: region)
         let accountVoices: [SonioxTTSAccountVoice]
@@ -68,9 +73,21 @@ public final class SonioxIOSVoiceOutputClient: ObservableObject {
 
         let task = Task { try await api.synthesize(text: trimmed, apiKey: apiKey, request: request) }
         synthesisTask = task
-        defer { synthesisTask = nil }
+        defer {
+            if activeOperationID == operationID {
+                synthesisTask = nil
+                activeOperationID = nil
+            }
+        }
         do {
-            try await playAudio(try await task.value)
+            let data = try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: {
+                task.cancel()
+            }
+            try Task.checkCancellation()
+            guard activeOperationID == operationID else { throw CancellationError() }
+            try await playAudio(data, operationID: operationID)
         } catch is CancellationError {
             throw CancellationError()
         } catch let error as SonioxTTSAPIError {
@@ -87,16 +104,19 @@ public final class SonioxIOSVoiceOutputClient: ObservableObject {
     }
 
     public func stop() {
+        activeOperationID = nil
         synthesisTask?.cancel()
         synthesisTask = nil
         audioPlayer?.stop()
         audioPlayer = nil
         isSpeaking = false
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
-    private func playAudio(_ data: Data) async throws {
-        stop()
+    private func playAudio(_ data: Data, operationID: UUID) async throws {
+        guard activeOperationID == operationID else { throw CancellationError() }
         let audioSession = AVAudioSession.sharedInstance()
+        var player: AVAudioPlayer?
         do {
             try audioSession.setCategory(
                 .playAndRecord,
@@ -104,19 +124,36 @@ public final class SonioxIOSVoiceOutputClient: ObservableObject {
                 options: [.allowBluetooth, .defaultToSpeaker, .allowBluetoothA2DP]
             )
             try audioSession.setActive(true)
-            audioPlayer = try AVAudioPlayer(data: data)
-            audioPlayer?.prepareToPlay()
-            isSpeaking = true
-            audioPlayer?.play()
-            while audioPlayer?.isPlaying == true {
+            guard activeOperationID == operationID else { throw CancellationError() }
+            let preparedPlayer = try AVAudioPlayer(data: data)
+            player = preparedPlayer
+            audioPlayer = preparedPlayer
+            preparedPlayer.prepareToPlay()
+            isSpeaking = preparedPlayer.play()
+            while preparedPlayer.isPlaying {
+                try Task.checkCancellation()
+                guard activeOperationID == operationID, audioPlayer === preparedPlayer else {
+                    throw CancellationError()
+                }
                 try await Task.sleep(for: .milliseconds(30))
             }
-            isSpeaking = false
-            try? audioSession.setActive(false, options: .notifyOthersOnDeactivation)
+            finishPlayback(operationID: operationID, player: preparedPlayer)
         } catch {
-            isSpeaking = false
+            finishPlayback(operationID: operationID, player: player)
             throw error
         }
+    }
+
+    private func finishPlayback(operationID: UUID, player: AVAudioPlayer?) {
+        guard activeOperationID == operationID else { return }
+        player?.stop()
+        if let player, audioPlayer === player {
+            audioPlayer = nil
+        }
+        synthesisTask = nil
+        activeOperationID = nil
+        isSpeaking = false
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 }
 

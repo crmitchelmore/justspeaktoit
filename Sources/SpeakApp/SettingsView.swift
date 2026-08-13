@@ -225,8 +225,13 @@ struct SettingsView: View {
         source: .openRouter
       )
     ]
+    // ElevenLabs and Soniox each use one key for transcription and voice
+    // output; their combined card is contributed by the TTS list below.
+    let sharedCredentialProviderIDs = Set(
+      TTSProvider.allCases.filter(\.sharesTranscriptionCredential).map(\.id)
+    )
     items += transcriptionProviders
-      .filter { $0.id != "elevenlabs" }
+      .filter { !sharedCredentialProviderIDs.contains($0.id) }
       .map { provider in
         MacAPIKeyItem(
           entry: APIKeyListEntry(
@@ -238,12 +243,13 @@ struct SettingsView: View {
           source: .transcription(provider)
         )
       }
-    items += [TTSProvider.elevenlabs, .openai, .azure, .deepgram].map { provider in
-      MacAPIKeyItem(
+    items += [TTSProvider.elevenlabs, .openai, .azure, .deepgram, .soniox].map { provider in
+      let isShared = provider.sharesTranscriptionCredential
+      return MacAPIKeyItem(
         entry: APIKeyListEntry(
           id: "tts-\(provider.id)",
           title: provider == .elevenlabs ? "ElevenLabs" : provider.displayName,
-          category: provider == .elevenlabs ? "Transcription & Voice Output" : "Voice Output",
+          category: isShared ? "Transcription & Voice Output" : "Voice Output",
           isStored: isAPIKeyStored(provider.apiKeyIdentifier)
         ),
         source: .textToSpeech(provider)

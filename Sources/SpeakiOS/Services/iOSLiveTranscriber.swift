@@ -377,7 +377,7 @@ public final class iOSLiveTranscriber: ObservableObject {
         audioSessionManager.deactivate()
         SpeakLogger.logTranscription(
             event: "stop",
-            model: "Apple SpeechTranscriber",
+            model: activeModelID,
             wordCount: result.text.split(separator: " ").count
         )
         onFinalResult?(result)

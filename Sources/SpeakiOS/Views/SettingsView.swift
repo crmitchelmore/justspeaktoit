@@ -76,11 +76,17 @@ public final class AppSettings: ObservableObject {
     public static let shared = AppSettings()
 
     @Published public var selectedModel: String {
-        didSet { UserDefaults.standard.set(selectedModel, forKey: "selectedModel") }
+        didSet {
+            UserDefaults.standard.set(selectedModel, forKey: "selectedModel")
+            publishKeyboardProfileSelection()
+        }
     }
 
     @Published public var transcriptionMode: IOSTranscriptionMode {
-        didSet { UserDefaults.standard.set(transcriptionMode.rawValue, forKey: "transcriptionMode") }
+        didSet {
+            UserDefaults.standard.set(transcriptionMode.rawValue, forKey: "transcriptionMode")
+            publishKeyboardProfileSelection()
+        }
     }
 
     @Published public var batchTranscriptionModel: String {
@@ -90,6 +96,7 @@ public final class AppSettings: ObservableObject {
                 batchTranscriptionModel = normalized
             } else {
                 UserDefaults.standard.set(batchTranscriptionModel, forKey: "batchTranscriptionModel")
+                publishKeyboardProfileSelection()
             }
         }
     }
@@ -208,7 +215,10 @@ public final class AppSettings: ObservableObject {
     }
 
     @Published public var preferredLocaleIdentifier: String {
-        didSet { UserDefaults.standard.set(preferredLocaleIdentifier, forKey: "preferredLocale") }
+        didSet {
+            UserDefaults.standard.set(preferredLocaleIdentifier, forKey: "preferredLocale")
+            publishKeyboardProfileSelection()
+        }
     }
 
     public var preferredModelLanguage: String? {
@@ -226,11 +236,17 @@ public final class AppSettings: ObservableObject {
     // MARK: - Post-Processing Settings
 
     @Published public var postProcessingEnabled: Bool {
-        didSet { UserDefaults.standard.set(postProcessingEnabled, forKey: "postProcessingEnabled") }
+        didSet {
+            UserDefaults.standard.set(postProcessingEnabled, forKey: "postProcessingEnabled")
+            publishKeyboardProfileSelection()
+        }
     }
 
     @Published public var postProcessingModel: String {
-        didSet { UserDefaults.standard.set(postProcessingModel, forKey: "postProcessingModel") }
+        didSet {
+            UserDefaults.standard.set(postProcessingModel, forKey: "postProcessingModel")
+            publishKeyboardProfileSelection()
+        }
     }
 
     @Published public var autoPostProcess: Bool {
@@ -343,6 +359,22 @@ public final class AppSettings: ObservableObject {
     /// see the placeholder empty keys and silently fall back to Apple Speech.
     public func ensureKeysLoaded() async {
         await initialKeyLoadTask?.value
+    }
+
+    /// Publishes one coherent, non-secret keyboard capability snapshot whenever
+    /// any owning setting changes. App activation calls this too as reconciliation.
+    public func publishKeyboardProfileSelection() {
+        let mode: KeyboardDictationTranscriptionMode = transcriptionMode == .batch ? .batch : .streaming
+        let model = transcriptionMode == .batch ? batchTranscriptionModel : selectedModel
+        KeyboardDictationPreferencesStore.shared.publishAppProfileSelection(
+            configuration: KeyboardAppProfileConfiguration(
+                transcriptionMode: mode,
+                transcriptionModelIdentifier: model,
+                languageIdentifier: preferredLocaleIdentifier,
+                postProcessingEnabled: postProcessingEnabled,
+                postProcessingModelIdentifier: postProcessingModel
+            )
+        )
     }
 
     deinit {
@@ -512,10 +544,14 @@ public final class AppSettings: ObservableObject {
     }
 
     public var batchAPIKey: String {
-        if batchTranscriptionModel == AppleLocalModels.speechTranscriberModelID {
+        batchAPIKey(for: batchTranscriptionModel)
+    }
+
+    public func batchAPIKey(for modelIdentifier: String) -> String {
+        if modelIdentifier == AppleLocalModels.speechTranscriberModelID {
             return ""
         }
-        if Self.openAIBatchModelIDs.contains(batchTranscriptionModel) {
+        if Self.openAIBatchModelIDs.contains(modelIdentifier) {
             return openAIAPIKey
         }
         return openRouterAPIKey

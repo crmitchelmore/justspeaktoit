@@ -60,9 +60,6 @@ public struct KeyboardDictationMachine: Equatable, Sendable {
         case starting
         case recording
         case stopping
-        /// The finished transcript is being rewritten by the selected
-        /// dictation profile's on-device cleanup pass.
-        case polishing
         case finished
         case failed(Failure)
     }
@@ -86,13 +83,6 @@ public struct KeyboardDictationMachine: Equatable, Sendable {
         case stopTapped
         /// The engine delivered the final transcript (may be empty).
         case finalized(String)
-        /// The selected profile's cleanup pass started on the inserted text.
-        case polishStarted
-        /// The cleanup pass returned a rewritten transcript.
-        case polished(String)
-        /// The cleanup pass failed, was cancelled, or is no longer safe to
-        /// apply. The raw transcript stays exactly as dictated.
-        case polishFailed
         /// The audio session was interrupted (call, Siri, route loss).
         case interrupted
         /// The host text field or selection changed mid-session.
@@ -122,16 +112,6 @@ public struct KeyboardDictationMachine: Equatable, Sendable {
         state == .starting || state == .recording || state == .stopping
     }
 
-    public var isPolishing: Bool {
-        state == .polishing
-    }
-
-    /// Capture or post-processing is in flight, so quick-switch chips and the
-    /// editing keys must stay disabled.
-    public var isBusy: Bool {
-        isCapturing || isPolishing
-    }
-
     public mutating func handle(_ event: Event) -> [Effect] {
         switch event {
         case .micTapped:
@@ -142,8 +122,6 @@ public struct KeyboardDictationMachine: Equatable, Sendable {
             return handleStopTapped()
         case let .finalized(text):
             return handleFinalized(text)
-        case .polishStarted, .polished, .polishFailed:
-            return handlePolishEvent(event)
         case .interrupted:
             return endEarly(reason: .audioInterrupted)
         case .targetChanged:
@@ -175,32 +153,6 @@ public struct KeyboardDictationMachine: Equatable, Sendable {
         }
     }
 
-    /// Post-processing only ever rewrites a transcript this session already
-    /// inserted, so every polish event outside ``State/polishing`` (and the
-    /// ``Event/polishStarted`` that enters it from ``State/finished``) is
-    /// ignored rather than applied late.
-    private mutating func handlePolishEvent(_ event: Event) -> [Effect] {
-        switch event {
-        case .polishStarted:
-            guard state == .finished else { return [] }
-            state = .polishing
-            return []
-        case let .polished(text):
-            guard state == .polishing else { return [] }
-            state = .finished
-            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return [] }
-            let edit = streamer.replaceInserted(with: trimmed)
-            return edit.isNoop ? [] : [.applyEdit(edit)]
-        case .polishFailed:
-            guard state == .polishing else { return [] }
-            state = .finished
-            return []
-        default:
-            return []
-        }
-    }
-
     private mutating func handleMicTapped() -> [Effect] {
         switch state {
         case .idle, .finished, .failed:
@@ -209,7 +161,7 @@ public struct KeyboardDictationMachine: Equatable, Sendable {
             return [.startCapture]
         case .recording, .starting:
             return handleStopTapped()
-        case .stopping, .polishing:
+        case .stopping:
             return []
         }
     }

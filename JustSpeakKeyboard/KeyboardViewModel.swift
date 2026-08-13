@@ -2,10 +2,11 @@ import Combine
 import Foundation
 import SpeakCore
 
-/// Top-level keyboard model. Plans the capture path for each appearance and
-/// drives either the in-extension dictation engine (primary) or the Instant
-/// Dictation handoff (fallback), exposing one surface to the SwiftUI view.
+/// Top-level keyboard model. Routes the selected mode to the in-extension
+/// Apple Speech engine or the app-owned Instant Dictation handoff, exposing one
+/// surface to the SwiftUI view.
 @MainActor
+// swiftlint:disable:next type_body_length
 final class KeyboardViewModel: ObservableObject {
     enum Mode: Equatable {
         case direct
@@ -26,9 +27,9 @@ final class KeyboardViewModel: ObservableObject {
     private let handoffStore: KeyboardHandoffStore
     private let preferences: KeyboardDictationPreferencesStore
     private var languageSelection = KeyboardLanguageSelection.automaticOnly
-    private var profileSelection = KeyboardProfileSelection.verbatim
+    private var profileSelection = KeyboardProfileSelection.directOnly
     private var handoffForwarder: AnyCancellable?
-    private var polishTask: Task<Void, Never>?
+    private var hasFullAccess = false
 
     private var currentDocumentIdentifier: UUID?
     private var proxyInsert: ((String) -> Void)?
@@ -53,15 +54,35 @@ final class KeyboardViewModel: ObservableObject {
         machine.isCapturing
     }
 
-    /// Capture or profile post-processing is in flight; the quick-switch chips
-    /// and the editing keys stay disabled until it settles.
+    /// Capture or app handoff is in flight; the quick-switch chips and editing
+    /// keys stay disabled until it settles.
     var isBusy: Bool {
-        machine.isBusy
+        switch mode {
+        case .direct:
+            return machine.isCapturing
+        case .handoff:
+            return handoff.presentation == .starting || handoff.presentation == .recording
+                || handoff.presentation == .transcribing
+        case .blocked:
+            return false
+        }
     }
 
     /// Full name of the selected dictation profile, for accessibility.
     var profileDisplayName: String {
         profileSelection.displayName
+    }
+
+    var profileRouteDisplayName: String {
+        profileSelection.route.displayName
+    }
+
+    var profileOptions: [KeyboardDictationProfileOption] {
+        profileSelection.availableProfiles
+    }
+
+    var selectedProfileIdentifier: String {
+        profileSelection.selectedIdentifier
     }
 
     // MARK: - Lifecycle from the input view controller
@@ -73,6 +94,7 @@ final class KeyboardViewModel: ObservableObject {
         deleteBackward: @escaping () -> Void,
         contextBeforeInput: @escaping () -> String?
     ) {
+        self.hasFullAccess = hasFullAccess
         self.currentDocumentIdentifier = documentIdentifier
         self.proxyInsert = insertText
         self.proxyDeleteBackward = deleteBackward
@@ -83,9 +105,28 @@ final class KeyboardViewModel: ObservableObject {
         profileSelection = preferences.profileSelection()
         refreshChips()
 
-        let path = KeyboardCapturePlanner.path(
+        configureCaptureMode(autoStartHandoff: true)
+    }
+
+    private func configureCaptureMode(autoStartHandoff: Bool) {
+        guard let currentDocumentIdentifier, let proxyInsert else { return }
+        if let reason = KeyboardLaunchPolicy.blockReason(
             hasFullAccess: hasFullAccess,
-            sharedContainerAvailable: handoffStore.isAvailable,
+            sharedContainerAvailable: handoffStore.isAvailable
+        ) {
+            handoff.deactivate()
+            mode = .blocked(reason)
+            return
+        }
+
+        if profileSelection.route == .appHandoff {
+            enterHandoffMode(autoStart: autoStartHandoff)
+            return
+        }
+
+        let path = KeyboardCapturePlanner.path(
+            hasFullAccess: true,
+            sharedContainerAvailable: true,
             microphonePermission: KeyboardDictationEngine.microphonePermission(),
             speechRecognitionPermission: KeyboardDictationEngine.speechRecognitionPermission(),
             speechRecognizerAvailable: KeyboardDictationEngine.recognizerAvailable(
@@ -94,19 +135,25 @@ final class KeyboardViewModel: ObservableObject {
         )
         switch path {
         case .direct:
+            handoff.deactivate()
             mode = .direct
             machine = KeyboardDictationMachine()
             directState = machine.state
             liveText = ""
         case .handoff:
-            enterHandoffMode()
+            handoff.activate(
+                documentIdentifier: currentDocumentIdentifier,
+                profile: captureProfile,
+                autoStart: autoStartHandoff,
+                insertText: proxyInsert
+            )
+            mode = .handoff
         case let .blocked(reason):
             mode = .blocked(reason)
         }
     }
 
     func deactivate() {
-        cancelPolish()
         dispatch(.dismissed)
         handoff.deactivate()
         proxyInsert = nil
@@ -125,8 +172,6 @@ final class KeyboardViewModel: ObservableObject {
             if machine.isCapturing {
                 dispatch(.targetChanged)
             }
-            // A pending rewrite belongs to the field that was dictated into.
-            cancelPolish()
         case .handoff:
             handoff.updateDocumentContext(
                 documentIdentifier: documentIdentifier,
@@ -162,8 +207,6 @@ final class KeyboardViewModel: ObservableObject {
     func cancelTapped() {
         switch mode {
         case .direct:
-            // Bailing out of a pending rewrite keeps the raw transcript.
-            cancelPolish()
             dispatch(.dismissed)
         case .handoff:
             handoff.cancel()
@@ -173,7 +216,7 @@ final class KeyboardViewModel: ObservableObject {
     }
 
     func cycleLanguage() {
-        guard mode == .direct, !machine.isBusy,
+        guard mode == .direct, !isBusy,
               let next = languageSelection.nextQuickIdentifier else {
             return
         }
@@ -182,19 +225,37 @@ final class KeyboardViewModel: ObservableObject {
     }
 
     func cycleProfile() {
-        guard mode == .direct, !machine.isBusy,
-              let next = profileSelection.nextQuickIdentifier else {
-            return
-        }
-        profileSelection = preferences.selectProfile(next)
+        selectProfile(profileSelection.nextQuickIdentifier)
+    }
+
+    func selectProfile(_ identifier: String?) {
+        guard !isBusy, identifier != nil else { return }
+        profileSelection = preferences.selectProfile(identifier)
         refreshChips()
+        configureCaptureMode(autoStartHandoff: false)
     }
 
     // MARK: - Direct capture wiring
 
     private var activeLocaleIdentifier: String {
         TranscriptionLanguageCatalog.localeIdentifier(
-            for: languageSelection.selectedIdentifier
+            for: captureProfile.languageIdentifier
+        )
+    }
+
+    private var captureProfile: KeyboardDictationProfileOption {
+        let selected = profileSelection.selectedProfile
+        guard selected.route == .directAppleSpeech else { return selected }
+        return KeyboardDictationProfileOption(
+            id: selected.id,
+            displayName: selected.displayName,
+            chipLabel: selected.chipLabel,
+            route: selected.route,
+            transcriptionMode: selected.transcriptionMode,
+            transcriptionModelIdentifier: selected.transcriptionModelIdentifier,
+            languageIdentifier: languageSelection.selectedIdentifier,
+            postProcessingEnabled: selected.postProcessingEnabled,
+            postProcessingModelIdentifier: selected.postProcessingModelIdentifier
         )
     }
 
@@ -205,7 +266,6 @@ final class KeyboardViewModel: ObservableObject {
         for effect in effects {
             perform(effect)
         }
-        startPolishIfNeeded(after: event)
     }
 
     private func perform(_ effect: KeyboardDictationMachine.Effect) {
@@ -280,86 +340,24 @@ final class KeyboardViewModel: ObservableObject {
               failure == .microphoneUnavailable || failure == .speechRecognitionUnavailable else {
             return
         }
-        enterHandoffMode()
+        enterHandoffMode(autoStart: true)
     }
 
-    private func enterHandoffMode() {
+    private func enterHandoffMode(autoStart: Bool) {
         mode = .handoff
         guard let currentDocumentIdentifier, let proxyInsert else { return }
         handoff.activate(
             documentIdentifier: currentDocumentIdentifier,
+            profile: captureProfile,
+            autoStart: autoStart,
             insertText: proxyInsert
         )
-    }
-
-    // MARK: - Dictation profile post-processing
-
-    /// Characters of the dictated text that must still sit immediately before
-    /// the cursor for a rewrite to be applied.
-    private static let polishAnchorLength = 24
-
-    /// Runs the selected profile's cleanup on the finished transcript, entirely
-    /// on device. The extension holds no API keys and makes no network request
-    /// for this, so when Apple's on-device model is unavailable the profile
-    /// selection still persists and mirrors while the raw transcript stands.
-    private func startPolishIfNeeded(after event: KeyboardDictationMachine.Event) {
-        guard case .finalized = event, mode == .direct, directState == .finished,
-              let prompt = profileSelection.systemPrompt(),
-              AppleFoundationModelPolisher.isAvailable else {
-            return
-        }
-        let dictated = machine.liveText
-        guard !dictated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-
-        dispatch(.polishStarted)
-        polishTask = Task { [weak self] in
-            let polished = try? await AppleFoundationModelPolisher.process(
-                text: dictated,
-                systemPrompt: prompt
-            )
-            guard !Task.isCancelled else { return }
-            self?.finishPolish(with: polished, replacing: dictated)
-        }
-    }
-
-    private func finishPolish(with polished: String?, replacing dictated: String) {
-        polishTask = nil
-        guard machine.isPolishing else { return }
-        guard let polished,
-              !polished.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              cursorStillFollows(dictated) else {
-            dispatch(.polishFailed)
-            return
-        }
-        dispatch(.polished(polished))
-    }
-
-    /// The user can move the caret while the on-device model runs. A rewrite is
-    /// only applied while the visible context still ends with what this session
-    /// dictated, so the delete-and-reinsert can never reach host text.
-    private func cursorStillFollows(_ dictated: String) -> Bool {
-        guard let context = contextBeforeInput?() else { return false }
-        let anchor = String(dictated.suffix(Self.polishAnchorLength))
-        return !anchor.isEmpty && context.hasSuffix(anchor)
-    }
-
-    private func cancelPolish() {
-        polishTask?.cancel()
-        polishTask = nil
-        if machine.isPolishing {
-            dispatch(.polishFailed)
-        }
     }
 
     private func refreshChips() {
         languageChipLabel = languageSelection.quickIdentifiers.count > 1
             ? KeyboardLanguageSelection.chipLabel(for: languageSelection.selectedIdentifier)
             : nil
-        // A profile chip that cannot change the transcript would be a dead key,
-        // so it appears only where the on-device cleanup engine can run.
-        profileChipLabel = profileSelection.quickIdentifiers.count > 1
-            && AppleFoundationModelPolisher.isAvailable
-            ? profileSelection.chipLabel
-            : nil
+        profileChipLabel = profileSelection.availableProfiles.count > 1 ? profileSelection.chipLabel : nil
     }
 }

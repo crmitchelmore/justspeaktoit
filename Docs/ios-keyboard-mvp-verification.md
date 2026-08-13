@@ -132,38 +132,37 @@ TestFlight workflow needs a provisioning profile for bundle ID
 3. Dictate in the switched language and verify recognition uses it.
 4. Switch the app language, reopen the keyboard → chip follows the app.
 
-### Direct path: profile quick-switch
+### Profile/mode quick-switch
 
-The profile chip selects what happens to the transcript **after** Apple Speech
-returns it: `Raw` (Verbatim) inserts exactly what was recognised, `Tidy`
-(Clean-up) and `Chat` (Message) rewrite it with Apple's on-device foundation
-model. The extension holds no API keys and makes no network request for this,
-so the chip is hidden on devices where that model is unavailable — record the
-device and OS version when it does not appear.
+The app publishes one non-secret capability snapshot with two modes. `Local`
+runs Apple Speech directly in the extension without post-processing. `App`
+routes through Instant Dictation using the app's exact selected transcription
+mode/model, spoken language, and post-processing model. API keys stay in the
+app Keychain, and the menu remains available without Apple Intelligence.
 
-1. Open the keyboard on a device with Apple Intelligence available → the chip
-   shows the current profile (`Raw` unless the app's post-processing switch is
-   on, which mirrors as `Tidy`).
-2. Tap the chip → it advances one profile per tap and wraps, so every profile
-   is reachable in ≤2 taps. Chip is disabled while recording and while a
-   rewrite is running.
-3. With `Tidy` selected, dictate a sentence with filler words and no
-   punctuation → the streamed raw text is replaced in place once the rewrite
-   lands; only the differing suffix is deleted, and text the keyboard did not
-   insert is untouched.
-4. With `Chat` selected, repeat → the inserted text is tightened into message
-   wording without adding or answering content.
-5. With `Raw` selected → no rewrite happens and no polishing status appears.
-6. Move the caret elsewhere in the same field immediately after tapping stop
-   with `Tidy` selected → the rewrite is abandoned (raw text stands) rather
-   than editing at the new cursor.
-7. Tap Cancel while the strip shows "Applying …" → the raw transcript stays.
-8. Dismiss the keyboard or switch text field mid-rewrite → no edit lands in the
-   new destination.
-9. Kill and reopen the keyboard → the last chip selection is still shown.
-10. Toggle post-processing off in the app, reopen the keyboard → the chip is
-    back on `Raw`; toggle it on with `Chat` previously selected → `Chat` is
-    kept (the app decides *whether* to polish, the chip decides *how*).
+1. In the app, select a remote streaming or batch model, language, and
+   post-processing model. Open the keyboard → its menu shows `App`; the full
+   accessibility label names the model and “Via app”, while `Local` says
+   “On-device”.
+2. Tap the chip, then a mode → each mode is reachable in two taps. The menu is
+   disabled from recording start until the result settles.
+3. Choose `Local` → Apple Speech streams into the field directly and no
+   post-processing runs. Repeat on a device without Apple Intelligence; the
+   profile control must still appear and work.
+4. Choose `App` with Instant Dictation ready → the app uses the exact model,
+   language, and polish model shown in settings; the completed result is
+   inserted once. Confirm the handoff record contains identifiers and route
+   metadata but no API key, token, prompt, or surrounding text.
+5. Select a remote model without its credential → the keyboard reports the
+   profile unavailable and does not silently fall back to Apple Speech.
+6. Change model, language, or post-processing while the app remains active,
+   then switch straight to another app → reopening the keyboard shows the new
+   values without requiring an app relaunch.
+7. Kill and reopen the keyboard → its last valid `Local`/`App` selection
+   survives. If a published mode is retired, the selection visibly falls back
+   to the app default instead of retaining stale fields.
+8. Switch fields during an App request → the nonce-scoped request is cancelled
+   and no result lands in the new destination.
 
 ### Direct path: interruptions and target changes
 
@@ -230,16 +229,16 @@ dictation), and touch targets of at least 44 points.
   permissions" above; the handoff path covers devices that refuse.
 - The extension records only while the mic key is active and prefers on-device
   recognition.
-- Dictation profiles post-process the finished transcript with Apple's
-  on-device foundation model only. The extension sends no transcript to a
-  server for this and holds no API keys; when that model is unavailable the
-  profile chip is hidden and the raw transcript stands.
+- `Local` sends no transcript to an app or network post-processor. `App`
+  explicitly routes the selected model through the containing app; credentials
+  stay in Keychain and never enter the App Group.
 - The keyboard does not read, persist, or transmit surrounding host text.
 - The App Group contains: versioned handoff records (schema version, request
   UUID, document identifier, timestamps, phase, safe failure enum, throttled
-  interim text, short-lived final transcript), the language selection, and the
-  schema-versioned dictation-profile selection (a catalogue identifier only).
-  Never audio or credentials.
+  interim text, short-lived final transcript), the language selection, and a
+  schema-versioned profile projection containing identifiers, display metadata,
+  language, and explicit route only. Never audio, credentials, prompts, or
+  surrounding host text.
 - No private settings URL, responder-chain workaround, Apple keyboard asset,
   or unsupported containing-app launch is used.
 - App Review notes should describe both capture paths, the permission grants,

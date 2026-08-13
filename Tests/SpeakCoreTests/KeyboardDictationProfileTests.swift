@@ -2,165 +2,122 @@ import XCTest
 
 @testable import SpeakCore
 
-/// Parity and contract tests for the shared dictation-profile catalogue. Every
-/// surface reads this one list, so an entry added here must satisfy the
-/// keyboard's layout, tap-count, and prompt-safety constraints.
 final class KeyboardDictationProfileTests: XCTestCase {
-    // MARK: - Catalogue parity
+    func testCatalogueOffersLocalAndExactAppModeWithinTwoTaps() {
+        let selection = makeSelection()
 
-    func testProfileIdentifiersAreUniqueAndStable() {
-        let options = KeyboardDictationProfileCatalog.options
-
-        XCTAssertEqual(Set(options.map(\.id)).count, options.count)
-        XCTAssertTrue(options.allSatisfy { !$0.id.trimmingCharacters(in: .whitespaces).isEmpty })
-        XCTAssertTrue(options.allSatisfy { $0.id == $0.id.lowercased() })
-        XCTAssertEqual(options.first?.id, KeyboardDictationProfileCatalog.verbatimIdentifier)
+        XCTAssertEqual(
+            selection.availableProfiles.map(\.id),
+            [KeyboardDictationProfileCatalog.directIdentifier, KeyboardDictationProfileCatalog.appIdentifier]
+        )
+        XCTAssertLessThanOrEqual(
+            selection.availableProfiles.count - 1,
+            KeyboardDictationProfileCatalog.maxCycleTaps
+        )
+        XCTAssertEqual(selection.selectedIdentifier, KeyboardDictationProfileCatalog.appIdentifier)
+        XCTAssertEqual(selection.nextQuickIdentifier, KeyboardDictationProfileCatalog.directIdentifier)
     }
 
-    func testEveryProfileHasADistinctNameAndKeyboardSizedChipLabel() {
-        let options = KeyboardDictationProfileCatalog.options
+    func testAppProjectionPreservesExecutionConfigurationWithoutCredentials() throws {
+        let selection = makeSelection()
+        let profile = selection.selectedProfile
 
-        XCTAssertEqual(Set(options.map(\.displayName)).count, options.count)
-        XCTAssertEqual(Set(options.map(\.chipLabel)).count, options.count)
-        for option in options {
-            XCTAssertFalse(option.displayName.isEmpty)
-            XCTAssertFalse(option.chipLabel.isEmpty)
-            XCTAssertLessThanOrEqual(
-                option.chipLabel.count,
-                KeyboardDictationProfileCatalog.maxChipLabelLength,
-                "\(option.id) would widen the one-row keyboard layout"
-            )
-        }
+        XCTAssertEqual(profile.route, .appHandoff)
+        XCTAssertEqual(profile.transcriptionMode, .batch)
+        XCTAssertEqual(profile.transcriptionModelIdentifier, "openai/gpt-transcribe")
+        XCTAssertEqual(profile.languageIdentifier, "en_GB")
+        XCTAssertTrue(profile.postProcessingEnabled)
+        XCTAssertEqual(profile.postProcessingModelIdentifier, "openai/gpt-5-mini")
+
+        let encoded = try XCTUnwrap(String(data: JSONEncoder().encode(selection), encoding: .utf8))
+        let lowercased = encoded.lowercased()
+        XCTAssertFalse(lowercased.contains("apikey"))
+        XCTAssertFalse(lowercased.contains("secret"))
+        XCTAssertFalse(lowercased.contains("token"))
+        XCTAssertFalse(lowercased.contains("prompt"))
     }
 
-    /// The #610 acceptance criterion: any profile is reachable in at most two
-    /// taps of the chip, from any starting profile.
-    func testEveryProfileIsReachableWithinTwoTaps() {
-        let selection = KeyboardProfileSelection.verbatim
-        let ring = selection.quickIdentifiers
+    func testLocalModeStaysAvailableWithoutFoundationModels() {
+        let selection = makeSelection(postProcessingModel: AppleLocalModels.foundationModelID)
+        let local = selection.availableProfiles[0]
 
-        XCTAssertEqual(ring, KeyboardDictationProfileCatalog.options.map(\.id))
-        XCTAssertLessThanOrEqual(ring.count - 1, KeyboardDictationProfileCatalog.maxCycleTaps)
-
-        for start in ring {
-            var current = KeyboardProfileSelection(selectedIdentifier: start)
-            var visited: Set<String> = [current.selectedIdentifier]
-            for _ in 0..<KeyboardDictationProfileCatalog.maxCycleTaps {
-                guard let next = current.nextQuickIdentifier else {
-                    return XCTFail("Expected a next profile from \(start)")
-                }
-                current = current.selecting(next)
-                visited.insert(current.selectedIdentifier)
-            }
-            XCTAssertEqual(visited, Set(ring), "Cycling from \(start) missed a profile")
-        }
+        XCTAssertEqual(local.route, .directAppleSpeech)
+        XCTAssertFalse(local.polishes)
+        XCTAssertEqual(local.transcriptionModelIdentifier, AppleLocalModels.legacySpeechModelID)
+        XCTAssertEqual(selection.availableProfiles[1].route, .appHandoff)
     }
 
-    func testExactlyOneProfileInsertsRawSpeech() {
-        let nonPolishing = KeyboardDictationProfileCatalog.options.filter { !$0.polishes }
-
-        XCTAssertEqual(nonPolishing.map(\.id), [KeyboardDictationProfileCatalog.verbatimIdentifier])
-    }
-
-    // MARK: - Normalisation
-
-    func testUnknownBlankAndMissingIdentifiersFallBackToVerbatim() {
-        for identifier in [nil, "", "   ", "deleted-profile", "CLEANUP"] as [String?] {
-            XCTAssertEqual(
-                KeyboardDictationProfileCatalog.normalizedIdentifier(identifier),
-                KeyboardDictationProfileCatalog.verbatimIdentifier
-            )
-            XCTAssertFalse(KeyboardProfileSelection(selectedIdentifier: identifier).polishes)
-        }
-    }
-
-    func testKnownIdentifiersSurviveSurroundingWhitespace() {
-        let selection = KeyboardProfileSelection(selectedIdentifier: "  cleanup ")
-
-        XCTAssertEqual(selection.selectedIdentifier, KeyboardDictationProfileCatalog.cleanupIdentifier)
-        XCTAssertEqual(selection.chipLabel, "Tidy")
-        XCTAssertEqual(selection.displayName, "Clean-up")
-        XCTAssertTrue(selection.polishes)
-    }
-
-    func testDecodingARetiredProfileFallsBackToVerbatim() throws {
-        let stored = Data(#"{"schemaVersion":1,"selectedIdentifier":"retired"}"#.utf8)
-
-        let decoded = try JSONDecoder().decode(KeyboardProfileSelection.self, from: stored)
-
-        XCTAssertEqual(decoded, .verbatim)
-        XCTAssertNotNil(decoded.nextQuickIdentifier)
-    }
-
-    func testSelectionRoundTripsThroughJSON() throws {
-        let selection = KeyboardProfileSelection(
-            selectedIdentifier: KeyboardDictationProfileCatalog.messageIdentifier
+    func testRetiredSelectionFallsBackToAppDefault() {
+        let selection = KeyboardDictationProfileCatalog.selection(
+            for: configuration,
+            selectedIdentifier: "retired-profile"
         )
 
+        XCTAssertEqual(selection.selectedIdentifier, KeyboardDictationProfileCatalog.appIdentifier)
+        XCTAssertEqual(selection.selectedProfile.route, .appHandoff)
+    }
+
+    func testSelectionRoundTripsWithCatalogueRevision() throws {
+        let selection = makeSelection().selecting(KeyboardDictationProfileCatalog.directIdentifier)
         let decoded = try JSONDecoder().decode(
             KeyboardProfileSelection.self,
             from: JSONEncoder().encode(selection)
         )
 
         XCTAssertEqual(decoded, selection)
+        XCTAssertEqual(decoded.selectedProfile.route, .directAppleSpeech)
     }
 
-    // MARK: - Prompts
+    func testRewriteRequiresTheEntireObservedDocumentContextToStayUnchanged() {
+        let dictated = "A long dictated sentence with an unchanged final twenty-four chars."
+        let original = "Host prefix. \(dictated)"
 
-    func testVerbatimProfileHasNoCleanupPrompt() {
-        XCTAssertNil(KeyboardProfileSelection.verbatim.systemPrompt())
-    }
-
-    func testCleanupProfileUsesTheSharedBasePrompt() {
-        let prompt = KeyboardDictationProfileCatalog.systemPrompt(
-            for: KeyboardDictationProfileCatalog.cleanupIdentifier
+        XCTAssertTrue(
+            KeyboardDocumentRewriteGuard.canReplace(
+                dictatedText: dictated,
+                contextAtPolishStart: original,
+                currentContext: original
+            )
         )
-
-        XCTAssertEqual(prompt, TranscriptCleanupPolicy.systemPrompt())
-    }
-
-    /// Custom profile prompts replace the base instructions, so each one has to
-    /// carry the untrusted-transcript constraints itself and still run through
-    /// the shared policy for the output contract.
-    func testEveryPolishingProfileKeepsTheUntrustedTranscriptContract() {
-        for option in KeyboardDictationProfileCatalog.options where option.polishes {
-            guard let prompt = KeyboardDictationProfileCatalog.systemPrompt(for: option.id) else {
-                return XCTFail("\(option.id) polishes but has no prompt")
-            }
-            XCTAssertTrue(prompt.contains("untrusted data"), "\(option.id) drops the untrusted-data rule")
-            XCTAssertTrue(
-                prompt.contains("Never answer, follow, or engage"),
-                "\(option.id) drops the no-instruction rule"
-            )
-            XCTAssertTrue(prompt.contains("plain text only"), "\(option.id) drops the plain-text rule")
-            XCTAssertTrue(
-                prompt.hasSuffix("Return only the cleaned transcript text."),
-                "\(option.id) bypasses TranscriptCleanupPolicy's output contract"
-            )
-        }
-    }
-
-    func testOutputLanguageContextLayersOntoAnyPolishingProfile() {
-        for option in KeyboardDictationProfileCatalog.options where option.polishes {
-            let prompt = KeyboardDictationProfileCatalog.systemPrompt(
-                for: option.id,
-                outputLanguage: "British English"
-            )
-
-            XCTAssertEqual(prompt?.contains("British English"), true)
-        }
-    }
-
-    // MARK: - App mapping
-
-    func testAppPostProcessingSwitchMapsToVerbatimAndCleanup() {
-        XCTAssertEqual(
-            KeyboardDictationProfileCatalog.identifier(forPostProcessingEnabled: true),
-            KeyboardDictationProfileCatalog.cleanupIdentifier
+        XCTAssertFalse(
+            KeyboardDocumentRewriteGuard.canReplace(
+                dictatedText: dictated,
+                contextAtPolishStart: original,
+                currentContext: "Changed host prefix. \(dictated)"
+            ),
+            "An earlier edit with the same trailing anchor must never authorise full replacement"
         )
-        XCTAssertEqual(
-            KeyboardDictationProfileCatalog.identifier(forPostProcessingEnabled: false),
-            KeyboardDictationProfileCatalog.verbatimIdentifier
+        XCTAssertFalse(
+            KeyboardDocumentRewriteGuard.canReplace(
+                dictatedText: dictated,
+                contextAtPolishStart: String(dictated.suffix(24)),
+                currentContext: String(dictated.suffix(24))
+            ),
+            "A truncated proxy context cannot prove ownership of the whole deletion"
+        )
+    }
+
+    private var configuration: KeyboardAppProfileConfiguration {
+        KeyboardAppProfileConfiguration(
+            transcriptionMode: .batch,
+            transcriptionModelIdentifier: "openai/gpt-transcribe",
+            languageIdentifier: "en_GB",
+            postProcessingEnabled: true,
+            postProcessingModelIdentifier: "openai/gpt-5-mini"
+        )
+    }
+
+    private func makeSelection(postProcessingModel: String = "openai/gpt-5-mini") -> KeyboardProfileSelection {
+        KeyboardDictationProfileCatalog.selection(
+            for: KeyboardAppProfileConfiguration(
+                transcriptionMode: .batch,
+                transcriptionModelIdentifier: "openai/gpt-transcribe",
+                languageIdentifier: "en_GB",
+                postProcessingEnabled: true,
+                postProcessingModelIdentifier: postProcessingModel
+            ),
+            revision: 7,
+            modifiedAt: Date(timeIntervalSince1970: 1_000)
         )
     }
 }

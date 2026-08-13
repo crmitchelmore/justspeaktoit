@@ -83,15 +83,27 @@ protocol KeyboardVersionedSelection: Codable {
 extension KeyboardLanguageSelection: KeyboardVersionedSelection {}
 extension KeyboardProfileSelection: KeyboardVersionedSelection {}
 
+private struct KeyboardStoredProfileIdentifier: KeyboardVersionedSelection {
+    static let schemaVersion = 1
+    let schemaVersion: Int
+    let selectedIdentifier: String
+
+    init(selectedIdentifier: String, schemaVersion: Int = Self.schemaVersion) {
+        self.schemaVersion = schemaVersion
+        self.selectedIdentifier = selectedIdentifier
+    }
+}
+
 /// App Group-backed storage for the keyboard's quick-switch preferences:
-/// ``KeyboardLanguageSelection`` and ``KeyboardProfileSelection``. Language and
-/// profile identifiers are the only content; no transcript or audio data enters
-/// this store.
+/// ``KeyboardLanguageSelection`` and ``KeyboardProfileSelection``. The profile
+/// projection contains non-secret model/language/route metadata only; no
+/// transcript, audio, credential, surrounding text, or prompt enters this store.
 public final class KeyboardDictationPreferencesStore {
     public static let shared = KeyboardDictationPreferencesStore()
 
     private static let selectionKey = "keyboardDictation.language.v1"
-    private static let profileKey = "keyboardDictation.profile.v1"
+    private static let profileCatalogueKey = "keyboardDictation.profileCatalogue.v2"
+    private static let profileSelectionKey = "keyboardDictation.profileSelection.v1"
 
     private let defaults: UserDefaults?
     private let encoder = JSONEncoder()
@@ -112,29 +124,31 @@ public final class KeyboardDictationPreferencesStore {
 
     public func profileSelection() -> KeyboardProfileSelection {
         lock.withLock {
-            readUnlocked(KeyboardProfileSelection.self, key: Self.profileKey) ?? .verbatim
+            profileSelectionUnlocked()
         }
     }
 
-    /// Mirrors the containing app's post-processing preference without
-    /// discarding a keyboard-side choice between polishing profiles: the app
-    /// decides *whether* the keyboard polishes, the chip decides *how*.
+    /// Publishes one coherent app-owned capability catalogue. A keyboard-side
+    /// selection survives catalogue refreshes while its identifier remains
+    /// available; deleted entries fall back visibly to the app default.
     @discardableResult
-    public func mirrorAppProfilePreference(polishesTranscripts: Bool) -> KeyboardProfileSelection {
+    public func publishAppProfileSelection(
+        configuration: KeyboardAppProfileConfiguration,
+        now: Date = Date()
+    ) -> KeyboardProfileSelection {
         lock.withLock {
-            let current = readUnlocked(KeyboardProfileSelection.self, key: Self.profileKey) ?? .verbatim
-            let updated: KeyboardProfileSelection
-            if !polishesTranscripts {
-                updated = .verbatim
-            } else if current.polishes {
-                updated = current
-            } else {
-                updated = KeyboardProfileSelection(
-                    selectedIdentifier: KeyboardDictationProfileCatalog.cleanupIdentifier
-                )
-            }
-            writeUnlocked(updated, key: Self.profileKey)
-            return updated
+            let current = readUnlocked(KeyboardProfileSelection.self, key: Self.profileCatalogueKey)
+            let updated = KeyboardDictationProfileCatalog.selection(
+                for: configuration,
+                revision: (current?.catalogueRevision ?? 0) + 1,
+                modifiedAt: now
+            )
+            writeUnlocked(updated, key: Self.profileCatalogueKey)
+            let selected = readUnlocked(
+                KeyboardStoredProfileIdentifier.self,
+                key: Self.profileSelectionKey
+            )?.selectedIdentifier
+            return updated.selecting(selected ?? updated.defaultIdentifier)
         }
     }
 
@@ -142,9 +156,12 @@ public final class KeyboardDictationPreferencesStore {
     @discardableResult
     public func selectProfile(_ identifier: String?) -> KeyboardProfileSelection {
         lock.withLock {
-            let current = readUnlocked(KeyboardProfileSelection.self, key: Self.profileKey) ?? .verbatim
+            let current = profileSelectionUnlocked()
             let updated = current.selecting(identifier)
-            writeUnlocked(updated, key: Self.profileKey)
+            writeUnlocked(
+                KeyboardStoredProfileIdentifier(selectedIdentifier: updated.selectedIdentifier),
+                key: Self.profileSelectionKey
+            )
             return updated
         }
     }
@@ -202,5 +219,15 @@ public final class KeyboardDictationPreferencesStore {
     private func writeUnlocked<Value: KeyboardVersionedSelection>(_ value: Value, key: String) {
         guard let defaults, let data = try? encoder.encode(value) else { return }
         defaults.set(data, forKey: key)
+        defaults.synchronize()
+    }
+
+    private func profileSelectionUnlocked() -> KeyboardProfileSelection {
+        let catalogue = readUnlocked(KeyboardProfileSelection.self, key: Self.profileCatalogueKey) ?? .directOnly
+        let selected = readUnlocked(
+            KeyboardStoredProfileIdentifier.self,
+            key: Self.profileSelectionKey
+        )?.selectedIdentifier
+        return catalogue.selecting(selected ?? catalogue.defaultIdentifier)
     }
 }

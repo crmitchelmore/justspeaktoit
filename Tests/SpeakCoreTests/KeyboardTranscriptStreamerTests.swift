@@ -171,47 +171,6 @@ final class KeyboardTranscriptStreamerTests: XCTestCase {
         XCTAssertEqual(KeyboardTranscriptStreamer.leadingSeparator(contextBeforeInput: "end."), " ")
     }
 
-    // MARK: - Profile post-processing rewrites
-
-    func testReplacingInsertedTextRewritesOnlyTheDivergentSuffix() {
-        var streamer = KeyboardTranscriptStreamer()
-        var document = DocumentSimulator()
-
-        document.apply(streamer.update(hypothesis: "send the report"))
-        document.apply(streamer.finalize(transcript: "send the report tomorow"))
-
-        let edit = streamer.replaceInserted(with: "Send the report tomorrow.")
-        document.apply(edit)
-
-        XCTAssertEqual(document.text, "Send the report tomorrow.")
-        XCTAssertEqual(streamer.insertedText, "Send the report tomorrow.")
-        XCTAssertEqual(streamer.volatileTail, "")
-        XCTAssertLessThan(edit.deleteCount, "send the report tomorow".count)
-    }
-
-    func testReplacementNeverDeletesMoreThanTheStreamerInserted() {
-        var streamer = KeyboardTranscriptStreamer()
-        var document = DocumentSimulator()
-        document.apply(KeyboardTranscriptEdit(deleteCount: 0, insertion: "host text "))
-
-        document.apply(streamer.update(hypothesis: "dictated words"))
-        let edit = streamer.replaceInserted(with: "Completely different wording.")
-
-        XCTAssertLessThanOrEqual(edit.deleteCount, "dictated words".count)
-        document.apply(edit)
-        XCTAssertEqual(document.text, "host text Completely different wording.")
-    }
-
-    func testIdenticalReplacementIsNoop() {
-        var streamer = KeyboardTranscriptStreamer()
-
-        _ = streamer.update(hypothesis: "already clean")
-        let edit = streamer.replaceInserted(with: "already clean")
-
-        XCTAssertTrue(edit.isNoop)
-        XCTAssertEqual(streamer.insertedText, "already clean")
-    }
-
     func testGraphemeClustersAreCountedAsUserPerceivedCharacters() {
         var streamer = KeyboardTranscriptStreamer()
         var document = DocumentSimulator()

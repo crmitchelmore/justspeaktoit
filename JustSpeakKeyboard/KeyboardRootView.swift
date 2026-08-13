@@ -2,6 +2,9 @@ import SpeakCore
 import SwiftUI
 import UIKit
 
+// swiftlint:disable file_length
+
+// swiftlint:disable type_body_length
 /// Compact dictation-first keyboard surface.
 ///
 /// Layout is a live transcript strip above one control row:
@@ -82,13 +85,8 @@ struct KeyboardRootView: View {
                 )
             }
 
-            if let chip = model.profileChipLabel, model.mode == .direct {
-                chipButton(
-                    label: chip,
-                    accessibilityLabel: "Dictation profile \(model.profileDisplayName). Tap to switch.",
-                    identifier: "keyboardProfileChip",
-                    action: model.cycleProfile
-                )
+            if let chip = model.profileChipLabel, !isBlocked {
+                profileMenu(label: chip)
             }
 
             micButton
@@ -139,6 +137,34 @@ struct KeyboardRootView: View {
         .disabled(model.isBusy)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityIdentifier(identifier)
+    }
+
+    private func profileMenu(label: String) -> some View {
+        Menu {
+            ForEach(model.profileOptions) { profile in
+                Button {
+                    model.selectProfile(profile.id)
+                } label: {
+                    Label(
+                        "\(profile.displayName) · \(profile.route.displayName)",
+                        systemImage: profile.id == model.selectedProfileIdentifier ? "checkmark" : "circle"
+                    )
+                }
+            }
+        } label: {
+            Text(label)
+                .font(.footnote.weight(.semibold))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .padding(.horizontal, 8)
+                .frame(minWidth: 44, minHeight: 46)
+        }
+        .background(keyBackground)
+        .disabled(model.isBusy)
+        .accessibilityLabel(
+            "Dictation profile \(model.profileDisplayName), \(model.profileRouteDisplayName). Choose profile."
+        )
+        .accessibilityIdentifier("keyboardProfileChip")
     }
 
     private var micButton: some View {
@@ -208,8 +234,6 @@ struct KeyboardRootView: View {
                 return "Listening…"
             case .stopping:
                 return "Finishing…"
-            case .polishing:
-                return "Applying \(model.profileDisplayName)…"
             case .finished:
                 return "Inserted. Tap the mic to dictate more."
             case let .failed(failure):
@@ -230,7 +254,8 @@ struct KeyboardRootView: View {
     private static func failureCopy(_ failure: KeyboardDictationMachine.Failure) -> String {
         switch failure {
         case .microphoneUnavailable:
-            return "The keyboard can't use the microphone. Allow it in Settings, or open Just Speak and enable Instant Dictation."
+            return "The keyboard can't use the microphone. Allow it in Settings, "
+                + "or open Just Speak and enable Instant Dictation."
         case .speechRecognitionUnavailable:
             return "Speech recognition isn't available. Allow it in Settings, then try again."
         case .audioInterrupted:
@@ -283,6 +308,8 @@ struct KeyboardRootView: View {
             return "The handoff ended safely. Tap the mic to retry."
         case .targetChanged:
             return "The destination changed, so nothing was inserted. Tap the mic to retry."
+        case .profileUnavailable:
+            return "This profile is unavailable. Open Just Speak to check its model and credentials."
         }
     }
 
@@ -298,7 +325,6 @@ struct KeyboardRootView: View {
         case .direct:
             switch model.directState {
             case .stopping: return "Finishing dictation"
-            case .polishing: return "Applying \(model.profileDisplayName)"
             case .finished: return "Dictation inserted"
             default: return "Dictating"
             }
@@ -318,7 +344,6 @@ struct KeyboardRootView: View {
         case .direct:
             switch model.directState {
             case .recording, .stopping: return "waveform"
-            case .polishing: return "wand.and.sparkles"
             case .finished: return "checkmark.circle.fill"
             case .failed: return "exclamationmark.triangle.fill"
             default: return "mic"
@@ -366,7 +391,11 @@ struct KeyboardRootView: View {
     /// the single control row keeps a full-size mic key on the narrowest
     /// supported iPhone instead of wrapping or truncating.
     private var micCaption: String? {
-        guard model.languageChipLabel == nil || model.profileChipLabel == nil else { return nil }
+        if model.mode == .direct,
+           model.languageChipLabel != nil,
+           model.profileChipLabel != nil {
+            return nil
+        }
         if isActivelyCapturing {
             return "Stop"
         }
@@ -382,7 +411,6 @@ struct KeyboardRootView: View {
         switch model.mode {
         case .direct:
             return model.directState == .starting || model.directState == .stopping
-                || model.directState == .polishing
         case .handoff:
             let presentation = model.handoff.presentation
             return presentation == .starting || presentation == .transcribing
@@ -405,7 +433,7 @@ struct KeyboardRootView: View {
     private var micDisabled: Bool {
         switch model.mode {
         case .direct:
-            return model.directState == .stopping || model.directState == .polishing
+            return model.directState == .stopping
         case .handoff:
             let presentation = model.handoff.presentation
             return presentation == .transcribing || presentation == .waitingForApp
@@ -430,11 +458,15 @@ struct KeyboardRootView: View {
         }
     }
 
+    private var isBlocked: Bool {
+        if case .blocked = model.mode { return true }
+        return false
+    }
+
     private var showsCancel: Bool {
         switch model.mode {
         case .direct:
             return model.directState == .recording || model.directState == .starting
-                || model.directState == .polishing
         case .handoff:
             let presentation = model.handoff.presentation
             return presentation == .starting || presentation == .recording
@@ -444,6 +476,7 @@ struct KeyboardRootView: View {
         }
     }
 }
+// swiftlint:enable type_body_length
 
 struct InputModeSwitchButton: UIViewRepresentable {
     let action: (UIButton, UIEvent) -> Void

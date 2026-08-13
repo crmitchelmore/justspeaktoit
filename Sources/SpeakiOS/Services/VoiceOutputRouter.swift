@@ -21,7 +21,7 @@ public final class VoiceOutputRouter: ObservableObject {
             .assign(to: &$isSpeaking)
     }
 
-    public func speak(
+    public func speak( // swiftlint:disable:this function_parameter_count
         text: String,
         provider: VoiceOutputProvider,
         model: String,

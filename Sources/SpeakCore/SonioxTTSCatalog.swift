@@ -264,7 +264,9 @@ public enum SonioxTTSCatalog {
 
         let requestedID = voiceID.map(normalizedUnscopedVoiceID)
         if let requestedID,
-           let accountVoice = accountVoices.first(where: { $0.id.caseInsensitiveCompare(requestedID) == .orderedSame }) {
+           let accountVoice = accountVoices.first(where: {
+               $0.id.caseInsensitiveCompare(requestedID) == .orderedSame
+           }) {
             if accountVoice.status(for: defaultModel) == .ready {
                 return SonioxTTSResolvedVoice(
                     apiVoiceID: accountVoice.id,

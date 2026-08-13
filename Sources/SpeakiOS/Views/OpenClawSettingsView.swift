@@ -1,10 +1,11 @@
 #if os(iOS)
-// swiftlint:disable file_length type_body_length
+// swiftlint:disable file_length
 import SpeakCore
 import SwiftUI
 
 // MARK: - OpenClaw Settings View
 
+// swiftlint:disable:next type_body_length
 public struct OpenClawSettingsView: View {
     @ObservedObject private var settings = OpenClawSettings.shared
     @ObservedObject private var appSettings = AppSettings.shared

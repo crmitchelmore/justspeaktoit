@@ -194,20 +194,21 @@ struct PolishTextIntent: AppIntent {
   @MainActor
   func perform() async throws -> some IntentResult & ReturnsValue<String> {
     let environment = try await automationEnvironment()
-    guard await environment.openRouter.hasStoredAPIKey() else {
+    // Asks the post-processing manager, not OpenRouter: a local or Apple
+    // Foundation model needs no key at all.
+    guard await environment.postProcessing.hasRequiredAPIKey() else {
       throw AutomationIntentError.openRouterKeyMissing
     }
-    let request = AutomationIntentSupport.polishRequest(text: text, customPrompt: customPrompt)
-    let configuredModel = environment.settings.postProcessingModel
-      .trimmingCharacters(in: .whitespacesAndNewlines)
-    let model = configuredModel.isEmpty ? "inception/mercury" : configuredModel
-    let response = try await environment.openRouter.sendChat(
-      systemPrompt: request.systemPrompt,
-      messages: [ChatMessage(role: .user, content: request.userMessage)],
-      model: model,
-      temperature: 0.2
+    let request = AutomationIntentSupport.polishRequest(
+      text: text,
+      customPrompt: customPrompt,
+      defaultSystemPrompt: environment.postProcessing.effectiveSystemPrompt()
     )
-    let polished = response.messages.last(where: { $0.role == .assistant })?.content ?? ""
+    let polished = try await environment.postProcessing.polish(
+      text: text,
+      systemPrompt: request.systemPrompt,
+      userMessage: request.userMessage
+    )
     guard !polished.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
       throw AutomationIntentError.noPolishOutput
     }

@@ -62,9 +62,7 @@ final class PostProcessingManager: ObservableObject {
     }
 
     let systemPrompt = effectiveSystemPrompt(for: context, corrections: corrections)
-    let model = settings.postProcessingModel.isEmpty
-      ? "inception/mercury"
-      : settings.postProcessingModel
+    let model = resolvedModel()
 
     if let localResult = await processWithLocalModelIfNeeded(
       model: model,
@@ -254,10 +252,52 @@ final class PostProcessingManager: ObservableObject {
     #endif
   }
 
-  func hasRequiredAPIKey() async -> Bool {
+  /// Runs a one-off post-processing pass with an explicit prompt pair and
+  /// returns the result, without touching session state. Used by the Polish
+  /// Text App Intent so a custom Shortcuts prompt can replace the default
+  /// cleanup contract (see `AutomationIntentSupport.polishRequest`) while the
+  /// configured model — including Apple Foundation and downloaded local models
+  /// that need no API key — and `postProcessingTemperature` still apply.
+  func polish(text: String, systemPrompt: String, userMessage: String) async throws -> String {
+    guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return text }
+    let model = resolvedModel()
+
+    if let localResult = await processWithLocalModelIfNeeded(
+      model: model,
+      rawText: text,
+      systemPrompt: systemPrompt
+    ) {
+      return try localResult.get().processed
+    }
+
+    let response = try await client.sendChat(
+      systemPrompt: systemPrompt,
+      messages: [ChatMessage(role: .user, content: userMessage)],
+      model: model,
+      temperature: settings.postProcessingTemperature
+    )
+    return response.messages.last(where: { $0.role == .assistant })?.content ?? ""
+  }
+
+  /// The system prompt a polish with no lexicon context would use: the user's
+  /// configured base prompt (or active profile override) and output language.
+  /// Shortcuts has no destination app or correction history, so the lexicon
+  /// directives that `process` adds are deliberately omitted.
+  func effectiveSystemPrompt() -> String {
+    basePrompt()
+  }
+
+  /// The configured post-processing model, falling back to the default when
+  /// the setting is empty. Single source of truth so the key check, the session
+  /// path, and the automation path can never disagree about which model runs.
+  private func resolvedModel() -> String {
     let configuredModel = settings.postProcessingModel
       .trimmingCharacters(in: .whitespacesAndNewlines)
-    let resolvedModel = configuredModel.isEmpty ? "inception/mercury" : configuredModel
+    return configuredModel.isEmpty ? "inception/mercury" : configuredModel
+  }
+
+  func hasRequiredAPIKey() async -> Bool {
+    let resolvedModel = resolvedModel()
 
     if Self.isLocalPostProcessingModel(resolvedModel) {
       return true

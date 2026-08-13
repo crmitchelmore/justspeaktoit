@@ -48,20 +48,44 @@ final class AutomationIntentSupportTests: XCTestCase {
     // MARK: - Polish prompt mapping
 
     func testPolishRequestWithoutCustomPromptUsesCleanupPolicy() {
-        let request = AutomationIntentSupport.polishRequest(text: "hello world", customPrompt: nil)
+        let request = AutomationIntentSupport.polishRequest(
+            text: "hello world",
+            customPrompt: nil,
+            defaultSystemPrompt: TranscriptCleanupPolicy.systemPrompt()
+        )
         XCTAssertEqual(request.systemPrompt, TranscriptCleanupPolicy.systemPrompt())
         XCTAssertEqual(request.userMessage, TranscriptCleanupPolicy.userMessage(transcript: "hello world"))
     }
 
     func testPolishRequestWithBlankCustomPromptUsesCleanupPolicy() {
-        let request = AutomationIntentSupport.polishRequest(text: "hello", customPrompt: "  \n ")
+        let request = AutomationIntentSupport.polishRequest(
+            text: "hello",
+            customPrompt: "  \n ",
+            defaultSystemPrompt: TranscriptCleanupPolicy.systemPrompt()
+        )
         XCTAssertEqual(request.systemPrompt, TranscriptCleanupPolicy.systemPrompt())
+    }
+
+    /// The caller's configured prompt — a custom base prompt, an output
+    /// language, or a dictation profile override — must reach the model
+    /// untouched, not be replaced by the stock cleanup policy.
+    func testPolishRequestWithoutCustomPromptUsesInjectedDefaultVerbatim() {
+        let configuredPrompt = "Reply only in British English. Keep the speaker's slang."
+        let request = AutomationIntentSupport.polishRequest(
+            text: "hello world",
+            customPrompt: nil,
+            defaultSystemPrompt: configuredPrompt
+        )
+        XCTAssertEqual(request.systemPrompt, configuredPrompt)
+        XCTAssertNotEqual(request.systemPrompt, TranscriptCleanupPolicy.systemPrompt())
+        XCTAssertEqual(request.userMessage, TranscriptCleanupPolicy.userMessage(transcript: "hello world"))
     }
 
     func testPolishRequestWithCustomPromptPassesTextVerbatim() {
         let request = AutomationIntentSupport.polishRequest(
             text: "long meeting notes",
-            customPrompt: "  Summarise this in one sentence.  "
+            customPrompt: "  Summarise this in one sentence.  ",
+            defaultSystemPrompt: TranscriptCleanupPolicy.systemPrompt()
         )
         XCTAssertEqual(request.systemPrompt, "Summarise this in one sentence.")
         XCTAssertEqual(request.userMessage, "long meeting notes")

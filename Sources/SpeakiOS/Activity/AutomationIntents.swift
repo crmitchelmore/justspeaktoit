@@ -161,7 +161,11 @@ public struct PolishTextIntent: AppIntent {
         guard model == AppleLocalModels.foundationModelID || settings.hasOpenRouterKey else {
             throw AutomationIntentError.openRouterKeyMissing
         }
-        let request = AutomationIntentSupport.polishRequest(text: text, customPrompt: customPrompt)
+        let request = AutomationIntentSupport.polishRequest(
+            text: text,
+            customPrompt: customPrompt,
+            defaultSystemPrompt: iOSPostProcessingManager.effectiveSystemPrompt()
+        )
         let polished = try await iOSPostProcessingManager.shared.polish(
             text: text,
             systemPrompt: request.systemPrompt,

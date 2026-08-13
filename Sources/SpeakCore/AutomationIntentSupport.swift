@@ -60,16 +60,25 @@ public enum AutomationIntentSupport {
     /// Maps the Polish Text intent parameters onto an LLM request.
     ///
     /// Without a custom prompt this is the shared transcript-cleanup contract:
-    /// the hardened policy prompt plus the JSON-wrapped transcript payload.
-    /// With a custom prompt the user is deliberately overriding that contract,
-    /// so their prompt becomes the system prompt and the text is passed through
-    /// verbatim — wrapping it in the cleanup payload would fight instructions
-    /// like "summarise this".
-    public static func polishRequest(text: String, customPrompt: String?) -> PolishRequest {
+    /// the caller's effective post-processing prompt — which already folds in
+    /// the user's custom base prompt, output language, and profile override —
+    /// plus the JSON-wrapped transcript payload. With a custom prompt the user
+    /// is deliberately overriding that contract, so their prompt becomes the
+    /// system prompt and the text is passed through verbatim — wrapping it in
+    /// the cleanup payload would fight instructions like "summarise this".
+    ///
+    /// `defaultSystemPrompt` is injected rather than derived here so the intent
+    /// honours whatever the platform's post-processing manager would use for a
+    /// normal dictation session.
+    public static func polishRequest(
+        text: String,
+        customPrompt: String?,
+        defaultSystemPrompt: String
+    ) -> PolishRequest {
         let trimmedPrompt = customPrompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !trimmedPrompt.isEmpty else {
             return PolishRequest(
-                systemPrompt: TranscriptCleanupPolicy.systemPrompt(),
+                systemPrompt: defaultSystemPrompt,
                 userMessage: TranscriptCleanupPolicy.userMessage(transcript: text)
             )
         }

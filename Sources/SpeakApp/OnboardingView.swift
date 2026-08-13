@@ -362,8 +362,9 @@ struct OnboardingView: View {
                         }
                     }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("onboardingBackButton")
                 }
-                
+
                 Spacer()
                 
                 if state.currentStep == .apiKey {
@@ -375,6 +376,7 @@ struct OnboardingView: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundColor(.secondary)
+                    .accessibilityIdentifier("onboardingSkipButton")
                 }
                 
                 if state.currentStep == .complete {
@@ -383,6 +385,7 @@ struct OnboardingView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
+                    .accessibilityIdentifier("onboardingGetStartedButton")
                 } else {
                     Button(state.currentStep == .apiKey ? "Save & Continue" : "Next") {
                         Task {
@@ -392,6 +395,7 @@ struct OnboardingView: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
                     .disabled(!canAdvance)
+                    .accessibilityIdentifier("onboardingNextButton")
                 }
             }
             .padding(.horizontal, 40)
@@ -732,6 +736,7 @@ struct PermissionRow: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .accessibilityIdentifier("onboardingGrantPermissionButton-\(String(describing: type))")
             }
         }
         .padding(.vertical, 8)

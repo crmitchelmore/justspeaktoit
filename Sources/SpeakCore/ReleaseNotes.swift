@@ -266,12 +266,17 @@ public struct ReleaseNotesBrowser: Equatable, Sendable {
     /// Explains why the screen is not showing the installed build's own notes,
     /// or `nil` when it is (or when there is nothing to show at all).
     ///
-    /// A build newer than the catalogue is waiting on its own release; a build
-    /// older than every bundled entry never had its notes shipped, so the only
-    /// honest thing to say is which notes are on screen.
+    /// A build newer than the catalogue is waiting on its own release, which
+    /// stays true whichever version is being read. A build older than every
+    /// bundled entry never had its notes shipped, so the only honest thing to
+    /// say is which notes are on screen — and that claim only holds while the
+    /// latest version is the one selected.
     public var installedVersionNotice: String? {
         guard !isEmpty, installedEntry == nil else { return nil }
-        guard !isInstalledVersionOlderThanCatalog else { return "Showing the latest release notes." }
+        guard !isInstalledVersionOlderThanCatalog else {
+            guard selectedVersion == entries.first?.version else { return nil }
+            return "Showing the latest release notes."
+        }
         return "Notes for the installed build (\(installedVersion)) are published with its release."
     }
 

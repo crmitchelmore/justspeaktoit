@@ -161,6 +161,30 @@ final class ReleaseNotesCatalogTests: XCTestCase {
         XCTAssertEqual(browser.installedVersionNotice, "Showing the latest release notes.")
     }
 
+    func testBrowser_dropsTheLatestNoticeWhenAnEarlierVersionIsSelected() throws {
+        var browser = ReleaseNotesBrowser(catalog: try makeCatalog(), installedVersion: "2.40.0")
+        XCTAssertEqual(browser.installedVersionNotice, "Showing the latest release notes.")
+
+        browser.select(version: "2.44.0")
+
+        XCTAssertNil(
+            browser.installedVersionNotice,
+            "The latest notes are no longer on screen, so the notice would be untrue"
+        )
+    }
+
+    func testBrowser_keepsTheUnreleasedNoticeWhileBrowsingEarlierVersions() throws {
+        var browser = ReleaseNotesBrowser(catalog: try makeCatalog(), installedVersion: "2.46.0-dev")
+
+        browser.select(version: "2.44.0")
+
+        XCTAssertEqual(
+            browser.installedVersionNotice,
+            "Notes for the installed build (2.46.0-dev) are published with its release.",
+            "The installed build is still awaiting its own notes whichever version is being read"
+        )
+    }
+
     func testBrowser_noticeIsAbsentWhenTheInstalledVersionIsOnScreen() throws {
         let browser = ReleaseNotesBrowser(catalog: try makeCatalog(), installedVersion: "2.44.0")
 

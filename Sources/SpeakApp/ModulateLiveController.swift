@@ -226,14 +226,24 @@ final class ModulateLiveController: NSObject, LiveTranscriptionController {
 
     self.transcriber = transcriber
     transcriber.start(
-      onUtterance: { [weak self] utterance in
-        Task { @MainActor [weak self] in
-          self?.handleUtterance(utterance)
+      onUtterance: { [weak self, weak transcriber] utterance in
+        Task { @MainActor [weak self, weak transcriber] in
+          guard let self else { return }
+          // Cached controllers are reused between recordings, so a message
+          // queued by the previous stream can land here after the next
+          // recording started. Only the current stream owns this state.
+          guard LiveTranscriptionRun.isCurrent(transcriber, activeStream: self.transcriber) else { return }
+          self.handleUtterance(utterance)
         }
       },
-      onDone: { [weak self] durationMs in
-        Task { @MainActor [weak self] in
-          self?.handleDone(durationMs: durationMs)
+      onDone: { [weak self, weak transcriber] durationMs in
+        Task { @MainActor [weak self, weak transcriber] in
+          guard let self else { return }
+          // Cached controllers are reused between recordings, so a message
+          // queued by the previous stream can land here after the next
+          // recording started. Only the current stream owns this state.
+          guard LiveTranscriptionRun.isCurrent(transcriber, activeStream: self.transcriber) else { return }
+          self.handleDone(durationMs: durationMs)
         }
       },
       onError: { [weak self] error in

@@ -110,7 +110,7 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
       let provider = OpenAIRealtimeTranscriptionProvider()
       let modelID = currentModel ?? appSettings.liveTranscriptionModel
       let realtimeName = OpenAIRealtimeTranscriptionProvider.realtimeModelName(from: modelID)
-      transcriber = provider.createLiveTranscriber(
+      let newTranscriber = provider.createLiveTranscriber(
         apiKey: apiKey,
         model: realtimeName,
         language: currentLanguage.map(\.localeLanguageCode),
@@ -121,11 +121,17 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
         prompt: trimmedKeytermsPrompt(),
         sampleRate: 24_000
       )
+      transcriber = newTranscriber
 
-      transcriber?.start(
-        onEvent: { [weak self] event in
-          Task { @MainActor [weak self] in
-            self?.handleEvent(event)
+      newTranscriber.start(
+        onEvent: { [weak self, weak newTranscriber] event in
+          Task { @MainActor [weak self, weak newTranscriber] in
+            guard let self else { return }
+            // Cached controllers are reused between recordings, so a message
+            // queued by the previous stream can land here after the next
+            // recording started. Only the current stream owns this state.
+            guard LiveTranscriptionRun.isCurrent(newTranscriber, activeStream: self.transcriber) else { return }
+            self.handleEvent(event)
           }
         },
         onError: { [weak self] error in

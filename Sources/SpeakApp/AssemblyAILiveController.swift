@@ -106,18 +106,23 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
         .filter { !$0.isEmpty }
 
       let provider = AssemblyAITranscriptionProvider()
-      transcriber = provider.createLiveTranscriber(
+      let newTranscriber = provider.createLiveTranscriber(
         apiKey: apiKey,
         sampleRate: 16000,
         model: currentModel ?? appSettings.liveTranscriptionModel,
         keyterms: keyterms,
         language: currentLanguage
       )
+      transcriber = newTranscriber
 
-      transcriber?.start(
-        onTranscript: { [weak self] turn in
-          Task { @MainActor [weak self] in
+      newTranscriber.start(
+        onTranscript: { [weak self, weak newTranscriber] turn in
+          Task { @MainActor [weak self, weak newTranscriber] in
             guard let self else { return }
+            // Cached controllers are reused between recordings, so a message
+            // queued by the previous stream can land here after the next
+            // recording started. Only the current stream owns this state.
+            guard LiveTranscriptionRun.isCurrent(newTranscriber, activeStream: self.transcriber) else { return }
             self.handleTurn(turn)
           }
         },

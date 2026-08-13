@@ -309,16 +309,16 @@ actor AudioFileManager {
   }
 
   func stopRecording() async throws -> RecordingSummary {
-    guard let recorder, let currentRecordingID, let start = currentRecordingStart else {
+    guard let recorder, let recordingID = currentRecordingID, let start = currentRecordingStart else {
       throw AudioFileManagerError.noActiveRecording
     }
 
     let owner = self.currentRecordingOwner
     recorder.stop()
     self.recorder = nil
-    currentRecordingStart = nil
-    currentRecordingID = nil
-    currentRecordingOwner = nil
+    self.currentRecordingStart = nil
+    self.currentRecordingID = nil
+    self.currentRecordingOwner = nil
 
     let url = recorder.url
     let attributes = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
@@ -329,7 +329,7 @@ actor AudioFileManager {
       preciseDuration.isFinite && preciseDuration > 0 ? preciseDuration : measuredDuration
 
     let summary = RecordingSummary(
-      id: currentRecordingID,
+      id: recordingID,
       url: url,
       startedAt: start,
       duration: duration,

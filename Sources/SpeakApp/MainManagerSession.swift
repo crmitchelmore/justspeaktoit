@@ -61,10 +61,18 @@ final class ActiveSession {
   var diagnosticContext: HistoryDiagnosticContext?
   var outputTarget: TextOutputTarget?
 
-  init(gesture: HistoryTrigger.HotKeyGesture, hotKeyDescription: String) {
+  /// - Parameter triggeredAt: when the user actually asked to record. Taken in
+  ///   the hotkey callback rather than here, so `captureStartMs` covers the
+  ///   whole hotkey→capture path — including the pre-session credential and
+  ///   profile checks — instead of starting the clock after them (issue #663).
+  init(
+    gesture: HistoryTrigger.HotKeyGesture,
+    hotKeyDescription: String,
+    triggeredAt: Date = Date()
+  ) {
     self.gesture = gesture
     self.hotKeyDescription = hotKeyDescription
-    self.recordingStarted = Date()
+    self.recordingStarted = triggeredAt
   }
 
   func recordCostFragment(_ fragment: ChatCostBreakdown) {

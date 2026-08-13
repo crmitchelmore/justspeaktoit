@@ -312,6 +312,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     case silenceThreshold
     case silenceDuration
     case connectionPreWarmingEnabled
+    case audioPreWarmingEnabled
     case postProcessingStreamingEnabled
     case hudSizePreference
     case showLiveTranscriptInHUD
@@ -722,8 +723,20 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   }
 
   // Performance Settings
+
+  /// Pre-warms the network path to the post-processing and live-transcription
+  /// providers while idle (DNS + TLS only — no credential is sent and no
+  /// provider session is opened).
   @Published var connectionPreWarmingEnabled: Bool {
     didSet { store(connectionPreWarmingEnabled, key: .connectionPreWarmingEnabled) }
+  }
+
+  /// Creates and prepares the audio recorder while the app is idle so the
+  /// hotkey→capture path only has to start it (issue #663). Pre-warming never
+  /// opens the microphone; capture still begins at session start. Costs one
+  /// prepared encoder and one empty file while idle, so it is on by default.
+  @Published var audioPreWarmingEnabled: Bool {
+    didSet { store(audioPreWarmingEnabled, key: .audioPreWarmingEnabled) }
   }
 
   @Published var postProcessingStreamingEnabled: Bool {
@@ -1057,6 +1070,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     }
     connectionPreWarmingEnabled =
       defaults.object(forKey: DefaultsKey.connectionPreWarmingEnabled.rawValue) as? Bool ?? true
+    audioPreWarmingEnabled =
+      defaults.object(forKey: DefaultsKey.audioPreWarmingEnabled.rawValue) as? Bool ?? true
     postProcessingStreamingEnabled =
       defaults.object(forKey: DefaultsKey.postProcessingStreamingEnabled.rawValue) as? Bool ?? true
 

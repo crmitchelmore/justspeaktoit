@@ -76,9 +76,11 @@ final class MainManager: ObservableObject {
   var activeSession: ActiveSession? {
     didSet {
       // Every session-teardown path clears `activeSession`, so this is the one
-      // place profile overrides are reverted back to the user's own settings.
+      // place profile overrides are reverted back to the user's own settings —
+      // and the one place capture pre-warming can safely resume.
       if activeSession == nil {
         profileApplier.end(settings: appSettings, postProcessing: postProcessingManager)
+        captureWarmer?.sessionDidEnd()
       }
     }
   }
@@ -86,6 +88,10 @@ final class MainManager: ObservableObject {
   /// Hands-free ("armed") dictation. Created eagerly but inert until the user
   /// arms it, which only the hands-free setting allows.
   private(set) lazy var handsFreeCoordinator = makeHandsFreeCoordinator()
+
+  /// Keeps the audio recorder and the streaming provider's network path warm
+  /// while idle so hotkey→capture does not pay setup cost (issue #663).
+  private var captureWarmer: CaptureWarmCoordinator?
   /// Guards against re-entrant calls to endSession (e.g. silence detection + user hotkey racing).
   var isEndingSession = false
   let recordingStopTimeout: TimeInterval = 8
@@ -238,7 +244,17 @@ final class MainManager: ObservableObject {
       queue: .main
     ) { [weak self] _ in
       self?.stopAudioLevelMonitoring()
+      self?.captureWarmer?.invalidate()
     }
+
+    let warmer = CaptureWarmCoordinator(
+      appSettings: appSettings,
+      permissionsManager: permissionsManager,
+      audioInputDeviceManager: audioInputDeviceManager,
+      audioFileManager: audioFileManager
+    )
+    captureWarmer = warmer
+    warmer.warmUp()
   }
 
   /// Applies a live-transcript snapshot to the preview and the HUD.
@@ -300,7 +316,8 @@ final class MainManager: ObservableObject {
   func toggleRecordingFromUI() {
     guard !isEndingSession else { return }
     if activeSession == nil {
-      Task { await startSession(trigger: .uiButton) }
+      let triggeredAt = Date()
+      Task { await startSession(trigger: .uiButton, triggeredAt: triggeredAt) }
     } else {
       Task { await endSession(trigger: .uiButton) }
     }
@@ -335,10 +352,10 @@ final class MainManager: ObservableObject {
   }
 
   /// Hands-free replaces press-to-talk with press-to-arm.
-  private func handleHoldStartGesture() async {
+  private func handleHoldStartGesture(triggeredAt: Date) async {
     guard appSettings.hotKeyActivationStyle.allowsHold else { return }
     if await handleHandsFreeHotKey() { return }
-    await startSession(trigger: .hold)
+    await startSession(trigger: .hold, triggeredAt: triggeredAt)
   }
 
   /// The arming press already consumed the gesture, so releasing the key must
@@ -358,7 +375,7 @@ final class MainManager: ObservableObject {
 
   /// Double-tap toggles: it arms hands-free dictation when that mode is on,
   /// otherwise it starts a session or ends the one it started.
-  private func handleDoubleTapGesture() async {
+  private func handleDoubleTapGesture(triggeredAt: Date) async {
     guard appSettings.hotKeyActivationStyle.allowsDoubleTap else { return }
     let now = ProcessInfo.processInfo.systemUptime
     guard now - lastDoubleTapEventUptime >= 0.25 else { return }
@@ -370,15 +387,19 @@ final class MainManager: ObservableObject {
       guard session.gesture == .doubleTap else { return }
       await endSession(trigger: .doubleTap)
     } else {
-      await startSession(trigger: .doubleTap)
+      await startSession(trigger: .doubleTap, triggeredAt: triggeredAt)
     }
   }
 
+  // swiftlint:disable:next function_body_length
   private func configureHotKeys() {
     hotKeyTokens.append(
       hotKeyManager.register(gesture: .holdStart) { [weak self] in
+        // Stamped here, before the actor hop, so the latency dashboard measures
+        // from the key press rather than from where `startSession` gets to run.
+        let triggeredAt = Date()
         Task { @MainActor in
-          await self?.handleHoldStartGesture()
+          await self?.handleHoldStartGesture(triggeredAt: triggeredAt)
         }
       }
     )
@@ -393,8 +414,9 @@ final class MainManager: ObservableObject {
 
     hotKeyTokens.append(
       hotKeyManager.register(gesture: .doubleTap) { [weak self] in
+        let triggeredAt = Date()
         Task { @MainActor in
-          await self?.handleDoubleTapGesture()
+          await self?.handleDoubleTapGesture(triggeredAt: triggeredAt)
         }
       }
     )
@@ -474,7 +496,8 @@ final class MainManager: ObservableObject {
   // swiftlint:disable:next cyclomatic_complexity function_body_length
   func startSession(
     trigger: SessionTriggerSource,
-    preRollBuffers: [AVAudioPCMBuffer] = []
+    preRollBuffers: [AVAudioPCMBuffer] = [],
+    triggeredAt: Date = Date()
   ) async -> HandsFreeCaptureStartOutcome {
     guard activeSession == nil else { return .rejected(.captureFailed) }
 
@@ -531,7 +554,11 @@ final class MainManager: ObservableObject {
     clearRetryData()
 
     let gesture = trigger.historyGesture
-    let session = ActiveSession(gesture: gesture, hotKeyDescription: appSettings.selectedHotKey.displayString)
+    let session = ActiveSession(
+      gesture: gesture,
+      hotKeyDescription: appSettings.selectedHotKey.displayString,
+      triggeredAt: triggeredAt
+    )
     session.outputTarget = TextOutputTarget.capture()
     session.diagnosticContext = makeHistoryDiagnosticContext()
     activeSession = session
@@ -577,9 +604,13 @@ final class MainManager: ObservableObject {
       hudManager.beginRecording(profileName: profileApplier.activeProfileName)
     }
 
+    // Claim the recorder staged while idle. Returns nil — and the cold path
+    // runs — whenever the environment moved since it was staged.
+    let warmContext = captureWarmer?.claimWarmContext()
+
     do {
-      _ = try await audioFileManager.startRecording()
-      recordCaptureStart(for: session)
+      _ = try await audioFileManager.startRecording(warmContext: warmContext)
+      recordCaptureStart(for: session, wasWarm: warmContext != nil)
       startAudioLevelMonitoring()
       if isStreamingTranscriptionMode {
         try await transcriptionManager.startLiveTranscription(
@@ -602,13 +633,16 @@ final class MainManager: ObservableObject {
   }
 
   /// Latency checkpoint: the recorder is live. hotkey → capture-start is the
-  /// cold-start figure competitors market, so log it explicitly every session.
-  private func recordCaptureStart(for session: ActiveSession) {
+  /// cold-start figure competitors market, so log it explicitly every session,
+  /// tagged with whether the pre-warmed recorder was used (issue #663) so the
+  /// dashboard percentiles can be read against the warm/cold split.
+  private func recordCaptureStart(for session: ActiveSession, wasWarm: Bool) {
     session.captureStarted = Date()
     if let coldStartMs = SessionLatencyMetrics.milliseconds(
       from: session.recordingStarted, to: session.captureStarted
     ) {
-      self.logger.info("Latency: capture started \(coldStartMs)ms after trigger (cold start)")
+      let path = wasWarm ? "pre-warmed" : "cold"
+      self.logger.info("Latency: capture started \(coldStartMs)ms after trigger (\(path, privacy: .public))")
     }
   }
 

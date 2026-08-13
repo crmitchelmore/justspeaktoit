@@ -32,6 +32,7 @@ final class KeyboardViewModelTests: XCTestCase {
         var before: String
         var after: String
         var deletesScalars = false
+        var contextLimit: Int?
 
         init(before: String, after: String = "") {
             self.before = before
@@ -39,6 +40,11 @@ final class KeyboardViewModelTests: XCTestCase {
         }
 
         var text: String { before + after }
+
+        var contextBeforeInput: String {
+            guard let contextLimit else { return before }
+            return String(before.suffix(contextLimit))
+        }
 
         func insertText(_ text: String) {
             before += text
@@ -193,6 +199,43 @@ final class KeyboardViewModelTests: XCTestCase {
         XCTAssertEqual(model.directState, .recording)
     }
 
+    func testBoundedContext_tailRevisionAppliesWithoutLosingAnchor() throws {
+        let engine = FakeEngine()
+        let document = DocumentProxy(before: "0123456789")
+        document.contextLimit = 5
+        let model = makeModel(engine: engine)
+        activate(model, document: document)
+        model.micTapped()
+        let runID = try XCTUnwrap(engine.startedRunIDs.last)
+        engine.emit(.captureStarted, for: runID)
+        engine.emit(.hypothesis("alpha"), for: runID)
+
+        engine.emit(.hypothesis("beta"), for: runID)
+
+        XCTAssertEqual(document.text, "0123456789 beta")
+        XCTAssertEqual(model.directState, .recording)
+    }
+
+    func testEditExceedingAuthoredText_isRejectedBeforeDeleting() {
+        let document = DocumentProxy(before: "Host")
+        let session = KeyboardDocumentSession(
+            insertText: document.insertText,
+            deleteBackward: document.deleteBackward,
+            contextBeforeInput: { document.contextBeforeInput },
+            contextAfterInput: { document.after }
+        )
+        session.begin()
+        XCTAssertEqual(
+            session.apply(KeyboardTranscriptEdit(deleteCount: 0, insertion: "dictated")),
+            .applied
+        )
+
+        let result = session.apply(KeyboardTranscriptEdit(deleteCount: 9, insertion: "replacement"))
+
+        XCTAssertEqual(result, .anchorLost)
+        XCTAssertEqual(document.text, "Host dictated")
+    }
+
     func testCanonicallyEquivalentHostMutation_doesNotProveReplacementAnchor() {
         let document = DocumentProxy(before: "Host é")
         let session = KeyboardDocumentSession(
@@ -248,7 +291,7 @@ final class KeyboardViewModelTests: XCTestCase {
             documentIdentifier: Self.documentID,
             insertText: document.insertText,
             deleteBackward: document.deleteBackward,
-            contextBeforeInput: { document.before },
+            contextBeforeInput: { document.contextBeforeInput },
             contextAfterInput: { document.after }
         )
     }

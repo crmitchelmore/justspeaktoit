@@ -13,6 +13,7 @@ enum AutomationIntentError: LocalizedError {
   case appNotReady
   case alreadyRecording
   case noActiveRecording
+  case stopAlreadyInProgress
   case noTranscriptionYet
   case emptyTranscript
   case openRouterKeyMissing
@@ -27,6 +28,8 @@ enum AutomationIntentError: LocalizedError {
       return "A dictation session is already in progress."
     case .noActiveRecording:
       return "No dictation session is running."
+    case .stopAlreadyInProgress:
+      return "A stop is already in progress."
     case .noTranscriptionYet:
       return "No transcriptions in history yet."
     case .emptyTranscript:
@@ -99,6 +102,12 @@ struct StopDictationIntent: AppIntent {
     let environment = try await automationEnvironment()
     guard environment.main.isDictationSessionActive else {
       throw AutomationIntentError.noActiveRecording
+    }
+    // A stop already running (hotkey, UI, or a second shortcut) makes
+    // `endSession` a no-op, so the session never reaches `.completed` here.
+    // Reported separately: it is a race, not an empty recording.
+    guard !environment.main.isEndingSession else {
+      throw AutomationIntentError.stopAlreadyInProgress
     }
     guard let item = await environment.main.stopDictationFromAutomation() else {
       if case .failed(let message) = environment.main.state {

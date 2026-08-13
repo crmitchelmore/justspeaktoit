@@ -282,8 +282,8 @@ extension SettingsView {
           if settings.handsFreeDictationSupported {
             Text(
               "The hotkey arms a listening session instead of recording straight away. "
-                + "Recording starts when you speak and stops after "
-                + "\(Self.handsFreeSilenceDescription) of silence, then re-arms. "
+                + "Recording starts when you speak and uses the Silence duration above before stopping. "
+                + "Silent audio stays in memory only and is discarded immediately. "
                 + "Press the hotkey again to disarm."
             )
             .font(.caption)
@@ -1755,12 +1755,6 @@ extension SettingsView {
     case .failed(let message):
       return message
     }
-  }
-
-  /// Derived from the shared policy so the copy can never drift from behaviour.
-  static var handsFreeSilenceDescription: String {
-    HandsFreeDictationPolicy.silenceHoldSeconds
-      .formatted(.number.precision(.fractionLength(0...1))) + " seconds"
   }
 
   private func localModelIcon(for state: LocalModelManager.InstallState) -> String {

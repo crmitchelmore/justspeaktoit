@@ -41,6 +41,10 @@ final class AppleSpeechAnalyzerLiveController: LiveTranscriptionController {
   }
 
   func start() async throws {
+    try await start(preRollBuffers: [])
+  }
+
+  func start(preRollBuffers: [AVAudioPCMBuffer]) async throws {
     guard await ensurePermissions() else {
       throw TranscriptionManagerError.permissionsMissing
     }
@@ -51,7 +55,7 @@ final class AppleSpeechAnalyzerLiveController: LiveTranscriptionController {
     let inputSession = await audioDeviceManager.beginUsingPreferredInput()
     audioEngine = AVAudioEngine()
     do {
-      try await startSpeechAnalyzer()
+      try await startSpeechAnalyzer(preRollBuffers: preRollBuffers)
       activeInputSession = inputSession
       latestUpdate = LiveTranscriptionUpdate(text: "")
       isRunning = true
@@ -64,7 +68,7 @@ final class AppleSpeechAnalyzerLiveController: LiveTranscriptionController {
   }
 
   @available(macOS 26.0, *)
-  private func startSpeechAnalyzer() async throws {
+  private func startSpeechAnalyzer(preRollBuffers: [AVAudioPCMBuffer]) async throws {
     // Published before the session exists so the handler can never observe a
     // window in which this run is not yet the active one. The handler hops to
     // the main actor through an unstructured Task, so an update produced by the
@@ -73,7 +77,6 @@ final class AppleSpeechAnalyzerLiveController: LiveTranscriptionController {
     // next recording's transcript (issue #668).
     let run = LiveTranscriptionRun.Token()
     activeRun = run
-
     let session = try await AppleSpeechAnalyzerLiveSession(
       localeIdentifier: currentLanguage ?? appSettings.resolvedPreferredLocaleIdentifier,
       engine: AppleSpeechAnalyzerEngine(modelID: currentModel)
@@ -108,6 +111,11 @@ final class AppleSpeechAnalyzerLiveController: LiveTranscriptionController {
       inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { buffer, _ in
         guard let converted = converter.convert(buffer) else { return }
         session.send(converted)
+      }
+      for buffer in preRollBuffers {
+        if let converted = converter.convert(buffer) {
+          session.send(converted)
+        }
       }
       try await startAudioEngineAfterInputDeviceSettles(audioEngine)
       analyzerSession = session

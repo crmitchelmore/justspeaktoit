@@ -88,6 +88,7 @@ public enum AppleLocalModels {
 
 public enum AppleLocalModelError: LocalizedError {
     case speechTranscriberUnavailable
+    case speechDetectorFailed
     case speechDetectorUnavailable
     case localeUnsupported(String)
     case modelAssetsUnavailable
@@ -102,6 +103,8 @@ public enum AppleLocalModelError: LocalizedError {
         switch self {
         case .speechTranscriberUnavailable:
             return "Apple on-device speech recognition isn't available on this device."
+        case .speechDetectorFailed:
+            return "Apple's on-device speech detector stopped unexpectedly."
         case .speechDetectorUnavailable:
             return "Hands-free dictation needs Apple's on-device speech detector, "
                 + "which isn't available on this device."

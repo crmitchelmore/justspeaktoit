@@ -1229,9 +1229,8 @@ public struct SettingsView: View {
         guard settings.handsFreeDictationSupported else {
             return "Requires iOS 26 or later — Apple's on-device speech detector isn't available here."
         }
-        let silence = HandsFreeDictationPolicy.silenceHoldSeconds
-            .formatted(.number.precision(.fractionLength(0...1)))
-        return "Recording starts when you speak and stops after \(silence) seconds of silence."
+        return "Arm from the microphone button. The microphone remains active while armed; "
+            + "silent audio stays in memory only and is never stored or sent off-device."
     }
 
     private var keyboardStatusLabel: String {

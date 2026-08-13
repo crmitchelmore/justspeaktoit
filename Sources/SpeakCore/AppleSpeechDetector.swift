@@ -61,7 +61,8 @@ public final class AppleSpeechDetectorSession: @unchecked Sendable {
     ///   detector's task. Callers debounce with `HandsFreeVoiceActivityTracker`.
     public init(
         sensitivity: AppleSpeechDetectorSensitivity = HandsFreeDictationPolicy.sensitivity,
-        onActivity: @escaping @Sendable (AppleSpeechActivityUpdate) -> Void
+        onActivity: @escaping @Sendable (AppleSpeechActivityUpdate) -> Void,
+        onFailure: @escaping @Sendable (Error) -> Void
     ) async throws {
         let detector = SpeechDetector(
             detectionOptions: sensitivity.detectionOptions,
@@ -89,18 +90,20 @@ public final class AppleSpeechDetectorSession: @unchecked Sendable {
                         )
                     )
                 }
+                guard !Task.isCancelled else { return }
+                onFailure(AppleLocalModelError.speechDetectorFailed)
             } catch {
-                // The session owner notices via the stalled activity stream and
-                // disarms; there is no transcript to salvage here.
+                guard !Task.isCancelled else { return }
+                onFailure(error)
             }
         }
 
         do {
             try await analyzer.start(inputSequence: inputSequence)
         } catch {
+            self.activityTask.cancel()
             continuation.finish()
             await analyzer.cancelAndFinishNow()
-            self.activityTask.cancel()
             throw error
         }
     }
@@ -110,8 +113,8 @@ public final class AppleSpeechDetectorSession: @unchecked Sendable {
     }
 
     public func cancel() async {
+        activityTask.cancel()
         inputContinuation.finish()
         await analyzer.cancelAndFinishNow()
-        activityTask.cancel()
     }
 }

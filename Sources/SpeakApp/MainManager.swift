@@ -79,12 +79,6 @@ final class MainManager: ObservableObject {
       // place profile overrides are reverted back to the user's own settings.
       if activeSession == nil {
         profileApplier.end(settings: appSettings, postProcessing: postProcessingManager)
-        // Cancelling with Escape or the UI button also ends a hands-free
-        // capture; tell the coordinator so it cools down and re-arms instead
-        // of waiting for a stop that already happened.
-        if handsFreeCoordinator.isCapturing {
-          Task { [handsFreeCoordinator] in await handsFreeCoordinator.captureFinished() }
-        }
       }
     }
   }
@@ -473,8 +467,12 @@ final class MainManager: ObservableObject {
   // Internal rather than private so the hands-free coordinator can start the
   // same session the hotkey would have.
   // swiftlint:disable:next function_body_length
-  func startSession(trigger: SessionTriggerSource) async {
-    guard activeSession == nil else { return }
+  @discardableResult
+  func startSession(
+    trigger: SessionTriggerSource,
+    preRollBuffers: [AVAudioPCMBuffer] = []
+  ) async -> HandsFreeCaptureStartOutcome {
+    guard activeSession == nil else { return .rejected(.captureFailed) }
 
     // Per-app dictation profile: resolve the frontmost app and apply its
     // overrides for this session only. Applied before the API-key check so the
@@ -488,9 +486,20 @@ final class MainManager: ObservableObject {
       frontmostBundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier
     )
 
+    if trigger == .handsFree {
+      guard HandsFreeDictationPolicy.supportsCapture(
+        modelID: appSettings.liveTranscriptionModel,
+        isStreaming: appSettings.transcriptionMode == .liveNative
+      )
+      else {
+        profileApplier.end(settings: appSettings, postProcessing: postProcessingManager)
+        return .rejected(.unsupportedConfiguration)
+      }
+    }
+
     if await presentMissingLiveAPIKeyAlertIfNeeded() {
       profileApplier.end(settings: appSettings, postProcessing: postProcessingManager)
-      return
+      return .rejected(.captureFailed)
     }
 
     if audioInputDeviceManager.devices.isEmpty {
@@ -502,7 +511,7 @@ final class MainManager: ObservableObject {
         headline: "No microphone connected",
         message: "Plug in a USB or Bluetooth microphone and try again."
       )
-      return
+      return .rejected(.audioUnavailable)
     }
 
     // Failsafe: if live transcription is still running but we have no activeSession,
@@ -569,8 +578,12 @@ final class MainManager: ObservableObject {
       recordCaptureStart(for: session)
       startAudioLevelMonitoring()
       if isStreamingTranscriptionMode {
-        try await transcriptionManager.startLiveTranscription()
+        try await transcriptionManager.startLiveTranscription(
+          preRollBuffers: preRollBuffers,
+          analyzerFallbackAllowed: trigger != .handsFree
+        )
       }
+      return .started
     } catch {
       session.errors.append(
         HistoryError(
@@ -580,6 +593,7 @@ final class MainManager: ObservableObject {
         )
       )
       cleanupAfterFailure(message: error.localizedDescription, preserveFile: false)
+      return .rejected(HandsFreeDictationMachine.Failure(error))
     }
   }
 
@@ -614,6 +628,7 @@ final class MainManager: ObservableObject {
         // Ignored: sleep cancellation simply means we stop immediately.
       }
     }
+    guard !Task.isCancelled, activeSession === session else { return }
 
     if appSettings.recordingSoundsEnabled {
       recordingSoundPlayer.play(.stop, volume: appSettings.recordingSoundVolume)
@@ -647,12 +662,14 @@ final class MainManager: ObservableObject {
 
     do {
       let summary = try await stopRecordingWithTimeout()
+      guard !Task.isCancelled, activeSession === session else { return }
       session.recordingSummary = summary
       session.recordingEnded = summary.startedAt.addingTimeInterval(summary.duration)
 
       if isStreamingTranscriptionMode {
         session.transcriptionStarted = Date()
         let result = try await transcriptionManager.stopLiveTranscription()
+        guard !Task.isCancelled, activeSession === session else { return }
         session.transcriptionEnded = Date()
         session.transcriptionResult = result
         session.modelsUsed.insert(result.modelIdentifier)
@@ -743,6 +760,7 @@ final class MainManager: ObservableObject {
           }
         }
         let result = try await transcriptionManager.transcribeFile(at: summary.url)
+        guard !Task.isCancelled, activeSession === session else { return }
         session.transcriptionEnded = Date()
         session.transcriptionResult = result
         session.modelsUsed.insert(result.modelIdentifier)
@@ -837,6 +855,7 @@ final class MainManager: ObservableObject {
             }
           }
         )
+        guard !Task.isCancelled, activeSession === session else { return }
         switch outcomeResult {
         case .success(let outcome):
           session.postProcessingEnded = Date()

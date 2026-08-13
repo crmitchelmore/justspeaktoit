@@ -10,6 +10,41 @@ import XCTest
 /// assert the same defaults key and the same default-off behaviour.
 @MainActor
 final class HandsFreeDictationSettingsTests: XCTestCase {
+    func testIOSHandsFreeRecordingFlowUsesTheSharedRuntimeStates() {
+        var machine = HandsFreeDictationMachine()
+
+        XCTAssertEqual(machine.handle(.userArmed), [.startDetector])
+        XCTAssertEqual(machine.state, .arming)
+        XCTAssertEqual(machine.handle(.detectorStarted), [])
+        XCTAssertEqual(machine.state, .armed)
+        XCTAssertEqual(machine.handle(.speechDetected), [.startCapture])
+        XCTAssertEqual(machine.state, .recording)
+        XCTAssertEqual(machine.handle(.silenceElapsed), [.stopCapture])
+        XCTAssertEqual(machine.state, .finalising)
+        XCTAssertEqual(machine.handle(.captureFinished), [])
+        XCTAssertEqual(machine.state, .armed)
+    }
+
+    func testIOSHandsFreeCaptureRejectsRemoteLegacyAndBatchRoutes() {
+        XCTAssertTrue(
+            HandsFreeDictationPolicy.supportsCapture(
+                modelID: AppleLocalModels.dictationTranscriberModelID,
+                isStreaming: true
+            )
+        )
+        XCTAssertFalse(
+            HandsFreeDictationPolicy.supportsCapture(
+                modelID: AppleLocalModels.legacySpeechModelID,
+                isStreaming: true
+            )
+        )
+        XCTAssertFalse(
+            HandsFreeDictationPolicy.supportsCapture(
+                modelID: AppleLocalModels.speechTranscriberModelID,
+                isStreaming: false
+            )
+        )
+    }
 
     /// Must match `AppSettings.DefaultsKey.handsFreeDictationEnabled` on macOS.
     private let sharedDefaultsKey = "handsFreeDictationEnabled"

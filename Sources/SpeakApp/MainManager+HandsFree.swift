@@ -17,11 +17,28 @@ extension MainManager {
       permissionsManager: permissionsManager,
       audioDeviceManager: audioInputDeviceManager,
       callbacks: HandsFreeDictationCoordinator.Callbacks(
-        startCapture: { [weak self] in
-          await self?.startSession(trigger: .handsFree)
+        startCapture: { [weak self] preRoll in
+          guard let self else { return .rejected(.captureFailed) }
+          return await self.startSession(trigger: .handsFree, preRollBuffers: preRoll)
         },
         stopCapture: { [weak self] in
-          await self?.endSession(trigger: .handsFree)
+          guard let self else { return .failed(.captureFailed) }
+          await self.endSession(trigger: .handsFree)
+          if case .completed = self.state { return .completed }
+          return .failed(.captureFailed)
+        },
+        cancelCapture: { [weak self] in
+          self?.userRequestedStopDueToError()
+        },
+        silenceDuration: { [weak self] in
+          self?.appSettings.silenceDuration ?? HandsFreeDictationPolicy.defaultSilenceHoldSeconds
+        },
+        captureIsSupported: { [weak self] in
+          guard let self else { return false }
+          return HandsFreeDictationPolicy.supportsCapture(
+            modelID: self.appSettings.liveTranscriptionModel,
+            isStreaming: self.appSettings.transcriptionMode == .liveNative
+          )
         },
         armedStateChanged: { [weak self] state in
           self?.presentHandsFreeState(state)
@@ -50,16 +67,19 @@ extension MainManager {
 
   private func presentHandsFreeState(_ state: HandsFreeDictationMachine.State) {
     switch state {
-    case .armedListening:
+    case .arming:
+      guard activeSession == nil else { return }
+      hudManager.beginArmed(subheadline: "Preparing on-device detector")
+    case .armed:
       // Only claim the HUD between utterances; the recording phase owns it
       // while capture is running.
       guard activeSession == nil else { return }
       hudManager.beginArmed()
-    case .disarmed:
+    case .off:
       if case .armed = hudManager.snapshot.phase {
         hudManager.hide()
       }
-    case .capturing, .coolingDown:
+    case .recording, .finalising:
       break
     }
   }

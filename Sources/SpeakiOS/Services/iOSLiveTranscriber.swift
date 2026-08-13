@@ -102,6 +102,13 @@ public final class iOSLiveTranscriber: ObservableObject {
 
     /// Start live transcription session.
     public func start() async throws {
+        try await start(preRollBuffers: [], analyzerFallbackAllowed: true)
+    }
+
+    public func start(
+        preRollBuffers: [AVAudioPCMBuffer],
+        analyzerFallbackAllowed: Bool = true
+    ) async throws {
         guard !isRunning else { return }
 
         SpeakLogger.logTranscription(event: "start", model: "Apple Speech")
@@ -128,7 +135,7 @@ public final class iOSLiveTranscriber: ObservableObject {
             if #available(iOS 26.0, *) {
                 do {
                     let engine = AppleSpeechAnalyzerEngine(modelID: modelID)
-                    try await startSpeechAnalyzer(engine: engine)
+                    try await startSpeechAnalyzer(engine: engine, preRollBuffers: preRollBuffers)
                     activeModelID = engine.modelID
                     isRunning = true
                     print("[iOSLiveTranscriber] Started with SpeechAnalyzer (\(engine.modelID))")
@@ -139,6 +146,7 @@ public final class iOSLiveTranscriber: ObservableObject {
                         context: "SpeechAnalyzer setup; falling back to SFSpeechRecognizer",
                         logger: SpeakLogger.transcription
                     )
+                    if !analyzerFallbackAllowed { throw error }
                 }
             }
         }
@@ -159,7 +167,10 @@ public final class iOSLiveTranscriber: ObservableObject {
     }
 
     @available(iOS 26.0, *)
-    private func startSpeechAnalyzer(engine: AppleSpeechAnalyzerEngine) async throws {
+    private func startSpeechAnalyzer(
+        engine: AppleSpeechAnalyzerEngine,
+        preRollBuffers: [AVAudioPCMBuffer]
+    ) async throws {
         let session = try await AppleSpeechAnalyzerLiveSession(
             localeIdentifier: language,
             engine: engine
@@ -187,9 +198,15 @@ public final class iOSLiveTranscriber: ObservableObject {
                     session.send(converted)
                 }
             }
+            _ = try? audioRecorder.startRecording(format: recordingFormat)
+            for buffer in preRollBuffers {
+                audioRecorder.writeBuffer(buffer)
+                if let converted = converter.convert(buffer) {
+                    session.send(converted)
+                }
+            }
             audioEngine.prepare()
             try audioEngine.start()
-            _ = try? audioRecorder.startRecording(format: recordingFormat)
             speechAnalyzerSession = session
             speechAnalyzerConverter = converter
         } catch {

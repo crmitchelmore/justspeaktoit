@@ -124,11 +124,11 @@ final class HUDManager: ObservableObject {
 
   /// Shows the armed indicator for hands-free dictation. The HUD stays up
   /// between utterances so "armed but silent" is never mistaken for "off".
-  func beginArmed() {
+  func beginArmed(subheadline: String = "Hands-free dictation is armed") {
     transition(
       .armed,
       headline: "Listening for speech",
-      subheadline: "Hands-free dictation is armed",
+      subheadline: subheadline,
       showsTimer: false
     )
   }

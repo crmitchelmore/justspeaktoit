@@ -14,7 +14,7 @@ extension HandsFreeDictationMachine.Failure {
             return
         }
         switch modelError {
-        case .speechDetectorUnavailable, .speechTranscriberUnavailable:
+        case .speechDetectorUnavailable, .speechDetectorFailed, .speechTranscriberUnavailable:
             self = .detectorUnavailable
         case .localeUnsupported:
             self = .localeUnsupported
@@ -42,6 +42,8 @@ extension HandsFreeDictationMachine.Failure {
             return "Hands-free dictation couldn't access the microphone."
         case .captureFailed:
             return "Hands-free dictation stopped because the recording session failed."
+        case .unsupportedConfiguration:
+            return "Hands-free dictation requires an Apple on-device streaming model."
         }
     }
 }
@@ -57,16 +59,23 @@ public enum HandsFreeDictationPolicy {
     /// How long the detector must report silence before capture auto-stops.
     /// Long enough to survive a mid-sentence breath, short enough that the
     /// transcript lands without the user reaching for the hotkey.
-    public static let silenceHoldSeconds: Double = 1.2
+    public static let defaultSilenceHoldSeconds: Double = 2.0
 
-    /// Quiet window after a capture ends before the session re-arms. Stops the
-    /// tail of the previous utterance (and any spoken-result feedback) from
-    /// immediately re-triggering capture.
-    public static let cooldownSeconds: Double = 0.4
+    /// Audio retained only in memory while a capture starts, so the first
+    /// phoneme is included once speech is confirmed.
+    public static let preRollSeconds: Double = 0.5
 
     /// Detector sensitivity used when arming. `.medium` trades a little
     /// eagerness for far fewer false starts in a noisy room.
     public static let sensitivity: AppleSpeechDetectorSensitivity = .medium
+
+    public static func silenceHoldSeconds(configured value: TimeInterval) -> TimeInterval {
+        min(max(value, 0.5), 5.0)
+    }
+
+    public static func supportsCapture(modelID: String, isStreaming: Bool) -> Bool {
+        isStreaming && AppleLocalModels.isSpeechAnalyzerModel(modelID)
+    }
 }
 
 /// Turns a stream of voice-activity samples into the discrete edges the
@@ -92,7 +101,7 @@ public struct HandsFreeVoiceActivityTracker: Equatable, Sendable {
     public mutating func observe(
         speechDetected: Bool,
         atSeconds seconds: Double,
-        silenceHoldSeconds: Double = HandsFreeDictationPolicy.silenceHoldSeconds
+        silenceHoldSeconds: Double = HandsFreeDictationPolicy.defaultSilenceHoldSeconds
     ) -> HandsFreeDictationMachine.Event? {
         guard speechDetected else { return observeSilence(atSeconds: seconds, hold: silenceHoldSeconds) }
         switch phase {
@@ -135,16 +144,14 @@ public struct HandsFreeVoiceActivityTracker: Equatable, Sendable {
 /// effects to perform. It knows nothing about audio, Speech or the OS version
 /// gate, so every transition is unit-testable.
 public struct HandsFreeDictationMachine: Equatable, Sendable {
-    /// - `disarmed`: hands-free is off; the hotkey behaves as it always has.
-    /// - `armedListening`: the detector is running, nothing is being captured.
-    /// - `capturing`: speech was detected and transcription is running.
-    /// - `coolingDown`: capture is finishing; the session re-arms after the
-    ///   cooldown rather than retriggering on the tail of the last utterance.
+    /// The runtime state is distinct from the persisted preference. `arming`
+    /// remains visible until permission, assets and the audio engine are ready.
     public enum State: Equatable, Sendable {
-        case disarmed
-        case armedListening
-        case capturing
-        case coolingDown
+        case off
+        case arming
+        case armed
+        case recording
+        case finalising
     }
 
     public enum Failure: String, Equatable, Sendable {
@@ -158,19 +165,22 @@ public struct HandsFreeDictationMachine: Equatable, Sendable {
         case audioUnavailable
         /// The transcription session failed while armed.
         case captureFailed
+        /// A legacy, remote or batch transcription engine is selected.
+        case unsupportedConfiguration
     }
 
     public enum Event: Equatable, Sendable {
-        /// The user armed or disarmed hands-free mode (hotkey, menu, toggle).
+        /// Compatibility input for callers that expose a single toggle action.
         case userToggled
+        case userArmed
+        case userDisarmed
+        case detectorStarted
         /// The detector reported the leading edge of speech.
         case speechDetected
         /// Silence has held long enough to end the utterance.
         case silenceElapsed
         /// The capture pipeline finished on its own (final transcript delivered).
         case captureFinished
-        /// The post-capture quiet window expired.
-        case cooldownElapsed
         /// Arming or capture failed; hands-free drops back to disarmed.
         case sessionFailed(Failure)
     }
@@ -180,59 +190,62 @@ public struct HandsFreeDictationMachine: Equatable, Sendable {
         case stopDetector
         case startCapture
         case stopCapture
-        /// Start the ``HandsFreeDictationPolicy/cooldownSeconds`` timer, which
-        /// must feed ``Event/cooldownElapsed`` back in.
-        case startCooldown
+        case cancelCapture
         case reportFailure(Failure)
     }
 
-    public private(set) var state: State = .disarmed
+    public private(set) var state: State = .off
     /// The failure that last disarmed the session, for HUD/status messaging.
     /// Cleared whenever the user arms again.
     public private(set) var lastFailure: Failure?
 
     public init() {}
 
-    public var isArmed: Bool { state != .disarmed }
-    public var isCapturing: Bool { state == .capturing }
+    public var isArmed: Bool { state != .off }
+    public var isRecording: Bool { state == .recording }
 
     public mutating func handle(_ event: Event) -> [Effect] {
         switch event {
         case .userToggled:
-            return handleUserToggled()
+            return state == .off ? handle(.userArmed) : handle(.userDisarmed)
+        case .userArmed:
+            guard state == .off else { return [] }
+            lastFailure = nil
+            state = .arming
+            return [.startDetector]
+        case .userDisarmed:
+            return handleUserDisarmed()
+        case .detectorStarted:
+            guard state == .arming else { return [] }
+            state = .armed
+            return []
         case .speechDetected:
-            guard state == .armedListening else { return [] }
-            state = .capturing
+            guard state == .armed else { return [] }
+            state = .recording
             return [.startCapture]
         case .silenceElapsed:
-            guard state == .capturing else { return [] }
-            state = .coolingDown
-            return [.stopCapture, .startCooldown]
+            guard state == .recording else { return [] }
+            state = .finalising
+            return [.stopCapture]
         case .captureFinished:
-            guard state == .capturing else { return [] }
-            state = .coolingDown
-            return [.startCooldown]
-        case .cooldownElapsed:
-            guard state == .coolingDown else { return [] }
-            state = .armedListening
+            guard state == .finalising else { return [] }
+            state = .armed
             return []
         case .sessionFailed(let failure):
             return handleFailure(failure)
         }
     }
 
-    private mutating func handleUserToggled() -> [Effect] {
+    private mutating func handleUserDisarmed() -> [Effect] {
         switch state {
-        case .disarmed:
-            lastFailure = nil
-            state = .armedListening
-            return [.startDetector]
-        case .armedListening, .coolingDown:
-            state = .disarmed
+        case .off:
+            return []
+        case .arming, .armed:
+            state = .off
             return [.stopDetector]
-        case .capturing:
-            state = .disarmed
-            return [.stopCapture, .stopDetector]
+        case .recording, .finalising:
+            state = .off
+            return [.cancelCapture, .stopDetector]
         }
     }
 
@@ -242,15 +255,20 @@ public struct HandsFreeDictationMachine: Equatable, Sendable {
     }
 
     private mutating func handleFailure(_ failure: Failure) -> [Effect] {
-        guard state != .disarmed else {
-            // A failure raised while arming has not started (or after the user
-            // already disarmed) still surfaces, so arming never fails silently.
-            lastFailure = failure
-            return [.reportFailure(failure)]
-        }
-        let wasCapturing = state == .capturing
-        state = .disarmed
+        guard state != .off else { return [] }
+        let hadCapture = state == .recording || state == .finalising
+        state = .off
         lastFailure = failure
-        return (wasCapturing ? [.stopCapture] : []) + [.stopDetector, .reportFailure(failure)]
+        return (hadCapture ? [.cancelCapture] : []) + [.stopDetector, .reportFailure(failure)]
     }
+}
+
+public enum HandsFreeCaptureStartOutcome: Equatable, Sendable {
+    case started
+    case rejected(HandsFreeDictationMachine.Failure)
+}
+
+public enum HandsFreeCaptureEndOutcome: Equatable, Sendable {
+    case completed
+    case failed(HandsFreeDictationMachine.Failure)
 }

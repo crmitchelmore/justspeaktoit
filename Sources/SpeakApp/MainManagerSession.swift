@@ -1,7 +1,7 @@
 import SpeakCore
 import Foundation
 
-enum SessionTriggerSource {
+enum SessionTriggerSource: Equatable {
   case hold
   case doubleTap
   case singleTap

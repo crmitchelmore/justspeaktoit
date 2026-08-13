@@ -1,4 +1,3 @@
-import AppKit
 import Combine
 import Foundation
 import SpeakCore
@@ -125,6 +124,7 @@ final class CaptureWarmCoordinator {
       let prepared = await manager.prepareWarmRecorder(for: context)
       guard let self else { return }
       guard prepared else {
+        self.logger.debug("Capture pre-warm did not stage a recorder; next session starts cold")
         self.machine.markFailed(context)
         return
       }

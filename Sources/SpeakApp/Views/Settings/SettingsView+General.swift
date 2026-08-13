@@ -286,7 +286,7 @@ extension SettingsView {
             .foregroundStyle(.secondary)
 
           settingsToggle(
-            "Prepare the microphone while idle",
+            "Prepare recording while idle",
             isOn: settingsBinding(\AppSettings.audioPreWarmingEnabled),
             tint: .brandAccentWarm
           )

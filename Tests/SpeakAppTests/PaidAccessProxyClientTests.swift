@@ -1,3 +1,4 @@
+import Foundation
 import SpeakCore
 import XCTest
 
@@ -124,6 +125,15 @@ final class PaidAccessProxyClientTests: XCTestCase {
             temperature: Double,
             idempotencyKey: String
         ) async throws -> String {
+            XCTFail("The paid service must not be called on a fallback path")
+            throw PaidAccessError.invalidResponse
+        }
+
+        func liveTranscriptionRequest(
+            session: PaidAccessSession,
+            language: String?,
+            sampleRate: Int
+        ) throws -> URLRequest {
             XCTFail("The paid service must not be called on a fallback path")
             throw PaidAccessError.invalidResponse
         }

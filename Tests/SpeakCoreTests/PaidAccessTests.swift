@@ -620,11 +620,13 @@ final class PaidAccessStateCommitTests: XCTestCase {
               "cancel_at_period_end": false,
               "paid_routing_available": true,
               "policy": {
+                "version": "2026-08-13",
                 "routes": [
                   {
                     "operation": "post_processing",
                     "model": "openai/gpt-5-mini",
-                    "provider": "openrouter"
+                    "provider": "openrouter",
+                    "display_name": "GPT-5 Mini"
                   }
                 ]
               }

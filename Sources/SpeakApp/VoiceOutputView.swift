@@ -633,7 +633,8 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
       do {
         inputText = try String(contentsOf: url, encoding: .utf8)
       } catch {
-        logger.error("Failed to read file: \(error.localizedDescription, privacy: .public)")
+        // Redacted: the read error carries the imported file's name and path.
+        logger.error("Failed to read file: \(error.localizedDescription, privacy: .private)")
       }
     case .failure(let error):
       logger.error("File import failed: \(error.localizedDescription, privacy: .public)")

@@ -45,6 +45,7 @@ final class WatchRecordingRuntime {
     var onRuntimeEnd: ((WatchRecordingEndReason) -> Void)?
 
     private var observers: [NSObjectProtocol] = []
+    private var activeRunID: UUID?
 
     /// Activates the audio session that grants the background runtime. Must be
     /// called while the app is frontmost — watchOS only allows a recording to
@@ -56,11 +57,14 @@ final class WatchRecordingRuntime {
         // active hardware behaviour and still participates in background audio.
         try session.setCategory(.record, mode: .default)
         try session.setActive(true)
-        observeRuntimeLoss()
+        let runID = UUID()
+        activeRunID = runID
+        observeRuntimeLoss(runID: runID)
     }
 
     /// Releases the audio session and stops watching for runtime loss.
     func end() {
+        activeRunID = nil
         for observer in observers {
             NotificationCenter.default.removeObserver(observer)
         }
@@ -68,7 +72,7 @@ final class WatchRecordingRuntime {
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
-    private func observeRuntimeLoss() {
+    private func observeRuntimeLoss(runID: UUID) {
         guard observers.isEmpty else { return }
         let center = NotificationCenter.default
 
@@ -81,6 +85,7 @@ final class WatchRecordingRuntime {
                 let raw = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
                 guard let raw, AVAudioSession.InterruptionType(rawValue: raw) == .began else { return }
                 Task { @MainActor in
+                    guard self?.activeRunID == runID else { return }
                     self?.onRuntimeEnd?(.interrupted)
                 }
             }
@@ -93,6 +98,7 @@ final class WatchRecordingRuntime {
                 queue: nil
             ) { [weak self] _ in
                 Task { @MainActor in
+                    guard self?.activeRunID == runID else { return }
                     self?.onRuntimeEnd?(.runtimeInvalidated(reason: nil))
                 }
             }

@@ -158,7 +158,12 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
         // A crash between queue persistence and marker cleanup must not create
         // a duplicate transfer on the next launch.
         if store.containsCapture(id: capture.id) {
-            try? activeCaptureRegistry.clear(matching: capture.id)
+            do {
+                try activeCaptureRegistry.clear(matching: capture.id)
+            } catch {
+                allowRecoveryRetry(for: capture)
+                lastError = "Recording was queued, but recovery cleanup was deferred."
+            }
             return
         }
 
@@ -219,6 +224,7 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
                     lastError = "An interrupted recording could not be recovered."
                 }
             } catch {
+                allowRecoveryRetry(for: finalisation.capture)
                 lastError = "Recording cleanup failed: \(error.localizedDescription)"
             }
         case .enqueue:
@@ -236,15 +242,24 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
                     )
                 }
                 guard enqueued else {
+                    allowRecoveryRetry(for: finalisation.capture)
                     lastError = "Recording was saved but could not be queued. It will be recovered next time."
                     return
                 }
             } catch {
                 // The queue write has succeeded; retaining the marker is safe
                 // because enqueue is idempotent on capture id at relaunch.
+                allowRecoveryRetry(for: finalisation.capture)
                 lastError = "Recording was queued, but recovery cleanup was deferred."
             }
         }
+    }
+
+    /// A retained marker still owns audio that must be reconciled. Let the next
+    /// start retry recovery rather than blocking recording until app relaunch.
+    private func allowRecoveryRetry(for capture: WatchActiveCapture) {
+        guard activeCaptureRegistry.load()?.id == capture.id else { return }
+        didRecoverInterruptedCapture = false
     }
 
     private func inspectAudio(at url: URL) async -> WatchAudioInspection {
@@ -269,8 +284,10 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
 
 extension WatchAudioRecorder: AVAudioRecorderDelegate {
     nonisolated func audioRecorderEncodeErrorDidOccur(_ recorder: AVAudioRecorder, error: Error?) {
+        let recorderID = ObjectIdentifier(recorder)
         let detail = error?.localizedDescription
         Task { @MainActor in
+            guard self.recorder.map(ObjectIdentifier.init) == recorderID else { return }
             await self.finish(reason: .encodingFailed(reason: detail))
         }
     }
@@ -280,7 +297,9 @@ extension WatchAudioRecorder: AVAudioRecorderDelegate {
         // no-op there. An unsuccessful finish means the system stopped the
         // recorder under us — treat it as lost runtime and keep the partial.
         guard !flag else { return }
+        let recorderID = ObjectIdentifier(recorder)
         Task { @MainActor in
+            guard self.recorder.map(ObjectIdentifier.init) == recorderID else { return }
             await self.finish(reason: .runtimeInvalidated(reason: nil))
         }
     }

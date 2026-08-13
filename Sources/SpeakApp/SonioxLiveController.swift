@@ -51,7 +51,7 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
     logger.info("Configured Soniox with model: \(model)")
   }
 
-  // swiftlint:disable:next function_body_length
+  // swiftlint:disable:next cyclomatic_complexity function_body_length
   func start() async throws {
     guard await ensurePermissions() else {
       throw TranscriptionManagerError.microphonePermissionMissing

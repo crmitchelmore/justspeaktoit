@@ -41,7 +41,10 @@ private enum TestError: Error {
 @MainActor
 final class NativeOSXLiveTranscriptIsolationTests: XCTestCase {
   func testCallbacksAfterStop_areDroppedForResultsAndErrors() async {
-    let (lifecycle, factory, events) = makeLifecycle()
+    let context = makeLifecycle()
+    let lifecycle = context.lifecycle
+    let factory = context.factory
+    let events = context.events
     start(lifecycle, factory: factory, events: events)
     factory.sendResult("current", task: 0)
     factory.sendError(task: 0)
@@ -58,7 +61,10 @@ final class NativeOSXLiveTranscriptIsolationTests: XCTestCase {
   }
 
   func testReusedLifecycle_acceptsCurrentCallbacksAndDropsPreviousRun() async {
-    let (lifecycle, factory, events) = makeLifecycle()
+    let context = makeLifecycle()
+    let lifecycle = context.lifecycle
+    let factory = context.factory
+    let events = context.events
     start(lifecycle, factory: factory, events: events)
     lifecycle.retire()
     start(lifecycle, factory: factory, events: events)
@@ -74,7 +80,10 @@ final class NativeOSXLiveTranscriptIsolationTests: XCTestCase {
   }
 
   func testMidSessionRestart_retiresBothResultAndErrorCallbacksFromCancelledTask() async {
-    let (lifecycle, factory, events) = makeLifecycle()
+    let context = makeLifecycle()
+    let lifecycle = context.lifecycle
+    let factory = context.factory
+    let events = context.events
     start(lifecycle, factory: factory, events: events)
 
     // `NativeOSXLiveTranscriber.restartRecognitionTask()` starts a replacement
@@ -91,12 +100,12 @@ final class NativeOSXLiveTranscriptIsolationTests: XCTestCase {
     XCTAssertEqual(events.errorCount, 1)
   }
 
-  private func makeLifecycle() -> (
-    NativeSpeechRecognitionTaskLifecycle,
-    RecognitionTaskFactoryDouble,
-    RecognitionEvents
-  ) {
-    (NativeSpeechRecognitionTaskLifecycle(), RecognitionTaskFactoryDouble(), RecognitionEvents())
+  private func makeLifecycle() -> RecognitionTestContext {
+    RecognitionTestContext(
+      lifecycle: NativeSpeechRecognitionTaskLifecycle(),
+      factory: RecognitionTaskFactoryDouble(),
+      events: RecognitionEvents()
+    )
   }
 
   private func start(
@@ -116,6 +125,13 @@ final class NativeOSXLiveTranscriptIsolationTests: XCTestCase {
   private func drainCallbacks() async {
     for _ in 0..<3 { await Task.yield() }
   }
+}
+
+@MainActor
+private struct RecognitionTestContext {
+  let lifecycle: NativeSpeechRecognitionTaskLifecycle
+  let factory: RecognitionTaskFactoryDouble
+  let events: RecognitionEvents
 }
 
 @MainActor

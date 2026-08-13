@@ -74,6 +74,10 @@ final class ReleaseNotesCatalogTests: XCTestCase {
             XCTAssertFalse(entry.markdown.isEmpty, "\(entry.version) shipped without notes")
             XCTAssertFalse(entry.blocks.isEmpty, "\(entry.version) produced no renderable content")
             XCTAssertFalse(entry.markdown.contains("<!--"), "\(entry.version) kept release-page HTML comments")
+            XCTAssertFalse(
+                entry.markdown.contains("/compare/"),
+                "\(entry.version) kept the compare-URL footer, which is meaningless offline"
+            )
         }
     }
 

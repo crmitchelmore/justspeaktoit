@@ -37,6 +37,21 @@ test("release-page furniture is stripped from bundled notes", () => {
     assert.equal(notes, "## Overview\n\nFaster startup.");
 });
 
+test("GitHub's auto-generated compare footer is stripped", () => {
+    const notes = sanitiseNotes([
+        "## What's Changed",
+        "* fix: something by @someone in https://github.com/example/repo/pull/629",
+        "",
+        "**Full Changelog**: https://github.com/example/repo/compare/mac-v2.41.0...mac-v2.41.1",
+    ].join("\n"));
+
+    assert.ok(!notes.includes("/compare/"), "the compare URL must not reach the bundled notes");
+    assert.equal(
+        notes,
+        "## What's Changed\n* fix: something by @someone in https://github.com/example/repo/pull/629"
+    );
+});
+
 test("entries default their tag and reject empty notes", () => {
     const entry = catalogueEntry({ version: "2.46.0", publishedAt: "2026-08-09T00:00:00Z", markdown: "## Overview\n\nNew." });
     assert.deepEqual(entry, {

@@ -34,12 +34,14 @@ export const compareVersions = (a, b) => {
 
 /**
  * Removes release-page furniture that is meaningless inside the app: the
- * generator's HTML provenance comment and the compare-URL footer.
+ * generator's HTML provenance comment and the compare-URL footer, in both the
+ * generator's `**Full changelog:**` form and GitHub's auto-generated
+ * `**Full Changelog**:` form.
  */
 export const sanitiseNotes = (markdown) => String(markdown ?? "")
     .replace(/<!--[\s\S]*?-->/g, "")
     .split("\n")
-    .filter((line) => !/^\s*\*\*Full changelog:\*\*/i.test(line))
+    .filter((line) => !/^\s*\*\*Full\s+changelog:?\*\*:?/i.test(line))
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();

@@ -30,7 +30,7 @@
       "version": "2.41.1",
       "tag": "mac-v2.41.1",
       "publishedAt": "2026-08-07T08:15:14Z",
-      "markdown": "## What's Changed\n* refactor: unify OpenRouter HTTP client in SpeakCore by @bravostation in https://github.com/crmitchelmore/justspeaktoit/pull/625\n* fix(transport): validate HelloMessage.protocolVersion on hello by @bravostation in https://github.com/crmitchelmore/justspeaktoit/pull/629\n\n**Full Changelog**: https://github.com/crmitchelmore/justspeaktoit/compare/mac-v2.41.0...mac-v2.41.1"
+      "markdown": "## What's Changed\n* refactor: unify OpenRouter HTTP client in SpeakCore by @bravostation in https://github.com/crmitchelmore/justspeaktoit/pull/625\n* fix(transport): validate HelloMessage.protocolVersion on hello by @bravostation in https://github.com/crmitchelmore/justspeaktoit/pull/629"
     },
     {
       "version": "2.41.0",

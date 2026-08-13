@@ -105,6 +105,7 @@ public struct PaidAccessHTTPClient: PaidAccessClienting { // swiftlint:disable:t
         case "too_many_sessions": return .tooManySessions
         case "paid_routing_disabled": return .paidRoutingDisabled
         case "unauthorized": return .notSignedIn
+        case "already_processed": return .alreadyProcessed
         case "forbidden":
             return .billingChannelUnavailable(
                 "This build cannot use that payment method."

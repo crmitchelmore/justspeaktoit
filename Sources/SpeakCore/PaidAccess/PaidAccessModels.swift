@@ -292,6 +292,9 @@ public enum PaidAccessError: LocalizedError, Sendable, Equatable {
     case unsupportedOperation(PaidOperation)
     case paidRoutingDisabled
     case billingChannelUnavailable(String)
+    /// This exact request already completed and was charged once. The service
+    /// keeps no transcripts, so there is no stored result to hand back.
+    case alreadyProcessed
     case serviceUnavailable(statusCode: Int)
     case invalidResponse
     case network(String)
@@ -312,6 +315,9 @@ public enum PaidAccessError: LocalizedError, Sendable, Equatable {
             return "Subscription routing is temporarily unavailable. Your own API keys and local models still work."
         case .billingChannelUnavailable(let reason):
             return reason
+        case .alreadyProcessed:
+            return "That request already went through and was not charged again. "
+                + "Nothing was kept, so please dictate it again."
         case .serviceUnavailable(let statusCode):
             return "The subscription service is unavailable (status \(statusCode))."
         case .invalidResponse:
@@ -331,8 +337,13 @@ public enum PaidAccessError: LocalizedError, Sendable, Equatable {
         case .notSignedIn, .entitlementRequired, .paidRoutingDisabled, .serviceUnavailable,
              .network, .quotaExceeded:
             return true
+        // `alreadyProcessed` deliberately does not fall back. The work was done
+        // and paid for once; quietly re-running it through the user's own key
+        // would spend their money to paper over our lost response. Telling them
+        // is the honest answer, and it cannot loop — the second attempt is what
+        // produced this.
         case .tooManySessions, .unsupportedOperation, .billingChannelUnavailable,
-             .invalidResponse:
+             .invalidResponse, .alreadyProcessed:
             return false
         }
     }

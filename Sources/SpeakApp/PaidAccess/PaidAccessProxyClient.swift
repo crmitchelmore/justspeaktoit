@@ -142,10 +142,12 @@ actor PaidAccessProxyClient: StreamingChatLLMClient, BatchTranscriptionClient {
           // A routing failure is treated exactly like "not entitled": the
           // stream still runs, through the user's own client. Throwing here
           // would end the stream and lose what the user dictated.
-          let resolved = (try? await self.paidRoute(
-            for: .postProcessing,
-            configuredModel: model
-          )) ?? nil
+          let resolved: (route: PaidRoute, session: PaidAccessSession)?
+          do {
+            resolved = try await self.paidRoute(for: .postProcessing, configuredModel: model)
+          } catch {
+            resolved = nil
+          }
           guard resolved != nil else {
             // Not entitled: stream straight from the user's own client so live
             // typing behaviour is byte-for-byte what it was before paid access.
@@ -196,7 +198,6 @@ actor PaidAccessProxyClient: StreamingChatLLMClient, BatchTranscriptionClient {
     // recording that has already been made.
     do {
       guard
-        let contentType = Self.contentType(for: url),
         let resolved = try await self.paidRoute(
           for: .batchTranscription,
           configuredModel: model
@@ -205,7 +206,17 @@ actor PaidAccessProxyClient: StreamingChatLLMClient, BatchTranscriptionClient {
         return try await self.fallback.transcribeFile(at: url, model: model, language: language)
       }
 
-      let audio = try Data(contentsOf: url)
+      // The app records AAC in an `.m4a` but the endpoint takes WAV only, so the
+      // recording is converted here. A file that cannot be converted falls back
+      // to the user's own client rather than failing the dictation.
+      let contentType = PaidAudioPayload.contentType
+      let audio: Data
+      do {
+        audio = try PaidAudioPayload.wavData(contentsOf: url)
+      } catch {
+        return try await self.fallback.transcribeFile(at: url, model: model, language: language)
+      }
+
       let text = try await self.paidClient.transcribe(
         session: resolved.session,
         audio: audio,
@@ -249,18 +260,6 @@ actor PaidAccessProxyClient: StreamingChatLLMClient, BatchTranscriptionClient {
       ?? ""
   }
 
-  /// Returns `nil` for formats the paid endpoint does not accept, which sends
-  /// the request down the user's own client instead of failing it.
-  ///
-  /// WAV only. The server bills recorded transcription by duration and reads
-  /// that duration out of the WAV header, because nothing upstream reports it
-  /// back and a compressed container's duration cannot be inferred from its
-  /// size. Sending an m4a or an mp3 would simply be rejected, so those go to the
-  /// user's own client instead — which is the better outcome anyway.
-  private static func contentType(for url: URL) -> String? {
-    switch url.pathExtension.lowercased() {
-    case "wav": return "audio/wav"
-    default: return nil
-    }
-  }
+  // Format selection lives in `PaidAudioPayload`: the endpoint takes WAV only,
+  // and anything else is converted rather than refused.
 }

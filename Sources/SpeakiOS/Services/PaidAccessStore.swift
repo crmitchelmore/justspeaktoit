@@ -40,16 +40,18 @@ public enum PaidAccessFeature {
 /// API keys keep working with no account at all.
 @MainActor
 public final class PaidAccessStore: NSObject, ObservableObject {
-    // swiftlint:disable:previous type_body_length
 
     public static let shared = PaidAccessStore()
 
-    @Published public private(set) var entitlement: PaidEntitlement = .unentitled
+    // `internal(set)` rather than `private(set)` on the four below: the StoreKit
+    // half of this type lives in `PaidAccessStore+Purchase.swift` and Swift
+    // scopes `private` to the file. Still read-only to anything outside SpeakiOS.
+    @Published public internal(set) var entitlement: PaidEntitlement = .unentitled
     @Published public private(set) var policy: PaidRoutingPolicy = .unknown
     @Published public private(set) var isSignedIn = false
-    @Published public private(set) var isBusy = false
-    @Published public private(set) var lastError: String?
-    @Published public private(set) var products: [Product] = []
+    @Published public internal(set) var isBusy = false
+    @Published public internal(set) var lastError: String?
+    @Published public internal(set) var products: [Product] = []
 
     /// Mirrors the macOS setting: hides the model pickers and lets the
     /// subscription pick the best model for each task.
@@ -68,7 +70,7 @@ public final class PaidAccessStore: NSObject, ObservableObject {
     /// reachable rather than losing to whichever product loaded first.
     @Published public var selectedTerm: PaidSubscriptionTerm = .monthly
 
-    private let client: any PaidAccessClienting
+    let client: any PaidAccessClienting
     private let sessionStore: any PaidAccessSessionStoring
     private var transactionListener: Task<Void, Never>?
     private var refreshTask: Task<PaidAccessSession?, Never>?
@@ -136,7 +138,9 @@ public final class PaidAccessStore: NSObject, ObservableObject {
 
     // MARK: - Session
 
-    private func currentSession() async -> PaidAccessSession? {
+    /// Internal rather than private: `PaidAccessStore+Purchase.swift` needs it,
+    /// and Swift scopes `private` to the file.
+    func currentSession() async -> PaidAccessSession? {
         guard let stored = await self.sessionStore.loadSession() else {
             self.isSignedIn = false
             return nil
@@ -277,121 +281,6 @@ public final class PaidAccessStore: NSObject, ObservableObject {
         guard let continuation = self.signInContinuation else { return }
         self.signInContinuation = nil
         continuation.resume(with: result)
-    }
-
-    // MARK: - Purchase
-
-    public func loadProducts() async {
-        let loaded = try? await Product.products(for: Self.subscriptionProductIDs)
-        self.products = (loaded ?? []).sorted { $0.price < $1.price }
-    }
-
-    /// The loaded StoreKit product for a term, if the App Store returned it.
-    public func product(for term: PaidSubscriptionTerm) -> Product? {
-        self.products.first { $0.id == term.productID }
-    }
-
-    /// Buys the named term.
-    ///
-    /// - Parameter term: Which subscription to buy. Defaults to the user's
-    ///   current choice rather than to whichever product loaded first.
-    public func purchase(term: PaidSubscriptionTerm? = nil) async {
-        // Refuses while iOS paid routing is unwired: see `PaidAccessFeature`.
-        // The UI hides the purchase controls too; this is the backstop that
-        // makes the guarantee independent of any view.
-        guard PaidAccessFeature.isAvailableOnIOS else {
-            self.lastError = "Subscriptions are not available in the iOS app yet."
-            return
-        }
-        let term = term ?? self.selectedTerm
-        self.isBusy = true
-        self.lastError = nil
-        defer { self.isBusy = false }
-
-        guard let session = await self.currentSession() else {
-            self.lastError = PaidAccessError.notSignedIn.errorDescription
-            return
-        }
-        if self.products.isEmpty {
-            await self.loadProducts()
-        }
-        // Matched by product id, never by position.
-        guard let product = self.product(for: term) else {
-            self.lastError = "The \(term.displayName.lowercased()) subscription is not available in this build yet."
-            return
-        }
-
-        // Bind the purchase to this account before it happens. The server rejects
-        // a signed transaction whose `appAccountToken` is not the caller's, so a
-        // purchase made without one produces a receipt nobody can redeem.
-        guard let accountToken = session.storeKitAccountToken else {
-            self.lastError = "This account cannot be linked to an App Store purchase. Sign out, sign back in and try again."
-            return
-        }
-
-        do {
-            let result = try await product.purchase(options: [.appAccountToken(accountToken)])
-            if case .success(let verification) = result {
-                await self.syncIfSubscription(verification, session: session)
-                if case .verified(let transaction) = verification {
-                    await transaction.finish()
-                }
-                await self.refreshEntitlement()
-            }
-        } catch {
-            self.lastError = "The purchase could not be completed."
-        }
-    }
-
-    public func restorePurchases() async {
-        self.isBusy = true
-        defer { self.isBusy = false }
-
-        guard let session = await self.currentSession() else {
-            self.lastError = PaidAccessError.notSignedIn.errorDescription
-            return
-        }
-        for await result in Transaction.currentEntitlements {
-            await self.syncIfSubscription(result, session: session)
-        }
-        await self.refreshEntitlement()
-    }
-
-    /// Opens Apple's subscription management. App Store builds must never send
-    /// the user to an external payment page.
-    public func manageSubscription() {
-        guard let url = URL(string: "https://apps.apple.com/account/subscriptions") else { return }
-        UIApplication.shared.open(url)
-    }
-
-    private func handleTransactionUpdate(_ result: VerificationResult<Transaction>) async {
-        guard let session = await self.currentSession() else { return }
-        await self.syncIfSubscription(result, session: session)
-        if case .verified(let transaction) = result {
-            await transaction.finish()
-        }
-        await self.refreshEntitlement()
-    }
-
-    private func syncIfSubscription(
-        _ result: VerificationResult<Transaction>,
-        session: PaidAccessSession
-    ) async {
-        guard case .verified(let transaction) = result else { return }
-        guard Self.subscriptionProductIDs.contains(transaction.productID) else { return }
-
-        do {
-            // The server verifies the signature again; the device's own
-            // verification is never sufficient on its own.
-            self.entitlement = try await self.client.syncStoreKitTransaction(
-                session: session,
-                signedTransaction: result.jwsRepresentation,
-                signedRenewalInfo: nil
-            )
-        } catch {
-            self.lastError = (error as? PaidAccessError)?.errorDescription
-                ?? "Could not confirm the subscription."
-        }
     }
 
     // MARK: - Nonce

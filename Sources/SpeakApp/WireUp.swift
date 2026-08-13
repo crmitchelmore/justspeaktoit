@@ -6,7 +6,11 @@ import SpeakSync
 
 // swiftlint:disable file_length
 
+// The dependency container: one stored property, one initialiser parameter and
+// one assignment per service, so it grows by three lines whenever the app gains
+// one. Splitting it would only move the list somewhere else.
 @MainActor
+// swiftlint:disable:next type_body_length
 final class AppEnvironment: ObservableObject {
   let settings: AppSettings
   let permissions: PermissionsManager

@@ -1,4 +1,5 @@
 // swiftlint:disable file_length
+import AVFoundation
 import XCTest
 
 @testable import SpeakCore
@@ -410,7 +411,10 @@ final class PaidAccessErrorTests: XCTestCase {
         let surfaced: [PaidAccessError] = [
             .tooManySessions,
             .unsupportedOperation(.liveTranscription),
-            .invalidResponse
+            .invalidResponse,
+            // Already paid for once. Re-running it through the user's own key
+            // would spend their money to cover our lost response.
+            .alreadyProcessed
         ]
         for error in surfaced {
             XCTAssertFalse(error.permitsSilentFallback, "\(error) should be shown to the user")
@@ -422,7 +426,7 @@ final class PaidAccessErrorTests: XCTestCase {
             .notSignedIn, .entitlementRequired, .quotaExceeded, .tooManySessions,
             .unsupportedOperation(.postProcessing), .paidRoutingDisabled,
             .billingChannelUnavailable("nope"), .serviceUnavailable(statusCode: 500),
-            .invalidResponse, .network("timeout")
+            .invalidResponse, .network("timeout"), .alreadyProcessed
         ]
         for error in errors {
             let description = error.errorDescription ?? ""
@@ -454,6 +458,10 @@ final class PaidAccessErrorTests: XCTestCase {
         XCTAssertEqual(mapped("too_many_sessions", status: 429), .tooManySessions)
         XCTAssertEqual(mapped("paid_routing_disabled", status: 503), .paidRoutingDisabled)
         XCTAssertEqual(mapped("unauthorized", status: 401), .notSignedIn)
+        // 409 shared with `conflict`, so the body's code is what distinguishes
+        // "already finished, do not retry" from "still running, try later".
+        XCTAssertEqual(mapped("already_processed", status: 409), .alreadyProcessed)
+        XCTAssertEqual(mapped("conflict", status: 409), .serviceUnavailable(statusCode: 409))
     }
 
     func testUnrecognisedErrorBody_doesNotBecomeASuccess() {
@@ -562,5 +570,112 @@ final class PaidAccessClientRequestTests: XCTestCase {
         )
         XCTAssertTrue((16...128).contains(key.count))
         XCTAssertTrue(key.range(of: "^[A-Za-z0-9_-]+$", options: .regularExpression) != nil)
+    }
+}
+
+/// The paid batch endpoint accepts WAV and nothing else, while the app records
+/// AAC in an `.m4a`. Without conversion every paid transcription silently falls
+/// back to the user's own key, so the subscription buys nothing.
+final class PaidAudioPayloadTests: XCTestCase {
+    private var scratch = FileManager.default.temporaryDirectory
+
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        self.scratch = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(
+            at: self.scratch,
+            withIntermediateDirectories: true
+        )
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: self.scratch)
+        try super.tearDownWithError()
+    }
+
+    /// Writes `seconds` of silence in whichever container `url`'s settings imply.
+    private func writeAudio(
+        to url: URL,
+        settings: [String: Any],
+        sampleRate: Double,
+        seconds: Double
+    ) throws {
+        let file = try AVAudioFile(forWriting: url, settings: settings)
+        let frames = AVAudioFrameCount(sampleRate * seconds)
+        guard
+            let buffer = AVAudioPCMBuffer(
+                pcmFormat: file.processingFormat,
+                frameCapacity: frames
+            )
+        else {
+            XCTFail("Could not allocate a buffer to write the fixture")
+            return
+        }
+        buffer.frameLength = frames
+        try file.write(from: buffer)
+    }
+
+    private func pcmSettings(sampleRate: Double) -> [String: Any] {
+        [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVSampleRateKey: sampleRate,
+            AVNumberOfChannelsKey: 1,
+            AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsFloatKey: false,
+            AVLinearPCMIsBigEndianKey: false,
+            AVLinearPCMIsNonInterleaved: false
+        ]
+    }
+
+    func testWavData_convertsANonWavRecordingIntoAReadableWav() throws {
+        // A CAF stands in for the recorded `.m4a`: it is a different container
+        // that AVFoundation reads, which is the property under test. Encoding
+        // AAC in a unit test would depend on a hardware encoder.
+        let source = self.scratch.appendingPathComponent("recording.caf")
+        try self.writeAudio(
+            to: source,
+            settings: self.pcmSettings(sampleRate: 44_100),
+            sampleRate: 44_100,
+            seconds: 0.5
+        )
+
+        let data = try PaidAudioPayload.wavData(contentsOf: source)
+
+        // The server reads the duration out of this header to bill the request,
+        // so it has to be a real RIFF/WAVE header, not merely non-empty bytes.
+        XCTAssertGreaterThan(data.count, 44)
+        XCTAssertEqual(String(bytes: data.prefix(4), encoding: .ascii), "RIFF")
+        XCTAssertEqual(String(bytes: data.dropFirst(8).prefix(4), encoding: .ascii), "WAVE")
+
+        // And it must still be audio of the same length once decoded back.
+        let roundTrip = self.scratch.appendingPathComponent("converted.wav")
+        try data.write(to: roundTrip)
+        let decoded = try AVAudioFile(forReading: roundTrip)
+        XCTAssertEqual(decoded.fileFormat.sampleRate, 44_100)
+        let duration = Double(decoded.length) / decoded.fileFormat.sampleRate
+        XCTAssertEqual(duration, 0.5, accuracy: 0.05)
+    }
+
+    func testWavData_passesAnExistingWavThroughUnchanged() throws {
+        let source = self.scratch.appendingPathComponent("already.wav")
+        try self.writeAudio(
+            to: source,
+            settings: self.pcmSettings(sampleRate: 16_000),
+            sampleRate: 16_000,
+            seconds: 0.25
+        )
+        let original = try Data(contentsOf: source)
+
+        XCTAssertEqual(try PaidAudioPayload.wavData(contentsOf: source), original)
+    }
+
+    func testWavData_reportsUnreadableAudioRatherThanReturningRubbish() throws {
+        let source = self.scratch.appendingPathComponent("notaudio.m4a")
+        try Data("this is not audio".utf8).write(to: source)
+
+        XCTAssertThrowsError(try PaidAudioPayload.wavData(contentsOf: source)) { error in
+            XCTAssertEqual(error as? PaidAudioPayloadError, .unreadableAudio)
+        }
     }
 }

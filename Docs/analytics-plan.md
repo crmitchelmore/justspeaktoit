@@ -72,18 +72,21 @@ auditor reading our source and watching our network traffic confirms it.
 ### Global context properties (attached to every event)
 
 `platform`, `app_version`, `build`, `os_major_minor`, `distribution_channel`
-(direct | homebrew | mas | testflight | appstore), `locale_language_code`,
+(direct | homebrew | mac_app_store | testflight | app_store | development),
+`locale_language_code`,
 `architecture`, `analytics_schema_version`. Nothing else. No device model, no
 device name, no timezone beyond what ingestion infers coarsely (IP capture
 disabled at the project level).
 
 ### Bucket definitions (shared, versioned with the schema)
 
-- `duration_bucket`: `<5s`, `5–15s`, `15–60s`, `1–5m`, `>5m`
-- `word_count_bucket`: `1–10`, `11–50`, `51–200`, `201–1000`, `>1000`
-- `latency_bucket`: `<250ms`, `250ms–1s`, `1–3s`, `3–10s`, `>10s`
-- `count_bucket` (rules/profiles/etc.): `0`, `1`, `2–5`, `6–20`, `>20`
-- `days_since_install_bucket`: `0`, `1`, `2–7`, `8–30`, `>30`
+- `duration_bucket`: `<5s`, `5-15s`, `15-60s`, `1-5m`, `>5m`
+- `word_count_bucket`: `1-10`, `11-50`, `51-200`, `201-1000`, `>1000`
+- `latency_bucket`: `<250ms`, `250ms-1s`, `1-3s`, `3-10s`, `>10s`
+- `count_bucket` (rules/profiles/etc.): `0`, `1`, `2-5`, `6-20`, `>20`
+- `days_since_install_bucket`: `0`, `1`, `2-7`, `8-30`, `>30`
+- `size_bucket` (downloaded model size): `<100mb`, `100-500mb`, `500mb-1gb`,
+  `1-5gb`, `>5gb`
 
 Raw durations, word counts, and latencies are computed locally, bucketed
 locally, and the raw values are never serialised into an event.
@@ -94,11 +97,11 @@ locally, and the raw values are never serialised into an event.
 | --- | --- | --- | --- | --- |
 | 1 | `app_active_daily` | *(none — deduplicated one-per-calendar-day ping, cmux pattern; replaces SDK lifecycle autocapture)* | P | DAU/WAU/MAU, retention, release health |
 | 2 | `onboarding_started` | `entry_point` (fresh_install \| reset) | P | Activation funnel top |
-| 3 | `onboarding_step_completed` | `step` (bounded enum: welcome, mic_permission, provider_choice, hotkey_setup, …) | P | Funnel leak location |
+| 3 | `onboarding_step_completed` | `step` (bounded enum: welcome, microphone_permission, provider_choice, hotkey_setup, analytics_choice) | P | Funnel leak location |
 | 4 | `onboarding_permission_result` | `permission` (microphone \| speech \| accessibility \| local_network \| notifications), `state` (granted \| denied \| restricted) | P | Funnel leaks caused by permission denials |
 | 5 | `onboarding_completed` | `steps_skipped_bucket` | P | Funnel bottom |
 | 6 | `first_transcription_succeeded` | `provider_type`, `engine_type` (on_device \| cloud), `days_since_install_bucket` | P | **Activation** (the north-star event) |
-| 7 | `transcription_started` | `mode` (live \| batch), `engine_type`, `provider_type` (apple \| deepgram \| openai \| … — type, never key or account info), `model_family`, `language_code`, `trigger` (hotkey \| menu_bar \| action_button \| keyboard \| widget \| url_scheme) | P | Feature usage, reliability denominator |
+| 7 | `transcription_started` | `mode` (live \| batch), `engine_type`, `provider_type` (apple \| deepgram \| openai \| … — type, never key or account info), `model_family` (bounded enum of shipped families: apple \| whisper \| parakeet \| nova \| scribe \| … \| other — never a raw model id), `language_code`, `trigger` (hotkey \| menu_bar \| action_button \| keyboard \| widget \| url_scheme) | P | Feature usage, reliability denominator |
 | 8 | `transcription_completed` | same as #7 + `duration_bucket`, `word_count_bucket`, `latency_bucket`, `output_method` (paste \| clipboard \| send_to_mac \| keyboard) | P | Reliability, usage depth |
 | 9 | `transcription_failed` | same as #7 + `error_category` (bounded enum), `pipeline_stage` (capture \| stream \| provider \| output) | P | Reliability |
 | 10 | `transcription_cancelled` | same as #7 + `duration_bucket` | P | Reliability (user-abandonment signal) |
@@ -111,7 +114,7 @@ locally, and the raw values are never serialised into an event.
 | 17 | `history_action` | `action` (search \| copy \| delete \| export \| clear_all) | P | History adoption |
 | 18 | `voice_output_used` | `engine_type`, `provider_type` | P | Voice output adoption |
 | 19 | `send_to_mac_completed` | `success`, `latency_bucket` | P | Send to Mac adoption/reliability |
-| 20 | `model_download_completed` | `model_family`, `size_bucket`, `success` | P | Local-model adoption |
+| 20 | `model_download_completed` | `model_family` (same bounded enum as #7), `size_bucket`, `success` | P | Local-model adoption |
 | 21 | `keyboard_enabled_state` | `enabled` *(reported by the consented main iOS app only; the keyboard extension itself is permanently analytics-free — see issue #591's Full Access constraint)* | P | Keyboard adoption |
 | 22 | `provider_configured` | `provider_type`, `method` (manual \| icloud_sync) *(the event says a provider became usable; nothing about the key itself)* | P | Provider adoption |
 | 23 | `settings_changed` | `setting_id` (bounded enum), `category` *(never the value)* | P | Feature discovery |

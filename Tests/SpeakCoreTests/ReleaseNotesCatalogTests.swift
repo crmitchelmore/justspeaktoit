@@ -147,6 +147,24 @@ final class ReleaseNotesCatalogTests: XCTestCase {
         XCTAssertFalse(browser.hasNotesForInstalledVersion)
         XCTAssertFalse(browser.isShowingInstalledVersion)
         XCTAssertEqual(browser.otherEntries.map(\.version), ["2.44.0"])
+        XCTAssertEqual(
+            browser.installedVersionNotice,
+            "Notes for the installed build (2.46.0-dev) are published with its release."
+        )
+    }
+
+    func testBrowser_doesNotPromiseNotesForBuildsOlderThanTheCatalogue() throws {
+        let browser = ReleaseNotesBrowser(catalog: try makeCatalog(), installedVersion: "2.40.0")
+
+        XCTAssertEqual(browser.selectedEntry?.version, "2.45.0")
+        XCTAssertFalse(browser.hasNotesForInstalledVersion)
+        XCTAssertEqual(browser.installedVersionNotice, "Showing the latest release notes.")
+    }
+
+    func testBrowser_noticeIsAbsentWhenTheInstalledVersionIsOnScreen() throws {
+        let browser = ReleaseNotesBrowser(catalog: try makeCatalog(), installedVersion: "2.44.0")
+
+        XCTAssertNil(browser.installedVersionNotice)
     }
 
     func testBrowser_browsesEarlierVersionsAndReturnsToInstalled() throws {
@@ -171,6 +189,7 @@ final class ReleaseNotesCatalogTests: XCTestCase {
         XCTAssertTrue(browser.isEmpty)
         XCTAssertNil(browser.selectedEntry)
         XCTAssertFalse(browser.hasNotesForInstalledVersion)
+        XCTAssertNil(browser.installedVersionNotice, "An empty catalogue explains itself on screen")
         browser.selectInstalledVersion()
         XCTAssertNil(browser.selectedEntry)
     }

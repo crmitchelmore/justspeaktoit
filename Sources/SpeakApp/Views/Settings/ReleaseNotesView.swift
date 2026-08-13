@@ -53,8 +53,8 @@ struct ReleaseNotesView: View {
     if let entry = browser.selectedEntry {
       ScrollView {
         VStack(alignment: .leading, spacing: 12) {
-          if !browser.hasNotesForInstalledVersion {
-            unreleasedNotice
+          if let notice = browser.installedVersionNotice {
+            noticeLabel(notice)
           }
           ReleaseNotesContentView(entry: entry)
         }
@@ -70,13 +70,10 @@ struct ReleaseNotesView: View {
     }
   }
 
-  private var unreleasedNotice: some View {
-    Label(
-      "Notes for the installed build (\(browser.installedVersion)) are published with its release.",
-      systemImage: "info.circle"
-    )
-    .font(.callout)
-    .foregroundStyle(.secondary)
+  private func noticeLabel(_ text: String) -> some View {
+    Label(text, systemImage: "info.circle")
+      .font(.callout)
+      .foregroundStyle(.secondary)
   }
 
   private var selectionBinding: Binding<String?> {

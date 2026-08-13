@@ -258,9 +258,29 @@ public struct ReleaseNotesBrowser: Equatable, Sendable {
         entries.first { $0.version == installedVersion }
     }
 
-    /// True when the running build is newer than anything in the catalogue,
-    /// which happens for development and unreleased builds.
+    /// True when the catalogue carries notes for the running build. It is false
+    /// for development and unreleased builds, and for builds older than the
+    /// oldest bundled entry.
     public var hasNotesForInstalledVersion: Bool { installedEntry != nil }
+
+    /// Explains why the screen is not showing the installed build's own notes,
+    /// or `nil` when it is (or when there is nothing to show at all).
+    ///
+    /// A build newer than the catalogue is waiting on its own release; a build
+    /// older than every bundled entry never had its notes shipped, so the only
+    /// honest thing to say is which notes are on screen.
+    public var installedVersionNotice: String? {
+        guard !isEmpty, installedEntry == nil else { return nil }
+        guard !isInstalledVersionOlderThanCatalog else { return "Showing the latest release notes." }
+        return "Notes for the installed build (\(installedVersion)) are published with its release."
+    }
+
+    /// True when the installed version sorts below the oldest bundled entry,
+    /// including when the running build reports no version at all.
+    private var isInstalledVersionOlderThanCatalog: Bool {
+        guard let oldest = entries.last else { return false }
+        return ReleaseNotesVersion.isDescending(oldest.version, installedVersion)
+    }
 
     public var selectedEntry: ReleaseNoteEntry? {
         guard let selectedVersion else { return nil }

@@ -25,9 +25,8 @@ public struct ReleaseNotesView: View {
                 } header: {
                     Text(browser.title(for: entry))
                 } footer: {
-                    if !browser.hasNotesForInstalledVersion {
-                        Text("Notes for the installed build (\(browser.installedVersion)) "
-                            + "are published with its release.")
+                    if let notice = browser.installedVersionNotice {
+                        Text(notice)
                     }
                 }
 

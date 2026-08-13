@@ -366,4 +366,19 @@ final class LiveTranscriptSessionIsolationTests: XCTestCase {
     XCTAssertFalse(LiveTranscriptionRun.isCurrent(active, activeStream: nil))
     XCTAssertFalse(LiveTranscriptionRun.isCurrent(nil, activeStream: active))
   }
+
+  func testStopGeneration_rejectsTimeoutFromPreviousStop() {
+    var generation = LiveTranscriptionStopGeneration()
+
+    let previousStop = generation.begin()
+    XCTAssertTrue(generation.isCurrent(previousStop))
+
+    let currentStop = generation.begin()
+
+    XCTAssertFalse(
+      generation.isCurrent(previousStop),
+      "A timeout from the previous recording must not resume the current stop"
+    )
+    XCTAssertTrue(generation.isCurrent(currentStop))
+  }
 }

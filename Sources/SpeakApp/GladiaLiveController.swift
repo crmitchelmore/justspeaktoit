@@ -23,6 +23,7 @@ final class GladiaLiveController: NSObject, LiveTranscriptionController {
   private let audioProcessor = GladiaAudioProcessor()
   private var hasFinished: Bool = false
   private var stopContinuation: CheckedContinuation<Void, Never>?
+  private var stopGeneration = LiveTranscriptionStopGeneration()
 
   private let targetSampleRate: Double = 16_000
   private var targetFormat: AVAudioFormat?
@@ -149,11 +150,15 @@ final class GladiaLiveController: NSObject, LiveTranscriptionController {
 
       let budget = appSettings.liveModelCapabilities.postStopFinalizeBudget
       if budget > 0 {
+        let generation = stopGeneration.begin()
         await withCheckedContinuation { continuation in
           stopContinuation = continuation
           Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(budget))
-            guard let self, let cont = self.stopContinuation else { return }
+            guard let self,
+              self.stopGeneration.isCurrent(generation),
+              let cont = self.stopContinuation
+            else { return }
             self.stopContinuation = nil
             cont.resume()
           }

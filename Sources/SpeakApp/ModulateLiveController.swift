@@ -30,6 +30,7 @@ final class ModulateLiveController: NSObject, LiveTranscriptionController {
   private var utterances: [ModulateUtterance] = []
   private var streamDurationMs: Int?
   private var stopContinuation: CheckedContinuation<Void, Never>?
+  private var stopGeneration = LiveTranscriptionStopGeneration()
   private var sessionFeatureConfiguration = ModulateFeatureConfiguration(
     speakerDiarization: true,
     emotionSignal: false,
@@ -108,11 +109,15 @@ final class ModulateLiveController: NSObject, LiveTranscriptionController {
 
       // Wait for the final response (resumed in finished/error callbacks) or a 2s timeout.
       // Both paths nil-out stopContinuation under the MainActor before resuming, so resume is idempotent.
+      let generation = stopGeneration.begin()
       await withCheckedContinuation { continuation in
         stopContinuation = continuation
         Task { @MainActor [weak self] in
           try? await Task.sleep(for: .seconds(2))
-          guard let self, let cont = self.stopContinuation else { return }
+          guard let self,
+            self.stopGeneration.isCurrent(generation),
+            let cont = self.stopContinuation
+          else { return }
           self.stopContinuation = nil
           cont.resume()
         }

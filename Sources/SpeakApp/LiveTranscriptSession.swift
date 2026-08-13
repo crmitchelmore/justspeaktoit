@@ -111,3 +111,23 @@ enum LiveTranscriptionRun {
   /// the controller has stored the stream (issue #668).
   final class Token {}
 }
+
+/// Identifies the stop/finalisation wait that currently owns a controller's
+/// continuation.
+///
+/// Provider callbacks can finish a wait before its timeout task wakes. If a
+/// second recording reaches its own stop wait first, the old timeout must not
+/// resume the replacement continuation. Controllers advance this value for
+/// every wait and timeout tasks act only while their captured value is current.
+struct LiveTranscriptionStopGeneration {
+  private var value = 0
+
+  mutating func begin() -> Int {
+    value &+= 1
+    return value
+  }
+
+  func isCurrent(_ generation: Int) -> Bool {
+    generation == value
+  }
+}

@@ -35,6 +35,7 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
   private var currentTurnOrder: Int = -1
   private var finalSegmentIndexByTurnOrder: [Int: Int] = [:]
   private var stopContinuation: CheckedContinuation<Void, Never>?
+  private var stopGeneration = LiveTranscriptionStopGeneration()
 
   init(
     appSettings: AppSettings,
@@ -390,11 +391,15 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
       // resume is idempotent.
       let budget = appSettings.liveModelCapabilities.postStopFinalizeBudget
       if budget > 0, serverBegan {
+        let generation = stopGeneration.begin()
         await withCheckedContinuation { continuation in
           stopContinuation = continuation
           Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(budget))
-            guard let self, let cont = self.stopContinuation else { return }
+            guard let self,
+              self.stopGeneration.isCurrent(generation),
+              let cont = self.stopContinuation
+            else { return }
             self.stopContinuation = nil
             cont.resume()
           }

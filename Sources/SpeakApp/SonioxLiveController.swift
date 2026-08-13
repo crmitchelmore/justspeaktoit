@@ -32,6 +32,7 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
   private var currentInterim: String = ""
   private var fullTranscript: String = ""
   private var stopContinuation: CheckedContinuation<Void, Never>?
+  private var stopGeneration = LiveTranscriptionStopGeneration()
 
   init(
     appSettings: AppSettings,
@@ -204,11 +205,15 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
 
       // Wait for `<fin>`/`finished:true` or a 2s timeout. Both paths nil-out
       // stopContinuation idempotently.
+      let generation = stopGeneration.begin()
       await withCheckedContinuation { continuation in
         stopContinuation = continuation
         Task { @MainActor [weak self] in
           try? await Task.sleep(for: .seconds(2))
-          guard let self, let cont = self.stopContinuation else { return }
+          guard let self,
+            self.stopGeneration.isCurrent(generation),
+            let cont = self.stopContinuation
+          else { return }
           self.stopContinuation = nil
           cont.resume()
         }

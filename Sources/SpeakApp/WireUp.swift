@@ -7,7 +7,7 @@ import SpeakSync
 // swiftlint:disable file_length
 
 @MainActor
-final class AppEnvironment: ObservableObject { // swiftlint:disable:this type_body_length
+final class AppEnvironment: ObservableObject {
   let settings: AppSettings
   let permissions: PermissionsManager
   let history: HistoryManager
@@ -39,6 +39,8 @@ final class AppEnvironment: ObservableObject { // swiftlint:disable:this type_bo
   @Published var sidebarNavigationTarget: SidebarItem?
 
   private(set) var statusBarController: StatusBarController?
+  /// Voice-edit controller; created by `installVoiceEdit()` in AppEnvironment+VoiceEdit.
+  var voiceEdit: VoiceEditController?
   /// Reopens the main window when the app is running without any visible
   /// window (e.g. menu-bar-only mode). Supplied by the SwiftUI scene.
   var reopenMainWindow: (() -> Void)?
@@ -222,6 +224,7 @@ final class AppEnvironment: ObservableObject { // swiftlint:disable:this type_bo
       self?.tts.stop()
     }
     shortcuts.register(action: .pasteLastHistoryItem) { [weak self] in self?.pasteLastHistoryItem() }
+    shortcuts.register(action: .editSelectionByVoice) { [weak self] in self?.toggleVoiceEdit() }
     registerNavigationShortcutHandlers()
     registerQuickVoiceShortcutHandlers()
     shortcuts.startMonitoring()
@@ -261,14 +264,6 @@ final class AppEnvironment: ObservableObject { // swiftlint:disable:this type_bo
     }
     shortcuts.register(action: .quickVoice3) { [weak self] in
       self?.switchToQuickVoice(3)
-    }
-  }
-
-  private func switchToQuickVoice(_ index: Int) {
-    let favorites = settings.ttsFavoriteVoices
-    let arrayIndex = index - 1
-    if arrayIndex < favorites.count {
-      settings.defaultTTSVoice = favorites[arrayIndex]
     }
   }
 
@@ -316,6 +311,14 @@ final class AppEnvironment: ObservableObject { // swiftlint:disable:this type_bo
 }
 
 extension AppEnvironment {
+  fileprivate func switchToQuickVoice(_ index: Int) {
+    let favorites = settings.ttsFavoriteVoices
+    let arrayIndex = index - 1
+    if arrayIndex < favorites.count {
+      settings.defaultTTSVoice = favorites[arrayIndex]
+    }
+  }
+
   /// Pastes the most recent history item's text into the frontmost app,
   /// preferring the post-processed transcription over the raw one. Reuses the
   /// same insertion path as transcription delivery (accessibility or paste,
@@ -482,6 +485,8 @@ enum WireUp {
     settings: AppSettings,
     secureStorage: SecureAppStorage
   ) {
+    environment.installVoiceEdit()
+
     // Restore an existing subscription at launch so paid routing works without
     // opening Settings first. Routing waits, briefly, for this to finish, so a
     // subscriber's first dictation does not race the restore and fall back to a

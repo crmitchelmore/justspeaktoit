@@ -10,6 +10,14 @@ stay in one place — no automation surface ever sees an API key.
 | `speak` CLI | Terminal, scripts, CI-style batch work | This document |
 | MCP server | Claude Code and other MCP agents | This document (`speak mcp`) |
 
+## Turn automation on first
+
+Automation is **off by default**. While it is on, anything running under your
+macOS account can start the microphone and read your transcription history, so
+the socket only opens once you ask for it: **Settings → General → Automation →
+Enable automation (speak CLI and MCP)**. Until then every client gets
+`app_unavailable`, exactly as it would if the app were closed.
+
 ## The `speak` CLI
 
 `speak` is a thin client. It opens a UNIX domain socket owned by the app
@@ -182,8 +190,10 @@ behaviour will be identical whichever surface starts a session.
 
 ## Troubleshooting
 
-**`app_unavailable` while the app is open.** The socket is created at launch. Quit
-and relaunch the app, then check the path:
+**`app_unavailable` while the app is open.** Check that automation is enabled in
+Settings → General → Automation; the socket only exists while that toggle is on.
+It is created when the app launches with the setting already on, so if you have
+just enabled it and still see this, check the path:
 
 ```bash
 ls -l ~/Library/Application\ Support/SpeakApp/Automation/automation.sock

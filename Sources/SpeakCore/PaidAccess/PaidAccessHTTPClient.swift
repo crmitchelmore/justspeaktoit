@@ -304,28 +304,40 @@ public struct PaidAccessHTTPClient: PaidAccessClienting { // swiftlint:disable:t
         return request
     }
 
-    /// The idempotency key for one *logical* request.
+    /// The idempotency key for one *logical attempt* at a paid request.
     ///
-    /// Derived from the request itself rather than generated per attempt. A
-    /// client-side timeout followed by a retry — here, or at any layer above
-    /// this client — then presents the same key, so the Worker's
-    /// `usage_ledger(user_id, idempotency_key)` uniqueness returns the first
-    /// result instead of metering and billing one dictation twice. A key that
-    /// changed on every attempt, as a fresh UUID did, makes that constraint
-    /// useless.
+    /// The key identifies an attempt, not a piece of content. Hashing only the
+    /// content looks appealing — a retry naturally presents the same key — but
+    /// it makes the two cases indistinguishable, and the server cannot tell a
+    /// retry of one dictation from a second, deliberate dictation of the same
+    /// words. Saying "delete the file" twice in a day is ordinary use, and it
+    /// would have been refused as a duplicate.
+    ///
+    /// So the caller supplies an `attemptID` that is stable for as long as the
+    /// attempt is, and `usage_ledger(user_id, idempotency_key)` still stops a
+    /// retry of *that* attempt being billed twice. Content stays in the hash as
+    /// well: an attempt is identified by what was asked and when it was asked.
     ///
     /// - Parameters:
     ///   - operation: Keeps the key spaces of the paid operations apart.
+    ///   - attemptID: Identity of this attempt. Reuse it to retry the same
+    ///     request; generate a fresh one for a genuinely new request. Callers
+    ///     with a natural per-request identity — a recording's own id, a history
+    ///     item — should pass that; otherwise a fresh `UUID().uuidString`.
     ///   - parameters: Everything else that changes the result — language,
     ///     prompt, temperature.
     ///   - payload: The request body: the recorded audio, or the transcript.
     public static func idempotencyKey(
         operation: PaidOperation,
+        attemptID: String,
         parameters: [String] = [],
         payload: Data
     ) -> String {
         var hasher = SHA256()
         hasher.update(data: Data(operation.rawValue.utf8))
+        // Length-prefixed like the parameters, so an attempt id cannot be
+        // confused with the parameter that follows it.
+        hasher.update(data: Data("\(attemptID.utf8.count):\(attemptID)".utf8))
         for parameter in parameters {
             // Length-prefixed, so ["a", "bc"] and ["ab", "c"] cannot collide.
             hasher.update(data: Data("\(parameter.utf8.count):\(parameter)".utf8))

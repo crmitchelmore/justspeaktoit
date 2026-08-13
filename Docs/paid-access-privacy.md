@@ -52,7 +52,7 @@ Your subscription history and usage records are append-only: they can be added t
 
 Audio, transcript text, and post-processing prompts are never written down at all, so there is nothing to keep: they exist only in memory for the duration of the request.
 
-Everything in the "Retained by us" column above is kept **until we remove it by hand**. We do not currently run any automatic expiry, purge, or deletion job, and there is no delete endpoint in the service. We would rather tell you that than publish a retention schedule the software does not enforce.
+Everything in the "Retained by us" column above is kept **until we remove it by hand**. We do not run any automatic expiry, purge, or deletion job over it, and there is no delete endpoint in the service. (The one thing that does expire on its own is a short-lived record used to stop a retried request being billed twice; it holds no audio or text.) We would rather tell you that than publish a retention schedule the software does not enforce.
 
 Two consequences worth being explicit about:
 

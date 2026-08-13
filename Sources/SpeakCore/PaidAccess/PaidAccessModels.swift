@@ -292,8 +292,8 @@ public enum PaidAccessError: LocalizedError, Sendable, Equatable {
     case unsupportedOperation(PaidOperation)
     case paidRoutingDisabled
     case billingChannelUnavailable(String)
-    /// This exact request already completed and was charged once. The service
-    /// keeps no transcripts, so there is no stored result to hand back.
+    /// This attempt was already sent and has completed or is still running.
+    /// The service keeps no transcripts, so there is no stored result to return.
     case alreadyProcessed
     case serviceUnavailable(statusCode: Int)
     case invalidResponse
@@ -316,8 +316,7 @@ public enum PaidAccessError: LocalizedError, Sendable, Equatable {
         case .billingChannelUnavailable(let reason):
             return reason
         case .alreadyProcessed:
-            return "That request already went through and was not charged again. "
-                + "Nothing was kept, so please dictate it again."
+            return "That request was already sent and was not charged again."
         case .serviceUnavailable(let statusCode):
             return "The subscription service is unavailable (status \(statusCode))."
         case .invalidResponse:

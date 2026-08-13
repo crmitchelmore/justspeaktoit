@@ -106,8 +106,13 @@ actor PaidAccessProxyClient: StreamingChatLLMClient, BatchTranscriptionClient {
         text: text,
         systemPrompt: systemPrompt,
         temperature: temperature,
+        // Each call is its own attempt: nothing here retries, and a timeout
+        // falls back to the user's own client rather than trying again. Reusing
+        // a key across calls would refuse a second, deliberate cleanup of the
+        // same text — which is ordinary use, not a duplicate.
         idempotencyKey: PaidAccessHTTPClient.idempotencyKey(
           operation: .postProcessing,
+          attemptID: UUID().uuidString,
           parameters: [resolved.route.model, systemPrompt ?? "", String(temperature)],
           payload: Data(text.utf8)
         )
@@ -222,8 +227,11 @@ actor PaidAccessProxyClient: StreamingChatLLMClient, BatchTranscriptionClient {
         audio: audio,
         contentType: contentType,
         language: language,
+        // A recording is a natural attempt identity: transcribing the same file
+        // again is a retry, recording the same words afresh is a new request.
         idempotencyKey: PaidAccessHTTPClient.idempotencyKey(
           operation: .batchTranscription,
+          attemptID: Self.attemptID(for: url),
           parameters: [resolved.route.model, contentType, language ?? ""],
           payload: audio
         )
@@ -262,4 +270,16 @@ actor PaidAccessProxyClient: StreamingChatLLMClient, BatchTranscriptionClient {
 
   // Format selection lives in `PaidAudioPayload`: the endpoint takes WAV only,
   // and anything else is converted rather than refused.
+
+  /// The attempt identity for transcribing a recording.
+  ///
+  /// Recordings are written as `Recording-<UUID>.m4a`, so the file's own name is
+  /// stable for exactly as long as the request is worth retrying and differs for
+  /// the next recording — even one of identical words. The audio itself is
+  /// hashed alongside this, so two imported files that happen to share a name
+  /// still get different keys.
+  private static func attemptID(for url: URL) -> String {
+    let name = url.deletingPathExtension().lastPathComponent
+    return name.isEmpty ? UUID().uuidString : name
+  }
 }

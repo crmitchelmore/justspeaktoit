@@ -523,40 +523,64 @@ final class PaidAccessClientRequestTests: XCTestCase {
         )
     }
 
-    func testIdempotencyKey_isStableAcrossRetriesOfTheSameRequest() {
-        // The whole point: a timeout followed by a retry must present the same
-        // key, or the Worker meters and bills one dictation twice.
+    func testIdempotencyKey_isStableAcrossRetriesOfTheSameAttempt() {
+        // A timeout followed by a retry of the same attempt must present the
+        // same key, or the Worker meters and bills one dictation twice.
+        let attempt = UUID().uuidString
         let first = PaidAccessHTTPClient.idempotencyKey(
             operation: .batchTranscription,
+            attemptID: attempt,
             parameters: ["model", "audio/wav", "en"],
             payload: Data("audio".utf8)
         )
         let retry = PaidAccessHTTPClient.idempotencyKey(
             operation: .batchTranscription,
+            attemptID: attempt,
             parameters: ["model", "audio/wav", "en"],
             payload: Data("audio".utf8)
         )
         XCTAssertEqual(first, retry)
     }
 
+    func testIdempotencyKey_differsWhenTheSameWordsAreDictatedAgain() {
+        // The load-bearing case. Saying "delete the file" twice in a day is
+        // ordinary use, not a duplicate: keying on content alone refused the
+        // second one, and after the claim expired it paid the vendor and then
+        // lost the result to the permanent ledger uniqueness.
+        let identicalContent: (String) -> String = { attempt in
+            PaidAccessHTTPClient.idempotencyKey(
+                operation: .postProcessing,
+                attemptID: attempt,
+                parameters: ["model", "prompt", "0.2"],
+                payload: Data("delete the file".utf8)
+            )
+        }
+        XCTAssertNotEqual(identicalContent(UUID().uuidString), identicalContent(UUID().uuidString))
+    }
+
     func testIdempotencyKey_differsForDifferentRequests() {
+        let attempt = UUID().uuidString
         let base = PaidAccessHTTPClient.idempotencyKey(
             operation: .postProcessing,
+            attemptID: attempt,
             parameters: ["model", "prompt", "0.2"],
             payload: Data("hello".utf8)
         )
         let otherPayload = PaidAccessHTTPClient.idempotencyKey(
             operation: .postProcessing,
+            attemptID: attempt,
             parameters: ["model", "prompt", "0.2"],
             payload: Data("goodbye".utf8)
         )
         let otherParameters = PaidAccessHTTPClient.idempotencyKey(
             operation: .postProcessing,
+            attemptID: attempt,
             parameters: ["model", "prompt", "0.9"],
             payload: Data("hello".utf8)
         )
         let otherOperation = PaidAccessHTTPClient.idempotencyKey(
             operation: .batchTranscription,
+            attemptID: attempt,
             parameters: ["model", "prompt", "0.2"],
             payload: Data("hello".utf8)
         )
@@ -566,6 +590,7 @@ final class PaidAccessClientRequestTests: XCTestCase {
     func testIdempotencyKey_matchesTheShapeTheWorkerAccepts() {
         let key = PaidAccessHTTPClient.idempotencyKey(
             operation: .postProcessing,
+            attemptID: UUID().uuidString,
             payload: Data()
         )
         XCTAssertTrue((16...128).contains(key.count))
@@ -655,6 +680,11 @@ final class PaidAudioPayloadTests: XCTestCase {
         XCTAssertEqual(decoded.fileFormat.sampleRate, 44_100)
         let duration = Double(decoded.length) / decoded.fileFormat.sampleRate
         XCTAssertEqual(duration, 0.5, accuracy: 0.05)
+
+        // 16-bit, not the 32-bit float AVAudioFile hands back: it is what the
+        // transcription providers expect and it halves the upload.
+        let bitDepth = decoded.fileFormat.streamDescription.pointee.mBitsPerChannel
+        XCTAssertEqual(bitDepth, 16)
     }
 
     func testWavData_passesAnExistingWavThroughUnchanged() throws {

@@ -1,4 +1,5 @@
 #if os(macOS)
+import AppKit
 import Foundation
 import SpeakCore
 
@@ -21,9 +22,14 @@ protocol AutomationCommandHandling: AnyObject {
 @MainActor
 final class AutomationServer {
     private let socketPath: String
-    private weak var handler: (any AutomationCommandHandling)?
+    /// Held strongly: the handler exists to serve this socket, so its lifetime is
+    /// the socket's lifetime and `stop()` is what releases it.
+    private var handler: (any AutomationCommandHandling)?
     private var listeningSource: DispatchSourceRead?
     private var listeningDescriptor: Int32 = -1
+    /// Closes the socket when the app quits, so no stale socket file is left for
+    /// a client to connect to and fail against confusingly.
+    private var terminationObserver: NSObjectProtocol?
     private nonisolated let queue = DispatchQueue(
         label: "com.justspeaktoit.automation",
         qos: .userInitiated,
@@ -72,6 +78,13 @@ final class AutomationServer {
         self.listeningSource = source
         self.listeningDescriptor = descriptor
         self.isRunning = true
+        self.terminationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.stop() }
+        }
         SpeakLogger.transport.info("Automation socket listening")
     }
 
@@ -145,7 +158,19 @@ final class AutomationServer {
         self.listeningSource?.cancel()
         self.listeningSource = nil
         self.listeningDescriptor = -1
+        if let terminationObserver {
+            NotificationCenter.default.removeObserver(terminationObserver)
+            self.terminationObserver = nil
+        }
+        self.handler = nil
         try? FileManager.default.removeItem(atPath: self.socketPath)
+        // In-flight work outlives the listener otherwise: its tasks hold a
+        // reference to the handler and would keep answering — and mutating the
+        // caches — after automation was turned off.
+        for work in self.inFlight.values {
+            work.cancel()
+        }
+        self.inFlight.removeAll()
         self.completedRequests.removeAll()
         self.completionOrder.removeAll()
         self.isRunning = false
@@ -156,6 +181,9 @@ final class AutomationServer {
         // `stop()` is @MainActor, but the source's cancel handler owns closing the
         // descriptor, so cancelling the source here is enough to release the listener.
         self.listeningSource?.cancel()
+        if let terminationObserver {
+            NotificationCenter.default.removeObserver(terminationObserver)
+        }
     }
 
     // MARK: - Connection handling

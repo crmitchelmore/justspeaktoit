@@ -7,15 +7,17 @@ import Foundation
 ///
 /// Two levels are possible in principle:
 ///
-/// * **Endpoint handshake** — resolve DNS and complete a TLS handshake against
-///   the provider's host so the `wss://` upgrade that follows session start
-///   skips resolution and can resume the TLS session. No credential is sent,
-///   no provider-side session exists, nothing is billed.
+/// * **Endpoint probe** — resolve DNS and complete a credential-free HTTPS
+///   request against the provider's host. This warms resolver state and may
+///   make a TLS session ticket available, but it does not claim to pre-connect
+///   the WebSocket or populate a different `URLSession`'s connection pool.
 /// * **Pre-connect** — open the WebSocket and send the provider's config frame
 ///   before the hotkey, holding the session open until it is needed.
 ///
-/// Every cloud provider the app supports is ``endpointHandshake`` today, and
-/// the reason is the same in each case: the first frame on the socket *is* the
+/// A probe is only enabled when the live client uses `URLSession.shared`.
+/// AssemblyAI and OpenAI construct dedicated sessions, so probing through the
+/// shared session would not prove transport reuse and is deliberately disabled.
+/// No provider is fully pre-connected: the first frame on the socket *is* the
 /// session. Soniox, Speechmatics, ElevenLabs, Cartesia, Gladia, Modulate,
 /// OpenAI Realtime and xAI all require an authenticated config/`StartRecognition`
 /// frame immediately after the upgrade, which creates a server-side session;
@@ -34,15 +36,15 @@ import Foundation
 public enum LiveStreamWarmUp: Equatable, Sendable {
     /// Nothing to warm: the provider runs on-device.
     case unsupported
-    /// Warm DNS + TLS against this host. No credential, no provider session.
-    case endpointHandshake(host: String)
+    /// Probe this host without credentials or a provider session.
+    case endpointProbe(host: String)
 
     /// The host to warm, when there is one.
     public var host: String? {
         switch self {
         case .unsupported:
             return nil
-        case .endpointHandshake(let host):
+        case .endpointProbe(let host):
             return host
         }
     }
@@ -83,21 +85,27 @@ extension LiveTranscriptionProviderID {
 
     /// How far this provider's connection may be warmed ahead of a session.
     public var streamWarmUp: LiveStreamWarmUp {
-        guard let host = self.streamingHost else { return .unsupported }
-        return .endpointHandshake(host: host)
+        switch self {
+        case .apple, .assemblyai, .openai:
+            return .unsupported
+        case .deepgram, .cartesia, .gladia, .modulate, .soniox, .elevenlabs,
+             .speechmatics, .xai:
+            guard let host = self.streamingHost else { return .unsupported }
+            return .endpointProbe(host: host)
+        }
     }
 }
 
 // MARK: - Warm tracker
 
-/// Tracks which streaming host has a warm connection and when it goes stale.
+/// Tracks which streaming host has a recent endpoint probe and when it expires.
 ///
 /// Pure logic so the freshness and re-warm rules are testable without touching
 /// the network. The owner asks ``hostNeedingWarmUp(for:now:)`` on every trigger
-/// (app launch, session end, provider change) and only performs a handshake
+/// (app launch, session end, provider change) and only performs a probe
 /// when a host comes back.
 public struct LiveStreamWarmTracker: Equatable, Sendable {
-    /// How long a completed handshake is considered fresh. Chosen to sit above
+    /// How long a completed probe is considered fresh. Chosen to sit above
     /// typical provider DNS TTLs while staying well inside TLS session-ticket
     /// lifetimes, so a user dictating repeatedly re-warms at most once a minute.
     public static let defaultFreshness: TimeInterval = 90
@@ -129,23 +137,27 @@ public struct LiveStreamWarmTracker: Equatable, Sendable {
         return host
     }
 
-    /// Records a completed handshake.
-    public mutating func markWarmed(host: String, at date: Date) {
-        if self.inFlightHost == host { self.inFlightHost = nil }
+    /// Records a completed probe.
+    @discardableResult
+    public mutating func markWarmed(host: String, at date: Date) -> Bool {
+        guard self.inFlightHost == host else { return false }
+        self.inFlightHost = nil
         self.warmedHost = host
         self.warmedAt = date
+        return true
     }
 
-    /// Records a failed handshake so the next trigger retries it.
+    /// Records a failed probe so the next trigger retries it.
     public mutating func markFailed(host: String) {
-        if self.inFlightHost == host { self.inFlightHost = nil }
+        guard self.inFlightHost == host else { return }
+        self.inFlightHost = nil
         if self.warmedHost == host {
             self.warmedHost = nil
             self.warmedAt = nil
         }
     }
 
-    /// Forgets the warm connection (provider changed, network changed, disabled).
+    /// Forgets the probe (provider changed, network changed, disabled).
     public mutating func invalidate() {
         self.warmedHost = nil
         self.warmedAt = nil
@@ -156,5 +168,16 @@ public struct LiveStreamWarmTracker: Equatable, Sendable {
     public func isWarm(host: String, now: Date) -> Bool {
         guard self.warmedHost == host, let warmedAt = self.warmedAt else { return false }
         return now.timeIntervalSince(warmedAt) < self.freshness
+    }
+
+    /// When the current provider should next be probed. Owners schedule this
+    /// deadline so freshness expires while the app remains otherwise idle.
+    public func refreshDeadline(
+        for provider: LiveTranscriptionProviderID?,
+        enabled: Bool = true
+    ) -> Date? {
+        guard enabled, let host = provider?.streamWarmUp.host else { return nil }
+        guard self.warmedHost == host, let warmedAt = self.warmedAt else { return nil }
+        return warmedAt.addingTimeInterval(self.freshness)
     }
 }

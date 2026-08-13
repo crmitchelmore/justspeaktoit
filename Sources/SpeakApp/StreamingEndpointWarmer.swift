@@ -1,23 +1,21 @@
 import Foundation
 import os.log
 
-/// Warms the network path to a streaming transcription host.
+/// Performs a credential-free endpoint probe for a streaming host.
 protocol StreamingEndpointWarming: Sendable {
   /// Performs the handshake. Returns `true` when the host answered.
   func warmUp(host: String) async -> Bool
 }
 
-/// Completes DNS resolution, TCP connect and the TLS handshake against a
-/// streaming provider's host so the `wss://` upgrade at session start does not
-/// pay for them (issue #663).
+/// Completes DNS resolution and an HTTPS exchange against a streaming
+/// provider's host (issue #663).
 ///
 /// Deliberately a bare `HEAD /` with no credential and no API path: the point is
-/// to populate the resolver cache, the URLSession connection pool and the
-/// process TLS session cache, not to talk to the provider. No API key leaves the
-/// machine, and no provider-side transcription session is created — see
-/// ``LiveStreamWarmUp`` for why a fully pre-connected WebSocket is not safe for
-/// any of the supported providers. Any HTTP status (including 401/404) counts as
-/// success; the bytes we wanted were the handshake.
+/// to populate resolver state and potentially seed TLS resumption, not to talk
+/// to the provider. It does not pre-connect the WebSocket or claim that an HTTP
+/// connection pool is reusable by a dedicated live-client `URLSession`. No API
+/// key leaves the machine and no provider-side transcription session is created.
+/// Any HTTP status (including 401/404) counts as success.
 ///
 /// Mirrors the existing `OpenRouterAPIClient.warmUp()` approach used for the
 /// post-processing connection.
@@ -26,9 +24,8 @@ struct StreamingEndpointWarmer: StreamingEndpointWarming {
   private let timeout: TimeInterval
   private let logger = Logger(subsystem: "com.github.speakapp", category: "StreamWarmUp")
 
-  /// Uses `URLSession.shared` on purpose: that is the session the streaming
-  /// clients connect through, so the warmed resolver entry, connection pool and
-  /// TLS session ticket are the ones session start will actually reach for.
+  /// Only providers whose live client also uses `URLSession.shared` opt into
+  /// this probe. Dedicated-session clients are excluded by `LiveStreamWarmUp`.
   init(session: URLSession = .shared, timeout: TimeInterval = 5) {
     self.session = session
     self.timeout = timeout

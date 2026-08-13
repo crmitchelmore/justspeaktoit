@@ -108,7 +108,6 @@ final class MainManager: ObservableObject {
   /// Tracks whether the HUD window is visible to skip unnecessary UI updates
   var isHUDOccluded: Bool = false
   var occlusionObserver: NSObjectProtocol?
-  private var willTerminateObserver: NSObjectProtocol?
 
   struct RetryData {
     let transcriptionResult: TranscriptionResult
@@ -237,15 +236,18 @@ final class MainManager: ObservableObject {
     configureHotKeys()
     setupCaptureHealthBindings()
 
-    // Observe app termination to clean up timer
-    willTerminateObserver = NotificationCenter.default.addObserver(
-      forName: NSApplication.willTerminateNotification,
-      object: nil,
-      queue: .main
-    ) { [weak self] _ in
-      self?.stopAudioLevelMonitoring()
-      self?.captureWarmer?.invalidate()
+    Publishers.CombineLatest(
+      appSettings.$connectionPreWarmingEnabled,
+      permissionsManager.$statuses.map { $0[.microphone]?.isGranted == true }
+    )
+    .removeDuplicates { lhs, rhs in lhs.0 == rhs.0 && lhs.1 == rhs.1 }
+    .dropFirst()
+    .receive(on: RunLoop.main)
+    .sink { [weak self] enabled, permissionGranted in
+      guard enabled, permissionGranted else { return }
+      self?.warmUpConnectionIfEnabled()
     }
+    .store(in: &cancellables)
 
     let warmer = CaptureWarmCoordinator(
       appSettings: appSettings,
@@ -254,7 +256,14 @@ final class MainManager: ObservableObject {
       audioFileManager: audioFileManager
     )
     captureWarmer = warmer
-    warmer.warmUp()
+    warmer.start()
+  }
+
+  /// Completes asynchronous warm-resource teardown before AppKit permits the
+  /// process to exit, so the prepared recorder cannot leave an empty file.
+  func prepareForTermination() async {
+    self.stopAudioLevelMonitoring()
+    await self.captureWarmer?.invalidate()
   }
 
   /// Applies a live-transcript snapshot to the preview and the HUD.
@@ -316,8 +325,8 @@ final class MainManager: ObservableObject {
   func toggleRecordingFromUI() {
     guard !isEndingSession else { return }
     if activeSession == nil {
-      let triggeredAt = Date()
-      Task { await startSession(trigger: .uiButton, triggeredAt: triggeredAt) }
+      let triggerTiming = SessionTriggerTiming.nonHotKey()
+      Task { await startSession(trigger: .uiButton, triggerTiming: triggerTiming) }
     } else {
       Task { await endSession(trigger: .uiButton) }
     }
@@ -352,10 +361,10 @@ final class MainManager: ObservableObject {
   }
 
   /// Hands-free replaces press-to-talk with press-to-arm.
-  private func handleHoldStartGesture(triggeredAt: Date) async {
+  private func handleHoldStartGesture(triggerTiming: SessionTriggerTiming) async {
     guard appSettings.hotKeyActivationStyle.allowsHold else { return }
     if await handleHandsFreeHotKey() { return }
-    await startSession(trigger: .hold, triggeredAt: triggeredAt)
+    await startSession(trigger: .hold, triggerTiming: triggerTiming)
   }
 
   /// The arming press already consumed the gesture, so releasing the key must
@@ -375,7 +384,7 @@ final class MainManager: ObservableObject {
 
   /// Double-tap toggles: it arms hands-free dictation when that mode is on,
   /// otherwise it starts a session or ends the one it started.
-  private func handleDoubleTapGesture(triggeredAt: Date) async {
+  private func handleDoubleTapGesture(triggerTiming: SessionTriggerTiming) async {
     guard appSettings.hotKeyActivationStyle.allowsDoubleTap else { return }
     let now = ProcessInfo.processInfo.systemUptime
     guard now - lastDoubleTapEventUptime >= 0.25 else { return }
@@ -387,7 +396,7 @@ final class MainManager: ObservableObject {
       guard session.gesture == .doubleTap else { return }
       await endSession(trigger: .doubleTap)
     } else {
-      await startSession(trigger: .doubleTap, triggeredAt: triggeredAt)
+      await startSession(trigger: .doubleTap, triggerTiming: triggerTiming)
     }
   }
 
@@ -397,9 +406,9 @@ final class MainManager: ObservableObject {
       hotKeyManager.register(gesture: .holdStart) { [weak self] in
         // Stamped here, before the actor hop, so the latency dashboard measures
         // from the key press rather than from where `startSession` gets to run.
-        let triggeredAt = Date()
+        let triggerTiming = SessionTriggerTiming.recognisedHotKey()
         Task { @MainActor in
-          await self?.handleHoldStartGesture(triggeredAt: triggeredAt)
+          await self?.handleHoldStartGesture(triggerTiming: triggerTiming)
         }
       }
     )
@@ -414,9 +423,9 @@ final class MainManager: ObservableObject {
 
     hotKeyTokens.append(
       hotKeyManager.register(gesture: .doubleTap) { [weak self] in
-        let triggeredAt = Date()
+        let triggerTiming = SessionTriggerTiming.recognisedHotKey()
         Task { @MainActor in
-          await self?.handleDoubleTapGesture(triggeredAt: triggeredAt)
+          await self?.handleDoubleTapGesture(triggerTiming: triggerTiming)
         }
       }
     )
@@ -457,6 +466,7 @@ final class MainManager: ObservableObject {
   /// This is called at app launch and when recording starts.
   private func warmUpConnectionIfEnabled() {
     guard appSettings.connectionPreWarmingEnabled else { return }
+    guard permissionsManager.status(for: .microphone).isGranted else { return }
     let client = openRouterClient
     Task.detached {
       await client.warmUp()
@@ -497,9 +507,10 @@ final class MainManager: ObservableObject {
   func startSession(
     trigger: SessionTriggerSource,
     preRollBuffers: [AVAudioPCMBuffer] = [],
-    triggeredAt: Date = Date()
+    triggerTiming: SessionTriggerTiming = .nonHotKey()
   ) async -> HandsFreeCaptureStartOutcome {
     guard activeSession == nil else { return .rejected(.captureFailed) }
+    captureWarmer?.sessionWillBegin()
 
     // Per-app dictation profile: resolve the frontmost app and apply its
     // overrides for this session only. Applied before the API-key check so the
@@ -520,17 +531,20 @@ final class MainManager: ObservableObject {
       )
       else {
         profileApplier.end(settings: appSettings, postProcessing: postProcessingManager)
+        captureWarmer?.sessionDidEnd()
         return .rejected(.unsupportedConfiguration)
       }
     }
 
     if await presentMissingLiveAPIKeyAlertIfNeeded() {
       profileApplier.end(settings: appSettings, postProcessing: postProcessingManager)
+      captureWarmer?.sessionDidEnd()
       return .rejected(.captureFailed)
     }
 
     if audioInputDeviceManager.devices.isEmpty {
       profileApplier.end(settings: appSettings, postProcessing: postProcessingManager)
+      captureWarmer?.sessionDidEnd()
       let message = "No microphone connected. Plug in a USB or Bluetooth microphone and try again."
       state = .failed(message)
       lastErrorMessage = message
@@ -557,28 +571,17 @@ final class MainManager: ObservableObject {
     let session = ActiveSession(
       gesture: gesture,
       hotKeyDescription: appSettings.selectedHotKey.displayString,
-      triggeredAt: triggeredAt
+      triggerTiming: triggerTiming
     )
     session.outputTarget = TextOutputTarget.capture()
     session.diagnosticContext = makeHistoryDiagnosticContext()
     activeSession = session
-    state = .recording
-
-    if appSettings.recordingSoundsEnabled {
-      recordingSoundPlayer.play(.start, volume: appSettings.recordingSoundVolume)
-    }
     lastErrorMessage = nil
     livePreview = ""
     polishedLivePreview = ""
     // Every recording starts from a blank live transcript, including batch
     // modes that never open a live session (issue #643).
     transcriptionManager.resetLiveTranscriptDisplay()
-    session.events.append(
-      HistoryEvent(
-        kind: .recordingStarted,
-        description: "Recording started via \(gesture.rawValue)"
-      )
-    )
 
     // Reset live polish for new session
     livePolishManager.reset()
@@ -598,19 +601,31 @@ final class MainManager: ObservableObject {
       }
     }
 
-    if appSettings.showHUDDuringSessions {
-      permissionsManager.refresh(.microphone)
-      hudManager.updateCaptureHealth(buildCaptureHealthSnapshot())
-      hudManager.beginRecording(profileName: profileApplier.activeProfileName)
-    }
-
     // Claim the recorder staged while idle. Returns nil — and the cold path
     // runs — whenever the environment moved since it was staged.
     let warmContext = captureWarmer?.claimWarmContext()
 
     do {
-      _ = try await audioFileManager.startRecording(warmContext: warmContext)
-      recordCaptureStart(for: session, wasWarm: warmContext != nil)
+      let recording = try await audioFileManager.startRecording(
+        warmContext: warmContext,
+        owner: .dictation
+      )
+      recordCaptureStart(for: session, wasWarm: recording.usedWarmRecorder)
+      state = .recording
+      session.events.append(
+        HistoryEvent(
+          kind: .recordingStarted,
+          description: "Recording started via \(gesture.rawValue)"
+        )
+      )
+      if appSettings.recordingSoundsEnabled {
+        recordingSoundPlayer.play(.start, volume: appSettings.recordingSoundVolume)
+      }
+      if appSettings.showHUDDuringSessions {
+        permissionsManager.refresh(.microphone)
+        hudManager.updateCaptureHealth(buildCaptureHealthSnapshot())
+        hudManager.beginRecording(profileName: profileApplier.activeProfileName)
+      }
       startAudioLevelMonitoring()
       if isStreamingTranscriptionMode {
         try await transcriptionManager.startLiveTranscription(
@@ -638,9 +653,8 @@ final class MainManager: ObservableObject {
   /// dashboard percentiles can be read against the warm/cold split.
   private func recordCaptureStart(for session: ActiveSession, wasWarm: Bool) {
     session.captureStarted = Date()
-    if let coldStartMs = SessionLatencyMetrics.milliseconds(
-      from: session.recordingStarted, to: session.captureStarted
-    ) {
+    session.captureStartedUptime = ProcessInfo.processInfo.systemUptime
+    if let coldStartMs = session.captureStartMilliseconds {
       let path = wasWarm ? "pre-warmed" : "cold"
       self.logger.info("Latency: capture started \(coldStartMs)ms after trigger (\(path, privacy: .public))")
     }

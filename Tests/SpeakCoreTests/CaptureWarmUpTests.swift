@@ -200,4 +200,15 @@ final class CaptureWarmStateMachineTests: XCTestCase {
         XCTAssertEqual(machine.reset(), .discard)
         XCTAssertEqual(machine.phase, .cold)
     }
+
+    func testAuxiliaryRecordingStart_DiscardsReadyWarmState() {
+        var machine = CaptureWarmStateMachine()
+        let context = self.context()
+        _ = machine.reconcile(with: context, enabled: true)
+        machine.markReady(context)
+
+        XCTAssertEqual(machine.recordingBeganWithoutClaim(), .discard)
+        XCTAssertEqual(machine.phase, .cold)
+        XCTAssertFalse(machine.claim(for: context))
+    }
 }

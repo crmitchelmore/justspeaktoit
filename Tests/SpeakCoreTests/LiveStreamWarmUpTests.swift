@@ -8,32 +8,33 @@ final class LiveStreamWarmUpPolicyTests: XCTestCase {
         XCTAssertEqual(LiveTranscriptionProviderID.apple.streamWarmUp, .unsupported)
     }
 
-    func testEveryCloudProvider_DeclaresAHostToWarm() {
+    func testEveryCloudProvider_DeclaresAStreamingHost() {
         for provider in LiveTranscriptionProviderID.allCases where provider != .apple {
             guard let host = provider.streamingHost else {
                 XCTFail("\(provider.rawValue) has no streaming host declared")
                 continue
             }
             XCTAssertFalse(host.isEmpty, "\(provider.rawValue) declares an empty host")
-            XCTAssertEqual(
-                provider.streamWarmUp,
-                .endpointHandshake(host: host),
-                "\(provider.rawValue) should warm its endpoint only"
-            )
         }
     }
 
-    func testBillingSensitiveProviders_AreNotPreConnected() {
-        // AssemblyAI meters session duration and Deepgram drops a socket that
-        // receives no audio, so neither may be held open before the hotkey.
-        // Both must resolve to the credential-free endpoint handshake.
-        for provider in [LiveTranscriptionProviderID.assemblyai, .deepgram, .soniox] {
+    func testSharedSessionProviders_UseCredentialFreeEndpointProbe() {
+        let providers: [LiveTranscriptionProviderID] = [
+            .deepgram, .cartesia, .gladia, .modulate, .soniox, .elevenlabs,
+            .speechmatics, .xai
+        ]
+        for provider in providers {
             guard let host = provider.streamingHost else {
                 XCTFail("\(provider.rawValue) has no streaming host declared")
                 continue
             }
-            XCTAssertEqual(provider.streamWarmUp, .endpointHandshake(host: host))
+            XCTAssertEqual(provider.streamWarmUp, .endpointProbe(host: host))
         }
+    }
+
+    func testDedicatedSessionProviders_AreNotClaimedAsTransportWarm() {
+        XCTAssertEqual(LiveTranscriptionProviderID.assemblyai.streamWarmUp, .unsupported)
+        XCTAssertEqual(LiveTranscriptionProviderID.openai.streamWarmUp, .unsupported)
     }
 }
 
@@ -71,6 +72,34 @@ final class LiveStreamWarmTrackerTests: XCTestCase {
         )
     }
 
+    func testCompletedProbe_ExposesRefreshDeadlineForIdleScheduling() {
+        var tracker = LiveStreamWarmTracker(freshness: 90)
+        guard let host = tracker.hostNeedingWarmUp(for: .deepgram, now: self.base) else {
+            return XCTFail("expected a host to warm")
+        }
+        XCTAssertTrue(tracker.markWarmed(host: host, at: self.base))
+
+        XCTAssertEqual(
+            tracker.refreshDeadline(for: .deepgram),
+            self.base.addingTimeInterval(90)
+        )
+        XCTAssertNil(tracker.refreshDeadline(for: .deepgram, enabled: false))
+    }
+
+    func testStaleProbeCompletion_DoesNotOverwriteCurrentProviderState() {
+        var tracker = LiveStreamWarmTracker()
+        guard let oldHost = tracker.hostNeedingWarmUp(for: .soniox, now: self.base) else {
+            return XCTFail("expected the original host")
+        }
+        guard let currentHost = tracker.hostNeedingWarmUp(for: .deepgram, now: self.base) else {
+            return XCTFail("expected the replacement host")
+        }
+
+        XCTAssertFalse(tracker.markWarmed(host: oldHost, at: self.base))
+        XCTAssertTrue(tracker.markWarmed(host: currentHost, at: self.base))
+        XCTAssertTrue(tracker.isWarm(host: currentHost, now: self.base))
+    }
+
     func testProviderChange_WarmsTheNewHostImmediately() {
         var tracker = LiveStreamWarmTracker()
         guard let sonioxHost = tracker.hostNeedingWarmUp(for: .soniox, now: self.base) else {
@@ -84,7 +113,7 @@ final class LiveStreamWarmTrackerTests: XCTestCase {
         )
     }
 
-    func testFailedHandshake_IsRetriedOnTheNextTrigger() {
+    func testFailedProbe_IsRetriedOnTheNextTrigger() {
         var tracker = LiveStreamWarmTracker()
         guard let host = tracker.hostNeedingWarmUp(for: .cartesia, now: self.base) else {
             return XCTFail("expected a host to warm")

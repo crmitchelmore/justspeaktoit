@@ -296,12 +296,12 @@ extension SettingsView {
           )
 
           settingsToggle(
-            "Keep the connection warm",
+            "Warm supported connections",
             isOn: settingsBinding(\AppSettings.connectionPreWarmingEnabled),
             tint: .brandAccentWarm
           )
           .speakTooltip(
-            "Opens the network path to your transcription provider ahead of time. "
+            "Probes supported provider endpoints ahead of time without opening a live session. "
               + "No audio, API key, or transcription request is sent while idle."
           )
         }

@@ -157,6 +157,14 @@ public struct CaptureWarmStateMachine: Equatable, Sendable {
         return true
     }
 
+    /// Invalidates warm state when any recording owner starts without claiming
+    /// the staged recorder. The recorder owner calls this for auxiliary flows
+    /// such as onboarding and Voice Edit so coordinator state cannot remain
+    /// `ready` after the backing recorder has been discarded.
+    public mutating func recordingBeganWithoutClaim() -> CaptureWarmAction {
+        self.reset()
+    }
+
     /// Drops any staged state. Returns the teardown the owner owes.
     public mutating func reset() -> CaptureWarmAction {
         switch self.phase {

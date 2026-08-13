@@ -724,9 +724,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
 
   // Performance Settings
 
-  /// Pre-warms the network path to the post-processing and live-transcription
-  /// providers while idle (DNS + TLS only — no credential is sent and no
-  /// provider session is opened).
+  /// Pre-warms OpenRouter plus supported shared-session transcription endpoints
+  /// while idle. No credential is sent and no provider session is opened.
   @Published var connectionPreWarmingEnabled: Bool {
     didSet { store(connectionPreWarmingEnabled, key: .connectionPreWarmingEnabled) }
   }

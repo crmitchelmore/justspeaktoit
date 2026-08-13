@@ -88,9 +88,13 @@ final class GladiaLiveController: NSObject, LiveTranscriptionController {
       transcriber = newTranscriber
 
       newTranscriber.start(
-        onTranscript: { [weak self] event in
-          Task { @MainActor [weak self] in
+        onTranscript: { [weak self, weak newTranscriber] event in
+          Task { @MainActor [weak self, weak newTranscriber] in
             guard let self else { return }
+            // Cached controllers are reused between recordings, so a message
+            // queued by the previous stream can land here after the next
+            // recording started. Only the current stream owns this state.
+            guard LiveTranscriptionRun.isCurrent(newTranscriber, activeStream: self.transcriber) else { return }
             self.handleTranscript(event)
           }
         },

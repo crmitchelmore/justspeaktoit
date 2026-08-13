@@ -69,9 +69,14 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
 
     do {
       client.start(
-        onTranscript: { [weak self] text, isFinal in
-          Task { @MainActor [weak self] in
-            self?.handleTranscript(text, isFinal: isFinal)
+        onTranscript: { [weak self, weak client] text, isFinal in
+          Task { @MainActor [weak self, weak client] in
+            guard let self else { return }
+            // Cached controllers are reused between recordings, so a message
+            // queued by the previous stream can land here after the next
+            // recording started. Only the current stream owns this state.
+            guard LiveTranscriptionRun.isCurrent(client, activeStream: self.client) else { return }
+            self.handleTranscript(text, isFinal: isFinal)
           }
         },
         onError: { [weak self] error in

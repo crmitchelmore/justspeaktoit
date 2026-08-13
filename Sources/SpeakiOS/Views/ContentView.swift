@@ -328,6 +328,19 @@ public struct ContentView: View {
                             backgroundService.isRunning ? "Recording via Action Button" : "Recording"
                         )
                     }
+                } else if handsFreeIsReady {
+                    ToolbarItem(placement: .topBarLeading) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "waveform.badge.mic")
+                                .font(.caption)
+                            Text("Hands-free")
+                                .font(.caption)
+                        }
+                        .foregroundStyle(.secondary)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Hands-free dictation is on")
+                        .accessibilityIdentifier("handsFreeArmedIndicator")
+                    }
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
@@ -574,6 +587,12 @@ public struct ContentView: View {
 
     private var isAnyRecording: Bool {
         coordinator.isRunning || backgroundService.isRunning
+    }
+
+    /// Whether the hands-free indicator should show: the setting is on, the
+    /// device has Apple's speech detector, and nothing is recording yet.
+    private var handsFreeIsReady: Bool {
+        AppSettings.shared.handsFreeDictationActive && !isAnyRecording
     }
 
     private var currentText: String {

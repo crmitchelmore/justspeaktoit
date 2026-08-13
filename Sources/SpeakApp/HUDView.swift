@@ -273,6 +273,8 @@ struct HUDOverlay: View {
 
   private var phaseColor: Color {
     switch manager.snapshot.phase {
+    case .armed:
+      return .brandLagoon
     case .recording:
       return .red
     case .transcribing:

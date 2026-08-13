@@ -265,6 +265,38 @@ extension SettingsView {
         .speakTooltip("Configure automatic recording stop based on silence detection.")
       }
 
+      SettingsCard(
+        title: "Hands-free dictation",
+        systemImage: "waveform.badge.mic",
+        tint: Color.brandLagoon
+      ) {
+        VStack(alignment: .leading, spacing: 12) {
+          Toggle(
+            "Arm on hotkey instead of recording",
+            isOn: settingsBinding(\AppSettings.handsFreeDictationEnabled)
+          )
+          .disabled(!settings.handsFreeDictationSupported)
+          .accessibilityIdentifier("handsFreeDictationToggle")
+          .speakTooltip("Your hotkey starts listening; speaking starts recording and silence stops it.")
+
+          if settings.handsFreeDictationSupported {
+            Text(
+              "The hotkey arms a listening session instead of recording straight away. "
+                + "Recording starts when you speak and stops after "
+                + "\(Self.handsFreeSilenceDescription) of silence, then re-arms. "
+                + "Press the hotkey again to disarm."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+          } else {
+            Text("Requires macOS 26 or later — Apple's on-device speech detector isn't available here.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+        }
+      }
+      .speakTooltip("Voice-activated dictation using Apple's on-device speech detector.")
+
       if isRemoteStreamingTranscriptionSelected {
         SettingsCard(title: "Remote Streaming model", systemImage: "mic.fill", tint: Color.brandAccentDeep) {
           VStack(alignment: .leading, spacing: 12) {
@@ -1723,6 +1755,12 @@ extension SettingsView {
     case .failed(let message):
       return message
     }
+  }
+
+  /// Derived from the shared policy so the copy can never drift from behaviour.
+  static var handsFreeSilenceDescription: String {
+    HandsFreeDictationPolicy.silenceHoldSeconds
+      .formatted(.number.precision(.fractionLength(0...1))) + " seconds"
   }
 
   private func localModelIcon(for state: LocalModelManager.InstallState) -> String {

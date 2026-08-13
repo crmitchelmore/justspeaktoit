@@ -308,6 +308,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     case ttsPronunciationDictionary
     case historyFlushInterval
     case silenceDetectionEnabled
+    case handsFreeDictationEnabled
     case silenceThreshold
     case silenceDuration
     case connectionPreWarmingEnabled
@@ -685,6 +686,24 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   // Silence Detection Settings
   @Published var silenceDetectionEnabled: Bool {
     didSet { store(silenceDetectionEnabled, key: .silenceDetectionEnabled) }
+  }
+
+  /// Hands-free dictation: the hotkey arms a listening session instead of
+  /// starting capture, and speech starts/stops recording. Off by default, and
+  /// inert below macOS 26 where `SpeechDetector` does not exist.
+  @Published var handsFreeDictationEnabled: Bool {
+    didSet { store(handsFreeDictationEnabled, key: .handsFreeDictationEnabled) }
+  }
+
+  /// Whether hands-free dictation can actually run on this machine.
+  var handsFreeDictationSupported: Bool {
+    AppleLocalModels.supportsSpeechDetector
+  }
+
+  /// The setting only takes effect where the detector exists, so an enabled
+  /// setting carried over from a newer OS cannot change behaviour on an older one.
+  var handsFreeDictationActive: Bool {
+    handsFreeDictationEnabled && handsFreeDictationSupported
   }
 
   /// Silence threshold (0.0 to 1.0) - audio levels below this are considered silence
@@ -1078,6 +1097,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     // Silence Detection Settings
     silenceDetectionEnabled =
       defaults.object(forKey: DefaultsKey.silenceDetectionEnabled.rawValue) as? Bool ?? false
+    handsFreeDictationEnabled =
+      defaults.object(forKey: DefaultsKey.handsFreeDictationEnabled.rawValue) as? Bool ?? false
     silenceThreshold =
       Float(defaults.object(forKey: DefaultsKey.silenceThreshold.rawValue) as? Double ?? 0.05)
     silenceDuration =

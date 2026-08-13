@@ -58,6 +58,15 @@ public enum AppleLocalModels {
         )
     }
 
+    /// `SpeechDetector` ships with the OS 26 Speech framework, so support tracks
+    /// the OS gate. Whether its assets install is decided when arming.
+    public static var supportsSpeechDetector: Bool {
+        if #available(macOS 26.0, iOS 26.0, *) {
+            return true
+        }
+        return false
+    }
+
     public static var supportsFoundationModels: Bool {
         #if canImport(FoundationModels)
         if #available(macOS 26.0, iOS 26.0, *) {
@@ -79,6 +88,7 @@ public enum AppleLocalModels {
 
 public enum AppleLocalModelError: LocalizedError {
     case speechTranscriberUnavailable
+    case speechDetectorUnavailable
     case localeUnsupported(String)
     case modelAssetsUnavailable
     case compatibleAudioFormatUnavailable
@@ -92,6 +102,9 @@ public enum AppleLocalModelError: LocalizedError {
         switch self {
         case .speechTranscriberUnavailable:
             return "Apple on-device speech recognition isn't available on this device."
+        case .speechDetectorUnavailable:
+            return "Hands-free dictation needs Apple's on-device speech detector, "
+                + "which isn't available on this device."
         case .localeUnsupported(let identifier):
             return "Apple on-device speech recognition doesn't support the \(identifier) locale "
                 + "on this device."

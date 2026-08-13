@@ -214,6 +214,27 @@ public final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(autoStartRecording, forKey: "autoStartRecording") }
     }
 
+    /// Hands-free dictation: recording is driven by Apple's on-device speech
+    /// detector rather than the record button. Off by default, and inert below
+    /// iOS 26 where `SpeechDetector` does not exist. The defaults key matches
+    /// macOS so the two platforms stay in step.
+    @Published public var handsFreeDictationEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(handsFreeDictationEnabled, forKey: "handsFreeDictationEnabled")
+        }
+    }
+
+    /// Whether hands-free dictation can actually run on this device.
+    public var handsFreeDictationSupported: Bool {
+        AppleLocalModels.supportsSpeechDetector
+    }
+
+    /// The setting only takes effect where the detector exists, so a value
+    /// synced from a newer OS cannot change behaviour on an older one.
+    public var handsFreeDictationActive: Bool {
+        handsFreeDictationEnabled && handsFreeDictationSupported
+    }
+
     @Published public var preferredLocaleIdentifier: String {
         didSet {
             UserDefaults.standard.set(preferredLocaleIdentifier, forKey: "preferredLocale")
@@ -297,6 +318,7 @@ public final class AppSettings: ObservableObject {
             rawValue: UserDefaults.standard.string(forKey: "visualDensity") ?? ""
         ) ?? .normal
         let autoStart = UserDefaults.standard.bool(forKey: "autoStartRecording")
+        let handsFree = UserDefaults.standard.bool(forKey: "handsFreeDictationEnabled")
         let preferredLocale = TranscriptionLanguageCatalog.normalizedIdentifier(
             UserDefaults.standard.string(forKey: "preferredLocale")
         )
@@ -337,6 +359,7 @@ public final class AppSettings: ObservableObject {
         self.liveActivitiesEnabled = liveActivities
         self.visualDensity = density
         self.autoStartRecording = autoStart
+        self.handsFreeDictationEnabled = handsFree
         self.preferredLocaleIdentifier = preferredLocale
         self.hardwareTriggerDestination = hardwareDest
         self.postProcessingEnabled = postEnabled
@@ -904,6 +927,18 @@ public struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Toggle(isOn: $settings.handsFreeDictationEnabled) {
+                    Label("Hands-Free Dictation", systemImage: "waveform.badge.mic")
+                }
+                .disabled(!settings.handsFreeDictationSupported)
+                .accessibilityIdentifier("handsFreeDictationToggle")
+
+                if !usesInlineDensityLayout {
+                    Text(handsFreeDictationCaption)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Toggle(isOn: $settings.liveActivitiesEnabled) {
                     Label("Live Activities", systemImage: "platter.filled.bottom.iphone")
                 }
@@ -1186,6 +1221,17 @@ public struct SettingsView: View {
 
     private var usesInlineDensityLayout: Bool {
         settings.visualDensity.prefersInlineLayout(dynamicTypeSize: dynamicTypeSize)
+    }
+
+    /// Silence budget is read from the shared policy so the copy cannot drift
+    /// from the behaviour, and matches the macOS wording.
+    private var handsFreeDictationCaption: String {
+        guard settings.handsFreeDictationSupported else {
+            return "Requires iOS 26 or later — Apple's on-device speech detector isn't available here."
+        }
+        let silence = HandsFreeDictationPolicy.silenceHoldSeconds
+            .formatted(.number.precision(.fractionLength(0...1)))
+        return "Recording starts when you speak and stops after \(silence) seconds of silence."
     }
 
     private var keyboardStatusLabel: String {

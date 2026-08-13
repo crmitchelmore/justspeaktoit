@@ -79,9 +79,19 @@ final class MainManager: ObservableObject {
       // place profile overrides are reverted back to the user's own settings.
       if activeSession == nil {
         profileApplier.end(settings: appSettings, postProcessing: postProcessingManager)
+        // Cancelling with Escape or the UI button also ends a hands-free
+        // capture; tell the coordinator so it cools down and re-arms instead
+        // of waiting for a stop that already happened.
+        if handsFreeCoordinator.isCapturing {
+          Task { [handsFreeCoordinator] in await handsFreeCoordinator.captureFinished() }
+        }
       }
     }
   }
+
+  /// Hands-free ("armed") dictation. Created eagerly but inert until the user
+  /// arms it, which only the hands-free setting allows.
+  private(set) lazy var handsFreeCoordinator = makeHandsFreeCoordinator()
   /// Guards against re-entrant calls to endSession (e.g. silence detection + user hotkey racing).
   var isEndingSession = false
   let recordingStopTimeout: TimeInterval = 8
@@ -161,6 +171,15 @@ final class MainManager: ObservableObject {
       .receive(on: RunLoop.main)
       .sink { [weak self] profile in
         self?.recordingSoundPlayer.profile = profile
+      }
+      .store(in: &cancellables)
+
+    // Turning hands-free dictation off must tear down a live detector, not
+    // just stop future arming.
+    appSettings.$handsFreeDictationEnabled
+      .receive(on: RunLoop.main)
+      .sink { [weak self] _ in
+        self?.disarmHandsFreeIfDisabled()
       }
       .store(in: &cancellables)
 
@@ -317,13 +336,51 @@ final class MainManager: ObservableObject {
     cleanupAfterFailure(message: "Recording cancelled", preserveFile: false)
   }
 
+  /// Hands-free replaces press-to-talk with press-to-arm.
+  private func handleHoldStartGesture() async {
+    guard appSettings.hotKeyActivationStyle.allowsHold else { return }
+    if await handleHandsFreeHotKey() { return }
+    await startSession(trigger: .hold)
+  }
+
+  /// The arming press already consumed the gesture, so releasing the key must
+  /// not stop a hands-free capture the detector is still driving.
+  private func handleHoldEndGesture() async {
+    guard appSettings.hotKeyActivationStyle.allowsHold else { return }
+    guard !handsFreeArmsHotKey else { return }
+    await endSession(trigger: .hold)
+  }
+
+  private func handleSingleTapGesture() async {
+    guard appSettings.hotKeyActivationStyle.allowsDoubleTap else { return }
+    guard !handsFreeArmsHotKey else { return }
+    guard let session = activeSession, session.gesture == .doubleTap else { return }
+    await endSession(trigger: .singleTap)
+  }
+
+  /// Double-tap toggles: it arms hands-free dictation when that mode is on,
+  /// otherwise it starts a session or ends the one it started.
+  private func handleDoubleTapGesture() async {
+    guard appSettings.hotKeyActivationStyle.allowsDoubleTap else { return }
+    let now = ProcessInfo.processInfo.systemUptime
+    guard now - lastDoubleTapEventUptime >= 0.25 else { return }
+    lastDoubleTapEventUptime = now
+
+    if await handleHandsFreeHotKey() { return }
+
+    if let session = activeSession {
+      guard session.gesture == .doubleTap else { return }
+      await endSession(trigger: .doubleTap)
+    } else {
+      await startSession(trigger: .doubleTap)
+    }
+  }
+
   private func configureHotKeys() {
     hotKeyTokens.append(
       hotKeyManager.register(gesture: .holdStart) { [weak self] in
         Task { @MainActor in
-          guard let self else { return }
-          guard self.appSettings.hotKeyActivationStyle.allowsHold else { return }
-          await self.startSession(trigger: .hold)
+          await self?.handleHoldStartGesture()
         }
       }
     )
@@ -331,9 +388,7 @@ final class MainManager: ObservableObject {
     hotKeyTokens.append(
       hotKeyManager.register(gesture: .holdEnd) { [weak self] in
         Task { @MainActor in
-          guard let self else { return }
-          guard self.appSettings.hotKeyActivationStyle.allowsHold else { return }
-          await self.endSession(trigger: .hold)
+          await self?.handleHoldEndGesture()
         }
       }
     )
@@ -341,20 +396,7 @@ final class MainManager: ObservableObject {
     hotKeyTokens.append(
       hotKeyManager.register(gesture: .doubleTap) { [weak self] in
         Task { @MainActor in
-          guard let self else { return }
-          guard self.appSettings.hotKeyActivationStyle.allowsDoubleTap else { return }
-          let now = ProcessInfo.processInfo.systemUptime
-          if now - self.lastDoubleTapEventUptime < 0.25 {
-            return
-          }
-          self.lastDoubleTapEventUptime = now
-
-          if let session = self.activeSession {
-            guard session.gesture == .doubleTap else { return }
-            await self.endSession(trigger: .doubleTap)
-          } else {
-            await self.startSession(trigger: .doubleTap)
-          }
+          await self?.handleDoubleTapGesture()
         }
       }
     )
@@ -362,11 +404,7 @@ final class MainManager: ObservableObject {
     hotKeyTokens.append(
       hotKeyManager.register(gesture: .singleTap) { [weak self] in
         Task { @MainActor in
-          guard let self else { return }
-          guard self.appSettings.hotKeyActivationStyle.allowsDoubleTap else { return }
-          if let session = self.activeSession, session.gesture == .doubleTap {
-            await self.endSession(trigger: .singleTap)
-          }
+          await self?.handleSingleTapGesture()
         }
       }
     )
@@ -432,8 +470,10 @@ final class MainManager: ObservableObject {
     return "Loading local model and transcribing. First run can take a minute."
   }
 
+  // Internal rather than private so the hands-free coordinator can start the
+  // same session the hotkey would have.
   // swiftlint:disable:next function_body_length
-  private func startSession(trigger: SessionTriggerSource) async {
+  func startSession(trigger: SessionTriggerSource) async {
     guard activeSession == nil else { return }
 
     // Per-app dictation profile: resolve the frontmost app and apply its

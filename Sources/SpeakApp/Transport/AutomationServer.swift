@@ -26,7 +26,6 @@ final class AutomationServer {
     /// the socket's lifetime and `stop()` is what releases it.
     private var handler: (any AutomationCommandHandling)?
     private var listeningSource: DispatchSourceRead?
-    private var listeningDescriptor: Int32 = -1
     /// Closes the socket when the app quits, so no stale socket file is left for
     /// a client to connect to and fail against confusingly.
     private var terminationObserver: NSObjectProtocol?
@@ -78,7 +77,6 @@ final class AutomationServer {
         source.resume()
 
         self.listeningSource = source
-        self.listeningDescriptor = descriptor
         self.isRunning = true
         self.terminationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification,
@@ -159,7 +157,6 @@ final class AutomationServer {
         guard self.isRunning else { return }
         self.listeningSource?.cancel()
         self.listeningSource = nil
-        self.listeningDescriptor = -1
         if let terminationObserver {
             NotificationCenter.default.removeObserver(terminationObserver)
             self.terminationObserver = nil
@@ -276,39 +273,19 @@ final class AutomationServer {
             self.inFlight[key] = work
         }
 
-        return await Self.value(of: work, within: request.resolvedTimeout, id: request.id, command: request.command)
-    }
-
-    /// Stops waiting once the caller's deadline passes. The command keeps running —
-    /// it owns app state that cannot be abandoned mid-flight — so a retry with the
-    /// same request id joins it and collects the result.
-    private static func value(
-        of work: Task<AutomationResponse, Never>,
-        within seconds: TimeInterval,
-        id: String,
-        command: AutomationCommand
-    ) async -> AutomationResponse {
-        await withTaskGroup(of: AutomationResponse?.self) { group in
-            group.addTask { await work.value }
-            group.addTask {
-                try? await Task.sleep(for: .seconds(seconds))
-                return nil
-            }
-            let completed: AutomationResponse? = await group.next().flatMap { $0 }
-            group.cancelAll()
-            return completed ?? .failure(
-                id: id,
-                command: command,
-                error: AutomationError(
-                    code: .timedOut,
-                    message: "\(command.rawValue) did not finish within \(Int(seconds))s. "
-                        + "Retry with the same request id to collect the result."
-                )
-            )
-        }
+        return await AutomationDeadline.value(
+            of: work,
+            within: request.resolvedTimeout,
+            id: request.id,
+            command: request.command
+        )
     }
 
     private func finish(key: CompletedKey, response: AutomationResponse) {
+        // A command orphaned by `stop()` outlives the caches it was cleared from,
+        // so without this a response from before an off/on toggle could be
+        // replayed to a client that connected after it.
+        guard self.isRunning else { return }
         self.inFlight.removeValue(forKey: key)
         self.completedRequests[key] = response
         self.completionOrder.append(key)

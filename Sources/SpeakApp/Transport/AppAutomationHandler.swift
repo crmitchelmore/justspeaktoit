@@ -44,7 +44,7 @@ final class AppAutomationHandler: AutomationCommandHandling {
                 return .success(
                     id: request.id,
                     command: request.command,
-                    result: AutomationResult(entries: self.historyEntries(limit: request.resolvedLimit))
+                    result: AutomationResult(entries: await self.historyEntries(limit: request.resolvedLimit))
                 )
             case .transcribeFile:
                 return .success(
@@ -101,8 +101,16 @@ final class AppAutomationHandler: AutomationCommandHandling {
         )
     }
 
-    private func historyEntries(limit: Int) -> [AutomationHistoryEntry] {
-        self.history.items.prefix(limit).map { item in
+    /// Reads the whole persisted history, not the loaded page.
+    ///
+    /// `items` is the paged view the History window scrolls through (50 entries),
+    /// while the wire contract advertises up to `AutomationLimits.maxHistoryLimit`,
+    /// so paging must not silently truncate an automation reply. Waiting for the
+    /// initial load also stops a request made during launch from reporting an
+    /// empty history for a user who has one.
+    private func historyEntries(limit: Int) async -> [AutomationHistoryEntry] {
+        await self.history.waitUntilLoaded()
+        return self.history.allItems.prefix(limit).map { item in
             let text = Self.transcript(of: item)
             return AutomationHistoryEntry(
                 id: item.id.uuidString,
@@ -206,7 +214,7 @@ final class AppAutomationHandler: AutomationCommandHandling {
         default:
             // Delivery can still be in flight. Only this session's own item counts —
             // the newest history entry may belong to an earlier session.
-            let item = self.history.items.first { $0.id == sessionID }
+            let item = self.history.allItems.first { $0.id == sessionID }
             return AutomationResult(
                 text: item.map(Self.transcript(of:)) ?? "",
                 model: item?.modelUsages.first?.modelIdentifier ?? item?.modelsUsed.first,

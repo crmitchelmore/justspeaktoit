@@ -22,6 +22,7 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
     private let cancelCapture: () -> Void
     private let silenceDuration: () -> TimeInterval
     private let captureIsSupported: () -> Bool
+    private let liveActivitiesEnabled: () -> Bool
     private var machine = HandsFreeDictationMachine()
     private var tracker = HandsFreeVoiceActivityTracker()
     private let preRoll = HandsFreeAudioPreRollBuffer()
@@ -32,6 +33,7 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
     private var sessionID: UUID?
     private var interruptionToken: UUID?
     private var routeChangeToken: UUID?
+    private var ownsLiveActivity = false
 
     init(
         audioSessionManager: AudioSessionManager = AudioSessionManager(),
@@ -39,7 +41,8 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
         stopCapture: @escaping StopCapture,
         cancelCapture: @escaping () -> Void,
         silenceDuration: @escaping () -> TimeInterval,
-        captureIsSupported: @escaping () -> Bool
+        captureIsSupported: @escaping () -> Bool,
+        liveActivitiesEnabled: @escaping () -> Bool
     ) {
         self.audioSessionManager = audioSessionManager
         self.startCapture = startCapture
@@ -47,6 +50,7 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
         self.cancelCapture = cancelCapture
         self.silenceDuration = silenceDuration
         self.captureIsSupported = captureIsSupported
+        self.liveActivitiesEnabled = liveActivitiesEnabled
         interruptionToken = audioSessionManager.addInterruptionObserver(owner: self) { [weak self] began in
             guard began else { return }
             Task { @MainActor [weak self] in await self?.fail(.audioUnavailable) }
@@ -86,7 +90,8 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
             Task { [weak self] in await self?.fail(.unsupportedConfiguration) }
             return
         }
-        _ = activityManager.startActivity(provider: "Apple on-device", initialStatus: .arming)
+        ownsLiveActivity = liveActivitiesEnabled()
+            && activityManager.startActivity(provider: "Apple on-device", initialStatus: .arming)
         let id = UUID()
         sessionID = id
         armTask?.cancel()
@@ -111,7 +116,9 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
                 cancelCapture()
             case .reportFailure(let failure):
                 failureMessage = failure.message
-                activityManager.reportError(failure.message)
+                if ownsLiveActivity {
+                    activityManager.reportError(failure.message)
+                }
             }
         }
         publishState()
@@ -285,15 +292,16 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
         case .recording: activityStatus = .recording
         case .finalising: activityStatus = .finalising
         }
-        if let activityStatus {
+        if let activityStatus, ownsLiveActivity {
             activityManager.updateActivity(
                 status: activityStatus,
                 lastSnippet: handsFreeStatusText,
                 wordCount: 0,
                 duration: 0
             )
-        } else if failureMessage == nil {
+        } else if state == .off, ownsLiveActivity {
             activityManager.endActivity()
+            ownsLiveActivity = false
         }
     }
 

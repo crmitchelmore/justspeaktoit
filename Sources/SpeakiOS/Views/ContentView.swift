@@ -20,6 +20,7 @@ final class TranscriberCoordinator: ObservableObject {
     private let sharedState = SharedTranscriptionState.shared
 
     private var transcriptionSession: IOSTranscriptionSession?
+    private var stoppingSession: IOSTranscriptionSession?
     private var startTime: Date?
     /// Last time the App Group shared state was written for a partial result.
     private var lastSharedStateWriteAt: Date = .distantPast
@@ -51,6 +52,7 @@ final class TranscriberCoordinator: ObservableObject {
         // Wait for the initial keychain load so auto-start on a cold launch
         // doesn't read empty API keys and fall back to Apple Speech.
         await settings.ensureKeysLoaded()
+        error = nil
         currentModel = settings.transcriptionMode == .batch
             ? settings.batchTranscriptionModel
             : settings.selectedModel
@@ -171,6 +173,12 @@ final class TranscriberCoordinator: ObservableObject {
 
         if let session = transcriptionSession {
             transcriptionSession = nil
+            stoppingSession = session
+            defer {
+                if stoppingSession === session {
+                    stoppingSession = nil
+                }
+            }
             do {
                 let result = try await session.stop()
                 guard !Task.isCancelled else {
@@ -224,7 +232,9 @@ final class TranscriberCoordinator: ObservableObject {
 
     func cancel() {
         transcriptionSession?.cancel()
+        stoppingSession?.cancel()
         transcriptionSession = nil
+        stoppingSession = nil
         isRunning = false
         startTime = nil
         if AppSettings.shared.liveActivitiesEnabled {
@@ -295,7 +305,8 @@ public struct ContentView: View {
                         modelID: AppSettings.shared.selectedModel,
                         isStreaming: AppSettings.shared.transcriptionMode == .streaming
                     )
-                }
+                },
+                liveActivitiesEnabled: { AppSettings.shared.liveActivitiesEnabled }
             )
         )
     }

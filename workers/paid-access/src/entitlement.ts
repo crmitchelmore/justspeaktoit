@@ -95,15 +95,41 @@ const ALLOWED_TRANSITIONS: Readonly<Record<EntitlementStatus, readonly Entitleme
   grace: ['active', 'past_due', 'expired', 'revoked'],
   past_due: ['active', 'grace', 'expired', 'revoked'],
   expired: ['active', 'trialing', 'past_due', 'grace', 'revoked'],
-  // Terminal: recovering requires a new purchase, which arrives with a new
-  // source reference. `revoked → revoked` is allowed because providers redeliver
-  // — a replayed revocation must be a no-op, not a 500 and an endless retry.
+  // Terminal *for the subscription that was revoked*. `revoked → revoked` is
+  // allowed because providers redeliver — a replayed revocation must be a no-op,
+  // not a 500 and an endless retry. A genuinely new purchase escapes this row
+  // via `isFreshPurchase` below; without that, a refunded user who subscribed
+  // again would be charged and never re-entitled.
   revoked: ['revoked'],
 };
 
 export function canTransition(from: EntitlementStatus, to: EntitlementStatus): boolean {
   if (from === to) return true;
   return ALLOWED_TRANSITIONS[from].includes(to);
+}
+
+/**
+ * Whether an update represents a new purchase rather than more news about the
+ * revoked one.
+ *
+ * Revocation is terminal per subscription, not per account. Providers identify a
+ * subscription by its reference — a Stripe subscription id, a StoreKit original
+ * transaction id — so an update carrying a *different* reference is a different
+ * subscription, and the only way back from `revoked`. Replays of the revoked
+ * subscription keep its own reference and stay terminal.
+ */
+const PURCHASED_STATUSES: readonly EntitlementStatus[] = ['trialing', 'active', 'past_due', 'grace'];
+
+function isFreshPurchase(current: Entitlement, update: EntitlementUpdate): boolean {
+  return (
+    current.status === 'revoked' &&
+    // Only a live subscription re-entitles. News that some *other* subscription
+    // expired or was cancelled must not lift a revocation — that is not a
+    // purchase, and treating it as one would hand back access for free.
+    PURCHASED_STATUSES.includes(update.status) &&
+    update.sourceReference !== null &&
+    update.sourceReference !== current.sourceReference
+  );
 }
 
 export class EntitlementTransitionError extends Error {
@@ -150,7 +176,7 @@ export function applyUpdate(
   if (current.sourceEventAt !== null && update.sourceEventAt < current.sourceEventAt) {
     return { kind: 'stale', current };
   }
-  if (!canTransition(current.status, update.status)) {
+  if (!isFreshPurchase(current, update) && !canTransition(current.status, update.status)) {
     throw new EntitlementTransitionError(current.status, update.status);
   }
 

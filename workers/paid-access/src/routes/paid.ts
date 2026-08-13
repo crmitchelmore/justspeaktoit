@@ -96,8 +96,13 @@ export function handlePolicy(context: AuthenticatedContext): Response {
  *
  * The key is claimed before quota is reserved and before the vendor is called,
  * which is the point: a retry arriving after a client timeout must not buy a
- * second upstream call. A retry of a finished request replays the stored
- * response; a retry that overlaps the original is refused rather than raced.
+ * second upstream call. A retry that overlaps the original is refused rather
+ * than raced; a retry of a finished request is told it already completed, and
+ * is charged nothing.
+ *
+ * That last case deliberately loses the response. Replaying it would mean
+ * storing transcripts, and not storing them is the stronger promise: the cost is
+ * that a client which loses a response to a timeout must dictate again.
  *
  * A failure drops the claim, so the client's next attempt is served normally
  * instead of being answered as a duplicate for ever.
@@ -122,19 +127,18 @@ async function underIdempotencyKey(
         'That Idempotency-Key was already used for a different operation',
       );
     }
-    if (existing.status !== 'completed' || existing.responseBody === null) {
+    if (existing.status !== 'completed') {
       throw new ApiError('conflict', 'A request with that Idempotency-Key is still in flight');
     }
-    context.logger.info('paid.idempotent_replay', { operation: input.operation });
-    return new Response(existing.responseBody, {
-      status: 200,
-      headers: {
-        'content-type': 'application/json; charset=utf-8',
-        'cache-control': 'no-store',
-        [CORRELATION_HEADER]: context.correlationId,
-        'idempotent-replay': 'true',
-      },
-    });
+    // The work completed and was charged once. The response is not replayed:
+    // storing it would make the claims table a store of dictated text, which is
+    // exactly what this service promises never to retain. The client is told the
+    // request already succeeded so it can say so rather than retrying.
+    context.logger.info('paid.idempotent_duplicate', { operation: input.operation });
+    throw new ApiError(
+      'already_processed',
+      'That request has already been processed and was not charged again',
+    );
   }
 
   let payload: Record<string, unknown>;
@@ -152,7 +156,6 @@ async function underIdempotencyKey(
   await context.repository.completeRequestClaim({
     userId: context.session.userId,
     idempotencyKey: input.idempotencyKey,
-    responseBody: body,
     nowSeconds: context.nowSeconds,
   });
   return new Response(body, {
@@ -521,6 +524,7 @@ export async function handleLiveTranscription(
         'x-session-init': JSON.stringify({
           userId: context.session.userId,
           reservationId: reservation.reservationId,
+          billingPeriod: period,
           upstreamUrl: deepgram.streamingUrl({
             upstreamModel: route.upstreamModel,
             language,
@@ -617,7 +621,11 @@ export async function handleLiveTranscriptionFinalise(
     model: route.catalogueModelId,
     unitKind: 'audio_seconds',
     units: outcome.elapsedSeconds,
-    billingPeriod: billingPeriod(context.nowSeconds),
+    // The reservation's period, not this moment's. The Durable Object committed
+    // the quota against the month the session started in, and a session that
+    // spans midnight on the 1st would otherwise book its ledger row to a
+    // different month than its quota.
+    billingPeriod: outcome.billingPeriod,
   });
 
   return jsonResponse(

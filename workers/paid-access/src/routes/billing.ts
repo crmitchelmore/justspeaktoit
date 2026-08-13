@@ -135,6 +135,26 @@ export async function handleEntitlement(context: AuthenticatedContext): Promise<
 
 interface CheckoutBody {
   channel?: unknown;
+  price_id?: unknown;
+}
+
+/**
+ * Picks which of the plan's prices Checkout opens with.
+ *
+ * The client may name one — that is how the yearly term is bought — but only
+ * from the configured list, so a modified build cannot open Checkout against an
+ * arbitrary price of its choosing. Omitting it takes the first configured price.
+ */
+function checkoutPriceFrom(body: CheckoutBody, allowed: readonly string[]): string {
+  const first = allowed[0];
+  if (first === undefined) {
+    throw new ApiError('internal_error', 'No Stripe price is configured for this plan');
+  }
+  if (body.price_id === undefined || body.price_id === null) return first;
+  if (typeof body.price_id !== 'string' || !allowed.includes(body.price_id)) {
+    throw new ApiError('bad_request', 'That price is not sold by this plan');
+  }
+  return body.price_id;
 }
 
 /**
@@ -189,7 +209,7 @@ export async function handleStripeCheckout(
   );
   const session = await stripe.createCheckoutSession({
     customerId,
-    priceId: context.config.stripePriceId,
+    priceId: checkoutPriceFrom(body, context.config.stripePriceIds),
     userId: context.session.userId,
     successUrl: context.config.stripeSuccessUrl,
     cancelUrl: context.config.stripeCancelUrl,

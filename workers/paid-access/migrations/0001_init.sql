@@ -162,10 +162,17 @@ CREATE INDEX idx_usage_ledger_period ON usage_ledger (user_id, billing_period);
 -- this purpose: it is append-only and is only written once the work is done, by
 -- which point the money has already been spent twice.
 --
--- `response_body` holds the payload the first attempt returned, so a client that
--- lost the response to a timeout gets its transcript back on retry instead of
--- paying again. It is the only place request content is stored, it is keyed to
--- the request that produced it, and it is never read by anything else.
+-- Deliberately stores no request or response content. An earlier draft kept the
+-- first attempt's response body here so a client that lost it to a timeout could
+-- get its transcript back; that made this table a store of dictated text, which
+-- contradicts the promise that transcripts are never retained. A retry that
+-- arrives after the work completed is told so and charged nothing, which costs
+-- the user a re-dictation in a rare case and keeps the guarantee absolute.
+--
+-- `expires_at` bounds how long a key is remembered. Keys are derived from
+-- request content, so without it an identical dictation a year later would be
+-- refused as a duplicate. Expiry is applied on read and on claim, so no
+-- scheduled job is required for correctness.
 CREATE TABLE request_claims (
   id               TEXT    PRIMARY KEY,
   user_id          TEXT    NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -175,12 +182,11 @@ CREATE TABLE request_claims (
                                           'post_processing')),
   status           TEXT    NOT NULL DEFAULT 'in_flight'
                      CHECK (status IN ('in_flight', 'completed')),
-  response_body    TEXT,
   correlation_id   TEXT    NOT NULL,
   created_at       INTEGER NOT NULL,
+  expires_at       INTEGER NOT NULL,
   completed_at     INTEGER,
-  UNIQUE (user_id, idempotency_key),
-  CHECK (status <> 'completed' OR response_body IS NOT NULL)
+  UNIQUE (user_id, idempotency_key)
 );
 
 CREATE INDEX idx_request_claims_created ON request_claims (created_at);

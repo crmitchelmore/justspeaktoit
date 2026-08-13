@@ -37,7 +37,7 @@ STRIPE_SUCCESS_URL = "https://justspeaktoit.com/billing/success"
 STRIPE_CANCEL_URL = "https://justspeaktoit.com/billing/cancel"
 STRIPE_PORTAL_RETURN_URL = "https://justspeaktoit.com/billing"
 # Placeholder identifiers — replace with the real product/price IDs at deploy time.
-STRIPE_PRICE_ID = "price_REPLACE_ME"
+STRIPE_PRICE_IDS = "price_REPLACE_ME_MONTHLY,price_REPLACE_ME_YEARLY"
 STOREKIT_SUBSCRIPTION_PRODUCT_IDS = "com.justspeaktoit.paid.monthly,com.justspeaktoit.paid.yearly"
 # Global kill switch for paid routing. Flip to "true" to fail paid requests
 # closed without revoking entitlements or taking the Worker offline.
@@ -83,7 +83,7 @@ LIVE_UPSTREAM_TIMEOUT_MS = "15000"
 STRIPE_SUCCESS_URL = "https://staging.justspeaktoit.com/billing/success"
 STRIPE_CANCEL_URL = "https://staging.justspeaktoit.com/billing/cancel"
 STRIPE_PORTAL_RETURN_URL = "https://staging.justspeaktoit.com/billing"
-STRIPE_PRICE_ID = "price_REPLACE_ME"
+STRIPE_PRICE_IDS = "price_REPLACE_ME_MONTHLY,price_REPLACE_ME_YEARLY"
 STOREKIT_SUBSCRIPTION_PRODUCT_IDS = "com.justspeaktoit.paid.monthly,com.justspeaktoit.paid.yearly"
 PAID_ROUTING_DISABLED = "true"
 
@@ -121,7 +121,7 @@ LIVE_UPSTREAM_TIMEOUT_MS = "15000"
 STRIPE_SUCCESS_URL = "https://justspeaktoit.com/billing/success"
 STRIPE_CANCEL_URL = "https://justspeaktoit.com/billing/cancel"
 STRIPE_PORTAL_RETURN_URL = "https://justspeaktoit.com/billing"
-STRIPE_PRICE_ID = "price_REPLACE_ME"
+STRIPE_PRICE_IDS = "price_REPLACE_ME_MONTHLY,price_REPLACE_ME_YEARLY"
 STOREKIT_SUBSCRIPTION_PRODUCT_IDS = "com.justspeaktoit.paid.monthly,com.justspeaktoit.paid.yearly"
 PAID_ROUTING_DISABLED = "true"
 

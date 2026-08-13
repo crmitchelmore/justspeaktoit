@@ -106,10 +106,17 @@ export async function handleStripeWebhook(
       return jsonResponse({ received: true, ignored: true }, { correlationId: context.correlationId });
     }
 
-    // The subscription must bill on the plan we sell. Stripe accounts routinely
+    // The subscription must bill on a price we sell. Stripe accounts routinely
     // carry other products, and a webhook for one of them must not silently
     // grant this product's entitlement.
-    if (!view.priceIds.includes(context.config.stripePriceId)) {
+    //
+    // Only events that would grant or extend access are gated this way. A
+    // cancellation must always be applied: `customer.subscription.deleted`
+    // frequently arrives without expanded line items, and refusing it for
+    // "wrong price" would leave a cancelled user entitled indefinitely — the
+    // failure that costs us money rather than protecting it.
+    const grantsAccess = view.status !== 'expired';
+    if (grantsAccess && !view.priceIds.some((id) => context.config.stripePriceIds.includes(id))) {
       await context.repository.completeWebhookEvent({
         provider: 'stripe',
         eventId: event.id,
@@ -156,7 +163,12 @@ export async function handleStripeWebhook(
       await transitionEntitlement(context, {
         userId,
         status: view.status,
-        planId: context.config.stripePriceId,
+        // The price actually billed, not the plan's headline price, so a yearly
+        // subscriber's record does not claim to be on the monthly plan.
+        planId:
+          view.priceIds.find((id) => context.config.stripePriceIds.includes(id)) ??
+          context.config.stripePriceIds[0] ??
+          'unknown',
         source: 'stripe',
         sourceReference: view.subscriptionId,
         currentPeriodStart: view.currentPeriodStart,

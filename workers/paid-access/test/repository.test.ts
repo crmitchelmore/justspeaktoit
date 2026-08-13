@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import { Repository } from '../src/data/repository.js';
+import { Repository, REQUEST_CLAIM_TTL_SECONDS } from '../src/data/repository.js';
 
 const NOW = 1_800_000_000;
 
@@ -281,6 +281,42 @@ describe('database constraints', () => {
     const first = await repo.ensureEntitlement(userId, NOW);
     const second = await repo.ensureEntitlement(userId, NOW + 5);
     expect(second.id).toBe(first.id);
+  });
+});
+
+describe('request claim expiry', () => {
+  const claimFor = (userId: string, key: string) => ({
+    userId,
+    idempotencyKey: key,
+    operation: 'post_processing' as const,
+    correlationId: `corr-${key}`,
+  });
+
+  it('holds a completed claim against a retry inside its window', async () => {
+    const repo = repository();
+    const userId = await seedUser();
+    const claim = claimFor(userId, 'key-1');
+
+    expect(await repo.claimRequest({ ...claim, nowSeconds: NOW })).toBeNull();
+    await repo.completeRequestClaim({ ...claim, nowSeconds: NOW });
+
+    const retry = await repo.claimRequest({ ...claim, nowSeconds: NOW + 3_600 });
+    expect(retry?.status).toBe('completed');
+  });
+
+  it('lets an identical request through once the claim has expired', async () => {
+    // Keys are derived from request content, so without expiry the same
+    // dictation a year later would be refused as a duplicate for ever.
+    const repo = repository();
+    const userId = await seedUser();
+    const claim = claimFor(userId, 'key-2');
+
+    expect(await repo.claimRequest({ ...claim, nowSeconds: NOW })).toBeNull();
+    await repo.completeRequestClaim({ ...claim, nowSeconds: NOW });
+
+    expect(
+      await repo.claimRequest({ ...claim, nowSeconds: NOW + REQUEST_CLAIM_TTL_SECONDS + 1 }),
+    ).toBeNull();
   });
 });
 

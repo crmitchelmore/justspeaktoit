@@ -24,6 +24,13 @@ import { QuotaSettlement } from '../quota.js';
 export interface LiveSessionInit {
   readonly userId: string;
   readonly reservationId: string;
+  /**
+   * The period the reservation was taken against. Carried through the session so
+   * the ledger row lands in the same month the quota was committed to — a
+   * session that starts on the last day of a month and finalises on the first of
+   * the next would otherwise split its accounting across two periods.
+   */
+  readonly billingPeriod: string;
   readonly upstreamUrl: string;
   readonly upstreamProtocolHeader: string;
   readonly maxSessionSeconds: number;
@@ -61,6 +68,8 @@ const RECONCILE_PATH = '/outcome/reconcile';
 export interface LiveSessionOutcome {
   readonly userId: string;
   readonly reservationId: string;
+  /** The reservation's period, not the period the session happened to end in. */
+  readonly billingPeriod: string;
   readonly elapsedSeconds: number;
   readonly closed: boolean;
 }
@@ -114,6 +123,7 @@ export class LiveSessionDurableObject implements DurableObject {
     if (
       typeof init.userId !== 'string' ||
       typeof init.reservationId !== 'string' ||
+      typeof init.billingPeriod !== 'string' ||
       typeof init.upstreamUrl !== 'string'
     ) {
       return new Response('Invalid session initialisation', { status: 400 });
@@ -122,6 +132,7 @@ export class LiveSessionDurableObject implements DurableObject {
     const metadata: SessionMetadata = {
       userId: init.userId,
       reservationId: init.reservationId,
+      billingPeriod: init.billingPeriod,
       upstreamUrl: init.upstreamUrl,
       upstreamProtocolHeader: init.upstreamProtocolHeader ?? '',
       maxSessionSeconds: init.maxSessionSeconds ?? 1_800,
@@ -168,6 +179,7 @@ export class LiveSessionDurableObject implements DurableObject {
     const stored: StoredSessionMetadata = {
       userId: metadata.userId,
       reservationId: metadata.reservationId,
+      billingPeriod: metadata.billingPeriod,
       upstreamUrl: metadata.upstreamUrl,
       maxSessionSeconds: metadata.maxSessionSeconds,
       connectTimeoutMs: metadata.connectTimeoutMs,
@@ -285,6 +297,7 @@ export class LiveSessionDurableObject implements DurableObject {
     const outcome: LiveSessionOutcome = {
       userId: metadata.userId,
       reservationId: metadata.reservationId,
+      billingPeriod: metadata.billingPeriod,
       elapsedSeconds: Math.min(elapsedSeconds, metadata.maxSessionSeconds),
       closed,
     };

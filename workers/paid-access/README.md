@@ -19,7 +19,7 @@ These are deliberate and load-bearing. Changing any of them is a design decision
 | Quota is reserved before work, finalised after | Reserve → finalise/release, serialised through one Durable Object per user, so two devices cannot both win a check-then-act race |
 | Unsupported operations fail loudly | `unsupported_operation` (HTTP 422). There is no silent downgrade to a cheaper model or to the user's own key |
 | Nothing is retried that would bill twice | Transcription and completion calls are attempted once; only safe reads retry |
-| Audio and transcript text are never persisted or logged | Only metered units (audio seconds, token counts) reach the ledger |
+| Audio and transcript text are never persisted or logged | Only metered units (audio seconds, token counts) reach the ledger. A retry of a completed request is told `already_processed` rather than handed a stored response — replaying one would mean keeping transcripts |
 
 ## Layout
 
@@ -120,7 +120,8 @@ There is no delete endpoint, by design.
 | `unauthorized` | 401 | Missing, expired or unverifiable session token |
 | `forbidden` | 403 | Authenticated but not permitted |
 | `not_found` | 404 | Unknown route |
-| `conflict` | 409 | Idempotency or state conflict |
+| `conflict` | 409 | Idempotency or state conflict; the first attempt is still in flight |
+| `already_processed` | 409 | That `Idempotency-Key` already completed. Nothing was charged again, and the response is **not** replayed — storing it would mean retaining transcripts |
 | `entitlement_required` | 402 | No entitlement currently grants paid routing |
 | `payload_too_large` | 413 | Body exceeds `MAX_REQUEST_BYTES` |
 | `unsupported_operation` | 422 | No Best path exists for the requested operation |
@@ -145,7 +146,7 @@ Set with `wrangler secret put <NAME>` (add `--env staging` or `--env production`
 | `OPENAI_API_KEY` | No | Reserved; not used by the current Best paths |
 | `APPSTORE_ROOT_CA_G3_BASE64` | No | Overrides the pinned Apple Root CA G3. Testing only |
 
-Non-secret configuration lives in `[vars]` in `wrangler.toml`: `ENVIRONMENT`, `APPLE_IDENTITY_AUDIENCES`, `APPLE_BUNDLE_IDS`, `SESSION_TTL_SECONDS`, `REFRESH_TTL_SECONDS`, `PLAN_MONTHLY_SECONDS`, `PLAN_MONTHLY_POSTPROCESS_TOKENS`, `MAX_CONCURRENT_SESSIONS`, `MAX_LIVE_SESSION_SECONDS`, `MAX_REQUEST_BYTES`, `UPSTREAM_TIMEOUT_MS`, `LIVE_UPSTREAM_TIMEOUT_MS`, `STRIPE_SUCCESS_URL`, `STRIPE_CANCEL_URL`, `STRIPE_PORTAL_RETURN_URL`, `STRIPE_PRICE_ID`, `STOREKIT_SUBSCRIPTION_PRODUCT_IDS`, `PAID_ROUTING_DISABLED`.
+Non-secret configuration lives in `[vars]` in `wrangler.toml`: `ENVIRONMENT`, `APPLE_IDENTITY_AUDIENCES`, `APPLE_BUNDLE_IDS`, `SESSION_TTL_SECONDS`, `REFRESH_TTL_SECONDS`, `PLAN_MONTHLY_SECONDS`, `PLAN_MONTHLY_POSTPROCESS_TOKENS`, `MAX_CONCURRENT_SESSIONS`, `MAX_LIVE_SESSION_SECONDS`, `MAX_REQUEST_BYTES`, `UPSTREAM_TIMEOUT_MS`, `LIVE_UPSTREAM_TIMEOUT_MS`, `STRIPE_SUCCESS_URL`, `STRIPE_CANCEL_URL`, `STRIPE_PORTAL_RETURN_URL`, `STRIPE_PRICE_IDS`, `STOREKIT_SUBSCRIPTION_PRODUCT_IDS`, `PAID_ROUTING_DISABLED`.
 
 ## Adding a D1 migration
 
@@ -170,7 +171,7 @@ Rules:
 ## Things that will bite you
 
 - **`wrangler dev` without a D1 id.** `database_id` is a placeholder in the committed config. Use `--local`, or paste a real id in and do not commit it.
-- **`STRIPE_PRICE_ID = "price_REPLACE_ME"`.** Checkout fails at Stripe, not at our validation. Replace it per environment before deploying.
+- **`STRIPE_PRICE_IDS = "price_REPLACE_ME_MONTHLY,price_REPLACE_ME_YEARLY"`.** Checkout fails at Stripe, not at our validation. Replace them per environment before deploying. Every price the plan has ever sold must stay listed: a subscription billing on a price missing from this list is treated as another product's and its webhooks are ignored. The first entry is what Checkout opens with when the client names no price.
 - **Deploying without `--env`.** `npx wrangler deploy` targets the development environment. Production is `npx wrangler deploy --env production`.
 - **Secrets are per environment.** Setting `STRIPE_SECRET_KEY` on the default environment does not set it for `production`.
 - **Log fields are redacted by key name.** Anything matching `authorization|api_key|secret|token|password|signature|cookie|transcript|audio|prompt|text|email` is replaced with `[redacted]`, and strings over 256 characters are truncated. If your field disappears in logs, rename it — do not weaken the pattern.

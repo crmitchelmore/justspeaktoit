@@ -26,9 +26,15 @@ export type RequestClaimStatus = 'in_flight' | 'completed';
 export interface RequestClaim {
   readonly operation: PaidOperationName;
   readonly status: RequestClaimStatus;
-  /** The response the first attempt returned; `null` while still in flight. */
-  readonly responseBody: string | null;
 }
+
+/**
+ * How long an idempotency key is remembered.
+ *
+ * Long enough to cover any retry a client could plausibly make, short enough
+ * that a content-derived key does not refuse an identical dictation for ever.
+ */
+export const REQUEST_CLAIM_TTL_SECONDS = 24 * 60 * 60;
 
 export interface UserRecord {
   readonly id: string;
@@ -486,11 +492,23 @@ export class Repository {
     correlationId: string;
     nowSeconds: number;
   }): Promise<RequestClaim | null> {
+    // Clear an expired claim first so the insert below can win it. Keys are
+    // derived from request content, so a claim that outlived its window would
+    // otherwise refuse an identical dictation for ever.
+    await this.db
+      .prepare(
+        `DELETE FROM request_claims
+          WHERE user_id = ?1 AND idempotency_key = ?2 AND expires_at <= ?3`,
+      )
+      .bind(input.userId, input.idempotencyKey, input.nowSeconds)
+      .run();
+
     const result = await this.db
       .prepare(
         `INSERT INTO request_claims
-           (id, user_id, idempotency_key, operation, status, correlation_id, created_at)
-         VALUES (?1, ?2, ?3, ?4, 'in_flight', ?5, ?6)
+           (id, user_id, idempotency_key, operation, status, correlation_id,
+            created_at, expires_at)
+         VALUES (?1, ?2, ?3, ?4, 'in_flight', ?5, ?6, ?7)
          ON CONFLICT (user_id, idempotency_key) DO NOTHING`,
       )
       .bind(
@@ -500,6 +518,7 @@ export class Repository {
         input.operation,
         input.correlationId,
         input.nowSeconds,
+        input.nowSeconds + REQUEST_CLAIM_TTL_SECONDS,
       )
       .run();
 
@@ -507,38 +526,43 @@ export class Repository {
 
     const row = await this.db
       .prepare(
-        `SELECT operation, status, response_body FROM request_claims
-          WHERE user_id = ?1 AND idempotency_key = ?2`,
+        `SELECT operation, status FROM request_claims
+          WHERE user_id = ?1 AND idempotency_key = ?2 AND expires_at > ?3`,
       )
-      .bind(input.userId, input.idempotencyKey)
-      .first<{ operation: string; status: string; response_body: string | null }>();
+      .bind(input.userId, input.idempotencyKey, input.nowSeconds)
+      .first<{ operation: string; status: string }>();
     if (row === null) {
       // The winning claim was rolled back between the insert and this read.
       // Treating that as "in flight" is the safe answer: the caller declines
       // rather than racing a request it cannot see.
-      return { operation: input.operation, status: 'in_flight', responseBody: null };
+      return { operation: input.operation, status: 'in_flight' };
     }
     return {
       operation: row.operation as PaidOperationName,
       status: row.status as RequestClaimStatus,
-      responseBody: row.response_body,
     };
   }
 
-  /** Records the response the claimed request produced, so a retry can replay it. */
+  /**
+   * Marks the claimed request as finished.
+   *
+   * Records that the work happened, never what it produced: a later retry is
+   * told the request already completed rather than being handed a replayed
+   * transcript, because storing the response would make this table a store of
+   * dictated text.
+   */
   async completeRequestClaim(input: {
     userId: string;
     idempotencyKey: string;
-    responseBody: string;
     nowSeconds: number;
   }): Promise<void> {
     await this.db
       .prepare(
         `UPDATE request_claims
-            SET status = 'completed', response_body = ?3, completed_at = ?4
+            SET status = 'completed', completed_at = ?3
           WHERE user_id = ?1 AND idempotency_key = ?2 AND status = 'in_flight'`,
       )
-      .bind(input.userId, input.idempotencyKey, input.responseBody, input.nowSeconds)
+      .bind(input.userId, input.idempotencyKey, input.nowSeconds)
       .run();
   }
 

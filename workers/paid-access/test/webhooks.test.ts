@@ -3,8 +3,9 @@ import { describe, expect, it } from 'vitest';
 import { hmacSha256Hex } from '../src/crypto.js';
 
 const WEBHOOK_SECRET = 'test-not-a-real-webhook-secret';
-/** Mirrors `STRIPE_PRICE_ID` in wrangler.toml — the only price this plan sells. */
-const PLAN_PRICE_ID = 'price_REPLACE_ME';
+/** Mirror `STRIPE_PRICE_IDS` in wrangler.toml — the prices this plan sells. */
+const PLAN_PRICE_ID = 'price_REPLACE_ME_MONTHLY';
+const PLAN_YEARLY_PRICE_ID = 'price_REPLACE_ME_YEARLY';
 
 interface StripeSubscriptionEvent {
   id: string;
@@ -303,6 +304,58 @@ describe('Stripe webhook idempotency', () => {
       .bind(first.id, second.id)
       .first<{ total: number }>();
     expect(rows?.total).toBe(2);
+  });
+
+  it('cancels a subscription whose deletion event carries no price data', async () => {
+    // `customer.subscription.deleted` routinely arrives without expanded line
+    // items. Gating cancellations on the price would leave the user entitled
+    // indefinitely — the failure that costs money rather than protecting it.
+    const userId = await seedStripeUser();
+    await postStripeWebhook(subscriptionEvent());
+    expect(await entitlementStatus(userId)).toBe('active');
+
+    const deletion = subscriptionEvent({ type: 'customer.subscription.deleted' });
+    deletion.data.object['status'] = 'canceled';
+    deletion.data.object['items'] = { data: [] };
+    expect((await postStripeWebhook(deletion)).status).toBe(200);
+
+    expect(await entitlementStatus(userId)).toBe('expired');
+  });
+
+  it('re-entitles a revoked account when a new subscription is bought', async () => {
+    // Revocation is terminal for the subscription, not for the account. A
+    // refunded user who subscribes again is charged, so they must get access.
+    const userId = await seedStripeUser();
+    await seedRevokedEntitlement(userId);
+
+    const repurchase = subscriptionEvent();
+    repurchase.data.object['id'] = 'sub_bought_again';
+    expect((await postStripeWebhook(repurchase)).status).toBe(200);
+
+    expect(await entitlementStatus(userId)).toBe('active');
+    const row = await env.DB.prepare(
+      'SELECT revoked_at, revocation_reason FROM entitlements WHERE user_id = ?1',
+    )
+      .bind(userId)
+      .first<{ revoked_at: number | null; revocation_reason: string | null }>();
+    expect(row?.revoked_at).toBeNull();
+    expect(row?.revocation_reason).toBeNull();
+  });
+
+  it('accepts a subscription billing on the plan\'s yearly price', async () => {
+    const userId = await seedStripeUser();
+    const yearly = subscriptionEvent();
+    yearly.data.object['items'] = {
+      data: [{ id: 'si_test_yearly', price: { id: PLAN_YEARLY_PRICE_ID } }],
+    };
+    expect((await postStripeWebhook(yearly)).status).toBe(200);
+
+    expect(await entitlementStatus(userId)).toBe('active');
+    const row = await env.DB.prepare('SELECT plan_id FROM entitlements WHERE user_id = ?1')
+      .bind(userId)
+      .first<{ plan_id: string }>();
+    // The price actually billed, so the record does not claim to be monthly.
+    expect(row?.plan_id).toBe(PLAN_YEARLY_PRICE_ID);
   });
 });
 

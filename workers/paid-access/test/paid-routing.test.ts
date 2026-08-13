@@ -366,23 +366,26 @@ describe('paid routing request validation', () => {
 });
 
 describe('paid routing usage accounting', () => {
-  it('replays a retried request instead of calling the provider again', async () => {
+  it('refuses a retried request instead of calling the provider again', async () => {
     const userId = await seedEntitledUser();
     const token = await tokenFor(userId);
 
     // Exactly one interceptor is registered. If the retry reached OpenRouter the
     // request would fail outright, which is the guarantee being tested: the key
     // is claimed before the vendor is called, so a client that lost the first
-    // response to a timeout gets it back rather than paying for it twice.
+    // response to a timeout cannot be charged for a second one.
     mockOpenRouterCompletion('First.');
     const first = await postProcess(token, { operation: 'post_processing', text: 'a' });
     expect(first.status).toBe(200);
     expect(((await first.json()) as { text: string }).text).toBe('First.');
 
+    // The response is deliberately not replayed. Storing it would make the
+    // claims table a store of dictated text, which the service promises never
+    // to retain, so the retry is told the work already happened instead.
     const retry = await postProcess(token, { operation: 'post_processing', text: 'a' });
-    expect(retry.status).toBe(200);
-    expect(retry.headers.get('idempotent-replay')).toBe('true');
-    expect(((await retry.json()) as { text: string }).text).toBe('First.');
+    expect(retry.status).toBe(409);
+    const body = (await retry.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('already_processed');
 
     const row = await env.DB.prepare(
       'SELECT COUNT(*) AS total FROM usage_ledger WHERE user_id = ?1',
@@ -390,6 +393,26 @@ describe('paid routing usage accounting', () => {
       .bind(userId)
       .first<{ total: number }>();
     expect(row?.total).toBe(1);
+  });
+
+  it('stores no request or response content alongside a claim', async () => {
+    const userId = await seedEntitledUser();
+    mockOpenRouterCompletion('Sensitive dictated text.');
+    await postProcess(await tokenFor(userId), {
+      operation: 'post_processing',
+      text: 'Sensitive dictated text.',
+    });
+
+    // Whatever columns the claims table grows, none of them may hold content.
+    const claim = await env.DB.prepare('SELECT * FROM request_claims WHERE user_id = ?1')
+      .bind(userId)
+      .first<Record<string, unknown>>();
+    expect(claim).not.toBeNull();
+    for (const value of Object.values(claim ?? {})) {
+      if (typeof value !== 'string') continue;
+      expect(value).not.toContain('Sensitive');
+      expect(value).not.toContain('dictated');
+    }
   });
 
   it('meters batch transcription by the duration in the WAV header, not the byte count', async () => {

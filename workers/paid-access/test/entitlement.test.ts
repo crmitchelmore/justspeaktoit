@@ -88,8 +88,12 @@ describe('entitlement transitions', () => {
     expect(canTransition('revoked', 'revoked')).toBe(true);
   });
 
-  it('rejects an illegal transition rather than silently applying it', () => {
-    const revoked = makeEntitlement({ status: 'revoked', revokedAt: NOW - 100 });
+  it('refuses to revive the very subscription that was revoked', () => {
+    const revoked = makeEntitlement({
+      status: 'revoked',
+      revokedAt: NOW - 100,
+      sourceReference: 'sub_1',
+    });
     expect(() =>
       applyUpdate(
         revoked,
@@ -107,6 +111,42 @@ describe('entitlement transitions', () => {
         NOW,
       ),
     ).toThrow(EntitlementTransitionError);
+  });
+
+  it('re-entitles a revoked account that buys a new subscription', () => {
+    // A refund revokes. If revocation were terminal for the account rather than
+    // for the subscription, the user could pay again and never get access back.
+    const revoked = makeEntitlement({
+      status: 'revoked',
+      revokedAt: NOW - 100,
+      sourceReference: 'sub_refunded',
+      revocationReason: 'refund',
+    });
+    const outcome = applyUpdate(
+      revoked,
+      {
+        status: 'active',
+        planId: 'paid',
+        source: 'stripe',
+        sourceReference: 'sub_bought_again',
+        currentPeriodStart: NOW,
+        currentPeriodEnd: NOW + 1_000,
+        cancelAtPeriodEnd: false,
+        revocationReason: null,
+        sourceEventAt: NOW,
+      },
+      NOW,
+    );
+
+    expect(outcome.kind).toBe('applied');
+    if (outcome.kind !== 'applied') return;
+    expect(outcome.next.status).toBe('active');
+    expect(grantsAccess(outcome.next, NOW)).toBe(true);
+    // The old revocation must not linger: `grantsAccess` refuses anything with a
+    // revocation stamp regardless of status.
+    expect(outcome.next.revokedAt).toBeNull();
+    expect(outcome.next.revocationReason).toBeNull();
+    expect(outcome.next.sourceReference).toBe('sub_bought_again');
   });
 
   it('discards an update that is older than the state already stored', () => {

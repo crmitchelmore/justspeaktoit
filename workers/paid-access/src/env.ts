@@ -30,7 +30,8 @@ export interface Env {
   STRIPE_SUCCESS_URL: string;
   STRIPE_CANCEL_URL: string;
   STRIPE_PORTAL_RETURN_URL: string;
-  STRIPE_PRICE_ID: string;
+  /** Comma-separated. The first entry is the price Checkout opens with. */
+  STRIPE_PRICE_IDS: string;
   STOREKIT_SUBSCRIPTION_PRODUCT_IDS: string;
   PAID_ROUTING_DISABLED: string;
 
@@ -62,7 +63,12 @@ export interface Config {
   stripeSuccessUrl: string;
   stripeCancelUrl: string;
   stripePortalReturnUrl: string;
-  stripePriceId: string;
+  /**
+   * Every price this plan sells — monthly, yearly, and any grandfathered price
+   * still billing. A subscription is ours if it bills on any of them; a single
+   * id would reject a yearly subscriber's webhooks as another product's.
+   */
+  stripePriceIds: readonly string[];
   storeKitProductIds: readonly string[];
   paidRoutingDisabled: boolean;
 }
@@ -143,7 +149,7 @@ export function loadConfig(env: Env): Config {
     stripeSuccessUrl: httpsUrl(env, 'STRIPE_SUCCESS_URL'),
     stripeCancelUrl: httpsUrl(env, 'STRIPE_CANCEL_URL'),
     stripePortalReturnUrl: httpsUrl(env, 'STRIPE_PORTAL_RETURN_URL'),
-    stripePriceId: requiredString(env, 'STRIPE_PRICE_ID'),
+    stripePriceIds: csv(env, 'STRIPE_PRICE_IDS'),
     storeKitProductIds: csv(env, 'STOREKIT_SUBSCRIPTION_PRODUCT_IDS'),
     paidRoutingDisabled: requiredString(env, 'PAID_ROUTING_DISABLED').toLowerCase() === 'true',
   };

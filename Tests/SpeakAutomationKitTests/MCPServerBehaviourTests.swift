@@ -180,6 +180,24 @@ final class MCPServerBehaviourTests: XCTestCase {
         XCTAssertEqual(error["code"] as? Int, -32602)
     }
 
+    func testUnadvertisedButValidCommand_returnsInvalidParams() throws {
+        let client = StubAutomationClient(result: AutomationResult())
+        let response = try XCTUnwrap(self.respond(
+            self.handler(client),
+            [
+                "jsonrpc": "2.0", "id": 12, "method": "tools/call",
+                "params": ["name": AutomationCommand.status.rawValue]
+            ]
+        ))
+        let error = try XCTUnwrap(response["error"] as? [String: Any])
+        XCTAssertEqual(
+            error["code"] as? Int,
+            -32602,
+            "`status` is a real socket command but is not advertised, so accepting it would make tools/list a lie"
+        )
+        XCTAssertTrue(client.sentRequests.isEmpty)
+    }
+
     func testBlankLine_isIgnored() {
         let handler = self.handler(StubAutomationClient(result: AutomationResult()))
         XCTAssertNil(handler.handle(line: "   "))

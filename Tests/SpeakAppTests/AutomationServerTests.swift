@@ -96,9 +96,21 @@ final class AutomationServerTests: XCTestCase {
         self.handler.delay = .seconds(2)
         let request = AutomationRequest(id: "req-slow", command: .stopDictation, timeout: 0.5)
 
+        let clock = ContinuousClock()
+        let started = clock.now
         let timedOut = try await self.send(request)
+        let elapsed = clock.now - started
+
         XCTAssertFalse(timedOut.ok)
         XCTAssertEqual(timedOut.error?.code, .timedOut)
+        // A reply that only arrives once the command finishes is worthless: the
+        // real client's socket read deadline is the request timeout, so it would
+        // already have hung up and the retry hint would be written to a dead socket.
+        XCTAssertLessThan(
+            elapsed,
+            .seconds(1.5),
+            "The timeout must be answered at the deadline, not after the command it gave up on"
+        )
 
         // The command was never abandoned — it owns app state — so retrying with
         // the same id joins the run in progress rather than starting another.

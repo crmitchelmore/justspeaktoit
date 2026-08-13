@@ -16,15 +16,18 @@ Paid access does not unlock any feature, model, or quality of output that you ca
 
 When paid access is switched on, your audio or text is sent to our server, which forwards it to a named provider using **our** credentials, and returns the result to you. That is the whole mechanism: we stand between you and the provider so that you do not have to hold an API key.
 
-We choose the model. Paid requests name an operation — live transcription, batch transcription, or post-processing — and our server decides which provider and model runs it. The app shows you the current choice; it cannot change it. That keeps costs predictable and means we can move a route if a provider degrades.
+We choose the model. Paid requests name an operation — recorded transcription, or post-processing — and our server decides which provider and model runs it. The app shows you the current choice; it cannot change it. That keeps costs predictable and means we can move a route if a provider degrades.
 
 | What you are doing | Who processes it | Measured in |
 | --- | --- | --- |
-| Live (streaming) transcription | Deepgram, model `nova-3` | Audio seconds |
 | Recorded (batch) transcription | OpenRouter, model `google/gemini-2.0-flash-001` | Audio seconds |
 | Post-processing of transcript text | OpenRouter, model `openai/gpt-5-mini` | Tokens |
 
-If an operation has no supported paid route, the request fails with a clear error. It is never quietly redirected to a different model or charged to your own key.
+**Live (streaming) dictation never uses paid access.** As you speak, the app transcribes with an on-device model or with your own API key exactly as it does without a subscription. Only a completed recording, or transcript text being cleaned up, is ever sent to us.
+
+**Paid access is a macOS feature today.** The iPhone app does not offer a subscription and does not route anything through our servers; it transcribes on device or with your own key.
+
+If an operation has no supported paid route, the request is completed through your own key or local model instead. It is never quietly redirected to a different paid model.
 
 ## What we process and what we keep
 
@@ -45,16 +48,18 @@ Your subscription history and usage records are append-only: they can be added t
 
 ### How long we keep it
 
-| Record | Retention |
-| --- | --- |
-| Microphone audio, transcript text, post-processing prompts | Not retained at all — in memory only, for the duration of the request |
-| Sign-in session records | Until the session is revoked or expires, then 90 days |
-| Metered usage records | 24 months from the end of the billing period they belong to |
-| Subscription state and its history | 7 years from the end of the subscription, to satisfy tax and accounting obligations |
-| Audit records | 24 months |
-| Your Apple user identifier and email address | For the life of the account, then 30 days after deletion |
+Audio, transcript text, and post-processing prompts are never written down at all, so there is nothing to keep: they exist only in memory for the duration of the request.
 
-Ask us to delete your account by emailing **privacy@justspeaktoit.com** from the address linked to it, or by quoting a recent `x-correlation-id`. We remove your Apple identifier, email address, and sign-in sessions within 30 days. Subscription and usage history is retained for the periods above because it is append-only and legally required for billing records; it is disassociated from your identifiers at deletion so it can no longer be traced back to you. The same address handles access requests, which we answer within 30 days.
+Everything in the "Retained by us" column above is kept **until we remove it by hand**. We do not currently run any automatic expiry, purge, or deletion job, and there is no delete endpoint in the service. We would rather tell you that than publish a retention schedule the software does not enforce.
+
+Two consequences worth being explicit about:
+
+- **Subscription history, usage counts, and audit records cannot be deleted, by you or by us.** The database physically rejects updates and deletions on those tables, which is what makes billing auditable. They contain counts and state transitions — never audio or transcript text.
+- **Your identity records — the Apple user identifier, your email address if Apple shared it, and your sign-in sessions — can be removed**, because they are ordinary rows. Removing them is a manual operation.
+
+To ask for that, email **privacy@justspeaktoit.com** from the address linked to your account, or quote a recent `x-correlation-id`. The same address handles questions about what we hold. We will act on requests, but we are not going to promise a fixed turnaround we have not built the tooling to guarantee.
+
+If none of this appeals, the alternative is complete and always available: use a local model or your own API key, and no record of any kind is created on our side.
 
 ## What is never logged
 
@@ -72,11 +77,10 @@ Log fields whose names look credential-shaped are redacted automatically before 
 
 | Third party | When | What they receive |
 | --- | --- | --- |
-| Deepgram | Live transcription | The audio stream |
 | OpenRouter | Recorded transcription | The audio you recorded |
 | OpenRouter | Post-processing | The transcript text and your post-processing prompt |
 | Stripe | Direct-download macOS subscriptions | Your payment details, handled by Stripe; we never see a card number |
-| Apple | App Store and iOS subscriptions | Your payment details, handled by Apple; we never see a card number |
+| Apple | Mac App Store subscriptions | Your payment details, handled by Apple; we never see a card number |
 | Cloudflare | All paid requests | Hosts our server and transports the request |
 
 If you use local models or your own API keys, **none of this applies**. Your data does not touch our servers at all: the app talks to your provider directly, or to nothing at all when the model runs on your device. Choosing paid access is the only thing that routes your dictation through us.
@@ -86,7 +90,7 @@ If you use local models or your own API keys, **none of this applies**. Your dat
 Paid access requires signing in with Apple. We use it for one thing: to know which subscription belongs to you.
 
 - We store the Apple user identifier for your account, and your email address if Apple shares it with us. Apple's Hide My Email relay address works normally.
-- One Apple account is one subscription. The same account signed in on a direct-download Mac, a Mac App Store Mac, and an iPhone resolves to the same person and the same entitlement — you do not pay twice for a second device.
+- One Apple account is one subscription. The same account signed in on a direct-download Mac and on a Mac App Store Mac resolves to the same person and the same entitlement — you do not pay twice for a second Mac.
 - Signing in does not create a profile of what you dictate. Your account record holds identity, subscription state and usage counts, and nothing about the content of your transcriptions.
 - Signing out revokes that device's session. It does not cancel your subscription, and it does not affect local models or your own keys.
 
@@ -97,7 +101,7 @@ How you cancel depends on where you subscribed, because that determines who take
 | Where you subscribed | How to cancel |
 | --- | --- |
 | Direct-download macOS build | Open the Stripe customer portal from the app's paid access settings, and cancel there |
-| Mac App Store, iOS App Store, or TestFlight | Cancel in Apple's subscription settings: **Settings → your name → Subscriptions** on iPhone, or **App Store → Account → Settings** on Mac |
+| Mac App Store or TestFlight | Cancel in Apple's subscription settings: **App Store → Account → Settings** on Mac, or **Settings → your name → Subscriptions** on iPhone |
 
 We cannot cancel an App Store subscription for you; only Apple can. Equally, cancelling in Apple's settings has no effect on a Stripe subscription, and vice versa.
 
@@ -120,8 +124,8 @@ No. We do not train models, and we do not supply your data to anyone for trainin
 **Can I use paid access without signing in?**
 No. A subscription has to belong to an account, and Sign in with Apple is the only identity we accept.
 
-**I subscribed on my Mac. Do I have to pay again on my iPhone?**
-No. Sign in with the same Apple account and the entitlement is already there.
+**I subscribed on my Mac. Does it work on my iPhone?**
+Not yet. The iPhone app does not use paid access at all: it transcribes on device or with your own API key. Your subscription is not charged twice and nothing changes for it — there is simply nothing on iPhone that routes through us.
 
 **Is paid access better quality than my own key?**
 Not inherently. It runs a fixed, current set of models chosen for good general results. If you have a key for a model you prefer, use it.
@@ -130,18 +134,16 @@ Not inherently. It runs a fixed, current set of models chosen for good general r
 It depends on how much you dictate. It is a flat monthly or yearly cost with a monthly allowance; your own key is metered by the provider. Heavy users of a cheap model may pay less with their own key, and local models cost nothing.
 
 **What happens if I run out of my monthly allowance?**
-Paid requests stop until the next period, with an explicit error rather than a silent charge. Local models and your own keys keep working.
+Paid routing stops until the next period. The app completes the request with the model you had configured — your own key, or an on-device model — rather than charging you extra or losing what you dictated.
 
 **What happens if your server is down?**
-Paid requests fail. Local models and your own keys are unaffected, because they never involve our server.
+The same thing: the app falls back to your own key or an on-device model, and your dictation completes. Local models and your own keys never involve our server at all.
 
 **Can you delete my account data?**
-Subscription and usage history is append-only and kept for billing integrity, so it is not removed on request. It contains no audio or transcript text. Cancel your subscription, sign out, and nothing further is recorded about you.
+Your identity records — Apple user identifier, email address, sign-in sessions — can be removed on request; that is a manual operation, not an automated one, and we do not quote a turnaround for it. Subscription and usage history cannot be removed at all: the database rejects deletions on those tables so that billing stays auditable. It contains counts and state transitions, never audio or transcript text. Cancel your subscription, sign out, and nothing further is recorded about you.
 
 **Who do I contact about this?**
-See the contact address in [`PRIVACY.md`](PRIVACY.md).
-
-> **TODO:** the paid access contact address is inherited from `PRIVACY.md`, which still carries a placeholder. Set a real address in both before publishing.
+Email **privacy@justspeaktoit.com**.
 
 ---
 

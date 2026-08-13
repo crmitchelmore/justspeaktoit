@@ -84,6 +84,8 @@ The dashed path matters: BYO and local users never contact our servers. Only pai
 
 The client hides the wrong control for its channel, and the Worker rejects it anyway. Client-side selection is a UX affordance, not the control.
 
+**iOS does not sell paid access yet.** `PaidAccessStore` compiles and can hold an entitlement bought on a Mac, but nothing on iOS routes work through it — `iOSBatchTranscriber`, `VoiceSummariser` and `PostProcessingView` all go straight to the user's own key or an on-device model. The purchase UI is therefore switched off behind `PaidAccessFeature.isAvailableOnIOS` (`Sources/SpeakiOS/Services/PaidAccessStore.swift`) so nobody is charged for routing that does not happen. Wire those three call sites through a proxy client, then flip that constant.
+
 Identity is shared. The same Apple account signing in on a direct-download Mac and on an iPhone resolves to one user row and one entitlement, whichever channel paid for it. A user who subscribes through Stripe on a Mac is entitled on their iPhone without a second purchase.
 
 ## External product setup
@@ -222,6 +224,11 @@ client must send that value back as `session_id` to
 `POST /v1/paid/transcribe/live/finalise` when the socket closes, which commits
 the measured duration and releases the remainder of the reservation.
 
+**No shipping client opens this socket yet.** The endpoint and its lease
+lifecycle are complete on the server, but macOS and iOS still stream through the
+user's own key or an on-device model, so the paths below are exercised by the
+Worker's own tests rather than by the apps.
+
 If the client never finalises, the reservation is reclaimed when its lease
 expires (`MAX_LIVE_SESSION_SECONDS` plus a minute), so a crashed client cannot
 hold a concurrency slot indefinitely and cannot under-report usage.
@@ -326,7 +333,7 @@ Run these in order after a production deploy. Each is a separate gate; a green e
 
 8. **Cross-channel identity.** Sign in with the same Apple account on the other platform and confirm the entitlement is already present without a second purchase.
 
-9. **A real paid request meters.** Run one live transcription and one post-processing request from the app, then:
+9. **A real paid request meters.** Run one recorded (batch) transcription and one post-processing request from the app, then:
 
    ```bash
    npx wrangler d1 execute paid-access --remote \
@@ -336,6 +343,8 @@ Run these in order after a production deploy. Each is a separate gate; a green e
    ```
 
    Expect rows naming only the Best models, with plausible unit counts and no transcript content.
+
+   Live transcription is deliberately not part of this step. The Worker serves `/v1/paid/transcribe/live`, but **no client sends audio to it**: streaming dictation on macOS and iOS still runs through the user's own key or an on-device model, and the apps do not advertise the live route in Settings. Add a live leg to this step in the same change that wires the client socket up.
 
 10. **Kill switch rehearsal.** In staging only, set `PAID_ROUTING_DISABLED = "true"`, confirm a 503 with `paid_routing_disabled`, confirm the app falls back to BYO/local, then set it back.
 
@@ -380,7 +389,9 @@ To grant, extend or revoke access manually, apply a `manual`-source entitlement 
 
 ### Retention
 
-| Table | Retention | Operator action |
+**None of this is implemented.** There is no scheduled Worker, no purge job, and no delete endpoint: every row the service writes stays until an operator removes it by hand with `wrangler d1 execute`. The table below is the intended policy and the manual procedure for applying it, not a description of what the service currently does. [`paid-access-privacy.md`](paid-access-privacy.md) deliberately publishes no retention periods for that reason — do not add them there until a job enforces them.
+
+| Table | Intended retention | Operator action (manual) |
 | --- | --- | --- |
 | `auth_sessions` | 90 days after `revoked_at` or `expires_at` | Monthly purge of rows past both |
 | `usage_ledger` | 24 months from the end of `billing_period` | Monthly purge of older periods |
@@ -389,6 +400,4 @@ To grant, extend or revoke access manually, apply a `manual`-source entitlement 
 | `audit_events` | 24 months | Monthly purge of older rows |
 | `users` | Life of the account, then 30 days | On a deletion request, clear `apple_sub` and `email` and disable the account within 30 days |
 
-Deletion and access requests arrive at the address published in [`paid-access-privacy.md`](paid-access-privacy.md). Handling a deletion request means disabling the account, revoking its sessions, and clearing the Apple identifier and email address; the append-only billing history stays, without identifiers that tie it to a person. Answer both request types within 30 days.
-
-These periods are duplicated in [`paid-access-privacy.md`](paid-access-privacy.md) and the two must be changed together.
+Deletion and access requests arrive at **privacy@justspeaktoit.com**, the address published in [`paid-access-privacy.md`](paid-access-privacy.md). Handling a deletion request means disabling the account, revoking its sessions, and clearing the Apple identifier and email address, by hand; the append-only billing history stays, without identifiers that tie it to a person. The privacy notice promises no turnaround, because nothing here guarantees one — answer promptly, and do not publish a deadline until the work is automated.

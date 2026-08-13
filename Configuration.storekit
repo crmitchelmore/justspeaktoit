@@ -98,7 +98,57 @@
       }
     ]
   },
-  "subscriptionGroups" : [],
+  "subscriptionGroups" : [
+    {
+      "id" : "21598374",
+      "localizations" : [],
+      "name" : "Just Speak to It Paid Access",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "6.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "paid_monthly",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Best models with no API keys to manage. On-device models and your own keys stay free.",
+              "displayName" : "Paid Access (Monthly)",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.justspeaktoit.paid.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Paid Access Monthly",
+          "subscriptionGroupID" : "21598374",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "59.99",
+          "familyShareable" : false,
+          "groupNumber" : 2,
+          "internalID" : "paid_yearly",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Best models with no API keys to manage, billed yearly. On-device models and your own keys stay free.",
+              "displayName" : "Paid Access (Yearly)",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.justspeaktoit.paid.yearly",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Paid Access Yearly",
+          "subscriptionGroupID" : "21598374",
+          "type" : "RecurringSubscription"
+        }
+      ]
+    }
+  ],
   "version" : {
     "major" : 3,
     "minor" : 0

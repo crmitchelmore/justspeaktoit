@@ -164,24 +164,12 @@ final class MainManager: ObservableObject {
       }
       .store(in: &cancellables)
 
-    transcriptionManager.$livePartialText
+    transcriptionManager.$liveTranscript
       .receive(on: RunLoop.main)
-      .sink { [weak self] text in
-        self?.handleLiveTextUpdate(text)
+      .sink { [weak self] snapshot in
+        self?.handleLiveTranscriptSnapshot(snapshot)
       }
       .store(in: &cancellables)
-
-    // Forward live transcription updates to HUD manager
-    Publishers.CombineLatest3(
-      transcriptionManager.$livePartialText,
-      transcriptionManager.$liveTextIsFinal,
-      transcriptionManager.$liveTextConfidence
-    )
-    .receive(on: RunLoop.main)
-    .sink { [weak self] text, isFinal, confidence in
-      self?.hudManager.updateLiveTranscription(text: text, isFinal: isFinal, confidence: confidence)
-    }
-    .store(in: &cancellables)
 
     // Subscribe to live polish updates
     livePolishManager.$polishedTail
@@ -234,6 +222,22 @@ final class MainManager: ObservableObject {
     ) { [weak self] _ in
       self?.stopAudioLevelMonitoring()
     }
+  }
+
+  /// Applies a live-transcript snapshot to the preview and the HUD.
+  ///
+  /// Delivery is deferred onto the run loop, so a snapshot published by one
+  /// recording can arrive after the next one has already started. Snapshots
+  /// that no longer belong to the current live session are dropped instead of
+  /// repainting the previous recording's text over the live view (issue #643).
+  private func handleLiveTranscriptSnapshot(_ snapshot: LiveTranscriptSnapshot) {
+    guard snapshot.sessionID == transcriptionManager.liveTranscript.sessionID else { return }
+    handleLiveTextUpdate(snapshot.text)
+    hudManager.updateLiveTranscription(
+      text: snapshot.text,
+      isFinal: snapshot.isFinal,
+      confidence: snapshot.confidence
+    )
   }
 
   /// Handle live text updates and trigger live polish if enabled
@@ -463,6 +467,9 @@ final class MainManager: ObservableObject {
 
     // Failsafe: if live transcription is still running but we have no activeSession,
     // cancel it so the app can always recover without requiring a restart.
+    //
+    // The switcher serialises this teardown with a replacement start and guards
+    // ownership by run, including when both runs reuse the same controller.
     if transcriptionManager.isLiveTranscribing {
       logger.warning("Live transcription still running without an active session; cancelling to recover")
       transcriptionManager.cancelLiveTranscription()
@@ -481,7 +488,11 @@ final class MainManager: ObservableObject {
       recordingSoundPlayer.play(.start, volume: appSettings.recordingSoundVolume)
     }
     lastErrorMessage = nil
+    livePreview = ""
     polishedLivePreview = ""
+    // Every recording starts from a blank live transcript, including batch
+    // modes that never open a live session (issue #643).
+    transcriptionManager.resetLiveTranscriptDisplay()
     session.events.append(
       HistoryEvent(
         kind: .recordingStarted,

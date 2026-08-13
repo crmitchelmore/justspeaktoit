@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import SpeakCore
 import AppKit
 @preconcurrency import AVFoundation
@@ -33,12 +34,24 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     activeController?.isRunning ?? false
   }
 
+  /// Notified whenever ownership of the live session moves to another
+  /// controller (or is released on stop), so transcript display state can be
+  /// scoped to the controller that is actually recording (issue #643).
+  var sessionSourceDidChange: (((any LiveTranscriptionController)?) -> Void)?
+
   private let appSettings: AppSettings
   private let permissionsManager: PermissionsManager
   private let audioDeviceManager: AudioInputDeviceManager
   private let secureStorage: SecureAppStorage
   private let nowProvider: () -> Date
-  private var activeController: (any LiveTranscriptionController)?
+  private let controllerOverride: ((String) -> any LiveTranscriptionController)?
+  private var activeRun: ActiveRun? {
+    didSet {
+      sessionSourceDidChange?(activeController)
+    }
+  }
+  private var pendingStop: PendingStop?
+  private var activeController: (any LiveTranscriptionController)? { activeRun?.controller }
   private var controllers: ControllerSet
   private var currentLanguage: String?
   private var currentModel: String?
@@ -52,13 +65,15 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     permissionsManager: PermissionsManager,
     audioDeviceManager: AudioInputDeviceManager,
     secureStorage: SecureAppStorage,
-    nowProvider: @escaping () -> Date = Date.init
+    nowProvider: @escaping () -> Date = Date.init,
+    controllerOverride: ((String) -> any LiveTranscriptionController)? = nil
   ) {
     self.appSettings = appSettings
     self.permissionsManager = permissionsManager
     self.audioDeviceManager = audioDeviceManager
     self.secureStorage = secureStorage
     self.nowProvider = nowProvider
+    self.controllerOverride = controllerOverride
     controllers = ControllerSet(
       appSettings: appSettings,
       permissionsManager: permissionsManager,
@@ -87,6 +102,10 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   }
 
   func start() async throws {
+    if let activeRun {
+      await stop(activeRun)
+    }
+
     let model = currentModel ?? appSettings.liveTranscriptionModel
     print("[SwitchingLiveTranscriber] Starting with model: \(model)")
     if shouldResetControllersBeforeStart(at: nowProvider()) {
@@ -95,7 +114,9 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     }
 
     let controller = controller(for: model)
-    activeController = controller
+    controller.delegate = delegate
+    controller.configure(language: currentLanguage, model: model)
+    let run = activate(controller)
     do {
       try await controller.start()
       invalidateBeforeNextStart = false
@@ -109,18 +130,18 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
           language: currentLanguage,
           model: AppleLocalModels.legacySpeechModelID
         )
-        activeController = nativeController
+        let fallbackRun = activate(nativeController)
         do {
           try await nativeController.start()
           invalidateBeforeNextStart = false
           return
         } catch {
-          activeController = nil
+          release(fallbackRun)
           invalidateBeforeNextStart = true
           throw error
         }
       }
-      activeController = nil
+      release(run)
       invalidateBeforeNextStart = true
       throw error
     }
@@ -128,12 +149,21 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
 
   func stop() async {
     print("[SwitchingLiveTranscriber] Stopping...")
-    await activeController?.stop()
-    activeController = nil
-    lastStopDate = nowProvider()
+    guard let activeRun else { return }
+    await stop(activeRun)
+  }
+
+  /// Captures the current run before asynchronous teardown is scheduled. This
+  /// prevents a delayed cancellation task from targeting a replacement run.
+  func scheduleStop() {
+    guard let activeRun else { return }
+    Task { @MainActor [weak self] in
+      await self?.stop(activeRun)
+    }
   }
 
   func controller(for model: String) -> any LiveTranscriptionController {
+    if let controllerOverride { return controllerOverride(model) }
     if model == AppleLocalModels.speechTranscriberModelID {
       return controllers.speechAnalyzer
     }
@@ -186,7 +216,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   }
 
   private func resetControllers() {
-    activeController = nil
+    activeRun = nil
     controllers = ControllerSet(
       appSettings: appSettings,
       permissionsManager: permissionsManager,
@@ -196,6 +226,51 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     invalidateBeforeNextStart = false
     lastStopDate = nil
     applyDelegateAndConfiguration()
+  }
+
+  @discardableResult
+  private func activate(_ controller: any LiveTranscriptionController) -> ActiveRun {
+    let run = ActiveRun(controller: controller)
+    activeRun = run
+    return run
+  }
+
+  private func release(_ run: ActiveRun) {
+    guard activeRun?.id == run.id else { return }
+    activeRun = nil
+  }
+
+  /// Serialises teardown with a replacement start. The run ID matters because
+  /// cached controllers can represent both recordings with the same object.
+  private func stop(_ run: ActiveRun) async {
+    guard activeRun?.id == run.id || pendingStop?.run.id == run.id else { return }
+    let task: Task<Void, Never>
+    if let pendingStop, pendingStop.run.id == run.id {
+      task = pendingStop.task
+    } else {
+      task = Task { @MainActor in
+        await run.controller.stop()
+      }
+      pendingStop = PendingStop(run: run, task: task)
+    }
+
+    await task.value
+    if pendingStop?.run.id == run.id {
+      pendingStop = nil
+    }
+    guard activeRun?.id == run.id else { return }
+    activeRun = nil
+    lastStopDate = nowProvider()
+  }
+
+  private struct ActiveRun {
+    let id = UUID()
+    let controller: any LiveTranscriptionController
+  }
+
+  private struct PendingStop {
+    let run: ActiveRun
+    let task: Task<Void, Never>
   }
 
   private func startObservingLifecycle() {

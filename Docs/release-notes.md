@@ -51,16 +51,25 @@ compiled into SpeakCore's resource bundle and read through
 `ReleaseNotesCatalog.bundled`; `ReleaseNotesBrowser` selects the installed
 version by default and keeps earlier versions browsable.
 
-`.github/workflows/release-mac.yml` refreshes the catalogue from the freshly
-generated Markdown *before* the archive is built, so every published build
-contains the notes for its own version:
+`.github/workflows/release-mac.yml` refreshes the catalogue *before* the archive
+is built, so every published build contains the notes for its own version. It
+runs the updater twice:
 
 ```bash
+# 1. Restore the history released since the checked-in file was last refreshed.
+node scripts/update-release-notes-catalogue.mjs --backfill
+
+# 2. Merge in the notes for the tag being released.
 node scripts/update-release-notes-catalogue.mjs \
   --version 2.46.0 --tag mac-v2.46.0 --notes-file "$RUNNER_TEMP/release-notes.md"
 ```
 
-Refresh the checked-in history from published GitHub releases with the `gh` CLI:
+The rebuilt catalogue lives only in the runner's checkout — the release job does
+not commit it back to `main`. The backfill is what keeps the shipped history
+complete: without it each release would merge a single entry onto whatever was
+last committed, and every version released in between would be missing. The
+checked-in file therefore only needs to be a reasonable starting point; run the
+same backfill locally (it needs an authenticated `gh` CLI) when refreshing it:
 
 ```bash
 node scripts/update-release-notes-catalogue.mjs --backfill --limit 12
@@ -69,4 +78,5 @@ node scripts/update-release-notes-catalogue.mjs --backfill --limit 12
 Entries are keyed by marketing version, sorted newest first, capped at
 `--limit` (12 by default) and stripped of the compare-URL footer and generator
 HTML comment. Notes for a build that has not been released yet are absent by
-design; the app then opens on the newest bundled version and says so.
+design; the app then opens on the newest bundled version and says so. A build
+older than every bundled entry simply says it is showing the latest notes.

@@ -140,9 +140,18 @@ jobs:
             --output "$RUNNER_TEMP/release-notes.md" \
             --html-output "$RUNNER_TEMP/release-notes.html"
 
+      # The catalogue is rebuilt in the runner's checkout and never committed
+      # back, so the checked-in file is only ever a starting point and goes
+      # stale between releases. Backfilling from the published releases first
+      # restores the versions released since it was last refreshed; the new
+      # tag's own notes are then merged on top.
       - name: Bundle release notes into the app
         if: startsWith(github.ref, 'refs/tags/mac-v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          node scripts/update-release-notes-catalogue.mjs --backfill \
+            || echo "::warning::Release-note backfill failed; bundling the checked-in history instead"
           node scripts/update-release-notes-catalogue.mjs \
             --version "${{ steps.version.outputs.version }}" \
             --tag "${GITHUB_REF_NAME}" \

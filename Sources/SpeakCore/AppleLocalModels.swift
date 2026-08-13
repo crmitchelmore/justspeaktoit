@@ -40,13 +40,6 @@ public enum AppleLocalModels {
         )
     }
 
-    public static func preferredSpeechModelID(speechTranscriberAvailable: Bool) -> String {
-        preferredSpeechModelID(
-            speechTranscriberAvailable: speechTranscriberAvailable,
-            dictationTranscriberAvailable: false
-        )
-    }
-
     public static func preferredSpeechModelID(
         speechTranscriberAvailable: Bool,
         dictationTranscriberAvailable: Bool
@@ -83,20 +76,24 @@ public enum AppleLocalModelError: LocalizedError {
     case foundationModelUnavailable
     case emptyTranscript
 
+    // Descriptions stay engine-neutral: the same errors surface from both
+    // SpeechTranscriber and DictationTranscriber, so naming one engine would
+    // misreport failures from the other.
     public var errorDescription: String? {
         switch self {
         case .speechTranscriberUnavailable:
-            return "Apple SpeechTranscriber isn't available on this device."
+            return "Apple on-device speech recognition isn't available on this device."
         case .localeUnsupported(let identifier):
-            return "Apple SpeechTranscriber doesn't support the \(identifier) locale on this device."
+            return "Apple on-device speech recognition doesn't support the \(identifier) locale "
+                + "on this device."
         case .modelAssetsUnavailable:
             return "Apple's on-device speech model could not be installed."
         case .compatibleAudioFormatUnavailable:
-            return "Apple SpeechTranscriber could not provide a compatible audio format."
+            return "Apple on-device speech recognition could not provide a compatible audio format."
         case .foundationModelUnavailable:
             return "Apple Intelligence's on-device language model isn't available on this device."
         case .emptyTranscript:
-            return "Apple SpeechTranscriber returned an empty transcript."
+            return "Apple on-device speech recognition returned an empty transcript."
         }
     }
 }

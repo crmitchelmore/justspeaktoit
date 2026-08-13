@@ -88,6 +88,68 @@ enum AppleSpeechAnalyzerModule {
     }
 }
 
+/// The asset-inventory states the install wait reacts to, mirrored off
+/// `AssetInventory.Status` so the wait policy stays testable on any OS.
+enum AppleSpeechAssetStatus: Sendable, Equatable {
+    case unsupported
+    case supported
+    case downloading
+    case installed
+}
+
+@available(macOS 26.0, iOS 26.0, *)
+extension AppleSpeechAssetStatus {
+    init(_ status: AssetInventory.Status) {
+        switch status {
+        case .unsupported: self = .unsupported
+        case .supported: self = .supported
+        case .downloading: self = .downloading
+        case .installed: self = .installed
+        @unknown default: self = .unsupported
+        }
+    }
+}
+
+/// What the asset-install wait loop should do after one inventory poll.
+enum AppleSpeechAssetWaitStep: Sendable, Equatable {
+    case installed
+    case keepWaiting
+    case giveUp
+}
+
+/// How long the SpeechAnalyzer asset wait tolerates each inventory state.
+///
+/// `.downloading` gets the full budget because a cold model download is slow.
+/// `.supported` means "installable but not installing", which only resolves
+/// itself while an install request is in flight — so it gets a short grace
+/// window when one was issued, and no wait at all when none was, instead of
+/// silently consuming the whole download budget before failing.
+enum AppleSpeechAssetWaitPolicy {
+    static let pollInterval = Duration.milliseconds(250)
+    /// 120 × 250ms = 30s.
+    static let maxPolls = 120
+    /// 8 × 250ms = 2s.
+    static let supportedGracePolls = 8
+
+    static func step(
+        status: AppleSpeechAssetStatus,
+        didRequestInstall: Bool,
+        consecutiveSupportedPolls: Int
+    ) -> AppleSpeechAssetWaitStep {
+        switch status {
+        case .installed:
+            return .installed
+        case .downloading:
+            return .keepWaiting
+        case .supported:
+            guard didRequestInstall else { return .giveUp }
+            return consecutiveSupportedPolls <= supportedGracePolls ? .keepWaiting : .giveUp
+        case .unsupported:
+            return .giveUp
+        }
+    }
+}
+
 /// Result fields shared by every SpeechAnalyzer module the app uses.
 @available(macOS 26.0, iOS 26.0, *)
 struct AppleSpeechAnalyzerModuleResult: Sendable {
@@ -187,10 +249,15 @@ public enum AppleSpeechAnalyzerTranscriber {
         case .installed:
             return
         case .supported, .downloading:
+            var didRequestInstall = false
             if let request = try await AssetInventory.assetInstallationRequest(supporting: modules) {
+                didRequestInstall = true
                 try await request.downloadAndInstall()
             }
-            guard try await waitForInstalledAssets(for: modules) else {
+            guard try await waitForInstalledAssets(
+                for: modules,
+                didRequestInstall: didRequestInstall
+            ) else {
                 throw AppleLocalModelError.modelAssetsUnavailable
             }
         case .unsupported:
@@ -200,19 +267,28 @@ public enum AppleSpeechAnalyzerTranscriber {
         }
     }
 
-    private static func waitForInstalledAssets(for modules: [any SpeechModule]) async throws -> Bool {
-        for _ in 0 ..< 120 {
+    /// Polls the asset inventory until the modules report `.installed`, applying
+    /// `AppleSpeechAssetWaitPolicy` so a device with nothing left to download
+    /// fails fast instead of burning the whole download budget.
+    private static func waitForInstalledAssets(
+        for modules: [any SpeechModule],
+        didRequestInstall: Bool
+    ) async throws -> Bool {
+        var consecutiveSupportedPolls = 0
+        for _ in 0 ..< AppleSpeechAssetWaitPolicy.maxPolls {
             try Task.checkCancellation()
-            switch await AssetInventory.status(forModules: modules) {
+            let status = AppleSpeechAssetStatus(await AssetInventory.status(forModules: modules))
+            consecutiveSupportedPolls = status == .supported ? consecutiveSupportedPolls + 1 : 0
+            switch AppleSpeechAssetWaitPolicy.step(
+                status: status,
+                didRequestInstall: didRequestInstall,
+                consecutiveSupportedPolls: consecutiveSupportedPolls
+            ) {
             case .installed:
                 return true
-            case .downloading, .supported:
-                // `.supported` is transient right after `downloadAndInstall()` returns —
-                // the inventory can report it before flipping to `.downloading`/`.installed`.
-                try await Task.sleep(for: .milliseconds(250))
-            case .unsupported:
-                return false
-            @unknown default:
+            case .keepWaiting:
+                try await Task.sleep(for: AppleSpeechAssetWaitPolicy.pollInterval)
+            case .giveUp:
                 return false
             }
         }

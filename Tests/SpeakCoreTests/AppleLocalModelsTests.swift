@@ -107,6 +107,79 @@ final class AppleLocalModelsTests: XCTestCase {
         }
     }
 
+    // MARK: - Asset install wait policy
+
+    func testAssetWait_installedStopsImmediately() {
+        XCTAssertEqual(
+            AppleSpeechAssetWaitPolicy.step(
+                status: .installed, didRequestInstall: true, consecutiveSupportedPolls: 0
+            ),
+            .installed
+        )
+    }
+
+    func testAssetWait_supportedWithoutInstallRequestFailsFast() {
+        // Nothing was queued for download, so `.supported` will never advance:
+        // waiting out the 30s budget just delays an inevitable failure.
+        XCTAssertEqual(
+            AppleSpeechAssetWaitPolicy.step(
+                status: .supported, didRequestInstall: false, consecutiveSupportedPolls: 1
+            ),
+            .giveUp
+        )
+    }
+
+    func testAssetWait_supportedAfterInstallRequestGetsShortGraceOnly() {
+        // `.supported` is transient right after `downloadAndInstall()` returns,
+        // so it is tolerated briefly and then abandoned.
+        XCTAssertEqual(
+            AppleSpeechAssetWaitPolicy.step(
+                status: .supported, didRequestInstall: true, consecutiveSupportedPolls: 1
+            ),
+            .keepWaiting
+        )
+        XCTAssertEqual(
+            AppleSpeechAssetWaitPolicy.step(
+                status: .supported,
+                didRequestInstall: true,
+                consecutiveSupportedPolls: AppleSpeechAssetWaitPolicy.supportedGracePolls
+            ),
+            .keepWaiting
+        )
+        XCTAssertEqual(
+            AppleSpeechAssetWaitPolicy.step(
+                status: .supported,
+                didRequestInstall: true,
+                consecutiveSupportedPolls: AppleSpeechAssetWaitPolicy.supportedGracePolls + 1
+            ),
+            .giveUp
+        )
+        XCTAssertLessThan(
+            AppleSpeechAssetWaitPolicy.supportedGracePolls,
+            AppleSpeechAssetWaitPolicy.maxPolls
+        )
+    }
+
+    func testAssetWait_downloadingKeepsFullBudget() {
+        XCTAssertEqual(
+            AppleSpeechAssetWaitPolicy.step(
+                status: .downloading,
+                didRequestInstall: false,
+                consecutiveSupportedPolls: AppleSpeechAssetWaitPolicy.maxPolls
+            ),
+            .keepWaiting
+        )
+    }
+
+    func testAssetWait_unsupportedGivesUp() {
+        XCTAssertEqual(
+            AppleSpeechAssetWaitPolicy.step(
+                status: .unsupported, didRequestInstall: true, consecutiveSupportedPolls: 0
+            ),
+            .giveUp
+        )
+    }
+
     func testDictationTranscriberModel_routesToAppleOnDevice() {
         XCTAssertEqual(
             ModelRouting.family(for: AppleLocalModels.dictationTranscriberModelID),

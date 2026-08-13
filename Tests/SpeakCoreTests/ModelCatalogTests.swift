@@ -249,11 +249,17 @@ final class ModelCatalogTests: XCTestCase {
 
     func testAppleSpeechModelSelection_preservesLegacyFallback() {
         XCTAssertEqual(
-            AppleLocalModels.preferredSpeechModelID(speechTranscriberAvailable: true),
+            AppleLocalModels.preferredSpeechModelID(
+                speechTranscriberAvailable: true,
+                dictationTranscriberAvailable: false
+            ),
             AppleLocalModels.speechTranscriberModelID
         )
         XCTAssertEqual(
-            AppleLocalModels.preferredSpeechModelID(speechTranscriberAvailable: false),
+            AppleLocalModels.preferredSpeechModelID(
+                speechTranscriberAvailable: false,
+                dictationTranscriberAvailable: false
+            ),
             AppleLocalModels.legacySpeechModelID
         )
         XCTAssertEqual(

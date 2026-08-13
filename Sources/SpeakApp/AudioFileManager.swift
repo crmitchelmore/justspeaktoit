@@ -84,6 +84,10 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
   private var currentRecordingID: UUID?
   private var currentRecordingStart: Date?
   private var currentRecordingOwner: AudioRecordingOwner?
+  /// Reserves the recorder across permission and input-device awaits. Without
+  /// this, actor reentrancy can admit a second start or stage a new warm
+  /// recorder while the first start is still configuring its input session.
+  private var isStartingRecording = false
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
   private var staged: StagedRecorder?
   private var warmMachine = CaptureWarmStateMachine()
@@ -136,7 +140,7 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
   /// Keeping both together prevents auxiliary recording flows from invalidating
   /// the recorder while a separate coordinator still believes it is ready.
   func reconcileWarmRecorder(for context: CaptureWarmContext, enabled: Bool) {
-    guard self.recorder == nil else {
+    guard self.recorder == nil, !self.isStartingRecording else {
       self.applyWarmAction(self.warmMachine.recordingBeganWithoutClaim())
       return
     }
@@ -236,7 +240,11 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
     warmContext: CaptureWarmContext? = nil,
     owner: AudioRecordingOwner = .auxiliary
   ) async throws -> RecordingStart {
-    guard recorder == nil else { throw AudioFileManagerError.alreadyRecording }
+    guard self.recorder == nil, !self.isStartingRecording else {
+      throw AudioFileManagerError.alreadyRecording
+    }
+    self.isStartingRecording = true
+    defer { self.isStartingRecording = false }
 
     let permissionStatus = await MainActor.run {
       permissionsManager.refresh(.microphone)

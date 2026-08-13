@@ -185,6 +185,8 @@ final class CaptureWarmCoordinator { // swiftlint:disable:this type_body_length
   func sessionWillBegin() {
     self.isSessionActive = true
     self.scheduler.cancel()
+    self.audioWarmTask?.cancel()
+    self.audioWarmTask = nil
     self.endpointProbeTask?.cancel()
     self.endpointProbeTask = nil
     self.streamTracker.invalidate()

@@ -121,6 +121,16 @@ extension SettingsView {
               : "Text will replace the entire contents of the focused text field.")
               .font(.caption)
               .foregroundStyle(.secondary)
+
+            settingsToggle(
+              "Stream text while dictating (experimental)",
+              isOn: settingsBinding(\AppSettings.streamingInsertionEnabled),
+              tint: .brandLagoon
+            )
+            .speakTooltip(
+              "Type words into supported apps (TextEdit, Notes) as you speak, correcting them live. "
+                + "Other apps keep the normal paste-at-end behaviour."
+            )
           }
           VStack(alignment: .leading, spacing: 8) {
             if DistributionChannel.current.supportsAccessibilityTextInsertion {

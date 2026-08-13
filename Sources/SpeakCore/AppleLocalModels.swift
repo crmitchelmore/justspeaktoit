@@ -49,6 +49,15 @@ public enum AppleLocalModels {
         return legacySpeechModelID
     }
 
+    /// Preserves the original selection API for package consumers that only
+    /// know about SpeechTranscriber availability.
+    public static func preferredSpeechModelID(speechTranscriberAvailable: Bool) -> String {
+        preferredSpeechModelID(
+            speechTranscriberAvailable: speechTranscriberAvailable,
+            dictationTranscriberAvailable: false
+        )
+    }
+
     public static var supportsFoundationModels: Bool {
         #if canImport(FoundationModels)
         if #available(macOS 26.0, iOS 26.0, *) {

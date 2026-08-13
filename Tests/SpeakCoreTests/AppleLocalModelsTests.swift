@@ -31,6 +31,17 @@ final class AppleLocalModelsTests: XCTestCase {
         )
     }
 
+    func testPreferredSpeechModelID_oneArgumentAPIKeepsLegacySelectionBehaviour() {
+        XCTAssertEqual(
+            AppleLocalModels.preferredSpeechModelID(speechTranscriberAvailable: true),
+            AppleLocalModels.speechTranscriberModelID
+        )
+        XCTAssertEqual(
+            AppleLocalModels.preferredSpeechModelID(speechTranscriberAvailable: false),
+            AppleLocalModels.legacySpeechModelID
+        )
+    }
+
     func testModelClassification_coversAnalyzerEngines() {
         XCTAssertTrue(AppleLocalModels.isSpeechAnalyzerModel(AppleLocalModels.speechTranscriberModelID))
         XCTAssertTrue(AppleLocalModels.isSpeechAnalyzerModel(AppleLocalModels.dictationTranscriberModelID))

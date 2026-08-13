@@ -307,6 +307,7 @@ let watchAppTarget: Target = .target(
         "Sources/SpeakCore/WatchCaptureProtocol.swift",
         "Sources/SpeakCore/WatchComplicationState.swift",
         "Sources/SpeakCore/WatchRecordingLifecycle.swift",
+        "Sources/SpeakCore/WatchRecordingToggleSerialiser.swift",
         "Sources/SpeakCore/WatchSharedContainer.swift"
     ],
     entitlements: .file(path: "JustSpeakWatch/JustSpeakWatch.entitlements"),

@@ -23,9 +23,9 @@ struct JustSpeakWatchApp: App {
                     await WatchRecordingCoordinator.shared.performPendingWatchFaceRequest()
                 }
                 .onChange(of: scenePhase) { _, phase in
-                    // A complication tap made while the app was not running
-                    // leaves a request behind; perform it now that the audio
-                    // session is available.
+                    // The watchOS 10 fallback can leave a request while opening
+                    // the app; perform it once the audio session is available.
+                    // watchOS 11+ runs its AudioRecordingIntent headlessly.
                     guard phase == .active else { return }
                     Task {
                         await WatchRecordingCoordinator.shared.performPendingWatchFaceRequest()

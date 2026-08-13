@@ -25,7 +25,7 @@ struct WatchCaptureStatusView: View {
     let entry: WatchComplicationEntry
 
     var body: some View {
-        Button(intent: StartWatchRecordingIntent()) {
+        WatchRecordingActionButton(state: entry.snapshot.state) {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
                     Image(systemName: entry.snapshot.state.symbolName)
@@ -46,7 +46,6 @@ struct WatchCaptureStatusView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         }
-        .buttonStyle(.plain)
     }
 
     /// Second line: how many captures are still on their way, or when the last

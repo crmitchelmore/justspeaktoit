@@ -12,16 +12,25 @@ final class WatchComplicationPublisher {
     static let shared = WatchComplicationPublisher()
 
     private var isRecording = false
+    private var recordingStartedAt: Date?
+    private var recordingError: String?
     private var latestCaptureStatus: WatchCaptureStatus?
     private var latestCaptureAt: Date?
+    private var latestFailureMessage: String?
     private var inFlightCount = 0
     private var published: WatchComplicationSnapshot?
     private var heartbeat: Task<Void, Never>?
 
     private init() {}
 
-    func update(isRecording: Bool) {
+    func update(isRecording: Bool, recordingStartedAt: Date?) {
         self.isRecording = isRecording
+        self.recordingStartedAt = recordingStartedAt
+        self.publish()
+    }
+
+    func update(recordingError: String?) {
+        self.recordingError = recordingError
         self.publish()
     }
 
@@ -29,6 +38,7 @@ final class WatchComplicationPublisher {
         let latest = captures.first
         self.latestCaptureStatus = latest?.status
         self.latestCaptureAt = latest?.createdAt
+        self.latestFailureMessage = latest?.status == .failed ? latest?.message : nil
         // Count every status the face calls "sending", so the Smart Stack
         // headline and its subtitle agree.
         self.inFlightCount = captures.filter { !$0.status.isTerminal && $0.status != .failed }.count
@@ -36,9 +46,25 @@ final class WatchComplicationPublisher {
     }
 
     private func snapshot() -> WatchComplicationSnapshot {
-        WatchComplicationSnapshot(
-            state: .state(isRecording: self.isRecording, latestCaptureStatus: self.latestCaptureStatus),
+        let now = Date()
+        let state = if !self.isRecording, self.recordingError != nil {
+            WatchComplicationState.failed
+        } else {
+            WatchComplicationState.state(
+                isRecording: self.isRecording,
+                latestCaptureStatus: self.latestCaptureStatus
+            )
+        }
+        return WatchComplicationSnapshot(
+            state: state,
+            updatedAt: now,
+            recordingStartedAt: self.recordingStartedAt,
             latestCaptureAt: self.latestCaptureAt,
+            latestCaptureStatus: self.latestCaptureStatus,
+            failureMessage: self.recordingError ?? self.latestFailureMessage,
+            expiresAt: state == .recording
+                ? now.addingTimeInterval(WatchComplicationSnapshot.recordingStaleAfter)
+                : nil,
             inFlightCount: self.inFlightCount
         )
     }
@@ -83,7 +109,10 @@ final class WatchComplicationPublisher {
 private extension WatchComplicationSnapshot {
     func rendersIdentically(to other: WatchComplicationSnapshot) -> Bool {
         state == other.state
+            && recordingStartedAt == other.recordingStartedAt
             && latestCaptureAt == other.latestCaptureAt
+            && latestCaptureStatus == other.latestCaptureStatus
+            && failureMessage == other.failureMessage
             && inFlightCount == other.inFlightCount
     }
 }

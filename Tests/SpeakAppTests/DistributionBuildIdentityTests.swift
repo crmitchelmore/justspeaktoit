@@ -225,6 +225,60 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(entitlements.contains("<string>group.com.justspeaktoit.watch</string>"))
     }
 
+    func testWatchComplication_usesSystemRecordingIntentWithAnOlderOSFallback() throws {
+        let root = repositoryRoot
+        let intent = try String(
+            contentsOf: root.appendingPathComponent("JustSpeakWatchShared/StartWatchRecordingIntent.swift"),
+            encoding: .utf8
+        )
+        let actionButton = try String(
+            contentsOf: root.appendingPathComponent("JustSpeakWatchWidget/WatchRecordingActionButton.swift"),
+            encoding: .utf8
+        )
+        let contentView = try String(
+            contentsOf: root.appendingPathComponent("JustSpeakWatch/WatchContentView.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(intent.contains("@available(watchOS 11.0, *)"))
+        XCTAssertTrue(intent.contains("struct StartWatchRecordingIntent: AudioRecordingIntent"))
+        XCTAssertTrue(intent.contains("struct OpenWatchRecordingIntent: AppIntent"))
+        XCTAssertTrue(intent.contains("static var openAppWhenRun: Bool { false }"))
+        XCTAssertTrue(intent.contains("static var openAppWhenRun: Bool { true }"))
+        XCTAssertTrue(actionButton.contains("if #available(watchOS 11.0, *)"))
+        XCTAssertTrue(actionButton.contains("Button(intent: StartWatchRecordingIntent()"))
+        XCTAssertTrue(actionButton.contains("Button(intent: OpenWatchRecordingIntent()"))
+        XCTAssertTrue(actionButton.contains(".accessibilityLabel(Text(self.state.recordingActionLabel))"))
+        XCTAssertTrue(actionButton.contains(".accessibilityHint(Text(self.state.recordingActionHint))"))
+        XCTAssertTrue(contentView.contains("WatchRecordingCoordinator.shared.toggleRecording()"))
+        XCTAssertFalse(contentView.contains("recorder.toggle(store:"))
+    }
+
+    func testWatchComplication_publishesEveryRecorderAndQueueTransition() throws {
+        let root = repositoryRoot
+        let recorder = try String(
+            contentsOf: root.appendingPathComponent("JustSpeakWatch/WatchAudioRecorder.swift"),
+            encoding: .utf8
+        )
+        let store = try String(
+            contentsOf: root.appendingPathComponent("JustSpeakWatch/WatchCaptureStore.swift"),
+            encoding: .utf8
+        )
+        let publisher = try String(
+            contentsOf: root.appendingPathComponent("JustSpeakWatch/WatchComplicationPublisher.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(recorder.contains("didSet"))
+        XCTAssertTrue(recorder.contains("WatchComplicationPublisher.shared.update("))
+        XCTAssertEqual(recorder.components(separatedBy: "store.enqueue(finished)").count - 1, 1)
+        XCTAssertTrue(store.contains("WatchComplicationPublisher.shared.update(captures: captures)"))
+        XCTAssertTrue(publisher.contains("WidgetCenter.shared.reloadAllTimelines()"))
+        XCTAssertTrue(publisher.contains("latestFailureMessage"))
+        XCTAssertTrue(publisher.contains("recordingStartedAt"))
+        XCTAssertTrue(publisher.contains("expiresAt"))
+    }
+
     func testIOSKeyboardUsesInstantSessionLivePreviewAndRetainsHistory() throws {
         // Keyboard v2 splits the extension into controller + model + view +
         // engine + handoff files; the fallback handoff invariants from v1 must

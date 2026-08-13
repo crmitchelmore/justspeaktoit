@@ -45,11 +45,16 @@ final class WatchComplicationStateTests: XCTestCase {
             // Corner complications truncate hard, so keep the short label short.
             XCTAssertFalse(state.shortLabel.isEmpty)
             XCTAssertLessThanOrEqual(state.shortLabel.count, 8, "\(state.rawValue) short label is too long")
+            XCTAssertFalse(state.recordingActionLabel.isEmpty)
+            XCTAssertFalse(state.recordingActionHint.isEmpty)
         }
+        XCTAssertEqual(WatchComplicationState.recording.recordingActionLabel, "Stop recording")
+        XCTAssertEqual(WatchComplicationState.idle.recordingActionLabel, "Start recording")
     }
 
     func testRelevance_ranksInFlightStatesAboveIdle() {
         let idle = WatchComplicationState.idle
+        XCTAssertEqual(idle.relevanceScore, 0, "idle relevance must remain neutral")
         for state in WatchComplicationState.allCases where state != idle {
             XCTAssertGreaterThan(state.relevanceScore, idle.relevanceScore, "\(state.rawValue) outranks idle")
             XCTAssertGreaterThan(state.relevanceDuration, 0)
@@ -66,7 +71,11 @@ final class WatchComplicationStateTests: XCTestCase {
         let snapshot = WatchComplicationSnapshot(
             state: .sending,
             updatedAt: wholeSecondDate,
+            recordingStartedAt: wholeSecondDate,
             latestCaptureAt: wholeSecondDate,
+            latestCaptureStatus: .failed,
+            failureMessage: "Phone unavailable",
+            expiresAt: wholeSecondDate.addingTimeInterval(300),
             inFlightCount: 2
         )
 
@@ -112,7 +121,9 @@ final class WatchComplicationStateTests: XCTestCase {
         let snapshot = WatchComplicationSnapshot(
             state: .recording,
             updatedAt: wholeSecondDate,
+            recordingStartedAt: wholeSecondDate,
             latestCaptureAt: wholeSecondDate,
+            expiresAt: wholeSecondDate.addingTimeInterval(WatchComplicationSnapshot.recordingStaleAfter),
             inFlightCount: 1
         )
 
@@ -120,6 +131,8 @@ final class WatchComplicationStateTests: XCTestCase {
         let settled = snapshot.settled(now: wholeSecondDate.addingTimeInterval(stale))
 
         XCTAssertEqual(settled.state, .idle)
+        XCTAssertNil(settled.recordingStartedAt)
+        XCTAssertNil(settled.expiresAt)
         // Only the disbelieved state changes; the rest of the payload stands.
         XCTAssertEqual(settled.latestCaptureAt, snapshot.latestCaptureAt)
         XCTAssertEqual(settled.inFlightCount, snapshot.inFlightCount)
@@ -140,6 +153,18 @@ final class WatchComplicationStateTests: XCTestCase {
             WatchComplicationSnapshot.recordingStaleAfter,
             WatchComplicationSnapshot.recordingHeartbeat * 4
         )
+    }
+
+    func testSettled_usesThePublishedExpiry() {
+        let explicitExpiry = wholeSecondDate.addingTimeInterval(10)
+        let snapshot = WatchComplicationSnapshot(
+            state: .recording,
+            updatedAt: wholeSecondDate,
+            expiresAt: explicitExpiry
+        )
+
+        XCTAssertEqual(snapshot.settled(now: explicitExpiry).state, .recording)
+        XCTAssertEqual(snapshot.settled(now: explicitExpiry.addingTimeInterval(1)).state, .idle)
     }
 
     // MARK: - Record request

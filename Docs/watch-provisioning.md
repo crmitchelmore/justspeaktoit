@@ -74,8 +74,11 @@ Complication and Smart Stack (this feature):
 
 - [ ] Both watch targets install; the complication appears in the face editor
       under **Just Speak to It** for circular and corner slots
-- [ ] Tap the complication with the app not running: the app comes forward and
-      recording starts (the pending request is performed on activation)
+- [ ] On watchOS 11+, tap the complication with the app not running: recording
+      starts through `AudioRecordingIntent` without foreground UI and watchOS
+      shows its system recording indicator for the active audio session
+- [ ] On watchOS 10, tap the complication: the app opens and performs the
+      pending request on activation
 - [ ] Tap again: recording stops and the capture enters the transfer queue
 - [ ] Complication glyph tracks state: mic (idle) → stop (recording) → arrow
       (sending) → check (in history), and warning on failure

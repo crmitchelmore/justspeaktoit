@@ -68,6 +68,28 @@ public enum WatchComplicationState: String, Codable, CaseIterable, Sendable {
         }
     }
 
+    /// VoiceOver action name for the complication and Smart Stack button.
+    public var recordingActionLabel: String {
+        self == .recording ? "Stop recording" : "Start recording"
+    }
+
+    /// State-aware context without making the icon's SF Symbol name the
+    /// accessible name of the command.
+    public var recordingActionHint: String {
+        switch self {
+        case .recording:
+            return "Stops and sends this voice note to your iPhone."
+        case .idle:
+            return "Records a new voice note on your Apple Watch."
+        case .sending:
+            return "Starts another voice note while the previous capture is in progress."
+        case .inHistory:
+            return "Starts another voice note after the latest capture reached history."
+        case .failed:
+            return "Starts another voice note after the latest capture failed."
+        }
+    }
+
     /// Smart Stack relevance: an in-flight capture is worth surfacing on the
     /// wrist, a long-settled idle complication is not.
     public var relevanceScore: Float {
@@ -76,7 +98,7 @@ public enum WatchComplicationState: String, Codable, CaseIterable, Sendable {
         case .sending: return 75
         case .failed: return 60
         case .inHistory: return 40
-        case .idle: return 10
+        case .idle: return 0
         }
     }
 
@@ -119,8 +141,16 @@ public struct WatchComplicationSnapshot: Codable, Equatable, Sendable {
     public let state: WatchComplicationState
     /// When the app last published this state.
     public let updatedAt: Date
+    /// Start of the active recording, when `state == .recording`.
+    public let recordingStartedAt: Date?
     /// Start time of the newest capture, for the Smart Stack subtitle.
     public let latestCaptureAt: Date?
+    /// Unprojected newest queue state, retained for diagnostics and migration.
+    public let latestCaptureStatus: WatchCaptureStatus?
+    /// Latest user-facing failure reason, when the newest capture failed.
+    public let failureMessage: String?
+    /// Explicit recording expiry refreshed by the app heartbeat.
+    public let expiresAt: Date?
     /// Captures that are recorded but not yet in history. Counts every status
     /// the face calls "sending", so the headline and the subtitle agree.
     public let inFlightCount: Int
@@ -128,14 +158,22 @@ public struct WatchComplicationSnapshot: Codable, Equatable, Sendable {
     public init(
         state: WatchComplicationState,
         updatedAt: Date = Date(),
+        recordingStartedAt: Date? = nil,
         latestCaptureAt: Date? = nil,
+        latestCaptureStatus: WatchCaptureStatus? = nil,
+        failureMessage: String? = nil,
+        expiresAt: Date? = nil,
         inFlightCount: Int = 0,
         schemaVersion: Int = WatchComplicationSnapshot.currentSchemaVersion
     ) {
         self.schemaVersion = schemaVersion
         self.state = state
         self.updatedAt = updatedAt
+        self.recordingStartedAt = recordingStartedAt
         self.latestCaptureAt = latestCaptureAt
+        self.latestCaptureStatus = latestCaptureStatus
+        self.failureMessage = failureMessage
+        self.expiresAt = expiresAt
         self.inFlightCount = inFlightCount
     }
 
@@ -144,11 +182,16 @@ public struct WatchComplicationSnapshot: Codable, Equatable, Sendable {
     /// writes it again, so a face must not show that state forever.
     public func settled(now: Date = Date()) -> WatchComplicationSnapshot {
         guard self.state == .recording else { return self }
-        guard now.timeIntervalSince(self.updatedAt) > Self.recordingStaleAfter else { return self }
+        let expiry = self.expiresAt ?? self.updatedAt.addingTimeInterval(Self.recordingStaleAfter)
+        guard now > expiry else { return self }
         return WatchComplicationSnapshot(
             state: .idle,
             updatedAt: self.updatedAt,
+            recordingStartedAt: nil,
             latestCaptureAt: self.latestCaptureAt,
+            latestCaptureStatus: self.latestCaptureStatus,
+            failureMessage: self.failureMessage,
+            expiresAt: nil,
             inFlightCount: self.inFlightCount,
             schemaVersion: self.schemaVersion
         )

@@ -12,12 +12,15 @@ final class WatchRecordingCoordinator {
 
     let recorder = WatchAudioRecorder()
     let store = WatchCaptureStore.shared
+    private let toggleSerialiser = WatchRecordingToggleSerialiser()
 
     private init() {}
 
     /// Starts a recording, or stops the one in progress.
     func toggleRecording() async {
-        await self.recorder.toggle(store: self.store)
+        await self.toggleSerialiser.run {
+            await self.recorder.toggle(store: self.store)
+        }
     }
 
     /// Performs a tap that was made on the watch face while the app was not

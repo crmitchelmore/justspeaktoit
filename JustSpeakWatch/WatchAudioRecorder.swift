@@ -26,11 +26,19 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
     @Published private(set) var isRecording = false {
         didSet {
             guard oldValue != self.isRecording else { return }
-            WatchComplicationPublisher.shared.update(isRecording: self.isRecording)
+            WatchComplicationPublisher.shared.update(
+                isRecording: self.isRecording,
+                recordingStartedAt: self.isRecording ? self.startedAt : nil
+            )
         }
     }
     @Published private(set) var startedAt: Date?
-    @Published private(set) var lastError: String?
+    @Published private(set) var lastError: String? {
+        didSet {
+            guard oldValue != self.lastError else { return }
+            WatchComplicationPublisher.shared.update(recordingError: self.lastError)
+        }
+    }
 
     private let store: WatchCaptureStore
     private let runtime: WatchRecordingRuntime

@@ -24,7 +24,7 @@ struct WatchRecordingComplicationView: View {
     let entry: WatchComplicationEntry
 
     var body: some View {
-        Button(intent: StartWatchRecordingIntent()) {
+        WatchRecordingActionButton(state: entry.snapshot.state) {
             switch family {
             case .accessoryCorner:
                 cornerContent
@@ -32,7 +32,6 @@ struct WatchRecordingComplicationView: View {
                 circularContent
             }
         }
-        .buttonStyle(.plain)
     }
 
     private var circularContent: some View {

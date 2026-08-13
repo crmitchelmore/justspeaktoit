@@ -457,6 +457,14 @@ final class MainManager: ObservableObject {
 
     // Failsafe: if live transcription is still running but we have no activeSession,
     // cancel it so the app can always recover without requiring a restart.
+    //
+    // Note: `cancelLiveTranscription()` tears the controller down asynchronously,
+    // so its `activeController = nil` can land *after* the recording started
+    // below has bound its own source, unbinding the new session's display scope.
+    // The effect is a blank live transcript for that recording, never text from
+    // the previous one — the per-session/per-stream guards (issue #643) still
+    // hold. Recovering the binding would need a generation token threaded
+    // through SwitchingLiveTranscriber; not worth it for this failsafe path.
     if transcriptionManager.isLiveTranscribing {
       logger.warning("Live transcription still running without an active session; cancelling to recover")
       transcriptionManager.cancelLiveTranscription()

@@ -13,6 +13,10 @@ final class AppleSpeechAnalyzerLiveController: LiveTranscriptionController {
   private let audioDeviceManager: AudioInputDeviceManager
   private var audioEngine = AVAudioEngine()
   private var analyzerSession: Any?
+  /// Identity of the analyzer run currently allowed to publish transcript text.
+  /// See `LiveTranscriptionRun.Token`: the update handler is an argument to the
+  /// session's initialiser, so it cannot capture the session it belongs to.
+  private var activeRun: LiveTranscriptionRun.Token?
   private var audioConverter: Any?
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
   private var currentLanguage: String?
@@ -57,11 +61,22 @@ final class AppleSpeechAnalyzerLiveController: LiveTranscriptionController {
 
   @available(macOS 26.0, *)
   private func startSpeechAnalyzer() async throws {
+    // Published before the session exists so the handler can never observe a
+    // window in which this run is not yet the active one. The handler hops to
+    // the main actor through an unstructured Task, so an update produced by the
+    // previous recording can land after `stop()` has returned — and this
+    // controller instance is reused across recordings, so it would repaint the
+    // next recording's transcript (issue #668).
+    let run = LiveTranscriptionRun.Token()
+    activeRun = run
+
     let session = try await AppleSpeechAnalyzerLiveSession(
       localeIdentifier: currentLanguage ?? appSettings.resolvedPreferredLocaleIdentifier
-    ) { [weak self] update in
-      Task { @MainActor [weak self] in
-        guard let self else { return }
+    ) { [weak self, weak run] update in
+      Task { @MainActor [weak self, weak run] in
+        guard let self,
+          LiveTranscriptionRun.isCurrent(run, activeStream: self.activeRun)
+        else { return }
         self.latestUpdate = LiveTranscriptionUpdate(
           text: update.text,
           isFinal: update.isFinal,
@@ -76,6 +91,7 @@ final class AppleSpeechAnalyzerLiveController: LiveTranscriptionController {
     inputNode.removeTap(onBus: 0)
     let inputFormat = inputNode.outputFormat(forBus: 0)
     guard audioInputFormatIsUsable(inputFormat) else {
+      activeRun = nil
       await session.cancel()
       throw TranscriptionManagerError.noUsableAudioInput
     }
@@ -92,6 +108,7 @@ final class AppleSpeechAnalyzerLiveController: LiveTranscriptionController {
       analyzerSession = session
       audioConverter = converter
     } catch {
+      activeRun = nil
       audioEngine.stop()
       inputNode.removeTap(onBus: 0)
       await session.cancel()
@@ -105,7 +122,10 @@ final class AppleSpeechAnalyzerLiveController: LiveTranscriptionController {
     audioEngine.inputNode.removeTap(onBus: 0)
     isRunning = false
 
+    // Retired after `finish()` so a final flush the analyzer emits through the
+    // update handler still counts towards this recording's result.
     defer {
+      activeRun = nil
       analyzerSession = nil
       audioConverter = nil
     }

@@ -101,4 +101,13 @@ enum LiveTranscriptionRun {
     guard let stream, let activeStream else { return false }
     return stream === activeStream
   }
+
+  /// Stand-in run identity for controllers whose stream cannot identify itself.
+  ///
+  /// Some local engines take their transcript callback as an argument to the
+  /// stream's own initialiser, so the callback cannot capture the object it is
+  /// about to create. A token is minted and published *before* the stream
+  /// exists, which also closes the window in which a callback could fire before
+  /// the controller has stored the stream (issue #668).
+  final class Token {}
 }

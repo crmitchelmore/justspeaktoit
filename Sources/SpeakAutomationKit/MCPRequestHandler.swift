@@ -82,7 +82,10 @@ public struct MCPRequestHandler {
         guard let name = params["name"] as? String else {
             return Self.errorResponse(id: id, code: -32602, message: "tools/call requires a \"name\".")
         }
-        guard let command = AutomationCommand(rawValue: name) else {
+        // The accepted surface must equal the advertised one: `AutomationCommand`
+        // carries verbs the socket understands but this server never lists
+        // (`status`), and answering those would make `tools/list` a lie.
+        guard let command = AutomationCommand(rawValue: name), Self.advertisedToolNames.contains(name) else {
             return Self.errorResponse(id: id, code: -32602, message: "Unknown tool: \(name).")
         }
         let arguments = params["arguments"] as? [String: Any] ?? [:]
@@ -182,6 +185,12 @@ public struct MCPRequestHandler {
         }
         return object
     }
+
+    /// Names from `toolDefinitions`, derived rather than restated so the two
+    /// cannot drift.
+    static let advertisedToolNames: Set<String> = Set(
+        Self.toolDefinitions.compactMap { $0["name"] as? String }
+    )
 
     static let toolDefinitions: [[String: Any]] = [
         [

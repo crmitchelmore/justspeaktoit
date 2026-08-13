@@ -34,7 +34,14 @@ const valueAfter = (name) => {
 const hasFlag = (name) => process.argv.includes(name);
 
 const cataloguePath = resolve(valueAfter("--catalogue") ?? DEFAULT_CATALOGUE_PATH);
-const limit = Number.parseInt(valueAfter("--limit") ?? `${DEFAULT_ENTRY_LIMIT}`, 10);
+// A non-numeric --limit must stop the run: `Math.max(1, NaN)` is NaN, so the
+// catalogue would otherwise be silently rewritten with no entries at all.
+const requestedLimit = valueAfter("--limit");
+const limit = hasFlag("--limit") ? Number.parseInt(requestedLimit ?? "", 10) : DEFAULT_ENTRY_LIMIT;
+if (!Number.isFinite(limit) || limit < 1) {
+    console.error(`--limit must be a positive whole number, got "${requestedLimit ?? ""}"`);
+    process.exit(2);
+}
 const repository = valueAfter("--repository") ?? process.env.GITHUB_REPOSITORY ?? "crmitchelmore/justspeaktoit";
 
 const readCatalogue = async () => {

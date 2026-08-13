@@ -395,6 +395,34 @@ describe('paid routing usage accounting', () => {
     expect(row?.total).toBe(1);
   });
 
+  it('processes identical text sent under a new key as a new request', async () => {
+    // Dictating the same words twice is ordinary use, not a duplicate. The key
+    // identifies one attempt, so the second dictation carries its own and must
+    // be served and billed in its own right.
+    const userId = await seedEntitledUser();
+    const token = await tokenFor(userId);
+
+    mockOpenRouterCompletion('First.');
+    const first = await postProcess(token, { operation: 'post_processing', text: 'a' });
+    expect(first.status).toBe(200);
+
+    mockOpenRouterCompletion('Second.');
+    const second = await postProcess(
+      token,
+      { operation: 'post_processing', text: 'a' },
+      { 'idempotency-key': `${IDEMPOTENCY_KEY}-second-attempt` },
+    );
+    expect(second.status).toBe(200);
+    expect(((await second.json()) as { text: string }).text).toBe('Second.');
+
+    const row = await env.DB.prepare(
+      'SELECT COUNT(*) AS total FROM usage_ledger WHERE user_id = ?1',
+    )
+      .bind(userId)
+      .first<{ total: number }>();
+    expect(row?.total).toBe(2);
+  });
+
   it('stores no request or response content alongside a claim', async () => {
     const userId = await seedEntitledUser();
     mockOpenRouterCompletion('Sensitive dictated text.');

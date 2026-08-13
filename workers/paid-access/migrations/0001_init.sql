@@ -169,10 +169,12 @@ CREATE INDEX idx_usage_ledger_period ON usage_ledger (user_id, billing_period);
 -- arrives after the work completed is told so and charged nothing, which costs
 -- the user a re-dictation in a rare case and keeps the guarantee absolute.
 --
--- `expires_at` bounds how long a key is remembered. Keys are derived from
--- request content, so without it an identical dictation a year later would be
--- refused as a duplicate. Expiry is applied on read and on claim, so no
--- scheduled job is required for correctness.
+-- `expires_at` bounds how long a key is remembered, as defence in depth. Keys
+-- identify one logical *attempt* — the client mixes a per-attempt id into them,
+-- so a second dictation of the same words is a different key and is processed
+-- normally — but a key that lived for ever would still make the permanent
+-- `usage_ledger` uniqueness reachable by an unlucky repeat. Expiry is applied on
+-- read and on claim, so no scheduled job is required for correctness.
 CREATE TABLE request_claims (
   id               TEXT    PRIMARY KEY,
   user_id          TEXT    NOT NULL REFERENCES users(id) ON DELETE CASCADE,

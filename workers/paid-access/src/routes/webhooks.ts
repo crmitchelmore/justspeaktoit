@@ -145,6 +145,29 @@ export async function handleStripeWebhook(
       context.logger.error('webhook.stripe.metadata_mismatch', { event_type: event.type });
       return jsonResponse({ received: true }, { correlationId: context.correlationId });
     }
+
+    // A cancellation skips the price gate, which leaves it able to expire an
+    // entitlement belonging to a different subscription entirely — another
+    // product on the same Stripe customer, or a previous subscription of ours.
+    // It may only apply to the subscription the entitlement actually names.
+    if (!grantsAccess && userId !== null) {
+      const current = await context.repository.findEntitlement(userId);
+      if (current !== null && current.sourceReference !== view.subscriptionId) {
+        await context.repository.completeWebhookEvent({
+          provider: 'stripe',
+          eventId: event.id,
+          status: 'ignored',
+          failureReason: 'subscription_not_current',
+          nowSeconds: context.nowSeconds,
+        });
+        context.logger.info('webhook.stripe.other_subscription', { event_type: event.type });
+        return jsonResponse(
+          { received: true, ignored: true },
+          { correlationId: context.correlationId },
+        );
+      }
+    }
+
     if (userId === null) {
       // The subscription exists but we cannot attribute it. Recording this as
       // failed keeps it visible for reconciliation instead of silently dropping.

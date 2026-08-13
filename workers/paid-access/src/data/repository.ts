@@ -569,7 +569,8 @@ export class Repository {
   /**
    * Drops a claim whose request failed, so the client's retry is served rather
    * than answered as a duplicate for ever. Only an `in_flight` claim is removed;
-   * a completed one stays put and keeps its stored response.
+   * a completed one stays put until it expires, which is what stops a retry of
+   * work we already did and charged for buying a second upstream call.
    */
   async releaseRequestClaim(input: { userId: string; idempotencyKey: string }): Promise<void> {
     await this.db

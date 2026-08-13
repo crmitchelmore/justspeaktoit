@@ -322,6 +322,24 @@ describe('Stripe webhook idempotency', () => {
     expect(await entitlementStatus(userId)).toBe('expired');
   });
 
+  it('ignores a cancellation for a subscription this entitlement is not on', async () => {
+    // Cancellations skip the price gate, so without a reference check another
+    // product's cancellation on the same Stripe customer would expire this
+    // subscription — a paying user losing access because they cancelled
+    // something else entirely.
+    const userId = await seedStripeUser();
+    await postStripeWebhook(subscriptionEvent());
+    expect(await entitlementStatus(userId)).toBe('active');
+
+    const otherProduct = subscriptionEvent({ type: 'customer.subscription.deleted' });
+    otherProduct.data.object['id'] = 'sub_some_other_product';
+    otherProduct.data.object['status'] = 'canceled';
+    otherProduct.data.object['items'] = { data: [] };
+    expect((await postStripeWebhook(otherProduct)).status).toBe(200);
+
+    expect(await entitlementStatus(userId)).toBe('active');
+  });
+
   it('re-entitles a revoked account when a new subscription is bought', async () => {
     // Revocation is terminal for the subscription, not for the account. A
     // refunded user who subscribes again is charged, so they must get access.

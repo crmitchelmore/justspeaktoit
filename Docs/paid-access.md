@@ -108,8 +108,8 @@ npx wrangler d1 create paid-access-staging
 
 ### Stripe
 
-- [ ] Create the product and its recurring price.
-- [ ] Copy the price id into `STRIPE_PRICE_ID` in `wrangler.toml`, replacing `price_REPLACE_ME`, for each environment.
+- [ ] Create the product and its recurring prices — one per term you sell (monthly, yearly).
+- [ ] Copy every price id into `STRIPE_PRICE_IDS` in `wrangler.toml`, comma-separated, replacing the `price_REPLACE_ME_*` placeholders, for each environment. The first is what Checkout opens with by default. A price missing from this list has its subscription webhooks ignored as another product's, so never remove one that still has subscribers on it.
 - [ ] Enable the Customer Portal in Stripe billing settings.
 - [ ] Create a webhook endpoint pointing at `https://api.justspeaktoit.com/v1/webhooks/stripe`, subscribed to `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`.
 - [ ] Copy the endpoint signing secret into `STRIPE_WEBHOOK_SECRET`.

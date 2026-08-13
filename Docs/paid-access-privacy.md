@@ -23,7 +23,9 @@ We choose the model. Paid requests name an operation — recorded transcription,
 | Recorded (batch) transcription | OpenRouter, model `google/gemini-2.0-flash-001` | Audio seconds |
 | Post-processing of transcript text | OpenRouter, model `openai/gpt-5-mini` | Tokens |
 
-**Live (streaming) dictation never uses paid access.** As you speak, the app transcribes with an on-device model or with your own API key exactly as it does without a subscription. Only a completed recording, or transcript text being cleaned up, is ever sent to us.
+**Live (streaming) dictation does not use paid access.** As you speak, the app transcribes with an on-device model or with your own API key exactly as it does without a subscription. Only a completed recording, or transcript text being cleaned up, is sent to us.
+
+To be precise about that rather than merely reassuring: our server does implement a live transcription route, and it is metered and documented like the others, but no released version of the app opens it. Nothing you say is streamed to us today. If we ever wire it up, this page changes first.
 
 **Paid access is a macOS feature today.** The iPhone app does not offer a subscription and does not route anything through our servers; it transcribes on device or with your own key.
 

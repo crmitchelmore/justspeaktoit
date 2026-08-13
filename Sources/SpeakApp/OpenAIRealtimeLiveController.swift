@@ -134,9 +134,10 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
             self.handleEvent(event)
           }
         },
-        onError: { [weak self] error in
-          Task { @MainActor [weak self] in
+        onError: { [weak self, weak newTranscriber] error in
+          Task { @MainActor [weak self, weak newTranscriber] in
             guard let self else { return }
+            guard LiveTranscriptionRun.isCurrent(newTranscriber, activeStream: self.transcriber) else { return }
             // NOTE: we no longer drop errors that arrive before isRunning
             // flips true. WebSocket failures during the connecting window
             // (invalid API key, 401, DNS, etc.) used to be swallowed,

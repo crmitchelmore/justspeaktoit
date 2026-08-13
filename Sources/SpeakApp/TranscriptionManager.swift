@@ -197,7 +197,7 @@ final class TranscriptionManager: ObservableObject {
       pendingError = nil
       isLiveTranscribing = false
       endLiveTranscriptDisplaySession()
-      Task { await liveController.stop() }
+      liveController.scheduleStop()
       throw error
     }
     guard isLiveTranscribing else { throw TranscriptionManagerError.liveSessionNotRunning }
@@ -239,9 +239,7 @@ final class TranscriptionManager: ObservableObject {
     cancelStopTimeout()
     continuation?.resume(throwing: TranscriptionManagerError.liveSessionNotRunning)
     continuation = nil
-    Task {
-      await liveController.stop()
-    }
+    liveController.scheduleStop()
     isLiveTranscribing = false
     resetLiveTranscriptDisplay()
   }

@@ -246,9 +246,11 @@ final class ModulateLiveController: NSObject, LiveTranscriptionController {
           self.handleDone(durationMs: durationMs)
         }
       },
-      onError: { [weak self] error in
-        Task { @MainActor [weak self] in
-          self?.handleStreamingError(error)
+      onError: { [weak self, weak transcriber] error in
+        Task { @MainActor [weak self, weak transcriber] in
+          guard let self else { return }
+          guard LiveTranscriptionRun.isCurrent(transcriber, activeStream: self.transcriber) else { return }
+          self.handleStreamingError(error)
         }
       }
     )
@@ -276,6 +278,8 @@ final class ModulateLiveController: NSObject, LiveTranscriptionController {
   }
 
   private func handleStreamingError(_ error: Error) {
+    let failedInputSession = activeInputSession
+    activeInputSession = nil
     hasFinished = true
     audioEngine.stop()
     audioEngine.inputNode.removeTap(onBus: 0)
@@ -290,8 +294,9 @@ final class ModulateLiveController: NSObject, LiveTranscriptionController {
       continuation.resume()
     }
 
-    Task { @MainActor [weak self] in
-      await self?.endActiveInputSession()
+    Task { @MainActor [audioDeviceManager] in
+      guard let failedInputSession else { return }
+      await audioDeviceManager.endUsingPreferredInput(session: failedInputSession)
     }
 
     delegate?.liveTranscriber(self, didFail: error)

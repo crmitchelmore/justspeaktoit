@@ -109,9 +109,10 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
             self.handleTranscript(text: text, isFinal: isFinal)
           }
         },
-        onError: { [weak self] error in
-          Task { @MainActor [weak self] in
+        onError: { [weak self, weak newTranscriber] error in
+          Task { @MainActor [weak self, weak newTranscriber] in
             guard let self else { return }
+            guard LiveTranscriptionRun.isCurrent(newTranscriber, activeStream: self.transcriber) else { return }
             // Always release a pending stop() continuation so we don't burn the
             // 2s timeout when an error/close arrives during shutdown.
             if let continuation = self.stopContinuation {
@@ -170,9 +171,10 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
 
   // MARK: - SonioxFinalizationDelegate
 
-  nonisolated func sonioxDidFinishStream() {
-    Task { @MainActor [weak self] in
+  nonisolated func sonioxDidFinishStream(_ transcriber: SonioxLiveTranscriber) {
+    Task { @MainActor [weak self, weak transcriber] in
       guard let self else { return }
+      guard LiveTranscriptionRun.isCurrent(transcriber, activeStream: self.transcriber) else { return }
       if let continuation = self.stopContinuation {
         self.stopContinuation = nil
         continuation.resume()

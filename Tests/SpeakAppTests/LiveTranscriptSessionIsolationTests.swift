@@ -11,6 +11,7 @@ import XCTest
 /// WebSocket/recogniser callbacks arrive late, out of order, or interleaved
 /// with the next recording.
 @MainActor
+// swiftlint:disable:next type_body_length
 final class LiveTranscriptSessionIsolationTests: XCTestCase {
 
   // MARK: - Doubles
@@ -27,6 +28,7 @@ final class LiveTranscriptSessionIsolationTests: XCTestCase {
   /// that mints a fresh stream object per recording and routes stream
   /// callbacks through `LiveTranscriptionRun`.
   private final class StreamingStubController: LiveTranscriptionController {
+    // swiftlint:disable:next nesting
     final class Stream {}
 
     weak var delegate: LiveTranscriptionSessionDelegate?

@@ -87,6 +87,7 @@ struct HistoryListRow: View { // swiftlint:disable:this type_body_length
             }
             .buttonStyle(.borderless)
             .speakTooltip("Delete this history item")
+            .accessibilityIdentifier("historyRowDeleteButton-\(item.id)")
             Image(systemName: isExpanded ? "chevron.up.circle.fill" : "chevron.down.circle")
               .imageScale(density.isCompact ? .medium : .large)
               .symbolRenderingMode(.palette)
@@ -111,6 +112,7 @@ struct HistoryListRow: View { // swiftlint:disable:this type_body_length
               }
               .buttonStyle(.borderless)
               .speakTooltip("Copy the best available transcript")
+              .accessibilityIdentifier("historyRowCopyButton-\(item.id)")
             }
           } else {
             Text(previewText)
@@ -130,6 +132,7 @@ struct HistoryListRow: View { // swiftlint:disable:this type_body_length
       }
       .buttonStyle(.plain)
       .speakTooltip("Click to open or close full details for this session, including transcripts, costs, and network activity.")
+      .accessibilityIdentifier("historyRowExpandButton-\(item.id)")
 
       if isExpanded {
         expandedContent

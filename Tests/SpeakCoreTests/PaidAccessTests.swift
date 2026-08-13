@@ -598,6 +598,71 @@ final class PaidAccessClientRequestTests: XCTestCase {
     }
 }
 
+/// An entitlement and the routing policy it was issued with are only meaningful
+/// together: an active entitlement with an empty policy routes nothing, so the
+/// app would believe it was subscribed and have nowhere to send the request.
+final class PaidAccessStateCommitTests: XCTestCase {
+    private func decodeState(_ json: String) throws -> PaidAccessState {
+        try JSONDecoder().decode(EntitlementResponse.self, from: Data(json.utf8)).state
+    }
+
+    func testEntitlementAndPolicy_comeFromOneDecodeOfOnePayload() throws {
+        // Both halves arrive in a single response and are turned into a single
+        // value, so there is no interval in which one is published without the
+        // other. Two requests, committed separately, is what this replaced.
+        let state = try self.decodeState(
+            """
+            {
+              "status": "active",
+              "plan_id": "paid",
+              "source": "stripe",
+              "current_period_end": 1893456000,
+              "cancel_at_period_end": false,
+              "paid_routing_available": true,
+              "policy": {
+                "routes": [
+                  {
+                    "operation": "post_processing",
+                    "model": "openai/gpt-5-mini",
+                    "provider": "openrouter"
+                  }
+                ]
+              }
+            }
+            """
+        )
+
+        XCTAssertEqual(state.entitlement.status, .active)
+        XCTAssertTrue(state.entitlement.paidRoutingAvailable)
+        // The policy must be populated in the same value, not left to a second
+        // call that might fail and strand an entitled user with no route.
+        XCTAssertFalse(state.policy.routes.isEmpty)
+        XCTAssertEqual(state.policy.routes.first?.operation, .postProcessing)
+    }
+
+    func testMissingPolicy_yieldsAnEntitlementThatRoutesNothing() throws {
+        // A response with no policy still publishes the entitlement, because the
+        // subscription state is worth showing; the empty policy is what makes
+        // the router fall the work back to the user's own configuration rather
+        // than sending it somewhere it was never told about.
+        let state = try self.decodeState(
+            """
+            {
+              "status": "active",
+              "plan_id": "paid",
+              "source": "stripe",
+              "cancel_at_period_end": false,
+              "paid_routing_available": true
+            }
+            """
+        )
+
+        XCTAssertEqual(state.entitlement.status, .active)
+        XCTAssertEqual(state.policy, .unknown)
+        XCTAssertTrue(state.policy.routes.isEmpty)
+    }
+}
+
 /// The paid batch endpoint accepts WAV and nothing else, while the app records
 /// AAC in an `.m4a`. Without conversion every paid transcription silently falls
 /// back to the user's own key, so the subscription buys nothing.

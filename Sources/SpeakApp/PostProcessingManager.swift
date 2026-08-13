@@ -281,7 +281,7 @@ final class PostProcessingManager: ObservableObject {
   }
 
   private static func hasOpenRouterAccess(
-    _ client: OpenRouterAPIClient,
+    _ client: any PaidAccessFallbackClient,
     model: String
   ) async -> Bool {
     let requiresRemote = await client.requiresRemoteAccess(for: model)

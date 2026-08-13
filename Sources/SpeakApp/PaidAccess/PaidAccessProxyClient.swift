@@ -13,13 +13,13 @@ import SpeakCore
 actor PaidAccessProxyClient: StreamingChatLLMClient, BatchTranscriptionClient {
 
   /// The bring-your-own-key client every non-paid request goes to.
-  nonisolated let fallback: OpenRouterAPIClient
+  nonisolated let fallback: any PaidAccessFallbackClient
   private let paidClient: any PaidAccessClienting
   private let sessionProvider: @Sendable () async -> PaidAccessSession?
   private let routerProvider: @Sendable () async -> PaidAccessRouter
 
   init(
-    fallback: OpenRouterAPIClient,
+    fallback: any PaidAccessFallbackClient,
     paidClient: any PaidAccessClienting,
     sessionProvider: @escaping @Sendable () async -> PaidAccessSession?,
     routerProvider: @escaping @Sendable () async -> PaidAccessRouter

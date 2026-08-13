@@ -375,7 +375,7 @@ private struct SessionResponse: Decodable {
     }
 }
 
-private struct UsagePayload: Decodable {
+struct UsagePayload: Decodable {
     let period: String
     let audioSecondsUsed: Int
     let audioSecondsLimit: Int
@@ -407,7 +407,7 @@ private struct UsagePayload: Decodable {
     }
 }
 
-private struct RoutePayload: Decodable {
+struct RoutePayload: Decodable {
     let operation: String
     let provider: String
     let model: String
@@ -431,7 +431,7 @@ private struct RoutePayload: Decodable {
     }
 }
 
-private struct PolicyPayload: Decodable {
+struct PolicyPayload: Decodable {
     let version: String
     let routes: [RoutePayload]
 
@@ -442,7 +442,10 @@ private struct PolicyPayload: Decodable {
     }
 }
 
-private struct EntitlementResponse: Decodable {
+/// Internal rather than private so the tests can cover the one guarantee
+/// that matters here: an entitlement and the policy it was issued with are
+/// decoded from a single payload, and therefore committed together.
+struct EntitlementResponse: Decodable {
     let status: String
     let planID: String
     let source: String

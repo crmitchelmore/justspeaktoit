@@ -126,6 +126,24 @@ jobs:
             -quiet \
             2>&1 | tail -50
 
+      - name: Build watchOS App (feature-flagged)
+        # The watch app target only exists when generated with
+        # TUIST_WATCH_APP=1 (it needs its own provisioning profile for release
+        # signing, so it is excluded from release builds). Build it unsigned
+        # here so the flagged target cannot rot. Cheap: four small source
+        # files plus one shared protocol file.
+        run: |
+          set -o pipefail
+          TUIST_WATCH_APP=1 tuist generate --no-open
+          xcodebuild build \
+            -workspace "Just Speak to It.xcworkspace" \
+            -scheme JustSpeakWatchApp \
+            -destination generic/platform=watchOS \
+            CODE_SIGNING_ALLOWED=NO \
+            -skipPackagePluginValidation \
+            -quiet \
+            2>&1 | tail -30
+
   lint:
     name: Lint
     runs-on: macos-latest

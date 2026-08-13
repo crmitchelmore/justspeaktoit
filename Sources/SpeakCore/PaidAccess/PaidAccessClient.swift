@@ -37,6 +37,20 @@ public struct PaidAccessSession: Codable, Hashable, Sendable {
     public func isRefreshable(asOf now: Date = Date()) -> Bool {
         self.refreshTokenExpiresAt > now
     }
+
+    /// The StoreKit `appAccountToken` that binds a purchase to this account.
+    ///
+    /// Apple stamps this onto the resulting transaction and onto every renewal
+    /// of it, and the server refuses to redeem a signed transaction whose token
+    /// does not match the caller. Without it a receipt is bearer-redeemable:
+    /// whoever syncs it first — another device, another account sharing a family
+    /// Apple ID — gets the subscription.
+    ///
+    /// `nil` when the account id is not a UUID, in which case the purchase must
+    /// not proceed: it would produce a receipt this account can never redeem.
+    public var storeKitAccountToken: UUID? {
+        UUID(uuidString: self.userID)
+    }
 }
 
 /// Persists the paid-access session.
@@ -98,8 +112,12 @@ public protocol PaidAccessClienting: Sendable {
     func refresh(session: PaidAccessSession) async throws -> PaidAccessSession
     func signOut(session: PaidAccessSession) async
 
-    func entitlement(session: PaidAccessSession) async throws -> PaidEntitlement
-    func routingPolicy(session: PaidAccessSession) async throws -> PaidRoutingPolicy
+    /// The entitlement together with the routing policy that applies to it.
+    ///
+    /// Returned as one value on purpose: the app commits both or neither, so a
+    /// failure can never leave an active entitlement paired with an empty
+    /// policy.
+    func entitlement(session: PaidAccessSession) async throws -> PaidAccessState
 
     /// Creates a Stripe Checkout session. Direct-download macOS only.
     func createCheckoutURL(session: PaidAccessSession) async throws -> URL

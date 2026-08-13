@@ -27,6 +27,12 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
   @Published private(set) var lastError: String?
   @Published private(set) var products: [Product] = []
 
+  /// The term the purchase button will buy. Held here rather than in the view
+  /// so the choice is explicit, testable, and impossible to skip: the flow used
+  /// to buy whichever product loaded first, which made the yearly plan
+  /// unreachable.
+  @Published var selectedTerm: PaidSubscriptionTerm = .monthly
+
   private let client: any PaidAccessClienting
   private let sessionStore: any PaidAccessSessionStoring
   private let settings: AppSettings
@@ -44,10 +50,7 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
   private static let launchRestoreGrace: TimeInterval = 3
 
   /// Subscription products offered by App Store builds.
-  static let subscriptionProductIDs = [
-    "com.justspeaktoit.paid.monthly",
-    "com.justspeaktoit.paid.yearly"
-  ]
+  static let subscriptionProductIDs = PaidSubscriptionTerm.productIDs
 
   init(
     client: any PaidAccessClienting,
@@ -230,9 +233,12 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
     }
 
     do {
-      let entitlement = try await self.client.entitlement(session: session)
-      self.entitlement = entitlement
-      self.policy = try await self.client.routingPolicy(session: session)
+      // One call, one commit. Fetching the policy separately could leave an
+      // active entitlement paired with an empty policy — entitled, with
+      // nowhere to send the request — if the second call failed.
+      let state = try await self.client.entitlement(session: session)
+      self.entitlement = state.entitlement
+      self.policy = state.policy
       self.lastError = nil
     } catch PaidAccessError.notSignedIn {
       await self.clearSession()
@@ -323,7 +329,12 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
 
   // MARK: - Purchase
 
-  func purchase() async {
+  /// Buys the named term.
+  ///
+  /// - Parameter term: Which subscription to buy. Defaults to the user's
+  ///   current choice rather than to whichever product loaded first.
+  func purchase(term: PaidSubscriptionTerm? = nil) async {
+    let term = term ?? self.selectedTerm
     self.isBusy = true
     self.lastError = nil
     defer { self.isBusy = false }
@@ -344,7 +355,7 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
       }
 
     case .storeKit:
-      await self.purchaseThroughStoreKit(session: session)
+      await self.purchaseThroughStoreKit(term: term, session: session)
     }
   }
 
@@ -400,17 +411,35 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
     self.products = (loaded ?? []).sorted { $0.price < $1.price }
   }
 
-  private func purchaseThroughStoreKit(session: PaidAccessSession) async {
+  /// The loaded StoreKit product for a term, if the App Store returned it.
+  func product(for term: PaidSubscriptionTerm) -> Product? {
+    self.products.first { $0.id == term.productID }
+  }
+
+  private func purchaseThroughStoreKit(
+    term: PaidSubscriptionTerm,
+    session: PaidAccessSession
+  ) async {
     if self.products.isEmpty {
       await self.loadProducts()
     }
-    guard let product = self.products.first else {
-      self.lastError = "Subscription products are not available in this build yet."
+    // Matched by product id, never by position: `products.first` bought the
+    // cheapest loaded product whatever the user had chosen.
+    guard let product = self.product(for: term) else {
+      self.lastError = "The \(term.displayName.lowercased()) subscription is not available in this build yet."
+      return
+    }
+
+    // Bind the purchase to this account before it happens. The server rejects a
+    // signed transaction whose `appAccountToken` is not the caller's, so a
+    // purchase made without one produces a receipt nobody can redeem.
+    guard let accountToken = session.storeKitAccountToken else {
+      self.lastError = "This account cannot be linked to an App Store purchase. Sign out, sign back in and try again."
       return
     }
 
     do {
-      let result = try await product.purchase()
+      let result = try await product.purchase(options: [.appAccountToken(accountToken)])
       switch result {
       case .success(let verification):
         await self.syncIfSubscription(verification, session: session)

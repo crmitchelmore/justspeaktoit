@@ -1,5 +1,6 @@
 #if os(iOS)
 import SpeakCore
+import StoreKit
 import SwiftUI
 
 /// Subscription screen for iOS.
@@ -34,10 +35,16 @@ public struct PaidAccessSettingsView: View {
                 Text("Paid access")
             }
 
+            if !PaidAccessFeature.isAvailableOnIOS {
+                self.unavailableSection
+            }
+
             if self.store.isSignedIn {
                 self.accountSection
-                self.routingSection
-            } else {
+                if PaidAccessFeature.isAvailableOnIOS {
+                    self.routingSection
+                }
+            } else if PaidAccessFeature.isAvailableOnIOS {
                 self.signedOutSection
             }
 
@@ -58,6 +65,26 @@ public struct PaidAccessSettingsView: View {
     }
 
     // MARK: - Sections
+
+    /// Shown instead of the purchase flow while iOS paid routing is unwired.
+    /// The app must not take money for routing it does not perform.
+    @ViewBuilder
+    private var unavailableSection: some View {
+        Section {
+            Label(
+                "Subscriptions are not available in the iOS app yet. "
+                    + "Transcription and cleanup on iPhone use on-device models "
+                    + "or your own API keys.",
+                systemImage: "info.circle"
+            )
+            .font(.caption)
+        }
+    }
+
+    private static func termLabel(_ term: PaidSubscriptionTerm, price: String?) -> String {
+        guard let price else { return term.displayName }
+        return "\(term.displayName) — \(price)"
+    }
 
     @ViewBuilder
     private var signedOutSection: some View {
@@ -97,11 +124,24 @@ public struct PaidAccessSettingsView: View {
                 }
             }
 
+            // Buying is switched off while iOS paid routing is unwired — see
+            // `PaidAccessFeature`. Managing and restoring an existing
+            // subscription stay available, because a subscriber who bought on a
+            // Mac still needs a way to see and cancel it.
             if self.store.entitlement.isActive() {
                 Button(self.store.billingChannel.manageActionTitle) {
                     self.store.manageSubscription()
                 }
-            } else {
+            } else if PaidAccessFeature.isAvailableOnIOS {
+                Picker("Billing", selection: self.$store.selectedTerm) {
+                    ForEach(PaidSubscriptionTerm.allCases) { term in
+                        Text(Self.termLabel(term, price: self.store.product(for: term)?.displayPrice))
+                            .tag(term)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("paidAccessTermPicker")
+
                 Button(self.store.billingChannel.purchaseActionTitle) {
                     Task { await self.store.purchase() }
                 }
@@ -133,7 +173,9 @@ public struct PaidAccessSettingsView: View {
             }
 
             if self.store.isPaidRoutingActive {
-                ForEach(self.store.policy.routes, id: \.operation) { route in
+                // Live transcription is published by the server but not used by
+                // any client, so it is never advertised here.
+                ForEach(self.store.policy.clientSupportedRoutes, id: \.operation) { route in
                     LabeledContent(route.operation.displayName, value: route.displayName)
                         .font(.caption)
                 }

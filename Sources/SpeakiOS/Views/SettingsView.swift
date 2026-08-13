@@ -743,32 +743,33 @@ public struct SettingsView: View {
                 }
 
                 if transcriptionLocationBinding.wrappedValue == .local {
-                    if !hidesModelSelection {
-                        Picker("Apple On-Device Model", selection: selectedModelBinding) {
-                            ForEach(ModelCatalog.onDeviceLiveTranscription) { option in
-                                HStack {
-                                    Text(option.displayName)
-                                    Spacer()
-                                    IOSModelCredentialStatusView(
-                                        availability: ModelCredentialResolver.availability(
-                                            for: option.id,
-                                            purpose: .liveTranscription,
-                                            storedAPIKeyIdentifiers: settings.storedAPIKeyIdentifiers
-                                        )
+                    // Never hidden: on-device transcription bypasses paid routing
+                    // entirely, so hiding this picker would leave no way to choose
+                    // the engine that is actually doing the work.
+                    Picker("Apple On-Device Model", selection: selectedModelBinding) {
+                        ForEach(ModelCatalog.onDeviceLiveTranscription) { option in
+                            HStack {
+                                Text(option.displayName)
+                                Spacer()
+                                IOSModelCredentialStatusView(
+                                    availability: ModelCredentialResolver.availability(
+                                        for: option.id,
+                                        purpose: .liveTranscription,
+                                        storedAPIKeyIdentifiers: settings.storedAPIKeyIdentifiers
                                     )
-                                }
-                                .accessibilityElement(children: .combine)
-                                .tag(option.id)
+                                )
                             }
+                            .accessibilityElement(children: .combine)
+                            .tag(option.id)
                         }
-                        .pickerStyle(.navigationLink)
-                        .accessibilityIdentifier("appleOnDeviceModelPicker")
+                    }
+                    .pickerStyle(.navigationLink)
+                    .accessibilityIdentifier("appleOnDeviceModelPicker")
 
-                        if !usesInlineDensityLayout {
-                            Text("Uses Apple's built-in speech engine. Audio stays on this device.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+                    if !usesInlineDensityLayout {
+                        Text("Uses Apple's built-in speech engine. Audio stays on this device.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 } else {
                     Picker("Remote Mode", selection: remoteTranscriptionModeBinding) {
@@ -779,7 +780,9 @@ public struct SettingsView: View {
                     .pickerStyle(.segmented)
                     .accessibilityIdentifier("remoteTranscriptionModePicker")
 
-                    if settings.transcriptionMode == .streaming, !hidesModelSelection {
+                    // Never hidden either: streaming dictation does not go through
+                    // the paid service, so this picker chooses the model that runs.
+                    if settings.transcriptionMode == .streaming {
                         Picker("Remote Streaming Model", selection: selectedModelBinding) {
                             ForEach(LiveModelGroup.grouped(AppSettings.supportedLiveModels)) { group in
                                 Section(group.title) {
@@ -966,16 +969,20 @@ public struct SettingsView: View {
                 }
             }
 
-            Section("Subscription") {
-                NavigationLink {
-                    PaidAccessSettingsView()
-                } label: {
-                    HStack {
-                        Label("Paid Access", systemImage: "creditcard")
-                        Spacer()
-                        Text(PaidAccessStore.shared.entitlement.status.displayName)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
+            // Hidden while iOS paid routing is unwired — see `PaidAccessFeature`.
+            // The screen stays compiled so re-enabling is one constant.
+            if PaidAccessFeature.isAvailableOnIOS {
+                Section("Subscription") {
+                    NavigationLink {
+                        PaidAccessSettingsView()
+                    } label: {
+                        HStack {
+                            Label("Paid Access", systemImage: "creditcard")
+                            Spacer()
+                            Text(PaidAccessStore.shared.entitlement.status.displayName)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
                     }
                 }
             }

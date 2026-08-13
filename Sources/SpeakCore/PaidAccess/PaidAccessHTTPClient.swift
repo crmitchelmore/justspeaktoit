@@ -1,4 +1,5 @@
 // swiftlint:disable file_length
+import CryptoKit
 import Foundation
 
 /// HTTP implementation of ``PaidAccessClienting``.
@@ -164,14 +165,11 @@ public struct PaidAccessHTTPClient: PaidAccessClienting { // swiftlint:disable:t
 
     // MARK: - Entitlement
 
-    public func entitlement(session: PaidAccessSession) async throws -> PaidEntitlement {
+    /// One round trip returns both halves of the state, so the app never has to
+    /// stitch an entitlement to a policy fetched by a second call that may fail.
+    public func entitlement(session: PaidAccessSession) async throws -> PaidAccessState {
         let request = try self.makeRequest(path: "v1/entitlement", method: "GET", session: session)
-        return try await self.send(request, as: EntitlementResponse.self).entitlement
-    }
-
-    public func routingPolicy(session: PaidAccessSession) async throws -> PaidRoutingPolicy {
-        let request = try self.makeRequest(path: "v1/policy", method: "GET", session: session)
-        return try await self.send(request, as: PolicyResponse.self).policy
+        return try await self.send(request, as: EntitlementResponse.self).state
     }
 
     // MARK: - Billing
@@ -305,11 +303,34 @@ public struct PaidAccessHTTPClient: PaidAccessClienting { // swiftlint:disable:t
         return request
     }
 
-    /// Idempotency keys are generated per user action, so a retried request is
-    /// billed once.
-    public static func newIdempotencyKey() -> String {
-        let raw = UUID().uuidString + UUID().uuidString
-        return String(raw.replacingOccurrences(of: "-", with: "").prefix(48))
+    /// The idempotency key for one *logical* request.
+    ///
+    /// Derived from the request itself rather than generated per attempt. A
+    /// client-side timeout followed by a retry — here, or at any layer above
+    /// this client — then presents the same key, so the Worker's
+    /// `usage_ledger(user_id, idempotency_key)` uniqueness returns the first
+    /// result instead of metering and billing one dictation twice. A key that
+    /// changed on every attempt, as a fresh UUID did, makes that constraint
+    /// useless.
+    ///
+    /// - Parameters:
+    ///   - operation: Keeps the key spaces of the paid operations apart.
+    ///   - parameters: Everything else that changes the result — language,
+    ///     prompt, temperature.
+    ///   - payload: The request body: the recorded audio, or the transcript.
+    public static func idempotencyKey(
+        operation: PaidOperation,
+        parameters: [String] = [],
+        payload: Data
+    ) -> String {
+        var hasher = SHA256()
+        hasher.update(data: Data(operation.rawValue.utf8))
+        for parameter in parameters {
+            // Length-prefixed, so ["a", "bc"] and ["ab", "c"] cannot collide.
+            hasher.update(data: Data("\(parameter.utf8.count):\(parameter)".utf8))
+        }
+        hasher.update(data: payload)
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 }
 
@@ -408,15 +429,6 @@ private struct PolicyPayload: Decodable {
     }
 }
 
-private struct PolicyResponse: Decodable {
-    let version: String
-    let routes: [RoutePayload]
-
-    var policy: PaidRoutingPolicy {
-        PolicyPayload(version: self.version, routes: self.routes).policy
-    }
-}
-
 private struct EntitlementResponse: Decodable {
     let status: String
     let planID: String
@@ -449,6 +461,16 @@ private struct EntitlementResponse: Decodable {
             cancelAtPeriodEnd: self.cancelAtPeriodEnd,
             paidRoutingAvailable: self.paidRoutingAvailable,
             usage: self.usage?.snapshot
+        )
+    }
+
+    /// A response without a policy yields ``PaidRoutingPolicy/unknown`` rather
+    /// than an error: the entitlement is still worth publishing, and a router
+    /// with no routes falls the request back to the user's own configuration.
+    var state: PaidAccessState {
+        PaidAccessState(
+            entitlement: self.entitlement,
+            policy: self.policy?.policy ?? .unknown
         )
     }
 }

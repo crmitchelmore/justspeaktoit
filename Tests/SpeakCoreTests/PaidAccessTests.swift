@@ -515,13 +515,52 @@ final class PaidAccessClientRequestTests: XCTestCase {
         )
     }
 
-    func testIdempotencyKeys_areUniqueAndWellFormed() {
-        let first = PaidAccessHTTPClient.newIdempotencyKey()
-        let second = PaidAccessHTTPClient.newIdempotencyKey()
-        XCTAssertNotEqual(first, second)
-        for key in [first, second] {
-            XCTAssertTrue((16...128).contains(key.count))
-            XCTAssertTrue(key.range(of: "^[A-Za-z0-9_-]+$", options: .regularExpression) != nil)
-        }
+    func testIdempotencyKey_isStableAcrossRetriesOfTheSameRequest() {
+        // The whole point: a timeout followed by a retry must present the same
+        // key, or the Worker meters and bills one dictation twice.
+        let first = PaidAccessHTTPClient.idempotencyKey(
+            operation: .batchTranscription,
+            parameters: ["model", "audio/wav", "en"],
+            payload: Data("audio".utf8)
+        )
+        let retry = PaidAccessHTTPClient.idempotencyKey(
+            operation: .batchTranscription,
+            parameters: ["model", "audio/wav", "en"],
+            payload: Data("audio".utf8)
+        )
+        XCTAssertEqual(first, retry)
+    }
+
+    func testIdempotencyKey_differsForDifferentRequests() {
+        let base = PaidAccessHTTPClient.idempotencyKey(
+            operation: .postProcessing,
+            parameters: ["model", "prompt", "0.2"],
+            payload: Data("hello".utf8)
+        )
+        let otherPayload = PaidAccessHTTPClient.idempotencyKey(
+            operation: .postProcessing,
+            parameters: ["model", "prompt", "0.2"],
+            payload: Data("goodbye".utf8)
+        )
+        let otherParameters = PaidAccessHTTPClient.idempotencyKey(
+            operation: .postProcessing,
+            parameters: ["model", "prompt", "0.9"],
+            payload: Data("hello".utf8)
+        )
+        let otherOperation = PaidAccessHTTPClient.idempotencyKey(
+            operation: .batchTranscription,
+            parameters: ["model", "prompt", "0.2"],
+            payload: Data("hello".utf8)
+        )
+        XCTAssertEqual(Set([base, otherPayload, otherParameters, otherOperation]).count, 4)
+    }
+
+    func testIdempotencyKey_matchesTheShapeTheWorkerAccepts() {
+        let key = PaidAccessHTTPClient.idempotencyKey(
+            operation: .postProcessing,
+            payload: Data()
+        )
+        XCTAssertTrue((16...128).contains(key.count))
+        XCTAssertTrue(key.range(of: "^[A-Za-z0-9_-]+$", options: .regularExpression) != nil)
     }
 }

@@ -6,6 +6,29 @@ import SpeakCore
 import StoreKit
 import UIKit
 
+/// Whether iOS can sell and use paid access at all.
+///
+/// **Paid routing is not wired up on iOS.** `PaidAccessStore` can hold a valid
+/// entitlement and a routing policy, but nothing consults it when work is
+/// actually dispatched — these three call sites all go straight to the user's
+/// own API key or an on-device model:
+///
+///   * `Sources/SpeakiOS/Services/iOSBatchTranscriber.swift`
+///   * `Sources/SpeakiOS/Services/VoiceSummariser.swift`
+///   * `Sources/SpeakiOS/Views/PostProcessingView.swift`
+///
+/// Selling a subscription in that state would charge for routing that does not
+/// exist, and hiding the model pickers would strand the user with neither a
+/// picker nor a paid route. So the purchase and routing UI is switched off
+/// here, and the code below stays compiled so that wiring those three call
+/// sites through a proxy client — as macOS does with `PaidAccessProxyClient` —
+/// plus flipping this one constant, is the whole change.
+public enum PaidAccessFeature {
+    /// Flip to `true` in the same change that routes the three call sites above
+    /// through the paid service.
+    public static let isAvailableOnIOS = false
+}
+
 /// Paid-access state for iOS.
 ///
 /// iOS always ships through the App Store, so billing is always StoreKit; the
@@ -39,10 +62,11 @@ public final class PaidAccessStore: NSObject, ObservableObject {
         didSet { UserDefaults.standard.set(paidRoutingEnabled, forKey: "paidAccessRoutingEnabled") }
     }
 
-    public static let subscriptionProductIDs = [
-        "com.justspeaktoit.paid.monthly",
-        "com.justspeaktoit.paid.yearly"
-    ]
+    public static let subscriptionProductIDs = PaidSubscriptionTerm.productIDs
+
+    /// The term the purchase button would buy. Explicit, so the yearly plan is
+    /// reachable rather than losing to whichever product loaded first.
+    @Published public var selectedTerm: PaidSubscriptionTerm = .monthly
 
     private let client: any PaidAccessClienting
     private let sessionStore: any PaidAccessSessionStoring
@@ -84,15 +108,22 @@ public final class PaidAccessStore: NSObject, ObservableObject {
         DistributionChannel.current.paidBillingChannel
     }
 
+    /// Reports no paid routing while ``PaidAccessFeature/isAvailableOnIOS`` is
+    /// off, so the model pickers stay visible even for a subscriber who bought
+    /// on a Mac. Without that, an entitled iPhone would hide the pickers and
+    /// then transcribe with the user's own key anyway.
     public var simpleModelChoicesPolicy: SimpleModelChoicesPolicy {
         SimpleModelChoicesPolicy(
             isEnabled: self.simpleModelChoices,
-            hasPaidRouting: self.entitlement.allowsPaidRouting()
+            hasPaidRouting: PaidAccessFeature.isAvailableOnIOS
+                && self.entitlement.allowsPaidRouting()
         )
     }
 
     public var isPaidRoutingActive: Bool {
-        self.paidRoutingEnabled && self.entitlement.allowsPaidRouting()
+        PaidAccessFeature.isAvailableOnIOS
+            && self.paidRoutingEnabled
+            && self.entitlement.allowsPaidRouting()
     }
 
     public var router: PaidAccessRouter {
@@ -161,8 +192,12 @@ public final class PaidAccessStore: NSObject, ObservableObject {
         }
 
         do {
-            self.entitlement = try await self.client.entitlement(session: session)
-            self.policy = try await self.client.routingPolicy(session: session)
+            // Entitlement and policy are committed together: a second, separate
+            // policy call could fail and leave an active entitlement with an
+            // empty policy, which routes nothing.
+            let state = try await self.client.entitlement(session: session)
+            self.entitlement = state.entitlement
+            self.policy = state.policy
             self.lastError = nil
         } catch PaidAccessError.notSignedIn {
             await self.clearSession()
@@ -251,7 +286,24 @@ public final class PaidAccessStore: NSObject, ObservableObject {
         self.products = (loaded ?? []).sorted { $0.price < $1.price }
     }
 
-    public func purchase() async {
+    /// The loaded StoreKit product for a term, if the App Store returned it.
+    public func product(for term: PaidSubscriptionTerm) -> Product? {
+        self.products.first { $0.id == term.productID }
+    }
+
+    /// Buys the named term.
+    ///
+    /// - Parameter term: Which subscription to buy. Defaults to the user's
+    ///   current choice rather than to whichever product loaded first.
+    public func purchase(term: PaidSubscriptionTerm? = nil) async {
+        // Refuses while iOS paid routing is unwired: see `PaidAccessFeature`.
+        // The UI hides the purchase controls too; this is the backstop that
+        // makes the guarantee independent of any view.
+        guard PaidAccessFeature.isAvailableOnIOS else {
+            self.lastError = "Subscriptions are not available in the iOS app yet."
+            return
+        }
+        let term = term ?? self.selectedTerm
         self.isBusy = true
         self.lastError = nil
         defer { self.isBusy = false }
@@ -263,13 +315,22 @@ public final class PaidAccessStore: NSObject, ObservableObject {
         if self.products.isEmpty {
             await self.loadProducts()
         }
-        guard let product = self.products.first else {
-            self.lastError = "Subscription products are not available in this build yet."
+        // Matched by product id, never by position.
+        guard let product = self.product(for: term) else {
+            self.lastError = "The \(term.displayName.lowercased()) subscription is not available in this build yet."
+            return
+        }
+
+        // Bind the purchase to this account before it happens. The server rejects
+        // a signed transaction whose `appAccountToken` is not the caller's, so a
+        // purchase made without one produces a receipt nobody can redeem.
+        guard let accountToken = session.storeKitAccountToken else {
+            self.lastError = "This account cannot be linked to an App Store purchase. Sign out, sign back in and try again."
             return
         }
 
         do {
-            let result = try await product.purchase()
+            let result = try await product.purchase(options: [.appAccountToken(accountToken)])
             if case .success(let verification) = result {
                 await self.syncIfSubscription(verification, session: session)
                 if case .verified(let transaction) = verification {

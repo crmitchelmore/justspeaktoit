@@ -157,6 +157,31 @@ public struct PaidEntitlement: Codable, Hashable, Sendable {
     }
 }
 
+/// The subscription terms on offer.
+///
+/// A type rather than an index into a loaded product array: the purchase flow
+/// used to buy whichever product happened to sort first, which made the yearly
+/// plan unbuyable. Naming the term forces every caller to say which one it
+/// means.
+public enum PaidSubscriptionTerm: String, Codable, Sendable, CaseIterable, Identifiable {
+    case monthly = "com.justspeaktoit.paid.monthly"
+    case yearly = "com.justspeaktoit.paid.yearly"
+
+    public var id: String { self.rawValue }
+
+    /// The App Store product identifier for this term.
+    public var productID: String { self.rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .monthly: return "Monthly"
+        case .yearly: return "Yearly"
+        }
+    }
+
+    public static let productIDs = PaidSubscriptionTerm.allCases.map(\.productID)
+}
+
 // MARK: - Routing policy
 
 /// The operations that can be routed through the paid service.
@@ -208,9 +233,46 @@ public struct PaidRoutingPolicy: Codable, Hashable, Sendable {
         self.routes.first { $0.operation == operation }
     }
 
+    /// The routes this client can actually use, and therefore the only ones it
+    /// is honest to show a subscriber.
+    ///
+    /// The server publishes a live-transcription route, but no client sends
+    /// audio to it yet: streaming dictation still runs through the user's own
+    /// key or an on-device model. Advertising that model would promise
+    /// something the app does not do. Delete this filter in the change that
+    /// wires live audio through the Worker.
+    public var clientSupportedRoutes: [PaidRoute] {
+        self.routes.filter { $0.operation != .liveTranscription }
+    }
+
     /// A conservative local fallback used only for display before the first
     /// successful policy fetch. It is never used to make a routing decision.
     public static let unknown = PaidRoutingPolicy(version: "unknown", routes: [])
+}
+
+// MARK: - Combined state
+
+/// An entitlement and the routing policy it was issued with.
+///
+/// The two are only meaningful together — an active entitlement with an empty
+/// policy routes nothing, and a policy with no entitlement grants nothing — so
+/// they are fetched and published as one value. Committing them separately
+/// leaves a window in which the app believes it is entitled and has nowhere to
+/// send the request.
+public struct PaidAccessState: Codable, Hashable, Sendable {
+    public let entitlement: PaidEntitlement
+    public let policy: PaidRoutingPolicy
+
+    public init(entitlement: PaidEntitlement, policy: PaidRoutingPolicy) {
+        self.entitlement = entitlement
+        self.policy = policy
+    }
+
+    /// The state of a device with no subscription: the app's default.
+    public static let unentitled = PaidAccessState(
+        entitlement: .unentitled,
+        policy: .unknown
+    )
 }
 
 // MARK: - Errors

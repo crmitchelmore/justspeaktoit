@@ -64,6 +64,20 @@ actor PaidAccessProxyClient: StreamingChatLLMClient, BatchTranscriptionClient {
     return (route, session)
   }
 
+  /// Whether a paid-path failure should be completed through the user's own
+  /// client rather than failed.
+  ///
+  /// Wider than ``PaidAccessError/permitsSilentFallback`` by exactly one case:
+  /// `unsupportedOperation` is still an error worth surfacing in Settings — the
+  /// server publishes no paid route for that operation — but it must not cost
+  /// the user a recording they have already made. Failing a request is never
+  /// the right answer when the user's own key or an on-device model can finish
+  /// it.
+  private static func completesThroughFallback(_ error: PaidAccessError) -> Bool {
+    if case .unsupportedOperation = error { return true }
+    return error.permitsSilentFallback
+  }
+
   // MARK: - Chat
 
   func sendChat(
@@ -72,34 +86,41 @@ actor PaidAccessProxyClient: StreamingChatLLMClient, BatchTranscriptionClient {
     model: String,
     temperature: Double
   ) async throws -> ChatResponse {
-    guard
-      let resolved = try await self.paidRoute(for: .postProcessing, configuredModel: model)
-    else {
-      return try await self.fallback.sendChat(
-        systemPrompt: systemPrompt,
-        messages: messages,
-        model: model,
-        temperature: temperature
-      )
-    }
-
+    // Resolving the route is inside the `do`: a routing failure must cost the
+    // user the paid model, never the text they just dictated.
     do {
-      let text = try await self.paidClient.postProcess(
+      guard
+        let resolved = try await self.paidRoute(for: .postProcessing, configuredModel: model)
+      else {
+        return try await self.fallback.sendChat(
+          systemPrompt: systemPrompt,
+          messages: messages,
+          model: model,
+          temperature: temperature
+        )
+      }
+
+      let text = Self.userText(from: messages)
+      let result = try await self.paidClient.postProcess(
         session: resolved.session,
-        text: Self.userText(from: messages),
+        text: text,
         systemPrompt: systemPrompt,
         temperature: temperature,
-        idempotencyKey: PaidAccessHTTPClient.newIdempotencyKey()
+        idempotencyKey: PaidAccessHTTPClient.idempotencyKey(
+          operation: .postProcessing,
+          parameters: [resolved.route.model, systemPrompt ?? "", String(temperature)],
+          payload: Data(text.utf8)
+        )
       )
       return ChatResponse(
-        messages: [ChatMessage(role: .assistant, content: text)],
+        messages: [ChatMessage(role: .assistant, content: result)],
         finishReason: "stop",
         // Cost accounting lives in the server's usage ledger; the client is
         // never told what a request cost and never reports one.
         cost: nil,
         rawPayload: nil
       )
-    } catch let error as PaidAccessError where error.permitsSilentFallback {
+    } catch let error as PaidAccessError where Self.completesThroughFallback(error) {
       return try await self.fallback.sendChat(
         systemPrompt: systemPrompt,
         messages: messages,
@@ -118,10 +139,13 @@ actor PaidAccessProxyClient: StreamingChatLLMClient, BatchTranscriptionClient {
     AsyncThrowingStream { continuation in
       let task = Task {
         do {
-          let resolved = try await self.paidRoute(
+          // A routing failure is treated exactly like "not entitled": the
+          // stream still runs, through the user's own client. Throwing here
+          // would end the stream and lose what the user dictated.
+          let resolved = (try? await self.paidRoute(
             for: .postProcessing,
             configuredModel: model
-          )
+          )) ?? nil
           guard resolved != nil else {
             // Not entitled: stream straight from the user's own client so live
             // typing behaviour is byte-for-byte what it was before paid access.
@@ -167,24 +191,31 @@ actor PaidAccessProxyClient: StreamingChatLLMClient, BatchTranscriptionClient {
     model: String,
     language: String?
   ) async throws -> TranscriptionResult {
-    guard
-      let contentType = Self.contentType(for: url),
-      let resolved = try await self.paidRoute(
-        for: .batchTranscription,
-        configuredModel: model
-      )
-    else {
-      return try await self.fallback.transcribeFile(at: url, model: model, language: language)
-    }
-
+    // As above: resolving the route sits inside the `do` so that a routing
+    // failure falls back to the user's own client instead of throwing away a
+    // recording that has already been made.
     do {
+      guard
+        let contentType = Self.contentType(for: url),
+        let resolved = try await self.paidRoute(
+          for: .batchTranscription,
+          configuredModel: model
+        )
+      else {
+        return try await self.fallback.transcribeFile(at: url, model: model, language: language)
+      }
+
       let audio = try Data(contentsOf: url)
       let text = try await self.paidClient.transcribe(
         session: resolved.session,
         audio: audio,
         contentType: contentType,
         language: language,
-        idempotencyKey: PaidAccessHTTPClient.newIdempotencyKey()
+        idempotencyKey: PaidAccessHTTPClient.idempotencyKey(
+          operation: .batchTranscription,
+          parameters: [resolved.route.model, contentType, language ?? ""],
+          payload: audio
+        )
       )
       let duration = await Self.audioDuration(of: url)
       return TranscriptionResult(
@@ -197,7 +228,7 @@ actor PaidAccessProxyClient: StreamingChatLLMClient, BatchTranscriptionClient {
         rawPayload: nil,
         debugInfo: nil
       )
-    } catch let error as PaidAccessError where error.permitsSilentFallback {
+    } catch let error as PaidAccessError where Self.completesThroughFallback(error) {
       return try await self.fallback.transcribeFile(at: url, model: model, language: language)
     }
   }
@@ -220,11 +251,15 @@ actor PaidAccessProxyClient: StreamingChatLLMClient, BatchTranscriptionClient {
 
   /// Returns `nil` for formats the paid endpoint does not accept, which sends
   /// the request down the user's own client instead of failing it.
+  ///
+  /// WAV only. The server bills recorded transcription by duration and reads
+  /// that duration out of the WAV header, because nothing upstream reports it
+  /// back and a compressed container's duration cannot be inferred from its
+  /// size. Sending an m4a or an mp3 would simply be rejected, so those go to the
+  /// user's own client instead — which is the better outcome anyway.
   private static func contentType(for url: URL) -> String? {
     switch url.pathExtension.lowercased() {
     case "wav": return "audio/wav"
-    case "m4a", "mp4": return "audio/mp4"
-    case "mp3": return "audio/mpeg"
     default: return nil
     }
   }

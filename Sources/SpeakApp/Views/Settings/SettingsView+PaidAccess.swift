@@ -1,5 +1,6 @@
 import AppKit
 import SpeakCore
+import StoreKit
 import SwiftUI
 
 extension SettingsView {
@@ -117,9 +118,42 @@ extension SettingsView {
         }
       }
 
+      if !paidAccess.entitlement.isActive() {
+        paidAccessTermPicker
+      }
       paidAccessRoutingControls
       paidAccessActionButtons
     }
+  }
+
+  /// Monthly or yearly, chosen before the purchase rather than inferred from
+  /// whichever product the App Store returned first.
+  ///
+  /// Shown only for StoreKit builds: the direct-download Mac build checks out
+  /// against a single Stripe price, and Stripe's own page states the term.
+  @ViewBuilder
+  private var paidAccessTermPicker: some View {
+    if paidAccess.billingChannel == .storeKit {
+      VStack(alignment: .leading, spacing: 4) {
+        Picker("Billing", selection: $paidAccess.selectedTerm) {
+          ForEach(PaidSubscriptionTerm.allCases) { term in
+            Text(Self.termLabel(term, price: paidAccess.product(for: term)?.displayPrice))
+              .tag(term)
+          }
+        }
+        .pickerStyle(.segmented)
+        .accessibilityIdentifier("paidAccessTermPicker")
+
+        Text("You can switch between monthly and yearly later in your App Store subscriptions.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+    }
+  }
+
+  private static func termLabel(_ term: PaidSubscriptionTerm, price: String?) -> String {
+    guard let price else { return term.displayName }
+    return "\(term.displayName) — \(price)"
   }
 
   @ViewBuilder
@@ -141,12 +175,16 @@ extension SettingsView {
         .foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)
 
-      if paidAccess.isPaidRoutingActive, !paidAccess.policy.routes.isEmpty {
+      // Only the routes this app actually uses are listed. The server also
+      // publishes a live-transcription model, but streaming dictation still
+      // runs through the user's own key or an on-device model, so naming that
+      // model here would advertise something the subscription does not do.
+      if paidAccess.isPaidRoutingActive, !paidAccess.policy.clientSupportedRoutes.isEmpty {
         VStack(alignment: .leading, spacing: 4) {
           Text("Models in use")
             .font(.caption.weight(.semibold))
             .foregroundStyle(.secondary)
-          ForEach(paidAccess.policy.routes, id: \.operation) { route in
+          ForEach(paidAccess.policy.clientSupportedRoutes, id: \.operation) { route in
             HStack {
               Text(route.operation.displayName)
                 .font(.caption)
@@ -221,7 +259,7 @@ extension SettingsView {
           .font(.callout)
           .fixedSize(horizontal: false, vertical: true)
 
-        ForEach(paidAccess.policy.routes, id: \.model) { route in
+        ForEach(paidAccess.policy.clientSupportedRoutes, id: \.model) { route in
           HStack {
             Text(route.operation.displayName)
               .font(.caption)

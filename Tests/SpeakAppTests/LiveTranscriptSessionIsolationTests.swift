@@ -23,6 +23,58 @@ final class LiveTranscriptSessionIsolationTests: XCTestCase {
     func stop() async {}
   }
 
+  /// Mirrors the production controller shape: one cached controller instance
+  /// that mints a fresh stream object per recording and routes stream
+  /// callbacks through `LiveTranscriptionRun`.
+  private final class StreamingStubController: LiveTranscriptionController {
+    final class Stream {}
+
+    weak var delegate: LiveTranscriptionSessionDelegate?
+    var isRunning: Bool = false
+    private(set) var stream: Stream?
+
+    func configure(language: String?, model: String) {}
+
+    @discardableResult
+    func startStream() -> Stream {
+      let stream = Stream()
+      self.stream = stream
+      isRunning = true
+      return stream
+    }
+
+    func start() async throws {
+      startStream()
+    }
+
+    func stop() async {
+      isRunning = false
+    }
+
+    /// Delivers a partial as if it arrived on `stream`'s socket.
+    func deliverPartial(_ text: String, from stream: Stream) {
+      guard LiveTranscriptionRun.isCurrent(stream, activeStream: self.stream) else { return }
+      delegate?.liveTranscriber(self, didUpdatePartial: text)
+    }
+  }
+
+  private func makeSwitchingTranscriber() -> SwitchingLiveTranscriber {
+    let settings = AppSettings()
+    let permissions = PermissionsManager()
+    let audioDevices = AudioInputDeviceManager(appSettings: settings)
+    let secureStorage = SecureAppStorage(
+      permissionsManager: permissions,
+      appSettings: settings,
+      keychainService: "com.justspeaktoit.tests.live-session.\(UUID().uuidString)"
+    )
+    return SwitchingLiveTranscriber(
+      appSettings: settings,
+      permissionsManager: permissions,
+      audioDeviceManager: audioDevices,
+      secureStorage: secureStorage
+    )
+  }
+
   private func makeManager() -> TranscriptionManager {
     let settings = AppSettings()
     let permissions = PermissionsManager()
@@ -206,6 +258,101 @@ final class LiveTranscriptSessionIsolationTests: XCTestCase {
     scope.end()
     scope.bind(source: owner)
     XCTAssertFalse(scope.accepts(owner), "Binding must not revive a finished session")
+  }
+
+  // MARK: - Production wiring
+
+  /// The switcher is what tells its owner which controller is on air. Without
+  /// this notification nothing ever binds the display scope in production.
+  func testSwitchingLiveTranscriber_publishesSessionOwnershipChanges() async {
+    let switcher = self.makeSwitchingTranscriber()
+    // Routes to the "local live streaming unsupported" controller, whose
+    // start() throws before touching the microphone or the network.
+    let model = "local/whisperkit/tiny"
+    let expected = ObjectIdentifier(switcher.controller(for: model))
+
+    var observed: [ObjectIdentifier?] = []
+    switcher.sessionSourceDidChange = { source in
+      observed.append(source.map(ObjectIdentifier.init))
+    }
+
+    switcher.configure(language: nil, model: model)
+    try? await switcher.start()
+    await switcher.stop()
+
+    XCTAssertEqual(
+      observed.first,
+      .some(expected),
+      "Session start must publish the controller that owns the recording"
+    )
+    XCTAssertEqual(observed.last, .some(nil), "Stopping must release session ownership")
+  }
+
+  /// Drives the real closure `TranscriptionManager` installs on
+  /// `sessionSourceDidChange`, rather than the `source:` convenience used by
+  /// the other tests, so the production binding path itself is covered.
+  func testSessionSourceDidChange_bindsAndReleasesTheDisplayScope() {
+    let manager = self.makeManager()
+    let controller = StubLiveController()
+
+    manager.beginLiveTranscriptDisplaySession()
+    XCTAssertFalse(
+      manager.displayScope.accepts(controller),
+      "A session with no bound source must not adopt the first caller"
+    )
+    manager.liveTranscriber(controller, didUpdatePartial: "too early")
+    XCTAssertEqual(manager.livePartialText, "")
+
+    manager.liveController.sessionSourceDidChange?(controller)
+
+    XCTAssertTrue(
+      manager.displayScope.accepts(controller),
+      "The controller published by the switcher must own the display session"
+    )
+    manager.liveTranscriber(controller, didUpdatePartial: "on air")
+    XCTAssertEqual(manager.livePartialText, "on air")
+
+    manager.liveController.sessionSourceDidChange?(nil)
+
+    XCTAssertFalse(manager.displayScope.accepts(controller))
+    manager.liveTranscriber(controller, didUpdatePartial: "after release")
+    XCTAssertEqual(manager.livePartialText, "on air")
+  }
+
+  // MARK: - Per-stream isolation
+
+  /// The display scope keys on the controller instance, and cached controllers
+  /// are reused, so a late callback from the previous recording's socket
+  /// arrives through a controller the scope legitimately accepts. Only the
+  /// per-stream guard can tell the two runs apart.
+  func testStaleStreamOnReusedController_isDroppedDuringTheNextSession() {
+    let manager = self.makeManager()
+    let controller = StreamingStubController()
+    controller.delegate = manager
+
+    let firstStream = controller.startStream()
+    manager.beginLiveTranscriptDisplaySession(source: controller)
+    controller.deliverPartial("first recording", from: firstStream)
+    XCTAssertEqual(manager.livePartialText, "first recording")
+    manager.endLiveTranscriptDisplaySession()
+
+    // Next recording: same cached controller instance, a brand new stream.
+    let secondStream = controller.startStream()
+    manager.beginLiveTranscriptDisplaySession(source: controller)
+    controller.deliverPartial("second recording", from: secondStream)
+    XCTAssertEqual(manager.livePartialText, "second recording")
+
+    XCTAssertTrue(
+      manager.displayScope.accepts(controller),
+      "The session guard cannot catch this — the stale callback shares the controller"
+    )
+    controller.deliverPartial("first recording", from: firstStream)
+
+    XCTAssertEqual(
+      manager.livePartialText,
+      "second recording",
+      "A message queued by the previous stream must not repaint the live view"
+    )
   }
 
   func testLiveTranscriptionRun_identifiesSupersededStreams() {

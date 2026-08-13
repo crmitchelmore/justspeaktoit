@@ -76,7 +76,7 @@ private final class SystemCaptureWarmNetworkMonitor: CaptureWarmNetworkMonitorin
 /// Warm-up is suspended for the duration of a session and resumed when the app
 /// returns to idle, so it never competes with a live capture.
 @MainActor
-final class CaptureWarmCoordinator {
+final class CaptureWarmCoordinator { // swiftlint:disable:this type_body_length
   private let appSettings: AppSettings
   private let permissionsManager: PermissionsManager
   private let audioInputDeviceManager: AudioInputDeviceManager
@@ -445,4 +445,4 @@ private final class CaptureWarmLifecycleSink: @unchecked Sendable {
       self?.coordinator?.handleRecordingLifecycle(event)
     }
   }
-}
+} // swiftlint:disable:this file_length

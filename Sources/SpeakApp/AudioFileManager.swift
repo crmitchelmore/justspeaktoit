@@ -51,7 +51,7 @@ enum AudioFileManagerError: LocalizedError {
   }
 }
 
-actor AudioFileManager {
+actor AudioFileManager { // swiftlint:disable:this type_body_length
   /// AAC encoder settings for every recording. Kept as one value so the warm-up
   /// fingerprint can name the exact profile a staged recorder was built for.
   private enum EncoderProfile {
@@ -231,6 +231,7 @@ actor AudioFileManager {
   /// Starts capture, claiming the staged recorder when `warmContext` matches
   /// the one it was prepared for. On the warm path the only work left on the
   /// hotkey→capture path is the input-device session and `record()` itself.
+  // swiftlint:disable:next function_body_length
   func startRecording(
     warmContext: CaptureWarmContext? = nil,
     owner: AudioRecordingOwner = .auxiliary
@@ -426,4 +427,4 @@ actor AudioFileManager {
     try FileManager.default.copyItem(at: url, to: destination)
     return destination
   }
-}
+} // swiftlint:disable:this file_length

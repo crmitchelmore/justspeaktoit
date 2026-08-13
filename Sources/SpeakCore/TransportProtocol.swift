@@ -22,10 +22,6 @@ public enum TransportMessage: Codable {
     case error(ErrorMessage)
     case ping
     case pong
-    /// Local automation (CLI / MCP) command, carried over the same envelope so
-    /// there is one message contract for every non-UI client.
-    case automationRequest(AutomationRequest)
-    case automationResponse(AutomationResponse)
 
     private enum CodingKeys: String, CodingKey {
         case type, payload
@@ -36,12 +32,8 @@ public enum TransportMessage: Codable {
         case sessionStart, sessionEnd
         case transcriptChunk, ack, error
         case ping, pong
-        case automationRequest, automationResponse
     }
 
-    // Exhaustive Codable mapping: one case per wire type, so complexity tracks
-    // the message count rather than any real branching logic.
-    // swiftlint:disable:next cyclomatic_complexity
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let type = try container.decode(MessageType.self, forKey: .type)
@@ -67,14 +59,9 @@ public enum TransportMessage: Codable {
             self = .ping
         case .pong:
             self = .pong
-        case .automationRequest:
-            self = .automationRequest(try container.decode(AutomationRequest.self, forKey: .payload))
-        case .automationResponse:
-            self = .automationResponse(try container.decode(AutomationResponse.self, forKey: .payload))
         }
     }
 
-    // swiftlint:disable:next cyclomatic_complexity
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
 
@@ -107,12 +94,6 @@ public enum TransportMessage: Codable {
             try container.encode(MessageType.ping, forKey: .type)
         case .pong:
             try container.encode(MessageType.pong, forKey: .type)
-        case .automationRequest(let msg):
-            try container.encode(MessageType.automationRequest, forKey: .type)
-            try container.encode(msg, forKey: .payload)
-        case .automationResponse(let msg):
-            try container.encode(MessageType.automationResponse, forKey: .type)
-            try container.encode(msg, forKey: .payload)
         }
     }
 }
@@ -123,26 +104,11 @@ public struct HelloMessage: Codable {
     public var protocolVersion: Int
     public var deviceName: String
     public var deviceId: String
-    /// Optional feature flags this endpoint supports beyond the base protocol.
-    ///
-    /// Optional (and additive) on purpose: older builds omit the key entirely and
-    /// still decode, so advertising a capability never breaks an existing client.
-    public var capabilities: [TransportCapability]?
 
-    public init(
-        protocolVersion: Int = SpeakTransportProtocolVersion,
-        deviceName: String,
-        deviceId: String,
-        capabilities: [TransportCapability]? = nil
-    ) {
+    public init(protocolVersion: Int = SpeakTransportProtocolVersion, deviceName: String, deviceId: String) {
         self.protocolVersion = protocolVersion
         self.deviceName = deviceName
         self.deviceId = deviceId
-        self.capabilities = capabilities
-    }
-
-    public func supports(_ capability: TransportCapability) -> Bool {
-        self.capabilities?.contains(capability) ?? false
     }
 
     /// Whether this hello's protocol version is compatible with the running build.

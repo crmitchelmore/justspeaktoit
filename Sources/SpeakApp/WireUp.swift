@@ -564,6 +564,12 @@ enum WireUp {
 
     if hasDeepgramKey {
       await MainActor.run {
+        // Re-check after the keychain await: the user may have chosen a model
+        // while this task was suspended, and that choice must win.
+        guard !settings.hasExplicitLiveTranscriptionModelChoice else {
+          print("[WireUp] User chose a transcription model during auto-config, skipping")
+          return
+        }
         settings.liveTranscriptionModel = "deepgram/nova-3-streaming"
         print("[WireUp] Deepgram API key found, setting as default transcription provider")
       }

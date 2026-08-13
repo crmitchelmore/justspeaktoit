@@ -13,14 +13,14 @@ final class LiveTranscriptionSelectionTests: XCTestCase {
 
     // MARK: - Placement
 
-    func testPlacementIsDerivedFromTheModelIdentifier() {
+    func testPlacement_isDerivedFromTheModelIdentifier() {
         XCTAssertEqual(LiveTranscriptionPlacement(modelID: appleModel), .onDevice)
         XCTAssertEqual(LiveTranscriptionPlacement(modelID: soniox), .remote)
     }
 
     // MARK: - Regression: Soniox must survive a mode switch
 
-    func testReturningToRemoteRestoresSonioxRatherThanTheDeepgramDefault() {
+    func testReturningToRemote_restoresSonioxRatherThanTheDeepgramDefault() {
         var selection = LiveTranscriptionSelection()
         selection.remember(soniox)
 
@@ -31,7 +31,7 @@ final class LiveTranscriptionSelectionTests: XCTestCase {
         XCTAssertEqual(restored, soniox, "Switching back to remote must not fall back to Deepgram")
     }
 
-    func testSwitchingToLocalRestoresThePreviousOnDeviceModel() {
+    func testSwitchingToLocal_restoresThePreviousOnDeviceModel() {
         var selection = LiveTranscriptionSelection()
         selection.remember(appleModel)
         selection.remember(soniox)
@@ -40,7 +40,7 @@ final class LiveTranscriptionSelectionTests: XCTestCase {
         XCTAssertEqual(selection.model(for: .remote, activeModel: appleModel), soniox)
     }
 
-    func testChoosingOneModeDoesNotOverwriteTheOtherModesMemory() {
+    func testChoosingOneMode_doesNotOverwriteTheOtherModesMemory() {
         var selection = LiveTranscriptionSelection()
         selection.remember(soniox)
         selection.remember(appleModel)
@@ -49,7 +49,7 @@ final class LiveTranscriptionSelectionTests: XCTestCase {
         XCTAssertEqual(selection.rememberedModel(for: .onDevice), appleModel)
     }
 
-    func testActiveModelIsKeptWhenItAlreadyMatchesThePlacement() {
+    func testActiveModel_isKeptWhenItAlreadyMatchesThePlacement() {
         var selection = LiveTranscriptionSelection()
         selection.remember(deepgram)
 
@@ -58,18 +58,18 @@ final class LiveTranscriptionSelectionTests: XCTestCase {
 
     // MARK: - Defaults only when there is no valid choice
 
-    func testDefaultAppliesOnlyWhenNothingValidIsRemembered() {
+    func testDefault_appliesOnlyWhenNothingValidIsRemembered() {
         let selection = LiveTranscriptionSelection()
         XCTAssertEqual(selection.model(for: .remote, activeModel: appleModel), deepgram)
     }
 
-    func testUnknownRememberedModelFallsBackToTheDefault() {
+    func testUnknownRememberedModel_fallsBackToTheDefault() {
         let selection = LiveTranscriptionSelection(remoteModel: "acme/not-a-real-model")
         XCTAssertNil(selection.rememberedModel(for: .remote))
         XCTAssertEqual(selection.model(for: .remote, activeModel: appleModel), deepgram)
     }
 
-    func testEmptyOrMisplacedIdentifiersAreIgnored() {
+    func testEmptyOrMisplacedIdentifiers_areIgnored() {
         var selection = LiveTranscriptionSelection()
         selection.remember("")
         XCTAssertNil(selection.rememberedModel(for: .remote))
@@ -79,7 +79,7 @@ final class LiveTranscriptionSelectionTests: XCTestCase {
         XCTAssertNil(misplaced.rememberedModel(for: .remote))
     }
 
-    func testRememberIfMissingNeverReplacesAnExistingChoice() {
+    func testRememberIfMissing_neverReplacesAnExistingChoice() {
         var selection = LiveTranscriptionSelection(remoteModel: soniox)
         selection.rememberIfMissing(deepgram)
         XCTAssertEqual(selection.rememberedModel(for: .remote), soniox)
@@ -87,7 +87,7 @@ final class LiveTranscriptionSelectionTests: XCTestCase {
 
     // MARK: - Platform-selectable filtering
 
-    func testSelectableFilteringNeverReturnsAModelThePlatformCannotRun() {
+    func testSelectableFiltering_neverReturnsAModelThePlatformCannotRun() {
         var selection = LiveTranscriptionSelection()
         selection.remember(soniox)
         let selectable: Set<String> = [deepgram, appleModel]
@@ -98,7 +98,7 @@ final class LiveTranscriptionSelectionTests: XCTestCase {
         )
     }
 
-    func testSelectableFilteringKeepsARememberedModelThatIsStillAvailable() {
+    func testSelectableFiltering_keepsARememberedModelThatIsStillAvailable() {
         var selection = LiveTranscriptionSelection()
         selection.remember(soniox)
         let selectable: Set<String> = [deepgram, soniox, appleModel]
@@ -111,7 +111,7 @@ final class LiveTranscriptionSelectionTests: XCTestCase {
 
     // MARK: - Persistence (relaunch)
 
-    func testSelectionSurvivesARelaunchThroughUserDefaults() throws {
+    func testSelection_survivesARelaunchThroughUserDefaults() throws {
         let suiteName = "LiveTranscriptionSelectionTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -126,7 +126,7 @@ final class LiveTranscriptionSelectionTests: XCTestCase {
         XCTAssertEqual(restored.model(for: .remote, activeModel: appleModel), soniox)
     }
 
-    func testPersistenceClearsSlotsThatHaveNoRememberedValue() throws {
+    func testPersistence_clearsSlotsThatHaveNoRememberedValue() throws {
         let suiteName = "LiveTranscriptionSelectionTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }

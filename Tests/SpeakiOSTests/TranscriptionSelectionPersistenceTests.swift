@@ -38,7 +38,7 @@ final class TranscriptionSelectionPersistenceTests: XCTestCase {
 
     // MARK: - Reported regression
 
-    func testSonioxSurvivesARoundTripThroughLocalMode() {
+    func testSoniox_survivesARoundTripThroughLocalMode() {
         let settings = makeSettings()
         settings.selectRemoteTranscriptionMode(.streaming)
         settings.selectedModel = soniox
@@ -53,7 +53,7 @@ final class TranscriptionSelectionPersistenceTests: XCTestCase {
         XCTAssertNotEqual(settings.selectedModel, deepgram)
     }
 
-    func testSonioxSurvivesRelaunch() {
+    func testSoniox_survivesRelaunch() {
         let settings = makeSettings()
         settings.selectRemoteTranscriptionMode(.streaming)
         settings.selectedModel = soniox
@@ -66,7 +66,7 @@ final class TranscriptionSelectionPersistenceTests: XCTestCase {
         XCTAssertEqual(relaunched.selectedModel, soniox)
     }
 
-    func testSavingADeepgramKeyDoesNotReplaceAChosenProvider() {
+    func testSavingADeepgramKey_doesNotReplaceAChosenProvider() {
         let settings = makeSettings()
         settings.selectRemoteTranscriptionMode(.streaming)
         settings.selectedModel = soniox
@@ -78,7 +78,7 @@ final class TranscriptionSelectionPersistenceTests: XCTestCase {
 
     // MARK: - Independent local and remote selections
 
-    func testLocalAndRemoteSelectionsAreStoredIndependently() {
+    func testLocalAndRemoteSelections_areStoredIndependently() {
         let settings = makeSettings()
         settings.selectRemoteTranscriptionMode(.streaming)
         settings.selectedModel = soniox
@@ -88,7 +88,7 @@ final class TranscriptionSelectionPersistenceTests: XCTestCase {
         XCTAssertEqual(settings.liveTranscriptionSelection.rememberedModel(for: .onDevice), appleModel)
     }
 
-    func testRemoteBatchPreferenceIsRestoredWhenReturningFromLocal() {
+    func testRemoteBatchPreference_isRestoredWhenReturningFromLocal() {
         let settings = makeSettings()
         settings.selectRemoteTranscriptionMode(.batch)
         XCTAssertEqual(settings.transcriptionMode, .batch)
@@ -100,7 +100,7 @@ final class TranscriptionSelectionPersistenceTests: XCTestCase {
         XCTAssertEqual(makeSettings().remoteTranscriptionMode, .batch)
     }
 
-    func testBatchModelSelectionSurvivesRelaunch() throws {
+    func testBatchModelSelection_survivesRelaunch() throws {
         let settings = makeSettings()
         let batchModel = try XCTUnwrap(AppSettings.supportedBatchModels.last?.id)
         settings.batchTranscriptionModel = batchModel
@@ -110,14 +110,14 @@ final class TranscriptionSelectionPersistenceTests: XCTestCase {
 
     // MARK: - Defaults only when nothing valid is stored
 
-    func testFirstRunUsesTheCatalogueDefaultForRemoteStreaming() {
+    func testFirstRun_usesTheCatalogueDefaultForRemoteStreaming() {
         let settings = makeSettings()
         settings.selectRemoteTranscriptionMode(.streaming)
 
         XCTAssertEqual(settings.selectedModel, deepgram)
     }
 
-    func testOnlySelectableModelsAreRestored() {
+    func testOnlySelectableModels_areRestored() {
         defaults.set(
             "speechmatics/ursa-2-streaming",
             forKey: LiveTranscriptionSelection.DefaultsKey.remoteModel
@@ -131,7 +131,7 @@ final class TranscriptionSelectionPersistenceTests: XCTestCase {
 
     // MARK: - Other user-configurable settings
 
-    func testRepresentativeSettingsSurviveRelaunch() {
+    func testRepresentativeSettings_surviveRelaunch() {
         let settings = makeSettings()
         settings.autoStartRecording = true
         settings.liveActivitiesEnabled = false

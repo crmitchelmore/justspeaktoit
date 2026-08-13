@@ -28,7 +28,7 @@ follows.
 | iOS app settings (model selection, mode, language, behaviour, post-processing, hardware trigger, Live Activities, density) | `SpeakiOSLib.AppSettings` | `UserDefaults` (injectable for tests) |
 | Live transcription model memory (both platforms) | `SpeakCore.LiveTranscriptionSelection` | `UserDefaults` keys `rememberedOnDeviceLiveTranscriptionModel`, `rememberedRemoteLiveTranscriptionModel` |
 | API keys / credentials | `SpeakCore.SecureStorage` (`SecureAppStorage` on macOS) | Keychain service `com.github.speakapp.credentials` |
-| Downloaded local models and imported sources | `LocalModelManager`, `LocalPostProcessingModelManager` | JSON marker files in application support |
+| Downloaded local models and imported sources | `LocalModelManager`, `LocalPostProcessingModelManager` | JSON marker files in Application Support |
 | Dictation profiles | `DictationProfileStore` | JSON on disk |
 | Personal lexicon, pronunciation, auto-corrections | `PersonalLexiconService`, `PronunciationManager`, `AutoCorrectionTracker` | JSON on disk |
 | History | `HistoryManager` / `HistoryWALStore` (iOS: `iOSHistoryManager`) | Write-ahead log + JSON |

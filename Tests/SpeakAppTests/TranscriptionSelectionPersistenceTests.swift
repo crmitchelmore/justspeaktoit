@@ -31,7 +31,7 @@ final class TranscriptionSelectionPersistenceTests: XCTestCase {
     // MARK: - Reported regression
 
     @MainActor
-    func testSonioxSurvivesARoundTripThroughLocalMode() {
+    func testSoniox_survivesARoundTripThroughLocalMode() {
         let settings = AppSettings(defaults: defaults)
         settings.selectRemoteTranscriptionMode(.streaming)
         settings.liveTranscriptionModel = soniox
@@ -46,7 +46,7 @@ final class TranscriptionSelectionPersistenceTests: XCTestCase {
     }
 
     @MainActor
-    func testSonioxSurvivesRelaunchAfterAModeSwitch() {
+    func testSoniox_survivesRelaunchAfterAModeSwitch() {
         let settings = AppSettings(defaults: defaults)
         settings.selectRemoteTranscriptionMode(.streaming)
         settings.liveTranscriptionModel = soniox
@@ -61,7 +61,7 @@ final class TranscriptionSelectionPersistenceTests: XCTestCase {
     }
 
     @MainActor
-    func testRemoteSelectionIsRestoredEvenWhenTheAppIsQuitWhileInLocalMode() {
+    func testRemoteSelection_isRestoredEvenWhenTheAppIsQuitWhileInLocalMode() {
         let settings = AppSettings(defaults: defaults)
         settings.selectRemoteTranscriptionMode(.streaming)
         settings.liveTranscriptionModel = soniox
@@ -77,7 +77,7 @@ final class TranscriptionSelectionPersistenceTests: XCTestCase {
     // MARK: - Independent local and remote selections
 
     @MainActor
-    func testLocalSelectionIsPreservedAcrossModeSwitchesAndRelaunch() {
+    func testLocalSelection_isPreservedAcrossModeSwitchesAndRelaunch() {
         let settings = AppSettings(defaults: defaults)
         settings.selectTranscriptionLocation(.local)
         settings.selectLocalTranscriptionSource(.downloaded)
@@ -95,7 +95,7 @@ final class TranscriptionSelectionPersistenceTests: XCTestCase {
     }
 
     @MainActor
-    func testChangingTheOnDeviceModelDoesNotOverwriteTheRemoteSelection() {
+    func testChangingTheOnDeviceModel_doesNotOverwriteTheRemoteSelection() {
         let settings = AppSettings(defaults: defaults)
         settings.selectRemoteTranscriptionMode(.streaming)
         settings.liveTranscriptionModel = soniox
@@ -108,7 +108,7 @@ final class TranscriptionSelectionPersistenceTests: XCTestCase {
     }
 
     @MainActor
-    func testRemoteBatchPreferenceIsRestoredWhenReturningFromLocal() {
+    func testRemoteBatchPreference_isRestoredWhenReturningFromLocal() {
         let settings = AppSettings(defaults: defaults)
         settings.selectRemoteTranscriptionMode(.batch)
         XCTAssertEqual(settings.transcriptionMode, .batchRemote)
@@ -123,7 +123,7 @@ final class TranscriptionSelectionPersistenceTests: XCTestCase {
     // MARK: - Defaults only when nothing valid is stored
 
     @MainActor
-    func testFirstRunFallsBackToTheCatalogueDefaultForRemoteStreaming() {
+    func testFirstRun_fallsBackToTheCatalogueDefaultForRemoteStreaming() {
         let settings = AppSettings(defaults: defaults)
         settings.selectRemoteTranscriptionMode(.streaming)
 
@@ -131,7 +131,7 @@ final class TranscriptionSelectionPersistenceTests: XCTestCase {
     }
 
     @MainActor
-    func testUpgradeSeedsTheMemoryFromTheExistingActiveModel() {
+    func testUpgrade_seedsTheMemoryFromTheExistingActiveModel() {
         defaults.set(soniox, forKey: AppSettings.DefaultsKey.liveTranscriptionModel.rawValue)
 
         let settings = AppSettings(defaults: defaults)
@@ -142,7 +142,7 @@ final class TranscriptionSelectionPersistenceTests: XCTestCase {
     }
 
     @MainActor
-    func testSessionProfileOverridesDoNotPersistTheModelMemory() {
+    func testSessionProfileOverrides_doNotPersistTheModelMemory() {
         let settings = AppSettings(defaults: defaults)
         settings.liveTranscriptionModel = soniox
 
@@ -160,12 +160,12 @@ final class TranscriptionSelectionPersistenceTests: XCTestCase {
     // MARK: - Launch-time auto-configuration
 
     @MainActor
-    func testAnUntouchedInstallHasNoExplicitModelChoice() {
+    func testAnUntouchedInstall_hasNoExplicitModelChoice() {
         XCTAssertFalse(AppSettings(defaults: defaults).hasExplicitLiveTranscriptionModelChoice)
     }
 
     @MainActor
-    func testChoosingAppleSpeechCountsAsAnExplicitChoice() {
+    func testChoosingAppleSpeech_countsAsAnExplicitChoice() {
         let settings = AppSettings(defaults: defaults)
         settings.selectTranscriptionLocation(.local)
         settings.selectLocalTranscriptionSource(.apple)

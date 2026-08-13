@@ -17,6 +17,7 @@ public final class SonioxIOSVoiceOutputClient: ObservableObject {
         self.session = session
     }
 
+    // swiftlint:disable:next function_body_length
     public func speak( // swiftlint:disable:this function_parameter_count
         text: String,
         apiKey: String,

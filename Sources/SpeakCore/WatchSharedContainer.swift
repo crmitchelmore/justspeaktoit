@@ -71,6 +71,15 @@ public struct WatchSharedContainer: Sendable {
         try? FileManager.default.removeItem(at: self.url(named: name))
     }
 
+    /// Names of payloads waiting under a producer-owned prefix. Callers still
+    /// claim a chosen file atomically before reading it.
+    func names(prefixedBy prefix: String) -> [String] {
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: self.directory.path) else {
+            return []
+        }
+        return names.filter { $0.hasPrefix(prefix) }.sorted()
+    }
+
     /// Atomically moves one payload to another name in the same container.
     /// A successful move transfers ownership to the caller before it reads,
     /// so a producer can safely recreate the original path immediately.

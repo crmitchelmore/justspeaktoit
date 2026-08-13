@@ -76,7 +76,22 @@ final class WatchSharedContainerTests: XCTestCase {
         WatchRecordingRequest(requestedAt: Date().addingTimeInterval(-600)).post(in: container)
 
         XCTAssertNil(WatchRecordingRequest.consume(from: container))
-        XCTAssertNil(container.read(named: WatchRecordingRequest.fileName))
+        XCTAssertNil(WatchRecordingRequest.consume(from: container))
+    }
+
+    func testRequestsPostedBeforeAClaim_areEachConsumed() {
+        let first = WatchRecordingRequest()
+        let second = WatchRecordingRequest()
+        first.post(in: container)
+        second.post(in: container)
+
+        let consumed = [
+            WatchRecordingRequest.consume(from: container),
+            WatchRecordingRequest.consume(from: container)
+        ].compactMap { $0?.id }
+
+        XCTAssertEqual(Set(consumed), Set([first.id, second.id]))
+        XCTAssertNil(WatchRecordingRequest.consume(from: container))
     }
 
     func testRequestClaim_doesNotRemoveARequestPostedDuringConsumption() throws {

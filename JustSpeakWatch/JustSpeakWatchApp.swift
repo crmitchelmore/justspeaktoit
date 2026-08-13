@@ -19,6 +19,8 @@ struct JustSpeakWatchApp: App {
                     captureStore.activate()
                 }
                 .task {
+                    // `scenePhase` may already be active on a cold launch. Recover
+                    // any durable active capture before draining watch-face taps.
                     await recorder.recoverInterruptedCapture()
                     await WatchRecordingCoordinator.shared.performPendingWatchFaceRequest()
                 }

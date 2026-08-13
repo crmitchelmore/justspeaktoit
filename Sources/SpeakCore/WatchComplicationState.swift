@@ -185,7 +185,10 @@ public struct WatchComplicationSnapshot: Codable, Equatable, Sendable {
         let expiry = self.expiresAt ?? self.updatedAt.addingTimeInterval(Self.recordingStaleAfter)
         guard now > expiry else { return self }
         return WatchComplicationSnapshot(
-            state: .idle,
+            state: WatchComplicationState.state(
+                isRecording: false,
+                latestCaptureStatus: self.latestCaptureStatus
+            ),
             updatedAt: self.updatedAt,
             recordingStartedAt: nil,
             latestCaptureAt: self.latestCaptureAt,
@@ -235,7 +238,10 @@ public struct WatchComplicationSnapshot: Codable, Equatable, Sendable {
 /// recording minutes later.
 public struct WatchRecordingRequest: Codable, Equatable, Sendable {
     public static let currentSchemaVersion = 1
+    /// Legacy single-slot path retained so an update can consume an existing request.
     public static let fileName = "watch-recording-request.json"
+    private static let pendingFilePrefix = "watch-recording-request.pending-"
+    private static let processingFilePrefix = "watch-recording-request.processing-"
 
     /// A request older than this is discarded unperformed.
     public static let freshnessWindow: TimeInterval = 30
@@ -282,15 +288,20 @@ public struct WatchRecordingRequest: Codable, Equatable, Sendable {
     /// Leaves the request for the watch app.
     public func post(in container: WatchSharedContainer = .shared) {
         guard let data = self.encoded() else { return }
-        container.write(data, named: Self.fileName)
+        container.write(data, named: "\(Self.pendingFilePrefix)\(self.id.uuidString).json")
     }
 
     /// Atomically takes ownership of the pending path. New posts can recreate
-    /// the canonical path without being removed when this claim is consumed.
+    /// their own paths without being removed when this claim is consumed.
     static func claim(from container: WatchSharedContainer = .shared) -> Claim? {
-        let claimedName = "\(fileName).processing-\(UUID().uuidString)"
-        guard container.claim(named: fileName, as: claimedName) else { return nil }
-        return Claim(fileName: claimedName)
+        let candidates = [fileName] + container.names(prefixedBy: pendingFilePrefix)
+        for candidate in candidates {
+            let claimedName = "\(processingFilePrefix)\(UUID().uuidString).json"
+            if container.claim(named: candidate, as: claimedName) {
+                return Claim(fileName: claimedName)
+            }
+        }
+        return nil
     }
 
     /// Decodes and removes one previously claimed request.

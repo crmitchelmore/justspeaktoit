@@ -138,6 +138,20 @@ final class WatchComplicationStateTests: XCTestCase {
         XCTAssertEqual(settled.inFlightCount, snapshot.inFlightCount)
     }
 
+    func testSettled_revealsTheLatestQueueStateBehindAStaleRecording() {
+        let snapshot = WatchComplicationSnapshot(
+            state: .recording,
+            updatedAt: wholeSecondDate,
+            latestCaptureStatus: .transferring,
+            expiresAt: wholeSecondDate
+        )
+
+        XCTAssertEqual(
+            snapshot.settled(now: wholeSecondDate.addingTimeInterval(1)).state,
+            .sending
+        )
+    }
+
     func testSettled_leavesEveryOtherStateAlone() {
         let ancient = wholeSecondDate.addingTimeInterval(WatchComplicationSnapshot.recordingStaleAfter * 10)
         for state in WatchComplicationState.allCases where state != .recording {

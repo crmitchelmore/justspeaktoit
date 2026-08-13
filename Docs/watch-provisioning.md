@@ -29,7 +29,7 @@ This is deliberately **not** the iOS group (`group.com.justspeaktoit.ios`):
 App Group containers are per-device, so the watch pair needs its own
 registration. The container holds `captures.json` (the capture queue),
 `watch-complication.json` (what the face renders) and
-`watch-recording-request.json` (a face tap waiting for the app to perform it) —
+`watch-recording-request.pending-*.json` (face taps waiting for the app to perform them) —
 see `Sources/SpeakCore/WatchSharedContainer.swift`.
 
 Without the entitlement the app still records and transfers normally: the

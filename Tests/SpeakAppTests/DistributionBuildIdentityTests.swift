@@ -243,6 +243,10 @@ final class DistributionBuildIdentityTests: XCTestCase {
             contentsOf: root.appendingPathComponent("JustSpeakWatch/WatchContentView.swift"),
             encoding: .utf8
         )
+        let watchApp = try String(
+            contentsOf: root.appendingPathComponent("JustSpeakWatch/JustSpeakWatchApp.swift"),
+            encoding: .utf8
+        )
 
         XCTAssertTrue(intent.contains("@available(watchOS 11.0, *)"))
         XCTAssertTrue(intent.contains("struct StartWatchRecordingIntent: AudioRecordingIntent"))
@@ -256,6 +260,8 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(actionButton.contains(".accessibilityHint(Text(self.state.recordingActionHint))"))
         XCTAssertTrue(contentView.contains("WatchRecordingCoordinator.shared.toggleRecording()"))
         XCTAssertFalse(contentView.contains("recorder.toggle(store:"))
+        XCTAssertTrue(watchApp.contains(".task {"))
+        XCTAssertTrue(watchApp.contains("performPendingWatchFaceRequest()"))
     }
 
     func testWatchComplication_publishesEveryRecorderAndQueueTransition() throws {

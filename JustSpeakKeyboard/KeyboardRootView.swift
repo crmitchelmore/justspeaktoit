@@ -76,7 +76,7 @@ struct KeyboardRootView: View {
                     .accessibilityHint("Touch and hold to choose another keyboard")
             }
 
-            if let chip = model.languageChipLabel, model.mode == .direct {
+            if let chip = model.languageChipLabel, model.showsLanguageChip {
                 chipButton(
                     label: chip,
                     accessibilityLabel: "Dictation language \(chip). Tap to switch.",

@@ -11,16 +11,23 @@ on:
         description: 'Build number (auto-increments if empty)'
         required: false
       include_keyboard:
-        description: 'Internal only: include the experimental custom keyboard extension'
+        description: 'Include the custom keyboard extension (persistent release default; disable only for build rollback)'
+        required: false
+        default: true
+        type: boolean
+      enable_direct_capture:
+        description: 'Device-matrix only: let the keyboard request microphone/Speech permission and capture directly'
         required: false
         default: false
         type: boolean
 
 env:
   APP_STORE_CONNECT_KEY_ID: S747NJ9DZY
-  # Off by default. Auto Release dispatches only `version`, so production
-  # TestFlight archives omit the experimental keyboard unless explicitly opted in.
+  # The extension now ships by default, while direct capture remains an
+  # independent, default-off rollout. Handoff-only builds never attempt the
+  # keyboard-process microphone or Speech permission path.
   TUIST_IOS_KEYBOARD: ${{ inputs.include_keyboard && '1' || '0' }}
+  TUIST_IOS_KEYBOARD_DIRECT_CAPTURE: ${{ inputs.include_keyboard && inputs.enable_direct_capture && '1' || '0' }}
 
 jobs:
   build-and-upload:
@@ -116,7 +123,14 @@ jobs:
           fi
 
       - name: Generate Xcode Project
-        run: tuist generate --no-open
+        run: |
+          tuist generate --no-open
+          {
+            echo "### Keyboard rollout policy"
+            echo "- Extension included: $TUIST_IOS_KEYBOARD"
+            echo "- Direct capture enabled: $TUIST_IOS_KEYBOARD_DIRECT_CAPTURE"
+            echo "- Commit: $GITHUB_SHA"
+          } >> "$GITHUB_STEP_SUMMARY"
       
       - name: Patch iOS Signing Settings
         env:

@@ -4,10 +4,18 @@ import Foundation
 ///
 /// Both paths require Full Access: without it iOS gives the keyboard neither
 /// an audio session nor the shared App Group container, so nothing can run.
-/// With Full Access the keyboard prefers recording in its own process and
-/// falls back to the containing app's Instant Dictation handoff when the
-/// microphone or Apple Speech is unavailable to the extension.
+/// With Full Access the independent direct-capture policy either selects the
+/// containing app's Instant Dictation handoff immediately or permits recording
+/// in the keyboard process, with handoff as the availability fallback.
 public enum KeyboardCapturePlanner {
+    public enum DirectCapturePolicy: Equatable, Sendable {
+        /// Ship the extension in handoff-only mode without reading or requesting
+        /// microphone and Speech permissions in the keyboard process.
+        case disabled
+        /// Permit the extension to attempt direct microphone capture.
+        case enabled
+    }
+
     public enum Permission: Equatable, Sendable {
         case undetermined
         case granted
@@ -28,6 +36,7 @@ public enum KeyboardCapturePlanner {
     public static func path(
         hasFullAccess: Bool,
         sharedContainerAvailable: Bool,
+        directCapturePolicy: DirectCapturePolicy = .enabled,
         microphonePermission: Permission,
         speechRecognitionPermission: Permission,
         speechRecognizerAvailable: Bool
@@ -37,6 +46,9 @@ public enum KeyboardCapturePlanner {
             sharedContainerAvailable: sharedContainerAvailable
         ) {
             return .blocked(reason)
+        }
+        guard directCapturePolicy == .enabled else {
+            return .handoff
         }
         guard speechRecognizerAvailable,
               microphonePermission != .denied,

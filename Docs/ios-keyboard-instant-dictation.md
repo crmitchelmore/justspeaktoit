@@ -1,14 +1,11 @@
 # iOS Keyboard Instant Dictation
 
-> **Shipping status:** disabled, and since keyboard v2 this is the **fallback**
-> capture path. The primary path records inside the keyboard extension itself —
-> see [iOS Keyboard v2 design](ios-keyboard-v2-design.md). Instant Dictation is
-> used when the extension cannot run the microphone or Apple Speech (permission
-> denied, recognizer unavailable, or in-extension capture failed). Default
-> local, archive, and TestFlight builds do not include the extension; internal
-> development requires `TUIST_IOS_KEYBOARD=1 tuist generate`, and a manual
-> TestFlight run additionally requires the off-by-default `include_keyboard`
-> input. Do not ship until the physical-device release matrix passes.
+> **Shipping status:** the keyboard is included in TestFlight and Instant
+> Dictation is its default capture path. Direct extension capture remains an
+> independent, default-off candidate — see
+> [iOS Keyboard v2 design](ios-keyboard-v2-design.md). Normal automated builds
+> use `include_keyboard=true` and `enable_direct_capture=false`, so the
+> extension does not read or request microphone/Speech permissions.
 
 ## Product decision
 
@@ -23,9 +20,9 @@ the user turns it off, the app is force-quit, the phone restarts, or iOS
 interrupts the audio session. After one of those events, opening Just Speak once
 reconnects the persisted Instant Dictation preference.
 
-In this fallback path the keyboard extension never opens the microphone: the
+In this handoff path the keyboard extension never opens the microphone: the
 containing app owns the foreground-consented audio session and stays alive with
-the `audio` background mode. (The v2 primary path *attempts* to record inside
+the `audio` background mode. (The v2 candidate path *attempts* to record inside
 the extension with Full Access plus user-granted microphone and speech
 permissions; that capability is an unverified platform assumption, and this
 handoff exists precisely for devices and users where it is refused or

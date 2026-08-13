@@ -69,6 +69,19 @@ final class KeyboardDictationMachineTests: XCTestCase {
         XCTAssertEqual(noRecognizer, .handoff)
     }
 
+    func testPlannerWithDirectCaptureDisabled_selectsHandoffBeforePermissions() {
+        let path = KeyboardCapturePlanner.path(
+            hasFullAccess: true,
+            sharedContainerAvailable: true,
+            directCapturePolicy: .disabled,
+            microphonePermission: .undetermined,
+            speechRecognitionPermission: .undetermined,
+            speechRecognizerAvailable: true
+        )
+
+        XCTAssertEqual(path, .handoff)
+    }
+
     // MARK: - Happy path
 
     func testMicTapRecordsStreamsAndFinishes() {

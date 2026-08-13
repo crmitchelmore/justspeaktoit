@@ -2,6 +2,12 @@
 
 Use this runbook for normal TestFlight releases and for failures involving the iOS app, widget, or transcription keyboard provisioning profiles.
 
+Normal automated and manual releases include the keyboard extension. Direct
+capture inside the extension is independently disabled until the physical
+matrix in [iOS keyboard verification](ios-keyboard-mvp-verification.md) passes;
+the shipping keyboard uses Instant Dictation handoff and makes no extension
+microphone or Speech permission attempt.
+
 ## Release identifiers
 
 | Component | Bundle identifier | Required shared capability |
@@ -18,7 +24,7 @@ Do not commit certificates, private keys, decoded profiles, or their base64 cont
 
 1. Confirm the intended commit is on `main` and its required checks passed.
 2. Open App Store Connect and check the latest iOS TestFlight marketing version and build number.
-3. Run the GitHub Actions workflow **Release iOS (TestFlight)**. Enter the intended semantic version explicitly, without a leading `v`. The repository `VERSION` file is not authoritative for iOS.
+3. Run the GitHub Actions workflow **Release iOS (TestFlight)**. Enter the intended semantic version explicitly, without a leading `v`. Keep `include_keyboard=true`. Keep `enable_direct_capture=false` unless this exact build is the recorded direct-capture matrix build. The repository `VERSION` file is not authoritative for iOS.
 4. Monitor all distribution gates in the workflow:
    - signing certificate and three profiles install successfully;
    - the keyboard profile authorizes `group.com.justspeaktoit.ios`;
@@ -60,11 +66,25 @@ The command must exit successfully. The release workflow performs the same exact
 
 1. Install or update the processed build from TestFlight and confirm its version/build in the app.
 2. In iOS Settings, enable **Just Speak to It** under **General** → **Keyboard** → **Keyboards**. Enable Full Access only when the app's current onboarding requires it.
-3. Open a text field in another app, switch to the Just Speak to It keyboard, and start transcription.
-4. Confirm the containing app records through the iPhone microphone, returns the nonce-matched result through the App Group, and the keyboard inserts the text at the cursor.
+3. Open a text field in another app, switch to the Just Speak to It keyboard, and start transcription. In a normal handoff-only build, no microphone or Speech permission prompt may come from the keyboard.
+4. Confirm the containing app records through the iPhone microphone, returns the nonce-matched result through the App Group, and the keyboard inserts the text at the cursor. If Instant Dictation is not ready, confirm the keyboard shows the reconnect state and leaves the field unchanged.
 5. Confirm stale results are not reused and normal Apple keyboard switching remains available.
 
-A custom keyboard extension cannot access the microphone directly. The supported path is keyboard → containing app → microphone/transcription → App Group handoff → `textDocumentProxy.insertText`.
+Direct extension capture remains an unverified, policy-gated candidate rather
+than an assumed platform capability. Run it only with
+`enable_direct_capture=true` and complete the separate physical matrix. The
+normal supported path is keyboard → containing app → microphone/transcription
+→ App Group handoff → `textDocumentProxy.insertText`.
+
+## Build-based rollback
+
+- Direct-capture rollback: run a new build with `include_keyboard=true` and
+  `enable_direct_capture=false`; verify handoff on hardware.
+- Extension rollback: run a new build with `include_keyboard=false`; verify the
+  archive omits `JustSpeakKeyboard.appex`.
+- There is no runtime switch for an installed build. Record the replacement
+  workflow URL, commit, version/build, processing, tester assignment, physical
+  installation, and observed extension state in issue #661.
 
 ## Completion evidence
 
@@ -72,6 +92,8 @@ Report each state separately:
 
 - PR merged and release commit identified.
 - Release workflow succeeded.
+- Workflow summary recorded keyboard inclusion and direct-capture policy.
+- Archive presence/absence and keyboard App Group entitlement matched policy.
 - App Store Connect processing completed for the exact version/build.
 - Internal tester group assignment confirmed.
 - TestFlight build installed on a physical iPhone.

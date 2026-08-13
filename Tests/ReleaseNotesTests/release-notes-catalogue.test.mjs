@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import {
     buildCatalogue,
     catalogueEntry,
@@ -89,4 +94,27 @@ test("catalogue round-trips through the shipped JSON shape", () => {
     assert.equal(parsed.generatedAt, "2026-08-09T00:00:00Z");
     assert.deepEqual(parsed.entries.map((entry) => entry.version), ["2.45.0"]);
     assert.deepEqual(parseCatalogue(null).entries, []);
+});
+
+test("an unusable --limit stops the run instead of emptying the catalogue", () => {
+    const script = fileURLToPath(new URL("../../scripts/update-release-notes-catalogue.mjs", import.meta.url));
+    const existing = serialiseCatalogue(buildCatalogue({
+        entries: [catalogueEntry({ version: "mac-v2.45.0", markdown: "## Overview\n\nShipped." })],
+        generatedAt: "2026-08-09T00:00:00Z",
+    }));
+
+    for (const limit of ["abc", "0", "-3"]) {
+        const cataloguePath = join(mkdtempSync(join(tmpdir(), "release-notes-")), "ReleaseNotes.json");
+        writeFileSync(cataloguePath, existing);
+
+        const result = spawnSync(
+            process.execPath,
+            [script, "--backfill", "--limit", limit, "--catalogue", cataloguePath],
+            { encoding: "utf8" },
+        );
+
+        assert.equal(result.status, 2, `--limit ${limit} should exit 2, stderr: ${result.stderr}`);
+        assert.match(result.stderr, /--limit must be a positive whole number/);
+        assert.equal(readFileSync(cataloguePath, "utf8"), existing, `--limit ${limit} rewrote the catalogue`);
+    }
 });

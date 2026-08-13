@@ -59,9 +59,11 @@ final class AutomationServer {
 
     func start(handler: any AutomationCommandHandling) throws {
         guard !self.isRunning else { return }
-        self.handler = handler
 
+        // After the socket exists, so a start that fails to bind leaves nothing
+        // retained behind a server that is not running.
         let descriptor = try Self.makeListeningSocket(at: self.socketPath)
+        self.handler = handler
         let source = DispatchSource.makeReadSource(fileDescriptor: descriptor, queue: self.queue)
         source.setEventHandler { [weak self] in
             guard let self else { return }

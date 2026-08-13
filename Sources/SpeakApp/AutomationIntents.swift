@@ -142,7 +142,61 @@ struct TranscribeAudioFileIntent: AppIntent {
     try file.data.write(to: temporaryURL)
     defer { try? FileManager.default.removeItem(at: temporaryURL) }
     let result = try await environment.transcription.transcribeFile(at: temporaryURL)
+    await Self.recordInHistory(result, in: environment)
     return .result(value: result.text)
+  }
+
+  /// Files transcribed through Shortcuts land in history like any other
+  /// transcription, matching the iOS intent and the in-app file import. The
+  /// temporary copy is deleted when the intent returns, so no audio URL is
+  /// stored; blank results are skipped rather than creating an empty entry.
+  @MainActor
+  private static func recordInHistory(
+    _ result: TranscriptionResult,
+    in environment: AppEnvironment
+  ) async {
+    guard !result.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+    let now = Date()
+    await environment.history.append(
+      HistoryItem(
+        modelsUsed: [result.modelIdentifier],
+        modelUsages: [
+          ModelUsage(modelIdentifier: result.modelIdentifier, phase: .transcriptionBatch)
+        ],
+        rawTranscription: result.text,
+        postProcessedTranscription: nil,
+        recordingDuration: result.duration,
+        cost: result.cost.map {
+          HistoryCost(total: $0.totalCost, currency: $0.currency, breakdown: $0)
+        },
+        audioFileURL: nil,
+        networkExchanges: [],
+        events: [
+          HistoryEvent(
+            kind: .transcriptionReceived,
+            description: "Transcribed \(result.modelIdentifier) via Shortcuts"
+          )
+        ],
+        phaseTimestamps: PhaseTimestamps(
+          recordingStarted: nil,
+          recordingEnded: nil,
+          transcriptionStarted: nil,
+          transcriptionEnded: now,
+          postProcessingStarted: nil,
+          postProcessingEnded: nil,
+          outputDelivered: nil
+        ),
+        trigger: HistoryTrigger(
+          gesture: .uiButton,
+          hotKeyDescription: "Shortcuts",
+          outputMethod: .none,
+          destinationApplication: nil
+        ),
+        personalCorrections: nil,
+        errors: [],
+        source: .importedFile
+      )
+    )
   }
 }
 

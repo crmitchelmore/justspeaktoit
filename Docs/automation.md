@@ -32,13 +32,18 @@ Notes:
   variant that hands the transcript to the next action in your shortcut.
 - **Transcribe Audio File** accepts common audio containers (m4a, mp3, wav,
   aac, flac, ogg, opus, aiff, caf, mp4, webm). On macOS it uses your configured
-  file-transcription provider; on iOS it uses your batch model. On iOS the
-  result is also saved to history.
-- **Polish Text** sends the text through the LLM post-processing path
-  (OpenRouter, or the on-device Apple model when selected on iOS). Without a
-  custom prompt it applies the standard transcript-cleanup contract; with a
-  custom prompt, your prompt replaces the cleanup instructions and the text is
-  passed to the model verbatim.
+  file-transcription provider; on iOS it uses your batch model. On both
+  platforms the result is saved to history, so **Get Last Transcription** and
+  the app's History screen show it. The audio itself is not kept: Shortcuts
+  hands over a temporary copy that is deleted once the action returns.
+- **Polish Text** sends the text through the same post-processing path a
+  dictation session uses, so your configured model applies — including the
+  on-device Apple Foundation model and downloaded local models, which need no
+  API key — along with your post-processing temperature. Without a custom
+  prompt it applies your effective cleanup prompt (custom base prompt, output
+  language, and active dictation profile included); with a custom prompt, your
+  prompt replaces the cleanup instructions and the text is passed to the model
+  verbatim.
 
 ## Recipes
 

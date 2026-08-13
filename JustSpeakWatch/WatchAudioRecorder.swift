@@ -33,17 +33,17 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
     private var didRecoverInterruptedCapture = false
 
     init(
-        store: WatchCaptureStore = WatchCaptureStore.shared,
-        runtime: WatchRecordingRuntime = WatchRecordingRuntime(),
-        activeCaptureRegistry: WatchActiveCaptureRegistry = WatchActiveCaptureRegistry(
-            fileURL: WatchAudioRecorder.activeCaptureMarkerURL
-        )
+        store: WatchCaptureStore? = nil,
+        runtime: WatchRecordingRuntime? = nil,
+        activeCaptureRegistry: WatchActiveCaptureRegistry? = nil
     ) {
-        self.store = store
-        self.runtime = runtime
-        self.activeCaptureRegistry = activeCaptureRegistry
+        self.store = store ?? WatchCaptureStore.shared
+        self.runtime = runtime ?? WatchRecordingRuntime()
+        self.activeCaptureRegistry = activeCaptureRegistry ?? WatchActiveCaptureRegistry(
+            fileURL: Self.activeCaptureMarkerURL
+        )
         super.init()
-        runtime.onRuntimeEnd = { [weak self] reason in
+        self.runtime.onRuntimeEnd = { [weak self] reason in
             Task { @MainActor in
                 await self?.finish(reason: reason)
             }

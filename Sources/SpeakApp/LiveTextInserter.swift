@@ -493,6 +493,14 @@ extension LiveTextInserter {
     }
 
     guard let field = streamingField() else {
+      // Deliberately .applied, not .failed. Every partial was written and
+      // verified before this point, so the user's full transcript is in the
+      // field; only the final polish delta may be missing. Reporting failure
+      // would suppress the "Delivered" HUD and record a HistoryError for a
+      // delivery that visibly succeeded, which misleads more than the mild
+      // inaccuracy of calling a near-final transcript delivered. Contrast the
+      // .unknown case below, which fails because the field may still hold only
+      // the first partial.
       print("[LiveTextInserter] Streaming finalize: focused element lost, keeping streamed text")
       lastError = TextOutputError.unableToFindFocusedElement
       return .applied
@@ -512,10 +520,15 @@ extension LiveTextInserter {
       print("[LiveTextInserter] Streaming finalize: streamed text absent, deferring to standard delivery")
       return .deferred
     case .unknown:
-      // Cannot prove where the text is: keep the streamed transcript rather than
-      // risk overwriting unrelated content or duplicating the delivery. The final
-      // polished text demonstrably did not land, so this is reported as a failure
-      // rather than a delivery the caller would announce as successful.
+      // Cannot prove where the text is: keep whatever is there rather than risk
+      // overwriting unrelated content or duplicating the delivery.
+      //
+      // Unlike the two .applied paths, this one genuinely fails. Reaching
+      // .unknown means the region stopped verifying, which is exactly what
+      // happens when the app accepted the first partial and then silently
+      // refused every later patch — the field may hold only that first partial,
+      // not the transcript. Announcing "Delivered" over a truncated transcript
+      // would hide real data loss, so the caller is told the delivery failed.
       lastError = TextOutputError.unableToVerifyInsertion
       print("[LiveTextInserter] Streaming finalize: region unverified, keeping streamed text")
       return .failed(TextOutputError.unableToVerifyInsertion)
@@ -537,6 +550,13 @@ extension LiveTextInserter {
     }
     // A write already landed but the final patch failed: keep the streamed
     // transcript as-is instead of risking a duplicate insert.
+    //
+    // Deliberately .applied, for the same reason as the lost-focus path above.
+    // The region was matched moments ago, so the streamed transcript is intact
+    // in the field and only the final polish delta is missing. Failing here
+    // would suppress the "Delivered" HUD and record a HistoryError against a
+    // delivery the user can see, which is a worse report than the mild
+    // inaccuracy of treating a near-final transcript as delivered.
     print("[LiveTextInserter] Streaming finalize failed after writes; keeping streamed text")
     return .applied
   }

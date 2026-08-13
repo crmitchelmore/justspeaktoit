@@ -61,7 +61,7 @@ private final class FakeStreamingTextField: StreamingTextField {
 /// how many accessibility writes each transcript sequence produces, and whether
 /// the session ends up delivering through the standard path — the two things
 /// that decide whether text can be lost or duplicated in the target app.
-final class LiveTextInserterStreamingOrchestrationTests: XCTestCase {
+final class LiveTextInserterStreamingTests: XCTestCase {
     @MainActor
     private func makeInserter(field: FakeStreamingTextField) -> LiveTextInserter {
         let defaults = UserDefaults(suiteName: "com.speakapp.tests.\(UUID().uuidString)")!

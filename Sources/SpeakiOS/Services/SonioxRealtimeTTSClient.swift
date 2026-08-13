@@ -77,14 +77,6 @@ private final class SonioxPCMAudioPlayer: SonioxPCMAudioPlaying {
 
     func prepare(streamID: String) throws {
         stop(streamID: nil)
-        let session = AVAudioSession.sharedInstance()
-        try session.setCategory(
-            .playAndRecord,
-            mode: .spokenAudio,
-            options: [.allowBluetooth, .defaultToSpeaker, .allowBluetoothA2DP]
-        )
-        try session.setActive(true)
-
         guard let format = AVAudioFormat(
             commonFormat: .pcmFormatInt16,
             sampleRate: 24_000,
@@ -93,12 +85,26 @@ private final class SonioxPCMAudioPlayer: SonioxPCMAudioPlaying {
         ) else {
             throw SonioxIOSVoiceOutputError.invalidPCMData
         }
+        let session = AVAudioSession.sharedInstance()
         let engine = AVAudioEngine()
         let player = AVAudioPlayerNode()
-        engine.attach(player)
-        engine.connect(player, to: engine.mainMixerNode, format: format)
-        try engine.start()
-        player.play()
+        do {
+            try session.setCategory(
+                .playAndRecord,
+                mode: .spokenAudio,
+                options: [.allowBluetooth, .defaultToSpeaker, .allowBluetoothA2DP]
+            )
+            try session.setActive(true)
+            engine.attach(player)
+            engine.connect(player, to: engine.mainMixerNode, format: format)
+            try engine.start()
+            player.play()
+        } catch {
+            player.stop()
+            engine.stop()
+            try? session.setActive(false, options: .notifyOthersOnDeactivation)
+            throw error
+        }
 
         self.engine = engine
         self.player = player
@@ -183,6 +189,7 @@ final class SonioxRealtimeTTSClient: ObservableObject {
 
     private let webSocketFactory: SonioxTTSWebSocketFactory
     private let audioPlayer: SonioxPCMAudioPlaying
+    private let cancelGracePeriod: Duration
     private let logger = Logger(subsystem: "com.justspeaktoit.ios", category: "SonioxTTS")
     private var activeStream: ActiveStream?
     private var notificationObservers: [NSObjectProtocol] = []
@@ -197,6 +204,7 @@ final class SonioxRealtimeTTSClient: ObservableObject {
         self.init(
             webSocketFactory: URLSessionSonioxTTSWebSocketFactory(session: session),
             audioPlayer: SonioxPCMAudioPlayer(),
+            cancelGracePeriod: .seconds(1),
             observesAudioLifecycle: true
         )
     }
@@ -204,10 +212,12 @@ final class SonioxRealtimeTTSClient: ObservableObject {
     init(
         webSocketFactory: SonioxTTSWebSocketFactory,
         audioPlayer: SonioxPCMAudioPlaying,
+        cancelGracePeriod: Duration = .seconds(1),
         observesAudioLifecycle: Bool = false
     ) {
         self.webSocketFactory = webSocketFactory
         self.audioPlayer = audioPlayer
+        self.cancelGracePeriod = cancelGracePeriod
         if observesAudioLifecycle { observeAudioLifecycle() }
     }
 
@@ -317,7 +327,10 @@ final class SonioxRealtimeTTSClient: ObservableObject {
             try? await stream.connection.send(JSONEncoder().encode(
                 SonioxTTSRealtimeCancel(streamID: stream.streamID)
             ))
-            try? await Task.sleep(for: .seconds(1))
+        }
+        let cancelGracePeriod = self.cancelGracePeriod
+        Task {
+            try? await Task.sleep(for: cancelGracePeriod)
             stream.connection.close()
         }
     }

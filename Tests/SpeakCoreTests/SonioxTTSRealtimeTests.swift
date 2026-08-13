@@ -114,7 +114,7 @@ final class SonioxTTSRealtimeTests: XCTestCase {
         )
 
         XCTAssertTrue(chunks.allSatisfy { $0.count <= 12 })
-        XCTAssertEqual(chunks.joined(separator: " "), "One short sentence followed by another sentence")
+        XCTAssertEqual(chunks.joined(), "One short sentence followed by another sentence")
     }
 
     func testRegions_exposeMatchingRealtimeEndpoints() {

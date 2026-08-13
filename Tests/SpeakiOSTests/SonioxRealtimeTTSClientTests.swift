@@ -12,6 +12,7 @@ final class SonioxRealtimeTTSClientTests: XCTestCase {
         let factory = MockSonioxWebSocketFactory(connections: [connection])
         let audio = MockSonioxPCMAudioPlayer()
         let client = SonioxRealtimeTTSClient(webSocketFactory: factory, audioPlayer: audio)
+        let text = String(repeating: "word ", count: 80).trimmingCharacters(in: .whitespaces)
         connection.responses = [
             eventData(#"{"stream_id":"STREAM","audio":"AAA=","audio_end":true}"#),
             eventData(#"{"stream_id":"STREAM","terminated":true}"#)
@@ -19,7 +20,7 @@ final class SonioxRealtimeTTSClientTests: XCTestCase {
         connection.rewriteStreamID = true
 
         try await client.speak(
-            text: String(repeating: "word ", count: 80),
+            text: text,
             apiKey: "credential",
             voice: "Maya",
             language: "en",
@@ -37,6 +38,7 @@ final class SonioxRealtimeTTSClientTests: XCTestCase {
         XCTAssertEqual(messages.first?["api_key"] as? String, "credential")
         XCTAssertEqual(messages.first?["audio_format"] as? String, "pcm_s16le")
         XCTAssertEqual(messages.last?["text_end"] as? Bool, true)
+        XCTAssertEqual(messages.dropFirst().compactMap { $0["text"] as? String }.joined(), text)
         XCTAssertEqual(audio.enqueued.count, 1)
         XCTAssertNotNil(client.firstAudioLatencySeconds)
     }
@@ -74,6 +76,40 @@ final class SonioxRealtimeTTSClientTests: XCTestCase {
         XCTAssertEqual(messages[2]["cancel"] as? Bool, true)
         XCTAssertEqual(messages[2]["stream_id"] as? String, streamID)
         XCTAssertEqual(audio.stoppedStreamIDs.compactMap { $0 }.last, streamID)
+    }
+
+    func testStop_closesConnectionWhenCancelSendDoesNotComplete() async throws {
+        let connection = MockSonioxWebSocketConnection()
+        connection.blocksCancelSend = true
+        let client = SonioxRealtimeTTSClient(
+            webSocketFactory: MockSonioxWebSocketFactory(connections: [connection]),
+            audioPlayer: MockSonioxPCMAudioPlayer(),
+            cancelGracePeriod: .milliseconds(1)
+        )
+        let speaking = Task {
+            try await client.speak(
+                text: "Cancel this response",
+                apiKey: "credential",
+                voice: "Maya",
+                language: "en",
+                region: .unitedStates,
+                speed: 1
+            )
+        }
+        await waitForSentMessages(2, on: connection)
+
+        client.stop()
+        for _ in 0..<100 where !connection.didClose {
+            try await Task.sleep(for: .milliseconds(1))
+        }
+
+        XCTAssertTrue(connection.didClose)
+        do {
+            try await speaking.value
+            XCTFail("Cancelled stream should not complete successfully")
+        } catch is CancellationError {
+            // Expected.
+        }
     }
 
     // swiftlint:disable:next function_body_length
@@ -188,7 +224,9 @@ private final class MockSonioxWebSocketConnection: SonioxTTSWebSocketConnection 
     var sent: [Data] = []
     var responses: [Data] = []
     var rewriteStreamID = false
+    var blocksCancelSend = false
     private var receiveContinuation: CheckedContinuation<Data, Error>?
+    private var sendContinuation: CheckedContinuation<Void, Error>?
     private(set) var didResume = false
     private(set) var didClose = false
 
@@ -196,6 +234,13 @@ private final class MockSonioxWebSocketConnection: SonioxTTSWebSocketConnection 
 
     func send(_ data: Data) async throws {
         sent.append(data)
+        guard !didClose else { throw CancellationError() }
+        guard blocksCancelSend,
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              object["cancel"] as? Bool == true else { return }
+        try await withCheckedThrowingContinuation { continuation in
+            self.sendContinuation = continuation
+        }
     }
 
     func receive() async throws -> Data {
@@ -207,7 +252,13 @@ private final class MockSonioxWebSocketConnection: SonioxTTSWebSocketConnection 
         }
     }
 
-    func close() { didClose = true }
+    func close() {
+        didClose = true
+        sendContinuation?.resume(throwing: CancellationError())
+        sendContinuation = nil
+        receiveContinuation?.resume(throwing: CancellationError())
+        receiveContinuation = nil
+    }
 
     func push(_ data: Data) {
         if let continuation = receiveContinuation {

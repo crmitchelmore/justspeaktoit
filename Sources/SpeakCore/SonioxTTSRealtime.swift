@@ -182,9 +182,8 @@ public enum SonioxTTSRealtimeTextChunker {
                let whitespace = remaining[..<end].lastIndex(where: { $0.isWhitespace }) {
                 split = remaining.index(after: whitespace)
             }
-            let chunk = remaining[..<split].trimmingCharacters(in: .whitespacesAndNewlines)
-            if !chunk.isEmpty { chunks.append(chunk) }
-            remaining = remaining[split...].drop(while: { $0.isWhitespace })
+            chunks.append(String(remaining[..<split]))
+            remaining = remaining[split...]
         }
         return chunks
     }

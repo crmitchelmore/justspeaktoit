@@ -19,23 +19,35 @@ public final class FileProductAnalyticsStateStore: ProductAnalyticsStateStore, @
     private func withState<T>(_ body: (State) throws -> T) throws -> T {
         lock.lock()
         defer { lock.unlock() }
-        return try body(try readState())
+        return try body(readState())
     }
 
     private func updateState(_ body: (inout State) throws -> Void) throws {
         lock.lock()
         defer { lock.unlock() }
-        var state = try readState()
+        var state = readState()
         try body(&state)
         try FileManager.default.createDirectory(
             at: fileURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
-        try JSONEncoder().encode(state).write(to: fileURL, options: [.atomic, .completeFileProtection])
+        // `completeUntilFirstUserAuthentication` keeps consent state readable from a locked or
+        // background launch after the first unlock, matching the history store's convention.
+        // Stricter `.completeFileProtection` would make every background read fail.
+        try JSONEncoder().encode(state).write(
+            to: fileURL,
+            options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+        )
     }
 
-    private func readState() throws -> State {
-        guard FileManager.default.fileExists(atPath: fileURL.path) else { return State() }
-        return try JSONDecoder().decode(State.self, from: Data(contentsOf: fileURL))
+    /// Reads persisted state, treating an unreadable or corrupt file as "nothing recorded yet".
+    /// This fails closed: a defaulted `State` carries `.unknown` consent and no installation ID,
+    /// so a damaged file can never enable collection — and can never permanently wedge start-up.
+    private func readState() -> State {
+        guard FileManager.default.fileExists(atPath: fileURL.path),
+              let data = try? Data(contentsOf: fileURL),
+              let state = try? JSONDecoder().decode(State.self, from: data)
+        else { return State() }
+        return state
     }
 }

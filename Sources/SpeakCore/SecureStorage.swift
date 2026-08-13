@@ -299,7 +299,7 @@ public actor SecureStorage {
             throw SecureStorageError.unexpectedStatus(status)
         }
 
-        cache = parse(payload: payload)
+        cache = Self.parse(payload: payload)
         await reconcileCachedIdentifiers()
         didLoadFromKeychain = true
     }
@@ -341,7 +341,7 @@ public actor SecureStorage {
                 throw SecureStorageError.unexpectedStatus(status)
             }
 
-            cache = parse(payload: payload)
+            cache = Self.parse(payload: payload)
             try writeCacheToKeychain()
             return true
         }
@@ -459,7 +459,7 @@ public actor SecureStorage {
     }
 
     private func writeCacheToKeychain() throws {
-        let payload = serialize(cache: cache)
+        let payload = Self.serialize(cache: cache)
 
         let query = baseQuery()
         
@@ -520,7 +520,48 @@ public actor SecureStorage {
         }
     }
 
-    private func parse(payload: String) -> [String: String] {
+    // MARK: - Payload Format
+    //
+    // The aggregate payload stores every secret in one keychain item. The current (v2)
+    // format percent-encodes each key and value, so a secret may contain any character —
+    // including the `;` pair separator and `=` key/value separator — without corrupting
+    // the payload. A version prefix distinguishes it from the legacy format (raw
+    // `key=value;key=value`, no encoding), which is still parsed transparently; the next
+    // save rewrites the item in the current format.
+
+    /// Prefix identifying the current payload format. The trailing `;` makes the marker
+    /// unforgeable by the legacy serializer: a legacy payload always begins with an
+    /// identifier followed by `=`, so it can never start with `v2:;`. A legacy identifier
+    /// that merely starts with `v2:` therefore still parses as legacy data.
+    static let payloadVersionPrefix = "v2:;"
+
+    /// Characters that may appear unescaped in an encoded payload key or value.
+    /// The structural characters `;` and `=`, and the escape character `%`, are excluded.
+    private static let payloadComponentAllowedCharacters: CharacterSet = {
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: ";=%&+")
+        return allowed
+    }()
+
+    static func parse(payload: String) -> [String: String] {
+        guard payload.hasPrefix(payloadVersionPrefix) else {
+            return parseLegacyPayload(payload)
+        }
+
+        return payload
+            .dropFirst(payloadVersionPrefix.count)
+            .split(separator: ";")
+            .reduce(into: [String: String]()) { partialResult, item in
+                let components = item.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+                guard let keyComponent = components.first else { return }
+                let key = String(keyComponent).removingPercentEncoding ?? String(keyComponent)
+                guard !key.isEmpty else { return }
+                let rawValue = components.count > 1 ? String(components[1]) : ""
+                partialResult[key] = rawValue.removingPercentEncoding ?? rawValue
+            }
+    }
+
+    private static func parseLegacyPayload(_ payload: String) -> [String: String] {
         payload
             .split(separator: ";")
             .reduce(into: [String: String]()) { partialResult, item in
@@ -534,11 +575,20 @@ public actor SecureStorage {
             }
     }
 
-    private func serialize(cache: [String: String]) -> String {
-        cache
+    /// Serializes to the current versioned format. An empty cache serializes to an empty
+    /// string (not a bare version prefix) so `writeCacheToKeychain` still deletes the item.
+    static func serialize(cache: [String: String]) -> String {
+        guard !cache.isEmpty else { return "" }
+
+        let body = cache
             .sorted { $0.key < $1.key }
-            .map { "\($0.key)=\($0.value)" }
+            .map { "\(encodePayloadComponent($0.key))=\(encodePayloadComponent($0.value))" }
             .joined(separator: ";")
+        return payloadVersionPrefix + body
+    }
+
+    private static func encodePayloadComponent(_ component: String) -> String {
+        component.addingPercentEncoding(withAllowedCharacters: payloadComponentAllowedCharacters) ?? component
     }
 
     private func postChangeNotification(identifier: String, operation: String) {

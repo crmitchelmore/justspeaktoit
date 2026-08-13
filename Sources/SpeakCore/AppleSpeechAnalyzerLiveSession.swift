@@ -116,8 +116,14 @@ public final class AppleSpeechAnalyzerLiveSession: @unchecked Sendable {
 
     public func finish() async throws -> TranscriptionResult {
         inputContinuation.finish()
-        try await analyzer.finalizeAndFinishThroughEndOfInput()
-        return try await resultTask.value
+        do {
+            try await analyzer.finalizeAndFinishThroughEndOfInput()
+            return try await resultTask.value
+        } catch {
+            await analyzer.cancelAndFinishNow()
+            resultTask.cancel()
+            throw error
+        }
     }
 
     public func cancel() async {

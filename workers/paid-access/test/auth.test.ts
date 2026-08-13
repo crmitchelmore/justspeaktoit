@@ -57,26 +57,46 @@ describe('authentication', () => {
     expect(response.status).toBe(401);
   });
 
+  // Each of the three tests below seeds a real user and a live auth session, so
+  // everything about the token is valid *except* the one property under test.
+  // Without that, the request would be rejected for an unknown user and the test
+  // would still pass with signature and expiry checking removed entirely.
+
   it('rejects a token signed with the wrong key', async () => {
-    const now = Math.floor(Date.now() / 1_000);
+    const userId = await seedUser();
+    const sessionId = await seedAuthSession(userId);
     const forged = await issueAccessToken(
       'a-completely-different-signing-key-32-chars',
-      { userId: 'user-1', sessionId: 'session-1', role: 'user' },
+      { userId, sessionId, role: 'user' },
       3_600,
-      now,
+      Math.floor(Date.now() / 1_000),
     );
     const response = await SELF.fetch('https://api.test/v1/entitlement', {
       headers: { authorization: `Bearer ${forged.token}` },
     });
     expect(response.status).toBe(401);
+
+    // Control: the same claims signed with the real key are accepted, so the
+    // rejection above can only have come from the signature.
+    const genuine = await issueAccessToken(
+      SIGNING_KEY,
+      { userId, sessionId, role: 'user' },
+      3_600,
+      Math.floor(Date.now() / 1_000),
+    );
+    const accepted = await SELF.fetch('https://api.test/v1/entitlement', {
+      headers: { authorization: `Bearer ${genuine.token}` },
+    });
+    expect(accepted.status).toBe(200);
   });
 
   it('rejects an expired token', async () => {
     const userId = await seedUser();
+    const sessionId = await seedAuthSession(userId);
     const past = Math.floor(Date.now() / 1_000) - 7_200;
     const expired = await issueAccessToken(
       SIGNING_KEY,
-      { userId, sessionId: crypto.randomUUID(), role: 'user' },
+      { userId, sessionId, role: 'user' },
       60,
       past,
     );
@@ -84,19 +104,39 @@ describe('authentication', () => {
       headers: { authorization: `Bearer ${expired.token}` },
     });
     expect(response.status).toBe(401);
+
+    // Control: identical claims issued now are accepted, so only the expiry
+    // caused the rejection.
+    const fresh = await issueAccessToken(
+      SIGNING_KEY,
+      { userId, sessionId, role: 'user' },
+      3_600,
+      Math.floor(Date.now() / 1_000),
+    );
+    const accepted = await SELF.fetch('https://api.test/v1/entitlement', {
+      headers: { authorization: `Bearer ${fresh.token}` },
+    });
+    expect(accepted.status).toBe(200);
   });
 
   it('rejects an unsigned "alg: none" token', async () => {
-    const header = btoa(JSON.stringify({ alg: 'none', typ: 'JWT' }))
-      .replace(/=+$/, '')
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_');
-    const payload = btoa(
-      JSON.stringify({ sub: 'user-1', sid: 's', role: 'user', exp: 9_999_999_999 }),
-    )
-      .replace(/=+$/, '')
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_');
+    const userId = await seedUser();
+    const sessionId = await seedAuthSession(userId);
+    const base64Url = (value: string): string =>
+      btoa(value).replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
+    const header = base64Url(JSON.stringify({ alg: 'none', typ: 'JWT' }));
+    // Real subject, real session, unexpired: the only thing wrong is that
+    // nothing signed it.
+    const payload = base64Url(
+      JSON.stringify({
+        iss: 'https://api.justspeaktoit.com/paid-access',
+        aud: 'justspeaktoit-app',
+        sub: userId,
+        sid: sessionId,
+        role: 'user',
+        exp: Math.floor(Date.now() / 1_000) + 3_600,
+      }),
+    );
     const response = await SELF.fetch('https://api.test/v1/entitlement', {
       headers: { authorization: `Bearer ${header}.${payload}.` },
     });

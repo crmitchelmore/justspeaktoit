@@ -84,7 +84,19 @@ interface PeriodState {
   tokensCommitted: number;
 }
 
-const PERIOD_KEY = 'period';
+/**
+ * Committed usage is stored one record per billing period.
+ *
+ * A single shared record cannot express "finalise a reservation taken last
+ * month": the write would have to name one period, and naming the reservation's
+ * period would overwrite — and so zero — the period that is currently being
+ * metered. Keying by period lets a late finalise land where it belongs.
+ */
+const PERIOD_KEY_PREFIX = 'period:';
+/** Pre-per-period-key storage layout; read once so no usage is lost on upgrade. */
+const LEGACY_PERIOD_KEY = 'period';
+/** The most recent period this user was seen in, used only for reporting. */
+const LATEST_PERIOD_KEY = 'latest_period';
 const RESERVATIONS_KEY = 'reservations';
 
 export class QuotaDurableObject implements DurableObject {
@@ -124,19 +136,77 @@ export class QuotaDurableObject implements DurableObject {
     }
   }
 
-  private async loadPeriod(period: string): Promise<PeriodState> {
-    const stored = await this.state.storage.get<PeriodState>(PERIOD_KEY);
-    if (stored === undefined || stored.period !== period) {
-      // A new billing period resets committed usage; the ledger in D1 remains
-      // the durable record.
-      return { period, audioSecondsCommitted: 0, tokensCommitted: 0 };
-    }
-    return stored;
+  private static periodKey(period: string): string {
+    return `${PERIOD_KEY_PREFIX}${period}`;
   }
 
+  private async loadPeriod(period: string): Promise<PeriodState> {
+    const stored = await this.state.storage.get<PeriodState>(QuotaDurableObject.periodKey(period));
+    if (stored !== undefined && stored.period === period) {
+      return stored;
+    }
+    const legacy = await this.state.storage.get<PeriodState>(LEGACY_PERIOD_KEY);
+    if (legacy !== undefined && legacy.period === period) {
+      return legacy;
+    }
+    // A new billing period starts at zero; the ledger in D1 remains the durable
+    // record of what came before.
+    return { period, audioSecondsCommitted: 0, tokensCommitted: 0 };
+  }
+
+  /**
+   * Adds committed usage to one period without touching any other.
+   *
+   * This is the only writer of committed usage, so a finalise arriving after a
+   * period boundary cannot silently reset the period now being metered.
+   */
+  private async commit(
+    period: string,
+    unitKind: QuotaUnitKind,
+    units: number,
+  ): Promise<PeriodState> {
+    const current = await this.loadPeriod(period);
+    const updated: PeriodState = {
+      period,
+      audioSecondsCommitted:
+        current.audioSecondsCommitted + (unitKind === 'audio_seconds' ? units : 0),
+      tokensCommitted: current.tokensCommitted + (unitKind === 'tokens' ? units : 0),
+    };
+    await this.state.storage.put(QuotaDurableObject.periodKey(period), updated);
+    return updated;
+  }
+
+  /**
+   * Returns the reservations still under lease, committing any that expired.
+   *
+   * A lease expires only when nothing finalised or released it — a crashed
+   * Worker, a device that vanished mid-session. The reserved amount was the
+   * agreed upper bound for that work, so committing it is the only outcome that
+   * cannot hand the usage away for free; anything genuinely smaller would have
+   * arrived through `finalise` before the lease ran out.
+   */
   private async loadReservations(nowSeconds: number): Promise<Reservation[]> {
     const stored = (await this.state.storage.get<Reservation[]>(RESERVATIONS_KEY)) ?? [];
-    return stored.filter((reservation) => reservation.expiresAt > nowSeconds);
+    const live: Reservation[] = [];
+    const expired: Reservation[] = [];
+    for (const reservation of stored) {
+      (reservation.expiresAt > nowSeconds ? live : expired).push(reservation);
+    }
+    if (expired.length > 0) {
+      for (const reservation of expired) {
+        await this.commit(reservation.period, reservation.unitKind, reservation.units);
+      }
+      await this.state.storage.put(RESERVATIONS_KEY, live);
+    }
+    return live;
+  }
+
+  /** The period to report on when the caller did not name one. */
+  private async latestPeriod(): Promise<PeriodState> {
+    const latest = await this.state.storage.get<string>(LATEST_PERIOD_KEY);
+    if (latest !== undefined) return this.loadPeriod(latest);
+    const legacy = await this.state.storage.get<PeriodState>(LEGACY_PERIOD_KEY);
+    return legacy ?? { period: '1970-01', audioSecondsCommitted: 0, tokensCommitted: 0 };
   }
 
   private snapshot(
@@ -144,10 +214,13 @@ export class QuotaDurableObject implements DurableObject {
     reservations: readonly Reservation[],
     limits: QuotaLimits,
   ): QuotaSnapshot {
-    const reservedAudio = reservations
+    // Only this period's reservations count towards this period's allowance; a
+    // lease still open across a month boundary belongs to the month it started in.
+    const current = reservations.filter((entry) => entry.period === period.period);
+    const reservedAudio = current
       .filter((entry) => entry.unitKind === 'audio_seconds')
       .reduce((total, entry) => total + entry.units, 0);
-    const reservedTokens = reservations
+    const reservedTokens = current
       .filter((entry) => entry.unitKind === 'tokens')
       .reduce((total, entry) => total + entry.units, 0);
     return {
@@ -156,6 +229,8 @@ export class QuotaDurableObject implements DurableObject {
       audioSecondsLimit: limits.monthlyAudioSeconds,
       tokensUsed: period.tokensCommitted + reservedTokens,
       tokensLimit: limits.monthlyTokens,
+      // Concurrency is a live-now property, so it counts every open lease
+      // regardless of which billing period it was taken in.
       activeSessions: reservations.filter((entry) => entry.countsAsSession).length,
       maxConcurrentSessions: limits.maxConcurrentSessions,
     };
@@ -165,8 +240,10 @@ export class QuotaDurableObject implements DurableObject {
     if (!Number.isFinite(request.units) || request.units < 0) {
       throw new Error('Reservation units must be a non-negative number');
     }
-    const period = await this.loadPeriod(request.period);
+    // Reservations first: sweeping an expired lease commits it, and the period
+    // must be read after that or the check would run against stale usage.
     const reservations = await this.loadReservations(request.nowSeconds);
+    const period = await this.loadPeriod(request.period);
     const before = this.snapshot(period, reservations, request.limits);
 
     if (
@@ -197,7 +274,8 @@ export class QuotaDurableObject implements DurableObject {
       expiresAt: request.nowSeconds + request.limits.leaseSeconds,
     };
     const next = [...reservations, reservation];
-    await this.state.storage.put(PERIOD_KEY, period);
+    await this.state.storage.put(QuotaDurableObject.periodKey(period.period), period);
+    await this.state.storage.put(LATEST_PERIOD_KEY, period.period);
     await this.state.storage.put(RESERVATIONS_KEY, next);
 
     return {
@@ -213,27 +291,21 @@ export class QuotaDurableObject implements DurableObject {
     const remaining = reservations.filter((entry) => entry.id !== request.reservationId);
 
     if (reservation === undefined) {
-      // The lease already expired, or this is a duplicate finalise. Both are
-      // safe no-ops: committed usage is authoritative in D1's ledger.
-      const period = await this.loadPeriod(
-        (await this.state.storage.get<PeriodState>(PERIOD_KEY))?.period ?? '1970-01',
-      );
+      // The lease already expired — and was therefore already committed above —
+      // or this is a duplicate finalise. Both are safe no-ops.
       await this.state.storage.put(RESERVATIONS_KEY, remaining);
-      return { ok: true, snapshot: this.snapshot(period, remaining, ZERO_LIMITS) };
+      return {
+        ok: true,
+        snapshot: this.snapshot(await this.latestPeriod(), remaining, ZERO_LIMITS),
+      };
     }
 
-    const period = await this.loadPeriod(reservation.period);
     // Charge the smaller of measured and reserved: the reservation was the
-    // agreed upper bound, so an over-reporting client cannot exceed it.
+    // agreed upper bound, so an over-reporting client cannot exceed it. The
+    // charge lands in the reservation's own period, which may no longer be the
+    // period the user is currently being metered in.
     const charged = Math.max(0, Math.min(Math.ceil(request.actualUnits), reservation.units));
-    const updated: PeriodState = {
-      period: period.period,
-      audioSecondsCommitted:
-        period.audioSecondsCommitted + (reservation.unitKind === 'audio_seconds' ? charged : 0),
-      tokensCommitted: period.tokensCommitted + (reservation.unitKind === 'tokens' ? charged : 0),
-    };
-
-    await this.state.storage.put(PERIOD_KEY, updated);
+    const updated = await this.commit(reservation.period, reservation.unitKind, charged);
     await this.state.storage.put(RESERVATIONS_KEY, remaining);
 
     return { ok: true, snapshot: this.snapshot(updated, remaining, ZERO_LIMITS) };
@@ -243,15 +315,17 @@ export class QuotaDurableObject implements DurableObject {
     const reservations = await this.loadReservations(request.nowSeconds);
     const remaining = reservations.filter((entry) => entry.id !== request.reservationId);
     await this.state.storage.put(RESERVATIONS_KEY, remaining);
-    const period = await this.loadPeriod(
-      (await this.state.storage.get<PeriodState>(PERIOD_KEY))?.period ?? '1970-01',
-    );
-    return { ok: true, snapshot: this.snapshot(period, remaining, ZERO_LIMITS) };
+    return {
+      ok: true,
+      snapshot: this.snapshot(await this.latestPeriod(), remaining, ZERO_LIMITS),
+    };
   }
 
   private async status(request: StatusRequest): Promise<QuotaResponse> {
-    const period = await this.loadPeriod(request.period);
+    // Sweep before reading, so a lease that expired since the last call is
+    // reported as committed usage rather than as nothing at all.
     const reservations = await this.loadReservations(request.nowSeconds);
+    const period = await this.loadPeriod(request.period);
     return { ok: true, snapshot: this.snapshot(period, reservations, request.limits) };
   }
 }

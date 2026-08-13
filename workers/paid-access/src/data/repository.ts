@@ -19,6 +19,17 @@ import type {
 } from '../entitlement.js';
 import type { UserRole } from '../auth/session.js';
 
+export type PaidOperationName = 'live_transcription' | 'batch_transcription' | 'post_processing';
+
+export type RequestClaimStatus = 'in_flight' | 'completed';
+
+export interface RequestClaim {
+  readonly operation: PaidOperationName;
+  readonly status: RequestClaimStatus;
+  /** The response the first attempt returned; `null` while still in flight. */
+  readonly responseBody: string | null;
+}
+
 export interface UserRecord {
   readonly id: string;
   readonly appleSub: string;
@@ -456,6 +467,97 @@ export class Repository {
   }
 
   // -------------------------------------------------------------------------
+  // Request idempotency
+  // -------------------------------------------------------------------------
+
+  /**
+   * Claims an `Idempotency-Key` for a paid request.
+   *
+   * Returns `null` when this caller now owns the request, or the existing claim
+   * when somebody got there first. Claiming happens before any quota is reserved
+   * and before the vendor is called, which is the whole point: a retry that
+   * arrives while the first attempt is still running, or after it finished, must
+   * not buy a second upstream call.
+   */
+  async claimRequest(input: {
+    userId: string;
+    idempotencyKey: string;
+    operation: PaidOperationName;
+    correlationId: string;
+    nowSeconds: number;
+  }): Promise<RequestClaim | null> {
+    const result = await this.db
+      .prepare(
+        `INSERT INTO request_claims
+           (id, user_id, idempotency_key, operation, status, correlation_id, created_at)
+         VALUES (?1, ?2, ?3, ?4, 'in_flight', ?5, ?6)
+         ON CONFLICT (user_id, idempotency_key) DO NOTHING`,
+      )
+      .bind(
+        crypto.randomUUID(),
+        input.userId,
+        input.idempotencyKey,
+        input.operation,
+        input.correlationId,
+        input.nowSeconds,
+      )
+      .run();
+
+    if ((result.meta.changes ?? 0) > 0) return null;
+
+    const row = await this.db
+      .prepare(
+        `SELECT operation, status, response_body FROM request_claims
+          WHERE user_id = ?1 AND idempotency_key = ?2`,
+      )
+      .bind(input.userId, input.idempotencyKey)
+      .first<{ operation: string; status: string; response_body: string | null }>();
+    if (row === null) {
+      // The winning claim was rolled back between the insert and this read.
+      // Treating that as "in flight" is the safe answer: the caller declines
+      // rather than racing a request it cannot see.
+      return { operation: input.operation, status: 'in_flight', responseBody: null };
+    }
+    return {
+      operation: row.operation as PaidOperationName,
+      status: row.status as RequestClaimStatus,
+      responseBody: row.response_body,
+    };
+  }
+
+  /** Records the response the claimed request produced, so a retry can replay it. */
+  async completeRequestClaim(input: {
+    userId: string;
+    idempotencyKey: string;
+    responseBody: string;
+    nowSeconds: number;
+  }): Promise<void> {
+    await this.db
+      .prepare(
+        `UPDATE request_claims
+            SET status = 'completed', response_body = ?3, completed_at = ?4
+          WHERE user_id = ?1 AND idempotency_key = ?2 AND status = 'in_flight'`,
+      )
+      .bind(input.userId, input.idempotencyKey, input.responseBody, input.nowSeconds)
+      .run();
+  }
+
+  /**
+   * Drops a claim whose request failed, so the client's retry is served rather
+   * than answered as a duplicate for ever. Only an `in_flight` claim is removed;
+   * a completed one stays put and keeps its stored response.
+   */
+  async releaseRequestClaim(input: { userId: string; idempotencyKey: string }): Promise<void> {
+    await this.db
+      .prepare(
+        `DELETE FROM request_claims
+          WHERE user_id = ?1 AND idempotency_key = ?2 AND status = 'in_flight'`,
+      )
+      .bind(input.userId, input.idempotencyKey)
+      .run();
+  }
+
+  // -------------------------------------------------------------------------
   // Usage ledger
   // -------------------------------------------------------------------------
 
@@ -466,7 +568,7 @@ export class Repository {
   async recordUsage(input: {
     userId: string;
     idempotencyKey: string;
-    operation: 'live_transcription' | 'batch_transcription' | 'post_processing';
+    operation: PaidOperationName;
     provider: string;
     model: string;
     unitKind: 'audio_seconds' | 'tokens';

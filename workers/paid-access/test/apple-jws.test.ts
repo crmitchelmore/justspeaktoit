@@ -14,7 +14,7 @@ import {
   buildCertificate,
   OID_APPLE_WWDR,
 } from './helpers/x509.js';
-import { sha256Hex } from '../src/crypto.js';
+import { base64ToBytes, sha256Hex } from '../src/crypto.js';
 
 const NOW_MS = Date.now();
 const NOW_SECONDS = Math.floor(NOW_MS / 1_000);
@@ -195,8 +195,19 @@ describe('pinned Apple root', () => {
     );
   });
 
-  it('uses the embedded root when no override is configured', () => {
-    expect(appleRootCertificate().length).toBe(appleRootCertificate(APPLE_ROOT_CA_G3_BASE64).length);
+  it('decodes the embedded root when no override is configured', () => {
+    // Comparing the default against the same constant decoded a second time
+    // would pass however broken the function was; compare against the bytes.
+    expect(Array.from(appleRootCertificate())).toEqual(
+      Array.from(base64ToBytes(APPLE_ROOT_CA_G3_BASE64)),
+    );
+  });
+
+  it('honours a configured root override', () => {
+    // Staging and the test chains pin their own anchor, so an override that was
+    // silently ignored would mean those deployments trusted Apple's root instead.
+    const override = appleRootCertificate(btoa('not-the-apple-root'));
+    expect(new TextDecoder().decode(override)).toBe('not-the-apple-root');
   });
 });
 

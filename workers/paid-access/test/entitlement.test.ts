@@ -80,10 +80,12 @@ describe('entitlement transitions', () => {
     expect(canTransition('expired', 'active')).toBe(true);
   });
 
-  it('treats revoked as terminal', () => {
+  it('treats revoked as terminal but lets a redelivered revocation through', () => {
     expect(canTransition('revoked', 'active')).toBe(false);
-    expect(canTransition('revoked', 'revoked')).toBe(false);
     expect(canTransition('active', 'revoked')).toBe(true);
+    // Providers redeliver. A second revocation must be a harmless no-op, not an
+    // error that has the provider retry an event that can never succeed.
+    expect(canTransition('revoked', 'revoked')).toBe(true);
   });
 
   it('rejects an illegal transition rather than silently applying it', () => {

@@ -17,6 +17,7 @@ import { StripeClient } from '../billing/stripe.js';
 import {
   acceptedAppleEnvironments,
   appleRootCertificate,
+  StoreKitError,
   storeKitEntitlementView,
   verifyStoreKitTransaction,
   type StoreKitRenewalPayload,
@@ -271,20 +272,29 @@ export async function handleStoreKitSync(
         bundleIds: context.config.appleBundleIds,
         productIds: context.config.storeKitProductIds,
         environments: acceptedAppleEnvironments(context.config.environment),
+        // Bind the receipt to the caller rather than to whoever syncs it first.
+        appAccountToken: context.session.userId,
       },
       context.nowMs,
     );
-  } catch {
-    context.logger.warn('billing.storekit.rejected');
+  } catch (error) {
+    const foreign = error instanceof StoreKitError && error.reason === 'not_this_account';
+    context.logger.warn('billing.storekit.rejected', { foreign });
     await context.repository.recordAudit({
       userId: context.session.userId,
       actor: 'user',
       action: 'billing.storekit.sync',
       outcome: 'denied',
-      detail: 'signed_transaction_rejected',
+      detail: foreign ? 'transaction_belongs_to_another_account' : 'signed_transaction_rejected',
       correlationId: context.correlationId,
       nowSeconds: context.nowSeconds,
     });
+    if (foreign) {
+      throw new ApiError(
+        'forbidden',
+        'That subscription was purchased by a different account',
+      );
+    }
     throw new ApiError('unauthorized', 'Signed transaction could not be verified');
   }
 

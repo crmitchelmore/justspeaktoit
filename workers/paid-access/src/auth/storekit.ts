@@ -27,10 +27,16 @@ export const APPLE_ROOT_CA_G3_BASE64 =
   'AgEGMAoGCCqGSM49BAMDA2gAMGUCMQCD6cHEFl4aXTQY2e3v9GwOAEZLuN+yRhHFD/3meoyhpmvOwgPUnPWTxnS4' +
   'at+qIxUCMG1mihDK1A3UT82NQz60imOlM27jbdoXt2QfyFMm+YhidDkLF1vLUagM6BgD56KyKA==';
 
+/** Why a signed payload was rejected, so callers can answer 401 or 403 correctly. */
+export type StoreKitRejection = 'unverifiable' | 'not_this_account';
+
 export class StoreKitError extends Error {
-  constructor(message: string) {
+  readonly reason: StoreKitRejection;
+
+  constructor(message: string, reason: StoreKitRejection = 'unverifiable') {
     super(message);
     this.name = 'StoreKitError';
+    this.reason = reason;
   }
 }
 
@@ -87,6 +93,15 @@ export async function verifyStoreKitTransaction(
     productIds: readonly string[];
     /** Apple environments this deployment accepts, e.g. `['Production']`. */
     environments?: readonly string[];
+    /**
+     * The account this transaction must belong to.
+     *
+     * Supply it whenever a user is presenting the receipt themselves. Omit it
+     * only where the account is established by other means — App Store server
+     * notifications arrive with no caller and are attributed through the stored
+     * customer mapping instead.
+     */
+    appAccountToken?: string;
   },
   nowMs: number,
 ): Promise<StoreKitTransactionPayload> {
@@ -114,6 +129,22 @@ export async function verifyStoreKitTransaction(
   }
   if (typeof payload.originalTransactionId !== 'string') {
     throw new StoreKitError('Signed transaction has no original transaction identifier');
+  }
+  // The client sets `appAccountToken` to its own user id when it buys, and Apple
+  // stamps it onto that transaction and every renewal of it. Requiring it to
+  // match the caller is what makes a receipt non-transferable: without it, a
+  // signed transaction lifted from another device — or shared through a family
+  // Apple ID — grants paid access to whoever presents it first.
+  if (options.appAccountToken !== undefined) {
+    if (
+      typeof payload.appAccountToken !== 'string' ||
+      payload.appAccountToken.toLowerCase() !== options.appAccountToken.toLowerCase()
+    ) {
+      throw new StoreKitError(
+        'Signed transaction is not bound to the signed-in account',
+        'not_this_account',
+      );
+    }
   }
   return payload;
 }

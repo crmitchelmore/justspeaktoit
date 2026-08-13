@@ -158,10 +158,16 @@ export class OpenRouterProxy {
 }
 
 /**
- * Mints a short-lived Deepgram scoped token for the live WebSocket proxy.
+ * Deepgram access for the live WebSocket proxy.
  *
- * Grant creation is an idempotent read-like call, so a bounded retry is safe
- * here — unlike the transcription calls above.
+ * No token is minted: the Worker's own long-lived project API key authenticates
+ * the upstream socket. The key never leaves the Worker — the live-session
+ * Durable Object attaches it to the upstream connection and holds it in memory
+ * only — but it is a full-privilege credential, so anything that can reach this
+ * class can spend the project's Deepgram balance.
+ *
+ * `verifyCredential` is an idempotent read, so a bounded retry is safe there —
+ * unlike the transcription calls above.
  */
 export class DeepgramProxy {
   private readonly secrets: SecretResolver;

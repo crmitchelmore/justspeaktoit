@@ -95,6 +95,46 @@ async function postProcess(
   });
 }
 
+/** A minimal but genuine 16-bit PCM WAV, so the duration is read not guessed. */
+function wavPayload(input: { seconds: number; sampleRate: number; channels: number }): Uint8Array {
+  const blockAlign = input.channels * 2;
+  const byteRate = input.sampleRate * blockAlign;
+  const dataBytes = byteRate * input.seconds;
+  const buffer = new ArrayBuffer(44 + dataBytes);
+  const view = new DataView(buffer);
+  const ascii = (offset: number, text: string): void => {
+    for (let index = 0; index < text.length; index += 1) {
+      view.setUint8(offset + index, text.charCodeAt(index));
+    }
+  };
+  ascii(0, 'RIFF');
+  view.setUint32(4, 36 + dataBytes, true);
+  ascii(8, 'WAVE');
+  ascii(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, input.channels, true);
+  view.setUint32(24, input.sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, 16, true);
+  ascii(36, 'data');
+  view.setUint32(40, dataBytes, true);
+  return new Uint8Array(buffer);
+}
+
+async function transcribeBatch(token: string, audio: Uint8Array): Promise<Response> {
+  return SELF.fetch('https://api.test/v1/paid/transcribe/batch', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'audio/wav',
+      'idempotency-key': IDEMPOTENCY_KEY,
+    },
+    body: audio,
+  });
+}
+
 describe('paid routing entitlement gate', () => {
   it('refuses an unentitled account with 402 and records the denial', async () => {
     const userId = await seedUnentitledUser();
@@ -326,15 +366,23 @@ describe('paid routing request validation', () => {
 });
 
 describe('paid routing usage accounting', () => {
-  it('does not double-charge a retried request with the same idempotency key', async () => {
+  it('replays a retried request instead of calling the provider again', async () => {
     const userId = await seedEntitledUser();
     const token = await tokenFor(userId);
 
+    // Exactly one interceptor is registered. If the retry reached OpenRouter the
+    // request would fail outright, which is the guarantee being tested: the key
+    // is claimed before the vendor is called, so a client that lost the first
+    // response to a timeout gets it back rather than paying for it twice.
     mockOpenRouterCompletion('First.');
-    expect((await postProcess(token, { operation: 'post_processing', text: 'a' })).status).toBe(200);
+    const first = await postProcess(token, { operation: 'post_processing', text: 'a' });
+    expect(first.status).toBe(200);
+    expect(((await first.json()) as { text: string }).text).toBe('First.');
 
-    mockOpenRouterCompletion('Second.');
-    expect((await postProcess(token, { operation: 'post_processing', text: 'a' })).status).toBe(200);
+    const retry = await postProcess(token, { operation: 'post_processing', text: 'a' });
+    expect(retry.status).toBe(200);
+    expect(retry.headers.get('idempotent-replay')).toBe('true');
+    expect(((await retry.json()) as { text: string }).text).toBe('First.');
 
     const row = await env.DB.prepare(
       'SELECT COUNT(*) AS total FROM usage_ledger WHERE user_id = ?1',
@@ -342,6 +390,48 @@ describe('paid routing usage accounting', () => {
       .bind(userId)
       .first<{ total: number }>();
     expect(row?.total).toBe(1);
+  });
+
+  it('meters batch transcription by the duration in the WAV header, not the byte count', async () => {
+    const userId = await seedEntitledUser();
+    mockOpenRouterCompletion('Transcribed.');
+
+    // Three seconds at 48 kHz stereo 16-bit: 576 kB of audio that a fixed
+    // 32 kB-per-second estimate would have billed as eighteen seconds.
+    const response = await transcribeBatch(
+      await tokenFor(userId),
+      wavPayload({ seconds: 3, sampleRate: 48_000, channels: 2 }),
+    );
+    expect(response.status).toBe(200);
+
+    const usage = await env.DB.prepare(
+      `SELECT unit_kind, units FROM usage_ledger WHERE user_id = ?1`,
+    )
+      .bind(userId)
+      .first<{ unit_kind: string; units: number }>();
+    expect(usage?.unit_kind).toBe('audio_seconds');
+    expect(usage?.units).toBe(3);
+  });
+
+  it('rejects audio it cannot measure rather than guessing at the duration', async () => {
+    const userId = await seedEntitledUser();
+    const response = await SELF.fetch('https://api.test/v1/paid/transcribe/batch', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${await tokenFor(userId)}`,
+        'content-type': 'audio/mp4',
+        'idempotency-key': IDEMPOTENCY_KEY,
+      },
+      body: new Uint8Array(64_000),
+    });
+    expect(response.status).toBe(400);
+
+    const usage = await env.DB.prepare(
+      'SELECT COUNT(*) AS total FROM usage_ledger WHERE user_id = ?1',
+    )
+      .bind(userId)
+      .first<{ total: number }>();
+    expect(usage?.total).toBe(0);
   });
 
   it('releases the reservation when the provider fails', async () => {

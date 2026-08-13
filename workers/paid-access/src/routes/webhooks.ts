@@ -12,19 +12,54 @@
 
 import { ApiError, jsonResponse, readBoundedText } from '../http.js';
 import { requireSecret } from '../env.js';
+import { EntitlementTransitionError } from '../entitlement.js';
 import { payloadDigest, subscriptionView, verifyStripeSignature } from '../billing/stripe.js';
 import {
+  acceptedAppleEnvironments,
   appleRootCertificate,
   storeKitEntitlementView,
   verifyAppStoreNotification,
+  verifyStoreKitTransaction,
   type StoreKitRenewalPayload,
-  type StoreKitTransactionPayload,
 } from '../auth/storekit.js';
 import { verifyAppleSignedJws } from '../auth/apple-jws.js';
 import { transitionEntitlement } from './billing.js';
 import type { RequestContext } from '../context.js';
 
 const MAX_WEBHOOK_BYTES = 512 * 1024;
+
+/**
+ * Acknowledges a delivery whose transition the entitlement machine refuses.
+ *
+ * Both providers retry anything they are not told succeeded, and this class of
+ * failure never becomes succeedable: the entitlement is already in a state this
+ * event cannot move it out of — `revoked`, typically. Answering 200 stops an
+ * endless redelivery loop, and the recorded event keeps the anomaly visible.
+ */
+async function acknowledgeIllegalTransition(
+  context: RequestContext,
+  provider: 'stripe' | 'appstore',
+  eventId: string,
+  eventType: string,
+  error: EntitlementTransitionError,
+): Promise<Response> {
+  await context.repository.completeWebhookEvent({
+    provider,
+    eventId,
+    status: 'ignored',
+    failureReason: `illegal_transition_${error.from}_to_${error.to}`,
+    nowSeconds: context.nowSeconds,
+  });
+  context.logger.warn(`webhook.${provider}.illegal_transition`, {
+    event_type: eventType,
+    from: error.from,
+    to: error.to,
+  });
+  return jsonResponse(
+    { received: true, ignored: true },
+    { correlationId: context.correlationId },
+  );
+}
 
 export async function handleStripeWebhook(
   request: Request,
@@ -71,8 +106,38 @@ export async function handleStripeWebhook(
       return jsonResponse({ received: true, ignored: true }, { correlationId: context.correlationId });
     }
 
-    const userId =
-      view.userIdHint ?? (await context.repository.findUserByBillingCustomer('stripe', view.customerId));
+    // The subscription must bill on the plan we sell. Stripe accounts routinely
+    // carry other products, and a webhook for one of them must not silently
+    // grant this product's entitlement.
+    if (!view.priceIds.includes(context.config.stripePriceId)) {
+      await context.repository.completeWebhookEvent({
+        provider: 'stripe',
+        eventId: event.id,
+        status: 'ignored',
+        failureReason: 'price_not_in_plan',
+        nowSeconds: context.nowSeconds,
+      });
+      context.logger.info('webhook.stripe.other_price', { event_type: event.type });
+      return jsonResponse({ received: true, ignored: true }, { correlationId: context.correlationId });
+    }
+
+    // Attribution comes from the customer mapping we wrote ourselves when the
+    // checkout was created. `metadata.user_id` is writable from the Stripe
+    // dashboard and by anything holding an API key, so it is only ever a
+    // cross-check: if it disagrees with the mapping, something is wrong and the
+    // safe move is to change nothing.
+    const userId = await context.repository.findUserByBillingCustomer('stripe', view.customerId);
+    if (userId !== null && view.userIdHint !== null && view.userIdHint !== userId) {
+      await context.repository.completeWebhookEvent({
+        provider: 'stripe',
+        eventId: event.id,
+        status: 'failed',
+        failureReason: 'metadata_user_mismatch',
+        nowSeconds: context.nowSeconds,
+      });
+      context.logger.error('webhook.stripe.metadata_mismatch', { event_type: event.type });
+      return jsonResponse({ received: true }, { correlationId: context.correlationId });
+    }
     if (userId === null) {
       // The subscription exists but we cannot attribute it. Recording this as
       // failed keeps it visible for reconciliation instead of silently dropping.
@@ -87,21 +152,26 @@ export async function handleStripeWebhook(
       return jsonResponse({ received: true }, { correlationId: context.correlationId });
     }
 
-    await transitionEntitlement(context, {
-      userId,
-      status: view.status,
-      planId: context.config.stripePriceId,
-      source: 'stripe',
-      sourceReference: view.subscriptionId,
-      currentPeriodStart: view.currentPeriodStart,
-      currentPeriodEnd: view.currentPeriodEnd,
-      cancelAtPeriodEnd: view.cancelAtPeriodEnd,
-      revocationReason: null,
-      sourceEventAt: event.created,
-      reason: event.type,
-      eventSource: 'stripe',
-      sourceEventId: event.id,
-    });
+    try {
+      await transitionEntitlement(context, {
+        userId,
+        status: view.status,
+        planId: context.config.stripePriceId,
+        source: 'stripe',
+        sourceReference: view.subscriptionId,
+        currentPeriodStart: view.currentPeriodStart,
+        currentPeriodEnd: view.currentPeriodEnd,
+        cancelAtPeriodEnd: view.cancelAtPeriodEnd,
+        revocationReason: null,
+        sourceEventAt: event.created,
+        reason: event.type,
+        eventSource: 'stripe',
+        sourceEventId: event.id,
+      });
+    } catch (error) {
+      if (!(error instanceof EntitlementTransitionError)) throw error;
+      return acknowledgeIllegalTransition(context, 'stripe', event.id, event.type, error);
+    }
 
     await context.repository.completeWebhookEvent({
       provider: 'stripe',
@@ -192,26 +262,23 @@ export async function handleAppStoreWebhook(
       return jsonResponse({ received: true, ignored: true }, { correlationId: context.correlationId });
     }
 
-    const transaction = await verifyAppleSignedJws<StoreKitTransactionPayload>(
+    // The notification envelope is bound to our bundle, but the transaction it
+    // carries is a separate JWS. It goes through exactly the same allow-lists as
+    // a client-supplied receipt — bundle, product and Apple environment — so a
+    // notification cannot grant an entitlement for another app or product, and a
+    // Sandbox notification cannot grant production access. No account binding is
+    // checked here: a notification has no caller, and is attributed below through
+    // the stored customer mapping instead.
+    const transaction = await verifyStoreKitTransaction(
       signedTransaction,
-      rootDer,
+      {
+        rootDer,
+        bundleIds: context.config.appleBundleIds,
+        productIds: context.config.storeKitProductIds,
+        environments: acceptedAppleEnvironments(context.config.environment),
+      },
       context.nowMs,
     );
-    // The notification envelope is bound to our bundle, but the transaction it
-    // carries is a separate JWS. Validate it against the same allow-lists so a
-    // notification cannot grant an entitlement for another app or product.
-    if (
-      typeof transaction.bundleId !== 'string' ||
-      !context.config.appleBundleIds.includes(transaction.bundleId)
-    ) {
-      throw new ApiError('bad_request', 'Notification transaction is for an unexpected bundle');
-    }
-    if (
-      typeof transaction.productId !== 'string' ||
-      !context.config.storeKitProductIds.includes(transaction.productId)
-    ) {
-      throw new ApiError('bad_request', 'Notification transaction is for an unexpected product');
-    }
     const renewal =
       typeof notification.data?.signedRenewalInfo === 'string'
         ? await verifyAppleSignedJws<StoreKitRenewalPayload>(
@@ -253,21 +320,32 @@ export async function handleAppStoreWebhook(
     }
 
     const view = storeKitEntitlementView(transaction, renewal, context.nowSeconds);
-    await transitionEntitlement(context, {
-      userId,
-      status: view.status,
-      planId: view.productId,
-      source: 'storekit',
-      sourceReference: view.originalTransactionId,
-      currentPeriodStart: view.currentPeriodStart,
-      currentPeriodEnd: view.currentPeriodEnd,
-      cancelAtPeriodEnd: view.cancelAtPeriodEnd,
-      revocationReason: view.revocationReason,
-      sourceEventAt: view.sourceEventAt,
-      reason: notification.notificationType ?? 'appstore_notification',
-      eventSource: 'storekit',
-      sourceEventId: notificationId,
-    });
+    try {
+      await transitionEntitlement(context, {
+        userId,
+        status: view.status,
+        planId: view.productId,
+        source: 'storekit',
+        sourceReference: view.originalTransactionId,
+        currentPeriodStart: view.currentPeriodStart,
+        currentPeriodEnd: view.currentPeriodEnd,
+        cancelAtPeriodEnd: view.cancelAtPeriodEnd,
+        revocationReason: view.revocationReason,
+        sourceEventAt: view.sourceEventAt,
+        reason: notification.notificationType ?? 'appstore_notification',
+        eventSource: 'storekit',
+        sourceEventId: notificationId,
+      });
+    } catch (error) {
+      if (!(error instanceof EntitlementTransitionError)) throw error;
+      return acknowledgeIllegalTransition(
+        context,
+        'appstore',
+        notificationId,
+        notification.notificationType ?? 'unknown',
+        error,
+      );
+    }
 
     await context.repository.completeWebhookEvent({
       provider: 'appstore',

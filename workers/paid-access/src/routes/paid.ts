@@ -5,18 +5,21 @@
  *
  *   1. Authenticate the session.
  *   2. Re-read the entitlement from D1 — the client never asserts entitlement.
- *   3. Resolve the operation to a route via the canonical Best policy — the
+ *   3. Claim the request's `Idempotency-Key`, before anything is spent.
+ *   4. Resolve the operation to a route via the canonical Best policy — the
  *      client never names a provider, model or cost.
- *   4. Reserve quota for a server-computed upper bound.
- *   5. Call the vendor with the Worker's own credential and an explicit timeout.
- *   6. Finalise quota with the measured amount and append one ledger row.
+ *   5. Reserve quota for a server-computed upper bound.
+ *   6. Call the vendor with the Worker's own credential and an explicit timeout.
+ *   7. Finalise quota with the measured amount and append one ledger row.
  *
- * If any step fails, the reservation is released. Nothing silently falls back to
- * a different model or to the user's own key.
+ * If any step fails, the reservation is released and the claim is dropped so the
+ * retry is served. Nothing silently falls back to a different model or to the
+ * user's own key.
  */
 
 import {
   ApiError,
+  CORRELATION_HEADER,
   jsonResponse,
   readBoundedBytes,
   readJson,
@@ -26,11 +29,10 @@ import { billingPeriod, grantsAccess } from '../entitlement.js';
 import { bestRoute, isPaidOperation, policyDocument, type PaidOperation } from '../policy.js';
 import { DeepgramProxy, OpenRouterProxy } from '../providers/index.js';
 import type { AuthenticatedContext } from '../context.js';
-import type { LiveSessionOutcome } from '../do/live-session.js';
+import type { PaidOperationName } from '../data/repository.js';
+import type { LiveSessionReconciliation } from '../do/live-session.js';
 
 const MAX_POST_PROCESSING_BODY_BYTES = 256 * 1024;
-/** WAV at 16 kHz mono is 32 kB per second; used to bound a reservation. */
-const ASSUMED_BYTES_PER_AUDIO_SECOND = 32_000;
 const MAX_TEXT_CHARACTERS = 100_000;
 /** Rough characters-per-token ratio, used only to size the quota reservation. */
 const CHARACTERS_PER_TOKEN = 4;
@@ -89,6 +91,168 @@ export function handlePolicy(context: AuthenticatedContext): Response {
   return jsonResponse(policyDocument(), { correlationId: context.correlationId });
 }
 
+/**
+ * Runs a paid operation under its idempotency key.
+ *
+ * The key is claimed before quota is reserved and before the vendor is called,
+ * which is the point: a retry arriving after a client timeout must not buy a
+ * second upstream call. A retry of a finished request replays the stored
+ * response; a retry that overlaps the original is refused rather than raced.
+ *
+ * A failure drops the claim, so the client's next attempt is served normally
+ * instead of being answered as a duplicate for ever.
+ */
+async function underIdempotencyKey(
+  context: AuthenticatedContext,
+  input: { idempotencyKey: string; operation: PaidOperationName },
+  work: () => Promise<Record<string, unknown>>,
+): Promise<Response> {
+  const existing = await context.repository.claimRequest({
+    userId: context.session.userId,
+    idempotencyKey: input.idempotencyKey,
+    operation: input.operation,
+    correlationId: context.correlationId,
+    nowSeconds: context.nowSeconds,
+  });
+
+  if (existing !== null) {
+    if (existing.operation !== input.operation) {
+      throw new ApiError(
+        'conflict',
+        'That Idempotency-Key was already used for a different operation',
+      );
+    }
+    if (existing.status !== 'completed' || existing.responseBody === null) {
+      throw new ApiError('conflict', 'A request with that Idempotency-Key is still in flight');
+    }
+    context.logger.info('paid.idempotent_replay', { operation: input.operation });
+    return new Response(existing.responseBody, {
+      status: 200,
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        'cache-control': 'no-store',
+        [CORRELATION_HEADER]: context.correlationId,
+        'idempotent-replay': 'true',
+      },
+    });
+  }
+
+  let payload: Record<string, unknown>;
+  try {
+    payload = await work();
+  } catch (error) {
+    await context.repository.releaseRequestClaim({
+      userId: context.session.userId,
+      idempotencyKey: input.idempotencyKey,
+    });
+    throw error;
+  }
+
+  const body = JSON.stringify(payload);
+  await context.repository.completeRequestClaim({
+    userId: context.session.userId,
+    idempotencyKey: input.idempotencyKey,
+    responseBody: body,
+    nowSeconds: context.nowSeconds,
+  });
+  return new Response(body, {
+    status: 200,
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'no-store',
+      [CORRELATION_HEADER]: context.correlationId,
+    },
+  });
+}
+
+/**
+ * Records metered usage, insisting the row is actually new.
+ *
+ * The claim above already guarantees one attempt per idempotency key, so a
+ * rejected insert here means the two disagree — an invariant violation worth
+ * failing on rather than quietly under-billing.
+ */
+async function recordMeteredUsage(
+  context: AuthenticatedContext,
+  input: {
+    idempotencyKey: string;
+    operation: PaidOperationName;
+    provider: string;
+    model: string;
+    unitKind: 'audio_seconds' | 'tokens';
+    units: number;
+    billingPeriod: string;
+  },
+): Promise<void> {
+  const recorded = await context.repository.recordUsage({
+    userId: context.session.userId,
+    idempotencyKey: input.idempotencyKey,
+    operation: input.operation,
+    provider: input.provider,
+    model: input.model,
+    unitKind: input.unitKind,
+    units: input.units,
+    billingPeriod: input.billingPeriod,
+    correlationId: context.correlationId,
+    nowSeconds: context.nowSeconds,
+  });
+  if (!recorded) {
+    context.logger.error('paid.usage_not_recorded', { operation: input.operation });
+    throw new ApiError(
+      'conflict',
+      'That Idempotency-Key has already been metered for this account',
+    );
+  }
+}
+
+/**
+ * The exact duration of a linear-PCM WAV payload.
+ *
+ * Duration is what gets billed, so it is measured from the payload's own header
+ * rather than assumed from its size: a fixed bytes-per-second guess is wrong by
+ * a factor of six between 16 kHz mono and 48 kHz stereo, and wrong by an order
+ * of magnitude for a compressed container. Nothing we route to reports the
+ * duration back, so the payload is the only source of truth — which is why the
+ * accepted content types are limited to what this can read.
+ */
+function wavDurationSeconds(audio: Uint8Array): number {
+  const view = new DataView(audio.buffer, audio.byteOffset, audio.byteLength);
+  const tag = (offset: number): string =>
+    String.fromCharCode(
+      view.getUint8(offset),
+      view.getUint8(offset + 1),
+      view.getUint8(offset + 2),
+      view.getUint8(offset + 3),
+    );
+
+  if (audio.byteLength < 44 || tag(0) !== 'RIFF' || tag(8) !== 'WAVE') {
+    throw new ApiError('bad_request', 'Audio body is not a WAV payload');
+  }
+
+  let byteRate: number | null = null;
+  let dataBytes: number | null = null;
+  let offset = 12;
+  while (offset + 8 <= audio.byteLength) {
+    const chunkId = tag(offset);
+    const chunkSize = view.getUint32(offset + 4, true);
+    if (chunkId === 'fmt ' && offset + 24 <= audio.byteLength) {
+      byteRate = view.getUint32(offset + 16, true);
+    } else if (chunkId === 'data') {
+      // A streamed WAV can declare a zero or overlong size; trust what arrived.
+      const declared = chunkSize === 0 ? Number.MAX_SAFE_INTEGER : chunkSize;
+      dataBytes = Math.min(declared, audio.byteLength - (offset + 8));
+      break;
+    }
+    // Chunks are word-aligned, so an odd size is followed by a pad byte.
+    offset += 8 + chunkSize + (chunkSize % 2);
+  }
+
+  if (byteRate === null || byteRate <= 0 || dataBytes === null || dataBytes <= 0) {
+    throw new ApiError('bad_request', 'Audio body is not a readable WAV payload');
+  }
+  return dataBytes / byteRate;
+}
+
 // ---------------------------------------------------------------------------
 // Batch transcription
 // ---------------------------------------------------------------------------
@@ -100,9 +264,13 @@ export async function handleBatchTranscription(
   await requirePaidAccess(context);
   const idempotencyKey = requireIdempotencyKey(request);
 
+  // WAV only. The billed quantity is the audio's duration, and a WAV header is
+  // the one thing in this path that states it — the upstream returns a
+  // transcript, not a duration, and a compressed container's duration cannot be
+  // read from its size. Clients send their own key's way anything else.
   const contentType = request.headers.get('content-type') ?? '';
-  if (!/^audio\/(wav|x-wav|mp4|m4a|mpeg)\b/.test(contentType)) {
-    throw new ApiError('bad_request', 'Body must be audio/wav, audio/mp4 or audio/mpeg');
+  if (!/^audio\/(wav|x-wav|vnd\.wave)\b/.test(contentType)) {
+    throw new ApiError('bad_request', 'Body must be audio/wav');
   }
   const language = new URL(request.url).searchParams.get('language');
   if (language !== null && !/^[a-z]{2}(-[A-Za-z0-9]{2,8})?$/.test(language)) {
@@ -115,69 +283,69 @@ export async function handleBatchTranscription(
   }
 
   const route = bestRoute('batch_transcription');
-  // Duration is derived from the payload we received, never from a client claim.
-  const estimatedSeconds = Math.max(1, Math.ceil(audio.byteLength / ASSUMED_BYTES_PER_AUDIO_SECOND));
+  // Duration is measured from the payload we received, never from a client claim.
+  const audioSeconds = Math.max(1, Math.ceil(wavDurationSeconds(audio)));
   const period = billingPeriod(context.nowSeconds);
 
-  const reservation = await context.quota.reserve({
-    userId: context.session.userId,
-    period,
-    unitKind: 'audio_seconds',
-    units: estimatedSeconds,
-    countsAsSession: false,
-    nowSeconds: context.nowSeconds,
-  });
+  return underIdempotencyKey(
+    context,
+    { idempotencyKey, operation: 'batch_transcription' },
+    async () => {
+      const reservation = await context.quota.reserve({
+        userId: context.session.userId,
+        period,
+        unitKind: 'audio_seconds',
+        units: audioSeconds,
+        countsAsSession: false,
+        nowSeconds: context.nowSeconds,
+      });
 
-  try {
-    const proxy = new OpenRouterProxy(
-      providerSecretResolver(context.env, ['OPENROUTER_API_KEY']),
-      context.config.upstreamTimeoutMs,
-    );
-    const result = await proxy.transcribe({
-      audio,
-      contentType,
-      filename: contentType.includes('mp4') || contentType.includes('m4a') ? 'audio.m4a' : 'audio.wav',
-      upstreamModel: route.upstreamModel,
-      language,
-    });
+      try {
+        const proxy = new OpenRouterProxy(
+          providerSecretResolver(context.env, ['OPENROUTER_API_KEY']),
+          context.config.upstreamTimeoutMs,
+        );
+        const result = await proxy.transcribe({
+          audio,
+          contentType,
+          filename: 'audio.wav',
+          upstreamModel: route.upstreamModel,
+          language,
+        });
 
-    await context.quota.finalise({
-      userId: context.session.userId,
-      reservationId: reservation.reservationId,
-      actualUnits: estimatedSeconds,
-      nowSeconds: context.nowSeconds,
-    });
-    await context.repository.recordUsage({
-      userId: context.session.userId,
-      idempotencyKey,
-      operation: 'batch_transcription',
-      provider: route.provider,
-      model: route.catalogueModelId,
-      unitKind: 'audio_seconds',
-      units: estimatedSeconds,
-      billingPeriod: period,
-      correlationId: context.correlationId,
-      nowSeconds: context.nowSeconds,
-    });
+        await context.quota.finalise({
+          userId: context.session.userId,
+          reservationId: reservation.reservationId,
+          actualUnits: audioSeconds,
+          nowSeconds: context.nowSeconds,
+        });
+        await recordMeteredUsage(context, {
+          idempotencyKey,
+          operation: 'batch_transcription',
+          provider: route.provider,
+          model: route.catalogueModelId,
+          unitKind: 'audio_seconds',
+          units: audioSeconds,
+          billingPeriod: period,
+        });
 
-    context.logger.info('paid.batch_transcription.completed', {
-      provider: route.provider,
-      model: route.catalogueModelId,
-      audio_seconds: estimatedSeconds,
-    });
+        context.logger.info('paid.batch_transcription.completed', {
+          provider: route.provider,
+          model: route.catalogueModelId,
+          audio_seconds: audioSeconds,
+        });
 
-    return jsonResponse(
-      { text: result.text, model: route.catalogueModelId, provider: route.provider },
-      { correlationId: context.correlationId },
-    );
-  } catch (error) {
-    await context.quota.release({
-      userId: context.session.userId,
-      reservationId: reservation.reservationId,
-      nowSeconds: context.nowSeconds,
-    });
-    throw error;
-  }
+        return { text: result.text, model: route.catalogueModelId, provider: route.provider };
+      } catch (error) {
+        await context.quota.release({
+          userId: context.session.userId,
+          reservationId: reservation.reservationId,
+          nowSeconds: context.nowSeconds,
+        });
+        throw error;
+      }
+    },
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -222,71 +390,72 @@ export async function handlePostProcessing(
     POST_PROCESSING_TOKEN_OVERHEAD +
     Math.ceil(((body.text.length + (systemPrompt?.length ?? 0)) * 3) / CHARACTERS_PER_TOKEN);
 
-  const reservation = await context.quota.reserve({
-    userId: context.session.userId,
-    period,
-    unitKind: 'tokens',
-    units: estimatedTokens,
-    countsAsSession: false,
-    nowSeconds: context.nowSeconds,
-  });
+  const text = body.text;
+  return underIdempotencyKey(
+    context,
+    { idempotencyKey, operation: 'post_processing' },
+    async () => {
+      const reservation = await context.quota.reserve({
+        userId: context.session.userId,
+        period,
+        unitKind: 'tokens',
+        units: estimatedTokens,
+        countsAsSession: false,
+        nowSeconds: context.nowSeconds,
+      });
 
-  try {
-    const proxy = new OpenRouterProxy(
-      providerSecretResolver(context.env, ['OPENROUTER_API_KEY']),
-      context.config.upstreamTimeoutMs,
-    );
-    const result = await proxy.postProcess({
-      systemPrompt,
-      userText: body.text,
-      upstreamModel: route.upstreamModel,
-      temperature,
-    });
+      try {
+        const proxy = new OpenRouterProxy(
+          providerSecretResolver(context.env, ['OPENROUTER_API_KEY']),
+          context.config.upstreamTimeoutMs,
+        );
+        const result = await proxy.postProcess({
+          systemPrompt,
+          userText: text,
+          upstreamModel: route.upstreamModel,
+          temperature,
+        });
 
-    // Cost comes from the provider's usage report, never from the client. The
-    // reservation caps it, so the ledger and the quota always agree.
-    const measuredTokens = Math.min(
-      Math.max(1, result.promptTokens + result.completionTokens),
-      estimatedTokens,
-    );
+        // Cost comes from the provider's usage report, never from the client. The
+        // reservation caps it, so the ledger and the quota always agree.
+        const measuredTokens = Math.min(
+          Math.max(1, result.promptTokens + result.completionTokens),
+          estimatedTokens,
+        );
 
-    await context.quota.finalise({
-      userId: context.session.userId,
-      reservationId: reservation.reservationId,
-      actualUnits: measuredTokens,
-      nowSeconds: context.nowSeconds,
-    });
-    await context.repository.recordUsage({
-      userId: context.session.userId,
-      idempotencyKey,
-      operation: 'post_processing',
-      provider: route.provider,
-      model: route.catalogueModelId,
-      unitKind: 'tokens',
-      units: measuredTokens,
-      billingPeriod: period,
-      correlationId: context.correlationId,
-      nowSeconds: context.nowSeconds,
-    });
+        await context.quota.finalise({
+          userId: context.session.userId,
+          reservationId: reservation.reservationId,
+          actualUnits: measuredTokens,
+          nowSeconds: context.nowSeconds,
+        });
+        await recordMeteredUsage(context, {
+          idempotencyKey,
+          operation: 'post_processing',
+          provider: route.provider,
+          model: route.catalogueModelId,
+          unitKind: 'tokens',
+          units: measuredTokens,
+          billingPeriod: period,
+        });
 
-    context.logger.info('paid.post_processing.completed', {
-      provider: route.provider,
-      model: route.catalogueModelId,
-      tokens: measuredTokens,
-    });
+        context.logger.info('paid.post_processing.completed', {
+          provider: route.provider,
+          model: route.catalogueModelId,
+          tokens: measuredTokens,
+        });
 
-    return jsonResponse(
-      { text: result.text, model: route.catalogueModelId, provider: route.provider },
-      { correlationId: context.correlationId },
-    );
-  } catch (error) {
-    await context.quota.release({
-      userId: context.session.userId,
-      reservationId: reservation.reservationId,
-      nowSeconds: context.nowSeconds,
-    });
-    throw error;
-  }
+        return { text: result.text, model: route.catalogueModelId, provider: route.provider };
+      } catch (error) {
+        await context.quota.release({
+          userId: context.session.userId,
+          reservationId: reservation.reservationId,
+          nowSeconds: context.nowSeconds,
+        });
+        throw error;
+      }
+    },
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -401,17 +570,20 @@ export async function handleLiveTranscription(
 }
 
 /**
- * Reconciles a finished live session.
+ * Reconciles a finished live session into the usage ledger.
  *
  * `session_id` is the value returned in the `x-session-id` header when the
- * socket was opened. The Durable Object is the source of truth for the measured
- * duration, so a client that never calls this simply keeps its reservation
- * until the lease expires — it can never under-report.
+ * socket was opened. This route is reconciliation only: the quota reservation
+ * was already settled by the Durable Object when the session ended, so a client
+ * that never calls this — or that calls it twice — changes nothing about what
+ * was metered. The Durable Object hands out its outcome exactly once, which is
+ * what stops a replay appending a second ledger row.
  */
 export async function handleLiveTranscriptionFinalise(
   request: Request,
   context: AuthenticatedContext,
 ): Promise<Response> {
+  await requirePaidAccess(context);
   const idempotencyKey = requireIdempotencyKey(request);
   const body = await readJson<{ session_id?: unknown }>(request, 4_096);
   if (typeof body.session_id !== 'string' || body.session_id.length > 128) {
@@ -420,22 +592,25 @@ export async function handleLiveTranscriptionFinalise(
 
   const sessionId = `${context.session.userId}:${body.session_id}`;
   const stub = context.env.LIVE_SESSION.get(context.env.LIVE_SESSION.idFromName(sessionId));
-  const outcomeResponse = await stub.fetch('https://live.invalid/outcome');
-  const outcome = (await outcomeResponse.json()) as LiveSessionOutcome | null;
+  const claimResponse = await stub.fetch('https://live.invalid/outcome/reconcile', {
+    method: 'POST',
+  });
+  const claim = (await claimResponse.json()) as LiveSessionReconciliation;
+  const outcome = claim.outcome;
 
   if (outcome === null || outcome.userId !== context.session.userId) {
     throw new ApiError('not_found', 'No finished live session matches that identifier');
   }
 
+  if (claim.alreadyReconciled) {
+    return jsonResponse(
+      { finalised: true, audio_seconds: outcome.elapsedSeconds, already_reconciled: true },
+      { correlationId: context.correlationId },
+    );
+  }
+
   const route = bestRoute('live_transcription');
-  await context.quota.finalise({
-    userId: context.session.userId,
-    reservationId: outcome.reservationId,
-    actualUnits: outcome.elapsedSeconds,
-    nowSeconds: context.nowSeconds,
-  });
-  await context.repository.recordUsage({
-    userId: context.session.userId,
+  await recordMeteredUsage(context, {
     idempotencyKey,
     operation: 'live_transcription',
     provider: route.provider,
@@ -443,8 +618,6 @@ export async function handleLiveTranscriptionFinalise(
     unitKind: 'audio_seconds',
     units: outcome.elapsedSeconds,
     billingPeriod: billingPeriod(context.nowSeconds),
-    correlationId: context.correlationId,
-    nowSeconds: context.nowSeconds,
   });
 
   return jsonResponse(

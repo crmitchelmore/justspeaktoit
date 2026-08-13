@@ -206,7 +206,16 @@ export interface StripeSubscriptionView {
   readonly currentPeriodStart: number | null;
   readonly currentPeriodEnd: number | null;
   readonly cancelAtPeriodEnd: boolean;
+  /**
+   * `metadata.user_id`, as Stripe echoed it back.
+   *
+   * A hint and nothing more: metadata is writable from the Stripe dashboard and
+   * by anything holding an API key, so it is cross-checked against the stored
+   * customer mapping rather than believed.
+   */
   readonly userIdHint: string | null;
+  /** Every price the subscription bills on, for checking against our own plan. */
+  readonly priceIds: readonly string[];
 }
 
 const STATUS_MAP: Readonly<Record<string, EntitlementStatus>> = {
@@ -248,18 +257,26 @@ export function subscriptionView(event: StripeEvent): StripeSubscriptionView | n
   }
 
   const metadata = object['metadata'];
-  const userIdHint =
+  const rawUserIdHint =
     typeof metadata === 'object' && metadata !== null
-      ? ((metadata as Record<string, unknown>)['user_id'] as string | undefined) ?? null
-      : null;
+      ? (metadata as Record<string, unknown>)['user_id']
+      : undefined;
+  // Metadata is free-form JSON from an external system; a number, an object or
+  // an array here must not be smuggled through as a user id.
+  const userIdHint = typeof rawUserIdHint === 'string' && rawUserIdHint.length > 0
+    ? rawUserIdHint
+    : null;
 
   // Stripe moved period boundaries onto the subscription item in newer API
   // versions; read both shapes so an account on either version works.
   const items = object['items'];
-  const firstItem =
+  const itemRows: readonly Record<string, unknown>[] =
     typeof items === 'object' && items !== null && Array.isArray((items as { data?: unknown }).data)
-      ? (((items as { data: unknown[] }).data[0] ?? null) as Record<string, unknown> | null)
-      : null;
+      ? ((items as { data: unknown[] }).data.filter(
+          (entry): entry is Record<string, unknown> => typeof entry === 'object' && entry !== null,
+        ))
+      : [];
+  const firstItem = itemRows[0] ?? null;
 
   return {
     subscriptionId,
@@ -273,5 +290,16 @@ export function subscriptionView(event: StripeEvent): StripeSubscriptionView | n
       (firstItem === null ? null : readNumber(firstItem, 'current_period_end')),
     cancelAtPeriodEnd: object['cancel_at_period_end'] === true,
     userIdHint,
+    priceIds: itemRows
+      .map((item) => {
+        const price = item['price'];
+        if (typeof price === 'string') return price;
+        if (typeof price === 'object' && price !== null) {
+          const id = (price as Record<string, unknown>)['id'];
+          return typeof id === 'string' ? id : null;
+        }
+        return null;
+      })
+      .filter((id): id is string => id !== null),
   };
 }

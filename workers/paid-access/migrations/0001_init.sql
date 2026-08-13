@@ -155,6 +155,37 @@ CREATE TABLE usage_ledger (
 CREATE INDEX idx_usage_ledger_period ON usage_ledger (user_id, billing_period);
 
 -- ---------------------------------------------------------------------------
+-- Request idempotency
+-- ---------------------------------------------------------------------------
+-- Claimed *before* quota is reserved and before the vendor is called, so a
+-- retried request cannot buy a second upstream call. `usage_ledger` cannot serve
+-- this purpose: it is append-only and is only written once the work is done, by
+-- which point the money has already been spent twice.
+--
+-- `response_body` holds the payload the first attempt returned, so a client that
+-- lost the response to a timeout gets its transcript back on retry instead of
+-- paying again. It is the only place request content is stored, it is keyed to
+-- the request that produced it, and it is never read by anything else.
+CREATE TABLE request_claims (
+  id               TEXT    PRIMARY KEY,
+  user_id          TEXT    NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  idempotency_key  TEXT    NOT NULL,
+  operation        TEXT    NOT NULL
+                     CHECK (operation IN ('live_transcription', 'batch_transcription',
+                                          'post_processing')),
+  status           TEXT    NOT NULL DEFAULT 'in_flight'
+                     CHECK (status IN ('in_flight', 'completed')),
+  response_body    TEXT,
+  correlation_id   TEXT    NOT NULL,
+  created_at       INTEGER NOT NULL,
+  completed_at     INTEGER,
+  UNIQUE (user_id, idempotency_key),
+  CHECK (status <> 'completed' OR response_body IS NOT NULL)
+);
+
+CREATE INDEX idx_request_claims_created ON request_claims (created_at);
+
+-- ---------------------------------------------------------------------------
 -- General audit log
 -- ---------------------------------------------------------------------------
 -- Never contains audio, transcript text, tokens or secrets — only the shape of

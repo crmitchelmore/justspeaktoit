@@ -95,11 +95,14 @@ const ALLOWED_TRANSITIONS: Readonly<Record<EntitlementStatus, readonly Entitleme
   grace: ['active', 'past_due', 'expired', 'revoked'],
   past_due: ['active', 'grace', 'expired', 'revoked'],
   expired: ['active', 'trialing', 'past_due', 'grace', 'revoked'],
-  revoked: [],
+  // Terminal: recovering requires a new purchase, which arrives with a new
+  // source reference. `revoked → revoked` is allowed because providers redeliver
+  // — a replayed revocation must be a no-op, not a 500 and an endless retry.
+  revoked: ['revoked'],
 };
 
 export function canTransition(from: EntitlementStatus, to: EntitlementStatus): boolean {
-  if (from === to && from !== 'revoked') return true;
+  if (from === to) return true;
   return ALLOWED_TRANSITIONS[from].includes(to);
 }
 

@@ -21,20 +21,26 @@ export interface QuotaReservation {
   readonly snapshot: QuotaSnapshot;
 }
 
-export class QuotaClient {
-  private readonly namespace: DurableObjectNamespace;
-  private readonly limits: QuotaLimits;
+/**
+ * Settling an existing reservation.
+ *
+ * Finalise and release never consult plan limits, so this half of the client is
+ * usable by code that holds a reservation id but has no business knowing — or
+ * inventing — the caller's plan. The live-session Durable Object settles its own
+ * reservation through exactly this surface and cannot reserve anything new.
+ */
+export class QuotaSettlement {
+  protected readonly namespace: DurableObjectNamespace;
 
-  constructor(namespace: DurableObjectNamespace, limits: QuotaLimits) {
+  constructor(namespace: DurableObjectNamespace) {
     this.namespace = namespace;
-    this.limits = limits;
   }
 
   private stub(userId: string): DurableObjectStub {
     return this.namespace.get(this.namespace.idFromName(`user:${userId}`));
   }
 
-  private async call(userId: string, body: unknown): Promise<QuotaResponse> {
+  protected async call(userId: string, body: unknown): Promise<QuotaResponse> {
     const response = await this.stub(userId).fetch('https://quota.invalid/', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -44,6 +50,41 @@ export class QuotaClient {
       throw new ApiError('internal_error', 'Quota service is unavailable');
     }
     return (await response.json());
+  }
+
+  async finalise(input: {
+    userId: string;
+    reservationId: string;
+    actualUnits: number;
+    nowSeconds: number;
+  }): Promise<void> {
+    await this.call(input.userId, {
+      kind: 'finalise',
+      reservationId: input.reservationId,
+      actualUnits: input.actualUnits,
+      nowSeconds: input.nowSeconds,
+    });
+  }
+
+  async release(input: {
+    userId: string;
+    reservationId: string;
+    nowSeconds: number;
+  }): Promise<void> {
+    await this.call(input.userId, {
+      kind: 'release',
+      reservationId: input.reservationId,
+      nowSeconds: input.nowSeconds,
+    });
+  }
+}
+
+export class QuotaClient extends QuotaSettlement {
+  private readonly limits: QuotaLimits;
+
+  constructor(namespace: DurableObjectNamespace, limits: QuotaLimits) {
+    super(namespace);
+    this.limits = limits;
   }
 
   /**
@@ -81,32 +122,6 @@ export class QuotaClient {
       throw new ApiError('internal_error', 'Quota service returned no reservation');
     }
     return { reservationId: result.reservationId, snapshot: result.snapshot };
-  }
-
-  async finalise(input: {
-    userId: string;
-    reservationId: string;
-    actualUnits: number;
-    nowSeconds: number;
-  }): Promise<void> {
-    await this.call(input.userId, {
-      kind: 'finalise',
-      reservationId: input.reservationId,
-      actualUnits: input.actualUnits,
-      nowSeconds: input.nowSeconds,
-    });
-  }
-
-  async release(input: {
-    userId: string;
-    reservationId: string;
-    nowSeconds: number;
-  }): Promise<void> {
-    await this.call(input.userId, {
-      kind: 'release',
-      reservationId: input.reservationId,
-      nowSeconds: input.nowSeconds,
-    });
   }
 
   async status(userId: string, period: string, nowSeconds: number): Promise<QuotaSnapshot> {

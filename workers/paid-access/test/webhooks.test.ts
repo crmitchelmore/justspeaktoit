@@ -2,7 +2,9 @@ import { env, SELF } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { hmacSha256Hex } from '../src/crypto.js';
 
-const WEBHOOK_SECRET = 'whsec_test_placeholder';
+const WEBHOOK_SECRET = 'test-not-a-real-webhook-secret';
+/** Mirrors `STRIPE_PRICE_ID` in wrangler.toml — the only price this plan sells. */
+const PLAN_PRICE_ID = 'price_REPLACE_ME';
 
 interface StripeSubscriptionEvent {
   id: string;
@@ -26,6 +28,7 @@ function subscriptionEvent(overrides: Partial<StripeSubscriptionEvent> = {}): St
         current_period_end: now + 86_400,
         cancel_at_period_end: false,
         metadata: {},
+        items: { data: [{ id: 'si_test_1', price: { id: PLAN_PRICE_ID } }] },
       },
     },
     ...overrides,
@@ -68,6 +71,18 @@ async function seedStripeUser(): Promise<string> {
     .bind(crypto.randomUUID(), userId, now)
     .run();
   return userId;
+}
+
+async function seedRevokedEntitlement(userId: string): Promise<void> {
+  const now = Math.floor(Date.now() / 1_000);
+  await env.DB.prepare(
+    `INSERT INTO entitlements
+       (id, user_id, plan_id, status, source, source_reference,
+        revoked_at, revocation_reason, version, created_at, updated_at)
+     VALUES (?1, ?2, 'paid', 'revoked', 'stripe', ?3, ?4, 'test_revocation', 1, ?4, ?4)`,
+  )
+    .bind(crypto.randomUUID(), userId, `sub_revoked_${userId}`, now)
+    .run();
 }
 
 async function entitlementStatus(userId: string): Promise<string | null> {
@@ -209,15 +224,85 @@ describe('Stripe webhook idempotency', () => {
     expect(row?.status).toBe('ignored');
   });
 
-  it('prefers the user id in subscription metadata over the customer lookup', async () => {
+  it('refuses to attribute a subscription on event metadata alone', async () => {
     const userId = await seedStripeUser();
     const event = subscriptionEvent();
+    // Metadata is writable from the Stripe dashboard and by anything holding an
+    // API key, so naming a user there must not be enough to grant them access.
     event.data.object['customer'] = 'cus_not_linked';
     event.data.object['metadata'] = { user_id: userId };
 
     const response = await postStripeWebhook(event);
     expect(response.status).toBe(200);
-    expect(await entitlementStatus(userId)).toBe('active');
+    expect(await entitlementStatus(userId)).toBeNull();
+
+    const row = await env.DB.prepare(
+      'SELECT status, failure_reason FROM webhook_events WHERE event_id = ?1',
+    )
+      .bind(event.id)
+      .first<{ status: string; failure_reason: string }>();
+    expect(row?.status).toBe('failed');
+    expect(row?.failure_reason).toBe('unattributable_customer');
+  });
+
+  it('changes nothing when event metadata disagrees with the customer mapping', async () => {
+    const userId = await seedStripeUser();
+    const event = subscriptionEvent();
+    event.data.object['metadata'] = { user_id: crypto.randomUUID() };
+
+    const response = await postStripeWebhook(event);
+    expect(response.status).toBe(200);
+    expect(await entitlementStatus(userId)).toBeNull();
+
+    const row = await env.DB.prepare(
+      'SELECT status, failure_reason FROM webhook_events WHERE event_id = ?1',
+    )
+      .bind(event.id)
+      .first<{ status: string; failure_reason: string }>();
+    expect(row?.failure_reason).toBe('metadata_user_mismatch');
+  });
+
+  it('ignores a subscription that bills on a price this plan does not sell', async () => {
+    const userId = await seedStripeUser();
+    const event = subscriptionEvent();
+    event.data.object['items'] = { data: [{ price: { id: 'price_some_other_product' } }] };
+
+    const response = await postStripeWebhook(event);
+    expect(response.status).toBe(200);
+    expect(await entitlementStatus(userId)).toBeNull();
+
+    const row = await env.DB.prepare(
+      'SELECT status, failure_reason FROM webhook_events WHERE event_id = ?1',
+    )
+      .bind(event.id)
+      .first<{ status: string; failure_reason: string }>();
+    expect(row?.status).toBe('ignored');
+    expect(row?.failure_reason).toBe('price_not_in_plan');
+  });
+
+  it('acknowledges a repeated cancellation of a revoked entitlement instead of retrying for ever', async () => {
+    const userId = await seedStripeUser();
+    await seedRevokedEntitlement(userId);
+
+    // Revocation is terminal, so neither delivery can be applied. Both must be
+    // answered 200: a 5xx would have Stripe redeliver an event that can never
+    // succeed, for ever.
+    const first = subscriptionEvent({ type: 'customer.subscription.deleted' });
+    first.data.object['status'] = 'canceled';
+    expect((await postStripeWebhook(first)).status).toBe(200);
+
+    const second = subscriptionEvent({ type: 'customer.subscription.deleted' });
+    second.data.object['status'] = 'canceled';
+    expect((await postStripeWebhook(second)).status).toBe(200);
+
+    expect(await entitlementStatus(userId)).toBe('revoked');
+    const rows = await env.DB.prepare(
+      `SELECT COUNT(*) AS total FROM webhook_events
+        WHERE event_id IN (?1, ?2) AND status = 'ignored'`,
+    )
+      .bind(first.id, second.id)
+      .first<{ total: number }>();
+    expect(rows?.total).toBe(2);
   });
 });
 

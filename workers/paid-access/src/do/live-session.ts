@@ -11,7 +11,15 @@
  * Sessions are bounded: an alarm closes the session at `maxSessionSeconds`
  * regardless of client behaviour, so a forgotten tab cannot burn a month of
  * quota.
+ *
+ * Metering is settled here too, not by the client. Whatever ends the session —
+ * the duration alarm, an abrupt disconnect, an upstream failure — `settle()`
+ * finalises the quota reservation from the server's own measurement. The
+ * client-facing finalise route only reconciles the ledger afterwards, and can
+ * therefore be skipped entirely without any usage going unmetered.
  */
+
+import { QuotaSettlement } from '../quota.js';
 
 export interface LiveSessionInit {
   readonly userId: string;
@@ -27,9 +35,28 @@ interface SessionMetadata extends LiveSessionInit {
   readonly startedAtMs: number;
 }
 
+/**
+ * What is safe to write to durable storage.
+ *
+ * `upstreamProtocolHeader` carries the raw vendor API key. The upstream socket
+ * is opened once, inside the same request that receives it, so persisting the
+ * credential would buy nothing and leave a long-lived secret at rest in every
+ * live session's storage.
+ */
+type StoredSessionMetadata = Omit<SessionMetadata, 'upstreamProtocolHeader'>;
+
+/** The subset of bindings this Durable Object is allowed to reach. */
+export interface LiveSessionEnv {
+  readonly QUOTA: DurableObjectNamespace;
+}
+
 const METADATA_KEY = 'metadata';
 const SETTLED_KEY = 'settled';
+const OUTCOME_KEY = 'outcome';
+const RECONCILED_KEY = 'reconciled';
 const OUTCOME_PATH = '/outcome';
+/** POSTed by the finalise route to claim the outcome exactly once. */
+const RECONCILE_PATH = '/outcome/reconcile';
 
 export interface LiveSessionOutcome {
   readonly userId: string;
@@ -38,22 +65,38 @@ export interface LiveSessionOutcome {
   readonly closed: boolean;
 }
 
+/**
+ * Answer to a reconciliation claim.
+ *
+ * `alreadyReconciled` is what stops a replayed finalise call appending a second
+ * `usage_ledger` row: the first claim wins, every later one is told so.
+ */
+export interface LiveSessionReconciliation {
+  readonly outcome: LiveSessionOutcome | null;
+  readonly alreadyReconciled: boolean;
+}
+
 export class LiveSessionDurableObject implements DurableObject {
   private readonly state: DurableObjectState;
+  private readonly quota: QuotaSettlement;
   private client: WebSocket | null = null;
   private upstream: WebSocket | null = null;
   private metadata: SessionMetadata | null = null;
   private settled = false;
 
-  constructor(state: DurableObjectState) {
+  constructor(state: DurableObjectState, env: LiveSessionEnv) {
     this.state = state;
+    this.quota = new QuotaSettlement(env.QUOTA);
   }
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === OUTCOME_PATH) {
-      const stored = await this.state.storage.get<LiveSessionOutcome>('outcome');
+      const stored = await this.state.storage.get<LiveSessionOutcome>(OUTCOME_KEY);
       return Response.json(stored ?? null);
+    }
+    if (url.pathname === RECONCILE_PATH) {
+      return Response.json(await this.claimReconciliation());
     }
 
     if (request.headers.get('upgrade') !== 'websocket') {
@@ -63,7 +106,7 @@ export class LiveSessionDurableObject implements DurableObject {
     // One reservation, one socket. A second upgrade for the same Durable Object
     // would replace `this.client`/`this.upstream` and orphan the first relay,
     // which then never settles its share of the reservation.
-    if (this.client !== null || (await this.state.storage.get<SessionMetadata>(METADATA_KEY))) {
+    if (this.client !== null || (await this.state.storage.get<StoredSessionMetadata>(METADATA_KEY))) {
       return new Response('Live session is already in use', { status: 409 });
     }
 
@@ -76,7 +119,7 @@ export class LiveSessionDurableObject implements DurableObject {
       return new Response('Invalid session initialisation', { status: 400 });
     }
 
-    this.metadata = {
+    const metadata: SessionMetadata = {
       userId: init.userId,
       reservationId: init.reservationId,
       upstreamUrl: init.upstreamUrl,
@@ -86,11 +129,12 @@ export class LiveSessionDurableObject implements DurableObject {
       correlationId: init.correlationId ?? 'unknown',
       startedAtMs: Date.now(),
     };
-    await this.state.storage.put(METADATA_KEY, this.metadata);
+    this.metadata = metadata;
+    await this.persistMetadata(metadata);
 
     let upstreamResponse: Response;
     try {
-      upstreamResponse = await this.connectUpstream(this.metadata);
+      upstreamResponse = await this.connectUpstream(metadata);
     } catch {
       await this.settle(false);
       return new Response('Upstream provider is unavailable', { status: 502 });
@@ -114,9 +158,44 @@ export class LiveSessionDurableObject implements DurableObject {
     this.wireRelay(serverSide, upstream);
 
     // Hard ceiling on session duration, enforced server-side.
-    await this.state.storage.setAlarm(Date.now() + this.metadata.maxSessionSeconds * 1_000);
+    await this.state.storage.setAlarm(Date.now() + metadata.maxSessionSeconds * 1_000);
 
     return new Response(null, { status: 101, webSocket: clientSide });
+  }
+
+  /** Writes everything about the session except the vendor credential. */
+  private async persistMetadata(metadata: SessionMetadata): Promise<void> {
+    const stored: StoredSessionMetadata = {
+      userId: metadata.userId,
+      reservationId: metadata.reservationId,
+      upstreamUrl: metadata.upstreamUrl,
+      maxSessionSeconds: metadata.maxSessionSeconds,
+      connectTimeoutMs: metadata.connectTimeoutMs,
+      correlationId: metadata.correlationId,
+      startedAtMs: metadata.startedAtMs,
+    };
+    await this.state.storage.put(METADATA_KEY, stored);
+  }
+
+  /**
+   * Hands the settled outcome to the first caller that asks for it.
+   *
+   * Reconciliation appends a ledger row, so it must happen at most once. The
+   * marker is written before the outcome is returned, which is why a replayed
+   * finalise sees `alreadyReconciled` instead of a fresh outcome to bill again.
+   */
+  private async claimReconciliation(): Promise<LiveSessionReconciliation> {
+    return this.state.blockConcurrencyWhile(async () => {
+      const outcome = (await this.state.storage.get<LiveSessionOutcome>(OUTCOME_KEY)) ?? null;
+      if (outcome === null) {
+        return { outcome: null, alreadyReconciled: false };
+      }
+      if ((await this.state.storage.get<boolean>(RECONCILED_KEY)) === true) {
+        return { outcome, alreadyReconciled: true };
+      }
+      await this.state.storage.put(RECONCILED_KEY, true);
+      return { outcome, alreadyReconciled: false };
+    });
   }
 
   private async connectUpstream(metadata: SessionMetadata): Promise<Response> {
@@ -175,8 +254,15 @@ export class LiveSessionDurableObject implements DurableObject {
   }
 
   /**
-   * Records the measured session duration exactly once. The Worker reads this
-   * to finalise the quota reservation; `settled` makes a double close idempotent.
+   * Records the measured session duration and meters it, exactly once.
+   *
+   * Every way a session can end funnels through here — the duration alarm, a
+   * client that disappears, an upstream that drops — and each of them finalises
+   * the reservation. Metering therefore never depends on the client calling the
+   * finalise route; that route only reconciles the ledger afterwards.
+   *
+   * `settled` (in memory, plus a durable copy for a restarted object) makes a
+   * double close a no-op.
    */
   private async settle(closed: boolean): Promise<void> {
     if (this.settled) return;
@@ -190,7 +276,9 @@ export class LiveSessionDurableObject implements DurableObject {
     await this.state.storage.put(SETTLED_KEY, true);
 
     const metadata =
-      this.metadata ?? (await this.state.storage.get<SessionMetadata>(METADATA_KEY)) ?? null;
+      this.metadata ?? (await this.state.storage.get<StoredSessionMetadata>(METADATA_KEY)) ?? null;
+    // The credential only ever lived in memory; drop it as soon as the relay is over.
+    this.metadata = null;
     if (metadata === null) return;
 
     const elapsedSeconds = Math.max(0, Math.ceil((Date.now() - metadata.startedAtMs) / 1_000));
@@ -200,7 +288,21 @@ export class LiveSessionDurableObject implements DurableObject {
       elapsedSeconds: Math.min(elapsedSeconds, metadata.maxSessionSeconds),
       closed,
     };
-    await this.state.storage.put('outcome', outcome);
+    await this.state.storage.put(OUTCOME_KEY, outcome);
     await this.state.storage.deleteAlarm();
+
+    // Settle the reservation from the server's own measurement. A failure here
+    // must not stop the outcome being recorded — the quota lease expires into a
+    // commit anyway, so the usage is metered either way.
+    try {
+      await this.quota.finalise({
+        userId: outcome.userId,
+        reservationId: outcome.reservationId,
+        actualUnits: outcome.elapsedSeconds,
+        nowSeconds: Math.floor(Date.now() / 1_000),
+      });
+    } catch {
+      // Deliberately swallowed: see above.
+    }
   }
 }

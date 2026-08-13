@@ -78,6 +78,15 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
   /// Whether incremental live updates should pause until finalization.
   private var shouldPauseIncrementalUpdates: Bool = false
 
+  /// Supplies the field the ranged streaming path reads and writes. Left `nil`
+  /// in production, where the focused accessibility element is used; tests
+  /// substitute an in-memory field to exercise the streaming orchestration.
+  var streamingFieldProvider: (() -> StreamingTextField?)?
+
+  /// How long to wait for the target app to apply the first streamed write
+  /// before reading it back. Shortened by tests, which have no real app to wait for.
+  var streamingVerificationDelay: TimeInterval = 0.05
+
   var shouldUseLiveFinalization: Bool {
     isActive && !usingClipboardFallback
   }
@@ -425,7 +434,7 @@ extension LiveTextInserter {
   /// the stable prefix is left untouched and only the differing tail is
   /// replaced through `kAXSelectedTextRange` + `kAXSelectedText`.
   fileprivate func streamingUpdate(with newText: String) {
-    guard let element = getFocusedTextElement() else {
+    guard let field = streamingField() else {
       abandonStreaming(
         reason: "no focused element",
         error: TextOutputError.unableToFindFocusedElement
@@ -436,17 +445,17 @@ extension LiveTextInserter {
     if self.streamingAnchorUTF16 == nil {
       // First insert: anchor the streamed region at the current caret, keeping
       // any selection so the first replacement consumes it.
-      guard let selection = selectedTextRange(of: element) else {
+      guard let selection = field.readSelectedRange() else {
         abandonStreaming(reason: "cannot read caret position", error: nil)
         return
       }
       self.streamingAnchorUTF16 = selection.location
       self.streamingPendingSelectionUTF16 = max(0, selection.length)
-      self.streamingBaselineFieldText = Self.fieldText(of: element)
+      self.streamingBaselineFieldText = field.readValue()
     } else if !insertedText.isEmpty {
       // Re-validate the region before every patch: another edit may have moved
       // or removed the streamed text since the last update.
-      switch inspectStreamingRegion(on: element) {
+      switch inspectStreamingRegion(on: field) {
       case .matched:
         break
       case .absent:
@@ -464,12 +473,12 @@ extension LiveTextInserter {
 
     let diff = StreamingTextReconciler.diff(from: insertedText, to: newText)
     guard !diff.isNoOp else { return }
-    guard applyStreamingDiff(diff, on: element) else { return }
+    guard applyStreamingDiff(diff, on: field) else { return }
     insertedText = newText
     confirmedCharCount = newText.count
 
     if !firstInsertionVerified {
-      verifyFirstStreamingInsertion(on: element)
+      verifyFirstStreamingInsertion(on: field)
     }
   }
 
@@ -483,7 +492,7 @@ extension LiveTextInserter {
       return .deferred
     }
 
-    guard let element = getFocusedTextElement() else {
+    guard let field = streamingField() else {
       print("[LiveTextInserter] Streaming finalize: focused element lost, keeping streamed text")
       lastError = TextOutputError.unableToFindFocusedElement
       return .applied
@@ -491,7 +500,7 @@ extension LiveTextInserter {
 
     // Only report success for text that is verifiably still where this session
     // put it, and only patch a region we can still locate.
-    switch inspectStreamingRegion(on: element) {
+    switch inspectStreamingRegion(on: field) {
     case .matched:
       break
     case .absent:
@@ -504,10 +513,12 @@ extension LiveTextInserter {
       return .deferred
     case .unknown:
       // Cannot prove where the text is: keep the streamed transcript rather than
-      // risk overwriting unrelated content or duplicating the delivery.
+      // risk overwriting unrelated content or duplicating the delivery. The final
+      // polished text demonstrably did not land, so this is reported as a failure
+      // rather than a delivery the caller would announce as successful.
       lastError = TextOutputError.unableToVerifyInsertion
       print("[LiveTextInserter] Streaming finalize: region unverified, keeping streamed text")
-      return .applied
+      return .failed(TextOutputError.unableToVerifyInsertion)
     }
 
     let diff = StreamingTextReconciler.diff(from: insertedText, to: finalText)
@@ -515,7 +526,7 @@ extension LiveTextInserter {
       return .applied
     }
 
-    if applyStreamingDiff(diff, on: element) {
+    if applyStreamingDiff(diff, on: field) {
       insertedText = finalText
       confirmedCharCount = finalText.count
       return .applied
@@ -532,23 +543,17 @@ extension LiveTextInserter {
 
   /// Selects `diff`'s range (offset by the region anchor) and replaces it.
   /// Returns false after routing any failure through `abandonStreaming`.
-  private func applyStreamingDiff(_ diff: StreamingTextDiff, on element: AXUIElement) -> Bool {
+  private func applyStreamingDiff(_ diff: StreamingTextDiff, on field: StreamingTextField) -> Bool {
     guard let anchor = self.streamingAnchorUTF16 else {
       abandonStreaming(reason: "streaming anchor missing", error: nil)
       return false
     }
 
-    var range = CFRange(
+    let range = CFRange(
       location: anchor + diff.replaceLocationUTF16,
       length: diff.replaceLengthUTF16 + self.streamingPendingSelectionUTF16
     )
-    guard let rangeValue = AXValueCreate(.cfRange, &range) else {
-      abandonStreaming(reason: "could not build AX range value", error: nil)
-      return false
-    }
-    let rangeStatus = AXUIElementSetAttributeValue(
-      element, kAXSelectedTextRangeAttribute as CFString, rangeValue
-    )
+    let rangeStatus = field.setSelectedRange(range)
     guard rangeStatus == .success else {
       abandonStreaming(
         reason: "selecting replacement range failed (AXError \(rangeStatus.rawValue))",
@@ -557,10 +562,12 @@ extension LiveTextInserter {
       return false
     }
 
-    let insertStatus = AXUIElementSetAttributeValue(
-      element, kAXSelectedTextAttribute as CFString, diff.replacement as CFTypeRef
-    )
+    let insertStatus = field.setSelectedText(diff.replacement)
     guard insertStatus == .success else {
+      // The selection landed but the replacement did not: leaving the user's
+      // text highlighted would make their next keystroke delete it, so collapse
+      // back to a caret at the region start before giving up.
+      _ = field.setSelectedRange(CFRange(location: range.location, length: 0))
       abandonStreaming(
         reason: "replacing selected text failed (AXError \(insertStatus.rawValue))",
         error: TextOutputError.unableToSetValue(insertStatus)
@@ -579,13 +586,13 @@ extension LiveTextInserter {
   /// session either falls back safely (nothing landed) or pauses incremental
   /// updates, so a misbehaving AX implementation can never garble or duplicate
   /// text.
-  private func verifyFirstStreamingInsertion(on element: AXUIElement) {
+  private func verifyFirstStreamingInsertion(on field: StreamingTextField) {
     guard self.streamingAnchorUTF16 != nil else { return }
     // Give the target app a brief moment to apply the change (same rationale
     // as verifyInsertion above).
-    Thread.sleep(forTimeInterval: 0.05)
+    Thread.sleep(forTimeInterval: self.streamingVerificationDelay)
 
-    switch inspectStreamingRegion(on: element) {
+    switch inspectStreamingRegion(on: field) {
     case .matched:
       firstInsertionVerified = true
       print("[LiveTextInserter] First streaming insertion verified")
@@ -615,9 +622,9 @@ extension LiveTextInserter {
   /// wrote, re-anchoring when the app moved the text. `.absent` is proof that
   /// nothing from this session is on screen, so a single standard delivery is
   /// safe; `.unknown` means no write may be attempted.
-  private func inspectStreamingRegion(on element: AXUIElement) -> StreamingRegionState {
+  private func inspectStreamingRegion(on field: StreamingTextField) -> StreamingRegionState {
     guard let anchor = self.streamingAnchorUTF16 else { return .unknown }
-    guard let fieldText = Self.fieldText(of: element) else { return .unknown }
+    guard let fieldText = field.readValue() else { return .unknown }
 
     let state = Self.resolveStreamingRegion(
       fieldText: fieldText,
@@ -662,7 +669,7 @@ extension LiveTextInserter {
     // confused with content that was already in the field.
     let offsets = self.utf16Offsets(of: expected, in: fieldText, limit: 2)
     if offsets.count == 1, let offset = offsets.first {
-      if let baseline = baselineFieldText, baseline.range(of: expected) != nil {
+      if let baseline = baselineFieldText, baseline.range(of: expected, options: .literal) != nil {
         return .unknown
       }
       return .matched(anchor: offset)
@@ -700,28 +707,14 @@ extension LiveTextInserter {
     }
   }
 
-  private func selectedTextRange(of element: AXUIElement) -> CFRange? {
-    var value: CFTypeRef?
-    let status = AXUIElementCopyAttributeValue(
-      element, kAXSelectedTextRangeAttribute as CFString, &value
-    )
-    guard status == .success, let value, CFGetTypeID(value) == AXValueGetTypeID() else {
-      return nil
+  /// The field the streaming path reads and writes: the focused accessibility
+  /// element in production, or an injected stand-in under test.
+  private func streamingField() -> StreamingTextField? {
+    if let provider = streamingFieldProvider {
+      return provider()
     }
-    let axValue = unsafeBitCast(value, to: AXValue.self)
-    var range = CFRange()
-    guard AXValueGetValue(axValue, .cfRange, &range) else { return nil }
-    return range
-  }
-
-  /// Reads the whole value of a text element, or `nil` when it cannot be read.
-  private static func fieldText(of element: AXUIElement) -> String? {
-    var currentValue: CFTypeRef?
-    let getStatus = AXUIElementCopyAttributeValue(
-      element, kAXValueAttribute as CFString, &currentValue
-    )
-    guard getStatus == .success, let text = currentValue as? String else { return nil }
-    return text
+    guard let element = getFocusedTextElement() else { return nil }
+    return AccessibilityStreamingTextField(element: element)
   }
 
   /// UTF-16 based substring with bounds checks; `nil` when the range is out of
@@ -742,8 +735,15 @@ extension LiveTextInserter {
     guard !needle.isEmpty, limit > 0 else { return [] }
     var offsets: [Int] = []
     var searchStart = haystack.startIndex
+    // `.literal` matches exact scalar sequences, the same rule
+    // `StreamingTextReconciler.diff` uses to compute replacement offsets. Without
+    // it a canonically equivalent match (decomposed vs precomposed accents) would
+    // re-anchor the region onto text of a different UTF-16 length and desynchronise
+    // every later patch.
     while offsets.count < limit, searchStart < haystack.endIndex,
-          let found = haystack.range(of: needle, range: searchStart..<haystack.endIndex) {
+          let found = haystack.range(
+            of: needle, options: .literal, range: searchStart..<haystack.endIndex
+          ) {
       offsets.append(found.lowerBound.utf16Offset(in: haystack))
       searchStart = haystack.index(after: found.lowerBound)
     }

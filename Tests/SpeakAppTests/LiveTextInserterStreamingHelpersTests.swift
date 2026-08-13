@@ -134,6 +134,29 @@ final class LiveTextInserterStreamingHelpersTests: XCTestCase {
     }
 
     @MainActor
+    func testResolveRegion_DoesNotReAnchorOntoCanonicallyEquivalentText() {
+        // "cafe" + combining acute and precomposed "café" render identically but
+        // occupy 5 and 4 UTF-16 code units. Matching them would re-anchor the
+        // region onto a shorter run and desynchronise every later replacement
+        // offset, so anchor search uses exact-scalar (.literal) semantics — the
+        // same rule StreamingTextReconciler.diff applies.
+        let decomposed = "cafe\u{0301}"
+        let precomposed = "caf\u{00E9}"
+        XCTAssertEqual(
+            LiveTextInserter.resolveStreamingRegion(
+                fieldText: "xx \(precomposed)",
+                expected: decomposed,
+                anchor: 0,
+                baselineFieldText: ""
+            ),
+            .unknown
+        )
+        XCTAssertTrue(
+            LiveTextInserter.utf16Offsets(of: decomposed, in: "xx \(precomposed)", limit: 2).isEmpty
+        )
+    }
+
+    @MainActor
     func testResolveRegion_AmbiguousOccurrencesAreUnknown() {
         let state = LiveTextInserter.resolveStreamingRegion(
             fieldText: "ab ab",

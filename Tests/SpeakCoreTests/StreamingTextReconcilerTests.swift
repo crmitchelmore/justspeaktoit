@@ -105,16 +105,23 @@ final class StreamingTextReconcilerTests: XCTestCase {
         XCTAssertEqual(diff.replacement, flag)
     }
 
-    func testDiff_CombiningMarksStayWithBaseCharacter() {
-        // "e" + combining acute vs precomposed "é" are canonically equal
-        // characters but different scalar sequences; Character comparison
-        // treats them as equal, so the prefix may include either form.
+    func testDiff_RewritesDecomposedClusterWhenTargetIsPrecomposed() {
+        // "e" + combining acute and precomposed "é" are canonically equal but
+        // hold different scalars, and 2 versus 1 UTF-16 code units. Clusters are
+        // compared by exact scalars, so the differing form is rewritten rather
+        // than kept as stable prefix — keeping it would leave every later
+        // replacement offset one code unit adrift from the target field.
         let decomposed = "cafe\u{0301}"
         let precomposed = "caf\u{00E9}"
         let diff = StreamingTextReconciler.diff(from: decomposed, to: precomposed + " bar")
+        XCTAssertEqual(diff.replaceLocationUTF16, 3)
+        XCTAssertEqual(diff.replaceLengthUTF16, 2, "the decomposed cluster is replaced whole")
+        XCTAssertEqual(diff.replacement, "\u{00E9} bar")
+        // Compared by scalars: String equality is canonical, so it would accept
+        // the decomposed form the diff is specifically meant to rewrite.
         XCTAssertEqual(
-            StreamingTextReconciler.apply(diff, to: decomposed).map { $0 + "" }?.hasSuffix(" bar"),
-            true
+            StreamingTextReconciler.apply(diff, to: decomposed).map { Array($0.unicodeScalars) },
+            Array((precomposed + " bar").unicodeScalars)
         )
     }
 

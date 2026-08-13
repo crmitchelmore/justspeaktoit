@@ -2,9 +2,8 @@ import Foundation
 
 // MARK: - Watch Recording Lifecycle
 //
-// Decides what happens to the audio captured so far when a watch recording
-// ends — whether the user tapped stop, or watchOS took the app's extra
-// runtime away mid-capture.
+// Persists enough state to recover a recording after process termination and
+// decides what happens to the audio captured so far when recording ends.
 //
 // Pure Foundation, no AVFoundation: the watch app target compiles this file by
 // direct source reference (like `WatchCaptureProtocol.swift`) and the rules are
@@ -14,6 +13,64 @@ import Foundation
 // thrown away. Anything long enough to be worth transcribing goes into the
 // same `recorded → transferring → delivered` queue as a normal capture, so a
 // wrist-down recording cut short still reaches iPhone history.
+
+/// Durable identity for a recording that has started but has not yet reached
+/// the transfer queue.
+public struct WatchActiveCapture: Codable, Equatable, Sendable {
+    public let id: UUID
+    public let fileURL: URL
+    public let startedAt: Date
+
+    public init(id: UUID, fileURL: URL, startedAt: Date) {
+        self.id = id
+        self.fileURL = fileURL
+        self.startedAt = startedAt
+    }
+}
+
+/// File-backed active-capture marker. A new instance reading the same URL
+/// models app relaunch, so recovery behaviour can be tested without watchOS.
+public struct WatchActiveCaptureRegistry: Sendable {
+    private let fileURL: URL
+
+    public init(fileURL: URL) {
+        self.fileURL = fileURL
+    }
+
+    public func persist(_ capture: WatchActiveCapture) throws {
+        try FileManager.default.createDirectory(
+            at: fileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(capture).write(to: fileURL, options: .atomic)
+    }
+
+    public func load() -> WatchActiveCapture? {
+        guard let data = try? Data(contentsOf: fileURL) else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try? decoder.decode(WatchActiveCapture.self, from: data)
+    }
+
+    public func clear(matching id: UUID) throws {
+        guard let capture = load(), capture.id == id else { return }
+        try FileManager.default.removeItem(at: fileURL)
+    }
+
+    /// Runs the durable queue write first and consumes the marker only when it
+    /// succeeds. A failed write deliberately leaves recovery state intact.
+    @discardableResult
+    public func clearAfterSuccessfulEnqueue(
+        matching id: UUID,
+        enqueue: () -> Bool
+    ) throws -> Bool {
+        guard enqueue() else { return false }
+        try clear(matching: id)
+        return true
+    }
+}
 
 /// Why an in-progress watch recording stopped.
 public enum WatchRecordingEndReason: Equatable, Sendable {
@@ -26,8 +83,22 @@ public enum WatchRecordingEndReason: Equatable, Sendable {
     /// On watchOS a background audio session cannot be reactivated after an
     /// interruption, so this always ends the capture.
     case interrupted
-    /// The encoder failed, so the bytes already on disk cannot be trusted.
+    /// The encoder reported a failure. The prefix already written may still be
+    /// playable, so finalisation validates the asset before discarding it.
     case encodingFailed(reason: String?)
+}
+
+/// Result of inspecting the audio asset after the recorder has stopped.
+public struct WatchAudioInspection: Equatable, Sendable {
+    public let isPlayable: Bool
+    public let duration: TimeInterval
+
+    public init(isPlayable: Bool, duration: TimeInterval) {
+        self.isPlayable = isPlayable
+        self.duration = duration
+    }
+
+    public static let unplayable = WatchAudioInspection(isPlayable: false, duration: 0)
 }
 
 /// What to do with the audio captured up to the stop.
@@ -51,6 +122,43 @@ public struct WatchRecordingOutcome: Equatable, Sendable {
     }
 }
 
+/// One stopped capture after combining the recorder's live duration with the
+/// duration recovered from the finished asset.
+public struct WatchRecordingFinalisation: Equatable, Sendable {
+    public let capture: WatchActiveCapture
+    public let duration: TimeInterval
+    public let outcome: WatchRecordingOutcome
+
+    public init(capture: WatchActiveCapture, duration: TimeInterval, outcome: WatchRecordingOutcome) {
+        self.capture = capture
+        self.duration = duration
+        self.outcome = outcome
+    }
+}
+
+/// Production finalisation boundary shared by normal stops, runtime loss,
+/// interruptions, encoder errors and relaunch recovery.
+public enum WatchRecordingFinaliser {
+    public static func finalise(
+        capture: WatchActiveCapture,
+        reason: WatchRecordingEndReason,
+        recorderDuration: TimeInterval,
+        inspection: WatchAudioInspection
+    ) -> WatchRecordingFinalisation {
+        // `AVAudioRecorder.currentTime` becomes zero after a system-driven
+        // stop. Prefer the finished asset's duration whenever it is valid.
+        let inspectedDuration = inspection.duration.isFinite ? max(0, inspection.duration) : 0
+        let liveDuration = recorderDuration.isFinite ? max(0, recorderDuration) : 0
+        let duration = max(inspectedDuration, liveDuration)
+        let outcome = WatchRecordingEndPolicy.outcome(
+            for: reason,
+            duration: duration,
+            hasPlayableAudio: inspection.isPlayable
+        )
+        return WatchRecordingFinalisation(capture: capture, duration: duration, outcome: outcome)
+    }
+}
+
 /// Maps "the recording ended, for this reason, with this much audio" onto a
 /// keep-or-drop decision.
 public enum WatchRecordingEndPolicy {
@@ -61,18 +169,9 @@ public enum WatchRecordingEndPolicy {
     public static func outcome(
         for reason: WatchRecordingEndReason,
         duration: TimeInterval,
-        hasAudioFile: Bool
+        hasPlayableAudio: Bool
     ) -> WatchRecordingOutcome {
-        // A failed encoder can leave a file behind, but its contents are
-        // unusable however long the recording ran.
-        if case let .encodingFailed(detail) = reason {
-            return WatchRecordingOutcome(
-                disposition: .discard,
-                message: detail ?? "Recording failed while saving audio."
-            )
-        }
-
-        let captured = hasAudioFile && duration >= minimumUsableDuration
+        let captured = hasPlayableAudio && duration >= minimumUsableDuration
         return WatchRecordingOutcome(
             disposition: captured ? .enqueue : .discard,
             message: message(for: reason, captured: captured)
@@ -94,8 +193,12 @@ public enum WatchRecordingEndPolicy {
             return captured
                 ? "Recording was interrupted. Sending what was captured."
                 : "Recording was interrupted before any audio was captured."
-        case .encodingFailed:
-            return nil // Handled above.
+        case .encodingFailed(let detail):
+            if captured {
+                return detail.map { "\($0) Sending what was captured." }
+                    ?? "Recording ended while saving. Sending what was captured."
+            }
+            return detail ?? "Recording failed while saving audio."
         }
     }
 }

@@ -52,7 +52,9 @@ final class WatchRecordingRuntime {
     /// background.
     func begin() throws {
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .default)
+        // This app only records on watch; `.record` truthfully describes the
+        // active hardware behaviour and still participates in background audio.
+        try session.setCategory(.record, mode: .default)
         try session.setActive(true)
         observeRuntimeLoss()
     }

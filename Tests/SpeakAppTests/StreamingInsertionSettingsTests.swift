@@ -48,11 +48,7 @@ final class StreamingInsertionSettingsTests: XCTestCase {
     func testAllowlist_AcceptsKnownGoodTargets() {
         for bundleID in [
             "com.apple.TextEdit",
-            "com.apple.Notes",
-            "com.tinyspeck.slackmacgap",
-            "com.microsoft.VSCode",
-            "com.apple.Safari",
-            "com.google.Chrome"
+            "com.apple.Notes"
         ] {
             XCTAssertTrue(
                 StreamingInsertionAllowlist.allows(self.makeTarget(bundleIdentifier: bundleID)),
@@ -70,5 +66,22 @@ final class StreamingInsertionSettingsTests: XCTestCase {
         XCTAssertFalse(
             StreamingInsertionAllowlist.allows(self.makeTarget(bundleIdentifier: "org.mozilla.firefox"))
         )
+    }
+
+    /// Web areas and custom text views often refuse to report `kAXValue`, which
+    /// leaves the streamed region unverifiable after the first partial. They stay
+    /// off the allowlist until verification no longer depends on reading the value.
+    func testAllowlist_RejectsAppsWithUnreliableValueReadback() {
+        for bundleID in [
+            "com.tinyspeck.slackmacgap",
+            "com.microsoft.VSCode",
+            "com.apple.Safari",
+            "com.google.Chrome"
+        ] {
+            XCTAssertFalse(
+                StreamingInsertionAllowlist.allows(self.makeTarget(bundleIdentifier: bundleID)),
+                "expected allowlist to reject \(bundleID)"
+            )
+        }
     }
 }

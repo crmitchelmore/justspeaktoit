@@ -128,8 +128,8 @@ extension SettingsView {
               tint: .brandLagoon
             )
             .speakTooltip(
-              "Type words into supported apps (TextEdit, Notes, Slack, VS Code, Safari, Chrome) as you "
-                + "speak, correcting them live. Other apps keep the normal paste-at-end behaviour."
+              "Type words into supported apps (TextEdit, Notes) as you speak, correcting them live. "
+                + "Other apps keep the normal paste-at-end behaviour."
             )
           }
           VStack(alignment: .leading, spacing: 8) {

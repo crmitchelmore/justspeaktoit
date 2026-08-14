@@ -218,6 +218,13 @@ final class KeyboardViewModel: ObservableObject {
             // the bounded replacement region unprovable and pauses the run.
             if machine.isCapturing,
                changedDocument || documentSession?.anchorIsCurrent() != true {
+                // A new field means the proxy now reads a document this session
+                // never wrote to. Drop the anchor first, so the `.targetChanged`
+                // failure path cannot delete separator whitespace from the new
+                // field on an exact scalar collision between the two contexts.
+                if changedDocument {
+                    documentSession?.invalidate()
+                }
                 dispatch(.targetChanged)
             }
         case .handoff:

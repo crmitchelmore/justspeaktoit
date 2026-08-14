@@ -413,7 +413,27 @@ final class KeyboardViewModelTests: XCTestCase {
         XCTAssertEqual(document.before, "Host  ")
     }
 
+    func testFieldChange_neverRemovesSeparatorWhitespaceFromTheNewField() throws {
+        let engine = FakeEngine()
+        // The new field reports a context identical to the old one, the only
+        // case where the ownership guards alone could not tell them apart.
+        let document = DocumentProxy(before: "Host")
+        let model = makeModel(engine: engine)
+        activate(model, document: document)
+        model.micTapped()
+        let runID = try XCTUnwrap(engine.startedRunIDs.last)
+        engine.emit(.captureStarted, for: runID)
+        engine.emit(.hypothesis(" "), for: runID)
+        let textAtFieldChange = document.text
+
+        model.updateDocumentContext(documentIdentifier: Self.otherDocumentID, selectionChanged: false)
+
+        XCTAssertEqual(document.text, textAtFieldChange)
+        XCTAssertEqual(model.directState, .failed(.targetChanged))
+    }
+
     private static let documentID = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
+    private static let otherDocumentID = UUID(uuidString: "BBBBBBBB-CCCC-DDDD-EEEE-FFFFFFFFFFFF")!
     private static let availableCapabilities = KeyboardViewModel.DirectCaptureCapabilities(
         microphonePermission: .granted,
         speechRecognitionPermission: .granted,

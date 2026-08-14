@@ -584,6 +584,10 @@ final class SonioxLiveTranscriber: @unchecked Sendable {
     private static let websocketHost = "stt-rt.soniox.com"
     private static let websocketPath = "/transcribe-websocket"
 
+    /// Upper bound on how long a close waits for queued frames to reach the
+    /// transport; a wedged send must never leave the socket open forever.
+    private static let stopFlushBudget: DispatchTimeInterval = .milliseconds(750)
+
     /// Preferred PCM chunk size: 100 ms at 16 kHz PCM16 mono.
     static let preferredChunkBytes = 3_200
     static let minimumChunkBytes = 1_600
@@ -673,6 +677,14 @@ final class SonioxLiveTranscriber: @unchecked Sendable {
         transmit(.string(#"{"type":"finalize"}"#), on: task)
     }
 
+    /// Closes the session, but never before the frames already handed to the
+    /// transport have left it.
+    ///
+    /// `cancel(with:reason:)` fails whatever URLSession has not yet written, so
+    /// cancelling here would discard the `finalize` and end-of-stream frames the
+    /// controller sends immediately before calling this — and with them the
+    /// trailing final tokens. The close therefore waits (bounded, off the
+    /// caller's thread) for `pendingSendGroup` to drain first.
     func stop() {
         let task = withStateLock { () -> URLSessionWebSocketTask? in
             guard !isStopping else { return nil }
@@ -683,12 +695,6 @@ final class SonioxLiveTranscriber: @unchecked Sendable {
             preroll.reset()
             return
         }
-        if task.state == .running {
-            task.cancel(with: .normalClosure, reason: nil)
-        }
-        withStateLock {
-            if webSocketTask === task { webSocketTask = nil }
-        }
         let unsentPreroll = preroll.snapshot
         if unsentPreroll.byteCount > 0 {
             logger.warning(
@@ -696,7 +702,30 @@ final class SonioxLiveTranscriber: @unchecked Sendable {
             )
         }
         preroll.reset()
-        logger.info("Soniox WebSocket connection closed")
+        closeAfterPendingSends(task)
+    }
+
+    private func closeAfterPendingSends(_ task: URLSessionWebSocketTask) {
+        let sendGroup = pendingSendGroup
+        let logger = self.logger
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            if sendGroup.wait(timeout: .now() + Self.stopFlushBudget) == .timedOut {
+                logger.warning("Soniox: closing with sends still in flight after the stop flush budget")
+            }
+            if task.state == .running {
+                task.cancel(with: .normalClosure, reason: nil)
+            }
+            self?.clearWebSocketTask(task)
+            logger.info("Soniox WebSocket connection closed")
+        }
+    }
+
+    /// Only the task this stop owns may be cleared: a newer session may already
+    /// have published its own socket.
+    private func clearWebSocketTask(_ task: URLSessionWebSocketTask) {
+        withStateLock {
+            if webSocketTask === task { webSocketTask = nil }
+        }
     }
 
     func waitForPendingSends(timeout: TimeInterval = 1.5) async {

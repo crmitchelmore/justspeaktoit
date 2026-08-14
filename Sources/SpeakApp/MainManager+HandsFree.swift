@@ -72,6 +72,7 @@ extension MainManager {
   }
 
   private func presentHandsFreeState(_ state: HandsFreeDictationMachine.State) {
+    setHandsFreeState(state)
     switch state {
     case .arming:
       guard activeSession == nil else { return }

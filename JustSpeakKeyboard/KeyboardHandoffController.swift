@@ -75,7 +75,7 @@ final class KeyboardHandoffController: ObservableObject {
         refreshInstantSession()
         refresh()
         startPolling()
-        if autoStartWhenReady, requestID == nil, isInstantReady, presentation != .inserted {
+        if autoStartWhenReady, requestID == nil, isInstantReady {
             start()
         } else if requestID == nil, !isInstantReady {
             presentation = .waitingForApp

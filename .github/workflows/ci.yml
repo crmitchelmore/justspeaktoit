@@ -106,9 +106,8 @@ jobs:
           echo "SIMULATOR_ID=$SIMULATOR_ID" >> "$GITHUB_ENV"
 
       - name: Generate iOS App Project
-        # Internal CI builds include the flagged-off keyboard extension so it
-        # keeps compiling and its flag-gated tests run. Release and TestFlight
-        # builds stay gated behind the manual `include_keyboard` input.
+        # CI includes the keyboard in its shipping handoff-only shape so the
+        # extension and its flow tests compile without enabling direct capture.
         env:
           TUIST_IOS_KEYBOARD: "1"
         run: tuist generate --no-open

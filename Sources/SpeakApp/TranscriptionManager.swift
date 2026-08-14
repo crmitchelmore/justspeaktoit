@@ -169,6 +169,13 @@ final class TranscriptionManager: ObservableObject {
   }
 
   func startLiveTranscription() async throws {
+    try await startLiveTranscription(preRollBuffers: [], analyzerFallbackAllowed: true)
+  }
+
+  func startLiveTranscription(
+    preRollBuffers: [AVAudioPCMBuffer],
+    analyzerFallbackAllowed: Bool = true
+  ) async throws {
     guard !isLiveTranscribing else { throw TranscriptionManagerError.liveSessionAlreadyRunning }
     let model = try liveTranscriptionModelForCurrentMode()
     let language = appSettings.preferredModelLanguage
@@ -181,7 +188,10 @@ final class TranscriptionManager: ObservableObject {
       model: model
     )
     do {
-      try await liveController.start()
+      try await liveController.start(
+        preRollBuffers: preRollBuffers,
+        analyzerFallbackAllowed: analyzerFallbackAllowed
+      )
     } catch {
       endLiveTranscriptDisplaySession()
       throw error

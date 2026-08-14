@@ -308,9 +308,11 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     case ttsPronunciationDictionary
     case historyFlushInterval
     case silenceDetectionEnabled
+    case handsFreeDictationEnabled
     case silenceThreshold
     case silenceDuration
     case connectionPreWarmingEnabled
+    case audioPreWarmingEnabled
     case postProcessingStreamingEnabled
     case hudSizePreference
     case showLiveTranscriptInHUD
@@ -687,6 +689,29 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     didSet { store(silenceDetectionEnabled, key: .silenceDetectionEnabled) }
   }
 
+  /// Hands-free dictation: the hotkey arms a listening session instead of
+  /// starting capture, and speech starts/stops recording. Off by default, and
+  /// inert below macOS 26 where `SpeechDetector` does not exist.
+  @Published var handsFreeDictationEnabled: Bool {
+    didSet { store(handsFreeDictationEnabled, key: .handsFreeDictationEnabled) }
+  }
+
+  /// Whether hands-free dictation can actually run on this machine.
+  var handsFreeDictationSupported: Bool {
+    AppleLocalModels.supportsSpeechDetector
+  }
+
+  /// The setting only takes effect where the detector exists, so an enabled
+  /// setting carried over from a newer OS cannot change behaviour on an older one.
+  var handsFreeDictationActive: Bool {
+    handsFreeDictationEnabled
+      && handsFreeDictationSupported
+      && HandsFreeDictationPolicy.supportsCapture(
+        modelID: liveTranscriptionModel,
+        isStreaming: transcriptionMode == .liveNative
+      )
+  }
+
   /// Silence threshold (0.0 to 1.0) - audio levels below this are considered silence
   @Published var silenceThreshold: Float {
     didSet { store(Double(silenceThreshold), key: .silenceThreshold) }
@@ -698,8 +723,19 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   }
 
   // Performance Settings
+
+  /// Pre-warms OpenRouter plus supported shared-session transcription endpoints
+  /// while idle. No credential is sent and no provider session is opened.
   @Published var connectionPreWarmingEnabled: Bool {
     didSet { store(connectionPreWarmingEnabled, key: .connectionPreWarmingEnabled) }
+  }
+
+  /// Creates and prepares the audio recorder while the app is idle so the
+  /// hotkey→capture path only has to start it (issue #663). Pre-warming never
+  /// opens the microphone; capture still begins at session start. Costs one
+  /// prepared encoder and one empty file while idle, so it is on by default.
+  @Published var audioPreWarmingEnabled: Bool {
+    didSet { store(audioPreWarmingEnabled, key: .audioPreWarmingEnabled) }
   }
 
   @Published var postProcessingStreamingEnabled: Bool {
@@ -1033,6 +1069,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     }
     connectionPreWarmingEnabled =
       defaults.object(forKey: DefaultsKey.connectionPreWarmingEnabled.rawValue) as? Bool ?? true
+    audioPreWarmingEnabled =
+      defaults.object(forKey: DefaultsKey.audioPreWarmingEnabled.rawValue) as? Bool ?? true
     postProcessingStreamingEnabled =
       defaults.object(forKey: DefaultsKey.postProcessingStreamingEnabled.rawValue) as? Bool ?? true
 
@@ -1078,6 +1116,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     // Silence Detection Settings
     silenceDetectionEnabled =
       defaults.object(forKey: DefaultsKey.silenceDetectionEnabled.rawValue) as? Bool ?? false
+    handsFreeDictationEnabled =
+      defaults.object(forKey: DefaultsKey.handsFreeDictationEnabled.rawValue) as? Bool ?? false
     silenceThreshold =
       Float(defaults.object(forKey: DefaultsKey.silenceThreshold.rawValue) as? Double ?? 0.05)
     silenceDuration =

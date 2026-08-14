@@ -9,6 +9,9 @@ final class HUDManager: ObservableObject {
   struct Snapshot: Equatable {
     enum Phase: Equatable {
       case hidden
+      /// Hands-free dictation is armed: the detector is listening, but nothing
+      /// is being captured until the user speaks.
+      case armed
       case recording
       case transcribing
       case postProcessing
@@ -82,6 +85,8 @@ final class HUDManager: ObservableObject {
   ) -> String? {
     let detail = subheadline.map { ". \($0)" } ?? ""
     switch phase {
+    case .armed:
+      return "Hands-free dictation armed\(detail)"
     case .recording:
       return "Recording started\(detail)"
     case .transcribing:
@@ -115,6 +120,17 @@ final class HUDManager: ObservableObject {
     }
     let subheadline = profileName.map { "Profile: \($0)" } ?? "Capturing audio"
     transition(.recording, headline: "Recording", subheadline: subheadline)
+  }
+
+  /// Shows the armed indicator for hands-free dictation. The HUD stays up
+  /// between utterances so "armed but silent" is never mistaken for "off".
+  func beginArmed(subheadline: String = "Hands-free dictation is armed") {
+    transition(
+      .armed,
+      headline: "Listening for speech",
+      subheadline: subheadline,
+      showsTimer: false
+    )
   }
 
   /// Update the current audio level during recording (0.0 to 1.0)

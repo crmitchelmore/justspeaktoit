@@ -279,7 +279,7 @@ public enum AppleSpeechAnalyzerTranscriber {
         }
     }
 
-    private static func ensureAssets(for modules: [any SpeechModule]) async throws {
+    static func ensureAssets(for modules: [any SpeechModule]) async throws {
         switch await AssetInventory.status(forModules: modules) {
         case .installed:
             return

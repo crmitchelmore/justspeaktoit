@@ -1,12 +1,15 @@
 import SpeakCore
 import Foundation
 
-enum SessionTriggerSource {
+enum SessionTriggerSource: Equatable {
   case hold
   case doubleTap
   case singleTap
   case uiButton
   case silenceDetection
+  /// Started or stopped by hands-free dictation's voice-activity detector.
+  case handsFree
+  /// Started or stopped by Shortcuts / App Intents.
   case automation
 
   var historyGesture: HistoryTrigger.HotKeyGesture {
@@ -19,11 +22,37 @@ enum SessionTriggerSource {
       return .singleTap
     case .uiButton:
       return .uiButton
-    case .silenceDetection:
+    case .silenceDetection, .handsFree:
       return .uiButton  // Treat as UI-initiated for history purposes
     case .automation:
       return .uiButton  // Shortcuts / App Intents; recorded like a UI trigger
     }
+  }
+}
+
+/// Wall-clock identity plus an optional monotonic hotkey checkpoint. UI and
+/// programmatic starts deliberately omit the monotonic value so they never
+/// enter the hotkey-to-capture percentile cohort.
+struct SessionTriggerTiming: Equatable {
+  let occurredAt: Date
+  let hotKeyUptime: TimeInterval?
+
+  static func recognisedHotKey(
+    occurredAt: Date = Date(),
+    uptime: TimeInterval = ProcessInfo.processInfo.systemUptime
+  ) -> SessionTriggerTiming {
+    SessionTriggerTiming(occurredAt: occurredAt, hotKeyUptime: uptime)
+  }
+
+  static func nonHotKey(occurredAt: Date = Date()) -> SessionTriggerTiming {
+    SessionTriggerTiming(occurredAt: occurredAt, hotKeyUptime: nil)
+  }
+
+  func milliseconds(to uptime: TimeInterval?) -> Int? {
+    guard let start = self.hotKeyUptime, let uptime else { return nil }
+    let interval = uptime - start
+    guard interval >= 0 else { return nil }
+    return Int((interval * 1000).rounded())
   }
 }
 
@@ -47,6 +76,7 @@ final class ActiveSession {
   /// capturing, when the first live partial arrived, when the first character
   /// reached the target app, and when the user requested stop.
   var captureStarted: Date?
+  var captureStartedUptime: TimeInterval?
   var firstPartialReceived: Date?
   var firstInsertion: Date?
   var stopRequested: Date?
@@ -62,10 +92,23 @@ final class ActiveSession {
   var diagnosticContext: HistoryDiagnosticContext?
   var outputTarget: TextOutputTarget?
 
-  init(gesture: HistoryTrigger.HotKeyGesture, hotKeyDescription: String) {
+  private let triggerTiming: SessionTriggerTiming
+
+  var captureStartMilliseconds: Int? {
+    self.triggerTiming.milliseconds(to: self.captureStartedUptime)
+  }
+
+  /// - Parameter triggerTiming: wall time for history plus a monotonic uptime
+  ///   only when a recognised hotkey initiated this session.
+  init(
+    gesture: HistoryTrigger.HotKeyGesture,
+    hotKeyDescription: String,
+    triggerTiming: SessionTriggerTiming = .nonHotKey()
+  ) {
     self.gesture = gesture
     self.hotKeyDescription = hotKeyDescription
-    self.recordingStarted = Date()
+    self.triggerTiming = triggerTiming
+    self.recordingStarted = triggerTiming.occurredAt
   }
 
   func recordCostFragment(_ fragment: ChatCostBreakdown) {
@@ -81,12 +124,16 @@ final class ActiveSession {
   /// Latency intervals derived from this session's checkpoints (issue #611).
   private var latencyMetrics: SessionLatencyMetrics {
     SessionLatencyMetrics(
-      hotKeyPressedAt: self.recordingStarted,
-      captureStartedAt: self.captureStarted,
-      firstPartialAt: self.firstPartialReceived,
-      firstInsertAt: self.firstInsertion ?? self.outputDelivered,
-      stopPressedAt: self.stopRequested,
-      finalInsertAt: self.outputDelivered
+      captureStartMs: self.captureStartMilliseconds,
+      firstPartialMs: SessionLatencyMetrics.milliseconds(
+        from: self.captureStarted, to: self.firstPartialReceived
+      ),
+      firstInsertMs: SessionLatencyMetrics.milliseconds(
+        from: self.captureStarted, to: self.firstInsertion ?? self.outputDelivered
+      ),
+      stopToFinalMs: SessionLatencyMetrics.milliseconds(
+        from: self.stopRequested, to: self.outputDelivered
+      )
     )
   }
 

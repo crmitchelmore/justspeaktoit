@@ -107,11 +107,12 @@ private struct IOSBatchTranscriptionClient {
     let session: URLSession
 
     func transcribeFile(at url: URL, model: String, language: String?) async throws -> TranscriptionResult {
-        if model == AppleLocalModels.speechTranscriberModelID {
+        if AppleLocalModels.isSpeechAnalyzerModel(model) {
             if #available(iOS 26.0, *) {
                 return try await AppleSpeechAnalyzerTranscriber.transcribeFile(
                     at: url,
-                    localeIdentifier: language
+                    localeIdentifier: language,
+                    engine: AppleSpeechAnalyzerEngine(modelID: model)
                 )
             }
             throw AppleLocalModelError.speechTranscriberUnavailable

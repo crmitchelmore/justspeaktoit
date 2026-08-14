@@ -23,12 +23,19 @@ var iosAppSettings: [String: SettingValue] = [
     "MARKETING_VERSION": "\(version)"
 ]
 
-// Build-time feature flags for iOS. Both features are hidden by default.
+// Build-time feature flags for iOS. The keyboard extension and its direct
+// capture path are independent rollout decisions: TestFlight can ship the
+// handoff-only keyboard without touching microphone/Speech permissions in the
+// extension process.
 // `TUIST_IOS_KEYBOARD=1 tuist generate` is the only way to include the custom
 // keyboard extension in the generated project and host app. The matching Swift
 // condition gates app activation and setup UI (see SpeakiOSApp/FeatureFlags.swift).
 let iosKeyboardFlag = (ProcessInfo.processInfo.environment["TUIST_IOS_KEYBOARD"] ?? "").lowercased()
 let isIOSKeyboardEnabled = ["1", "true", "yes"].contains(iosKeyboardFlag)
+let iosKeyboardDirectCaptureFlag = (
+    ProcessInfo.processInfo.environment["TUIST_IOS_KEYBOARD_DIRECT_CAPTURE"] ?? ""
+).lowercased()
+let isIOSKeyboardDirectCaptureEnabled = ["1", "true", "yes"].contains(iosKeyboardDirectCaptureFlag)
 // `TUIST_WATCH_APP=1 tuist generate` includes the Apple Watch companion app
 // and defines `WATCH_APP_FEATURE`, which gates the iPhone-side
 // WatchConnectivity receiver (see SpeakiOSApp/FeatureFlags.swift). Off by
@@ -50,6 +57,11 @@ if isIOSKeyboardEnabled {
     iosActiveCompilationConditions.append("IOS_KEYBOARD_FEATURE")
     iosTestSettings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] = "$(inherited) IOS_KEYBOARD_FEATURE"
     iosTestResourceElements.append("JustSpeakKeyboard/JustSpeakKeyboard.entitlements")
+}
+if isIOSKeyboardEnabled, isIOSKeyboardDirectCaptureEnabled {
+    iosActiveCompilationConditions.append("IOS_KEYBOARD_DIRECT_CAPTURE")
+    iosTestSettings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] =
+        "$(inherited) IOS_KEYBOARD_FEATURE IOS_KEYBOARD_DIRECT_CAPTURE"
 }
 if isWatchAppEnabled {
     iosActiveCompilationConditions.append("WATCH_APP_FEATURE")
@@ -108,6 +120,27 @@ var iosKeyboardSettings: [String: SettingValue] = [
     "MARKETING_VERSION": "\(version)",
     "SKIP_INSTALL": "YES"
 ]
+if isIOSKeyboardDirectCaptureEnabled {
+    iosKeyboardSettings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] = "$(inherited) IOS_KEYBOARD_DIRECT_CAPTURE"
+}
+
+let iosKeyboardInfoPlist: InfoPlist = isIOSKeyboardDirectCaptureEnabled
+    ? .file(path: "JustSpeakKeyboard/Info.plist")
+    : .extendingDefault(with: [
+        "CFBundleDisplayName": "Just Speak",
+        "CFBundleShortVersionString": "$(MARKETING_VERSION)",
+        "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
+        "NSExtension": [
+            "NSExtensionAttributes": [
+                "IsASCIICapable": true,
+                "PrefersRightToLeft": false,
+                "PrimaryLanguage": "en-GB",
+                "RequestsOpenAccess": true
+            ],
+            "NSExtensionPointIdentifier": "com.apple.keyboard-service",
+            "NSExtensionPrincipalClass": "$(PRODUCT_MODULE_NAME).KeyboardViewController"
+        ]
+    ])
 
 var watchAppSettings: [String: SettingValue] = [
     "CURRENT_PROJECT_VERSION": "1",
@@ -270,15 +303,24 @@ let watchAppTarget: Target = .target(
         "CFBundleShortVersionString": "$(MARKETING_VERSION)",
         "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
         "NSMicrophoneUsageDescription":
-            "Just Speak to It records audio on your watch and transcribes it on your iPhone."
+            "Just Speak to It records audio on your watch and transcribes it on your iPhone.",
+        // The audio background mode is what keeps a capture running once the
+        // wrist drops and the screen turns off: an AVAudioSession activated
+        // while the app is frontmost stays alive for as long as audio flows.
+        // Deliberately *not* one of the `WKBackgroundModes` extended-runtime
+        // types (self-care/mindfulness/physical-therapy/alarm) — none of them
+        // describes dictation, and all are frontmost-only. See the rationale
+        // in JustSpeakWatch/WatchRecordingRuntime.swift.
+        "UIBackgroundModes": ["audio"]
     ]),
     // The watch target cannot depend on the SpeakCore package product
     // (several transitive package manifests do not declare watchOS support),
-    // so it compiles the shared watch protocol file directly. Pure
-    // Foundation; unit-tested via SpeakCoreTests.
+    // so it compiles the shared watch files directly. Pure Foundation;
+    // unit-tested via SpeakCoreTests.
     sources: [
         "JustSpeakWatch/**",
-        "Sources/SpeakCore/WatchCaptureProtocol.swift"
+        "Sources/SpeakCore/WatchCaptureProtocol.swift",
+        "Sources/SpeakCore/WatchRecordingLifecycle.swift"
     ],
     settings: .settings(base: watchAppSettings)
 )
@@ -289,7 +331,7 @@ let keyboardTarget: Target = .target(
     product: .appExtension,
     bundleId: "com.justspeaktoit.ios.keyboard",
     deploymentTargets: .iOS("17.0"),
-    infoPlist: .file(path: "JustSpeakKeyboard/Info.plist"),
+    infoPlist: iosKeyboardInfoPlist,
     sources: ["JustSpeakKeyboard/**/*.swift"],
     entitlements: .file(path: "JustSpeakKeyboard/JustSpeakKeyboard.entitlements"),
     dependencies: [
@@ -344,7 +386,15 @@ let iosTestsTarget: Target = .target(
     product: .unitTests,
     bundleId: "com.justspeaktoit.ios.tests",
     deploymentTargets: .iOS("17.0"),
-    sources: ["Tests/SpeakiOSTests/**"],
+    sources: isIOSKeyboardEnabled
+        ? [
+            "Tests/SpeakiOSTests/**",
+            "JustSpeakKeyboard/KeyboardDictationEngine.swift",
+            "JustSpeakKeyboard/KeyboardDocumentSession.swift",
+            "JustSpeakKeyboard/KeyboardHandoffController.swift",
+            "JustSpeakKeyboard/KeyboardViewModel.swift"
+        ]
+        : ["Tests/SpeakiOSTests/**"],
     resources: .resources(iosTestResourceElements),
     dependencies: [
         .target(name: "SpeakiOS"),

@@ -16,8 +16,8 @@ public final class KeyboardHandoffStore: @unchecked Sendable {
     public static let transcriptionLifetime: TimeInterval = 90
     public static let resultLifetime: TimeInterval = 60
 
-    private static let recordKey = "keyboardHandoff.record.v2"
-    private static let observationKey = "keyboardHandoff.extensionObservation.v2"
+    private static let recordKey = "keyboardHandoff.record.v3"
+    private static let observationKey = "keyboardHandoff.extensionObservation.v3"
 
     private let defaults: UserDefaults?
     private let lock = NSLock()
@@ -40,6 +40,7 @@ public final class KeyboardHandoffStore: @unchecked Sendable {
     public func createRequest(
         id: UUID = UUID(),
         targetDocumentIdentifier: UUID? = nil,
+        profile: KeyboardDictationProfileOption? = nil,
         now: Date = Date(),
         lifetime: TimeInterval = requestLifetime
     ) throws -> KeyboardHandoffRecord {
@@ -50,7 +51,8 @@ public final class KeyboardHandoffStore: @unchecked Sendable {
             updatedAt: now,
             expiresAt: now.addingTimeInterval(lifetime),
             phase: .requested,
-            targetDocumentIdentifier: targetDocumentIdentifier
+            targetDocumentIdentifier: targetDocumentIdentifier,
+            profile: profile
         )
         try write(record)
         return record
@@ -127,6 +129,7 @@ public final class KeyboardHandoffStore: @unchecked Sendable {
                 expiresAt: now.addingTimeInterval(Self.requestLifetime),
                 phase: current.phase,
                 targetDocumentIdentifier: current.targetDocumentIdentifier,
+                profile: current.profile,
                 interimTranscript: trimmed.isEmpty ? nil : trimmed
             )
             try writeUnlocked(updated)
@@ -252,6 +255,7 @@ private extension KeyboardHandoffStore {
                 expiresAt: now.addingTimeInterval(lifetime),
                 phase: phase,
                 targetDocumentIdentifier: current.targetDocumentIdentifier,
+                profile: current.profile,
                 interimTranscript: phase == .recording || phase == .finishRequested || phase == .transcribing
                     ? current.interimTranscript
                     : nil,
@@ -303,6 +307,7 @@ private extension KeyboardHandoffStore {
             expiresAt: now.addingTimeInterval(Self.resultLifetime),
             phase: .failed,
             targetDocumentIdentifier: record.targetDocumentIdentifier,
+            profile: record.profile,
             failureCode: .timedOut
         )
         try? writeUnlocked(timedOut)

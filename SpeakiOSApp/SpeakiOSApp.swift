@@ -81,6 +81,10 @@ struct SpeakiOSApp: App {
                 .environmentObject(deepLinkRouter)
                 .environment(\.openClawEnabled, FeatureFlags.openClawTabEnabled)
                 .environment(\.iOSKeyboardEnabled, FeatureFlags.iOSKeyboardEnabled)
+                .environment(
+                    \.iOSKeyboardDirectCaptureEnabled,
+                    FeatureFlags.iOSKeyboardDirectCaptureEnabled
+                )
                 .onOpenURL { url in
                     deepLinkRouter.handle(url)
                 }

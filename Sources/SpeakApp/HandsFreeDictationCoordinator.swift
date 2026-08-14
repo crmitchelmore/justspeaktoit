@@ -1,5 +1,6 @@
 import SpeakCore
 @preconcurrency import AVFoundation
+import AppKit
 import Foundation
 import os.log
 
@@ -39,6 +40,9 @@ final class HandsFreeDictationCoordinator {
   private var armTask: Task<Void, Never>?
   private var finalisationTask: Task<Void, Never>?
   private var armID: UUID?
+  private var willSleepObserver: (any NSObjectProtocol)?
+  private var screenLockObserver: (any NSObjectProtocol)?
+  private var engineConfigurationObserver: (any NSObjectProtocol)?
 
   init(
     permissionsManager: PermissionsManager,
@@ -48,6 +52,19 @@ final class HandsFreeDictationCoordinator {
     self.permissionsManager = permissionsManager
     self.audioDeviceManager = audioDeviceManager
     self.callbacks = callbacks
+    observeSleepAndScreenLock()
+  }
+
+  deinit {
+    if let willSleepObserver {
+      NSWorkspace.shared.notificationCenter.removeObserver(willSleepObserver)
+    }
+    if let screenLockObserver {
+      DistributedNotificationCenter.default().removeObserver(screenLockObserver)
+    }
+    if let engineConfigurationObserver {
+      NotificationCenter.default.removeObserver(engineConfigurationObserver)
+    }
   }
 
   var isArmed: Bool { machine.isArmed }
@@ -226,6 +243,7 @@ final class HandsFreeDictationCoordinator {
       try await startAudioEngineAfterInputDeviceSettles(engine)
       audioEngine = engine
       detectorSession = session
+      observeEngineConfigurationChange(engine, armID: armID)
     } catch {
       engine.stop()
       inputNode.removeTap(onBus: 0)
@@ -254,6 +272,7 @@ final class HandsFreeDictationCoordinator {
     armID = nil
     tracker.reset()
     preRoll.reset()
+    removeEngineConfigurationObserver()
 
     audioEngine?.stop()
     audioEngine?.inputNode.removeTap(onBus: 0)
@@ -279,5 +298,67 @@ final class HandsFreeDictationCoordinator {
 
   private func armAttemptIsCurrent(_ id: UUID) -> Bool {
     armID == id && !Task.isCancelled && machine.state == .arming
+  }
+}
+
+// MARK: - Sleep, screen lock and audio-device changes
+
+extension HandsFreeDictationCoordinator {
+  /// An armed detector holds the microphone open, so it must never outlive the
+  /// user's presence at the Mac. Sleep and screen lock both disarm. Wake and
+  /// unlock never re-arm: an armed microphone that comes back on its own is
+  /// exactly what the lock screen protects the user against.
+  fileprivate func observeSleepAndScreenLock() {
+    willSleepObserver = NSWorkspace.shared.notificationCenter.addObserver(
+      forName: NSWorkspace.willSleepNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      Task { @MainActor [weak self] in
+        await self?.disarmForAbsentUser(reason: "the Mac went to sleep")
+      }
+    }
+    screenLockObserver = DistributedNotificationCenter.default().addObserver(
+      forName: Notification.Name("com.apple.screenIsLocked"),
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      Task { @MainActor [weak self] in
+        await self?.disarmForAbsentUser(reason: "the screen locked")
+      }
+    }
+  }
+
+  /// Disarms because the user is no longer at the Mac. The user arms again by
+  /// hand after wake or unlock.
+  fileprivate func disarmForAbsentUser(reason: String) async {
+    guard machine.isArmed else { return }
+    logger.info("Disarming hands-free dictation because \(reason, privacy: .public)")
+    await disarm()
+  }
+
+  /// The engine reports a configuration change when its input device changes
+  /// or disappears — for example when the armed microphone is unplugged. The
+  /// tap is dead from that point, so hands-free disarms with a message rather
+  /// than showing "Listening for speech" over a detector that hears nothing.
+  fileprivate func observeEngineConfigurationChange(_ engine: AVAudioEngine, armID: UUID) {
+    removeEngineConfigurationObserver()
+    engineConfigurationObserver = NotificationCenter.default.addObserver(
+      forName: .AVAudioEngineConfigurationChange,
+      object: engine,
+      queue: .main
+    ) { [weak self] _ in
+      Task { @MainActor [weak self] in
+        guard let self, self.armID == armID, self.machine.isArmed else { return }
+        self.logger.error("Hands-free audio engine configuration changed; the input is gone")
+        await self.apply(self.machine.handle(.sessionFailed(.audioUnavailable)))
+      }
+    }
+  }
+
+  fileprivate func removeEngineConfigurationObserver() {
+    guard let engineConfigurationObserver else { return }
+    NotificationCenter.default.removeObserver(engineConfigurationObserver)
+    self.engineConfigurationObserver = nil
   }
 }

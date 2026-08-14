@@ -100,6 +100,7 @@ final class CaptureWarmCoordinator { // swiftlint:disable:this type_body_length
   private var observers: [NSObjectProtocol] = []
   private var audioWarmTask: Task<Void, Never>?
   private var audioWarmGeneration = 0
+  private var knownRecordingsDirectory: URL?
   private var endpointProbeTask: Task<Void, Never>?
 
   init(
@@ -354,6 +355,7 @@ final class CaptureWarmCoordinator { // swiftlint:disable:this type_body_length
     self.rewarm(on: self.audioInputDeviceManager.$activeDeviceUID)
     self.rewarm(on: self.audioInputDeviceManager.$selectedDeviceUID)
     self.rewarm(on: self.appSettings.$recordingsDirectory)
+    self.sweepStagingOnRecordingsDirectoryChange()
     self.rewarm(on: self.appSettings.$audioPreWarmingEnabled)
     self.rewarm(on: self.appSettings.$connectionPreWarmingEnabled)
     self.rewarm(on: self.permissionsManager.$statuses)
@@ -363,6 +365,25 @@ final class CaptureWarmCoordinator { // swiftlint:disable:this type_body_length
     self.invalidateEndpoint(on: self.appSettings.$preferredLocaleIdentifier)
     self.invalidateEndpoint(on: self.appSettings.$assemblyAIKeyterms)
     self.invalidateEndpoint(on: self.appSettings.$trackedAPIKeyIdentifiers)
+  }
+
+  /// Sweeps both staging folders when the user moves their recordings.
+  ///
+  /// The launch sweep only knows the directory in use, so a staged file left
+  /// beside the old one by a crashed run would stay there for ever. The first
+  /// value only records where the recordings are; a sweep needs a real change.
+  private func sweepStagingOnRecordingsDirectoryChange() {
+    self.appSettings.$recordingsDirectory
+      .removeDuplicates()
+      .receive(on: RunLoop.main)
+      .sink { [weak self] directory in
+        guard let self else { return }
+        defer { self.knownRecordingsDirectory = directory }
+        guard let previous = self.knownRecordingsDirectory, previous != directory else { return }
+        AudioFileManager.scheduleStagedLeftoverSweep(in: previous)
+        AudioFileManager.scheduleStagedLeftoverSweep(in: directory)
+      }
+      .store(in: &self.cancellables)
   }
 
   private func rewarm<P: Publisher>(on publisher: P) where P.Output: Equatable, P.Failure == Never {

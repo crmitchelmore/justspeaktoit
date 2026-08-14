@@ -123,7 +123,6 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
     self.appSettings = appSettings
     self.permissionsManager = permissionsManager
     self.audioDeviceManager = audioDeviceManager
-    Self.scheduleStagedLeftoverSweep(for: appSettings)
   }
 
   /// Returns the current audio level (0.0 to 1.0) if recording is active.
@@ -280,17 +279,22 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
     return left.isEqual(right)
   }
 
-  /// Starts the launch sweep away from the recorder.
+  /// Asks for the staging folder of `recordingsDirectory` to be swept.
   ///
-  /// Housekeeping must never stand in front of a session. On the actor, the
-  /// directory scan would hold every other message — the warm-up handshake and
-  /// `startRecording` included — behind it for as long as it ran, which is
-  /// exactly the delay pre-warming exists to remove. It therefore runs
+  /// The owner calls this from the composition root at launch, and again
+  /// whenever the recordings directory changes, for the old folder and the new
+  /// one. Creating a recorder deliberately starts nothing: a test or a preview
+  /// that builds one must never reach a real recordings directory, so the
+  /// trigger belongs to whoever knows the app is really running.
+  ///
+  /// Housekeeping must also never stand in front of a session. On the actor,
+  /// the directory scan would hold every other message — the warm-up handshake
+  /// and `startRecording` included — behind it for as long as it ran, which is
+  /// exactly the delay pre-warming exists to remove. The sweep therefore runs
   /// detached, at utility priority, and only once the launch has settled.
-  private static func scheduleStagedLeftoverSweep(for appSettings: AppSettings) {
+  static func scheduleStagedLeftoverSweep(in recordingsDirectory: URL) {
     Task.detached(priority: .utility) {
       try? await Task.sleep(nanoseconds: 2 * NSEC_PER_SEC)
-      let recordingsDirectory = await MainActor.run { appSettings.recordingsDirectory }
       Self.sweepStagedLeftovers(in: recordingsDirectory, now: Date())
     }
   }

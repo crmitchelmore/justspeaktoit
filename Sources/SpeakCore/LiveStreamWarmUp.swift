@@ -140,6 +140,11 @@ public struct LiveStreamWarmTracker: Equatable, Sendable {
     }
 
     /// The host that should be warmed now, or `nil` when there is nothing to do.
+    ///
+    /// The idle cap is deliberately not applied here: a trigger that asks
+    /// directly — a device change, for example — still gets its probe, even
+    /// after the timer has stopped. One probe on a real event costs little,
+    /// and refusing it would make warm-up less useful than the timer it caps.
     public mutating func hostNeedingWarmUp(
         for provider: LiveTranscriptionProviderID?,
         now: Date,

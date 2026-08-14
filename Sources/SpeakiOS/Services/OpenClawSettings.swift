@@ -124,24 +124,29 @@ public final class OpenClawSettings: ObservableObject {
         self.summariseResponses = UserDefaults.standard.object(forKey: "openclaw.summarise") as? Bool ?? true
         let storedModel = UserDefaults.standard.string(forKey: "openclaw.ttsModel")
         let storedVoice = UserDefaults.standard.string(forKey: "openclaw.ttsVoice")
-        self.ttsProvider = VoiceOutputProvider(
+        let resolvedProvider = VoiceOutputProvider(
             rawValue: UserDefaults.standard.string(forKey: "openclaw.ttsProvider") ?? ""
         ) ?? VoiceOutputProvider.inferred(modelID: storedModel, voiceID: storedVoice)
-        if ttsProvider == .soniox {
-            self.ttsModel = SonioxTTSCatalog.defaultModel.rawValue
+        let resolvedModel: String
+        let resolvedVoice: String
+        if resolvedProvider == .soniox {
+            resolvedModel = SonioxTTSCatalog.defaultModel.rawValue
             if let storedVoice, storedVoice.hasPrefix("soniox/") {
-                self.ttsVoice = storedVoice
+                resolvedVoice = storedVoice
             } else {
-                self.ttsVoice = SonioxTTSCatalog.defaultVoice(
+                resolvedVoice = SonioxTTSCatalog.defaultVoice(
                     for: SonioxTTSCatalog.defaultModel
                 ).providerVoiceID
             }
         } else {
             let selection = DeepgramTTSCatalog.resolvedSelection(modelID: storedModel, voiceID: storedVoice)
-            self.ttsVoice = selection.voice.id
-            self.ttsModel = selection.model.id
+            resolvedVoice = selection.voice.id
+            resolvedModel = selection.model.id
         }
-        self.ttsVoiceName = UserDefaults.standard.string(forKey: "openclaw.ttsVoiceName") ?? ttsVoice
+        self.ttsProvider = resolvedProvider
+        self.ttsVoice = resolvedVoice
+        self.ttsVoiceName = UserDefaults.standard.string(forKey: "openclaw.ttsVoiceName") ?? resolvedVoice
+        self.ttsModel = resolvedModel
         self.ttsSpeed = UserDefaults.standard.object(forKey: "openclaw.ttsSpeed") as? Double ?? 1.0
         self.ttsLanguageIdentifier = VoiceOutputLanguageCatalog.normalizedIdentifier(
             UserDefaults.standard.string(forKey: "openclaw.ttsLanguage")

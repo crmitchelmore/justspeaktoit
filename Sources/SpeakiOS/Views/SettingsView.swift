@@ -1285,6 +1285,13 @@ public struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+
+                NavigationLink {
+                    ReleaseNotesView()
+                } label: {
+                    Label("Release Notes", systemImage: "sparkles")
+                }
+                .accessibilityHint("Shows what changed in this version and earlier versions")
             }
         }
         .environment(\.defaultMinListRowHeight, settings.visualDensity.minimumListRowHeight)

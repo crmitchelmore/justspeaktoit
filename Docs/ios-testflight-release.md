@@ -24,7 +24,9 @@ Do not commit certificates, private keys, decoded profiles, or their base64 cont
 
 1. Confirm the intended commit is on `main` and its required checks passed.
 2. Open App Store Connect and check the latest iOS TestFlight marketing version and build number.
-3. Run the GitHub Actions workflow **Release iOS (TestFlight)**. Enter the intended semantic version explicitly, without a leading `v`. Keep `include_keyboard=true`. Keep `enable_direct_capture=false` unless this exact build is the recorded direct-capture matrix build. The repository `VERSION` file is not authoritative for iOS.
+3. Run the GitHub Actions workflow **Release iOS (TestFlight)**. Enter the intended semantic version explicitly, without a leading `v`.
+   Set `release_notes_source_tag` to the existing `mac-v*` or `ios-v*` tag at the release commit. The workflow rejects a source tag whose code differs from the checkout (apart from `VERSION`).
+   Keep `include_keyboard=true`. Keep `enable_direct_capture=false` unless this exact build is the recorded direct-capture matrix build. The repository `VERSION` file is not authoritative for iOS.
 4. Monitor all distribution gates in the workflow:
    - signing certificate and three profiles install successfully;
    - the keyboard profile authorizes `group.com.justspeaktoit.ios`;

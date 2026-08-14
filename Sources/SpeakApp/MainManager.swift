@@ -570,6 +570,7 @@ final class MainManager: ObservableObject {
     let session = ActiveSession(
       gesture: gesture,
       hotKeyDescription: appSettings.selectedHotKey.displayString,
+      trigger: trigger,
       triggerTiming: triggerTiming
     )
     session.outputTarget = TextOutputTarget.capture()

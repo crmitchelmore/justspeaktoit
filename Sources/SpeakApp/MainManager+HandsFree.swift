@@ -23,8 +23,12 @@ extension MainManager {
         },
         stopCapture: { [weak self] in
           guard let self else { return .failed(.captureFailed) }
+          // The session may already have ended, or be ending, by another route
+          // — the user pressed stop, or the app hit its own limit. That is a
+          // capture that ended cleanly, not a failed one, so hands-free stays
+          // armed instead of reporting a failure after every utterance.
           guard !self.isEndingSession, let session = self.activeSession else {
-            return .failed(.captureFailed)
+            return .completed
           }
           await self.endSession(trigger: .handsFree)
           return session.outputDelivered == nil ? .failed(.captureFailed) : .completed

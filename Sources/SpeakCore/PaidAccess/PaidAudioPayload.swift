@@ -93,7 +93,9 @@ public enum PaidAudioPayload {
             throw PaidAudioPayloadError.conversionFailed
         }
 
-        while true {
+        // Stop on the file's own position, not on an empty read: `AVAudioFile`
+        // throws rather than returning zero frames when asked to read past EOF.
+        while source.framePosition < source.length {
             try source.read(into: buffer, frameCount: frameCapacity)
             if buffer.frameLength == 0 { break }
             try output.write(from: buffer)

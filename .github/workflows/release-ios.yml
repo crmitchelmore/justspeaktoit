@@ -7,6 +7,10 @@ on:
         description: 'Required iOS version, e.g. 2.29.2. For manual releases, check App Store Connect first.'
         required: true
         type: string
+      release_notes_source_tag:
+        description: 'Required Git tag whose changes describe this iOS build, e.g. mac-v2.29.2 or ios-v0.9.1.'
+        required: true
+        type: string
       build_number:
         description: 'Build number (auto-increments if empty)'
         required: false
@@ -35,6 +39,8 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Setup Xcode
         uses: maxim-lobanov/setup-xcode@v1
@@ -223,6 +229,38 @@ jobs:
           echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
           echo "Building iOS version: $VERSION (commit $SHORT_SHA)"
 
+      - name: Bundle iOS release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          RELEASE_NOTES_MODEL: gpt-5.6-luna
+          RELEASE_NOTES_REASONING_EFFORT: medium
+          SOURCE_TAG: ${{ inputs.release_notes_source_tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if [[ ! "$SOURCE_TAG" =~ ^(mac|ios)-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release-note source must be an existing mac-v* or ios-v* semantic-version tag."
+            exit 1
+          fi
+          git rev-parse --verify "refs/tags/$SOURCE_TAG^{commit}" >/dev/null
+          if ! git diff --quiet "$SOURCE_TAG^{commit}" HEAD -- . ':(exclude)VERSION'; then
+            echo "::error::$SOURCE_TAG does not describe the checked-out iOS source."
+            echo "Tag this release commit (normally ios-v$VERSION) or select its matching mac-v* tag."
+            exit 1
+          fi
+          node scripts/generate-release-notes.mjs \
+            --tag "$SOURCE_TAG" \
+            --output "$RUNNER_TEMP/release-notes.md"
+          node scripts/update-release-notes-catalogue.mjs --backfill --platform ios \
+            || echo "::warning::iOS release-note backfill failed; keeping the checked-in history"
+          node scripts/update-release-notes-catalogue.mjs \
+            --platform ios \
+            --version "$VERSION" \
+            --tag "$SOURCE_TAG" \
+            --notes-file "$RUNNER_TEMP/release-notes.md"
+          node scripts/update-release-notes-catalogue.mjs \
+            --verify --platform ios --version "$VERSION"
+
       - name: Determine Build Number
         id: build_number
         env:
@@ -267,6 +305,19 @@ jobs:
             -archivePath build/SpeakiOS.xcarchive \
             MARKETING_VERSION="$VERSION" \
             CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
+
+      - name: Verify archived release notes
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          APP_PATH="build/SpeakiOS.xcarchive/Products/Applications/JustSpeakToIt.app"
+          CATALOGUE_PATH=$(find "$APP_PATH" -name ReleaseNotes.json -print -quit)
+          if [ -z "$CATALOGUE_PATH" ]; then
+            echo "::error::Archived iOS app does not contain ReleaseNotes.json"
+            exit 1
+          fi
+          node scripts/update-release-notes-catalogue.mjs \
+            --verify --platform ios --version "$VERSION" --catalogue "$CATALOGUE_PATH"
 
       - name: Verify Archived App Metadata
         env:

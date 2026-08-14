@@ -453,5 +453,4 @@ final class KeyboardViewModelTests: XCTestCase {
         )
     }
 }
-// swiftlint:enable file_length
 #endif

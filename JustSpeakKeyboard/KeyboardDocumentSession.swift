@@ -180,7 +180,7 @@ private extension KeyboardDocumentSession.Snapshot {
         guard scalarCount > 0,
               let originalBefore = original.beforeInput,
               let currentBefore = beforeInput,
-              Snapshot.scalarExact(afterInput, original.afterInput) else {
+              Self.scalarExact(afterInput, original.afterInput) else {
             return false
         }
         let originalScalars = originalBefore.unicodeScalars

@@ -72,7 +72,20 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
     let context: CaptureWarmContext
     let recorder: AVAudioRecorder
     let id: UUID
+    /// Where staging created the file. Outside the recordings directory, so an
+    /// unclaimed recorder never leaves an empty recording behind.
     let url: URL
+    /// Where the file moves when a session claims the recorder.
+    let destination: URL
+  }
+
+  /// A recorder that is ready to start, and the file its audio lands in.
+  private struct PreparedRecorder {
+    let id: UUID
+    let url: URL
+    let recorder: AVAudioRecorder
+    /// Whether the recorder was staged ahead of the hotkey.
+    let isWarm: Bool
   }
 
   private let appSettings: AppSettings
@@ -84,12 +97,17 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
   private var currentRecordingID: UUID?
   private var currentRecordingStart: Date?
   private var currentRecordingOwner: AudioRecordingOwner?
+  /// Where the active recording lands. A claimed warm recorder still reports
+  /// the staging path in `AVAudioRecorder.url`, so the actor tracks the real
+  /// destination itself.
+  private var currentRecordingURL: URL?
   /// Reserves the recorder across permission and input-device awaits. Without
   /// this, actor reentrancy can admit a second start or stage a new warm
   /// recorder while the first start is still configuring its input session.
   private var isStartingRecording = false
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
   private var staged: StagedRecorder?
+  private var stagingDirectories: [String: URL] = [:]
   private var warmMachine = CaptureWarmStateMachine()
   private var lifecycleHandler: (@Sendable (AudioRecordingLifecycleEvent) -> Void)?
   private let logger = Logger(subsystem: "com.github.speakapp", category: "AudioFileManager")
@@ -105,6 +123,7 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
     self.appSettings = appSettings
     self.permissionsManager = permissionsManager
     self.audioDeviceManager = audioDeviceManager
+    Task { await self.sweepStagedLeftovers() }
   }
 
   /// Returns the current audio level (0.0 to 1.0) if recording is active.
@@ -192,10 +211,14 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
 
     let id = UUID()
     let directory = URL(fileURLWithPath: context.recordingsDirectoryPath, isDirectory: true)
-    let fileURL = directory.appendingPathComponent("Recording-\(id.uuidString).m4a")
+    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let name = "Recording-\(id.uuidString).m4a"
+    let destination = directory.appendingPathComponent(name)
+    let staging = self.stagingDirectory(for: directory)
+    try? FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+    let fileURL = staging.appendingPathComponent(name)
 
     do {
-      try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
       let warmRecorder = try AVAudioRecorder(url: fileURL, settings: EncoderProfile.settings)
       warmRecorder.isMeteringEnabled = true
       // Creates the file and readies the encoder. Does NOT open the microphone.
@@ -205,7 +228,13 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
         self.warmMachine.markFailed(context)
         return
       }
-      self.staged = StagedRecorder(context: context, recorder: warmRecorder, id: id, url: fileURL)
+      self.staged = StagedRecorder(
+        context: context,
+        recorder: warmRecorder,
+        id: id,
+        url: fileURL,
+        destination: destination
+      )
       if !self.warmMachine.markReady(context) {
         self.discardWarmRecorder()
       }
@@ -213,6 +242,82 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
       self.logger.debug("Capture pre-warm failed; falling back to cold start")
       try? FileManager.default.removeItem(at: fileURL)
       self.warmMachine.markFailed(context)
+    }
+  }
+
+  /// The folder staged files belong in for `recordingsDirectory`. See
+  /// ``CaptureStaging`` for why the choice depends on which volume the
+  /// recordings directory is on. Resolving it reads volume identifiers, so the
+  /// answer is cached per directory and never repeated on the capture path.
+  private func stagingDirectory(for recordingsDirectory: URL) -> URL {
+    if let cached = self.stagingDirectories[recordingsDirectory.path] { return cached }
+    let temporary = FileManager.default.temporaryDirectory
+    let directory = CaptureStaging.directory(
+      temporaryDirectory: temporary,
+      recordingsDirectory: recordingsDirectory,
+      sharesVolume: Self.sharesVolume(temporary, recordingsDirectory)
+    )
+    self.stagingDirectories[recordingsDirectory.path] = directory
+    return directory
+  }
+
+  /// Whether both URLs sit on the same volume, which is what makes claiming a
+  /// staged recorder a rename rather than a copy. Unknown answers count as
+  /// "no", so an unreadable volume identifier keeps staging beside the
+  /// recordings directory instead of risking a cross-volume move.
+  private static func sharesVolume(_ lhs: URL, _ rhs: URL) -> Bool {
+    guard
+      let left = try? lhs.resourceValues(forKeys: [.volumeIdentifierKey]).volumeIdentifier,
+      let right = try? rhs.resourceValues(forKeys: [.volumeIdentifierKey]).volumeIdentifier
+    else {
+      return false
+    }
+    return left.isEqual(right)
+  }
+
+  /// Removes staged files no session ever claimed.
+  ///
+  /// A crash, a force quit or a power loss between staging a recorder and the
+  /// hotkey leaves its file behind, and nothing runs on the way out to clean
+  /// it up. This sweep runs once per launch and only takes files that have
+  /// been untouched for ``CaptureStaging/leftoverAge``, so it can never reach
+  /// a file the running app still owns.
+  private func sweepStagedLeftovers() async {
+    let recordingsDirectory = await MainActor.run { appSettings.recordingsDirectory }
+    let manager = FileManager.default
+    let now = Date()
+
+    let staging = self.stagingDirectory(for: recordingsDirectory)
+    let stagedKeys: [URLResourceKey] = [.contentModificationDateKey]
+    let stagedFiles =
+      (try? manager.contentsOfDirectory(at: staging, includingPropertiesForKeys: stagedKeys)) ?? []
+    for url in stagedFiles {
+      let modified = (try? url.resourceValues(forKeys: Set(stagedKeys)))?.contentModificationDate
+      guard CaptureStaging.isLeftover(modifiedAt: modified ?? .distantFuture, now: now) else {
+        continue
+      }
+      try? manager.removeItem(at: url)
+    }
+
+    // Builds before staging moved out of the recordings directory left their
+    // unclaimed files there. Clear those too, on the same age rule.
+    let inPlaceKeys: [URLResourceKey] = [.contentModificationDateKey, .fileSizeKey]
+    let recordings =
+      (try? manager.contentsOfDirectory(at: recordingsDirectory, includingPropertiesForKeys: inPlaceKeys))
+      ?? []
+    for url in recordings {
+      let values = try? url.resourceValues(forKeys: Set(inPlaceKeys))
+      guard
+        CaptureStaging.isAbandonedInPlaceStage(
+          fileName: url.lastPathComponent,
+          byteSize: values?.fileSize ?? .max,
+          modifiedAt: values?.contentModificationDate ?? .distantFuture,
+          now: now
+        )
+      else {
+        continue
+      }
+      try? manager.removeItem(at: url)
     }
   }
 
@@ -267,54 +372,109 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
     let sessionContext = await audioDeviceManager.beginUsingPreferredInput()
 
     do {
-      let id: UUID
-      let fileURL: URL
-      let newRecorder: AVAudioRecorder
+      let directory: URL
+      let prepared: PreparedRecorder
       if let claimed {
-        id = claimed.id
-        fileURL = claimed.url
-        newRecorder = claimed.recorder
+        directory = claimed.destination.deletingLastPathComponent()
+        prepared = PreparedRecorder(
+          id: claimed.id,
+          url: claimed.destination,
+          recorder: claimed.recorder,
+          isWarm: true
+        )
       } else {
-        id = UUID()
-        let directory = await MainActor.run { appSettings.recordingsDirectory }
-        fileURL = directory.appendingPathComponent("Recording-\(id.uuidString).m4a")
-        newRecorder = try AVAudioRecorder(url: fileURL, settings: EncoderProfile.settings)
-        newRecorder.isMeteringEnabled = true
-        guard newRecorder.prepareToRecord() else {
-          _ = newRecorder.deleteRecording()
-          try? FileManager.default.removeItem(at: fileURL)
-          throw AudioFileManagerError.failedToCreateRecorder
-        }
+        directory = await MainActor.run { appSettings.recordingsDirectory }
+        prepared = try self.makeRecorder(in: directory)
       }
-      guard newRecorder.record() else {
-        _ = newRecorder.deleteRecording()
-        throw AudioFileManagerError.failedToCreateRecorder
-      }
+
+      let started = try self.startCapture(with: prepared, in: directory)
       let startDate = Date()
-      recorder = newRecorder
-      currentRecordingID = id
+      recorder = started.recorder
+      currentRecordingID = started.id
+      currentRecordingURL = started.url
       currentRecordingStart = startDate
       currentRecordingOwner = owner
       activeInputSession = sessionContext
-      if claimed != nil {
+      if started.isWarm {
         // The staged file was created while the app was idle, so its creation
         // date would otherwise misdate the recording in listings.
-        try? FileManager.default.setAttributes([.creationDate: startDate], ofItemAtPath: fileURL.path)
+        try? FileManager.default.setAttributes(
+          [.creationDate: startDate], ofItemAtPath: started.url.path)
       }
       if owner == .auxiliary {
         self.lifecycleHandler?(.auxiliaryStarted)
       }
-      return RecordingStart(url: fileURL, usedWarmRecorder: claimed != nil)
+      return RecordingStart(url: started.url, usedWarmRecorder: started.isWarm)
     } catch {
       await audioDeviceManager.endUsingPreferredInput(session: sessionContext)
       throw AudioFileManagerError.failedToCreateRecorder
     }
   }
 
+  /// Opens the microphone, and falls back to a cold recorder once when a staged
+  /// one refuses to start. A staged recorder that fails is worth a few
+  /// milliseconds of extra latency, never the dictation itself.
+  private func startCapture(with prepared: PreparedRecorder, in directory: URL) throws -> PreparedRecorder {
+    if prepared.recorder.record() { return prepared }
+    self.discard(prepared)
+    guard prepared.isWarm else { throw AudioFileManagerError.failedToCreateRecorder }
+    self.logger.warning("Pre-warmed recorder failed to start; retrying from cold")
+
+    let cold = try self.makeRecorder(in: directory)
+    guard cold.recorder.record() else {
+      self.discard(cold)
+      throw AudioFileManagerError.failedToCreateRecorder
+    }
+    return cold
+  }
+
+  /// Creates and prepares a recorder in the recordings directory itself. Used
+  /// by the cold path, where the file is written to from the moment it exists.
+  private func makeRecorder(in directory: URL) throws -> PreparedRecorder {
+    let id = UUID()
+    let fileURL = directory.appendingPathComponent("Recording-\(id.uuidString).m4a")
+    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    do {
+      let newRecorder = try AVAudioRecorder(url: fileURL, settings: EncoderProfile.settings)
+      newRecorder.isMeteringEnabled = true
+      let prepared = PreparedRecorder(id: id, url: fileURL, recorder: newRecorder, isWarm: false)
+      guard newRecorder.prepareToRecord() else {
+        self.discard(prepared)
+        throw AudioFileManagerError.failedToCreateRecorder
+      }
+      return prepared
+    } catch {
+      try? FileManager.default.removeItem(at: fileURL)
+      throw AudioFileManagerError.failedToCreateRecorder
+    }
+  }
+
+  private func discard(_ prepared: PreparedRecorder) {
+    _ = prepared.recorder.deleteRecording()
+    try? FileManager.default.removeItem(at: prepared.url)
+  }
+
+  /// Hands the staged recorder to a starting session, moving its file into the
+  /// recordings directory first.
+  ///
+  /// The move happens before `record()`, and the recorder keeps writing through
+  /// the file it opened during staging, so the session records straight into
+  /// its final home. Staging and destination always share a volume, which keeps
+  /// this a rename. A move that fails leaves the session on the cold path
+  /// rather than recording somewhere the user cannot reach.
   private func claimWarmRecorder(matching context: CaptureWarmContext?) -> StagedRecorder? {
     guard let context, self.warmMachine.claim(for: context) else { return nil }
     guard let staged = self.staged, staged.context == context else { return nil }
     self.staged = nil
+    do {
+      try FileManager.default.moveItem(at: staged.url, to: staged.destination)
+    } catch {
+      self.logger.error(
+        "Failed to claim staged recording: \(error.localizedDescription, privacy: .public)")
+      _ = staged.recorder.deleteRecording()
+      try? FileManager.default.removeItem(at: staged.url)
+      return nil
+    }
     return staged
   }
 
@@ -324,13 +484,13 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
     }
 
     let owner = self.currentRecordingOwner
+    let url = self.currentRecordingURL ?? recorder.url
     recorder.stop()
     self.recorder = nil
     self.currentRecordingStart = nil
     self.currentRecordingID = nil
     self.currentRecordingOwner = nil
-
-    let url = recorder.url
+    self.currentRecordingURL = nil
     let attributes = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
     let fileSize = (attributes[.size] as? NSNumber)?.int64Value ?? 0
     let measuredDuration = recorder.currentTime
@@ -363,12 +523,13 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
     let owner = currentRecordingOwner
 
     if let recorder {
+      let url = self.currentRecordingURL ?? recorder.url
       recorder.stop()
-      let url = recorder.url
       self.recorder = nil
       currentRecordingStart = nil
       currentRecordingID = nil
       currentRecordingOwner = nil
+      currentRecordingURL = nil
       if deleteFile {
         try? FileManager.default.removeItem(at: url)
       }
@@ -388,7 +549,11 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
     let directory = await MainActor.run { appSettings.recordingsDirectory }
     guard
       let enumerator = FileManager.default.enumerator(
-        at: directory, includingPropertiesForKeys: [.creationDateKey, .fileSizeKey])
+        at: directory,
+        includingPropertiesForKeys: [.creationDateKey, .fileSizeKey],
+        // Keeps the hidden staging folder, which holds files no session has
+        // claimed, out of the user's recordings list.
+        options: [.skipsHiddenFiles])
     else {
       return []
     }

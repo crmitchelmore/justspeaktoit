@@ -8,7 +8,7 @@ medium reasoning effort.
 The release workflow writes three formats from the same source:
 
 - Markdown for the GitHub release description.
-- Escaped HTML for Sparkle's in-app update interface.
+- Adaptive HTML for Sparkle's in-app update interface.
 - A JSON catalogue bundled into the app for the in-app Release Notes screen.
 
 `OPENAI_API_KEY` is stored as a GitHub Actions secret. If the secret, model, or
@@ -26,6 +26,25 @@ OPENAI_API_KEY="..." node scripts/generate-release-notes.mjs \
 
 The previous tag is discovered from Git ancestry within the same tag family.
 Pass `--previous-tag <tag>` only when intentionally overriding that comparison.
+
+## Sparkle update history
+
+The direct macOS release passes the stamped `CFBundleVersion` to the release-note
+generator. It reads every published stable `mac-v*` release and its `appcast.xml`
+asset, then builds one adaptive HTML document for Sparkle. Each release section
+uses the historical `sparkle:version` build number in a `data-sparkle-version`
+attribute. Sparkle 2.5+ marks the installed build, and the document hides that
+section and everything older, so a user sees every release since their last
+installed update.
+
+The newest two releases keep their complete notes. When an update spans more
+than two releases, older entries show the overview and up to three key changes
+instead. A **View full release notes** link remains visible at the bottom, and
+the appcast also declares the same GitHub history using
+`sparkle:fullReleaseNotesLink`. Releases without written notes retain their
+build marker and point to the full history. If any historical build marker
+cannot be recovered, generation warns and safely falls back to the current
+release's complete notes instead of publishing a partial history.
 
 ## Backfill published releases
 

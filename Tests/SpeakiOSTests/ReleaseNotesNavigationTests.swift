@@ -18,7 +18,7 @@ final class ReleaseNotesNavigationTests: XCTestCase {
             tag: "ios-v1.1.0",
             publishedAt: "2026-08-07T00:00:00Z",
             markdown: "## Overview\n\nEarlier iOS notes."
-        ),
+        )
     ])
 
     func testBundledResourceIsReadableFromTheIOSTarget() {

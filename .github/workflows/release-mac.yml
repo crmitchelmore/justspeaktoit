@@ -131,12 +131,14 @@ jobs:
       - name: Generate detailed release notes
         if: startsWith(github.ref, 'refs/tags/mac-v')
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           RELEASE_NOTES_MODEL: gpt-5.6-luna
           RELEASE_NOTES_REASONING_EFFORT: medium
         run: |
           node scripts/generate-release-notes.mjs \
             --tag "${GITHUB_REF_NAME}" \
+            --build-number "$BUILD_NUMBER" \
             --output "$RUNNER_TEMP/release-notes.md" \
             --html-output "$RUNNER_TEMP/release-notes.html"
 

@@ -62,7 +62,7 @@ final class ReleaseNotesCatalogTests: XCTestCase {
                 tag: "ios-v2.45.0",
                 publishedAt: "2026-08-08T09:05:28Z",
                 markdown: "iOS notes"
-            ),
+            )
         ])
 
         XCTAssertEqual(catalog.entry(forVersion: "2.45.0", platform: .mac)?.markdown, "macOS notes")

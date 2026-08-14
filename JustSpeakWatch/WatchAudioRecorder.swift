@@ -46,6 +46,7 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
     private var recorder: AVAudioRecorder?
     private var currentID = UUID()
     private var isFinalising = false
+    private var finalisationTask: Task<Void, Never>?
     private var didRecoverInterruptedCapture = false
 
     init(
@@ -72,10 +73,10 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
         return base.appendingPathComponent("Captures", isDirectory: true)
     }
 
+    /// Derived from the capture id, never persisted: the container path changes
+    /// across an app update or a restore, so a stored path would break recovery.
     static func fileURL(for id: UUID) -> URL {
-        capturesDirectory
-            .appendingPathComponent(id.uuidString)
-            .appendingPathExtension("m4a")
+        WatchActiveCapture.fileURL(for: id, in: capturesDirectory)
     }
 
     private static var activeCaptureMarkerURL: URL {
@@ -93,6 +94,18 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
     func start() async {
         guard !isRecording else { return }
         lastError = nil
+
+        // A stop keeps the marker on disk while it inspects the finished asset.
+        // Wait for that work instead of reading the marker as an unrecovered
+        // capture, which made a fast stop-then-start look like a failure.
+        if let finalisationTask {
+            await finalisationTask.value
+        }
+        guard !isFinalising else {
+            lastError = "The previous recording is still finishing."
+            return
+        }
+        guard !isRecording else { return }
 
         await recoverInterruptedCapture()
         guard activeCaptureRegistry.load() == nil else {
@@ -119,7 +132,7 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
 
             let id = UUID()
             let url = Self.fileURL(for: id)
-            let capture = WatchActiveCapture(id: id, fileURL: url, startedAt: Date())
+            let capture = WatchActiveCapture(id: id, startedAt: Date())
             preparedCapture = capture
             // Mono 16 kHz AAC: compact voice-quality audio that keeps
             // WatchConnectivity transfers small (~250 KB per minute).
@@ -149,7 +162,7 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
             if let preparedCapture,
                activeCaptureRegistry.load()?.id != preparedCapture.id
             {
-                try? FileManager.default.removeItem(at: preparedCapture.fileURL)
+                try? FileManager.default.removeItem(at: Self.fileURL(for: preparedCapture.id))
             }
             recorder = nil
             isRecording = false
@@ -183,7 +196,9 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
             return
         }
 
-        let inspection = await inspectAudio(at: capture.fileURL)
+        // The path comes from the id, so a marker written before an app update
+        // still finds its audio in the new container.
+        let inspection = await inspectAudio(at: Self.fileURL(for: capture.id))
         let finalisation = WatchRecordingFinaliser.finalise(
             capture: capture,
             reason: .runtimeInvalidated(reason: "Recording ended while the watch app was unavailable."),
@@ -200,11 +215,7 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
         guard !isFinalising, isRecording, let recorder else { return }
         isFinalising = true
         let capture = activeCaptureRegistry.load()
-            ?? WatchActiveCapture(
-                id: currentID,
-                fileURL: Self.fileURL(for: currentID),
-                startedAt: startedAt ?? Date()
-            )
+            ?? WatchActiveCapture(id: currentID, startedAt: startedAt ?? Date())
         // Preserve the live value for a user stop. System-driven delegate
         // callbacks may already see zero, so asset inspection below remains
         // the authoritative fallback.
@@ -215,27 +226,39 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
         startedAt = nil
         runtime.end()
 
-        let inspection = await inspectAudio(at: capture.fileURL)
-        let finalisation = WatchRecordingFinaliser.finalise(
-            capture: capture,
-            reason: reason,
-            recorderDuration: recorderDuration,
-            inspection: inspection
-        )
-        complete(finalisation, recovery: false)
-        isFinalising = false
+        // The remaining work suspends. Hold it in a task so `start()` can wait
+        // for the marker to be reconciled rather than trip over it.
+        let task = Task { @MainActor in
+            defer { self.isFinalising = false }
+            let inspection = await self.inspectAudio(at: Self.fileURL(for: capture.id))
+            let finalisation = WatchRecordingFinaliser.finalise(
+                capture: capture,
+                reason: reason,
+                recorderDuration: recorderDuration,
+                inspection: inspection
+            )
+            self.complete(finalisation, recovery: false)
+        }
+        finalisationTask = task
+        await task.value
+        if finalisationTask == task { finalisationTask = nil }
     }
 
     private func complete(_ finalisation: WatchRecordingFinalisation, recovery: Bool) {
+        // The marker holds identity only, so the audio path comes from the id.
+        let audioURL = Self.fileURL(for: finalisation.capture.id)
+
         switch finalisation.outcome.disposition {
         case .discard:
             lastError = finalisation.outcome.message
             do {
-                if FileManager.default.fileExists(atPath: finalisation.capture.fileURL.path) {
-                    try FileManager.default.removeItem(at: finalisation.capture.fileURL)
+                if FileManager.default.fileExists(atPath: audioURL.path) {
+                    try FileManager.default.removeItem(at: audioURL)
                 }
                 try activeCaptureRegistry.clear(matching: finalisation.capture.id)
-                if recovery {
+                // Only fall back to the generic wording. A reason from the
+                // policy tells the user more than "could not be recovered".
+                if recovery, lastError == nil {
                     lastError = "An interrupted recording could not be recovered."
                 }
             } catch {
@@ -250,7 +273,7 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
                     store.enqueue(
                         FinishedRecording(
                             id: finalisation.capture.id,
-                            url: finalisation.capture.fileURL,
+                            url: audioURL,
                             createdAt: finalisation.capture.startedAt,
                             duration: finalisation.duration
                         )

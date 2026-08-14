@@ -64,6 +64,14 @@ extension SettingsView {
               .disabled(!updaterManager.canCheckForUpdates)
             }
 
+            Button {
+              showingReleaseNotes = true
+            } label: {
+              Label("Release Notes", systemImage: "sparkles")
+            }
+            .buttonStyle(.bordered)
+            .accessibilityHint("Shows what changed in this version and earlier versions")
+
             if updaterManager.allowsCrossChannelMessaging {
               Link(destination: URL(string: "https://github.com/crmitchelmore/justspeaktoit/releases")!) {
                 Label("View Releases", systemImage: "shippingbox")
@@ -72,6 +80,9 @@ extension SettingsView {
             }
           }
         }
+      }
+      .sheet(isPresented: $showingReleaseNotes) {
+        ReleaseNotesView()
       }
 
       SettingsCard(title: "Feedback & Support", systemImage: "bubble.left.and.bubble.right", tint: Color.green) {

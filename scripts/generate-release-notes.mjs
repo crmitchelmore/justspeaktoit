@@ -3,10 +3,13 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import {
+    cumulativeSparkleHTML,
     DEFAULT_MODEL,
     DEFAULT_REASONING_EFFORT,
+    fetchPublishedSparkleReleases,
     generateReleaseNotes,
     markdownToHTML,
+    releaseTrack,
 } from "./release-notes-lib.mjs";
 
 const valueAfter = (name) => {
@@ -17,6 +20,7 @@ const tag = valueAfter("--tag") ?? process.env.GITHUB_REF_NAME;
 const previousTag = valueAfter("--previous-tag");
 const output = valueAfter("--output");
 const htmlOutput = valueAfter("--html-output");
+const buildNumber = valueAfter("--build-number");
 const repository = valueAfter("--repository") ?? process.env.GITHUB_REPOSITORY ?? "crmitchelmore/justspeaktoit";
 const model = valueAfter("--model") ?? process.env.RELEASE_NOTES_MODEL ?? DEFAULT_MODEL;
 const reasoningEffort = valueAfter("--reasoning-effort")
@@ -48,6 +52,29 @@ if (output) {
 if (htmlOutput) {
     const htmlOutputPath = resolve(htmlOutput);
     await mkdir(dirname(htmlOutputPath), { recursive: true });
-    await writeFile(htmlOutputPath, markdownToHTML(result.notes), "utf8");
+    let html = markdownToHTML(result.notes);
+    if (buildNumber && releaseTrack(tag) === "mac") {
+        try {
+            const warnings = [];
+            const history = await fetchPublishedSparkleReleases({
+                repository,
+                token: process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN,
+                onWarning: (warning) => warnings.push(warning),
+            });
+            warnings.forEach((warning) => console.error(`::warning::${warning}`));
+            html = cumulativeSparkleHTML({
+                releases: [{
+                    tag,
+                    version: tag.slice("mac-v".length),
+                    buildNumber,
+                    markdown: result.notes,
+                }, ...history],
+                fullReleaseNotesURL: `https://github.com/${repository}/releases`,
+            });
+        } catch (error) {
+            console.error(`::warning::Could not build cumulative Sparkle notes: ${error.message}`);
+        }
+    }
+    await writeFile(htmlOutputPath, html, "utf8");
     console.error(`Wrote Sparkle HTML release notes to ${htmlOutputPath}`);
 }

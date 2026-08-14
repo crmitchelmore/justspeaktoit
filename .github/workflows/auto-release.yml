@@ -145,6 +145,7 @@ jobs:
           echo "🚀 Triggering iOS TestFlight build for v$NEW_VERSION"
           if gh workflow run "Release iOS (TestFlight)" --ref main \
             -f version="$NEW_VERSION" \
+            -f release_notes_source_tag="mac-v$NEW_VERSION" \
             -f include_keyboard=true \
             -f enable_direct_capture=false; then
             echo "✅ Triggered iOS TestFlight release for v$NEW_VERSION"

@@ -42,7 +42,7 @@ final class SonioxTTSAPIContractTests: XCTestCase {
     /// status code must still reach the caller so it can name the real cause.
     func testRefusedKey_ReportsTheStatusCodeWithAnUnrecognisedBody() async {
         SonioxTTSMockURLProtocol.handler = { request in
-            return (
+            (
                 HTTPURLResponse(
                     url: try XCTUnwrap(request.url),
                     statusCode: 401,

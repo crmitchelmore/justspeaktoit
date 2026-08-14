@@ -47,7 +47,7 @@ public final class SonioxIOSVoiceOutputClient: ObservableObject {
         let api = SonioxTTSAPI(session: session, region: region)
         let accountVoices: [SonioxTTSAccountVoice]
         if SonioxTTSCatalog.voice(forID: voiceID) == nil {
-            accountVoices = try await api.listAccountVoices(apiKey: apiKey)
+            accountVoices = try await Self.accountVoices(from: api, apiKey: apiKey)
         } else {
             accountVoices = []
         }
@@ -84,12 +84,29 @@ public final class SonioxIOSVoiceOutputClient: ObservableObject {
         region: SonioxTTSRegion
     ) async throws -> [SonioxTTSAccountVoice] {
         guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
-        return try await SonioxTTSAPI(session: session, region: region).listAccountVoices(apiKey: apiKey)
+        return try await Self.accountVoices(
+            from: SonioxTTSAPI(session: session, region: region),
+            apiKey: apiKey
+        )
     }
 
     public func stop() {
         activeOperationID = nil
         realtime.stop()
+    }
+
+    /// Keeps the typed error surface. Transport errors from the voices endpoint
+    /// become ``SonioxIOSVoiceOutputError/api(_:)``, which gives the caller one
+    /// error type for all Soniox voice-output failures.
+    private static func accountVoices(
+        from api: SonioxTTSAPI,
+        apiKey: String
+    ) async throws -> [SonioxTTSAccountVoice] {
+        do {
+            return try await api.listAccountVoices(apiKey: apiKey)
+        } catch let error as SonioxTTSAPIError {
+            throw SonioxIOSVoiceOutputError.api(error)
+        }
     }
 }
 

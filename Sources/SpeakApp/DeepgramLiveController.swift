@@ -351,23 +351,27 @@ private extension DeepgramLiveController {
       language: currentLanguage,
       sampleRate: 16000
     )
+    self.transcriber = transcriber
     transcriber.start(
-      onTranscript: { [weak self] text, isFinal in
-        Task { @MainActor [weak self] in
+      onTranscript: { [weak self, weak transcriber] text, isFinal in
+        Task { @MainActor [weak self, weak transcriber] in
           guard let self else { return }
+          // Drop callbacks queued by a previous recording's stream: this
+          // controller instance is reused between recordings (issue #643).
+          guard LiveTranscriptionRun.isCurrent(transcriber, activeStream: self.transcriber) else { return }
           self.handleTranscript(text: text, isFinal: isFinal)
         }
       },
-      onError: { [weak self] error in
-        Task { @MainActor [weak self] in
+      onError: { [weak self, weak transcriber] error in
+        Task { @MainActor [weak self, weak transcriber] in
           guard let self else { return }
+          guard LiveTranscriptionRun.isCurrent(transcriber, activeStream: self.transcriber) else { return }
           if !self.isRunning { return }
           print("[DeepgramLiveController] ERROR: \(error.localizedDescription)")
           self.delegate?.liveTranscriber(self, didFail: error)
         }
       }
     )
-    self.transcriber = transcriber
     return transcriber
   }
 

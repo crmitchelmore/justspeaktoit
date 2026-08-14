@@ -9,6 +9,7 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
   case openai
   case azure
   case deepgram
+  case soniox
   case system
 
   var id: String { rawValue }
@@ -19,6 +20,7 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     case .openai: return "OpenAI"
     case .azure: return "Azure Cognitive Services"
     case .deepgram: return "Deepgram Aura"
+    case .soniox: return "Soniox"
     case .system: return "macOS System"
     }
   }
@@ -36,7 +38,20 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     case .openai: return "openai.tts.apiKey"
     case .azure: return "azure.speech.apiKey"
     case .deepgram: return "deepgram.apiKey"
+    // One Soniox key covers transcription and speech generation.
+    case .soniox: return "soniox.apiKey"
     case .system: return ""
+    }
+  }
+
+  /// Whether this provider's single account key also powers transcription.
+  ///
+  /// Settings shows one shared credential card for these providers instead of a
+  /// separate transcription entry writing the same Keychain item.
+  var sharesTranscriptionCredential: Bool {
+    switch self {
+    case .elevenlabs, .soniox: return true
+    case .openai, .azure, .deepgram, .system: return false
     }
   }
 
@@ -45,6 +60,7 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     if voiceID.hasPrefix("openai/") { return .openai }
     if voiceID.hasPrefix("azure/") { return .azure }
     if voiceID.hasPrefix("deepgram/") { return .deepgram }
+    if voiceID.hasPrefix("soniox/") { return .soniox }
     if voiceID.hasPrefix("system/") { return .system }
     return .system
   }
@@ -100,19 +116,28 @@ struct TTSSettings {
   var quality: TTSQuality
   var format: AudioFormat
   var useSSML: Bool
+  /// The user's language preference as a locale identifier (`en_US`), or `nil`
+  /// when they have not chosen one. Providers that need an explicit spoken
+  /// language resolve it themselves; the rest ignore it.
+  var language: String?
+  var sonioxRegion: SonioxTTSRegion
 
   init(
     speed: Double = 1.0,
     pitch: Double = 0.0,
     quality: TTSQuality = .high,
     format: AudioFormat = .mp3,
-    useSSML: Bool = false
+    useSSML: Bool = false,
+    language: String? = nil,
+    sonioxRegion: SonioxTTSRegion = .unitedStates
   ) {
     self.speed = speed
     self.pitch = pitch
     self.quality = quality
     self.format = format
     self.useSSML = useSSML
+    self.language = language
+    self.sonioxRegion = sonioxRegion
   }
 }
 
@@ -145,6 +170,8 @@ struct TTSVoice: Identifiable, Hashable, Codable {
     case builtin
     case lowLatency
     case multilingual
+    case indian
+    case spanish
   }
 }
 
@@ -458,8 +485,19 @@ struct VoiceCatalog {
     )
   }
 
+  // Both platform pickers project from the canonical SpeakCore Soniox catalogue.
+  static let sonioxVoices: [TTSVoice] = SonioxTTSCatalog.voices.map { voice in
+    TTSVoice(
+      id: voice.providerVoiceID,
+      name: voice.id,
+      provider: .soniox,
+      traits: sonioxTraits(for: voice),
+      previewURL: nil
+    )
+  }
+
   static let allVoices: [TTSVoice] =
-    elevenlabsVoices + openaiVoices + azureVoices + deepgramVoices + systemVoices
+    elevenlabsVoices + openaiVoices + azureVoices + deepgramVoices + sonioxVoices + systemVoices
 
   static func voices(for provider: TTSProvider) -> [TTSVoice] {
     switch provider {
@@ -467,6 +505,7 @@ struct VoiceCatalog {
     case .openai: return openaiVoices
     case .azure: return azureVoices
     case .deepgram: return deepgramVoices
+    case .soniox: return sonioxVoices
     case .system: return systemVoices
     }
   }
@@ -504,6 +543,38 @@ struct VoiceCatalog {
     case .british: .british
     case .filipino: .filipino
     case .irish: .irish
+    }
+  }
+
+  private static func sonioxTraits(for voice: SonioxTTSVoice) -> [TTSVoice.VoiceTrait] {
+    let gender: TTSVoice.VoiceTrait = voice.gender == .female ? .female : .male
+    return [
+      gender,
+      sonioxAccent(voice.accent),
+      sonioxStyle(voice.style),
+      .multilingual,
+      .lowLatency
+    ]
+  }
+
+  private static func sonioxAccent(_ accent: SonioxTTSVoiceAccent) -> TTSVoice.VoiceTrait {
+    switch accent {
+    case .american: .american
+    case .australian: .australian
+    case .british: .british
+    case .indian: .indian
+    case .spanish: .spanish
+    }
+  }
+
+  private static func sonioxStyle(_ style: SonioxTTSVoiceStyle) -> TTSVoice.VoiceTrait {
+    switch style {
+    case .casual: .casual
+    case .clear: .clear
+    case .deep: .deep
+    case .energetic: .energetic
+    case .professional: .professional
+    case .warm: .warm
     }
   }
 

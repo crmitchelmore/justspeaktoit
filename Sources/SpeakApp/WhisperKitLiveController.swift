@@ -11,6 +11,11 @@ final class WhisperKitLiveController: LiveTranscriptionController {
     private let audioDeviceManager: AudioInputDeviceManager
     private let modelManager: LocalModelManager
     private var transcriber: AudioStreamTranscriber?
+    /// Identity of the stream run currently allowed to publish transcript text
+    /// and to resume `startupContinuation`. See `LiveTranscriptionRun.Token`:
+    /// the state-change callback is an argument to the transcriber's
+    /// initialiser, so it cannot capture the transcriber it belongs to.
+    private var activeRun: LiveTranscriptionRun.Token?
     private var streamTask: Task<Void, Never>?
     private var startupTask: Task<Void, Never>?
     private var startupContinuation: CheckedContinuation<Void, Error>?
@@ -69,6 +74,16 @@ final class WhisperKitLiveController: LiveTranscriptionController {
             skipSpecialTokens: true,
             wordTimestamps: true
         )
+        // Published before the transcriber exists so the callback can never
+        // observe a window in which this run is not yet the active one. The
+        // callback hops to the main actor through an unstructured Task, so a
+        // state change from the previous recording can land after `stop()`
+        // returned; this controller instance is reused across recordings, so it
+        // would repaint the next recording's transcript — and worse, resume the
+        // next run's `startupContinuation` early (issue #668).
+        let run = LiveTranscriptionRun.Token()
+        activeRun = run
+
         let transcriber = AudioStreamTranscriber(
             audioEncoder: pipeline.audioEncoder,
             featureExtractor: pipeline.featureExtractor,
@@ -77,9 +92,12 @@ final class WhisperKitLiveController: LiveTranscriptionController {
             tokenizer: tokenizer,
             audioProcessor: pipeline.audioProcessor,
             decodingOptions: options,
-            stateChangeCallback: { [weak self] oldState, newState in
-                Task { @MainActor [weak self] in
-                    self?.handleStateChange(from: oldState, to: newState)
+            stateChangeCallback: { [weak self, weak run] oldState, newState in
+                Task { @MainActor [weak self, weak run] in
+                    guard let self,
+                        LiveTranscriptionRun.isCurrent(run, activeStream: self.activeRun)
+                    else { return }
+                    self.handleStateChange(from: oldState, to: newState)
                 }
             }
         )
@@ -128,6 +146,9 @@ final class WhisperKitLiveController: LiveTranscriptionController {
         }
         await streamTask?.value
         streamTask = nil
+        // Retired only here, after the stream has drained, so the run's final
+        // state changes still count towards this recording's `latestText`.
+        activeRun = nil
         transcriber = nil
         isRunning = false
 
@@ -200,6 +221,7 @@ final class WhisperKitLiveController: LiveTranscriptionController {
         guard !isStopping else { return }
         isRunning = false
         streamTask = nil
+        activeRun = nil
         if let transcriber {
             await transcriber.stopStreamTranscription()
         }
@@ -214,6 +236,7 @@ final class WhisperKitLiveController: LiveTranscriptionController {
 
     private func cleanupAfterFailedStart() async {
         streamTask = nil
+        activeRun = nil
         if let transcriber {
             await transcriber.stopStreamTranscription()
         }

@@ -10,6 +10,7 @@ import SwiftUI
 @MainActor
 public final class OpenClawSettings: ObservableObject {
     public static let shared = OpenClawSettings()
+    public static let sonioxBuiltInVoices = SonioxTTSCatalog.voices
 
     @Published public var gatewayURL: String {
         didSet { UserDefaults.standard.set(gatewayURL, forKey: "openclaw.gatewayURL") }
@@ -27,6 +28,10 @@ public final class OpenClawSettings: ObservableObject {
         didSet { UserDefaults.standard.set(ttsEnabled, forKey: "openclaw.ttsEnabled") }
     }
 
+    @Published public var ttsProvider: VoiceOutputProvider {
+        didSet { UserDefaults.standard.set(ttsProvider.rawValue, forKey: "openclaw.ttsProvider") }
+    }
+
     @Published public var summariseResponses: Bool {
         didSet { UserDefaults.standard.set(summariseResponses, forKey: "openclaw.summarise") }
     }
@@ -35,12 +40,24 @@ public final class OpenClawSettings: ObservableObject {
         didSet { UserDefaults.standard.set(ttsVoice, forKey: "openclaw.ttsVoice") }
     }
 
+    @Published public var ttsVoiceName: String {
+        didSet { UserDefaults.standard.set(ttsVoiceName, forKey: "openclaw.ttsVoiceName") }
+    }
+
     @Published public var ttsModel: String {
         didSet { UserDefaults.standard.set(ttsModel, forKey: "openclaw.ttsModel") }
     }
 
     @Published public var ttsSpeed: Double {
         didSet { UserDefaults.standard.set(ttsSpeed, forKey: "openclaw.ttsSpeed") }
+    }
+
+    @Published public var ttsLanguageIdentifier: String {
+        didSet { UserDefaults.standard.set(ttsLanguageIdentifier, forKey: "openclaw.ttsLanguage") }
+    }
+
+    @Published public var sonioxRegion: SonioxTTSRegion {
+        didSet { UserDefaults.standard.set(sonioxRegion.rawValue, forKey: "openclaw.sonioxRegion") }
     }
 
     @Published public var conversationModeEnabled: Bool {
@@ -74,12 +91,25 @@ public final class OpenClawSettings: ObservableObject {
 
     /// Migrates legacy selections and keeps the selected voice compatible with its model.
     public func validateVoiceModelCombination() {
-        let selection = DeepgramTTSCatalog.resolvedSelection(
-            modelID: ttsModel,
-            voiceID: ttsVoice
-        )
-        if ttsModel != selection.model.id { ttsModel = selection.model.id }
-        if ttsVoice != selection.voice.id { ttsVoice = selection.voice.id }
+        switch ttsProvider {
+        case .deepgram:
+            let incompatibleVoice = ttsVoice.hasPrefix("soniox/") ? nil : ttsVoice
+            let selection = DeepgramTTSCatalog.resolvedSelection(modelID: ttsModel, voiceID: incompatibleVoice)
+            if ttsModel != selection.model.id { ttsModel = selection.model.id }
+            if ttsVoice != selection.voice.id { ttsVoice = selection.voice.id }
+            ttsVoiceName = selection.voice.displayName
+        case .soniox:
+            ttsModel = SonioxTTSCatalog.defaultModel.rawValue
+            if let voice = SonioxTTSCatalog.voice(forID: ttsVoice) {
+                ttsVoice = voice.providerVoiceID
+                ttsVoiceName = voice.displayName
+            } else if !ttsVoice.hasPrefix("soniox/") {
+                let voice = SonioxTTSCatalog.defaultVoice(for: SonioxTTSCatalog.defaultModel)
+                ttsVoice = voice.providerVoiceID
+                ttsVoiceName = voice.displayName
+            }
+        }
+        ttsSpeed = min(max(ttsSpeed, ttsProvider.speedRange.lowerBound), ttsProvider.speedRange.upperBound)
     }
 
     public var isConfigured: Bool {
@@ -92,13 +122,38 @@ public final class OpenClawSettings: ObservableObject {
         self.enabled = UserDefaults.standard.bool(forKey: "openclaw.enabled")
         self.ttsEnabled = UserDefaults.standard.object(forKey: "openclaw.ttsEnabled") as? Bool ?? true
         self.summariseResponses = UserDefaults.standard.object(forKey: "openclaw.summarise") as? Bool ?? true
-        let ttsSelection = DeepgramTTSCatalog.resolvedSelection(
-            modelID: UserDefaults.standard.string(forKey: "openclaw.ttsModel"),
-            voiceID: UserDefaults.standard.string(forKey: "openclaw.ttsVoice")
-        )
-        self.ttsVoice = ttsSelection.voice.id
-        self.ttsModel = ttsSelection.model.id
+        let storedModel = UserDefaults.standard.string(forKey: "openclaw.ttsModel")
+        let storedVoice = UserDefaults.standard.string(forKey: "openclaw.ttsVoice")
+        let resolvedProvider = VoiceOutputProvider(
+            rawValue: UserDefaults.standard.string(forKey: "openclaw.ttsProvider") ?? ""
+        ) ?? VoiceOutputProvider.inferred(modelID: storedModel, voiceID: storedVoice)
+        let resolvedModel: String
+        let resolvedVoice: String
+        if resolvedProvider == .soniox {
+            resolvedModel = SonioxTTSCatalog.defaultModel.rawValue
+            if let storedVoice, storedVoice.hasPrefix("soniox/") {
+                resolvedVoice = storedVoice
+            } else {
+                resolvedVoice = SonioxTTSCatalog.defaultVoice(
+                    for: SonioxTTSCatalog.defaultModel
+                ).providerVoiceID
+            }
+        } else {
+            let selection = DeepgramTTSCatalog.resolvedSelection(modelID: storedModel, voiceID: storedVoice)
+            resolvedVoice = selection.voice.id
+            resolvedModel = selection.model.id
+        }
+        self.ttsProvider = resolvedProvider
+        self.ttsVoice = resolvedVoice
+        self.ttsVoiceName = UserDefaults.standard.string(forKey: "openclaw.ttsVoiceName") ?? resolvedVoice
+        self.ttsModel = resolvedModel
         self.ttsSpeed = UserDefaults.standard.object(forKey: "openclaw.ttsSpeed") as? Double ?? 1.0
+        self.ttsLanguageIdentifier = VoiceOutputLanguageCatalog.normalizedIdentifier(
+            UserDefaults.standard.string(forKey: "openclaw.ttsLanguage")
+        )
+        self.sonioxRegion = SonioxTTSRegion.migrated(
+            from: UserDefaults.standard.string(forKey: "openclaw.sonioxRegion")
+        )
         self.conversationModeEnabled =
             UserDefaults.standard.object(forKey: "openclaw.conversationModeEnabled") as? Bool ?? false
         self.autoResumeListening = UserDefaults.standard.object(forKey: "openclaw.autoResumeListening") as? Bool ?? true
@@ -112,6 +167,7 @@ public final class OpenClawSettings: ObservableObject {
 
         UserDefaults.standard.set(ttsVoice, forKey: "openclaw.ttsVoice")
         UserDefaults.standard.set(ttsModel, forKey: "openclaw.ttsModel")
+        UserDefaults.standard.set(ttsProvider.rawValue, forKey: "openclaw.ttsProvider")
     }
 
     // MARK: - Keychain

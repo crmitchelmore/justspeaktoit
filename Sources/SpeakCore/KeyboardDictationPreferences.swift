@@ -73,13 +73,37 @@ public struct KeyboardLanguageSelection: Codable, Equatable, Sendable {
     }
 }
 
-/// App Group-backed storage for ``KeyboardLanguageSelection``. Language
-/// identifiers are the only content; no transcript or audio data enters this
-/// store.
+/// A keyboard preference that is stored whole and rejected outright when a
+/// future release changes its shape.
+protocol KeyboardVersionedSelection: Codable {
+    static var schemaVersion: Int { get }
+    var schemaVersion: Int { get }
+}
+
+extension KeyboardLanguageSelection: KeyboardVersionedSelection {}
+extension KeyboardProfileSelection: KeyboardVersionedSelection {}
+
+private struct KeyboardStoredProfileIdentifier: KeyboardVersionedSelection {
+    static let schemaVersion = 1
+    let schemaVersion: Int
+    let selectedIdentifier: String
+
+    init(selectedIdentifier: String, schemaVersion: Int = Self.schemaVersion) {
+        self.schemaVersion = schemaVersion
+        self.selectedIdentifier = selectedIdentifier
+    }
+}
+
+/// App Group-backed storage for the keyboard's quick-switch preferences:
+/// ``KeyboardLanguageSelection`` and ``KeyboardProfileSelection``. The profile
+/// projection contains non-secret model/language/route metadata only; no
+/// transcript, audio, credential, surrounding text, or prompt enters this store.
 public final class KeyboardDictationPreferencesStore {
     public static let shared = KeyboardDictationPreferencesStore()
 
     private static let selectionKey = "keyboardDictation.language.v1"
+    private static let profileCatalogueKey = "keyboardDictation.profileCatalogue.v2"
+    private static let profileSelectionKey = "keyboardDictation.profileSelection.v1"
 
     private let defaults: UserDefaults?
     private let encoder = JSONEncoder()
@@ -96,9 +120,57 @@ public final class KeyboardDictationPreferencesStore {
         self.defaults = defaults
     }
 
+    // MARK: - Dictation profile
+
+    public func profileSelection() -> KeyboardProfileSelection {
+        lock.withLock {
+            profileSelectionUnlocked()
+        }
+    }
+
+    /// Publishes one coherent app-owned capability catalogue. A keyboard-side
+    /// selection survives catalogue refreshes while its identifier remains
+    /// available; deleted entries fall back visibly to the app default.
+    @discardableResult
+    public func publishAppProfileSelection(
+        configuration: KeyboardAppProfileConfiguration,
+        now: Date = Date()
+    ) -> KeyboardProfileSelection {
+        lock.withLock {
+            let current = readUnlocked(KeyboardProfileSelection.self, key: Self.profileCatalogueKey)
+            let updated = KeyboardDictationProfileCatalog.selection(
+                for: configuration,
+                revision: (current?.catalogueRevision ?? 0) + 1,
+                modifiedAt: now
+            )
+            writeUnlocked(updated, key: Self.profileCatalogueKey)
+            let selected = readUnlocked(
+                KeyboardStoredProfileIdentifier.self,
+                key: Self.profileSelectionKey
+            )?.selectedIdentifier
+            return updated.selecting(selected ?? updated.defaultIdentifier)
+        }
+    }
+
+    /// Records a keyboard-side quick switch.
+    @discardableResult
+    public func selectProfile(_ identifier: String?) -> KeyboardProfileSelection {
+        lock.withLock {
+            let current = profileSelectionUnlocked()
+            let updated = current.selecting(identifier)
+            writeUnlocked(
+                KeyboardStoredProfileIdentifier(selectedIdentifier: updated.selectedIdentifier),
+                key: Self.profileSelectionKey
+            )
+            return updated
+        }
+    }
+
+    // MARK: - Spoken language
+
     public func selection() -> KeyboardLanguageSelection {
         lock.withLock {
-            readUnlocked() ?? .automaticOnly
+            readUnlocked(KeyboardLanguageSelection.self, key: Self.selectionKey) ?? .automaticOnly
         }
     }
 
@@ -107,12 +179,12 @@ public final class KeyboardDictationPreferencesStore {
     @discardableResult
     public func mirrorAppPreference(selectedIdentifier: String) -> KeyboardLanguageSelection {
         lock.withLock {
-            let current = readUnlocked() ?? .automaticOnly
+            let current = readUnlocked(KeyboardLanguageSelection.self, key: Self.selectionKey) ?? .automaticOnly
             let updated = KeyboardLanguageSelection(
                 selectedIdentifier: selectedIdentifier,
                 quickIdentifiers: current.quickIdentifiers
             )
-            writeUnlocked(updated)
+            writeUnlocked(updated, key: Self.selectionKey)
             return updated
         }
     }
@@ -121,24 +193,41 @@ public final class KeyboardDictationPreferencesStore {
     @discardableResult
     public func select(_ identifier: String) -> KeyboardLanguageSelection {
         lock.withLock {
-            let current = readUnlocked() ?? .automaticOnly
+            let current = readUnlocked(KeyboardLanguageSelection.self, key: Self.selectionKey) ?? .automaticOnly
             let updated = current.selecting(identifier)
-            writeUnlocked(updated)
+            writeUnlocked(updated, key: Self.selectionKey)
             return updated
         }
     }
 
-    private func readUnlocked() -> KeyboardLanguageSelection? {
-        guard let data = defaults?.data(forKey: Self.selectionKey),
-              let selection = try? decoder.decode(KeyboardLanguageSelection.self, from: data),
-              selection.schemaVersion == KeyboardLanguageSelection.schemaVersion else {
+    // MARK: - Storage
+
+    /// Values written by a future schema version are ignored rather than
+    /// migrated, so an older keyboard falls back to its safe default.
+    private func readUnlocked<Value: KeyboardVersionedSelection>(
+        _ type: Value.Type,
+        key: String
+    ) -> Value? {
+        guard let data = defaults?.data(forKey: key),
+              let value = try? decoder.decode(Value.self, from: data),
+              value.schemaVersion == Value.schemaVersion else {
             return nil
         }
-        return selection
+        return value
     }
 
-    private func writeUnlocked(_ selection: KeyboardLanguageSelection) {
-        guard let defaults, let data = try? encoder.encode(selection) else { return }
-        defaults.set(data, forKey: Self.selectionKey)
+    private func writeUnlocked<Value: KeyboardVersionedSelection>(_ value: Value, key: String) {
+        guard let defaults, let data = try? encoder.encode(value) else { return }
+        defaults.set(data, forKey: key)
+        defaults.synchronize()
+    }
+
+    private func profileSelectionUnlocked() -> KeyboardProfileSelection {
+        let catalogue = readUnlocked(KeyboardProfileSelection.self, key: Self.profileCatalogueKey) ?? .directOnly
+        let selected = readUnlocked(
+            KeyboardStoredProfileIdentifier.self,
+            key: Self.profileSelectionKey
+        )?.selectedIdentifier
+        return catalogue.selecting(selected ?? catalogue.defaultIdentifier)
     }
 }

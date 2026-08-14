@@ -38,6 +38,37 @@ final class WatchComplicationStateTests: XCTestCase {
         XCTAssertEqual(WatchComplicationState.state(isRecording: false, latestCaptureStatus: .failed), .failed)
     }
 
+    func testState_keepsAnInterruptedPartialCaptureSending() {
+        for status in [WatchCaptureStatus.recorded, .transferring, .delivered] {
+            XCTAssertEqual(
+                WatchComplicationState.state(
+                    isRecording: false,
+                    hasRecordingError: true,
+                    latestCaptureStatus: status
+                ),
+                .sending,
+                "a durable \(status.rawValue) capture must not be masked by its interruption detail"
+            )
+        }
+
+        XCTAssertEqual(
+            WatchComplicationState.state(
+                isRecording: false,
+                hasRecordingError: true,
+                latestCaptureStatus: nil
+            ),
+            .failed
+        )
+        XCTAssertEqual(
+            WatchComplicationState.state(
+                isRecording: true,
+                hasRecordingError: true,
+                latestCaptureStatus: .recorded
+            ),
+            .recording
+        )
+    }
+
     func testEveryState_hasFaceRenderableContent() {
         for state in WatchComplicationState.allCases {
             XCTAssertFalse(state.symbolName.isEmpty)

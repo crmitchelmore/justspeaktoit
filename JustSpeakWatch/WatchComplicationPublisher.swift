@@ -47,14 +47,11 @@ final class WatchComplicationPublisher {
 
     private func snapshot() -> WatchComplicationSnapshot {
         let now = Date()
-        let state = if !self.isRecording, self.recordingError != nil {
-            WatchComplicationState.failed
-        } else {
-            WatchComplicationState.state(
-                isRecording: self.isRecording,
-                latestCaptureStatus: self.latestCaptureStatus
-            )
-        }
+        let state = WatchComplicationState.state(
+            isRecording: self.isRecording,
+            hasRecordingError: self.recordingError != nil,
+            latestCaptureStatus: self.latestCaptureStatus
+        )
         return WatchComplicationSnapshot(
             state: state,
             updatedAt: now,

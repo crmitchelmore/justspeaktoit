@@ -11,7 +11,6 @@ final class WatchRecordingCoordinator {
     static let shared = WatchRecordingCoordinator()
 
     let recorder = WatchAudioRecorder()
-    let store = WatchCaptureStore.shared
     private let toggleSerialiser = WatchRecordingToggleSerialiser()
 
     private init() {}
@@ -19,7 +18,7 @@ final class WatchRecordingCoordinator {
     /// Starts a recording, or stops the one in progress.
     func toggleRecording() async {
         await self.toggleSerialiser.run {
-            await self.recorder.toggle(store: self.store)
+            await self.recorder.toggle()
         }
     }
 

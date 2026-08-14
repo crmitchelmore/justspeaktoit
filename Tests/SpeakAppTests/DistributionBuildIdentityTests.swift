@@ -247,6 +247,10 @@ final class DistributionBuildIdentityTests: XCTestCase {
             contentsOf: root.appendingPathComponent("JustSpeakWatch/JustSpeakWatchApp.swift"),
             encoding: .utf8
         )
+        let coordinator = try String(
+            contentsOf: root.appendingPathComponent("JustSpeakWatch/WatchRecordingCoordinator.swift"),
+            encoding: .utf8
+        )
 
         XCTAssertTrue(intent.contains("@available(watchOS 11.0, *)"))
         XCTAssertTrue(intent.contains("struct StartWatchRecordingIntent: AudioRecordingIntent"))
@@ -260,8 +264,15 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(actionButton.contains(".accessibilityHint(Text(self.state.recordingActionHint))"))
         XCTAssertTrue(contentView.contains("WatchRecordingCoordinator.shared.toggleRecording()"))
         XCTAssertFalse(contentView.contains("recorder.toggle(store:"))
+        XCTAssertTrue(coordinator.contains("await self.recorder.toggle()"))
+        XCTAssertFalse(coordinator.contains("toggle(store:"))
         XCTAssertTrue(watchApp.contains(".task {"))
         XCTAssertTrue(watchApp.contains("performPendingWatchFaceRequest()"))
+        let recovery = try XCTUnwrap(watchApp.range(of: "await recorder.recoverInterruptedCapture()"))
+        let pending = try XCTUnwrap(
+            watchApp.range(of: "await WatchRecordingCoordinator.shared.performPendingWatchFaceRequest()")
+        )
+        XCTAssertLessThan(recovery.lowerBound, pending.lowerBound)
     }
 
     func testWatchComplication_publishesEveryRecorderAndQueueTransition() throws {
@@ -281,7 +292,7 @@ final class DistributionBuildIdentityTests: XCTestCase {
 
         XCTAssertTrue(recorder.contains("didSet"))
         XCTAssertTrue(recorder.contains("WatchComplicationPublisher.shared.update("))
-        XCTAssertEqual(recorder.components(separatedBy: "store.enqueue(finished)").count - 1, 1)
+        XCTAssertEqual(recorder.components(separatedBy: "store.enqueue(").count - 1, 1)
         XCTAssertTrue(store.contains("WatchComplicationPublisher.shared.update(captures: captures)"))
         XCTAssertTrue(publisher.contains("WidgetCenter.shared.reloadAllTimelines()"))
         XCTAssertTrue(publisher.contains("latestFailureMessage"))

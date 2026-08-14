@@ -227,10 +227,9 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
     }
 
     private func complete(_ finalisation: WatchRecordingFinalisation, recovery: Bool) {
-        lastError = finalisation.outcome.message
-
         switch finalisation.outcome.disposition {
         case .discard:
+            lastError = finalisation.outcome.message
             do {
                 if FileManager.default.fileExists(atPath: finalisation.capture.fileURL.path) {
                     try FileManager.default.removeItem(at: finalisation.capture.fileURL)
@@ -262,6 +261,10 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
                     lastError = "Recording was saved but could not be queued. It will be recovered next time."
                     return
                 }
+                // Publish the interruption detail only after the queue write.
+                // The complication then keeps the durable capture in its
+                // sending state while the in-app UI still explains the stop.
+                lastError = finalisation.outcome.message
             } catch {
                 // The queue write has succeeded; retaining the marker is safe
                 // because enqueue is idempotent on capture id at relaunch.

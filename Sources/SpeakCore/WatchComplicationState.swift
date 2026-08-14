@@ -35,6 +35,25 @@ public enum WatchComplicationState: String, Codable, CaseIterable, Sendable {
         }
     }
 
+    /// Adds recorder failures to the published state without hiding a partial
+    /// capture that was successfully persisted for delivery after an
+    /// interruption. Kept internal because it is composition policy for the
+    /// watch publisher, not part of the cross-platform payload contract.
+    static func state(
+        isRecording: Bool,
+        hasRecordingError: Bool,
+        latestCaptureStatus: WatchCaptureStatus?
+    ) -> WatchComplicationState {
+        let queueState = self.state(
+            isRecording: isRecording,
+            latestCaptureStatus: latestCaptureStatus
+        )
+        guard !isRecording, hasRecordingError, queueState != .sending else {
+            return queueState
+        }
+        return .failed
+    }
+
     /// SF Symbol shown in the circular/corner complication.
     public var symbolName: String {
         switch self {

@@ -64,6 +64,7 @@ extension ModelCatalog {
         // Apple on-device — raw passthrough only.
         "apple/local/SFSpeechRecognizer": .default,
         "apple/local/SpeechTranscriber": .default,
+        "apple/local/DictationTranscriber": .default,
         "apple/local/Dictation": .default,
 
         // Streaming providers that emit incremental finals during the session.

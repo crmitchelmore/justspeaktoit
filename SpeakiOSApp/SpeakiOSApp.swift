@@ -9,6 +9,11 @@ final class SpeakiOSAppDelegate: NSObject, UIApplicationDelegate {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         application.registerForRemoteNotifications()
+        // Watch file transfers launch the app in the background; the session
+        // must be activated during launch so queued captures are delivered.
+        if FeatureFlags.watchCaptureEnabled {
+            WatchCaptureReceiver.shared.activate()
+        }
         Task { @MainActor in
             _ = await AppSettings.shared.syncCloudKitKeys()
         }
@@ -76,6 +81,10 @@ struct SpeakiOSApp: App {
                 .environmentObject(deepLinkRouter)
                 .environment(\.openClawEnabled, FeatureFlags.openClawTabEnabled)
                 .environment(\.iOSKeyboardEnabled, FeatureFlags.iOSKeyboardEnabled)
+                .environment(
+                    \.iOSKeyboardDirectCaptureEnabled,
+                    FeatureFlags.iOSKeyboardDirectCaptureEnabled
+                )
                 .onOpenURL { url in
                     deepLinkRouter.handle(url)
                 }

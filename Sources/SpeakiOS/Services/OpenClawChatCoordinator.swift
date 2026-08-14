@@ -110,7 +110,7 @@ public final class OpenClawChatCoordinator: ObservableObject {
     // MARK: - Dependencies
 
     let client = OpenClawClient()
-    let ttsClient = DeepgramTTSClient()
+    let ttsClient = VoiceOutputRouter()
     let summariser = VoiceSummariser()
     let store = ConversationStore.shared
     let settings = OpenClawSettings.shared
@@ -359,7 +359,7 @@ public final class OpenClawChatCoordinator: ObservableObject {
             accumulatedResponse = ""
             pendingAssistantResponses = []
 
-            if settings.ttsEnabled, appSettings.hasDeepgramKey {
+            if settings.ttsEnabled, hasSelectedVoiceOutputKey {
                 isBufferingForTTS = true
                 messageCountBeforeResponse = currentConversation?.messages.count ?? 0
             }

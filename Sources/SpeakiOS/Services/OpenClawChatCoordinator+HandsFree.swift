@@ -45,7 +45,7 @@ extension OpenClawChatCoordinator {
                 self.updateLiveActivityState()
 
                 // Summarise and speak if enabled
-                if self.settings.ttsEnabled && self.appSettings.hasDeepgramKey {
+                if self.settings.ttsEnabled && self.hasSelectedVoiceOutputKey {
                     await self.speakAssistantResponses(responseBatch)
                 }
                 self.isBufferingForTTS = false
@@ -65,6 +65,13 @@ extension OpenClawChatCoordinator {
                 self?.pendingAssistantResponses = []
                 self?.isBufferingForTTS = false
             }
+        }
+    }
+
+    var hasSelectedVoiceOutputKey: Bool {
+        switch settings.ttsProvider {
+        case .deepgram: appSettings.hasDeepgramKey
+        case .soniox: appSettings.hasSonioxKey
         }
     }
 
@@ -301,13 +308,18 @@ extension OpenClawChatCoordinator {
                 }
             }
 
-            // Apply TTS settings
-            ttsClient.model = settings.ttsModel
-            ttsClient.voice = settings.ttsVoice
-            ttsClient.speed = settings.ttsSpeed
-
-            // Speak via Deepgram TTS
-            try await ttsClient.speak(text: spokenText, apiKey: appSettings.deepgramAPIKey)
+            try await ttsClient.speak(
+                text: spokenText,
+                provider: settings.ttsProvider,
+                model: settings.ttsModel,
+                voice: settings.ttsVoice,
+                lastKnownVoiceName: settings.ttsVoiceName,
+                speed: settings.ttsSpeed,
+                languageIdentifier: settings.ttsLanguageIdentifier,
+                sonioxRegion: settings.sonioxRegion,
+                deepgramAPIKey: appSettings.deepgramAPIKey,
+                sonioxAPIKey: appSettings.sonioxAPIKey
+            )
         } catch {
             logger.error("TTS failed: \(error.localizedDescription)")
             // Don't set self.error — TTS failure shouldn't block the UI

@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import SpeakCore
 import os.log
 
 // @Implement: This file manages the audio recording bit rate and other audio settings. It also depends on app settings to know where to write the audio files to. It never loses any data during recording. It also has the ability to manager audio files e.g. listing, deleting, accessing etc.
@@ -10,6 +11,21 @@ struct RecordingSummary: Identifiable, Hashable {
   let startedAt: Date
   let duration: TimeInterval
   let fileSize: Int64
+}
+
+enum AudioRecordingOwner: Sendable {
+  case dictation
+  case auxiliary
+}
+
+enum AudioRecordingLifecycleEvent: Sendable {
+  case auxiliaryStarted
+  case auxiliaryEnded
+}
+
+struct RecordingStart: Sendable {
+  let url: URL
+  let usedWarmRecorder: Bool
 }
 
 enum AudioFileManagerError: LocalizedError {
@@ -38,7 +54,30 @@ enum AudioFileManagerError: LocalizedError {
   }
 }
 
-actor AudioFileManager {
+actor AudioFileManager { // swiftlint:disable:this type_body_length
+  /// AAC encoder settings for every recording. Kept as one value so the warm-up
+  /// fingerprint can name the exact profile a staged recorder was built for.
+  private enum EncoderProfile {
+    static let id = "aac-44100-mono-128k"
+    static var settings: [String: Any] {
+      [
+        AVFormatIDKey: kAudioFormatMPEG4AAC,
+        AVSampleRateKey: 44_100,
+        AVNumberOfChannelsKey: 1,
+        AVEncoderBitRateKey: 128_000,
+        AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
+      ]
+    }
+  }
+
+  /// A recorder created and prepared ahead of the hotkey, waiting to be claimed.
+  private struct StagedRecorder {
+    let context: CaptureWarmContext
+    let recorder: AVAudioRecorder
+    let id: UUID
+    let url: URL
+  }
+
   private let appSettings: AppSettings
   private let permissionsManager: PermissionsManager
   private let audioDeviceManager: AudioInputDeviceManager
@@ -47,8 +86,19 @@ actor AudioFileManager {
   nonisolated(unsafe) private var recorder: AVAudioRecorder?
   private var currentRecordingID: UUID?
   private var currentRecordingStart: Date?
+  private var currentRecordingOwner: AudioRecordingOwner?
+  /// Reserves the recorder across permission and input-device awaits. Without
+  /// this, actor reentrancy can admit a second start or stage a new warm
+  /// recorder while the first start is still configuring its input session.
+  private var isStartingRecording = false
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
+  private var staged: StagedRecorder?
+  private var warmMachine = CaptureWarmStateMachine()
+  private var lifecycleHandler: (@Sendable (AudioRecordingLifecycleEvent) -> Void)?
   private let logger = Logger(subsystem: "com.github.speakapp", category: "AudioFileManager")
+
+  /// Identifier for the encoder settings every recording uses.
+  static let encoderProfileID = EncoderProfile.id
 
   init(
     appSettings: AppSettings,
@@ -81,60 +131,188 @@ actor AudioFileManager {
     return max(0, min(1, (combinedPower - minDb) / (-minDb)))
   }
 
-  func startRecording() async throws -> URL {
-    guard recorder == nil else { throw AudioFileManagerError.alreadyRecording }
+  // MARK: - Pre-warming (issue #663)
+
+  func setRecordingLifecycleHandler(
+    _ handler: (@Sendable (AudioRecordingLifecycleEvent) -> Void)?
+  ) {
+    self.lifecycleHandler = handler
+  }
+
+  /// Reconciles the staged recorder and its state as one actor-owned operation.
+  /// Keeping both together prevents auxiliary recording flows from invalidating
+  /// the recorder while a separate coordinator still believes it is ready.
+  func reconcileWarmRecorder(for context: CaptureWarmContext, enabled: Bool) {
+    guard self.recorder == nil, !self.isStartingRecording else {
+      self.applyWarmAction(self.warmMachine.recordingBeganWithoutClaim())
+      return
+    }
+    self.applyWarmAction(self.warmMachine.reconcile(with: context, enabled: enabled))
+  }
+
+  func invalidateWarmRecorder() {
+    self.applyWarmAction(self.warmMachine.reset())
+  }
+
+  private func applyWarmAction(_ action: CaptureWarmAction) {
+    switch action {
+    case .none:
+      return
+    case .discard:
+      self.discardWarmRecorder()
+    case .prepare(let context):
+      self.prepareWarmRecorder(for: context)
+    case .discardThenPrepare(let context):
+      self.discardWarmRecorder()
+      self.prepareWarmRecorder(for: context)
+    }
+  }
+
+  /// Creates and prepares a recorder ahead of the hotkey so session start only
+  /// has to call `record()`.
+  ///
+  /// **Privacy boundary.** `AVAudioRecorder.prepareToRecord()` creates the
+  /// output file and readies the encoder; it is `record()` that starts pulling
+  /// samples from the microphone and lights the macOS recording indicator.
+  /// Nothing in this method starts capture, and nothing here may ever call
+  /// `record()` — the staged recorder stays silent until a real session claims
+  /// it. Staging is also skipped entirely unless microphone permission has
+  /// already been granted (see ``CaptureWarmContext/isWarmable``), so warm-up
+  /// can never be the thing that provokes a permission prompt.
+  ///
+  private func prepareWarmRecorder(for context: CaptureWarmContext) {
+    guard self.recorder == nil, context.isWarmable else {
+      self.warmMachine.markFailed(context)
+      return
+    }
+    if let staged = self.staged {
+      guard staged.context != context else {
+        _ = self.warmMachine.markReady(context)
+        return
+      }
+      self.discardWarmRecorder()
+    }
+
+    let id = UUID()
+    let directory = URL(fileURLWithPath: context.recordingsDirectoryPath, isDirectory: true)
+    let fileURL = directory.appendingPathComponent("Recording-\(id.uuidString).m4a")
+
+    do {
+      try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+      let warmRecorder = try AVAudioRecorder(url: fileURL, settings: EncoderProfile.settings)
+      warmRecorder.isMeteringEnabled = true
+      // Creates the file and readies the encoder. Does NOT open the microphone.
+      guard warmRecorder.prepareToRecord() else {
+        _ = warmRecorder.deleteRecording()
+        try? FileManager.default.removeItem(at: fileURL)
+        self.warmMachine.markFailed(context)
+        return
+      }
+      self.staged = StagedRecorder(context: context, recorder: warmRecorder, id: id, url: fileURL)
+      if !self.warmMachine.markReady(context) {
+        self.discardWarmRecorder()
+      }
+    } catch {
+      self.logger.debug("Capture pre-warm failed; falling back to cold start")
+      try? FileManager.default.removeItem(at: fileURL)
+      self.warmMachine.markFailed(context)
+    }
+  }
+
+  /// Tears the staged recorder down and removes the empty file it created.
+  private func discardWarmRecorder() {
+    guard let staged = self.staged else { return }
+    self.staged = nil
+    _ = staged.recorder.deleteRecording()
+    do {
+      try FileManager.default.removeItem(at: staged.url)
+    } catch where (error as NSError).code == NSFileNoSuchFileError {
+      return
+    } catch {
+      self.logger.error("Failed to remove staged recording: \(error.localizedDescription, privacy: .public)")
+    }
+  }
+
+  // MARK: - Recording
+
+  /// Starts capture, claiming the staged recorder when `warmContext` matches
+  /// the one it was prepared for. On the warm path the only work left on the
+  /// hotkey→capture path is the input-device session and `record()` itself.
+  func startRecording( // swiftlint:disable:this function_body_length
+    warmContext: CaptureWarmContext? = nil,
+    owner: AudioRecordingOwner = .auxiliary
+  ) async throws -> RecordingStart {
+    guard self.recorder == nil, !self.isStartingRecording else {
+      throw AudioFileManagerError.alreadyRecording
+    }
+    self.isStartingRecording = true
+    defer { self.isStartingRecording = false }
 
     let permissionStatus = await MainActor.run {
       permissionsManager.refresh(.microphone)
       return permissionsManager.status(for: .microphone)
     }
     if !permissionStatus.isGranted {
+      self.invalidateWarmRecorder()
       let requested = await permissionsManager.request(.microphone)
       guard requested.isGranted else {
         throw AudioFileManagerError.microphonePermissionMissing
       }
     }
 
+    let claimed = self.claimWarmRecorder(matching: warmContext)
+    // A staged recorder the starting session cannot use is stale by definition:
+    // discard it rather than leave an orphaned file behind.
+    if claimed == nil {
+      self.applyWarmAction(self.warmMachine.recordingBeganWithoutClaim())
+    }
+
     let sessionContext = await audioDeviceManager.beginUsingPreferredInput()
 
-    let id = UUID()
-    let startDate = Date()
-    let directory = await MainActor.run { appSettings.recordingsDirectory }
-    let fileURL = directory.appendingPathComponent("Recording-\(id.uuidString).m4a")
-
-    let settings: [String: Any] = [
-      AVFormatIDKey: kAudioFormatMPEG4AAC,
-      AVSampleRateKey: 44_100,
-      AVNumberOfChannelsKey: 1,
-      AVEncoderBitRateKey: 128_000,
-      AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
-    ]
-
     do {
-      let newRecorder = try AVAudioRecorder(url: fileURL, settings: settings)
-      newRecorder.isMeteringEnabled = true
-      newRecorder.prepareToRecord()
-      // Issue #641: the caller plays the start cue on the strength of this
-      // return, so only claim readiness once the recorder says it is capturing.
-      // `record()` answering false (or a recorder that never flips to
-      // `isRecording`) used to be swallowed, leaving the user speaking into a
-      // microphone that was not running.
-      guard newRecorder.record(), newRecorder.isRecording else {
-        newRecorder.stop()
-        // `prepareToRecord()` already created the destination file; nothing owns
-        // it once we bail out, so remove it rather than leaking an empty file.
-        try? FileManager.default.removeItem(at: fileURL)
-        await audioDeviceManager.endUsingPreferredInput(session: sessionContext)
-        throw AudioFileManagerError.failedToStartCapture
+      let captureRequestedAt = Date()
+      let id: UUID
+      let fileURL: URL
+      let newRecorder: AVAudioRecorder
+      if let claimed {
+        id = claimed.id
+        fileURL = claimed.url
+        newRecorder = claimed.recorder
+      } else {
+        id = UUID()
+        let directory = await MainActor.run { appSettings.recordingsDirectory }
+        fileURL = directory.appendingPathComponent("Recording-\(id.uuidString).m4a")
+        newRecorder = try AVAudioRecorder(url: fileURL, settings: EncoderProfile.settings)
+        newRecorder.isMeteringEnabled = true
+        guard newRecorder.prepareToRecord() else {
+          _ = newRecorder.deleteRecording()
+          try? FileManager.default.removeItem(at: fileURL)
+          throw AudioFileManagerError.failedToCreateRecorder
+        }
       }
-      let readyDelay = Date().timeIntervalSince(startDate)
+      try self.startCapturing(with: newRecorder, at: fileURL)
+      let startDate = Date()
+      let readyDelay = startDate.timeIntervalSince(captureRequestedAt)
       logger.info("Audio capture confirmed live \(Int(readyDelay * 1000))ms after start request")
       recorder = newRecorder
       currentRecordingID = id
       currentRecordingStart = startDate
+      currentRecordingOwner = owner
       activeInputSession = sessionContext
-      return fileURL
+      if claimed != nil {
+        // The staged file was created while the app was idle, so its creation
+        // date would otherwise misdate the recording in listings.
+        try? FileManager.default.setAttributes([.creationDate: startDate], ofItemAtPath: fileURL.path)
+      }
+      if owner == .auxiliary {
+        self.lifecycleHandler?(.auxiliaryStarted)
+      }
+      return RecordingStart(url: fileURL, usedWarmRecorder: claimed != nil)
     } catch let error as AudioFileManagerError {
+      // Capture that never started (or a recorder we could not build) must
+      // surface as itself: the start sequencer distinguishes them, and only a
+      // confirmed capture is allowed to play the cue.
+      await audioDeviceManager.endUsingPreferredInput(session: sessionContext)
       throw error
     } catch {
       await audioDeviceManager.endUsingPreferredInput(session: sessionContext)
@@ -142,17 +320,47 @@ actor AudioFileManager {
     }
   }
 
+  /// Starts the recorder and only returns once it says it is capturing.
+  ///
+  /// Issue #641: the caller plays the start cue on the strength of this
+  /// returning, so readiness has to be proven rather than assumed. `record()`
+  /// answering false (or a recorder that never flips to `isRecording`) used to
+  /// be swallowed, leaving the user speaking into a microphone that was not
+  /// running. Warm and cold recorders are held to the same proof — a staged
+  /// recorder can be just as dead.
+  private func startCapturing(with recorder: AVAudioRecorder, at fileURL: URL) throws {
+    guard recorder.record(), recorder.isRecording else {
+      recorder.stop()
+      // The destination file already exists (staged, or created by
+      // `prepareToRecord()`); nothing owns it once we bail out, so remove it
+      // rather than leaking an empty file.
+      _ = recorder.deleteRecording()
+      try? FileManager.default.removeItem(at: fileURL)
+      throw AudioFileManagerError.failedToStartCapture
+    }
+  }
+
+  private func claimWarmRecorder(matching context: CaptureWarmContext?) -> StagedRecorder? {
+    guard let context, self.warmMachine.claim(for: context) else { return nil }
+    guard let staged = self.staged, staged.context == context else { return nil }
+    self.staged = nil
+    return staged
+  }
+
   func stopRecording() async throws -> RecordingSummary {
-    guard let recorder, let currentRecordingID, let start = currentRecordingStart else {
+    guard let recorder, let recordingID = currentRecordingID, let start = currentRecordingStart else {
       throw AudioFileManagerError.noActiveRecording
     }
 
+    let owner = self.currentRecordingOwner
     recorder.stop()
     self.recorder = nil
-    currentRecordingStart = nil
+    self.currentRecordingStart = nil
+    self.currentRecordingID = nil
+    self.currentRecordingOwner = nil
 
     let url = recorder.url
-    let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+    let attributes = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
     let fileSize = (attributes[.size] as? NSNumber)?.int64Value ?? 0
     let measuredDuration = recorder.currentTime
     let preciseDuration = (try? AVAudioPlayer(contentsOf: url).duration) ?? measuredDuration
@@ -160,7 +368,7 @@ actor AudioFileManager {
       preciseDuration.isFinite && preciseDuration > 0 ? preciseDuration : measuredDuration
 
     let summary = RecordingSummary(
-      id: currentRecordingID,
+      id: recordingID,
       url: url,
       startedAt: start,
       duration: duration,
@@ -172,11 +380,16 @@ actor AudioFileManager {
       activeInputSession = nil
     }
 
+    if owner == .auxiliary {
+      self.lifecycleHandler?(.auxiliaryEnded)
+    }
+
     return summary
   }
 
   func cancelRecording(deleteFile: Bool = true) async {
     let session = activeInputSession
+    let owner = currentRecordingOwner
 
     if let recorder {
       recorder.stop()
@@ -184,6 +397,7 @@ actor AudioFileManager {
       self.recorder = nil
       currentRecordingStart = nil
       currentRecordingID = nil
+      currentRecordingOwner = nil
       if deleteFile {
         try? FileManager.default.removeItem(at: url)
       }
@@ -192,6 +406,10 @@ actor AudioFileManager {
     if let session {
       await audioDeviceManager.endUsingPreferredInput(session: session)
       activeInputSession = nil
+    }
+
+    if owner == .auxiliary {
+      self.lifecycleHandler?(.auxiliaryEnded)
     }
   }
 
@@ -247,4 +465,4 @@ actor AudioFileManager {
     try FileManager.default.copyItem(at: url, to: destination)
     return destination
   }
-}
+} // swiftlint:disable:this file_length

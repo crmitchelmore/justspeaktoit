@@ -23,6 +23,7 @@ final class GladiaLiveController: NSObject, LiveTranscriptionController {
   private let audioProcessor = GladiaAudioProcessor()
   private var hasFinished: Bool = false
   private var stopContinuation: CheckedContinuation<Void, Never>?
+  private var stopGeneration = LiveTranscriptionStopGeneration()
 
   private let targetSampleRate: Double = 16_000
   private var targetFormat: AVAudioFormat?
@@ -88,15 +89,20 @@ final class GladiaLiveController: NSObject, LiveTranscriptionController {
       transcriber = newTranscriber
 
       newTranscriber.start(
-        onTranscript: { [weak self] event in
-          Task { @MainActor [weak self] in
+        onTranscript: { [weak self, weak newTranscriber] event in
+          Task { @MainActor [weak self, weak newTranscriber] in
             guard let self else { return }
+            // Cached controllers are reused between recordings, so a message
+            // queued by the previous stream can land here after the next
+            // recording started. Only the current stream owns this state.
+            guard LiveTranscriptionRun.isCurrent(newTranscriber, activeStream: self.transcriber) else { return }
             self.handleTranscript(event)
           }
         },
-        onError: { [weak self] error in
-          Task { @MainActor [weak self] in
+        onError: { [weak self, weak newTranscriber] error in
+          Task { @MainActor [weak self, weak newTranscriber] in
             guard let self else { return }
+            guard LiveTranscriptionRun.isCurrent(newTranscriber, activeStream: self.transcriber) else { return }
             if !self.isRunning { return }
             self.delegate?.liveTranscriber(self, didFail: error)
           }
@@ -144,11 +150,15 @@ final class GladiaLiveController: NSObject, LiveTranscriptionController {
 
       let budget = appSettings.liveModelCapabilities.postStopFinalizeBudget
       if budget > 0 {
+        let generation = stopGeneration.begin()
         await withCheckedContinuation { continuation in
           stopContinuation = continuation
           Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(budget))
-            guard let self, let cont = self.stopContinuation else { return }
+            guard let self,
+              self.stopGeneration.isCurrent(generation),
+              let cont = self.stopContinuation
+            else { return }
             self.stopContinuation = nil
             cont.resume()
           }

@@ -3,9 +3,10 @@ import Foundation
 import SpeakCore
 import XCTest
 
-// swiftlint:disable file_length type_body_length
+// swiftlint:disable file_length
 
 @MainActor
+// swiftlint:disable:next type_body_length
 final class KeyboardViewModelTests: XCTestCase {
     private final class FakeEngine: KeyboardDictationEngineProtocol {
         var onEvent: ((UUID, KeyboardDictationMachine.Event) -> Void)?
@@ -452,4 +453,5 @@ final class KeyboardViewModelTests: XCTestCase {
         )
     }
 }
+// swiftlint:enable file_length
 #endif

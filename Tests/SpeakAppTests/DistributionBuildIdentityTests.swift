@@ -248,6 +248,7 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(instantCoordinator.contains("iOSHistoryManager.shared.recordTranscription"))
     }
 
+    // swiftlint:disable:next function_body_length
     func testIOSReleaseWorkflowSignsAndValidatesKeyboardExtension() throws {
         let workflow = try String(
             contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/release-ios.yml"),

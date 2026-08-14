@@ -33,7 +33,7 @@ final class KeyboardViewModel: ObservableObject {
     private let handoffStore: KeyboardHandoffStore
     private let preferences: KeyboardDictationPreferencesStore
     private let directCapturePolicy: KeyboardCapturePlanner.DirectCapturePolicy
-    private let directCaptureCapabilities: () -> DirectCaptureCapabilities
+    private let directCaptureCapabilities: @MainActor () -> DirectCaptureCapabilities
     private var languageSelection = KeyboardLanguageSelection.automaticOnly
     private var profileSelection = KeyboardProfileSelection.directOnly
     private var handoffForwarder: AnyCancellable?
@@ -44,21 +44,32 @@ final class KeyboardViewModel: ObservableObject {
     private var currentDocumentIdentifier: UUID?
     private var proxyInsert: ((String) -> Void)?
 
+    convenience init() {
+        self.init(
+            engine: KeyboardDictationEngine(),
+            handoff: KeyboardHandoffController(),
+            handoffStore: .shared,
+            preferences: .shared,
+            directCapturePolicy: Self.buildDirectCapturePolicy,
+            directCaptureCapabilities: {
+                DirectCaptureCapabilities(
+                    microphonePermission: KeyboardDictationEngine.microphonePermission(),
+                    speechRecognitionPermission: KeyboardDictationEngine.speechRecognitionPermission(),
+                    speechRecognizerAvailable: {
+                        KeyboardDictationEngine.recognizerAvailable(localeIdentifier: $0)
+                    }
+                )
+            }
+        )
+    }
+
     init(
-        engine: any KeyboardDictationEngineProtocol = KeyboardDictationEngine(),
-        handoff: KeyboardHandoffController = KeyboardHandoffController(),
-        handoffStore: KeyboardHandoffStore = .shared,
-        preferences: KeyboardDictationPreferencesStore = .shared,
-        directCapturePolicy: KeyboardCapturePlanner.DirectCapturePolicy = KeyboardViewModel.buildDirectCapturePolicy,
-        directCaptureCapabilities: @escaping () -> DirectCaptureCapabilities = {
-            DirectCaptureCapabilities(
-                microphonePermission: KeyboardDictationEngine.microphonePermission(),
-                speechRecognitionPermission: KeyboardDictationEngine.speechRecognitionPermission(),
-                speechRecognizerAvailable: {
-                    KeyboardDictationEngine.recognizerAvailable(localeIdentifier: $0)
-                }
-            )
-        }
+        engine: any KeyboardDictationEngineProtocol,
+        handoff: KeyboardHandoffController,
+        handoffStore: KeyboardHandoffStore,
+        preferences: KeyboardDictationPreferencesStore,
+        directCapturePolicy: KeyboardCapturePlanner.DirectCapturePolicy,
+        directCaptureCapabilities: @escaping @MainActor () -> DirectCaptureCapabilities
     ) {
         self.engine = engine
         self.handoff = handoff

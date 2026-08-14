@@ -14,9 +14,12 @@ always-ready microphone behaviour is documented in
 ## Scope
 
 The Just Speak keyboard is transcription-first: a live transcript strip plus
-one control row (globe · language chip · mic/stop · delete · return). There is
-deliberately no QWERTY layer; the globe key returns to a system keyboard for
-typing. Two capture paths exist behind `KeyboardCapturePlanner`:
+one control row (globe · language chip · profile chip · mic/stop · delete ·
+return). Each chip appears only when it has somewhere to switch to, and the mic
+drops its "Speak"/"Stop" caption while both chips are present so the row stays
+one line at the same ~170 pt height. There is deliberately no QWERTY layer; the
+globe key returns to a system keyboard for typing. Two capture paths exist
+behind `KeyboardCapturePlanner`:
 
 - **Direct** (primary): the extension records via `AVAudioEngine` and
   transcribes with Apple Speech (on-device preferred), streaming text into the
@@ -129,6 +132,38 @@ TestFlight workflow needs a provisioning profile for bundle ID
 3. Dictate in the switched language and verify recognition uses it.
 4. Switch the app language, reopen the keyboard → chip follows the app.
 
+### Profile/mode quick-switch
+
+The app publishes one non-secret capability snapshot with two modes. `Local`
+runs Apple Speech directly in the extension without post-processing. `App`
+routes through Instant Dictation using the app's exact selected transcription
+mode/model, spoken language, and post-processing model. API keys stay in the
+app Keychain, and the menu remains available without Apple Intelligence.
+
+1. In the app, select a remote streaming or batch model, language, and
+   post-processing model. Open the keyboard → its menu shows `App`; the full
+   accessibility label names the model and “Via app”, while `Local` says
+   “On-device”.
+2. Tap the chip, then a mode → each mode is reachable in two taps. The menu is
+   disabled from recording start until the result settles.
+3. Choose `Local` → Apple Speech streams into the field directly and no
+   post-processing runs. Repeat on a device without Apple Intelligence; the
+   profile control must still appear and work.
+4. Choose `App` with Instant Dictation ready → the app uses the exact model,
+   language, and polish model shown in settings; the completed result is
+   inserted once. Confirm the handoff record contains identifiers and route
+   metadata but no API key, token, prompt, or surrounding text.
+5. Select a remote model without its credential → the keyboard reports the
+   profile unavailable and does not silently fall back to Apple Speech.
+6. Change model, language, or post-processing while the app remains active,
+   then switch straight to another app → reopening the keyboard shows the new
+   values without requiring an app relaunch.
+7. Kill and reopen the keyboard → its last valid `Local`/`App` selection
+   survives. If a published mode is retired, the selection visibly falls back
+   to the app default instead of retaining stale fields.
+8. Switch fields during an App request → the nonce-scoped request is cancelled
+   and no result lands in the new destination.
+
 ### Direct path: interruptions and target changes
 
 1. Receive a call / trigger Siri mid-dictation → capture ends, words already
@@ -194,11 +229,16 @@ dictation), and touch targets of at least 44 points.
   permissions" above; the handoff path covers devices that refuse.
 - The extension records only while the mic key is active and prefers on-device
   recognition.
+- `Local` sends no transcript to an app or network post-processor. `App`
+  explicitly routes the selected model through the containing app; credentials
+  stay in Keychain and never enter the App Group.
 - The keyboard does not read, persist, or transmit surrounding host text.
 - The App Group contains: versioned handoff records (schema version, request
   UUID, document identifier, timestamps, phase, safe failure enum, throttled
-  interim text, short-lived final transcript) and the language selection.
-  Never audio or credentials.
+  interim text, short-lived final transcript), the language selection, and a
+  schema-versioned profile projection containing identifiers, display metadata,
+  language, and explicit route only. Never audio, credentials, prompts, or
+  surrounding host text.
 - No private settings URL, responder-chain workaround, Apple keyboard asset,
   or unsupported containing-app launch is used.
 - App Review notes should describe both capture paths, the permission grants,

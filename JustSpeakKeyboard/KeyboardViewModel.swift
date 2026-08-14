@@ -2,10 +2,11 @@ import Combine
 import Foundation
 import SpeakCore
 
-/// Top-level keyboard model. Plans the capture path for each appearance and
-/// drives either the in-extension dictation engine (primary) or the Instant
-/// Dictation handoff (fallback), exposing one surface to the SwiftUI view.
+/// Top-level keyboard model. Routes the selected mode to the in-extension
+/// Apple Speech engine or the app-owned Instant Dictation handoff, exposing one
+/// surface to the SwiftUI view.
 @MainActor
+// swiftlint:disable:next type_body_length
 final class KeyboardViewModel: ObservableObject {
     enum Mode: Equatable {
         case direct
@@ -17,6 +18,7 @@ final class KeyboardViewModel: ObservableObject {
     @Published private(set) var directState: KeyboardDictationMachine.State = .idle
     @Published private(set) var liveText = ""
     @Published private(set) var languageChipLabel: String?
+    @Published private(set) var profileChipLabel: String?
 
     let handoff: KeyboardHandoffController
 
@@ -25,7 +27,9 @@ final class KeyboardViewModel: ObservableObject {
     private let handoffStore: KeyboardHandoffStore
     private let preferences: KeyboardDictationPreferencesStore
     private var languageSelection = KeyboardLanguageSelection.automaticOnly
+    private var profileSelection = KeyboardProfileSelection.directOnly
     private var handoffForwarder: AnyCancellable?
+    private var hasFullAccess = false
 
     private var currentDocumentIdentifier: UUID?
     private var proxyInsert: ((String) -> Void)?
@@ -50,6 +54,37 @@ final class KeyboardViewModel: ObservableObject {
         machine.isCapturing
     }
 
+    /// Capture or app handoff is in flight; the quick-switch chips and editing
+    /// keys stay disabled until it settles.
+    var isBusy: Bool {
+        switch mode {
+        case .direct:
+            return machine.isCapturing
+        case .handoff:
+            return handoff.presentation == .starting || handoff.presentation == .recording
+                || handoff.presentation == .transcribing
+        case .blocked:
+            return false
+        }
+    }
+
+    /// Full name of the selected dictation profile, for accessibility.
+    var profileDisplayName: String {
+        profileSelection.displayName
+    }
+
+    var profileRouteDisplayName: String {
+        profileSelection.route.displayName
+    }
+
+    var profileOptions: [KeyboardDictationProfileOption] {
+        profileSelection.availableProfiles
+    }
+
+    var selectedProfileIdentifier: String {
+        profileSelection.selectedIdentifier
+    }
+
     // MARK: - Lifecycle from the input view controller
 
     func activate(
@@ -59,6 +94,7 @@ final class KeyboardViewModel: ObservableObject {
         deleteBackward: @escaping () -> Void,
         contextBeforeInput: @escaping () -> String?
     ) {
+        self.hasFullAccess = hasFullAccess
         self.currentDocumentIdentifier = documentIdentifier
         self.proxyInsert = insertText
         self.proxyDeleteBackward = deleteBackward
@@ -66,11 +102,31 @@ final class KeyboardViewModel: ObservableObject {
         handoffStore.recordExtensionObservation(hasFullAccess: hasFullAccess)
 
         languageSelection = preferences.selection()
-        refreshLanguageChip()
+        profileSelection = preferences.profileSelection()
+        refreshChips()
+
+        configureCaptureMode(autoStartHandoff: true)
+    }
+
+    private func configureCaptureMode(autoStartHandoff: Bool) {
+        guard let currentDocumentIdentifier, let proxyInsert else { return }
+        if let reason = KeyboardLaunchPolicy.blockReason(
+            hasFullAccess: hasFullAccess,
+            sharedContainerAvailable: handoffStore.isAvailable
+        ) {
+            handoff.deactivate()
+            mode = .blocked(reason)
+            return
+        }
+
+        if profileSelection.route == .appHandoff {
+            enterHandoffMode(autoStart: autoStartHandoff)
+            return
+        }
 
         let path = KeyboardCapturePlanner.path(
-            hasFullAccess: hasFullAccess,
-            sharedContainerAvailable: handoffStore.isAvailable,
+            hasFullAccess: true,
+            sharedContainerAvailable: true,
             microphonePermission: KeyboardDictationEngine.microphonePermission(),
             speechRecognitionPermission: KeyboardDictationEngine.speechRecognitionPermission(),
             speechRecognizerAvailable: KeyboardDictationEngine.recognizerAvailable(
@@ -79,12 +135,19 @@ final class KeyboardViewModel: ObservableObject {
         )
         switch path {
         case .direct:
+            handoff.deactivate()
             mode = .direct
             machine = KeyboardDictationMachine()
             directState = machine.state
             liveText = ""
         case .handoff:
-            enterHandoffMode()
+            handoff.activate(
+                documentIdentifier: currentDocumentIdentifier,
+                profile: captureProfile,
+                autoStart: autoStartHandoff,
+                insertText: proxyInsert
+            )
+            mode = .handoff
         case let .blocked(reason):
             mode = .blocked(reason)
         }
@@ -105,7 +168,8 @@ final class KeyboardViewModel: ObservableObject {
         case .direct:
             // The keyboard's own streamed insertions raise text/selection
             // callbacks, so only a genuine document change ends the session.
-            if changedDocument, machine.isCapturing {
+            guard changedDocument else { return }
+            if machine.isCapturing {
                 dispatch(.targetChanged)
             }
         case .handoff:
@@ -152,19 +216,46 @@ final class KeyboardViewModel: ObservableObject {
     }
 
     func cycleLanguage() {
-        guard mode == .direct, !machine.isCapturing,
+        guard mode == .direct, !isBusy,
               let next = languageSelection.nextQuickIdentifier else {
             return
         }
         languageSelection = preferences.select(next)
-        refreshLanguageChip()
+        refreshChips()
+    }
+
+    func cycleProfile() {
+        selectProfile(profileSelection.nextQuickIdentifier)
+    }
+
+    func selectProfile(_ identifier: String?) {
+        guard !isBusy, identifier != nil else { return }
+        profileSelection = preferences.selectProfile(identifier)
+        refreshChips()
+        configureCaptureMode(autoStartHandoff: false)
     }
 
     // MARK: - Direct capture wiring
 
     private var activeLocaleIdentifier: String {
         TranscriptionLanguageCatalog.localeIdentifier(
-            for: languageSelection.selectedIdentifier
+            for: captureProfile.languageIdentifier
+        )
+    }
+
+    private var captureProfile: KeyboardDictationProfileOption {
+        let selected = profileSelection.selectedProfile
+        guard selected.route == .directAppleSpeech else { return selected }
+        return KeyboardDictationProfileOption(
+            id: selected.id,
+            displayName: selected.displayName,
+            chipLabel: selected.chipLabel,
+            route: selected.route,
+            transcriptionMode: selected.transcriptionMode,
+            transcriptionModelIdentifier: selected.transcriptionModelIdentifier,
+            languageIdentifier: languageSelection.selectedIdentifier,
+            postProcessingEnabled: selected.postProcessingEnabled,
+            postProcessingModelIdentifier: selected.postProcessingModelIdentifier
         )
     }
 
@@ -249,21 +340,24 @@ final class KeyboardViewModel: ObservableObject {
               failure == .microphoneUnavailable || failure == .speechRecognitionUnavailable else {
             return
         }
-        enterHandoffMode()
+        enterHandoffMode(autoStart: true)
     }
 
-    private func enterHandoffMode() {
+    private func enterHandoffMode(autoStart: Bool) {
         mode = .handoff
         guard let currentDocumentIdentifier, let proxyInsert else { return }
         handoff.activate(
             documentIdentifier: currentDocumentIdentifier,
+            profile: captureProfile,
+            autoStart: autoStart,
             insertText: proxyInsert
         )
     }
 
-    private func refreshLanguageChip() {
+    private func refreshChips() {
         languageChipLabel = languageSelection.quickIdentifiers.count > 1
             ? KeyboardLanguageSelection.chipLabel(for: languageSelection.selectedIdentifier)
             : nil
+        profileChipLabel = profileSelection.availableProfiles.count > 1 ? profileSelection.chipLabel : nil
     }
 }

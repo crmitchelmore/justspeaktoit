@@ -79,7 +79,7 @@ public struct KeyboardSetupView: View {
                 .foregroundStyle(.secondary)
             }
 
-            Section("Fallback: Instant Dictation") {
+            Section("App Mode: Instant Dictation") {
                 statusRow(
                     title: "App-owned microphone",
                     isReady: instantDictation.isReady || instantDictation.isRecording,
@@ -106,12 +106,10 @@ public struct KeyboardSetupView: View {
                 .accessibilityIdentifier("keyboardInstantDictationButton")
 
                 Text(
-                    "Only needed if the keyboard can't record itself — for example if you declined its "
-                        + "microphone or speech-recognition permission, your language has no speech "
-                        + "recogniser, or in-keyboard capture fails. Just Speak then keeps a ready "
-                        + "microphone session and the keyboard hands recording to the app — still without "
-                        + "leaving the app you're typing in. Idle audio is discarded immediately and never "
-                        + "saved or sent."
+                    "Required when the keyboard's App mode uses your selected model and post-processing. "
+                        + "It is also the fallback if local keyboard capture is unavailable. Just Speak keeps "
+                        + "a ready microphone session and handles recording without leaving the app you're "
+                        + "typing in. Idle audio is discarded immediately and never saved or sent."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -222,10 +220,11 @@ public struct KeyboardSetupView: View {
 
     private func refresh() {
         observation = KeyboardHandoffStore.shared.extensionObservation()
-        // Keep the keyboard's language chip in sync with the app preference.
+        // Keep the keyboard's chips in sync with the app preferences.
         KeyboardDictationPreferencesStore.shared.mirrorAppPreference(
             selectedIdentifier: AppSettings.shared.preferredLocaleIdentifier
         )
+        AppSettings.shared.publishKeyboardProfileSelection()
     }
 }
 #endif

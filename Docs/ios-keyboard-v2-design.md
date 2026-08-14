@@ -95,17 +95,26 @@ missing recogniser, or capture failure degrades to **Handoff** at runtime
 - Language quick-switch chip: `KeyboardDictationPreferencesStore` (App Group)
   mirrors the app's spoken-language preference and keeps a ring of up to four
   recent languages; the chip cycles the ring in one tap (≤2 taps requirement).
+- Profile/mode menu: the same store holds one schema-versioned, app-owned
+  `KeyboardProfileSelection` catalogue. `Local` is explicit direct Apple Speech
+  with no polish. `App` snapshots the app's exact transcription mode/model,
+  language, and post-processing model with an `appHandoff` route. Both options
+  are defined by `KeyboardDictationProfileCatalog` in SpeakCore, remain
+  reachable in two taps, and stay available without Apple Foundation Models.
+  The projection contains no credentials or custom prompt text.
 - Guardrails: a `documentIdentifier` change mid-session cancels capture and
   commits what was already streamed (never streams into the wrong field);
   audio interruptions finish gracefully, keeping inserted words.
 
 ### Handoff path (fallback)
 
-The v1 Instant Dictation flow is preserved verbatim behind
+The v1 Instant Dictation transport is preserved behind
 `KeyboardHandoffController` (extension) + `KeyboardInstantDictationCoordinator`
 (app): app-owned mic session, nonce-scoped App Group records, interim
-transcript mirroring, single insert on completion. The keyboard automatically
-degrades to this path when direct capture fails with a permission-style error.
+transcript mirroring, single insert on completion. Each request snapshots its
+selected profile, and the app executes that exact model/language/polish
+configuration or returns `profileUnavailable`; it never silently downgrades.
+The keyboard also automatically degrades to this path when direct capture fails with a permission-style error.
 Setup copy now frames Instant Dictation as the fallback, not the primary flow.
 
 ### Surface
@@ -114,20 +123,23 @@ One compact layout (~170 pt portrait iPhone; v1 was 300 pt):
 
 - **Strip:** live partial transcript while dictating; state/setup copy
   otherwise; inline Cancel while capturing.
-- **Control row:** globe (when required) · language chip · mic/stop ·
-  delete · return. Deliberately no QWERTY — the globe key returns to the
-  system keyboard for typing, per the v1 correction-UX decision which stands.
+- **Control row:** globe (when required) · language chip · profile chip ·
+  mic/stop · delete · return. Each chip appears only when it has somewhere to
+  switch to, and the mic drops its caption while both are present so the row
+  stays one line at the same height. Deliberately no QWERTY — the globe key
+  returns to the system keyboard for typing, per the v1 correction-UX decision
+  which stands.
 
 ## What was kept vs redone
 
 | Piece | v2 status |
 | --- | --- |
-| `KeyboardHandoffStore` / records / signals (SpeakCore) | Kept unchanged (fallback transport) |
-| `KeyboardInstantDictationStore` + coordinator | Kept unchanged (fallback capture) |
+| `KeyboardHandoffStore` / records / signals (SpeakCore) | Extended with an immutable profile snapshot |
+| `KeyboardInstantDictationStore` + coordinator | Extended to execute the request snapshot |
 | `KeyboardLaunchPolicy` | Kept; feeds the new planner |
 | `KeyboardCorrectionPlan` (safe undo) | Kept in SpeakCore; the v2 surface drops the undo/cursor row in favour of delete + re-dictation |
 | `KeyboardViewController` monolith (~800 lines incl. UI) | Split: shell controller, `KeyboardViewModel`, `KeyboardRootView`, `KeyboardDictationEngine`, `KeyboardHandoffController` |
-| 13-state single presentation enum | Direct machine (6 states) + handoff presentation (10), unified in one strip |
+| 13-state single presentation enum | Direct machine + handoff presentation, unified in one strip |
 
 ## Privacy and review posture
 
@@ -136,8 +148,8 @@ One compact layout (~170 pt portrait iPhone; v1 was 300 pt):
   when the user explicitly enables the fallback.
 - The keyboard still never reads or transmits surrounding host text; edits go
   one way through `textDocumentProxy`.
-- The App Group carries: handoff records (unchanged from v1) and the language
-  selection. Never audio, never credentials.
+- The App Group carries handoff records, language selection, and a non-secret
+  profile projection. Never audio, credentials, custom prompts, or surrounding text.
 - Extension Info.plist declares microphone and speech-recognition usage
   strings; both permissions are user-granted and revocable in Settings.
 

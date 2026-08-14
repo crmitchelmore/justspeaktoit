@@ -226,7 +226,7 @@ final class DistributionBuildIdentityTests: XCTestCase {
         for source in [controller, handoff, rootView] {
             XCTAssertFalse(source.contains("extensionContext.open"))
         }
-        XCTAssertTrue(handoff.contains("if requestID == nil, isInstantReady"))
+        XCTAssertTrue(handoff.contains("guard isInstantReady, let currentDocumentIdentifier"))
         XCTAssertTrue(handoff.contains("KeyboardHandoffSignal.postRequestChanged"))
         XCTAssertTrue(rootView.contains("Open Just Speak once"))
         XCTAssertTrue(rootView.contains("keyboardLiveTranscript"))
@@ -238,7 +238,10 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(instantCoordinator.contains("updateInterim"))
         XCTAssertFalse(instantCoordinator.contains(".write("))
         XCTAssertFalse(instantCoordinator.contains(".upload("))
-        XCTAssertTrue(instantCoordinator.contains("saveToHistory: true"))
+        XCTAssertTrue(instantCoordinator.contains("saveToHistory: false"))
+        XCTAssertTrue(instantCoordinator.contains("saveToHistory(transcript, result: result)"))
+        XCTAssertTrue(instantCoordinator.contains("saveToHistory(result.text, result: result)"))
+        XCTAssertTrue(instantCoordinator.contains("iOSHistoryManager.shared.recordTranscription"))
     }
 
     func testIOSReleaseWorkflowSignsAndValidatesKeyboardExtension() throws {

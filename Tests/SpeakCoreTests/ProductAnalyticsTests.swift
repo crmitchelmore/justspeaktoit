@@ -1,9 +1,10 @@
 // Consent, lifecycle and payload privacy flows share fixtures whose behaviour is easier to audit in one file.
-// swiftlint:disable file_length type_body_length
+// swiftlint:disable file_length
 import Foundation
 @testable import SpeakCore
 import XCTest
 
+// swiftlint:disable:next type_body_length
 final class ProductAnalyticsTests: XCTestCase {
     func testUnknownConsent_SendsNothingAndDoesNotCreateIdentity() async throws {
         let fixture = try Fixture()

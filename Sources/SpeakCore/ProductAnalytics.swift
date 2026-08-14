@@ -1,4 +1,4 @@
-// The event catalogue, payload boundary and controller stay together so the privacy contract can be audited as one unit.
+// Event catalogue, payload boundary and controller stay together so the privacy contract can be audited as one unit.
 // swiftlint:disable file_length
 import Foundation
 
@@ -46,20 +46,22 @@ public enum AnalyticsProviderType: String, Codable, Sendable {
     case revAI = "rev_ai"
     case xAI = "xai"
 
+    private static let liveProviderMapping: [LiveTranscriptionProviderID: AnalyticsProviderType] = [
+        .apple: .apple,
+        .deepgram: .deepgram,
+        .cartesia: .cartesia,
+        .gladia: .gladia,
+        .modulate: .modulate,
+        .assemblyai: .assemblyAI,
+        .soniox: .soniox,
+        .elevenlabs: .elevenLabs,
+        .openai: .openAI,
+        .speechmatics: .speechmatics,
+        .xai: .xAI
+    ]
+
     public init(liveProvider: LiveTranscriptionProviderID) {
-        self = switch liveProvider {
-        case .apple: .apple
-        case .deepgram: .deepgram
-        case .cartesia: .cartesia
-        case .gladia: .gladia
-        case .modulate: .modulate
-        case .assemblyai: .assemblyAI
-        case .soniox: .soniox
-        case .elevenlabs: .elevenLabs
-        case .openai: .openAI
-        case .speechmatics: .speechmatics
-        case .xai: .xAI
-        }
+        self = Self.liveProviderMapping[liveProvider] ?? .other
     }
 }
 

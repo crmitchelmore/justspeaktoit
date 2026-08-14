@@ -56,7 +56,14 @@ final class WatchCaptureStore: NSObject, ObservableObject {
     // MARK: - Capture queue
 
     /// Registers a finished recording and hands it to WatchConnectivity.
-    func enqueue(_ recording: WatchAudioRecorder.FinishedRecording) {
+    @discardableResult
+    func enqueue(_ recording: WatchAudioRecorder.FinishedRecording) -> Bool {
+        if captures.contains(where: { $0.id == recording.id }) {
+            startTransfer(for: recording.id)
+            return true
+        }
+
+        let previousCaptures = captures
         let capture = WatchCapture(
             id: recording.id,
             createdAt: recording.createdAt,
@@ -65,8 +72,16 @@ final class WatchCaptureStore: NSObject, ObservableObject {
         )
         captures.insert(capture, at: 0)
         prune()
-        save()
+        guard save() else {
+            captures = previousCaptures
+            return false
+        }
         startTransfer(for: capture.id)
+        return true
+    }
+
+    func containsCapture(id: UUID) -> Bool {
+        captures.contains { $0.id == id }
     }
 
     /// Re-queues captures whose transfer never completed (e.g. after the
@@ -116,7 +131,7 @@ final class WatchCaptureStore: NSObject, ObservableObject {
         guard captures[index].status.canTransition(to: status) else { return }
         captures[index].status = status
         captures[index].message = message
-        save()
+        _ = save()
     }
 
     private func handleTransferFinished(id: UUID, error: Error?) {
@@ -180,11 +195,17 @@ final class WatchCaptureStore: NSObject, ObservableObject {
         captures = (try? decoder.decode([WatchCapture].self, from: data)) ?? []
     }
 
-    private func save() {
+    @discardableResult
+    private func save() -> Bool {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
-        guard let data = try? encoder.encode(captures) else { return }
-        try? data.write(to: fileURL, options: .atomic)
+        guard let data = try? encoder.encode(captures) else { return false }
+        do {
+            try data.write(to: fileURL, options: .atomic)
+            return true
+        } catch {
+            return false
+        }
     }
 
     private func prune() {

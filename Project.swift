@@ -270,15 +270,24 @@ let watchAppTarget: Target = .target(
         "CFBundleShortVersionString": "$(MARKETING_VERSION)",
         "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
         "NSMicrophoneUsageDescription":
-            "Just Speak to It records audio on your watch and transcribes it on your iPhone."
+            "Just Speak to It records audio on your watch and transcribes it on your iPhone.",
+        // The audio background mode is what keeps a capture running once the
+        // wrist drops and the screen turns off: an AVAudioSession activated
+        // while the app is frontmost stays alive for as long as audio flows.
+        // Deliberately *not* one of the `WKBackgroundModes` extended-runtime
+        // types (self-care/mindfulness/physical-therapy/alarm) — none of them
+        // describes dictation, and all are frontmost-only. See the rationale
+        // in JustSpeakWatch/WatchRecordingRuntime.swift.
+        "UIBackgroundModes": ["audio"]
     ]),
     // The watch target cannot depend on the SpeakCore package product
     // (several transitive package manifests do not declare watchOS support),
-    // so it compiles the shared watch protocol file directly. Pure
-    // Foundation; unit-tested via SpeakCoreTests.
+    // so it compiles the shared watch files directly. Pure Foundation;
+    // unit-tested via SpeakCoreTests.
     sources: [
         "JustSpeakWatch/**",
-        "Sources/SpeakCore/WatchCaptureProtocol.swift"
+        "Sources/SpeakCore/WatchCaptureProtocol.swift",
+        "Sources/SpeakCore/WatchRecordingLifecycle.swift"
     ],
     settings: .settings(base: watchAppSettings)
 )

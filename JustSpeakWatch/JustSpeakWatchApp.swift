@@ -15,6 +15,9 @@ struct JustSpeakWatchApp: App {
                 .onAppear {
                     captureStore.activate()
                 }
+                .task {
+                    await recorder.recoverInterruptedCapture()
+                }
         }
     }
 }

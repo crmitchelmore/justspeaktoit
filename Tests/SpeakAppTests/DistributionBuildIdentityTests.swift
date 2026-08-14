@@ -139,7 +139,6 @@ final class DistributionBuildIdentityTests: XCTestCase {
             contentsOf: repositoryRoot.appendingPathComponent("Sources/SpeakiOS/Views/SettingsView.swift"),
             encoding: .utf8
         )
-
         XCTAssertTrue(manifest.contains("environment[\"TUIST_IOS_KEYBOARD\"] ?? \"\""))
         XCTAssertTrue(manifest.contains("let isIOSKeyboardEnabled = [\"1\", \"true\", \"yes\"]"))
         XCTAssertTrue(manifest.contains("if isIOSKeyboardEnabled {"))
@@ -261,7 +260,6 @@ final class DistributionBuildIdentityTests: XCTestCase {
             contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/auto-release.yml"),
             encoding: .utf8
         )
-
         XCTAssertTrue(workflow.contains("IOS_KEYBOARD_APPSTORE_PROFILE"))
         XCTAssertTrue(workflow.contains("ios-keyboard-appstore.provisionprofile"))
         XCTAssertTrue(workflow.contains("com.justspeaktoit.ios.keyboard"))
@@ -292,14 +290,12 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(workflow.contains("Keyboard feature is off, but JustSpeakKeyboard.appex was embedded"))
         XCTAssertTrue(workflow.contains("Handoff-only keyboard unexpectedly declares $usage_key"))
         XCTAssertTrue(workflow.contains("Direct-capture keyboard is missing $usage_key"))
-
         let keyboardInputStart = try XCTUnwrap(workflow.range(of: "      include_keyboard:\n")?.lowerBound)
         let directInputStart = try XCTUnwrap(workflow.range(of: "      enable_direct_capture:\n")?.lowerBound)
         let environmentStart = try XCTUnwrap(workflow.range(of: "\nenv:\n")?.lowerBound)
         let keyboardInput = workflow[keyboardInputStart..<directInputStart]
         XCTAssertTrue(keyboardInput.contains("default: true"))
         XCTAssertTrue(keyboardInput.contains("type: boolean"))
-
         let directInput = workflow[directInputStart..<environmentStart]
         XCTAssertTrue(directInput.contains("default: false"))
         XCTAssertTrue(autoRelease.contains("-f include_keyboard=true"))

@@ -107,6 +107,13 @@ final class SonioxTTSRealtimeTests: XCTestCase {
         )
     }
 
+    func testResponse_rejectsInvalidBase64Audio() {
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            SonioxTTSRealtimeEvent.self,
+            from: Data(#"{"stream_id":"one","audio":"%%%"}"#.utf8)
+        ))
+    }
+
     func testChunker_preservesTextWithinProviderLimit() {
         let chunks = SonioxTTSRealtimeTextChunker.chunks(
             "One short sentence followed by another sentence",
@@ -115,6 +122,20 @@ final class SonioxTTSRealtimeTests: XCTestCase {
 
         XCTAssertTrue(chunks.allSatisfy { $0.count <= 12 })
         XCTAssertEqual(chunks.joined(), "One short sentence followed by another sentence")
+    }
+
+    func testChunker_returnsNoChunksForWhitespaceOnlyText() {
+        XCTAssertTrue(SonioxTTSRealtimeTextChunker.chunks("   \n ").isEmpty)
+    }
+
+    func testLifecycle_rejectsAudioAfterTermination() throws {
+        var lifecycle = SonioxTTSRealtimeLifecycle()
+        lifecycle.recordCancel()
+        try lifecycle.record(.terminated(streamID: "one"))
+
+        XCTAssertThrowsError(try lifecycle.record(.audio(streamID: "one", data: Data(), isFinal: false))) {
+            XCTAssertEqual($0 as? SonioxTTSRealtimeProtocolError, .eventAfterTermination)
+        }
     }
 
     func testRegions_exposeMatchingRealtimeEndpoints() {

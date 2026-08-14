@@ -102,8 +102,14 @@ extension SonioxTTSRealtimeEvent: Decodable {
             self = .terminated(streamID: streamID)
             return
         }
-        if let encodedAudio = try values.decodeIfPresent(String.self, forKey: .audio),
-           let audio = Data(base64Encoded: encodedAudio) {
+        if let encodedAudio = try values.decodeIfPresent(String.self, forKey: .audio) {
+            guard let audio = Data(base64Encoded: encodedAudio) else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .audio,
+                    in: values,
+                    debugDescription: "Soniox audio chunk is not valid base64"
+                )
+            }
             self = .audio(
                 streamID: streamID,
                 data: audio,

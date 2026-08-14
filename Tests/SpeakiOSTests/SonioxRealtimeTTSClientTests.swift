@@ -58,11 +58,11 @@ final class SonioxRealtimeTTSClientTests: XCTestCase {
                 speed: 1
             )
         }
-        await waitForSentMessages(2, on: connection)
+        try await waitForSentMessages(2, on: connection)
         let streamID = try XCTUnwrap(jsonObject(connection.sent[0])["stream_id"] as? String)
 
         client.stop()
-        await waitForSentMessages(3, on: connection)
+        try await waitForSentMessages(3, on: connection)
         connection.push(eventData("{\"stream_id\":\"\(streamID)\",\"terminated\":true}"))
         do {
             try await speaking.value
@@ -96,7 +96,7 @@ final class SonioxRealtimeTTSClientTests: XCTestCase {
                 speed: 1
             )
         }
-        await waitForSentMessages(2, on: connection)
+        try await waitForSentMessages(2, on: connection)
 
         client.stop()
         for _ in 0..<100 where !connection.didClose {
@@ -110,6 +110,62 @@ final class SonioxRealtimeTTSClientTests: XCTestCase {
         } catch is CancellationError {
             // Expected.
         }
+    }
+
+    func testStream_closesStalledConnectionAfterReceiveTimeout() async throws {
+        let connection = MockSonioxWebSocketConnection()
+        let audio = MockSonioxPCMAudioPlayer()
+        let client = SonioxRealtimeTTSClient(
+            webSocketFactory: MockSonioxWebSocketFactory(connections: [connection]),
+            audioPlayer: audio,
+            receiveTimeout: .milliseconds(1)
+        )
+
+        do {
+            try await client.speak(
+                text: "This response will stall",
+                apiKey: "credential",
+                voice: "Maya",
+                language: "en",
+                region: .unitedStates,
+                speed: 1
+            )
+            XCTFail("A stalled stream should time out")
+        } catch SonioxRealtimeTTSClientError.streamTimedOut {
+            // Expected.
+        }
+
+        XCTAssertTrue(connection.didClose)
+        XCTAssertFalse(client.isSpeaking)
+        XCTAssertFalse(audio.stoppedStreamIDs.isEmpty)
+    }
+
+    func testStream_ignoresWhitespaceWithoutOpeningConnection() async throws {
+        let factory = MockSonioxWebSocketFactory(connections: [])
+        let client = SonioxRealtimeTTSClient(
+            webSocketFactory: factory,
+            audioPlayer: MockSonioxPCMAudioPlayer()
+        )
+
+        try await client.speak(
+            text: "  \n ",
+            apiKey: "credential",
+            voice: "Maya",
+            language: "en",
+            region: .unitedStates,
+            speed: 1
+        )
+
+        XCTAssertTrue(factory.endpoints.isEmpty)
+    }
+
+    func testPCMFrameAccumulator_buffersPartialSamplesAndRejectsTruncatedFinalFrame() throws {
+        var accumulator = SonioxPCMFrameAccumulator()
+
+        XCTAssertEqual(try accumulator.append(Data([1]), isFinal: false), Data())
+        XCTAssertEqual(try accumulator.append(Data([2, 3, 4]), isFinal: true), Data([1, 2, 3, 4]))
+
+        XCTAssertThrowsError(try accumulator.append(Data([5]), isFinal: true))
     }
 
     func testReplacementStream_ignoresLateAudioFromCancelledStream() async throws {
@@ -128,7 +184,7 @@ final class SonioxRealtimeTTSClientTests: XCTestCase {
                 speed: 1
             )
         }
-        await waitForSentMessages(2, on: first)
+        try await waitForSentMessages(2, on: first)
         let firstID = try XCTUnwrap(jsonObject(first.sent[0])["stream_id"] as? String)
 
         let secondTask = Task {
@@ -141,7 +197,7 @@ final class SonioxRealtimeTTSClientTests: XCTestCase {
                 speed: 1
             )
         }
-        await waitForSentMessages(2, on: second)
+        try await waitForSentMessages(2, on: second)
         let secondID = try XCTUnwrap(jsonObject(second.sent[0])["stream_id"] as? String)
         first.push(eventData("{\"stream_id\":\"\(firstID)\",\"audio\":\"AAA=\",\"audio_end\":true}"))
         first.push(eventData("{\"stream_id\":\"\(firstID)\",\"terminated\":true}"))
@@ -176,7 +232,7 @@ final class SonioxRealtimeTTSClientTests: XCTestCase {
                 speed: 1
             )
         }
-        await waitForSentMessages(2, on: connection)
+        try await waitForSentMessages(2, on: connection)
         let streamID = try XCTUnwrap(jsonObject(connection.sent[0])["stream_id"] as? String)
 
         client.handleAudioInterruption(began: true)
@@ -196,9 +252,13 @@ final class SonioxRealtimeTTSClientTests: XCTestCase {
         try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
     }
 
-    private func waitForSentMessages(_ count: Int, on connection: MockSonioxWebSocketConnection) async {
+    private func waitForSentMessages(_ count: Int, on connection: MockSonioxWebSocketConnection) async throws {
         for _ in 0..<100 where connection.sent.count < count {
             await Task.yield()
+        }
+        guard connection.sent.count >= count else {
+            XCTFail("Expected \(count) sent messages, observed \(connection.sent.count)")
+            throw CancellationError()
         }
     }
 }
@@ -287,7 +347,10 @@ private final class MockSonioxPCMAudioPlayer: SonioxPCMAudioPlaying {
     private(set) var resumedStreamIDs: [String] = []
 
     func prepare(streamID: String) throws { preparedStreamIDs.append(streamID) }
-    func enqueue(_ data: Data, streamID: String) throws { enqueued.append((data, streamID)) }
+    func enqueue(_ data: Data, isFinal _: Bool, streamID: String) throws -> Bool {
+        enqueued.append((data, streamID))
+        return true
+    }
     func waitUntilDrained(streamID: String) async {}
     func pause(streamID: String) { pausedStreamIDs.append(streamID) }
     func resume(streamID: String) { resumedStreamIDs.append(streamID) }

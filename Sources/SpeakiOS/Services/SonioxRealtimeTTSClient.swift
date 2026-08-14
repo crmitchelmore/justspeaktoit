@@ -21,6 +21,19 @@ protocol SonioxTTSWebSocketFactory {
 }
 
 @MainActor
+private final class SonioxReceiveTimeoutState {
+    var didFire = false
+}
+
+enum SonioxRealtimeTTSClientError: LocalizedError {
+    case streamTimedOut
+
+    var errorDescription: String? {
+        "Soniox streaming response timed out"
+    }
+}
+
+@MainActor
 private final class URLSessionSonioxTTSWebSocketConnection: SonioxTTSWebSocketConnection {
     private let task: URLSessionWebSocketTask
 
@@ -59,11 +72,31 @@ private struct URLSessionSonioxTTSWebSocketFactory: SonioxTTSWebSocketFactory {
 @MainActor
 protocol SonioxPCMAudioPlaying: AnyObject {
     func prepare(streamID: String) throws
-    func enqueue(_ data: Data, streamID: String) throws
+    func enqueue(_ data: Data, isFinal: Bool, streamID: String) throws -> Bool
     func waitUntilDrained(streamID: String) async
     func pause(streamID: String)
     func resume(streamID: String)
     func stop(streamID: String?)
+}
+
+struct SonioxPCMFrameAccumulator {
+    private var pending = Data()
+
+    mutating func append(_ data: Data, isFinal: Bool) throws -> Data {
+        pending.append(data)
+        let sampleSize = MemoryLayout<Int16>.size
+        let completeByteCount = pending.count - pending.count % sampleSize
+        let completeSamples = Data(pending.prefix(completeByteCount))
+        pending.removeFirst(completeByteCount)
+        guard !isFinal || pending.isEmpty else {
+            throw SonioxIOSVoiceOutputError.invalidPCMData
+        }
+        return completeSamples
+    }
+
+    mutating func reset() {
+        pending.removeAll(keepingCapacity: true)
+    }
 }
 
 @MainActor
@@ -74,6 +107,7 @@ private final class SonioxPCMAudioPlayer: SonioxPCMAudioPlaying {
     private var streamID: String?
     private var scheduledBuffers = 0
     private var drainContinuation: CheckedContinuation<Void, Never>?
+    private var frameAccumulator = SonioxPCMFrameAccumulator()
 
     func prepare(streamID: String) throws {
         stop(streamID: nil)
@@ -112,29 +146,30 @@ private final class SonioxPCMAudioPlayer: SonioxPCMAudioPlaying {
         self.streamID = streamID
     }
 
-    func enqueue(_ data: Data, streamID: String) throws {
+    func enqueue(_ data: Data, isFinal: Bool, streamID: String) throws -> Bool {
         guard self.streamID == streamID,
-              data.count >= MemoryLayout<Int16>.size,
-              data.count.isMultiple(of: MemoryLayout<Int16>.size),
               let format,
               let player else {
             throw SonioxIOSVoiceOutputError.invalidPCMData
         }
-        let frameCount = AVAudioFrameCount(data.count / MemoryLayout<Int16>.size)
+        let payload = try frameAccumulator.append(data, isFinal: isFinal)
+        guard !payload.isEmpty else { return false }
+        let frameCount = AVAudioFrameCount(payload.count / MemoryLayout<Int16>.size)
         guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount),
               let channel = buffer.int16ChannelData?[0] else {
             throw SonioxIOSVoiceOutputError.invalidPCMData
         }
-        data.withUnsafeBytes { source in
+        payload.withUnsafeBytes { source in
             guard let baseAddress = source.baseAddress else { return }
-            memcpy(channel, baseAddress, data.count)
+            memcpy(channel, baseAddress, payload.count)
         }
         buffer.frameLength = frameCount
         scheduledBuffers += 1
-        player.scheduleBuffer(buffer) { [weak self] in
+        player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in
             Task { @MainActor in self?.didFinishBuffer(streamID: streamID) }
         }
         if !player.isPlaying { player.play() }
+        return true
     }
 
     func waitUntilDrained(streamID: String) async {
@@ -164,6 +199,7 @@ private final class SonioxPCMAudioPlayer: SonioxPCMAudioPlaying {
         format = nil
         self.streamID = nil
         scheduledBuffers = 0
+        frameAccumulator.reset()
         drainContinuation?.resume()
         drainContinuation = nil
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
@@ -189,6 +225,7 @@ final class SonioxRealtimeTTSClient: ObservableObject {
     private let webSocketFactory: SonioxTTSWebSocketFactory
     private let audioPlayer: SonioxPCMAudioPlaying
     private let cancelGracePeriod: Duration
+    private let receiveTimeout: Duration
     private let logger = Logger(subsystem: "com.justspeaktoit.ios", category: "SonioxTTS")
     private var activeStream: ActiveStream?
     private var notificationObservers: [NSObjectProtocol] = []
@@ -204,6 +241,7 @@ final class SonioxRealtimeTTSClient: ObservableObject {
             webSocketFactory: URLSessionSonioxTTSWebSocketFactory(session: session),
             audioPlayer: SonioxPCMAudioPlayer(),
             cancelGracePeriod: .seconds(1),
+            receiveTimeout: .seconds(15),
             observesAudioLifecycle: true
         )
     }
@@ -212,11 +250,13 @@ final class SonioxRealtimeTTSClient: ObservableObject {
         webSocketFactory: SonioxTTSWebSocketFactory,
         audioPlayer: SonioxPCMAudioPlaying,
         cancelGracePeriod: Duration = .seconds(1),
+        receiveTimeout: Duration = .seconds(15),
         observesAudioLifecycle: Bool = false
     ) {
         self.webSocketFactory = webSocketFactory
         self.audioPlayer = audioPlayer
         self.cancelGracePeriod = cancelGracePeriod
+        self.receiveTimeout = receiveTimeout
         if observesAudioLifecycle { observeAudioLifecycle() }
     }
 
@@ -236,6 +276,8 @@ final class SonioxRealtimeTTSClient: ObservableObject {
         speed: Double
     ) async throws {
         stop()
+        let chunks = SonioxTTSRealtimeTextChunker.chunks(text)
+        guard !chunks.isEmpty else { return }
         let generation = UUID()
         let streamID = "openclaw-\(generation.uuidString.lowercased())"
         let connection = webSocketFactory.makeConnection(to: region.webSocketEndpoint)
@@ -255,7 +297,6 @@ final class SonioxRealtimeTTSClient: ObservableObject {
                 voice: voice,
                 speed: speed
             )))
-            let chunks = SonioxTTSRealtimeTextChunker.chunks(text)
             for (index, chunk) in chunks.enumerated() {
                 try ensureCurrent(generation)
                 let isFinal = index == chunks.index(before: chunks.endIndex)
@@ -270,7 +311,7 @@ final class SonioxRealtimeTTSClient: ObservableObject {
             while true {
                 let event = try JSONDecoder().decode(
                     SonioxTTSRealtimeEvent.self,
-                    from: try await connection.receive()
+                    from: try await receive(from: connection)
                 )
                 guard event.streamID == streamID else { continue }
                 guard isCurrent(generation) else {
@@ -283,14 +324,14 @@ final class SonioxRealtimeTTSClient: ObservableObject {
                 try lifecycle.record(event)
 
                 switch event {
-                case .audio(_, let data, _):
-                    if firstAudioLatencySeconds == nil {
+                case .audio(_, let data, let isFinal):
+                    if try audioPlayer.enqueue(data, isFinal: isFinal, streamID: streamID),
+                       firstAudioLatencySeconds == nil {
                         let latency = Date().timeIntervalSince(startedAt)
                         firstAudioLatencySeconds = latency
                         logger.info("Soniox first-audio latency: \(latency, privacy: .public) seconds")
+                        isSpeaking = true
                     }
-                    try audioPlayer.enqueue(data, streamID: streamID)
-                    isSpeaking = true
                 case .failure(_, let failure):
                     providerFailure = failure
                     if let requestID = failure.requestID {
@@ -336,6 +377,27 @@ final class SonioxRealtimeTTSClient: ObservableObject {
 
     private func ensureCurrent(_ generation: UUID) throws {
         guard isCurrent(generation) else { throw CancellationError() }
+    }
+
+    private func receive(from connection: SonioxTTSWebSocketConnection) async throws -> Data {
+        let timeout = receiveTimeout
+        let timeoutState = SonioxReceiveTimeoutState()
+        let timeoutTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: timeout)
+            } catch {
+                return
+            }
+            timeoutState.didFire = true
+            connection.close()
+        }
+        defer { timeoutTask.cancel() }
+        do {
+            return try await connection.receive()
+        } catch {
+            if timeoutState.didFire { throw SonioxRealtimeTTSClientError.streamTimedOut }
+            throw error
+        }
     }
 
     private func isCurrent(_ generation: UUID) -> Bool {

@@ -65,8 +65,8 @@ extension PaidAccessStore {
         do {
             let result = try await product.purchase(options: [.appAccountToken(accountToken)])
             if case .success(let verification) = result {
-                await self.syncIfSubscription(verification, session: session)
-                if case .verified(let transaction) = verification {
+                if await self.syncIfSubscription(verification, session: session),
+                   case .verified(let transaction) = verification {
                     await transaction.finish()
                 }
                 await self.refreshEntitlement()
@@ -99,8 +99,8 @@ extension PaidAccessStore {
 
     func handleTransactionUpdate(_ result: VerificationResult<Transaction>) async {
         guard let session = await self.currentSession() else { return }
-        await self.syncIfSubscription(result, session: session)
-        if case .verified(let transaction) = result {
+        if await self.syncIfSubscription(result, session: session),
+           case .verified(let transaction) = result {
             await transaction.finish()
         }
         await self.refreshEntitlement()
@@ -109,9 +109,9 @@ extension PaidAccessStore {
     func syncIfSubscription(
         _ result: VerificationResult<Transaction>,
         session: PaidAccessSession
-    ) async {
-        guard case .verified(let transaction) = result else { return }
-        guard Self.subscriptionProductIDs.contains(transaction.productID) else { return }
+    ) async -> Bool {
+        guard case .verified(let transaction) = result else { return false }
+        guard Self.subscriptionProductIDs.contains(transaction.productID) else { return false }
 
         do {
             // The server verifies the signature again; the device's own
@@ -121,9 +121,11 @@ extension PaidAccessStore {
                 signedTransaction: result.jwsRepresentation,
                 signedRenewalInfo: nil
             )
+            return true
         } catch {
             self.lastError = (error as? PaidAccessError)?.errorDescription
                 ?? "Could not confirm the subscription."
+            return false
         }
     }
 }

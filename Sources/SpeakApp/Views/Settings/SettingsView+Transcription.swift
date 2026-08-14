@@ -265,6 +265,68 @@ extension SettingsView {
         .speakTooltip("Configure automatic recording stop based on silence detection.")
       }
 
+      SettingsCard(
+        title: "Hands-free dictation",
+        systemImage: "waveform.badge.mic",
+        tint: Color.brandLagoon
+      ) {
+        let captureConfigurationSupported = HandsFreeDictationPolicy.supportsCapture(
+          modelID: settings.liveTranscriptionModel,
+          isStreaming: settings.transcriptionMode == .liveNative
+        )
+        VStack(alignment: .leading, spacing: 12) {
+          Toggle(
+            "Arm on hotkey instead of recording",
+            isOn: settingsBinding(\AppSettings.handsFreeDictationEnabled)
+          )
+          .disabled(!settings.handsFreeDictationSupported || !captureConfigurationSupported)
+          .accessibilityIdentifier("handsFreeDictationToggle")
+          .speakTooltip("Your hotkey starts listening; speaking starts recording and silence stops it.")
+
+          if settings.handsFreeDictationSupported {
+            Text(
+              "The hotkey arms a listening session instead of recording straight away. "
+                + "Recording starts when you speak and stops after the silence duration below. "
+                + "Silent audio stays in memory only and is discarded immediately. "
+                + "Press the hotkey again to disarm."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+            if !captureConfigurationSupported {
+              Text("Select an Apple on-device streaming model to use hands-free dictation.")
+                .font(.caption)
+                .foregroundStyle(.orange)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+              HStack {
+                Text("Silence duration")
+                  .font(.caption)
+                Spacer()
+                Text(settings.silenceDuration, format: .number.precision(.fractionLength(1)))
+                  .font(.caption.monospacedDigit())
+                  .foregroundStyle(.secondary)
+                Text("sec")
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+              }
+              Slider(
+                value: settingsBinding(\AppSettings.silenceDuration),
+                in: 0.5...5.0,
+                step: 0.5
+              )
+              .speakTooltip("How long to wait in silence before stopping hands-free recording.")
+            }
+          } else {
+            Text("Requires macOS 26 or later — Apple's on-device speech detector isn't available here.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+        }
+      }
+      .speakTooltip("Voice-activated dictation using Apple's on-device speech detector.")
+
       if hidesModelSelection {
         simpleModelChoicesNotice
       }

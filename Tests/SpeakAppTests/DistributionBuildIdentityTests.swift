@@ -79,23 +79,27 @@ final class DistributionBuildIdentityTests: XCTestCase {
         )
         let macTarget = try targetBlock(named: "SpeakApp", in: manifest)
         let iosTarget = try targetBlock(named: "SpeakiOS", in: manifest)
+        let macDependencies = try dependencyBlock(named: "macAppDependencies", in: manifest)
+        let iosDependencies = try dependencyBlock(named: "iosAppDependencies", in: manifest)
 
         XCTAssertTrue(macTarget.contains("sources: [\"Sources/SpeakApp/**\"]"))
+        XCTAssertTrue(macTarget.contains("dependencies: macAppDependencies"))
         XCTAssertFalse(macTarget.contains("SpeakiOSApp"))
-        XCTAssertFalse(macTarget.contains("SpeakiOSLib"))
-        XCTAssertFalse(macTarget.contains("JustSpeakToItWidgetExtension"))
-        XCTAssertFalse(macTarget.contains("JustSpeakKeyboard"))
+        XCTAssertFalse(macDependencies.contains("SpeakiOSLib"))
+        XCTAssertFalse(macDependencies.contains("JustSpeakToItWidgetExtension"))
+        XCTAssertFalse(macDependencies.contains("JustSpeakKeyboard"))
 
         XCTAssertTrue(iosTarget.contains("sources: [\"SpeakiOSApp/**\"]"))
-        XCTAssertTrue(iosTarget.contains(".package(product: \"SpeakiOSLib\")"))
+        XCTAssertTrue(iosTarget.contains("dependencies: iosAppDependencies"))
+        XCTAssertTrue(iosDependencies.contains(".package(product: \"SpeakiOSLib\")"))
         XCTAssertTrue(
-            iosTarget.contains(
-                "] + (isIOSKeyboardEnabled ? [.target(name: \"JustSpeakKeyboard\")] : [])"
+            iosDependencies.contains(
+                "iosAppDependencies.append(.target(name: \"JustSpeakKeyboard\"))"
             )
         )
         XCTAssertFalse(iosTarget.contains("Sources/SpeakApp"))
-        XCTAssertFalse(iosTarget.contains("SpeakHotKeys"))
-        XCTAssertFalse(iosTarget.contains("Sparkle"))
+        XCTAssertFalse(iosDependencies.contains("SpeakHotKeys"))
+        XCTAssertFalse(iosDependencies.contains("Sparkle"))
     }
 
     func testIOSKeyboardTargetUsesPublicExtensionConfiguration() throws {
@@ -118,7 +122,7 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(infoPlist.contains("$(PRODUCT_MODULE_NAME).KeyboardViewController"))
     }
 
-    func testIOSKeyboardIsAnExplicitOffByDefaultBuildFeature() throws {
+    func testIOSKeyboardBuild_hasIndependentDirectCapturePolicy() throws {
         let manifest = try String(
             contentsOf: repositoryRoot.appendingPathComponent("Project.swift"),
             encoding: .utf8
@@ -135,11 +139,16 @@ final class DistributionBuildIdentityTests: XCTestCase {
             contentsOf: repositoryRoot.appendingPathComponent("Sources/SpeakiOS/Views/SettingsView.swift"),
             encoding: .utf8
         )
-
         XCTAssertTrue(manifest.contains("environment[\"TUIST_IOS_KEYBOARD\"] ?? \"\""))
         XCTAssertTrue(manifest.contains("let isIOSKeyboardEnabled = [\"1\", \"true\", \"yes\"]"))
-        XCTAssertTrue(manifest.contains("isIOSKeyboardEnabled ? ["))
+        XCTAssertTrue(manifest.contains("if isIOSKeyboardEnabled {"))
+        XCTAssertTrue(manifest.contains("projectTargets.append(keyboardTarget)"))
         XCTAssertTrue(manifest.contains("iosActiveCompilationConditions.append(\"IOS_KEYBOARD_FEATURE\")"))
+        XCTAssertTrue(manifest.contains("environment[\"TUIST_IOS_KEYBOARD_DIRECT_CAPTURE\"] ?? \"\""))
+        XCTAssertTrue(manifest.contains("IOS_KEYBOARD_DIRECT_CAPTURE"))
+        XCTAssertTrue(manifest.contains("let iosKeyboardInfoPlist: InfoPlist = isIOSKeyboardDirectCaptureEnabled"))
+        XCTAssertTrue(manifest.contains("? .file(path: \"JustSpeakKeyboard/Info.plist\")"))
+        XCTAssertTrue(manifest.contains("infoPlist: iosKeyboardInfoPlist"))
         XCTAssertTrue(manifest.contains("settings: .settings(base: iosTestSettings)"))
         XCTAssertTrue(
             manifest.contains(
@@ -148,9 +157,47 @@ final class DistributionBuildIdentityTests: XCTestCase {
         )
         XCTAssertTrue(featureFlags.contains("#if IOS_KEYBOARD_FEATURE"))
         XCTAssertTrue(featureFlags.contains("static var iOSKeyboardEnabled: Bool"))
+        XCTAssertTrue(featureFlags.contains("static var iOSKeyboardDirectCaptureEnabled: Bool"))
         XCTAssertTrue(app.contains("guard FeatureFlags.iOSKeyboardEnabled else"))
         XCTAssertTrue(app.contains("KeyboardInstantDictationStore.shared.setEnabled(false)"))
         XCTAssertTrue(settings.contains("if iOSKeyboardEnabled"))
+        XCTAssertTrue(settings.contains("KeyboardDictationPreferencesStore.shared.mirrorAppPreference"))
+    }
+
+    func testWatchAppBuildFeature_isOffByDefault() throws {
+        let manifest = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("Project.swift"),
+            encoding: .utf8
+        )
+        let featureFlags = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("SpeakiOSApp/FeatureFlags.swift"),
+            encoding: .utf8
+        )
+        let app = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("SpeakiOSApp/SpeakiOSApp.swift"),
+            encoding: .utf8
+        )
+        let releaseWorkflow = try String(
+            contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/release-ios.yml"),
+            encoding: .utf8
+        )
+        let watchTarget = try targetBlock(named: "JustSpeakWatchApp", in: manifest)
+
+        XCTAssertTrue(manifest.contains("environment[\"TUIST_WATCH_APP\"] ?? \"\""))
+        XCTAssertTrue(manifest.contains("let isWatchAppEnabled = [\"1\", \"true\", \"yes\"]"))
+        XCTAssertTrue(manifest.contains("if isWatchAppEnabled {"))
+        XCTAssertTrue(manifest.contains("iosActiveCompilationConditions.append(\"WATCH_APP_FEATURE\")"))
+        XCTAssertTrue(manifest.contains("projectTargets.append(watchAppTarget)"))
+        XCTAssertTrue(featureFlags.contains("#if WATCH_APP_FEATURE"))
+        XCTAssertTrue(featureFlags.contains("static var watchCaptureEnabled: Bool"))
+        XCTAssertTrue(app.contains("if FeatureFlags.watchCaptureEnabled {"))
+
+        // The watch app is a separate bundle id that still needs provisioning,
+        // so release signing must not pick it up yet.
+        XCTAssertFalse(releaseWorkflow.contains("TUIST_WATCH_APP"))
+        XCTAssertTrue(watchTarget.contains("bundleId: \"com.justspeaktoit.ios.watchkitapp\""))
+        XCTAssertTrue(watchTarget.contains("\"WKCompanionAppBundleIdentifier\": \"com.justspeaktoit.ios\""))
+        XCTAssertTrue(watchTarget.contains("\"Sources/SpeakCore/WatchCaptureProtocol.swift\""))
     }
 
     func testIOSKeyboardUsesInstantSessionLivePreviewAndRetainsHistory() throws {
@@ -185,7 +232,7 @@ final class DistributionBuildIdentityTests: XCTestCase {
         for source in [controller, handoff, rootView] {
             XCTAssertFalse(source.contains("extensionContext.open"))
         }
-        XCTAssertTrue(handoff.contains("if requestID == nil, isInstantReady"))
+        XCTAssertTrue(handoff.contains("guard isInstantReady, let currentDocumentIdentifier"))
         XCTAssertTrue(handoff.contains("KeyboardHandoffSignal.postRequestChanged"))
         XCTAssertTrue(rootView.contains("Open Just Speak once"))
         XCTAssertTrue(rootView.contains("keyboardLiveTranscript"))
@@ -197,15 +244,22 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(instantCoordinator.contains("updateInterim"))
         XCTAssertFalse(instantCoordinator.contains(".write("))
         XCTAssertFalse(instantCoordinator.contains(".upload("))
-        XCTAssertTrue(instantCoordinator.contains("saveToHistory: true"))
+        XCTAssertTrue(instantCoordinator.contains("saveToHistory: false"))
+        XCTAssertTrue(instantCoordinator.contains("saveToHistory(transcript, result: result)"))
+        XCTAssertTrue(instantCoordinator.contains("saveToHistory(result.text, result: result)"))
+        XCTAssertTrue(instantCoordinator.contains("iOSHistoryManager.shared.recordTranscription"))
     }
 
+    // swiftlint:disable:next function_body_length
     func testIOSReleaseWorkflowSignsAndValidatesKeyboardExtension() throws {
         let workflow = try String(
             contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/release-ios.yml"),
             encoding: .utf8
         )
-
+        let autoRelease = try String(
+            contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/auto-release.yml"),
+            encoding: .utf8
+        )
         XCTAssertTrue(workflow.contains("IOS_KEYBOARD_APPSTORE_PROFILE"))
         XCTAssertTrue(workflow.contains("ios-keyboard-appstore.provisionprofile"))
         XCTAssertTrue(workflow.contains("com.justspeaktoit.ios.keyboard"))
@@ -228,13 +282,24 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(workflow.contains("iCloud container mismatch"))
         XCTAssertTrue(workflow.contains("iCloud.com.justspeaktoit.ios"))
         XCTAssertTrue(workflow.contains("TUIST_IOS_KEYBOARD: ${{ inputs.include_keyboard && '1' || '0' }}"))
+        XCTAssertTrue(
+            workflow.contains(
+                "TUIST_IOS_KEYBOARD_DIRECT_CAPTURE: ${{ inputs.include_keyboard && inputs.enable_direct_capture"
+            )
+        )
         XCTAssertTrue(workflow.contains("Keyboard feature is off, but JustSpeakKeyboard.appex was embedded"))
-
+        XCTAssertTrue(workflow.contains("Handoff-only keyboard unexpectedly declares $usage_key"))
+        XCTAssertTrue(workflow.contains("Direct-capture keyboard is missing $usage_key"))
         let keyboardInputStart = try XCTUnwrap(workflow.range(of: "      include_keyboard:\n")?.lowerBound)
+        let directInputStart = try XCTUnwrap(workflow.range(of: "      enable_direct_capture:\n")?.lowerBound)
         let environmentStart = try XCTUnwrap(workflow.range(of: "\nenv:\n")?.lowerBound)
-        let keyboardInput = workflow[keyboardInputStart..<environmentStart]
-        XCTAssertTrue(keyboardInput.contains("default: false"))
+        let keyboardInput = workflow[keyboardInputStart..<directInputStart]
+        XCTAssertTrue(keyboardInput.contains("default: true"))
         XCTAssertTrue(keyboardInput.contains("type: boolean"))
+        let directInput = workflow[directInputStart..<environmentStart]
+        XCTAssertTrue(directInput.contains("default: false"))
+        XCTAssertTrue(autoRelease.contains("-f include_keyboard=true"))
+        XCTAssertTrue(autoRelease.contains("-f enable_direct_capture=false"))
 
         let profileBootstrap = try String(
             contentsOf: repositoryRoot.appendingPathComponent("scripts/create-ios-app-store-profile.rb"),
@@ -300,11 +365,36 @@ final class DistributionBuildIdentityTests: XCTestCase {
     }
 
     private func targetBlock(named name: String, in manifest: String) throws -> Substring {
-        let marker = ".target(\n            name: \"\(name)\""
-        let start = try XCTUnwrap(manifest.range(of: marker)?.lowerBound)
+        // Targets are declared as top-level `let xTarget: Target = .target(...)`
+        // statements (the manifest exceeded the type-checker's limit when the
+        // conditional targets were assembled inline in one array literal).
+        let topLevelMarker = ".target(\n    name: \"\(name)\""
+        let nestedMarker = ".target(\n            name: \"\(name)\""
+        let start = try XCTUnwrap(
+            manifest.range(of: topLevelMarker)?.lowerBound
+                ?? manifest.range(of: nestedMarker)?.lowerBound,
+            "No target block found for \(name)"
+        )
         let remainder = manifest[start...]
-        let nextTarget = remainder.dropFirst(marker.count).range(of: "\n        .target(")?.lowerBound
-        let end = nextTarget ?? manifest.endIndex
+        let end = ["\n)\n", "\n        .target("]
+            .compactMap { remainder.range(of: $0)?.upperBound }
+            .min() ?? manifest.endIndex
+        return manifest[start..<end]
+    }
+
+    /// The declaration of a target-dependency array plus the conditional
+    /// `append` statements that extend it, which together determine what a
+    /// target links.
+    private func dependencyBlock(named name: String, in manifest: String) throws -> Substring {
+        let start = try XCTUnwrap(
+            manifest.range(of: "var \(name): [TargetDependency] = [")?.lowerBound,
+            "No dependency list found for \(name)"
+        )
+        let remainder = manifest[start...]
+        // The list ends at the next top-level declaration.
+        let end = ["\nlet ", "\nvar "]
+            .compactMap { remainder.range(of: $0)?.lowerBound }
+            .min() ?? manifest.endIndex
         return manifest[start..<end]
     }
 }

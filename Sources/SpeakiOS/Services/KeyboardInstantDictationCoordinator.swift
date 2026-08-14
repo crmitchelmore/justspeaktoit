@@ -5,6 +5,8 @@ import Foundation
 import SpeakCore
 import UIKit
 
+// swiftlint:disable file_length
+
 /// Owns the containing app's foreground-started Instant Dictation microphone
 /// session. Once the user enables it, the session remains ready until they turn
 /// it off, iOS interrupts it, or the app is terminated.
@@ -13,6 +15,7 @@ import UIKit
 /// transcription provider, or placed in the App Group. Actual transcription
 /// starts only after the keyboard creates a nonce-scoped handoff request.
 @MainActor
+// swiftlint:disable:next type_body_length
 public final class KeyboardInstantDictationCoordinator: ObservableObject {
     public static let shared = KeyboardInstantDictationCoordinator()
 
@@ -30,6 +33,7 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
     private var requestTask: Task<Void, Never>?
     private var startTask: Task<Void, Never>?
     private var activeRequestID: UUID?
+    private var activeProfile: KeyboardDictationProfileOption?
 
     private init() {}
 
@@ -47,11 +51,13 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
 
     public func activate() {
         ensureSignalObservation()
-        // Keep the keyboard's language quick-switch in sync with the app's
-        // spoken-language preference on every foreground activation.
+        // Keep the keyboard's quick-switch chips in sync with the app's spoken
+        // language and post-processing preferences on every foreground
+        // activation.
         KeyboardDictationPreferencesStore.shared.mirrorAppPreference(
             selectedIdentifier: AppSettings.shared.preferredLocaleIdentifier
         )
+        AppSettings.shared.publishKeyboardProfileSelection()
         session = sessionStore.activeSession(clearingStaleRecord: true)
         guard sessionStore.isEnabled,
               UIApplication.shared.applicationState == .active,
@@ -139,6 +145,7 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
             _ = try? handoffStore.cancel(requestID: activeRequestID)
         }
         activeRequestID = nil
+        activeProfile = nil
         heartbeatTask?.cancel()
         heartbeatTask = nil
         readinessAudio.stop(deactivateAudioSession: true)
@@ -178,7 +185,7 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
         switch record.phase {
         case .requested:
             requestTask = Task { [weak self] in
-                await self?.beginRecording(for: record.requestID)
+                await self?.beginRecording(for: record)
                 self?.requestTask = nil
                 self?.handleRequestChange()
             }
@@ -195,9 +202,15 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
         }
     }
 
-    private func beginRecording(for requestID: UUID) async {
+    private func beginRecording(for record: KeyboardHandoffRecord) async {
+        let requestID = record.requestID
         guard activeRequestID == nil, !recordingService.isRunning else {
             _ = try? handoffStore.fail(requestID: requestID, code: .recordingUnavailable)
+            return
+        }
+        await AppSettings.shared.ensureKeysLoaded()
+        guard let profile = record.profile, profileIsAvailable(profile) else {
+            _ = try? handoffStore.fail(requestID: requestID, code: .profileUnavailable)
             return
         }
 
@@ -205,13 +218,15 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
         // Provider setup can take longer than one heartbeat; without this the
         // liveness loop would mistake a healthy engine swap for interruption.
         activeRequestID = requestID
+        activeProfile = profile
         session = sessionStore.heartbeat(phase: .recording)
         readinessAudio.stop(deactivateAudioSession: false)
         do {
             try await recordingService.startRecording(
                 retainBatchRecording: false,
                 sharesLiveTranscript: false,
-                requiresLiveActivity: false
+                requiresLiveActivity: false,
+                keyboardProfile: profile
             )
             try handoffStore.markRecording(requestID: requestID)
             observePartialTranscript(for: requestID)
@@ -220,6 +235,7 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
             recordingService.cancelRecording()
             _ = try? handoffStore.fail(requestID: requestID, code: .recordingUnavailable)
             activeRequestID = nil
+            activeProfile = nil
             await resumeReadinessAfterRequest()
         }
     }
@@ -241,20 +257,34 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
             recordingService.cancelRecording()
             _ = try? handoffStore.fail(requestID: requestID, code: .invalidRequest)
             activeRequestID = nil
+            activeProfile = nil
             await resumeReadinessAfterRequest()
             return
         }
 
+        let profile = activeProfile
         let result = await recordingService.stopRecording(
             destination: .historyOnly,
-            saveToHistory: true,
+            saveToHistory: false,
             primedActivityMessage: "Keyboard ready"
         )
         activeRequestID = nil
-        let transcript = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        activeProfile = nil
+        var transcript = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let profile, profile.polishes, !transcript.isEmpty {
+            do {
+                transcript = try await polish(transcript, with: profile)
+            } catch {
+                saveToHistory(result.text, result: result)
+                _ = try? handoffStore.fail(requestID: requestID, code: .profileUnavailable)
+                await resumeReadinessAfterRequest()
+                return
+            }
+        }
         if transcript.isEmpty {
             _ = try? handoffStore.fail(requestID: requestID, code: .noSpeech)
         } else {
+            saveToHistory(transcript, result: result)
             _ = try? handoffStore.complete(requestID: requestID, transcript: transcript)
         }
         await resumeReadinessAfterRequest()
@@ -267,6 +297,7 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
             recordingService.cancelRecording()
         }
         activeRequestID = nil
+        activeProfile = nil
         Task {
             await resumeReadinessAfterRequest()
         }
@@ -297,6 +328,62 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
                     transcript: text
                 )
             }
+    }
+
+    private func profileIsAvailable(_ profile: KeyboardDictationProfileOption) -> Bool {
+        let settings = AppSettings.shared
+        if profile.transcriptionMode == .streaming {
+            guard let route = LiveTranscriptionRouting.route(for: profile.transcriptionModelIdentifier),
+                  route.isSupportedOnIOS else {
+                return false
+            }
+            if route.apiKeyIdentifier != nil,
+               settings.liveAPIKey(for: route).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return false
+            }
+        }
+        if profile.transcriptionMode == .batch {
+            guard AppSettings.supportedBatchModels.contains(where: {
+                $0.id == profile.transcriptionModelIdentifier
+            }) else {
+                return false
+            }
+            if profile.transcriptionModelIdentifier != AppleLocalModels.speechTranscriberModelID,
+               settings.batchAPIKey(for: profile.transcriptionModelIdentifier)
+                   .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return false
+            }
+        }
+        guard profile.polishes, let postProcessingModel = profile.postProcessingModelIdentifier else { return true }
+        guard AppSettings.postProcessingModels.contains(where: {
+            $0.id == postProcessingModel
+        }) else {
+            return false
+        }
+        if postProcessingModel == AppleLocalModels.foundationModelID {
+            return AppleFoundationModelPolisher.isAvailable
+        }
+        return settings.hasOpenRouterKey
+    }
+
+    private func polish(_ transcript: String, with profile: KeyboardDictationProfileOption) async throws -> String {
+        guard let model = profile.postProcessingModelIdentifier else { return transcript }
+        let response = try await iOSPostProcessingManager.shared.polish(
+            text: transcript,
+            model: model,
+            apiKey: AppSettings.shared.openRouterAPIKey
+        )
+        let polished = response.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !polished.isEmpty else { throw PostProcessingError.emptyResult }
+        return polished
+    }
+
+    private func saveToHistory(_ transcript: String, result: TranscriptionResult) {
+        iOSHistoryManager.shared.recordTranscription(
+            text: transcript,
+            model: result.modelIdentifier,
+            duration: result.duration
+        )
     }
 }
 

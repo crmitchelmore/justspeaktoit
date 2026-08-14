@@ -101,6 +101,104 @@ final class KeyboardDictationPreferencesTests: XCTestCase {
         XCTAssertEqual(unavailable.selection(), .automaticOnly)
     }
 
+    // MARK: - Dictation profile
+
+    func testDefaultProfileIsSafeLocalMode() {
+        let selection = store.profileSelection()
+
+        XCTAssertEqual(selection.selectedIdentifier, KeyboardDictationProfileCatalog.directIdentifier)
+        XCTAssertEqual(selection.selectedProfile.route, .directAppleSpeech)
+        XCTAssertNil(selection.nextQuickIdentifier)
+    }
+
+    func testPublishingAppSettingsCreatesAnExactAppMode() {
+        store.publishAppProfileSelection(configuration: appConfiguration)
+
+        let selection = store.profileSelection()
+        XCTAssertEqual(selection.selectedIdentifier, KeyboardDictationProfileCatalog.appIdentifier)
+        XCTAssertEqual(selection.selectedProfile.transcriptionModelIdentifier, "openai/gpt-live-transcribe")
+        XCTAssertEqual(selection.selectedProfile.languageIdentifier, "en_GB")
+        XCTAssertEqual(selection.selectedProfile.postProcessingModelIdentifier, "openai/gpt-5-mini")
+    }
+
+    func testAppRefreshPreservesKeyboardSelectionAndUpdatesCapabilityAtomically() {
+        let first = store.publishAppProfileSelection(configuration: appConfiguration)
+        store.selectProfile(KeyboardDictationProfileCatalog.directIdentifier)
+        let changed = KeyboardAppProfileConfiguration(
+            transcriptionMode: .batch,
+            transcriptionModelIdentifier: "openai/gpt-transcribe",
+            languageIdentifier: "fr_FR",
+            postProcessingEnabled: false,
+            postProcessingModelIdentifier: nil
+        )
+
+        let refreshed = store.publishAppProfileSelection(configuration: changed)
+
+        XCTAssertEqual(refreshed.selectedIdentifier, KeyboardDictationProfileCatalog.directIdentifier)
+        XCTAssertGreaterThan(refreshed.catalogueRevision, first.catalogueRevision)
+        let app = refreshed.availableProfiles[1]
+        XCTAssertEqual(app.transcriptionMode, .batch)
+        XCTAssertEqual(app.transcriptionModelIdentifier, "openai/gpt-transcribe")
+        XCTAssertEqual(app.languageIdentifier, "fr_FR")
+        XCTAssertFalse(app.postProcessingEnabled)
+    }
+
+    func testProfileSelectionSurvivesAStoreRestart() {
+        store.publishAppProfileSelection(configuration: appConfiguration)
+        store.selectProfile(KeyboardDictationProfileCatalog.directIdentifier)
+
+        let restarted = KeyboardDictationPreferencesStore(defaults: defaults)
+
+        XCTAssertEqual(
+            restarted.profileSelection().selectedIdentifier,
+            KeyboardDictationProfileCatalog.directIdentifier
+        )
+    }
+
+    func testProfileFromAFutureSchemaVersionIsIgnored() {
+        let current = KeyboardDictationProfileCatalog.selection(for: appConfiguration)
+        let future = KeyboardProfileSelection(
+            schemaVersion: KeyboardProfileSelection.schemaVersion + 1,
+            selectedIdentifier: current.selectedIdentifier,
+            availableProfiles: current.availableProfiles,
+            defaultIdentifier: current.defaultIdentifier,
+            catalogueRevision: current.catalogueRevision,
+            catalogueModifiedAt: current.catalogueModifiedAt
+        )
+        defaults.set(try? JSONEncoder().encode(future), forKey: "keyboardDictation.profileCatalogue.v2")
+
+        XCTAssertEqual(store.profileSelection(), .directOnly)
+    }
+
+    func testCorruptProfileCatalogueFallsBackToSafeLocalMode() {
+        defaults.set(Data("not-json".utf8), forKey: "keyboardDictation.profileCatalogue.v2")
+
+        XCTAssertEqual(store.profileSelection(), .directOnly)
+    }
+
+    func testProfileSelectionIsIndependentOfTheLanguageSelection() {
+        store.mirrorAppPreference(selectedIdentifier: "fr_FR")
+        store.publishAppProfileSelection(configuration: appConfiguration)
+        store.selectProfile(KeyboardDictationProfileCatalog.directIdentifier)
+
+        XCTAssertEqual(store.selection().selectedIdentifier, "fr_FR")
+        XCTAssertEqual(
+            store.profileSelection().selectedIdentifier,
+            KeyboardDictationProfileCatalog.directIdentifier
+        )
+    }
+
+    func testMissingAppGroupIsSafeForProfiles() {
+        let unavailable = KeyboardDictationPreferencesStore(defaults: nil)
+
+        XCTAssertEqual(unavailable.profileSelection(), .directOnly)
+        XCTAssertEqual(
+            unavailable.publishAppProfileSelection(configuration: appConfiguration).selectedProfile.route,
+            .appHandoff
+        )
+        XCTAssertEqual(unavailable.profileSelection(), .directOnly)
+    }
+
     func testChipLabels() {
         XCTAssertEqual(
             KeyboardLanguageSelection.chipLabel(for: TranscriptionLanguageCatalog.automaticIdentifier),
@@ -108,5 +206,15 @@ final class KeyboardDictationPreferencesTests: XCTestCase {
         )
         XCTAssertEqual(KeyboardLanguageSelection.chipLabel(for: "en_GB"), "EN-GB")
         XCTAssertEqual(KeyboardLanguageSelection.chipLabel(for: ""), "Auto")
+    }
+
+    private var appConfiguration: KeyboardAppProfileConfiguration {
+        KeyboardAppProfileConfiguration(
+            transcriptionMode: .streaming,
+            transcriptionModelIdentifier: "openai/gpt-live-transcribe",
+            languageIdentifier: "en_GB",
+            postProcessingEnabled: true,
+            postProcessingModelIdentifier: "openai/gpt-5-mini"
+        )
     }
 }

@@ -12,15 +12,33 @@ import Foundation
 /// `SHOW_OPENCLAW_TAB` compilation condition).
 enum FeatureFlags {
     /// Whether the custom keyboard extension (in-keyboard dictation with the
-    /// Instant Dictation handoff as fallback) is enabled. Defaults to `false`
-    /// so App Store and TestFlight builds ship without it; `Project.swift`
-    /// includes the extension and defines `IOS_KEYBOARD_FEATURE` only when
-    /// generated with `TUIST_IOS_KEYBOARD=1`. Internal builds (CI and the
-    /// manual `include_keyboard` release input) turn it on; the physical
-    /// device matrix in `Docs/ios-keyboard-mvp-verification.md` is the gate
-    /// for enabling it in TestFlight.
+    /// Instant Dictation handoff) is included. TestFlight includes it by
+    /// default; `TUIST_IOS_KEYBOARD=0` is the build-based rollback switch.
+    /// Direct capture has a separate gate below.
     static var iOSKeyboardEnabled: Bool {
         #if IOS_KEYBOARD_FEATURE
+        true
+        #else
+        false
+        #endif
+    }
+
+    /// Whether this build permits microphone capture inside the keyboard
+    /// extension. The keyboard can ship independently in handoff-only mode.
+    static var iOSKeyboardDirectCaptureEnabled: Bool {
+        #if IOS_KEYBOARD_DIRECT_CAPTURE
+        true
+        #else
+        false
+        #endif
+    }
+
+    /// Whether the Apple Watch companion app (and the iPhone-side
+    /// WatchConnectivity capture receiver) are enabled. Defaults to `false`;
+    /// `Project.swift` includes the watch app target and defines
+    /// `WATCH_APP_FEATURE` only when generated with `TUIST_WATCH_APP=1`.
+    static var watchCaptureEnabled: Bool {
+        #if WATCH_APP_FEATURE
         true
         #else
         false

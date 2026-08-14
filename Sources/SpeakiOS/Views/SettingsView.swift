@@ -76,11 +76,17 @@ public final class AppSettings: ObservableObject {
     public static let shared = AppSettings()
 
     @Published public var selectedModel: String {
-        didSet { UserDefaults.standard.set(selectedModel, forKey: "selectedModel") }
+        didSet {
+            UserDefaults.standard.set(selectedModel, forKey: "selectedModel")
+            publishKeyboardProfileSelection()
+        }
     }
 
     @Published public var transcriptionMode: IOSTranscriptionMode {
-        didSet { UserDefaults.standard.set(transcriptionMode.rawValue, forKey: "transcriptionMode") }
+        didSet {
+            UserDefaults.standard.set(transcriptionMode.rawValue, forKey: "transcriptionMode")
+            publishKeyboardProfileSelection()
+        }
     }
 
     @Published public var batchTranscriptionModel: String {
@@ -90,6 +96,7 @@ public final class AppSettings: ObservableObject {
                 batchTranscriptionModel = normalized
             } else {
                 UserDefaults.standard.set(batchTranscriptionModel, forKey: "batchTranscriptionModel")
+                publishKeyboardProfileSelection()
             }
         }
     }
@@ -207,8 +214,35 @@ public final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(autoStartRecording, forKey: "autoStartRecording") }
     }
 
+    /// Hands-free dictation: recording is driven by Apple's on-device speech
+    /// detector rather than the record button. Off by default, and inert below
+    /// iOS 26 where `SpeechDetector` does not exist. The defaults key matches
+    /// macOS so the two platforms stay in step.
+    @Published public var handsFreeDictationEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(handsFreeDictationEnabled, forKey: "handsFreeDictationEnabled")
+        }
+    }
+
+    /// Whether hands-free dictation can actually run on this device.
+    public var handsFreeDictationSupported: Bool {
+        AppleLocalModels.supportsSpeechDetector
+    }
+
+    /// The setting only takes effect where the detector exists, so a value
+    /// synced from a newer OS cannot change behaviour on an older one.
+    public var handsFreeDictationActive: Bool {
+        handsFreeDictationEnabled && handsFreeDictationSupported
+    }
+
     @Published public var preferredLocaleIdentifier: String {
-        didSet { UserDefaults.standard.set(preferredLocaleIdentifier, forKey: "preferredLocale") }
+        didSet {
+            UserDefaults.standard.set(preferredLocaleIdentifier, forKey: "preferredLocale")
+            KeyboardDictationPreferencesStore.shared.mirrorAppPreference(
+                selectedIdentifier: preferredLocaleIdentifier
+            )
+            publishKeyboardProfileSelection()
+        }
     }
 
     public var preferredModelLanguage: String? {
@@ -226,11 +260,17 @@ public final class AppSettings: ObservableObject {
     // MARK: - Post-Processing Settings
 
     @Published public var postProcessingEnabled: Bool {
-        didSet { UserDefaults.standard.set(postProcessingEnabled, forKey: "postProcessingEnabled") }
+        didSet {
+            UserDefaults.standard.set(postProcessingEnabled, forKey: "postProcessingEnabled")
+            publishKeyboardProfileSelection()
+        }
     }
 
     @Published public var postProcessingModel: String {
-        didSet { UserDefaults.standard.set(postProcessingModel, forKey: "postProcessingModel") }
+        didSet {
+            UserDefaults.standard.set(postProcessingModel, forKey: "postProcessingModel")
+            publishKeyboardProfileSelection()
+        }
     }
 
     @Published public var autoPostProcess: Bool {
@@ -278,6 +318,7 @@ public final class AppSettings: ObservableObject {
             rawValue: UserDefaults.standard.string(forKey: "visualDensity") ?? ""
         ) ?? .normal
         let autoStart = UserDefaults.standard.bool(forKey: "autoStartRecording")
+        let handsFree = UserDefaults.standard.bool(forKey: "handsFreeDictationEnabled")
         let preferredLocale = TranscriptionLanguageCatalog.normalizedIdentifier(
             UserDefaults.standard.string(forKey: "preferredLocale")
         )
@@ -318,6 +359,7 @@ public final class AppSettings: ObservableObject {
         self.liveActivitiesEnabled = liveActivities
         self.visualDensity = density
         self.autoStartRecording = autoStart
+        self.handsFreeDictationEnabled = handsFree
         self.preferredLocaleIdentifier = preferredLocale
         self.hardwareTriggerDestination = hardwareDest
         self.postProcessingEnabled = postEnabled
@@ -343,6 +385,22 @@ public final class AppSettings: ObservableObject {
     /// see the placeholder empty keys and silently fall back to Apple Speech.
     public func ensureKeysLoaded() async {
         await initialKeyLoadTask?.value
+    }
+
+    /// Publishes one coherent, non-secret keyboard capability snapshot whenever
+    /// any owning setting changes. App activation calls this too as reconciliation.
+    public func publishKeyboardProfileSelection() {
+        let mode: KeyboardDictationTranscriptionMode = transcriptionMode == .batch ? .batch : .streaming
+        let model = transcriptionMode == .batch ? batchTranscriptionModel : selectedModel
+        KeyboardDictationPreferencesStore.shared.publishAppProfileSelection(
+            configuration: KeyboardAppProfileConfiguration(
+                transcriptionMode: mode,
+                transcriptionModelIdentifier: model,
+                languageIdentifier: preferredLocaleIdentifier,
+                postProcessingEnabled: postProcessingEnabled,
+                postProcessingModelIdentifier: postProcessingModel
+            )
+        )
     }
 
     deinit {
@@ -512,10 +570,14 @@ public final class AppSettings: ObservableObject {
     }
 
     public var batchAPIKey: String {
-        if batchTranscriptionModel == AppleLocalModels.speechTranscriberModelID {
+        batchAPIKey(for: batchTranscriptionModel)
+    }
+
+    public func batchAPIKey(for modelIdentifier: String) -> String {
+        if AppleLocalModels.isSpeechAnalyzerModel(modelIdentifier) {
             return ""
         }
-        if Self.openAIBatchModelIDs.contains(batchTranscriptionModel) {
+        if Self.openAIBatchModelIDs.contains(modelIdentifier) {
             return openAIAPIKey
         }
         return openRouterAPIKey
@@ -536,7 +598,7 @@ public final class AppSettings: ObservableObject {
     /// Mac but are hidden until their upload clients are available on iPhone.
     public static let supportedBatchModels: [ModelCatalog.Option] =
         ModelCatalog.batchTranscription.filter { option in
-            option.id == AppleLocalModels.speechTranscriberModelID
+            AppleLocalModels.isSpeechAnalyzerModel(option.id)
                 || openAIBatchModelIDs.contains(option.id)
                 || option.id.hasPrefix("google/")
                 || option.id == "openai/gpt-4o-audio-preview-2024-12-17"
@@ -857,7 +919,7 @@ public struct SettingsView: View {
 
                 if transcriptionLocationBinding.wrappedValue == .remote,
                    settings.transcriptionMode == .batch,
-                   settings.batchTranscriptionModel != AppleLocalModels.speechTranscriberModelID,
+                   !AppleLocalModels.isSpeechAnalyzerModel(settings.batchTranscriptionModel),
                    settings.batchAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Label(
                         AppSettings.openAIBatchModelIDs.contains(settings.batchTranscriptionModel)
@@ -878,6 +940,18 @@ public struct SettingsView: View {
 
                 if settings.autoStartRecording && !usesInlineDensityLayout {
                     Text("Recording starts automatically when you open the app.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Toggle(isOn: $settings.handsFreeDictationEnabled) {
+                    Label("Hands-Free Dictation", systemImage: "waveform.badge.mic")
+                }
+                .disabled(!settings.handsFreeDictationSupported)
+                .accessibilityIdentifier("handsFreeDictationToggle")
+
+                if !usesInlineDensityLayout {
+                    Text(handsFreeDictationCaption)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -1170,7 +1244,7 @@ public struct SettingsView: View {
     }
 
     private var batchModeDescription: String {
-        if settings.batchTranscriptionModel == AppleLocalModels.speechTranscriberModelID {
+        if AppleLocalModels.isSpeechAnalyzerModel(settings.batchTranscriptionModel) {
             return "Audio is recorded first, then transcribed privately on this device when you stop."
         }
         return "Audio is recorded first, then uploaded when you stop for a more complete transcript."
@@ -1182,6 +1256,16 @@ public struct SettingsView: View {
 
     private var usesInlineDensityLayout: Bool {
         settings.visualDensity.prefersInlineLayout(dynamicTypeSize: dynamicTypeSize)
+    }
+
+    /// Silence budget is read from the shared policy so the copy cannot drift
+    /// from the behaviour, and matches the macOS wording.
+    private var handsFreeDictationCaption: String {
+        guard settings.handsFreeDictationSupported else {
+            return "Requires iOS 26 or later — Apple's on-device speech detector isn't available here."
+        }
+        return "Arm from the microphone button. The microphone remains active while armed; "
+            + "silent audio stays in memory only and is never stored or sent off-device."
     }
 
     private var keyboardStatusLabel: String {
@@ -1577,7 +1661,8 @@ struct APIKeysView: View {
                 id: "cartesia", title: "Cartesia", category: "Transcription", isStored: settings.hasCartesiaKey
             ),
             APIKeyListEntry(
-                id: "soniox", title: "Soniox", category: "Transcription", isStored: settings.hasSonioxKey
+                id: "soniox", title: "Soniox", category: "Transcription & Voice Output",
+                isStored: settings.hasSonioxKey
             ),
             APIKeyListEntry(
                 id: "modulate", title: "Modulate", category: "Transcription", isStored: settings.hasModulateKey
@@ -1840,11 +1925,11 @@ struct APIKeysView: View {
                 messages.append("✓ Cartesia key saved")
             }
 
-            // Save Soniox key (no cheap validation endpoint)
+            // The same Soniox credential powers transcription and voice output.
             if !sonioxKey.isEmpty {
                 settings.sonioxAPIKey = sonioxKey
                 sonioxKey = ""
-                messages.append("✓ Soniox key saved")
+                messages.append("✓ Soniox key saved for transcription and voice output")
             }
 
             // Save Modulate key (no cheap validation endpoint)

@@ -1,11 +1,11 @@
 # iOS Keyboard v2: In-Keyboard Dictation Design
 
-> **Shipping status:** disabled. Default local, archive, and TestFlight builds
-> omit the extension. Internal CI generates with `TUIST_IOS_KEYBOARD=1` so the
-> extension keeps compiling; a manual TestFlight run additionally requires the
-> off-by-default `include_keyboard` input. The physical-device matrix in
-> [iOS keyboard verification](ios-keyboard-mvp-verification.md) is the release
-> gate.
+> **Shipping status:** the keyboard extension is included in TestFlight by
+> default, using the existing Instant Dictation handoff. Direct capture is an
+> independent build policy and remains default-off until the physical-device
+> matrix in [iOS keyboard verification](ios-keyboard-mvp-verification.md)
+> passes. This lets the handoff-only keyboard ship without attempting
+> microphone or Speech permissions inside the extension.
 
 ## Audit: why v1 bounced to the main app
 
@@ -36,7 +36,7 @@ extension with `RequestsOpenAccess` and user-granted Full Access **can** in
 practice activate an audio session and use the Speech framework. Apple
 documents Full Access as gating shared containers and network access, not
 microphone capture, and does not state that extensions may record; the
-extension must separately declare `NSMicrophoneUsageDescription`/
+direct-capture build must separately declare `NSMicrophoneUsageDescription`/
 `NSSpeechRecognitionUsageDescription` and the user must grant both. **Treat
 in-extension capture as an unverified platform assumption** until the
 physical-device matrix signs it off: first-run permission behaviour on real
@@ -45,12 +45,14 @@ fallback for devices that refuse.
 
 ## Decision
 
-Two capture paths behind one planner (`KeyboardCapturePlanner` in SpeakCore):
+Two capture paths behind one planner (`KeyboardCapturePlanner` in SpeakCore)
+and an independent direct-capture policy:
 
 | Condition | Path |
 | --- | --- |
 | No Full Access (no audio session, no App Group) | **Blocked** — setup guidance in the strip |
-| Full Access, mic + speech permission not denied | **Direct**: record + transcribe inside the extension |
+| Full Access, direct capture disabled by policy | **Handoff** without reading/requesting extension permissions |
+| Full Access, direct capture enabled, mic + speech permission not denied | **Direct**: record + transcribe inside the extension |
 | Full Access, mic or speech denied / recognizer missing / capture fails | **Handoff**: v1 Instant Dictation flow |
 
 Note: issue #610 sketched "handoff when Full Access is off", but Full Access
@@ -64,7 +66,7 @@ Speech support is unverified on device (see above), so any denied prompt,
 missing recogniser, or capture failure degrades to **Handoff** at runtime
 (`fallBackToHandoffIfDirectCaptureIsImpossible`).
 
-### Direct path (primary)
+### Direct path (candidate)
 
 - `KeyboardDictationEngine` (extension-only): `AVAudioEngine` input tap →
   `SFSpeechAudioBufferRecognitionRequest` with partial results.
@@ -85,28 +87,43 @@ missing recogniser, or capture failure degrades to **Handoff** at runtime
   (`deleteCount` + `insertion`) against the document proxy. Words that survive
   one revision are committed at word boundaries and never rewritten; the final
   two words stay volatile (engines revise those most). Structural invariant:
-  deletes never exceed the volatile tail, so **while the selection stays where
-  the streamer left it** host-app text is never eaten. If the user moves the
-  cursor mid-dictation the tail no longer maps to the streamed text, so the
-  verification matrix requires stopping dictation before editing elsewhere in
-  the same field and records observed behaviour when it is not.
+  deletes never exceed the volatile tail. `KeyboardDocumentSession` also owns
+  the leading separator and snapshots bounded context on both sides of the
+  cursor after every extension-authored edit. A caret move or host edit that
+  makes the replacement anchor unprovable pauses the run before another tail
+  deletion. Composed clusters are deleted only while the complete context
+  proves scalar-wise progress; ambiguous outcomes are never followed by an
+  insert.
   Text therefore **streams into the field as the user speaks**, with the same
   live text mirrored in the keyboard strip.
 - Language quick-switch chip: `KeyboardDictationPreferencesStore` (App Group)
   mirrors the app's spoken-language preference and keeps a ring of up to four
   recent languages; the chip cycles the ring in one tap (≤2 taps requirement).
-- Guardrails: a `documentIdentifier` change mid-session cancels capture and
+- Profile/mode menu: the same store holds one schema-versioned, app-owned
+  `KeyboardProfileSelection` catalogue. `Local` is explicit direct Apple Speech
+  with no polish. `App` snapshots the app's exact transcription mode/model,
+  language, and post-processing model with an `appHandoff` route. Both options
+  are defined by `KeyboardDictationProfileCatalog` in SpeakCore, remain
+  reachable in two taps, and stay available without Apple Foundation Models.
+  The projection contains no credentials or custom prompt text.
+- Guardrails: every engine callback carries a per-run UUID, so a delayed result,
+  final, error, timeout, or interruption from a cancelled recogniser cannot
+  mutate or tear down a newer run. A document/selection mutation mid-session
+  cancels capture and
   commits what was already streamed (never streams into the wrong field);
   audio interruptions finish gracefully, keeping inserted words.
 
 ### Handoff path (fallback)
 
-The v1 Instant Dictation flow is preserved verbatim behind
+The v1 Instant Dictation transport is preserved behind
 `KeyboardHandoffController` (extension) + `KeyboardInstantDictationCoordinator`
 (app): app-owned mic session, nonce-scoped App Group records, interim
-transcript mirroring, single insert on completion. The keyboard automatically
-degrades to this path when direct capture fails with a permission-style error.
-Setup copy now frames Instant Dictation as the fallback, not the primary flow.
+transcript mirroring, single insert on completion. Each request snapshots its
+selected profile, and the app executes that exact model/language/polish
+configuration or returns `profileUnavailable`; it never silently downgrades.
+The keyboard also automatically degrades to this path when direct capture fails with a permission-style error.
+Setup copy distinguishes the App profile from Local mode's default-off and
+permission-failure handoff without implying that the rollout flag is enabled.
 
 ### Surface
 
@@ -114,32 +131,37 @@ One compact layout (~170 pt portrait iPhone; v1 was 300 pt):
 
 - **Strip:** live partial transcript while dictating; state/setup copy
   otherwise; inline Cancel while capturing.
-- **Control row:** globe (when required) · language chip · mic/stop ·
-  delete · return. Deliberately no QWERTY — the globe key returns to the
-  system keyboard for typing, per the v1 correction-UX decision which stands.
+- **Control row:** globe (when required) · language chip · profile chip ·
+  mic/stop · delete · return. Each chip appears only when it has somewhere to
+  switch to, and the mic drops its caption while both are present so the row
+  stays one line at the same height. Deliberately no QWERTY — the globe key
+  returns to the system keyboard for typing, per the v1 correction-UX decision
+  which stands.
 
 ## What was kept vs redone
 
 | Piece | v2 status |
 | --- | --- |
-| `KeyboardHandoffStore` / records / signals (SpeakCore) | Kept unchanged (fallback transport) |
-| `KeyboardInstantDictationStore` + coordinator | Kept unchanged (fallback capture) |
+| `KeyboardHandoffStore` / records / signals (SpeakCore) | Extended with an immutable profile snapshot |
+| `KeyboardInstantDictationStore` + coordinator | Extended to execute the request snapshot |
 | `KeyboardLaunchPolicy` | Kept; feeds the new planner |
 | `KeyboardCorrectionPlan` (safe undo) | Kept in SpeakCore; the v2 surface drops the undo/cursor row in favour of delete + re-dictation |
 | `KeyboardViewController` monolith (~800 lines incl. UI) | Split: shell controller, `KeyboardViewModel`, `KeyboardRootView`, `KeyboardDictationEngine`, `KeyboardHandoffController` |
-| 13-state single presentation enum | Direct machine (6 states) + handoff presentation (10), unified in one strip |
+| 13-state single presentation enum | Direct machine + handoff presentation, unified in one strip |
 
 ## Privacy and review posture
 
 - Recording happens only while the mic key is active; there is no idle
   listening in the direct path. The permanent orange indicator now exists only
   when the user explicitly enables the fallback.
-- The keyboard still never reads or transmits surrounding host text; edits go
-  one way through `textDocumentProxy`.
-- The App Group carries: handoff records (unchanged from v1) and the language
-  selection. Never audio, never credentials.
-- Extension Info.plist declares microphone and speech-recognition usage
-  strings; both permissions are user-granted and revocable in Settings.
+- The keyboard reads bounded context immediately before and after the cursor
+  locally to prove its replacement anchor. It never persists or transmits that
+  host context.
+- The App Group carries handoff records, language selection, and a non-secret
+  profile projection. Never audio, credentials, custom prompts, or surrounding text.
+- Direct-capture builds add microphone and speech-recognition usage strings to
+  the extension Info.plist; handoff-only builds omit them. Both permissions are
+  user-granted and revocable in Settings when direct capture is enabled.
 
 ## Open risks (device-matrix items)
 
@@ -148,9 +170,8 @@ One compact layout (~170 pt portrait iPhone; v1 was 300 pt):
    If a device declines, the engine reports failure and the keyboard degrades
    to handoff — but the prompt flow must be confirmed on hardware.
 2. **Memory ceiling** under long dictation with on-device speech.
-3. **Cursor moves mid-dictation**: `selectionDidChange` is unreliable in
-   keyboard extensions; a user tapping elsewhere in the same field during
-   dictation can misplace tail replacements. Document-change cancellation
-   covers the cross-field case; same-field cursor taps need device testing.
+3. **Cursor/host mutations mid-dictation**: code now pauses when the bounded
+   before/after context no longer matches the session anchor. Device testing
+   must confirm callback ordering across Notes, WhatsApp, and Safari.
 4. **`SFSpeechRecognizer` availability inside extensions** per locale asset
    state (undownloaded on-device models fall back to server dictation).

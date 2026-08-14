@@ -1,0 +1,156 @@
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+import {
+    buildCatalogue,
+    catalogueEntry,
+    compareVersions,
+    mergeEntries,
+    normaliseVersion,
+    parseCatalogue,
+    sanitiseNotes,
+    serialiseCatalogue,
+} from "../../scripts/release-notes-catalogue-lib.mjs";
+
+test("versions normalise across tag families", () => {
+    assert.equal(normaliseVersion("mac-v2.45.0"), "2.45.0");
+    assert.equal(normaliseVersion("ios-v0.9.1"), "0.9.1");
+    assert.equal(normaliseVersion(" v1.2.3 "), "1.2.3");
+});
+
+test("versions sort newest first using numeric components", () => {
+    const versions = ["2.9.0", "2.41.1", "2.10.0", "2.41.0"].sort(compareVersions);
+    assert.deepEqual(versions, ["2.41.1", "2.41.0", "2.10.0", "2.9.0"]);
+});
+
+test("release-page furniture is stripped from bundled notes", () => {
+    const notes = sanitiseNotes([
+        "## Overview",
+        "",
+        "Faster startup.",
+        "",
+        "**Full changelog:** https://github.com/example/repo/compare/mac-v1...mac-v2",
+        "",
+        "<!-- release-notes: model=gpt-5.6-luna effort=medium -->",
+        "",
+    ].join("\n"));
+
+    assert.equal(notes, "## Overview\n\nFaster startup.");
+});
+
+test("GitHub's auto-generated compare footer is stripped", () => {
+    const notes = sanitiseNotes([
+        "## What's Changed",
+        "* fix: something by @someone in https://github.com/example/repo/pull/629",
+        "",
+        "**Full Changelog**: https://github.com/example/repo/compare/mac-v2.41.0...mac-v2.41.1",
+    ].join("\n"));
+
+    assert.ok(!notes.includes("/compare/"), "the compare URL must not reach the bundled notes");
+    assert.equal(
+        notes,
+        "## What's Changed\n* fix: something by @someone in https://github.com/example/repo/pull/629"
+    );
+});
+
+test("entries default their tag and reject empty notes", () => {
+    const entry = catalogueEntry({ version: "2.46.0", publishedAt: "2026-08-09T00:00:00Z", markdown: "## Overview\n\nNew." });
+    assert.deepEqual(entry, {
+        platform: "mac",
+        version: "2.46.0",
+        tag: "mac-v2.46.0",
+        publishedAt: "2026-08-09T00:00:00Z",
+        markdown: "## Overview\n\nNew.",
+    });
+    assert.throws(() => catalogueEntry({ version: "2.46.0", markdown: "<!-- only a comment -->" }), /empty/);
+    assert.throws(() => catalogueEntry({ markdown: "## Overview" }), /version/);
+});
+
+test("merging replaces a version in place, orders newest first and honours the limit", () => {
+    const existing = [
+        { version: "2.44.0", tag: "mac-v2.44.0", publishedAt: "b", markdown: "old" },
+        { version: "2.43.0", tag: "mac-v2.43.0", publishedAt: "a", markdown: "older" },
+    ];
+    const merged = mergeEntries(existing, [
+        { version: "2.44.0", tag: "mac-v2.44.0", publishedAt: "b", markdown: "regenerated" },
+        { version: "2.45.0", tag: "mac-v2.45.0", publishedAt: "c", markdown: "newest" },
+    ], 2);
+
+    assert.deepEqual(merged.map((entry) => entry.version), ["2.45.0", "2.44.0"]);
+    assert.equal(merged[1].markdown, "regenerated");
+});
+
+test("matching macOS and iOS versions remain separate and limits apply per platform", () => {
+    const merged = mergeEntries([], [
+        catalogueEntry({ platform: "mac", version: "2.45.0", markdown: "mac current" }),
+        catalogueEntry({ platform: "ios", version: "2.45.0", markdown: "ios current" }),
+        catalogueEntry({ platform: "mac", version: "2.44.0", markdown: "mac previous" }),
+        catalogueEntry({ platform: "ios", version: "2.44.0", markdown: "ios previous" }),
+    ], 1);
+
+    assert.deepEqual(
+        merged.map((entry) => `${entry.platform}:${entry.version}`),
+        ["ios:2.45.0", "mac:2.45.0"],
+    );
+});
+
+test("catalogue round-trips through the shipped JSON shape", () => {
+    const catalogue = buildCatalogue({
+        entries: [catalogueEntry({ version: "mac-v2.45.0", markdown: "## Overview\n\nShipped." })],
+        generatedAt: "2026-08-09T00:00:00Z",
+    });
+    const parsed = parseCatalogue(serialiseCatalogue(catalogue));
+
+    assert.equal(parsed.schemaVersion, 2);
+    assert.equal(parsed.generatedAt, "2026-08-09T00:00:00Z");
+    assert.deepEqual(parsed.entries.map((entry) => entry.version), ["2.45.0"]);
+    assert.deepEqual(parseCatalogue(null).entries, []);
+});
+
+test("an unusable --limit stops the run instead of emptying the catalogue", () => {
+    const script = fileURLToPath(new URL("../../scripts/update-release-notes-catalogue.mjs", import.meta.url));
+    const existing = serialiseCatalogue(buildCatalogue({
+        entries: [catalogueEntry({ version: "mac-v2.45.0", markdown: "## Overview\n\nShipped." })],
+        generatedAt: "2026-08-09T00:00:00Z",
+    }));
+
+    for (const limit of ["abc", "0", "-3", "1.5", "12oops", "9999999999999999999999999"]) {
+        const cataloguePath = join(mkdtempSync(join(tmpdir(), "release-notes-")), "ReleaseNotes.json");
+        writeFileSync(cataloguePath, existing);
+
+        const result = spawnSync(
+            process.execPath,
+            [script, "--backfill", "--limit", limit, "--catalogue", cataloguePath],
+            { encoding: "utf8" },
+        );
+
+        assert.equal(result.status, 2, `--limit ${limit} should exit 2, stderr: ${result.stderr}`);
+        assert.match(result.stderr, /--limit must be a positive whole number/);
+        assert.equal(readFileSync(cataloguePath, "utf8"), existing, `--limit ${limit} rewrote the catalogue`);
+    }
+});
+
+test("a malformed existing catalogue fails without rewriting it", () => {
+    const script = fileURLToPath(new URL("../../scripts/update-release-notes-catalogue.mjs", import.meta.url));
+    const directory = mkdtempSync(join(tmpdir(), "release-notes-"));
+    const cataloguePath = join(directory, "ReleaseNotes.json");
+    const notesPath = join(directory, "notes.md");
+    const malformed = "{ definitely-not-json }\n";
+    writeFileSync(cataloguePath, malformed);
+    writeFileSync(notesPath, "## Overview\n\nShipped.");
+
+    const result = spawnSync(process.execPath, [
+        script,
+        "--platform", "mac",
+        "--version", "2.46.0",
+        "--notes-file", notesPath,
+        "--catalogue", cataloguePath,
+    ], { encoding: "utf8" });
+
+    assert.notEqual(result.status, 0);
+    assert.equal(readFileSync(cataloguePath, "utf8"), malformed);
+});

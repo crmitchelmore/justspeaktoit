@@ -6,6 +6,7 @@ import UIKit
 public struct KeyboardSetupView: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.iOSKeyboardDirectCaptureEnabled) private var directCaptureEnabled
     @State private var observation: KeyboardExtensionObservation?
     @ObservedObject private var instantDictation = KeyboardInstantDictationCoordinator.shared
 
@@ -22,8 +23,11 @@ public struct KeyboardSetupView: View {
                     Text("Dictate in any app, right from the keyboard")
                         .font(.title2.bold())
                     Text(
-                        "Tap the mic key and your words stream into the text field as you speak — "
-                            + "no app switching. Use the globe key to return to the system keyboard for typing."
+                        directCaptureEnabled
+                            ? "Tap the mic key and your words stream into the text field as you speak — "
+                                + "no app switching. Use the globe key to return to the system keyboard for typing."
+                            : "Tap the mic key to dictate through Just Speak's Instant Dictation handoff — "
+                                + "without leaving the app you're typing in."
                     )
                     .foregroundStyle(.secondary)
                 }
@@ -44,8 +48,11 @@ public struct KeyboardSetupView: View {
                 setupStep(
                     number: 3,
                     title: "Tap the mic and speak",
-                    detail: "In any text field, hold the globe key, pick Just Speak, and tap the mic. "
-                        + "Allow microphone and speech recognition when asked the first time."
+                    detail: directCaptureEnabled
+                        ? "In any text field, hold the globe key, pick Just Speak, and tap the mic. "
+                            + "Allow microphone and speech recognition when asked the first time."
+                        : "Enable Instant Dictation below, then hold the globe key in any text field, "
+                            + "pick Just Speak, and tap the mic."
                 )
 
                 Button {
@@ -79,7 +86,7 @@ public struct KeyboardSetupView: View {
                 .foregroundStyle(.secondary)
             }
 
-            Section("Fallback: Instant Dictation") {
+            Section(directCaptureEnabled ? "App Mode and Fallback" : "Instant Dictation") {
                 statusRow(
                     title: "App-owned microphone",
                     isReady: instantDictation.isReady || instantDictation.isRecording,
@@ -106,12 +113,13 @@ public struct KeyboardSetupView: View {
                 .accessibilityIdentifier("keyboardInstantDictationButton")
 
                 Text(
-                    "Only needed if the keyboard can't record itself — for example if you declined its "
-                        + "microphone or speech-recognition permission, your language has no speech "
-                        + "recogniser, or in-keyboard capture fails. Just Speak then keeps a ready "
-                        + "microphone session and the keyboard hands recording to the app — still without "
-                        + "leaving the app you're typing in. Idle audio is discarded immediately and never "
-                        + "saved or sent."
+                    "App mode always uses Instant Dictation for your selected model and post-processing. "
+                        + (directCaptureEnabled
+                            ? "Local mode also falls back to it when in-keyboard capture is unavailable. "
+                            : "Local mode uses it while direct capture remains off, without requesting "
+                                + "microphone or speech-recognition permission in the keyboard. ")
+                        + "Just Speak keeps a ready microphone session and securely handles each request."
+                        + " Idle audio is discarded immediately and never saved or sent."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -125,22 +133,25 @@ public struct KeyboardSetupView: View {
 
             Section("Why Full Access?") {
                 Label(
-                    "Lets the keyboard run the microphone and Apple speech recognition",
-                    systemImage: "mic.fill"
+                    directCaptureEnabled
+                        ? "Lets the keyboard run the microphone and Apple speech recognition"
+                        : "Lets the keyboard exchange private dictation state with Just Speak",
+                    systemImage: directCaptureEnabled ? "mic.fill" : "arrow.left.arrow.right"
                 )
                 Label(
                     "Shares your language choice and dictation state with the app",
                     systemImage: "gearshape.2"
                 )
                 Label(
-                    "Required by iOS before a keyboard may record or reach the network",
+                    "Required by iOS for the shared App Group and network access",
                     systemImage: "lock.open"
                 )
                 Text(
-                    "The keyboard reads the text just before the cursor only to place dictated words "
-                        + "correctly, and never stores or transmits it. It records only while the mic key "
-                        + "is active, prefers on-device Apple speech, and shares state with Just Speak "
-                        + "solely through the private App Group."
+                    "The keyboard reads bounded text immediately before and after the cursor only to place "
+                        + "dictated words safely, and never stores or transmits that context. "
+                        + (directCaptureEnabled
+                            ? "It records only while the mic key is active and prefers on-device Apple speech."
+                            : "Recording runs in Just Speak through Instant Dictation, not in the keyboard.")
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -222,10 +233,11 @@ public struct KeyboardSetupView: View {
 
     private func refresh() {
         observation = KeyboardHandoffStore.shared.extensionObservation()
-        // Keep the keyboard's language chip in sync with the app preference.
+        // Keep the keyboard's chips in sync with the app preferences.
         KeyboardDictationPreferencesStore.shared.mirrorAppPreference(
             selectedIdentifier: AppSettings.shared.preferredLocaleIdentifier
         )
+        AppSettings.shared.publishKeyboardProfileSelection()
     }
 }
 #endif

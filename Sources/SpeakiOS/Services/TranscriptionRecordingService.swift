@@ -71,7 +71,8 @@ public final class TranscriptionRecordingService: ObservableObject {
     public func startRecording( // swiftlint:disable:this function_body_length
         retainBatchRecording: Bool = true,
         sharesLiveTranscript: Bool = true,
-        requiresLiveActivity: Bool = true
+        requiresLiveActivity: Bool = true,
+        keyboardProfile: KeyboardDictationProfileOption? = nil
     ) async throws {
         guard !isRunning, !isStarting else { return }
         isStarting = true
@@ -87,9 +88,10 @@ public final class TranscriptionRecordingService: ObservableObject {
 
         lastSessionError = nil
         providerFallbackNotice = nil
-        currentModel = settings.transcriptionMode == .batch
-            ? settings.batchTranscriptionModel
-            : settings.selectedModel
+        let usesBatchTranscription = keyboardProfile?.transcriptionMode == .batch
+            || (keyboardProfile == nil && settings.transcriptionMode == .batch)
+        currentModel = keyboardProfile?.transcriptionModelIdentifier
+            ?? (usesBatchTranscription ? settings.batchTranscriptionModel : settings.selectedModel)
         partialText = ""
         wordCount = 0
         lastSharedStateWriteAt = .distantPast
@@ -99,7 +101,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         sharedState.isRecording = true
         sharedState.recordingStartTime = startTime
 
-        if settings.transcriptionMode == .streaming {
+        if !usesBatchTranscription && keyboardProfile == nil {
             let requestedModel = currentModel
             let route = LiveTranscriptionRouting.route(for: currentModel)
             currentModel = LiveTranscriptionRouting.resolvedModelID(
@@ -146,15 +148,17 @@ public final class TranscriptionRecordingService: ObservableObject {
         #endif
 
         do {
-            let mode: IOSTranscriptionSession.Mode = settings.transcriptionMode == .batch
+            let mode: IOSTranscriptionSession.Mode = usesBatchTranscription
                 ? .batch(retainRecording: retainBatchRecording)
                 : .streaming
+            let languageIdentifier = keyboardProfile?.languageIdentifier
+                ?? settings.preferredLocaleIdentifier
             let session = try IOSTranscriptionSession(
                 modelID: currentModel,
                 mode: mode,
-                language: settings.preferredModelLanguage,
+                language: TranscriptionLanguageCatalog.providerLanguage(for: languageIdentifier),
                 audioSessionManager: audioSessionManager,
-                batchAPIKey: settings.batchAPIKey,
+                batchAPIKey: settings.batchAPIKey(for: currentModel),
                 liveAPIKey: settings.liveAPIKey(for:)
             )
             session.onPartialResult = { [weak self] text, _ in

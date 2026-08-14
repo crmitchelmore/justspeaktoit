@@ -1,6 +1,8 @@
+// swiftlint:disable file_length
 import AppKit
 import ApplicationServices
 import Foundation
+import SpeakCore
 
 /// Handles live incremental text insertion during streaming transcription.
 /// Tracks what's been inserted and handles updates/replacements.
@@ -11,6 +13,17 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
     case applied
     case deferred
     case failed(Error)
+  }
+
+  /// How live text reaches the target app during a session.
+  enum InsertionStrategy {
+    /// Rewrite the whole field value on every update (existing behaviour).
+    case fullValue
+    /// Experimental (issue #611): keep the stable prefix untouched and patch
+    /// only the unstable tail via ranged `kAXSelectedTextRange` replacement.
+    /// Only used for allowlisted apps; any failure drops cleanly back to the
+    /// standard one-shot delivery without ever duplicating text.
+    case rangedStreaming
   }
 
   /// The text that has been successfully inserted
@@ -44,8 +57,35 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
   /// (latency checkpoint: first character visible in the target app).
   private(set) var firstInsertionAt: Date?
 
+  /// Strategy chosen for the current session.
+  private(set) var strategy: InsertionStrategy = .fullValue
+
+  /// UTF-16 offset in the target field where the streamed region begins
+  /// (ranged streaming only). Captured from the caret on first insert.
+  private var streamingAnchorUTF16: Int?
+
+  /// UTF-16 length of the selection present when the streamed region was
+  /// anchored. The first ranged replacement consumes it so streaming replaces a
+  /// selection exactly like the standard insertion path does.
+  private var streamingPendingSelectionUTF16: Int = 0
+
+  /// The target field's contents captured when the streamed region was anchored,
+  /// before this session wrote anything. It is the only evidence available for
+  /// proving that streamed text is genuinely absent (rather than merely altered
+  /// by the app) and for rejecting a re-anchor onto identical pre-existing text.
+  private var streamingBaselineFieldText: String?
+
   /// Whether incremental live updates should pause until finalization.
   private var shouldPauseIncrementalUpdates: Bool = false
+
+  /// Supplies the field the ranged streaming path reads and writes. Left `nil`
+  /// in production, where the focused accessibility element is used; tests
+  /// substitute an in-memory field to exercise the streaming orchestration.
+  var streamingFieldProvider: (() -> StreamingTextField?)?
+
+  /// How long to wait for the target app to apply the first streamed write
+  /// before reading it back. Shortened by tests, which have no real app to wait for.
+  var streamingVerificationDelay: TimeInterval = 0.05
 
   var shouldUseLiveFinalization: Bool {
     isActive && !usingClipboardFallback
@@ -57,7 +97,7 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
   }
 
   /// Start a live insertion session
-  func begin(target: TextOutputTarget? = nil) {
+  func begin(target: TextOutputTarget? = nil, strategy: InsertionStrategy = .fullValue) {
     guard canUseAccessibility() else {
       lastError = TextOutputError.accessibilityPermissionMissing
       print("[LiveTextInserter] Cannot start: accessibility permission missing")
@@ -69,6 +109,10 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
     firstInsertionVerified = false
     hasPerformedAccessibilityWrite = false
     self.firstInsertionAt = nil
+    self.strategy = strategy
+    self.streamingAnchorUTF16 = nil
+    self.streamingPendingSelectionUTF16 = 0
+    self.streamingBaselineFieldText = nil
     shouldPauseIncrementalUpdates = false
     usingClipboardFallback = false
     isActive = true
@@ -76,7 +120,7 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
     self.target = target ?? .capture()
     let targetApp = self.target?.applicationName ?? "unknown"
     print(
-      "[LiveTextInserter] Started live insertion session, target app: \(targetApp), " +
+      "[LiveTextInserter] Started live insertion session (\(strategy)), target app: \(targetApp), " +
         "deferring AX readiness checks"
     )
   }
@@ -96,6 +140,10 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
     firstInsertionVerified = false
     hasPerformedAccessibilityWrite = false
     self.firstInsertionAt = nil
+    self.strategy = .fullValue
+    self.streamingAnchorUTF16 = nil
+    self.streamingPendingSelectionUTF16 = 0
+    self.streamingBaselineFieldText = nil
     shouldPauseIncrementalUpdates = false
     usingClipboardFallback = false
     isActive = false
@@ -113,6 +161,11 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
 
     // Calculate what's new since last confirmed insertion
     let trimmedNew = newText.trimmingCharacters(in: .whitespaces)
+
+    if self.strategy == .rangedStreaming {
+      streamingUpdate(with: trimmedNew)
+      return
+    }
 
     // If the new text is shorter (correction), we need to handle replacement
     if trimmedNew.count < insertedText.count {
@@ -133,6 +186,10 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
   /// Apply final polished text - replaces what was inserted with polished version
   func applyPolishedFinal(_ polishedText: String) -> FinalizationResult {
     guard shouldUseLiveFinalization else { return .deferred }
+
+    if self.strategy == .rangedStreaming {
+      return streamingFinalize(with: polishedText)
+    }
 
     guard !insertedText.isEmpty else {
       // Nothing was inserted live, just do normal insertion
@@ -163,9 +220,22 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
     }
   }
 
-  private func deferToStandardDelivery(reason: String, error: Error? = nil) {
+  /// - Parameter textAbsentFromField: pass `true` only after reading the target
+  ///   field back and confirming none of this session's text is present, which
+  ///   makes a one-shot standard delivery safe even after a successful write.
+  private func deferToStandardDelivery(
+    reason: String, error: Error? = nil, textAbsentFromField: Bool = false
+  ) {
     if let error {
       lastError = error
+    }
+
+    if textAbsentFromField {
+      insertedText = ""
+      confirmedCharCount = 0
+      usingClipboardFallback = true
+      print("[LiveTextInserter] \(reason), deferring to standard delivery")
+      return
     }
 
     guard canDeferToStandardDelivery else {
@@ -354,5 +424,349 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
     }
 
     return currentString == expected || currentString.hasSuffix(expected)
+  }
+}
+
+// MARK: - Ranged streaming insertion (experimental, issue #611)
+
+extension LiveTextInserter {
+  /// Patches the target field so it contains `newText` at the streamed region:
+  /// the stable prefix is left untouched and only the differing tail is
+  /// replaced through `kAXSelectedTextRange` + `kAXSelectedText`.
+  fileprivate func streamingUpdate(with newText: String) {
+    guard let field = streamingField() else {
+      abandonStreaming(
+        reason: "no focused element",
+        error: TextOutputError.unableToFindFocusedElement
+      )
+      return
+    }
+
+    if self.streamingAnchorUTF16 == nil {
+      // First insert: anchor the streamed region at the current caret, keeping
+      // any selection so the first replacement consumes it.
+      guard let selection = field.readSelectedRange() else {
+        abandonStreaming(reason: "cannot read caret position", error: nil)
+        return
+      }
+      self.streamingAnchorUTF16 = selection.location
+      self.streamingPendingSelectionUTF16 = max(0, selection.length)
+      self.streamingBaselineFieldText = field.readValue()
+    } else if !insertedText.isEmpty {
+      // Re-validate the region before every patch: another edit may have moved
+      // or removed the streamed text since the last update.
+      switch inspectStreamingRegion(on: field) {
+      case .matched:
+        break
+      case .absent:
+        abandonStreaming(
+          reason: "streamed text is no longer in the field",
+          error: nil,
+          textAbsentFromField: true
+        )
+        return
+      case .unknown:
+        pauseStreaming(reason: "streamed region could not be verified")
+        return
+      }
+    }
+
+    let diff = StreamingTextReconciler.diff(from: insertedText, to: newText)
+    guard !diff.isNoOp else { return }
+    guard applyStreamingDiff(diff, on: field) else { return }
+    insertedText = newText
+    confirmedCharCount = newText.count
+
+    if !firstInsertionVerified {
+      verifyFirstStreamingInsertion(on: field)
+    }
+  }
+
+  /// One clean final pass: transform the streamed region into the final
+  /// polished text. Never re-pastes on failure — if text already reached the
+  /// app the streamed transcript is left in place rather than duplicated.
+  fileprivate func streamingFinalize(with finalText: String) -> FinalizationResult {
+    // Nothing ever streamed: hand the whole delivery to the standard path.
+    guard !insertedText.isEmpty || hasPerformedAccessibilityWrite else {
+      usingClipboardFallback = true
+      return .deferred
+    }
+
+    guard let field = streamingField() else {
+      // Deliberately .applied, not .failed. Every partial was written and
+      // verified before this point, so the user's full transcript is in the
+      // field; only the final polish delta may be missing. Reporting failure
+      // would suppress the "Delivered" HUD and record a HistoryError for a
+      // delivery that visibly succeeded, which misleads more than the mild
+      // inaccuracy of calling a near-final transcript delivered. Contrast the
+      // .unknown case below, which fails because the field may still hold only
+      // the first partial.
+      print("[LiveTextInserter] Streaming finalize: focused element lost, keeping streamed text")
+      lastError = TextOutputError.unableToFindFocusedElement
+      return .applied
+    }
+
+    // Only report success for text that is verifiably still where this session
+    // put it, and only patch a region we can still locate.
+    switch inspectStreamingRegion(on: field) {
+    case .matched:
+      break
+    case .absent:
+      // Nothing from this session is on screen, so one standard delivery of the
+      // final text is safe and cannot duplicate anything.
+      insertedText = ""
+      confirmedCharCount = 0
+      usingClipboardFallback = true
+      print("[LiveTextInserter] Streaming finalize: streamed text absent, deferring to standard delivery")
+      return .deferred
+    case .unknown:
+      // Cannot prove where the text is: keep whatever is there rather than risk
+      // overwriting unrelated content or duplicating the delivery.
+      //
+      // Unlike the two .applied paths, this one genuinely fails. Reaching
+      // .unknown means the region stopped verifying, which is exactly what
+      // happens when the app accepted the first partial and then silently
+      // refused every later patch — the field may hold only that first partial,
+      // not the transcript. Announcing "Delivered" over a truncated transcript
+      // would hide real data loss, so the caller is told the delivery failed.
+      lastError = TextOutputError.unableToVerifyInsertion
+      print("[LiveTextInserter] Streaming finalize: region unverified, keeping streamed text")
+      return .failed(TextOutputError.unableToVerifyInsertion)
+    }
+
+    let diff = StreamingTextReconciler.diff(from: insertedText, to: finalText)
+    if diff.isNoOp {
+      return .applied
+    }
+
+    if applyStreamingDiff(diff, on: field) {
+      insertedText = finalText
+      confirmedCharCount = finalText.count
+      return .applied
+    }
+    if usingClipboardFallback {
+      // No text ever reached the app, so the one-shot standard delivery is safe.
+      return .deferred
+    }
+    // A write already landed but the final patch failed: keep the streamed
+    // transcript as-is instead of risking a duplicate insert.
+    //
+    // Deliberately .applied, for the same reason as the lost-focus path above.
+    // The region was matched moments ago, so the streamed transcript is intact
+    // in the field and only the final polish delta is missing. Failing here
+    // would suppress the "Delivered" HUD and record a HistoryError against a
+    // delivery the user can see, which is a worse report than the mild
+    // inaccuracy of treating a near-final transcript as delivered.
+    print("[LiveTextInserter] Streaming finalize failed after writes; keeping streamed text")
+    return .applied
+  }
+
+  /// Selects `diff`'s range (offset by the region anchor) and replaces it.
+  /// Returns false after routing any failure through `abandonStreaming`.
+  private func applyStreamingDiff(_ diff: StreamingTextDiff, on field: StreamingTextField) -> Bool {
+    guard let anchor = self.streamingAnchorUTF16 else {
+      abandonStreaming(reason: "streaming anchor missing", error: nil)
+      return false
+    }
+
+    let range = CFRange(
+      location: anchor + diff.replaceLocationUTF16,
+      length: diff.replaceLengthUTF16 + self.streamingPendingSelectionUTF16
+    )
+    let rangeStatus = field.setSelectedRange(range)
+    guard rangeStatus == .success else {
+      abandonStreaming(
+        reason: "selecting replacement range failed (AXError \(rangeStatus.rawValue))",
+        error: TextOutputError.unableToSetValue(rangeStatus)
+      )
+      return false
+    }
+
+    let insertStatus = field.setSelectedText(diff.replacement)
+    guard insertStatus == .success else {
+      // The selection landed but the replacement did not: leaving the user's
+      // text highlighted would make their next keystroke delete it, so collapse
+      // back to a caret at the region start before giving up.
+      _ = field.setSelectedRange(CFRange(location: range.location, length: 0))
+      abandonStreaming(
+        reason: "replacing selected text failed (AXError \(insertStatus.rawValue))",
+        error: TextOutputError.unableToSetValue(insertStatus)
+      )
+      return false
+    }
+
+    // The diff always extends to the end of the streamed region, so the caret
+    // lands at the region end naturally after the replacement.
+    self.streamingPendingSelectionUTF16 = 0
+    recordAccessibilityWrite()
+    return true
+  }
+
+  /// Reads back the streamed region once after the first write. On mismatch the
+  /// session either falls back safely (nothing landed) or pauses incremental
+  /// updates, so a misbehaving AX implementation can never garble or duplicate
+  /// text.
+  private func verifyFirstStreamingInsertion(on field: StreamingTextField) {
+    guard self.streamingAnchorUTF16 != nil else { return }
+    // Give the target app a brief moment to apply the change (same rationale
+    // as verifyInsertion above).
+    Thread.sleep(forTimeInterval: self.streamingVerificationDelay)
+
+    switch inspectStreamingRegion(on: field) {
+    case .matched:
+      firstInsertionVerified = true
+      print("[LiveTextInserter] First streaming insertion verified")
+    case .absent:
+      abandonStreaming(
+        reason: "first streaming insertion never reached the field",
+        error: TextOutputError.unableToVerifyInsertion,
+        textAbsentFromField: true
+      )
+    case .unknown:
+      lastError = TextOutputError.unableToVerifyInsertion
+      pauseStreaming(reason: "streaming verification failed")
+    }
+  }
+
+  /// State of the streamed region as observed in the live target field.
+  enum StreamingRegionState: Equatable {
+    /// The streamed text is present at the given UTF-16 offset.
+    case matched(anchor: Int)
+    /// The field was read successfully and provably holds none of the streamed text.
+    case absent
+    /// The field could not be read, or the streamed text is ambiguous.
+    case unknown
+  }
+
+  /// Confirms the streamed region still holds what this session believes it
+  /// wrote, re-anchoring when the app moved the text. `.absent` is proof that
+  /// nothing from this session is on screen, so a single standard delivery is
+  /// safe; `.unknown` means no write may be attempted.
+  private func inspectStreamingRegion(on field: StreamingTextField) -> StreamingRegionState {
+    guard let anchor = self.streamingAnchorUTF16 else { return .unknown }
+    guard let fieldText = field.readValue() else { return .unknown }
+
+    let state = Self.resolveStreamingRegion(
+      fieldText: fieldText,
+      expected: insertedText,
+      anchor: anchor,
+      baselineFieldText: self.streamingBaselineFieldText
+    )
+    if case let .matched(resolvedAnchor) = state, resolvedAnchor != anchor {
+      self.streamingAnchorUTF16 = resolvedAnchor
+      print("[LiveTextInserter] Streaming anchor re-synced to \(resolvedAnchor)")
+    }
+    return state
+  }
+
+  /// Pure decision behind `inspectStreamingRegion`, kept separate so the
+  /// never-duplicate and never-overwrite rules are unit-testable without AX.
+  ///
+  /// - `.absent` is returned only when the field cannot be hiding an altered
+  ///   copy of the streamed text: the field is empty, or it has not grown since
+  ///   the region was anchored. Anything else (an app that autocorrected,
+  ///   reformatted or smart-quoted the streamed text) is `.unknown`, because
+  ///   handing such a session back to the standard delivery would duplicate it.
+  /// - Re-anchoring on a unique occurrence is refused when the field already
+  ///   contained that text before this session wrote anything, since the match
+  ///   may be unrelated pre-existing content.
+  static func resolveStreamingRegion(
+    fieldText: String,
+    expected: String,
+    anchor: Int,
+    baselineFieldText: String?
+  ) -> StreamingRegionState {
+    guard !expected.isEmpty else {
+      return anchor <= fieldText.utf16.count ? .matched(anchor: anchor) : .unknown
+    }
+
+    if self.utf16Substring(of: fieldText, location: anchor, length: expected.utf16.count) == expected {
+      return .matched(anchor: anchor)
+    }
+
+    // The app shifted the text (autocorrect, an edit above the region, …).
+    // Re-anchor only when the streamed text appears exactly once and cannot be
+    // confused with content that was already in the field.
+    let offsets = self.utf16Offsets(of: expected, in: fieldText, limit: 2)
+    if offsets.count == 1, let offset = offsets.first {
+      if let baseline = baselineFieldText, baseline.range(of: expected, options: .literal) != nil {
+        return .unknown
+      }
+      return .matched(anchor: offset)
+    }
+    guard offsets.isEmpty else { return .unknown }
+
+    if fieldText.isEmpty { return .absent }
+    guard let baseline = baselineFieldText, fieldText.utf16.count <= baseline.utf16.count else {
+      return .unknown
+    }
+    return .absent
+  }
+
+  /// Stops incremental patching; finalization performs a single clean pass.
+  private func pauseStreaming(reason: String) {
+    shouldPauseIncrementalUpdates = true
+    print("[LiveTextInserter] Streaming paused: \(reason)")
+  }
+
+  /// Streaming failure policy: if nothing has reached the app yet, fall back to
+  /// the standard one-shot delivery; if text is already on screen, only pause
+  /// incremental updates (finalize will do a single clean patch, never a paste).
+  private func abandonStreaming(reason: String, error: Error?, textAbsentFromField: Bool = false) {
+    if let error {
+      lastError = error
+    }
+    if hasPerformedAccessibilityWrite, !textAbsentFromField {
+      pauseStreaming(reason: reason)
+    } else {
+      deferToStandardDelivery(
+        reason: "streaming aborted: \(reason)",
+        error: error,
+        textAbsentFromField: textAbsentFromField
+      )
+    }
+  }
+
+  /// The field the streaming path reads and writes: the focused accessibility
+  /// element in production, or an injected stand-in under test.
+  private func streamingField() -> StreamingTextField? {
+    if let provider = streamingFieldProvider {
+      return provider()
+    }
+    guard let element = getFocusedTextElement() else { return nil }
+    return AccessibilityStreamingTextField(element: element)
+  }
+
+  /// UTF-16 based substring with bounds checks; `nil` when the range is out of
+  /// bounds or splits a surrogate pair.
+  static func utf16Substring(of text: String, location: Int, length: Int) -> String? {
+    let utf16 = text.utf16
+    guard location >= 0, length >= 0, location + length <= utf16.count else { return nil }
+    let start = utf16.index(utf16.startIndex, offsetBy: location)
+    let end = utf16.index(start, offsetBy: length)
+    guard let startIndex = start.samePosition(in: text),
+          let endIndex = end.samePosition(in: text)
+    else { return nil }
+    return String(text[startIndex..<endIndex])
+  }
+
+  /// UTF-16 offsets of up to `limit` occurrences of `needle` in `haystack`.
+  static func utf16Offsets(of needle: String, in haystack: String, limit: Int) -> [Int] {
+    guard !needle.isEmpty, limit > 0 else { return [] }
+    var offsets: [Int] = []
+    var searchStart = haystack.startIndex
+    // `.literal` matches exact scalar sequences, the same rule
+    // `StreamingTextReconciler.diff` uses to compute replacement offsets. Without
+    // it a canonically equivalent match (decomposed vs precomposed accents) would
+    // re-anchor the region onto text of a different UTF-16 length and desynchronise
+    // every later patch.
+    while offsets.count < limit, searchStart < haystack.endIndex,
+          let found = haystack.range(
+            of: needle, options: .literal, range: searchStart..<haystack.endIndex
+          ) {
+      offsets.append(found.lowerBound.utf16Offset(in: haystack))
+      searchStart = haystack.index(after: found.lowerBound)
+    }
+    return offsets
   }
 }

@@ -1,11 +1,10 @@
 import Foundation
 import SpeakCore
 
-/// Fallback capture path: the containing app's Instant Dictation session
+/// App-owned capture path: the containing app's Instant Dictation session
 /// records while the keyboard drives it through nonce-scoped App Group
-/// records. Used when the extension itself cannot run the microphone or Apple
-/// Speech (permission refused, recognizer missing, or in-extension capture
-/// failed on this device).
+/// records. Used for an explicitly selected App profile and as the fallback
+/// when the extension cannot run Apple Speech.
 ///
 /// Behaviour is unchanged from keyboard v1: recording starts automatically
 /// when the keyboard appears while Instant Dictation is ready, interim text is
@@ -37,6 +36,8 @@ final class KeyboardHandoffController: ObservableObject {
     private var currentDocumentIdentifier: UUID?
     private var pollTask: Task<Void, Never>?
     private var insertText: ((String) -> Void)?
+    private var profile: KeyboardDictationProfileOption?
+    private var autoStartWhenReady = false
 
     /// Poll cadence while a handoff request is in flight; the keyboard mirrors
     /// interim text from the App Group record at this rate.
@@ -54,17 +55,27 @@ final class KeyboardHandoffController: ObservableObject {
         self.consumer = KeyboardHandoffConsumer(store: store)
     }
 
-    func activate(documentIdentifier: UUID, insertText: @escaping (String) -> Void) {
+    func activate(
+        documentIdentifier: UUID,
+        profile: KeyboardDictationProfileOption,
+        autoStart: Bool,
+        insertText: @escaping (String) -> Void
+    ) {
         self.currentDocumentIdentifier = documentIdentifier
+        self.profile = profile
         self.insertText = insertText
 
         if requestID == nil {
             requestID = store.activeRecord()?.requestID
         }
+        autoStartWhenReady = autoStart && requestID == nil
+        if requestID == nil {
+            presentation = .idle
+        }
         refreshInstantSession()
         refresh()
         startPolling()
-        if requestID == nil, isInstantReady, presentation != .inserted {
+        if autoStartWhenReady, requestID == nil, isInstantReady, presentation != .inserted {
             start()
         } else if requestID == nil, !isInstantReady {
             presentation = .waitingForApp
@@ -82,6 +93,7 @@ final class KeyboardHandoffController: ObservableObject {
         }
         pollTask?.cancel()
         pollTask = nil
+        autoStartWhenReady = false
         liveTranscript = ""
         presentation = .idle
     }
@@ -106,13 +118,15 @@ final class KeyboardHandoffController: ObservableObject {
     }
 
     func start() {
+        autoStartWhenReady = false
         do {
             guard isInstantReady, let currentDocumentIdentifier else {
                 presentation = .waitingForApp
                 return
             }
             let request = try store.createRequest(
-                targetDocumentIdentifier: currentDocumentIdentifier
+                targetDocumentIdentifier: currentDocumentIdentifier,
+                profile: profile
             )
             requestID = request.requestID
             liveTranscript = ""
@@ -172,10 +186,11 @@ final class KeyboardHandoffController: ObservableObject {
         }
     }
 
+    // swiftlint:disable:next function_body_length cyclomatic_complexity
     private func refresh() {
         refreshInstantSession()
         guard let requestID else {
-            if isInstantReady, presentation == .waitingForApp {
+            if autoStartWhenReady, isInstantReady, presentation == .waitingForApp {
                 start()
                 return
             }

@@ -1099,8 +1099,8 @@ struct TestRecordingStepView: View {
         state.testRecordingText = nil
         state.isTestRecording = true
         do {
-            let url = try await state.audioFileManager.startRecording()
-            recordingURL = url
+            let recording = try await state.audioFileManager.startRecording()
+            recordingURL = recording.url
         } catch {
             state.isTestRecording = false
             state.testRecordingError = "Failed to start recording: \(error.localizedDescription)"

@@ -10,7 +10,7 @@ extension TTSProvider: PronunciationPhonemeCapable {
   var supportsSSMLPhonemes: Bool {
     switch self {
     case .azure, .system: return true
-    case .elevenlabs, .openai, .deepgram: return false
+    case .elevenlabs, .openai, .deepgram, .soniox: return false
     }
   }
 

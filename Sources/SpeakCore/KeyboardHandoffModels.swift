@@ -7,7 +7,7 @@ import Foundation
 /// exists only until the matching keyboard consumes it or the short result
 /// timeout expires. History persistence happens separately inside the app.
 public struct KeyboardHandoffRecord: Codable, Equatable, Sendable {
-    public static let schemaVersion = 2
+    public static let schemaVersion = 3
 
     public enum Phase: String, Codable, Equatable, Hashable, Sendable {
         case requested
@@ -27,6 +27,7 @@ public struct KeyboardHandoffRecord: Codable, Equatable, Sendable {
         case timedOut
         case invalidRequest
         case targetChanged
+        case profileUnavailable
         case unknown
     }
 
@@ -37,6 +38,8 @@ public struct KeyboardHandoffRecord: Codable, Equatable, Sendable {
     public let expiresAt: Date
     public let phase: Phase
     public let targetDocumentIdentifier: UUID?
+    /// Immutable capability snapshot selected before recording began.
+    public let profile: KeyboardDictationProfileOption?
     public let interimTranscript: String?
     public let transcript: String?
     public let failureCode: FailureCode?
@@ -49,6 +52,7 @@ public struct KeyboardHandoffRecord: Codable, Equatable, Sendable {
         expiresAt: Date,
         phase: Phase,
         targetDocumentIdentifier: UUID? = nil,
+        profile: KeyboardDictationProfileOption? = nil,
         interimTranscript: String? = nil,
         transcript: String? = nil,
         failureCode: FailureCode? = nil
@@ -60,6 +64,7 @@ public struct KeyboardHandoffRecord: Codable, Equatable, Sendable {
         self.expiresAt = expiresAt
         self.phase = phase
         self.targetDocumentIdentifier = targetDocumentIdentifier
+        self.profile = profile
         self.interimTranscript = interimTranscript
         self.transcript = transcript
         self.failureCode = failureCode

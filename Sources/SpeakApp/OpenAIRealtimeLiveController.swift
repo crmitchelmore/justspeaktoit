@@ -47,6 +47,7 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
   /// commit-triggered completion arrives.
   private var preStopCompletedItemIDs: Set<String> = []
   private var stopContinuation: CheckedContinuation<Void, Never>?
+  private var stopGeneration = LiveTranscriptionStopGeneration()
 
   init(
     appSettings: AppSettings,
@@ -110,7 +111,7 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
       let provider = OpenAIRealtimeTranscriptionProvider()
       let modelID = currentModel ?? appSettings.liveTranscriptionModel
       let realtimeName = OpenAIRealtimeTranscriptionProvider.realtimeModelName(from: modelID)
-      transcriber = provider.createLiveTranscriber(
+      let newTranscriber = provider.createLiveTranscriber(
         apiKey: apiKey,
         model: realtimeName,
         language: currentLanguage.map(\.localeLanguageCode),
@@ -121,16 +122,23 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
         prompt: trimmedKeytermsPrompt(),
         sampleRate: 24_000
       )
+      transcriber = newTranscriber
 
-      transcriber?.start(
-        onEvent: { [weak self] event in
-          Task { @MainActor [weak self] in
-            self?.handleEvent(event)
+      newTranscriber.start(
+        onEvent: { [weak self, weak newTranscriber] event in
+          Task { @MainActor [weak self, weak newTranscriber] in
+            guard let self else { return }
+            // Cached controllers are reused between recordings, so a message
+            // queued by the previous stream can land here after the next
+            // recording started. Only the current stream owns this state.
+            guard LiveTranscriptionRun.isCurrent(newTranscriber, activeStream: self.transcriber) else { return }
+            self.handleEvent(event)
           }
         },
-        onError: { [weak self] error in
-          Task { @MainActor [weak self] in
+        onError: { [weak self, weak newTranscriber] error in
+          Task { @MainActor [weak self, weak newTranscriber] in
             guard let self else { return }
+            guard LiveTranscriptionRun.isCurrent(newTranscriber, activeStream: self.transcriber) else { return }
             // NOTE: we no longer drop errors that arrive before isRunning
             // flips true. WebSocket failures during the connecting window
             // (invalid API key, 401, DNS, etc.) used to be swallowed,
@@ -206,11 +214,15 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
       //    no audio was ever processed and no `.completed` will arrive.
       let budget = appSettings.liveModelCapabilities.postStopFinalizeBudget
       if budget > 0, sessionReady {
+        let generation = stopGeneration.begin()
         await withCheckedContinuation { continuation in
           stopContinuation = continuation
           Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(budget))
-            guard let self, let cont = self.stopContinuation else { return }
+            guard let self,
+              self.stopGeneration.isCurrent(generation),
+              let cont = self.stopContinuation
+            else { return }
             self.stopContinuation = nil
             cont.resume()
           }

@@ -235,8 +235,7 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
   /// Starts capture, claiming the staged recorder when `warmContext` matches
   /// the one it was prepared for. On the warm path the only work left on the
   /// hotkey→capture path is the input-device session and `record()` itself.
-  // swiftlint:disable:next function_body_length
-  func startRecording(
+  func startRecording( // swiftlint:disable:this function_body_length
     warmContext: CaptureWarmContext? = nil,
     owner: AudioRecordingOwner = .auxiliary
   ) async throws -> RecordingStart {

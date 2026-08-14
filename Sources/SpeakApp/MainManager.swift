@@ -400,7 +400,6 @@ final class MainManager: ObservableObject {
     }
   }
 
-  // swiftlint:disable:next function_body_length
   private func configureHotKeys() {
     hotKeyTokens.append(
       hotKeyManager.register(gesture: .holdStart) { [weak self] in

@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import SpeakCore
 import XCTest
 
 @testable import SpeakApp
@@ -43,6 +44,33 @@ final class CaptureWarmCoordinatorTests: XCTestCase {
 
         let refreshedProbeHosts = await harness.warmer.hosts()
         XCTAssertEqual(refreshedProbeHosts, ["api.deepgram.com", "api.deepgram.com"])
+        await harness.coordinator.invalidate()
+    }
+
+    func testIdleRefreshes_StopAtTheCapAndResumeAfterTheNextSession() async {
+        var now = Date(timeIntervalSince1970: 1_700_000_000)
+        let harness = self.makeHarness(now: { now })
+        harness.coordinator.start()
+        await self.drainTasks()
+        XCTAssertEqual(harness.scheduler.delay, 90)
+
+        for _ in 0..<LiveStreamWarmTracker.maxIdleRefreshes {
+            now = now.addingTimeInterval(90)
+            harness.scheduler.fire()
+            await self.drainTasks()
+        }
+
+        let idleProbes = await harness.warmer.hosts()
+        XCTAssertEqual(idleProbes.count, LiveStreamWarmTracker.maxIdleRefreshes + 1)
+        XCTAssertNil(harness.scheduler.delay, "the idle refresh loop must stop at the cap")
+
+        harness.coordinator.sessionWillBegin()
+        harness.coordinator.sessionDidEnd()
+        await self.drainTasks()
+
+        let afterSession = await harness.warmer.hosts()
+        XCTAssertEqual(afterSession.count, LiveStreamWarmTracker.maxIdleRefreshes + 2)
+        XCTAssertEqual(harness.scheduler.delay, 90)
         await harness.coordinator.invalidate()
     }
 

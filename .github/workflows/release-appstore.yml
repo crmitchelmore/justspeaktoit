@@ -185,6 +185,15 @@ jobs:
           BUILD_NUMBER=${{ github.run_number }}
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" Config/AppInfo.AppStore.plist
 
+      - name: Bundle published macOS release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ github.event.inputs.version }}
+        run: |
+          node scripts/update-release-notes-catalogue.mjs --backfill --platform mac
+          node scripts/update-release-notes-catalogue.mjs \
+            --verify --platform mac --version "$VERSION"
+
       - name: Build Release Archive
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -205,6 +214,19 @@ jobs:
             -destination "generic/platform=macOS" \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
             OTHER_CODE_SIGN_FLAGS="--keychain $RUNNER_TEMP/app-signing.keychain-db"
+
+      - name: Verify archived release notes
+        env:
+          VERSION: ${{ github.event.inputs.version }}
+        run: |
+          APP_PATH="$RUNNER_TEMP/$PRODUCT_NAME.xcarchive/Products/Applications/$PRODUCT_NAME.app"
+          CATALOGUE_PATH=$(find "$APP_PATH" -name ReleaseNotes.json -print -quit)
+          if [ -z "$CATALOGUE_PATH" ]; then
+            echo "::error::Archived App Store build does not contain ReleaseNotes.json"
+            exit 1
+          fi
+          node scripts/update-release-notes-catalogue.mjs \
+            --verify --platform mac --version "$VERSION" --catalogue "$CATALOGUE_PATH"
 
       - name: Validate App Store Archive
         run: |

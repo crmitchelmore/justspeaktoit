@@ -831,11 +831,9 @@ extension SettingsView {
           Button("Delete") {
             localModels.delete(model)
             if settings.localTranscriptionModel == model.id {
-              if let fallback = firstInstalledLocalTranscriptionModelID(excluding: model.id) {
-                settings.localTranscriptionModel = fallback
-              } else {
-                settings.transcriptionMode = .liveNative
-              }
+              settings.repairDownloadedTranscriptionSelection(
+                fallbackModelID: firstInstalledLocalTranscriptionModelID(excluding: model.id)
+              )
             }
           }
         }

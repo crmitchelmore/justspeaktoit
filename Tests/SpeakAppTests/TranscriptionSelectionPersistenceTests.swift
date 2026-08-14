@@ -22,7 +22,7 @@ final class TranscriptionSelectionPersistenceTests: XCTestCase {
     }
 
     override func tearDown() {
-        UserDefaults.standard.removePersistentDomain(forName: suiteName)
+        defaults.removePersistentDomain(forName: suiteName)
         defaults = nil
         suiteName = nil
         super.tearDown()
@@ -92,6 +92,18 @@ final class TranscriptionSelectionPersistenceTests: XCTestCase {
         let relaunched = AppSettings(defaults: defaults)
         XCTAssertEqual(relaunched.localTranscriptionSource, .downloaded)
         XCTAssertEqual(relaunched.localTranscriptionModel, "local/whisperkit/base")
+    }
+
+    @MainActor
+    func testRemovingTheLastDownloadedModel_fallsBackToAppleSpeech() {
+        let settings = AppSettings(defaults: defaults)
+        settings.selectLocalTranscriptionSource(.downloaded)
+
+        settings.repairDownloadedTranscriptionSelection(fallbackModelID: nil)
+
+        XCTAssertEqual(settings.rememberedLocalTranscriptionSource, .apple)
+        XCTAssertEqual(settings.localTranscriptionSource, .apple)
+        XCTAssertTrue(settings.isAppleOnDeviceTranscriptionSelected)
     }
 
     @MainActor

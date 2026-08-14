@@ -518,11 +518,22 @@ public final class AppSettings: ObservableObject {
     /// Only fills a gap: once the user has picked a remote streaming model, a
     /// newly saved key must not silently move them onto another provider.
     public func reconfigureDefaultProvider() {
-        guard liveTranscriptionSelection.rememberedModel(for: .remote) == nil else { return }
         if hasDeepgramKey {
-            selectedModel = "deepgram/nova-3-streaming"
+            applyDefaultRemoteProviderIfNeeded("deepgram/nova-3-streaming")
         } else if hasElevenLabsKey {
-            selectedModel = "elevenlabs/scribe-v2-streaming"
+            applyDefaultRemoteProviderIfNeeded("elevenlabs/scribe-v2-streaming")
+        }
+    }
+
+    func applyDefaultRemoteProviderIfNeeded(_ modelID: String) {
+        guard liveTranscriptionSelection.rememberedModel(for: .remote) == nil else { return }
+        let isRemoteStreaming = transcriptionMode == .streaming
+            && !ModelCatalog.isOnDeviceLiveTranscriptionModel(selectedModel)
+        if isRemoteStreaming {
+            selectedModel = modelID
+        } else {
+            liveTranscriptionSelection.remember(modelID)
+            liveTranscriptionSelection.persist(to: defaults)
         }
     }
 

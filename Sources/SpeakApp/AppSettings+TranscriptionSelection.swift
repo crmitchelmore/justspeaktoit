@@ -123,4 +123,17 @@ extension AppSettings {
             transcriptionMode = .batchRemote
         }
     }
+
+    /// Repairs the remembered local source after a downloaded model is removed.
+    /// A remote session stays remote; an active downloaded-local session falls
+    /// back to Apple Speech when no installed replacement remains.
+    func repairDownloadedTranscriptionSelection(fallbackModelID: String?) {
+        if let fallbackModelID {
+            localTranscriptionModel = fallbackModelID
+            return
+        }
+        rememberedLocalTranscriptionSource = .apple
+        guard transcriptionMode == .localModel else { return }
+        selectLocalTranscriptionSource(.apple)
+    }
 }

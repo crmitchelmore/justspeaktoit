@@ -71,9 +71,24 @@ final class TranscriptionSelectionPersistenceTests: XCTestCase {
         settings.selectRemoteTranscriptionMode(.streaming)
         settings.selectedModel = soniox
 
-        settings.reconfigureDefaultProvider()
+        settings.applyDefaultRemoteProviderIfNeeded(deepgram)
 
         XCTAssertEqual(settings.selectedModel, soniox)
+    }
+
+    func testSavingTheFirstProviderKey_whileLocalOnlySeedsRemoteMemory() {
+        let settings = makeSettings()
+        settings.selectTranscriptionLocation(.local)
+        let localModel = settings.selectedModel
+
+        settings.applyDefaultRemoteProviderIfNeeded(deepgram)
+
+        XCTAssertEqual(settings.transcriptionLocation, .local)
+        XCTAssertEqual(settings.selectedModel, localModel)
+        XCTAssertEqual(settings.liveTranscriptionSelection.rememberedModel(for: .remote), deepgram)
+
+        settings.selectTranscriptionLocation(.remote)
+        XCTAssertEqual(settings.selectedModel, deepgram)
     }
 
     // MARK: - Independent local and remote selections

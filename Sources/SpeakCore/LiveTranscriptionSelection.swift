@@ -36,8 +36,9 @@ public struct LiveTranscriptionSelection: Equatable, Sendable {
     }
 
     /// Records a user selection against the placement the model belongs to.
-    /// Unknown or empty identifiers are ignored so a transient value can never
-    /// evict a good one.
+    /// Empty, misplaced, or non-live identifiers are ignored so a transient
+    /// value can never evict a good one. Custom remote identifiers remain valid
+    /// because macOS deliberately supports them.
     public mutating func remember(_ modelID: String) {
         switch LiveTranscriptionPlacement(modelID: modelID) {
         case .onDevice:
@@ -103,10 +104,19 @@ public struct LiveTranscriptionSelection: Equatable, Sendable {
     }
 
     /// Apple identifiers are accepted beyond the catalogue because the
-    /// available on-device engines vary by OS version.
+    /// available on-device engines vary by OS version. Remote identifiers may
+    /// also be custom, but known batch, post-processing, and local model IDs do
+    /// not belong in the live-selection slot.
     private static func isKnown(_ modelID: String) -> Bool {
         if LiveTranscriptionPlacement(modelID: modelID) == .onDevice { return true }
-        return ModelCatalog.remoteLiveTranscription.contains { $0.id == modelID }
+        switch ModelRouting.family(for: modelID) {
+        case .cloudStreaming:
+            return true
+        case .unknown(let provider):
+            return provider != nil && modelID != ModelCatalog.customOptionID && modelID.contains("/")
+        case .appleSpeech, .downloadedLocal, .cloudBatch, .postProcessing:
+            return false
+        }
     }
 
     private static func isSelectable(_ modelID: String, in selectableModelIDs: Set<String>?) -> Bool {
@@ -121,10 +131,11 @@ public struct LiveTranscriptionSelection: Equatable, Sendable {
         guard let modelID, !modelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return nil
         }
-        guard LiveTranscriptionPlacement(modelID: modelID) == placement, isKnown(modelID) else {
+        let normalised = ModelCatalog.normalizedLiveTranscriptionModel(modelID)
+        guard LiveTranscriptionPlacement(modelID: normalised) == placement, isKnown(normalised) else {
             return nil
         }
-        return modelID
+        return normalised
     }
 }
 

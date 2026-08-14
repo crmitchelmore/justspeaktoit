@@ -63,10 +63,27 @@ final class LiveTranscriptionSelectionTests: XCTestCase {
         XCTAssertEqual(selection.model(for: .remote, activeModel: appleModel), deepgram)
     }
 
-    func testUnknownRememberedModel_fallsBackToTheDefault() {
-        let selection = LiveTranscriptionSelection(remoteModel: "acme/not-a-real-model")
+    func testNonLiveRememberedModel_fallsBackToTheDefault() {
+        let selection = LiveTranscriptionSelection(remoteModel: "local/whisperkit/not-a-live-model")
         XCTAssertNil(selection.rememberedModel(for: .remote))
         XCTAssertEqual(selection.model(for: .remote, activeModel: appleModel), deepgram)
+    }
+
+    func testCustomRemoteModel_isRememberedAcrossPlacementSwitches() {
+        let custom = "acme/realtime-v1"
+        let selection = LiveTranscriptionSelection(remoteModel: custom)
+
+        XCTAssertEqual(selection.rememberedModel(for: .remote), custom)
+        XCTAssertEqual(selection.model(for: .remote, activeModel: appleModel), custom)
+    }
+
+    func testRetiredRememberedModel_isMigratedThroughTheSharedCatalogueRule() {
+        let selection = LiveTranscriptionSelection(remoteModel: "assemblyai/universal-streaming")
+
+        XCTAssertEqual(
+            selection.rememberedModel(for: .remote),
+            AssemblyAIModels.universal35ProStreamingID
+        )
     }
 
     func testEmptyOrMisplacedIdentifiers_areIgnored() {
@@ -131,7 +148,10 @@ final class LiveTranscriptionSelectionTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
-        defaults.set("acme/not-a-real-model", forKey: LiveTranscriptionSelection.DefaultsKey.remoteModel)
+        defaults.set(
+            "local/whisperkit/not-a-live-model",
+            forKey: LiveTranscriptionSelection.DefaultsKey.remoteModel
+        )
         LiveTranscriptionSelection().persist(to: defaults)
 
         XCTAssertNil(defaults.string(forKey: LiveTranscriptionSelection.DefaultsKey.remoteModel))

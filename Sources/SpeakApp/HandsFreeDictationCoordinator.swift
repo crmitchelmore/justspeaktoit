@@ -40,9 +40,12 @@ final class HandsFreeDictationCoordinator {
   private var armTask: Task<Void, Never>?
   private var finalisationTask: Task<Void, Never>?
   private var armID: UUID?
-  private var willSleepObserver: (any NSObjectProtocol)?
-  private var screenLockObserver: (any NSObjectProtocol)?
-  private var engineConfigurationObserver: (any NSObjectProtocol)?
+  /// Observers for the events that mean the user left: sleep and fast user
+  /// switching come from the workspace centre, screen lock from the
+  /// distributed one.
+  fileprivate var workspaceObservers: [any NSObjectProtocol] = []
+  fileprivate var screenLockObserver: (any NSObjectProtocol)?
+  fileprivate var engineConfigurationObserver: (any NSObjectProtocol)?
 
   init(
     permissionsManager: PermissionsManager,
@@ -52,12 +55,12 @@ final class HandsFreeDictationCoordinator {
     self.permissionsManager = permissionsManager
     self.audioDeviceManager = audioDeviceManager
     self.callbacks = callbacks
-    observeSleepAndScreenLock()
+    observeUserAbsence()
   }
 
   deinit {
-    if let willSleepObserver {
-      NSWorkspace.shared.notificationCenter.removeObserver(willSleepObserver)
+    for observer in workspaceObservers {
+      NSWorkspace.shared.notificationCenter.removeObserver(observer)
     }
     if let screenLockObserver {
       DistributedNotificationCenter.default().removeObserver(screenLockObserver)
@@ -305,19 +308,16 @@ final class HandsFreeDictationCoordinator {
 
 extension HandsFreeDictationCoordinator {
   /// An armed detector holds the microphone open, so it must never outlive the
-  /// user's presence at the Mac. Sleep and screen lock both disarm. Wake and
-  /// unlock never re-arm: an armed microphone that comes back on its own is
-  /// exactly what the lock screen protects the user against.
-  fileprivate func observeSleepAndScreenLock() {
-    willSleepObserver = NSWorkspace.shared.notificationCenter.addObserver(
-      forName: NSWorkspace.willSleepNotification,
-      object: nil,
-      queue: .main
-    ) { [weak self] _ in
-      Task { @MainActor [weak self] in
-        await self?.disarmForAbsentUser(reason: "the Mac went to sleep")
-      }
-    }
+  /// user's presence at the Mac. Sleep, screen lock and a switch to another
+  /// login session all disarm. Wake, unlock and a return to this session never
+  /// re-arm: an armed microphone that comes back on its own is exactly what
+  /// the lock screen protects the user against.
+  fileprivate func observeUserAbsence() {
+    observeWorkspace(NSWorkspace.willSleepNotification, reason: "the Mac went to sleep")
+    observeWorkspace(
+      NSWorkspace.sessionDidResignActiveNotification,
+      reason: "another user took the login session"
+    )
     screenLockObserver = DistributedNotificationCenter.default().addObserver(
       forName: Notification.Name("com.apple.screenIsLocked"),
       object: nil,
@@ -329,8 +329,21 @@ extension HandsFreeDictationCoordinator {
     }
   }
 
+  fileprivate func observeWorkspace(_ name: Notification.Name, reason: String) {
+    let observer = NSWorkspace.shared.notificationCenter.addObserver(
+      forName: name,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      Task { @MainActor [weak self] in
+        await self?.disarmForAbsentUser(reason: reason)
+      }
+    }
+    workspaceObservers.append(observer)
+  }
+
   /// Disarms because the user is no longer at the Mac. The user arms again by
-  /// hand after wake or unlock.
+  /// hand after wake, unlock or a return to this login session.
   fileprivate func disarmForAbsentUser(reason: String) async {
     guard machine.isArmed else { return }
     logger.info("Disarming hands-free dictation because \(reason, privacy: .public)")

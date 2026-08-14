@@ -619,12 +619,20 @@ final class MainManager: ObservableObject {
         }
         : nil
       let sequencer = RecordingStartSequencer(
+        isSessionCurrent: { [weak self] in self?.activeSession === session },
         startCapture: { [weak self] in
           guard let self else { return }
           let recording = try await self.audioFileManager.startRecording(
             warmContext: warmContext,
             owner: .dictation
           )
+          // The stop could have landed while `startRecording()` was suspended.
+          // Publish nothing for a session that is already over — throw away the
+          // capture that just came up instead.
+          guard self.activeSession === session else {
+            await self.discardStartedCapture()
+            throw RecordingStartAbort.sessionEnded
+          }
           self.recordCaptureStart(for: session, wasWarm: recording.usedWarmRecorder)
           self.state = .recording
           session.events.append(
@@ -640,12 +648,20 @@ final class MainManager: ObservableObject {
           }
           self.startAudioLevelMonitoring()
         },
+        discardCapture: { [weak self] in await self?.discardStartedCapture() },
         startStream: startStream,
+        discardStream: { [weak self] in self?.transcriptionManager.cancelLiveTranscription() },
         playCue: { [weak self] in self?.playRecordingStartCue(for: session) }
       )
       let timeline = try await sequencer.run()
       recordStartTimeline(for: session, timeline: timeline)
       return .started
+    } catch is RecordingStartAbort {
+      // Not a failure: the session ended while startup was suspended, and the
+      // sequencer has already torn down whatever it brought up. Touching the
+      // shared failure path here would clobber the session that replaced it.
+      logger.info("Recording start abandoned: the session ended before capture was ready")
+      return .rejected(.captureFailed)
     } catch {
       session.errors.append(
         HistoryError(
@@ -685,6 +701,15 @@ final class MainManager: ObservableObject {
       let path = wasWarm ? "pre-warmed" : "cold"
       self.logger.info("Latency: capture started \(coldStartMs)ms after trigger (\(path, privacy: .public))")
     }
+  }
+
+  /// Throws away capture that came up for a session nobody is listening to any
+  /// more (the user stopped, or a replacement session started, while the start
+  /// was suspended). Without this the recorder keeps running and the file is
+  /// never claimed by any session.
+  private func discardStartedCapture() async {
+    stopAudioLevelMonitoring()
+    await audioFileManager.cancelRecording(deleteFile: true)
   }
 
   /// Records the full start timeline (capture, streaming tap, cue) in history

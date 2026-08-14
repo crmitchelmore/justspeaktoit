@@ -38,6 +38,12 @@ final class RecordingStartSequenceTests: XCTestCase {
         }
     }
 
+    /// Session ownership as the sequencer sees it: a stop flips it mid-step.
+    private final class MutableFlag {
+        var value: Bool
+        init(_ value: Bool) { self.value = value }
+    }
+
     private struct StartFailure: Error {}
 
     // MARK: - Cue ordering
@@ -113,6 +119,88 @@ final class RecordingStartSequenceTests: XCTestCase {
             XCTAssertTrue(error is StartFailure)
         }
         XCTAssertEqual(log.events, ["capture-ready"])
+    }
+
+    // MARK: - Stopping while a start step is suspended
+
+    /// Issue #652: the user can release the hot key while `startRecording()` is
+    /// still suspended. The recorder must not be left running for a session
+    /// that has already ended.
+    func testStop_DuringCaptureStart_DiscardsTheCaptureAndSkipsTheCue() async {
+        // Arrange
+        let log = StartLog()
+        let sessionIsCurrent = MutableFlag(true)
+        let sequencer = RecordingStartSequencer(
+            isSessionCurrent: { sessionIsCurrent.value },
+            startCapture: {
+                log.record("capture-ready")
+                // The stop lands while the recorder is coming up.
+                sessionIsCurrent.value = false
+            },
+            discardCapture: { log.record("capture-discarded") },
+            startStream: nil,
+            playCue: { log.record("cue") }
+        )
+
+        // Act / Assert
+        do {
+            _ = try await sequencer.run()
+            XCTFail("Expected the abandoned start to abort")
+        } catch {
+            XCTAssertEqual(error as? RecordingStartAbort, .sessionEnded)
+        }
+        XCTAssertEqual(log.events, ["capture-ready", "capture-discarded"])
+    }
+
+    /// The same race one step later: capture is up and the live transcriber has
+    /// just been published when the session ends. Both must be torn down, the
+    /// stream first, so nothing outlives the session.
+    func testStop_DuringStreamStart_DiscardsBothAndSkipsTheCue() async {
+        // Arrange
+        let log = StartLog()
+        let sessionIsCurrent = MutableFlag(true)
+        let sequencer = RecordingStartSequencer(
+            isSessionCurrent: { sessionIsCurrent.value },
+            startCapture: { log.record("capture-ready") },
+            discardCapture: { log.record("capture-discarded") },
+            startStream: {
+                log.record("stream-ready")
+                sessionIsCurrent.value = false
+            },
+            discardStream: { log.record("stream-discarded") },
+            playCue: { log.record("cue") }
+        )
+
+        // Act / Assert
+        do {
+            _ = try await sequencer.run()
+            XCTFail("Expected the abandoned start to abort")
+        } catch {
+            XCTAssertEqual(error as? RecordingStartAbort, .sessionEnded)
+        }
+        XCTAssertEqual(
+            log.events,
+            ["capture-ready", "stream-ready", "stream-discarded", "capture-discarded"]
+        )
+    }
+
+    func testStart_ThatKeepsItsSession_TearsDownNothing() async throws {
+        // Arrange
+        let log = StartLog()
+        let sequencer = RecordingStartSequencer(
+            isSessionCurrent: { true },
+            startCapture: { log.record("capture-ready") },
+            discardCapture: { log.record("capture-discarded") },
+            startStream: { log.record("stream-ready") },
+            discardStream: { log.record("stream-discarded") },
+            playCue: { log.record("cue") }
+        )
+
+        // Act
+        _ = try await sequencer.run()
+
+        // Assert
+        XCTAssertEqual(log.events, ["capture-ready", "stream-ready", "cue"])
     }
 
     // MARK: - Timing diagnostics

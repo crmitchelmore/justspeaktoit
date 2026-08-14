@@ -89,34 +89,54 @@ public struct RecordingStartTimeline: Sendable, Equatable {
 @MainActor
 public struct RecordingStartSequencer {
     public typealias Step = () async throws -> Void
+    /// Undoes what a start step brought up, for a session that ended while the
+    /// step was suspended.
+    public typealias Teardown = () async -> Void
 
     private let now: () -> Date
+    private let isSessionCurrent: () -> Bool
     private let startCapture: Step
+    private let discardCapture: Teardown?
     private let startStream: Step?
+    private let discardStream: Teardown?
     private let playCue: () -> Void
 
     public init(
         now: @escaping () -> Date = Date.init,
+        isSessionCurrent: @escaping () -> Bool = { true },
         startCapture: @escaping Step,
+        discardCapture: Teardown? = nil,
         startStream: Step?,
+        discardStream: Teardown? = nil,
         playCue: @escaping () -> Void
     ) {
         self.now = now
+        self.isSessionCurrent = isSessionCurrent
         self.startCapture = startCapture
+        self.discardCapture = discardCapture
         self.startStream = startStream
+        self.discardStream = discardStream
         self.playCue = playCue
     }
 
     /// Brings capture up and only then plays the cue. Any failure propagates
     /// with the cue unplayed — the user is never told a failed session started.
+    ///
+    /// Both steps are awaits, and the user can stop (or start a replacement
+    /// session) while either is suspended. Ownership is re-checked after each
+    /// one: a session that is no longer current has whatever just came up torn
+    /// down again, so a stop during startup can never leave the recorder or the
+    /// live transcriber running behind it.
     public func run() async throws -> RecordingStartTimeline {
         var timeline = RecordingStartTimeline(triggeredAt: self.now())
 
         try await self.startCapture()
+        try await self.requireSessionIsCurrent(discarding: [self.discardCapture])
         timeline.mark(.captureReady, at: self.now())
 
         if let startStream = self.startStream {
             try await startStream()
+            try await self.requireSessionIsCurrent(discarding: [self.discardStream, self.discardCapture])
             timeline.mark(.streamReady, at: self.now())
         }
 
@@ -124,4 +144,21 @@ public struct RecordingStartSequencer {
         timeline.mark(.cuePlayed, at: self.now())
         return timeline
     }
+
+    /// Tears down in reverse order of bring-up and aborts, so nothing outlives
+    /// the session it was started for.
+    private func requireSessionIsCurrent(discarding teardowns: [Teardown?]) async throws {
+        guard !self.isSessionCurrent() else { return }
+        for teardown in teardowns.compactMap({ $0 }) {
+            await teardown()
+        }
+        throw RecordingStartAbort.sessionEnded
+    }
+}
+
+/// Why a start attempt stopped short of the cue without anything failing.
+public enum RecordingStartAbort: Error, Equatable {
+    /// The session ended — a stop, or a replacement session — while a start
+    /// step was suspended. Whatever the step brought up has been torn down.
+    case sessionEnded
 }

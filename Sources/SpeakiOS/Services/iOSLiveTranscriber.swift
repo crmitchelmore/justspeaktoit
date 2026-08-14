@@ -124,13 +124,14 @@ public final class iOSLiveTranscriber: ObservableObject {
 
         resetState()
 
-        if modelID == AppleLocalModels.speechTranscriberModelID {
+        if AppleLocalModels.isSpeechAnalyzerModel(modelID) {
             if #available(iOS 26.0, *) {
                 do {
-                    try await startSpeechAnalyzer()
-                    activeModelID = AppleLocalModels.speechTranscriberModelID
+                    let engine = AppleSpeechAnalyzerEngine(modelID: modelID)
+                    try await startSpeechAnalyzer(engine: engine)
+                    activeModelID = engine.modelID
                     isRunning = true
-                    print("[iOSLiveTranscriber] Started with SpeechAnalyzer")
+                    print("[iOSLiveTranscriber] Started with SpeechAnalyzer (\(engine.modelID))")
                     return
                 } catch {
                     SpeakLogger.logError(
@@ -158,9 +159,10 @@ public final class iOSLiveTranscriber: ObservableObject {
     }
 
     @available(iOS 26.0, *)
-    private func startSpeechAnalyzer() async throws {
+    private func startSpeechAnalyzer(engine: AppleSpeechAnalyzerEngine) async throws {
         let session = try await AppleSpeechAnalyzerLiveSession(
-            localeIdentifier: language
+            localeIdentifier: language,
+            engine: engine
         ) { [weak self] update in
             Task { @MainActor [weak self] in
                 self?.handleSpeechAnalyzerUpdate(update)
@@ -349,7 +351,7 @@ public final class iOSLiveTranscriber: ObservableObject {
                 segments: analyzerResult.segments,
                 confidence: analyzerResult.confidence,
                 duration: max(elapsed, analyzerResult.duration),
-                modelIdentifier: AppleLocalModels.speechTranscriberModelID,
+                modelIdentifier: activeModelID,
                 cost: nil,
                 rawPayload: nil,
                 debugInfo: nil
@@ -362,7 +364,7 @@ public final class iOSLiveTranscriber: ObservableObject {
                 segments: [],
                 confidence: confidence,
                 duration: elapsed,
-                modelIdentifier: AppleLocalModels.speechTranscriberModelID,
+                modelIdentifier: activeModelID,
                 cost: nil,
                 rawPayload: nil,
                 debugInfo: nil
@@ -375,7 +377,7 @@ public final class iOSLiveTranscriber: ObservableObject {
         audioSessionManager.deactivate()
         SpeakLogger.logTranscription(
             event: "stop",
-            model: "Apple SpeechTranscriber",
+            model: activeModelID,
             wordCount: result.text.split(separator: " ").count
         )
         onFinalResult?(result)
@@ -389,9 +391,17 @@ public final class iOSLiveTranscriber: ObservableObject {
         SpeakLogger.transcription.info("Cancelling transcription")
 
         isShuttingDownRecognitionTask = true
-        recognitionRequest?.endAudio()
+
+        // Stop input first, then drain the queue so tap work already enqueued
+        // cannot write to the recorder or feed the analyser after they have been
+        // torn down below. `sync` (not `await`) keeps cancellation atomic on the
+        // main actor; the queued work never waits on the main actor, so it
+        // cannot deadlock.
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
+        audioProcessingQueue.sync {}
+
+        recognitionRequest?.endAudio()
         recognitionTask?.cancel()
 
         // Cancel persistent recording (keeps partial file by default)

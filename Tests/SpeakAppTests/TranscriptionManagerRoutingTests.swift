@@ -1,3 +1,4 @@
+import SpeakCore
 import XCTest
 
 @testable import SpeakApp
@@ -74,6 +75,41 @@ final class TranscriptionManagerRoutingTests: XCTestCase {
 
     XCTAssertTrue(
       transcriber.controller(for: "local/streaming/whisperkit/tiny") is WhisperKitLiveController
+    )
+  }
+
+  @MainActor
+  func testSwitchingLiveTranscriber_routesSpeechAnalyzerModelsToAnalyzerController() {
+    let settings = AppSettings()
+    let permissions = PermissionsManager()
+    let audioDevices = AudioInputDeviceManager(appSettings: settings)
+    let secureStorage = SecureAppStorage(
+      permissionsManager: permissions,
+      appSettings: settings,
+      keychainService: "com.justspeaktoit.tests.speechanalyzer.routing.\(UUID().uuidString)"
+    )
+    let transcriber = SwitchingLiveTranscriber(
+      appSettings: settings,
+      permissionsManager: permissions,
+      audioDeviceManager: audioDevices,
+      secureStorage: secureStorage
+    )
+
+    XCTAssertTrue(
+      transcriber.controller(for: AppleLocalModels.speechTranscriberModelID)
+        is AppleSpeechAnalyzerLiveController
+    )
+    XCTAssertTrue(
+      transcriber.controller(for: AppleLocalModels.dictationTranscriberModelID)
+        is AppleSpeechAnalyzerLiveController
+    )
+    // The legacy engine and the system-dictation alias stay on the native path.
+    XCTAssertTrue(
+      transcriber.controller(for: AppleLocalModels.legacySpeechModelID)
+        is NativeOSXLiveTranscriber
+    )
+    XCTAssertTrue(
+      transcriber.controller(for: "apple/local/Dictation") is NativeOSXLiveTranscriber
     )
   }
 

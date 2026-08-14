@@ -67,12 +67,16 @@ enum TTSAudioJoiner {
 
     for url in partURLs {
       let part = try AVAudioFile(forReading: url)
-      guard part.length > 0,
-        let buffer = AVAudioPCMBuffer(
-          pcmFormat: part.processingFormat,
-          frameCapacity: AVAudioFrameCount(part.length)
-        )
-      else { continue }
+      // An empty part carries no speech, so it contributes nothing.
+      guard part.length > 0 else { continue }
+      // A failed allocation must stop the join. Skipping the part would drop
+      // words from the middle of the document and still report success.
+      guard let buffer = AVAudioPCMBuffer(
+        pcmFormat: part.processingFormat,
+        frameCapacity: AVAudioFrameCount(part.length)
+      ) else {
+        throw TTSError.synthesisFailure("Not enough memory to join the generated audio")
+      }
       try part.read(into: buffer)
       try output.write(from: buffer)
     }

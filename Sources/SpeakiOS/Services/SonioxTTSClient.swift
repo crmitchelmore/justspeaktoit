@@ -20,7 +20,6 @@ public final class SonioxIOSVoiceOutputClient: ObservableObject {
         realtime.$firstAudioLatencySeconds.assign(to: &$firstAudioLatencySeconds)
     }
 
-    // swiftlint:disable:next function_body_length
     public func speak( // swiftlint:disable:this function_parameter_count
         text: String,
         apiKey: String,

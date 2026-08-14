@@ -112,7 +112,6 @@ final class SonioxRealtimeTTSClientTests: XCTestCase {
         }
     }
 
-    // swiftlint:disable:next function_body_length
     func testReplacementStream_ignoresLateAudioFromCancelledStream() async throws {
         let first = MockSonioxWebSocketConnection()
         let second = MockSonioxWebSocketConnection()

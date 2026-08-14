@@ -182,7 +182,6 @@ private final class SonioxPCMAudioPlayer: SonioxPCMAudioPlaying {
 /// Owns one low-latency Soniox stream at a time. Replacement sessions use a new
 /// stream ID and ignore all late events from the prior connection.
 @MainActor
-// swiftlint:disable:next type_body_length
 final class SonioxRealtimeTTSClient: ObservableObject {
     @Published private(set) var isSpeaking = false
     @Published private(set) var firstAudioLatencySeconds: TimeInterval?
@@ -227,7 +226,7 @@ final class SonioxRealtimeTTSClient: ObservableObject {
         }
     }
 
-    // swiftlint:disable:next function_body_length
+    // swiftlint:disable:next cyclomatic_complexity function_body_length function_parameter_count
     func speak(
         text: String,
         apiKey: String,

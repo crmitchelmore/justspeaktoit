@@ -448,5 +448,5 @@ final class DistributionBuildIdentityTests: XCTestCase {
 
         XCTAssertTrue(iosTarget.contains("\"UIBackgroundModes\": [\"audio\", \"remote-notification\"]"))
     }
-
+    // swiftlint:disable:next file_length
 }

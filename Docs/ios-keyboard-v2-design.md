@@ -122,7 +122,8 @@ transcript mirroring, single insert on completion. Each request snapshots its
 selected profile, and the app executes that exact model/language/polish
 configuration or returns `profileUnavailable`; it never silently downgrades.
 The keyboard also automatically degrades to this path when direct capture fails with a permission-style error.
-Setup copy now frames Instant Dictation as the fallback, not the primary flow.
+Setup copy distinguishes the App profile from Local mode's default-off and
+permission-failure handoff without implying that the rollout flag is enabled.
 
 ### Surface
 

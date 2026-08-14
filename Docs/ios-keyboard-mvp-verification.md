@@ -264,7 +264,9 @@ dictation), and touch targets of at least 44 points.
   permissions" above; the handoff path covers devices that refuse.
 - When direct capture is enabled, the extension records only while the mic key
   is active and prefers on-device recognition.
-- `Local` sends no transcript to an app or network post-processor. `App`
+- `Local` never routes a transcript to a network post-processor. With direct
+  capture enabled it runs in the extension; while direct capture is off or
+  unavailable, the app executes the same Apple Speech snapshot. `App`
   explicitly routes the selected model through the containing app; credentials
   stay in Keychain and never enter the App Group.
 - The keyboard reads bounded context immediately before and after the cursor

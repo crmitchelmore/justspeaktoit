@@ -37,6 +37,7 @@ final class KeyboardHandoffController: ObservableObject {
     private var pollTask: Task<Void, Never>?
     private var insertText: ((String) -> Void)?
     private var profile: KeyboardDictationProfileOption?
+    private var autoStartWhenReady = false
 
     /// Poll cadence while a handoff request is in flight; the keyboard mirrors
     /// interim text from the App Group record at this rate.
@@ -67,10 +68,14 @@ final class KeyboardHandoffController: ObservableObject {
         if requestID == nil {
             requestID = store.activeRecord()?.requestID
         }
+        autoStartWhenReady = autoStart && requestID == nil
+        if requestID == nil {
+            presentation = .idle
+        }
         refreshInstantSession()
         refresh()
         startPolling()
-        if autoStart, requestID == nil, isInstantReady, presentation != .inserted {
+        if autoStartWhenReady, requestID == nil, isInstantReady, presentation != .inserted {
             start()
         } else if requestID == nil, !isInstantReady {
             presentation = .waitingForApp
@@ -88,6 +93,7 @@ final class KeyboardHandoffController: ObservableObject {
         }
         pollTask?.cancel()
         pollTask = nil
+        autoStartWhenReady = false
         liveTranscript = ""
         presentation = .idle
     }
@@ -112,6 +118,7 @@ final class KeyboardHandoffController: ObservableObject {
     }
 
     func start() {
+        autoStartWhenReady = false
         do {
             guard isInstantReady, let currentDocumentIdentifier else {
                 presentation = .waitingForApp
@@ -183,7 +190,7 @@ final class KeyboardHandoffController: ObservableObject {
     private func refresh() {
         refreshInstantSession()
         guard let requestID else {
-            if isInstantReady, presentation == .waitingForApp {
+            if autoStartWhenReady, isInstantReady, presentation == .waitingForApp {
                 start()
                 return
             }

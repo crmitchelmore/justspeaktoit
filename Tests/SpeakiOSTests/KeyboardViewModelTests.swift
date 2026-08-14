@@ -3,6 +3,8 @@ import Foundation
 import SpeakCore
 import XCTest
 
+// swiftlint:disable file_length type_body_length
+
 @MainActor
 final class KeyboardViewModelTests: XCTestCase {
     private final class FakeEngine: KeyboardDictationEngineProtocol {
@@ -69,6 +71,13 @@ final class KeyboardViewModelTests: XCTestCase {
         }
     }
 
+    private struct Harness {
+        let model: KeyboardViewModel
+        let handoffStore: KeyboardHandoffStore
+        let instantStore: KeyboardInstantDictationStore
+        let preferences: KeyboardDictationPreferencesStore
+    }
+
     func testDisabledDirectCapture_plansHandoffWithoutReadingPermissions() {
         let engine = FakeEngine()
         let document = DocumentProxy(before: "Host")
@@ -88,6 +97,117 @@ final class KeyboardViewModelTests: XCTestCase {
         XCTAssertEqual(capabilityReads, 0)
         XCTAssertTrue(engine.startedRunIDs.isEmpty)
         model.deactivate()
+    }
+
+    func testDisabledDirectCapture_localProfileHandsOffExactSnapshotWithoutCapabilityReads() throws {
+        let engine = FakeEngine()
+        let document = DocumentProxy(before: "Host")
+        var capabilityReads = 0
+        let harness = makeHarness(
+            engine: engine,
+            policy: .disabled,
+            capabilities: {
+                capabilityReads += 1
+                return Self.availableCapabilities
+            },
+            configurePreferences: { preferences in
+                Self.publishProfileCatalogue(preferences)
+                preferences.selectProfile(KeyboardDictationProfileCatalog.directIdentifier)
+            },
+            instantReady: true
+        )
+        let expectedProfile = harness.preferences.profileSelection().selectedProfile
+
+        activate(harness.model, document: document)
+
+        XCTAssertEqual(harness.model.mode, .handoff)
+        XCTAssertEqual(capabilityReads, 0)
+        XCTAssertEqual(try XCTUnwrap(harness.handoffStore.activeRecord()).profile, expectedProfile)
+        XCTAssertTrue(engine.startedRunIDs.isEmpty)
+        harness.model.deactivate()
+    }
+
+    func testAppProfile_handsOffExactSnapshotRegardlessOfDirectCapturePolicy() throws {
+        for policy: KeyboardCapturePlanner.DirectCapturePolicy in [.disabled, .enabled] {
+            let engine = FakeEngine()
+            let document = DocumentProxy(before: "Host")
+            var capabilityReads = 0
+            let harness = makeHarness(
+                engine: engine,
+                policy: policy,
+                capabilities: {
+                    capabilityReads += 1
+                    return Self.availableCapabilities
+                },
+                configurePreferences: Self.publishProfileCatalogue,
+                instantReady: true
+            )
+            let expectedProfile = harness.preferences.profileSelection().selectedProfile
+
+            activate(harness.model, document: document)
+
+            XCTAssertEqual(harness.model.mode, .handoff)
+            XCTAssertEqual(capabilityReads, 0)
+            XCTAssertEqual(try XCTUnwrap(harness.handoffStore.activeRecord()).profile, expectedProfile)
+            XCTAssertTrue(engine.startedRunIDs.isEmpty)
+            harness.model.deactivate()
+        }
+    }
+
+    func testEnabledDirectCapture_localProfileUsesRunScopedDocumentSession() throws {
+        let engine = FakeEngine()
+        let document = DocumentProxy(before: "Host", after: " tail")
+        let harness = makeHarness(
+            engine: engine,
+            configurePreferences: { preferences in
+                Self.publishProfileCatalogue(preferences)
+                preferences.selectProfile(KeyboardDictationProfileCatalog.directIdentifier)
+            }
+        )
+
+        activate(harness.model, document: document)
+        harness.model.micTapped()
+        let runID = try XCTUnwrap(engine.startedRunIDs.last)
+        engine.emit(.captureStarted, for: runID)
+        engine.emit(.hypothesis("dictated words"), for: runID)
+
+        XCTAssertEqual(harness.model.mode, .direct)
+        XCTAssertEqual(document.text, "Host dictated words tail")
+        XCTAssertNil(harness.handoffStore.activeRecord())
+        harness.model.deactivate()
+    }
+
+    func testIdleProfileAndLanguageSwitch_reconfiguresHandoffWithoutAutoStart() throws {
+        let engine = FakeEngine()
+        let document = DocumentProxy(before: "Host")
+        var capabilityReads = 0
+        let harness = makeHarness(
+            engine: engine,
+            policy: .disabled,
+            capabilities: {
+                capabilityReads += 1
+                return Self.availableCapabilities
+            },
+            configurePreferences: Self.publishProfileCatalogue
+        )
+
+        activate(harness.model, document: document)
+        harness.model.selectProfile(KeyboardDictationProfileCatalog.directIdentifier)
+        _ = harness.instantStore.start(enabling: true)
+        harness.model.cycleLanguage()
+
+        XCTAssertEqual(harness.model.mode, .handoff)
+        XCTAssertTrue(harness.model.showsLanguageChip)
+        XCTAssertEqual(harness.model.languageChipLabel, "EN-GB")
+        XCTAssertEqual(harness.model.handoff.presentation, .idle)
+        XCTAssertNil(harness.handoffStore.activeRecord())
+        XCTAssertEqual(capabilityReads, 0)
+
+        harness.model.micTapped()
+        let request = try XCTUnwrap(harness.handoffStore.activeRecord())
+        XCTAssertEqual(request.profile?.id, KeyboardDictationProfileCatalog.directIdentifier)
+        XCTAssertEqual(request.profile?.languageIdentifier, "en-GB")
+        harness.model.deactivate()
     }
 
     func testDelayedCallbacks_fromPreviousRunCannotReachNewRun() throws {
@@ -263,6 +383,20 @@ final class KeyboardViewModelTests: XCTestCase {
         speechRecognizerAvailable: { _ in true }
     )
 
+    private static func publishProfileCatalogue(_ preferences: KeyboardDictationPreferencesStore) {
+        preferences.mirrorAppPreference(selectedIdentifier: "en-GB")
+        preferences.mirrorAppPreference(selectedIdentifier: "fr-FR")
+        preferences.publishAppProfileSelection(
+            configuration: KeyboardAppProfileConfiguration(
+                transcriptionMode: .batch,
+                transcriptionModelIdentifier: "openai/gpt-transcribe",
+                languageIdentifier: "fr-FR",
+                postProcessingEnabled: true,
+                postProcessingModelIdentifier: "openrouter/openai/gpt-5-mini"
+            )
+        )
+    }
+
     private func makeModel(
         engine: FakeEngine,
         policy: KeyboardCapturePlanner.DirectCapturePolicy = .enabled,
@@ -270,18 +404,40 @@ final class KeyboardViewModelTests: XCTestCase {
             Self.availableCapabilities
         }
     ) -> KeyboardViewModel {
+        makeHarness(engine: engine, policy: policy, capabilities: capabilities).model
+    }
+
+    private func makeHarness(
+        engine: FakeEngine,
+        policy: KeyboardCapturePlanner.DirectCapturePolicy = .enabled,
+        capabilities: @escaping () -> KeyboardViewModel.DirectCaptureCapabilities = {
+            Self.availableCapabilities
+        },
+        configurePreferences: (KeyboardDictationPreferencesStore) -> Void = { _ in },
+        instantReady: Bool = false
+    ) -> Harness {
         let suiteName = "KeyboardViewModelTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         let handoffStore = KeyboardHandoffStore(defaults: defaults)
         let instantStore = KeyboardInstantDictationStore(defaults: defaults)
         let preferences = KeyboardDictationPreferencesStore(defaults: defaults)
-        return KeyboardViewModel(
+        configurePreferences(preferences)
+        if instantReady {
+            _ = instantStore.start(enabling: true)
+        }
+        let model = KeyboardViewModel(
             engine: engine,
             handoff: KeyboardHandoffController(store: handoffStore, instantSessionStore: instantStore),
             handoffStore: handoffStore,
             preferences: preferences,
             directCapturePolicy: policy,
             directCaptureCapabilities: capabilities
+        )
+        return Harness(
+            model: model,
+            handoffStore: handoffStore,
+            instantStore: instantStore,
+            preferences: preferences
         )
     }
 

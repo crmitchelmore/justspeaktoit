@@ -1,3 +1,5 @@
+// Consent, lifecycle and payload privacy flows share fixtures whose behaviour is easier to audit in one file.
+// swiftlint:disable file_length type_body_length
 import Foundation
 @testable import SpeakCore
 import XCTest
@@ -61,9 +63,10 @@ final class ProductAnalyticsTests: XCTestCase {
     func testPreview_UsesTheSameAllowlistedPayloadEncoder() async throws {
         let fixture = try Fixture()
         let data = try await fixture.controller.preview(.onboardingStarted(entryPoint: .freshInstall))
-        let payload = try JSONDecoder().decode(ProductAnalyticsPayload.self, from: data)
-        XCTAssertEqual(payload.event, "onboarding_started")
-        XCTAssertEqual(payload.properties["entry_point"], "fresh_install")
+        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let properties = try XCTUnwrap(payload["properties"] as? [String: String])
+        XCTAssertEqual(payload["event"] as? String, "onboarding_started")
+        XCTAssertEqual(properties["entry_point"], "fresh_install")
     }
 
     func testDetailedTranscriptionEvent_BucketsRawMeasurementsLocally() async throws {
@@ -118,6 +121,101 @@ final class ProductAnalyticsTests: XCTestCase {
         )
         XCTAssertEqual(dimensions.modelFamily, .other)
         XCTAssertEqual(dimensions.languageCode, "other")
+
+        let shortASCII = AnalyticsTranscriptionDimensions(
+            mode: .batch,
+            engine: .onDevice,
+            provider: .local,
+            modelFamily: .other,
+            languageCode: "mypassword",
+            trigger: .menuBar
+        )
+        XCTAssertEqual(shortASCII.languageCode, "other")
+    }
+
+    func testGlobalContext_RejectsArbitraryShortASCII() {
+        let input = "mypassword"
+        let context = ProductAnalyticsContext(
+            platform: .macOS,
+            appVersion: input,
+            build: input,
+            osMajorMinor: input,
+            distributionChannel: .development,
+            localeLanguageCode: input,
+            architecture: input
+        )
+        let payload = ProductAnalyticsPayload(event: .appActiveDaily, context: context, distinctID: UUID())
+
+        XCTAssertEqual(context.appVersion, "other")
+        XCTAssertEqual(context.build, "other")
+        XCTAssertEqual(context.osMajorMinor, "other")
+        XCTAssertEqual(context.localeLanguageCode, "other")
+        XCTAssertEqual(context.architecture, "other")
+        XCTAssertFalse(payload.properties.values.contains(input))
+    }
+
+    func testAnonymousPreview_DropsCallerSuppliedIdentity() async throws {
+        let fixture = try Fixture()
+        let data = try await fixture.controller.preview(.correctionApplied(rulesMatched: .one))
+        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        XCTAssertNil(payload["distinctID"])
+        XCTAssertEqual(payload["privacyClass"] as? String, AnalyticsPrivacyClass.anonymousCounter.rawValue)
+    }
+
+    func testOptOutThenOptIn_ReopensTerminalSinkBeforeCapture() async throws {
+        let fixture = try Fixture()
+        try await fixture.controller.setConsent(.optedIn)
+        try await fixture.controller.setConsent(.optedOut)
+        try await fixture.controller.setConsent(.optedIn)
+        try await fixture.controller.capture(.appActiveDaily)
+
+        let payloads = await fixture.sink.payloads
+        let reopenCount = await fixture.sink.reopenCount
+        XCTAssertEqual(payloads.count, 1)
+        XCTAssertEqual(reopenCount, 2)
+    }
+
+    func testKillSwitchAfterCapture_PurgesClosesAndDeletesIdentity() async throws {
+        let store = StubStore()
+        let sink = SpySink()
+        let forceDisabled = LockedFlag(false)
+        let controller = try Self.makeController(sink: sink, store: store) { forceDisabled.value }
+        try await controller.setConsent(.optedIn)
+        try await controller.capture(.appActiveDaily)
+        XCTAssertNotNil(store.installationID)
+
+        forceDisabled.value = true
+        try await controller.capture(.appActiveDaily)
+
+        let payloads = await sink.payloads
+        let closeCount = await sink.closeCount
+        XCTAssertTrue(payloads.isEmpty)
+        XCTAssertNil(store.installationID)
+        XCTAssertEqual(closeCount, 1)
+    }
+
+    func testCurrentWatchAndXAIModels_HaveTypedAnalyticsDimensions() {
+        let dimensions = AnalyticsTranscriptionDimensions(
+            mode: .live,
+            engine: .cloud,
+            provider: .xAI,
+            modelFamily: .grok,
+            languageCode: "en_GB",
+            trigger: .watch
+        )
+
+        XCTAssertEqual(dimensions.properties["provider_type"], "xai")
+        XCTAssertEqual(dimensions.properties["model_family"], "grok")
+        XCTAssertEqual(dimensions.properties["language_code"], "en-gb")
+        XCTAssertEqual(dimensions.properties["trigger"], "watch")
+    }
+
+    func testLiveProviderCatalogue_MapsEveryProviderToTypedAnalytics() {
+        let mapped = LiveTranscriptionProviderID.allCases.map { AnalyticsProviderType(liveProvider: $0) }
+
+        XCTAssertEqual(mapped.count, LiveTranscriptionProviderID.allCases.count)
+        XCTAssertFalse(mapped.contains(.other))
     }
 
     /// A transcript is not representable as a model family: the type is a closed enum, and the only
@@ -197,6 +295,27 @@ final class ProductAnalyticsTests: XCTestCase {
         XCTAssertNil(store.installationID)
     }
 
+    func testOptOutPersistenceFailure_ResetsDurableStateAndClosesSink() async throws {
+        let store = StubStore()
+        store.consent = .optedIn
+        store.installationID = UUID()
+        store.saveConsentError = StubError()
+        let sink = SpySink()
+        let controller = try Self.makeController(sink: sink, store: store)
+
+        do {
+            try await controller.setConsent(.optedOut)
+            XCTFail("Expected the failed consent write to propagate")
+        } catch is StubError {}
+
+        let state = await controller.consentState()
+        let closeCount = await sink.closeCount
+        XCTAssertEqual(state, .optedOut)
+        XCTAssertEqual(store.consent, .unknown)
+        XCTAssertNil(store.installationID)
+        XCTAssertEqual(closeCount, 1)
+    }
+
     func testOptOutPurgeFailure_StillDeletesIdentityAndClosesSink() async throws {
         let store = StubStore()
         store.consent = .optedIn
@@ -260,13 +379,13 @@ private extension ProductAnalyticsTests {
     static func makeController(
         sink: any ProductAnalyticsSink,
         store: any ProductAnalyticsStateStore,
-        forceDisabled: Bool = false
+        forceDisabled: @escaping @Sendable () -> Bool = { false }
     ) throws -> ProductAnalyticsController {
         try ProductAnalyticsController(
             context: context,
             sink: sink,
             stateStore: store,
-            forceDisabled: { forceDisabled }
+            forceDisabled: forceDisabled
         )
     }
 
@@ -292,6 +411,11 @@ private extension ProductAnalyticsTests {
             if let deleteInstallationIDError { throw deleteInstallationIDError }
             installationID = nil
         }
+
+        func resetState() throws {
+            consent = .unknown
+            installationID = nil
+        }
     }
 
     struct Fixture {
@@ -307,7 +431,7 @@ private extension ProductAnalyticsTests {
             controller = try ProductAnalyticsTests.makeController(
                 sink: sink,
                 store: store,
-                forceDisabled: forceDisabled
+                forceDisabled: { forceDisabled }
             )
         }
     }
@@ -316,11 +440,21 @@ private extension ProductAnalyticsTests {
         var payloads: [ProductAnalyticsPayload] = []
         var purgeCount = 0
         var closeCount = 0
+        var reopenCount = 0
+        private var isClosed = false
         private let purgeError: Error?
 
         init(purgeError: Error? = nil) { self.purgeError = purgeError }
 
-        func capture(_ payload: ProductAnalyticsPayload) async throws { payloads.append(payload) }
+        func reopen() async throws {
+            reopenCount += 1
+            isClosed = false
+        }
+
+        func capture(_ payload: ProductAnalyticsPayload) async throws {
+            guard !isClosed else { throw StubError() }
+            payloads.append(payload)
+        }
 
         func purge() async throws {
             purgeCount += 1
@@ -328,6 +462,21 @@ private extension ProductAnalyticsTests {
             if let purgeError { throw purgeError }
         }
 
-        func close() async { closeCount += 1 }
+        func close() async {
+            closeCount += 1
+            isClosed = true
+        }
+    }
+
+    final class LockedFlag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var storedValue: Bool
+
+        init(_ value: Bool) { storedValue = value }
+
+        var value: Bool {
+            get { lock.withLock { storedValue } }
+            set { lock.withLock { storedValue = newValue } }
+        }
     }
 }

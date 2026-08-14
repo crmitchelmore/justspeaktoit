@@ -8,10 +8,12 @@ public enum AnalyticsPermissionType: String, Codable, Sendable {
 public enum AnalyticsPermissionState: String, Codable, Sendable { case granted, denied, restricted }
 public enum AnalyticsTranscriptionMode: String, Codable, Sendable { case live, batch }
 public enum AnalyticsTriggerSource: String, Codable, Sendable {
-    case hotkey, keyboard, widget
+    case hotkey, keyboard, watch, widget
     case menuBar = "menu_bar"
     case actionButton = "action_button"
+    case handsFree = "hands_free"
     case urlScheme = "url_scheme"
+    case voiceEdit = "voice_edit"
 }
 
 public enum AnalyticsDurationBucket: String, Codable, Sendable {
@@ -129,6 +131,8 @@ public enum AnalyticsModelFamily: String, Codable, Sendable {
     case speechmatics
     /// Google Gemini audio models used as transcribers.
     case gemini
+    /// xAI Grok Voice models used in transcription-only mode.
+    case grok
     /// Rev.ai.
     case revAI = "rev_ai"
     /// Anything not in the list above — never the caller's own identifier.
@@ -170,13 +174,17 @@ public struct AnalyticsTranscriptionDimensions: Equatable, Sendable {
         ]
     }
 
-    /// Language codes are still free-form at the call site (they come from `Locale`), so they are
-    /// clamped to an explicit ASCII alphabet. `CharacterSet.lowercaseLetters` would admit any
-    /// lowercase script in Unicode, which is exactly the leak this boundary exists to prevent.
+    /// Only identifiers represented by the shared transcription-language catalogue are emitted.
+    /// Callers may supply the catalogue's underscore or BCP-47 hyphen spelling; everything else is
+    /// collapsed to `other` so short ASCII user content cannot pass through this boundary.
     private static func boundedLanguageCode(_ value: String) -> String {
         let normalized = value.lowercased().replacingOccurrences(of: "_", with: "-")
-        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789_-")
-        guard normalized.count <= 12, normalized.unicodeScalars.allSatisfy(allowed.contains) else { return "other" }
-        return normalized
+        let identifiers = Set(TranscriptionLanguageCatalog.options.map {
+            $0.id.lowercased().replacingOccurrences(of: "_", with: "-")
+        })
+        let baseLanguages = Set(identifiers.compactMap {
+            $0.split(separator: "-", maxSplits: 1).first.map(String.init)
+        })
+        return identifiers.contains(normalized) || baseLanguages.contains(normalized) ? normalized : "other"
     }
 }

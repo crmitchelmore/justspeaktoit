@@ -15,6 +15,12 @@ public final class FileProductAnalyticsStateStore: ProductAnalyticsStateStore, @
     public func loadInstallationID() throws -> UUID? { try withState { $0.installationID } }
     public func saveInstallationID(_ id: UUID) throws { try updateState { $0.installationID = id } }
     public func deleteInstallationID() throws { try updateState { $0.installationID = nil } }
+    public func resetState() throws {
+        lock.lock()
+        defer { lock.unlock() }
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+        try FileManager.default.removeItem(at: fileURL)
+    }
 
     private func withState<T>(_ body: (State) throws -> T) throws -> T {
         lock.lock()

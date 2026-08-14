@@ -76,7 +76,9 @@ auditor reading our source and watching our network traffic confirms it.
 `locale_language_code`,
 `architecture`, `analytics_schema_version`. Nothing else. No device model, no
 device name, no timezone beyond what ingestion infers coarsely (IP capture
-disabled at the project level).
+disabled at the project level). The shared payload boundary validates version,
+build and OS formats, restricts architecture to a closed set, and derives locale
+language from the canonical language catalogue; invalid values become `other`.
 
 ### Bucket definitions (shared, versioned with the schema)
 
@@ -101,7 +103,7 @@ locally, and the raw values are never serialised into an event.
 | 4 | `onboarding_permission_result` | `permission` (microphone \| speech \| accessibility \| local_network \| notifications), `state` (granted \| denied \| restricted) | P | Funnel leaks caused by permission denials |
 | 5 | `onboarding_completed` | `steps_skipped_bucket` | P | Funnel bottom |
 | 6 | `first_transcription_succeeded` | `provider_type`, `engine_type` (on_device \| cloud), `days_since_install_bucket` | P | **Activation** (the north-star event) |
-| 7 | `transcription_started` | `mode` (live \| batch), `engine_type`, `provider_type` (apple \| deepgram \| openai \| … — type, never key or account info), `model_family` (bounded enum of shipped families: apple \| whisper \| parakeet \| nova \| scribe \| … \| other — never a raw model id), `language_code`, `trigger` (hotkey \| menu_bar \| action_button \| keyboard \| widget \| url_scheme) | P | Feature usage, reliability denominator |
+| 7 | `transcription_started` | `mode` (live \| batch), `engine_type`, `provider_type` (apple \| deepgram \| openai \| xai \| … — type, never key or account info), `model_family` (bounded enum of shipped families: apple \| whisper \| parakeet \| nova \| scribe \| grok \| … \| other — never a raw model id), `language_code` (canonical shared catalogue only), `trigger` (hotkey \| menu_bar \| action_button \| hands_free \| keyboard \| voice_edit \| watch \| widget \| url_scheme) | P | Feature usage, reliability denominator |
 | 8 | `transcription_completed` | same as #7 + `duration_bucket`, `word_count_bucket`, `latency_bucket`, `output_method` (paste \| clipboard \| send_to_mac \| keyboard) | P | Reliability, usage depth |
 | 9 | `transcription_failed` | same as #7 + `error_category` (bounded enum), `pipeline_stage` (capture \| stream \| provider \| output) | P | Reliability |
 | 10 | `transcription_cancelled` | same as #7 + `duration_bucket` | P | Reliability (user-abandonment signal) |

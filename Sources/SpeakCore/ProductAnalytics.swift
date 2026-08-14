@@ -1,3 +1,5 @@
+// The event catalogue, payload boundary and controller stay together so the privacy contract can be audited as one unit.
+// swiftlint:disable file_length
 import Foundation
 
 public enum AnalyticsConsentState: String, Codable, CaseIterable, Sendable {
@@ -36,10 +38,29 @@ public enum AnalyticsOnboardingStep: String, Codable, Sendable {
 }
 
 public enum AnalyticsProviderType: String, Codable, Sendable {
-    case apple, azure, cartesia, deepgram, gladia, local, soniox, speechmatics, other
+    case apple, azure, cartesia, deepgram, gladia, groq, local, mistral, modulate, soniox, speechmatics, other
     case assemblyAI = "assembly_ai"
     case elevenLabs = "eleven_labs"
     case openAI = "openai"
+    case openRouter = "openrouter"
+    case revAI = "rev_ai"
+    case xAI = "xai"
+
+    public init(liveProvider: LiveTranscriptionProviderID) {
+        self = switch liveProvider {
+        case .apple: .apple
+        case .deepgram: .deepgram
+        case .cartesia: .cartesia
+        case .gladia: .gladia
+        case .modulate: .modulate
+        case .assemblyai: .assemblyAI
+        case .soniox: .soniox
+        case .elevenlabs: .elevenLabs
+        case .openai: .openAI
+        case .speechmatics: .speechmatics
+        case .xai: .xAI
+        }
+    }
 }
 
 public enum AnalyticsEngineType: String, Codable, Sendable {
@@ -230,7 +251,7 @@ public enum ProductAnalyticsEvent: Sendable, Equatable {
     }
 }
 
-public struct ProductAnalyticsContext: Codable, Equatable, Sendable {
+public struct ProductAnalyticsContext: Equatable, Sendable {
     public static let schemaVersion = 1
     public let platform: AnalyticsPlatform
     public let appVersion: String
@@ -250,16 +271,56 @@ public struct ProductAnalyticsContext: Codable, Equatable, Sendable {
         architecture: String
     ) {
         self.platform = platform
-        self.appVersion = appVersion
-        self.build = build
-        self.osMajorMinor = osMajorMinor
+        self.appVersion = Self.boundedVersion(appVersion)
+        self.build = Self.boundedBuild(build)
+        self.osMajorMinor = Self.boundedOperatingSystemVersion(osMajorMinor)
         self.distributionChannel = distributionChannel
-        self.localeLanguageCode = localeLanguageCode
-        self.architecture = architecture
+        self.localeLanguageCode = Self.boundedLocaleLanguageCode(localeLanguageCode)
+        self.architecture = Self.boundedArchitecture(architecture)
+    }
+
+    private static func boundedVersion(_ value: String) -> String {
+        let components = value.split(separator: ".", omittingEmptySubsequences: false)
+        guard (1 ... 4).contains(components.count),
+              components.allSatisfy({ Self.isBoundedDecimal($0, maximumLength: 5) })
+        else { return "other" }
+        return value
+    }
+
+    private static func boundedBuild(_ value: String) -> String {
+        Self.isBoundedDecimal(value[...], maximumLength: 12) ? value : "other"
+    }
+
+    private static func boundedOperatingSystemVersion(_ value: String) -> String {
+        let components = value.split(separator: ".", omittingEmptySubsequences: false)
+        guard components.count == 2,
+              components.allSatisfy({ Self.isBoundedDecimal($0, maximumLength: 3) })
+        else { return "other" }
+        return value
+    }
+
+    private static func boundedLocaleLanguageCode(_ value: String) -> String {
+        let normalized = value.lowercased().replacingOccurrences(of: "_", with: "-")
+        let language = normalized.split(separator: "-", maxSplits: 1).first.map(String.init) ?? ""
+        let supportedLanguages = Set(TranscriptionLanguageCatalog.options.compactMap { option -> String? in
+            guard option.id != TranscriptionLanguageCatalog.automaticIdentifier else { return nil }
+            return option.id.lowercased().split(separator: "_", maxSplits: 1).first.map(String.init)
+        })
+        return supportedLanguages.contains(language) ? language : "other"
+    }
+
+    private static func boundedArchitecture(_ value: String) -> String {
+        let normalized = value.lowercased()
+        return ["arm64", "x86_64"].contains(normalized) ? normalized : "other"
+    }
+
+    private static func isBoundedDecimal(_ value: Substring, maximumLength: Int) -> Bool {
+        !value.isEmpty && value.count <= maximumLength
+            && value.unicodeScalars.allSatisfy { (48 ... 57).contains(Int($0.value)) }
     }
 }
 
-public struct ProductAnalyticsPayload: Codable, Equatable, Sendable {
+public struct ProductAnalyticsPayload: Encodable, Equatable, Sendable {
     public let event: String
     public let distinctID: UUID?
     public let privacyClass: AnalyticsPrivacyClass
@@ -267,7 +328,7 @@ public struct ProductAnalyticsPayload: Codable, Equatable, Sendable {
 
     public init(event: ProductAnalyticsEvent, context: ProductAnalyticsContext, distinctID: UUID?) {
         self.event = event.name
-        self.distinctID = distinctID
+        self.distinctID = event.privacyClass == .pseudonymous ? distinctID : nil
         self.privacyClass = event.privacyClass
         self.properties = event.properties.merging([
             "platform": context.platform.rawValue,
@@ -283,6 +344,7 @@ public struct ProductAnalyticsPayload: Codable, Equatable, Sendable {
 }
 
 public protocol ProductAnalyticsSink: Sendable {
+    func reopen() async throws
     func capture(_ payload: ProductAnalyticsPayload) async throws
     func purge() async throws
     func close() async
@@ -290,6 +352,7 @@ public protocol ProductAnalyticsSink: Sendable {
 
 public struct NoOpProductAnalyticsSink: ProductAnalyticsSink {
     public init() {}
+    public func reopen() async throws {}
     public func capture(_: ProductAnalyticsPayload) async throws {}
     public func purge() async throws {}
     public func close() async {}
@@ -301,6 +364,7 @@ public protocol ProductAnalyticsStateStore: Sendable {
     func loadInstallationID() throws -> UUID?
     func saveInstallationID(_ id: UUID) throws
     func deleteInstallationID() throws
+    func resetState() throws
 }
 
 public actor ProductAnalyticsController {
@@ -309,6 +373,7 @@ public actor ProductAnalyticsController {
     private let stateStore: any ProductAnalyticsStateStore
     private let forceDisabled: @Sendable () -> Bool
     private var consent: AnalyticsConsentState
+    private var sinkIsClosed = false
 
     public init(
         context: ProductAnalyticsContext,
@@ -330,20 +395,44 @@ public actor ProductAnalyticsController {
     public func setConsent(_ newConsent: AnalyticsConsentState) async throws {
         guard newConsent != .optedIn else {
             try stateStore.saveConsent(newConsent)
+            guard !forceDisabled() else {
+                consent = newConsent
+                try await suspendCollection()
+                return
+            }
+            try await sink.reopen()
+            sinkIsClosed = false
             consent = newConsent
             return
         }
         consent = newConsent
         var firstFailure: Error?
-        do { try stateStore.saveConsent(newConsent) } catch { firstFailure = firstFailure ?? error }
-        do { try await sink.purge() } catch { firstFailure = firstFailure ?? error }
-        do { try stateStore.deleteInstallationID() } catch { firstFailure = firstFailure ?? error }
-        await sink.close()
+        var shouldDeleteIdentity = true
+        do {
+            try stateStore.saveConsent(newConsent)
+        } catch {
+            firstFailure = error
+            shouldDeleteIdentity = false
+            do { try stateStore.resetState() } catch { firstFailure = firstFailure ?? error }
+        }
+        do {
+            try await suspendCollection(deleteIdentity: shouldDeleteIdentity)
+        } catch {
+            firstFailure = firstFailure ?? error
+        }
         if let firstFailure { throw firstFailure }
     }
 
     public func capture(_ event: ProductAnalyticsEvent) async throws {
-        guard consent.permitsCollection, !forceDisabled() else { return }
+        guard consent.permitsCollection else { return }
+        guard !forceDisabled() else {
+            try await suspendCollection()
+            return
+        }
+        if sinkIsClosed {
+            try await sink.reopen()
+            sinkIsClosed = false
+        }
         let distinctID = event.privacyClass == .pseudonymous ? try installationID() : nil
         try await sink.capture(ProductAnalyticsPayload(event: event, context: context, distinctID: distinctID))
     }
@@ -365,5 +454,16 @@ public actor ProductAnalyticsController {
         let id = UUID()
         try stateStore.saveInstallationID(id)
         return id
+    }
+
+    private func suspendCollection(deleteIdentity: Bool = true) async throws {
+        var firstFailure: Error?
+        do { try await sink.purge() } catch { firstFailure = error }
+        if deleteIdentity {
+            do { try stateStore.deleteInstallationID() } catch { firstFailure = firstFailure ?? error }
+        }
+        await sink.close()
+        sinkIsClosed = true
+        if let firstFailure { throw firstFailure }
     }
 }

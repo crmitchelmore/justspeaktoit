@@ -123,7 +123,7 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
     self.appSettings = appSettings
     self.permissionsManager = permissionsManager
     self.audioDeviceManager = audioDeviceManager
-    Task { await self.sweepStagedLeftovers() }
+    Self.scheduleStagedLeftoverSweep(for: appSettings)
   }
 
   /// Returns the current audio level (0.0 to 1.0) if recording is active.
@@ -245,20 +245,25 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
     }
   }
 
-  /// The folder staged files belong in for `recordingsDirectory`. See
-  /// ``CaptureStaging`` for why the choice depends on which volume the
-  /// recordings directory is on. Resolving it reads volume identifiers, so the
-  /// answer is cached per directory and never repeated on the capture path.
+  /// The folder staged files belong in for `recordingsDirectory`. Resolving it
+  /// reads volume identifiers, so the answer is cached per directory and never
+  /// repeated on the capture path.
   private func stagingDirectory(for recordingsDirectory: URL) -> URL {
     if let cached = self.stagingDirectories[recordingsDirectory.path] { return cached }
-    let temporary = FileManager.default.temporaryDirectory
-    let directory = CaptureStaging.directory(
-      temporaryDirectory: temporary,
-      recordingsDirectory: recordingsDirectory,
-      sharesVolume: Self.sharesVolume(temporary, recordingsDirectory)
-    )
+    let directory = Self.resolveStagingDirectory(for: recordingsDirectory)
     self.stagingDirectories[recordingsDirectory.path] = directory
     return directory
+  }
+
+  /// See ``CaptureStaging`` for why the choice depends on which volume the
+  /// recordings directory is on.
+  private static func resolveStagingDirectory(for recordingsDirectory: URL) -> URL {
+    let temporary = FileManager.default.temporaryDirectory
+    return CaptureStaging.directory(
+      temporaryDirectory: temporary,
+      recordingsDirectory: recordingsDirectory,
+      sharesVolume: self.sharesVolume(temporary, recordingsDirectory)
+    )
   }
 
   /// Whether both URLs sit on the same volume, which is what makes claiming a
@@ -275,6 +280,21 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
     return left.isEqual(right)
   }
 
+  /// Starts the launch sweep away from the recorder.
+  ///
+  /// Housekeeping must never stand in front of a session. On the actor, the
+  /// directory scan would hold every other message — the warm-up handshake and
+  /// `startRecording` included — behind it for as long as it ran, which is
+  /// exactly the delay pre-warming exists to remove. It therefore runs
+  /// detached, at utility priority, and only once the launch has settled.
+  private static func scheduleStagedLeftoverSweep(for appSettings: AppSettings) {
+    Task.detached(priority: .utility) {
+      try? await Task.sleep(nanoseconds: 2 * NSEC_PER_SEC)
+      let recordingsDirectory = await MainActor.run { appSettings.recordingsDirectory }
+      Self.sweepStagedLeftovers(in: recordingsDirectory, now: Date())
+    }
+  }
+
   /// Removes staged files no session ever claimed.
   ///
   /// A crash, a force quit or a power loss between staging a recorder and the
@@ -282,12 +302,10 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
   /// it up. This sweep runs once per launch and only takes files that have
   /// been untouched for ``CaptureStaging/leftoverAge``, so it can never reach
   /// a file the running app still owns.
-  private func sweepStagedLeftovers() async {
-    let recordingsDirectory = await MainActor.run { appSettings.recordingsDirectory }
+  private static func sweepStagedLeftovers(in recordingsDirectory: URL, now: Date) {
     let manager = FileManager.default
-    let now = Date()
 
-    let staging = self.stagingDirectory(for: recordingsDirectory)
+    let staging = self.resolveStagingDirectory(for: recordingsDirectory)
     let stagedKeys: [URLResourceKey] = [.contentModificationDateKey]
     let stagedFiles =
       (try? manager.contentsOfDirectory(at: staging, includingPropertiesForKeys: stagedKeys)) ?? []

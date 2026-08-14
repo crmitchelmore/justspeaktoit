@@ -91,15 +91,19 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
       transcriber = newTranscriber
 
       newTranscriber.start(
-        onTranscript: { [weak self] text, isFinal in
-          Task { @MainActor [weak self] in
+        onTranscript: { [weak self, weak newTranscriber] text, isFinal in
+          Task { @MainActor [weak self, weak newTranscriber] in
             guard let self else { return }
+            // Drop callbacks queued by a previous recording's stream: this
+            // controller instance is reused between recordings (issue #643).
+            guard LiveTranscriptionRun.isCurrent(newTranscriber, activeStream: self.transcriber) else { return }
             self.handleTranscript(text: text, isFinal: isFinal)
           }
         },
-        onError: { [weak self] error in
-          Task { @MainActor [weak self] in
+        onError: { [weak self, weak newTranscriber] error in
+          Task { @MainActor [weak self, weak newTranscriber] in
             guard let self else { return }
+            guard LiveTranscriptionRun.isCurrent(newTranscriber, activeStream: self.transcriber) else { return }
             if !self.isRunning { return }
             self.delegate?.liveTranscriber(self, didFail: error)
           }

@@ -62,7 +62,7 @@ private struct SonioxStreamResponse: Decodable {
 
 protocol SonioxFinalizationDelegate: AnyObject {
     /// Soniox emitted a `finished: true` signal — caller should release any pending stop().
-    func sonioxDidFinishStream()
+    func sonioxDidFinishStream(_ transcriber: SonioxLiveTranscriber)
 }
 
 // MARK: - Provider
@@ -841,13 +841,13 @@ final class SonioxLiveTranscriber: @unchecked Sendable {
 
                 if sawFinalizationMarker {
                     flushFinal()
-                    finalizationDelegate?.sonioxDidFinishStream()
+                    finalizationDelegate?.sonioxDidFinishStream(self)
                 }
             }
 
             if response.finished == true {
                 flushFinal()
-                finalizationDelegate?.sonioxDidFinishStream()
+                finalizationDelegate?.sonioxDidFinishStream(self)
             }
         } catch {
             logger.debug("Failed to parse Soniox response: \(error.localizedDescription)")

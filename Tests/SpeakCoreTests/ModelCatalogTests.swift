@@ -225,28 +225,41 @@ final class ModelCatalogTests: XCTestCase {
 
     func testAppleSpeechCatalog_usesBestRuntimeAvailableModel() {
         let liveIDs = Set(ModelCatalog.liveTranscription.map(\.id))
+        let batchIDs = Set(ModelCatalog.batchTranscription.map(\.id))
         XCTAssertTrue(liveIDs.contains(AppleLocalModels.preferredSpeechModelID))
 
         if AppleLocalModels.supportsSpeechTranscriber {
-            XCTAssertTrue(ModelCatalog.batchTranscription.contains {
-                $0.id == AppleLocalModels.speechTranscriberModelID
-            })
+            XCTAssertTrue(batchIDs.contains(AppleLocalModels.speechTranscriberModelID))
+            XCTAssertFalse(liveIDs.contains(AppleLocalModels.legacySpeechModelID))
+            XCTAssertFalse(liveIDs.contains(AppleLocalModels.dictationTranscriberModelID))
+        } else if AppleLocalModels.supportsDictationTranscriber {
+            // OS 26 without Apple Intelligence: DictationTranscriber fills the gap.
+            XCTAssertTrue(liveIDs.contains(AppleLocalModels.dictationTranscriberModelID))
+            XCTAssertTrue(batchIDs.contains(AppleLocalModels.dictationTranscriberModelID))
+            XCTAssertFalse(liveIDs.contains(AppleLocalModels.speechTranscriberModelID))
             XCTAssertFalse(liveIDs.contains(AppleLocalModels.legacySpeechModelID))
         } else {
-            XCTAssertFalse(ModelCatalog.batchTranscription.contains {
-                $0.id == AppleLocalModels.speechTranscriberModelID
-            })
+            XCTAssertFalse(batchIDs.contains(AppleLocalModels.speechTranscriberModelID))
+            XCTAssertFalse(batchIDs.contains(AppleLocalModels.dictationTranscriberModelID))
             XCTAssertFalse(liveIDs.contains(AppleLocalModels.speechTranscriberModelID))
+            XCTAssertFalse(liveIDs.contains(AppleLocalModels.dictationTranscriberModelID))
+            XCTAssertTrue(liveIDs.contains(AppleLocalModels.legacySpeechModelID))
         }
     }
 
     func testAppleSpeechModelSelection_preservesLegacyFallback() {
         XCTAssertEqual(
-            AppleLocalModels.preferredSpeechModelID(speechTranscriberAvailable: true),
+            AppleLocalModels.preferredSpeechModelID(
+                speechTranscriberAvailable: true,
+                dictationTranscriberAvailable: false
+            ),
             AppleLocalModels.speechTranscriberModelID
         )
         XCTAssertEqual(
-            AppleLocalModels.preferredSpeechModelID(speechTranscriberAvailable: false),
+            AppleLocalModels.preferredSpeechModelID(
+                speechTranscriberAvailable: false,
+                dictationTranscriberAvailable: false
+            ),
             AppleLocalModels.legacySpeechModelID
         )
         XCTAssertEqual(
@@ -254,6 +267,9 @@ final class ModelCatalogTests: XCTestCase {
             AppleLocalModels.preferredSpeechModelID
         )
     }
+
+    // Apple analyzer-engine selection and availability tests live in
+    // AppleLocalModelsTests.swift.
 
     func testAppleFoundationModelCatalog_matchesRuntimeAvailability() {
         let isCatalogued = ModelCatalog.postProcessing.contains {

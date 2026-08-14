@@ -6,6 +6,11 @@ import Foundation
 /// Recording is buffered entirely on-device; hand-off to the iPhone is the
 /// `WatchCaptureStore`'s job, so a capture survives the phone being out of
 /// range (or the transfer failing) without losing audio.
+///
+/// Runtime past the screen turning off comes from `WatchRecordingRuntime`.
+/// Every way a recording can end — a tap, an interruption, watchOS pulling the
+/// runtime — funnels through `finish(reason:)`, so a capture cut short is
+/// queued for the iPhone rather than dropped.
 @MainActor
 final class WatchAudioRecorder: NSObject, ObservableObject {
     struct FinishedRecording {
@@ -19,8 +24,31 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
     @Published private(set) var startedAt: Date?
     @Published private(set) var lastError: String?
 
+    private let store: WatchCaptureStore
+    private let runtime: WatchRecordingRuntime
+    private let activeCaptureRegistry: WatchActiveCaptureRegistry
     private var recorder: AVAudioRecorder?
     private var currentID = UUID()
+    private var isFinalising = false
+    private var didRecoverInterruptedCapture = false
+
+    init(
+        store: WatchCaptureStore? = nil,
+        runtime: WatchRecordingRuntime? = nil,
+        activeCaptureRegistry: WatchActiveCaptureRegistry? = nil
+    ) {
+        self.store = store ?? WatchCaptureStore.shared
+        self.runtime = runtime ?? WatchRecordingRuntime()
+        self.activeCaptureRegistry = activeCaptureRegistry ?? WatchActiveCaptureRegistry(
+            fileURL: Self.activeCaptureMarkerURL
+        )
+        super.init()
+        self.runtime.onRuntimeEnd = { [weak self] reason in
+            Task { @MainActor in
+                await self?.finish(reason: reason)
+            }
+        }
+    }
 
     /// Directory holding not-yet-transferred capture audio.
     static var capturesDirectory: URL {
@@ -34,9 +62,13 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
             .appendingPathExtension("m4a")
     }
 
-    func toggle(store: WatchCaptureStore) async {
+    private static var activeCaptureMarkerURL: URL {
+        capturesDirectory.appendingPathComponent("active-capture.json")
+    }
+
+    func toggle() async {
         if isRecording {
-            stop(store: store)
+            await stop()
         } else {
             await start()
         }
@@ -46,15 +78,23 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
         guard !isRecording else { return }
         lastError = nil
 
+        await recoverInterruptedCapture()
+        guard activeCaptureRegistry.load() == nil else {
+            lastError = "The previous recording is still waiting to be recovered."
+            return
+        }
+
         guard await AVAudioApplication.requestRecordPermission() else {
             lastError = "Microphone access is required. Allow it in the Watch app settings."
             return
         }
 
+        var preparedCapture: WatchActiveCapture?
         do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playAndRecord, mode: .default)
-            try session.setActive(true)
+            // Activating the audio session in the foreground is what buys the
+            // background runtime; watchOS will not let a recording start once
+            // the app is already backgrounded.
+            try runtime.begin()
 
             try FileManager.default.createDirectory(
                 at: Self.capturesDirectory,
@@ -63,6 +103,8 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
 
             let id = UUID()
             let url = Self.fileURL(for: id)
+            let capture = WatchActiveCapture(id: id, fileURL: url, startedAt: Date())
+            preparedCapture = capture
             // Mono 16 kHz AAC: compact voice-quality audio that keeps
             // WatchConnectivity transfers small (~250 KB per minute).
             let settings: [String: Any] = [
@@ -73,78 +115,192 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
             ]
             let recorder = try AVAudioRecorder(url: url, settings: settings)
             recorder.delegate = self
-            guard recorder.record() else {
-                throw WatchRecorderError.failedToStart
-            }
+
+            // Persist before audio starts flowing. A process kill after this
+            // point leaves enough information for relaunch recovery.
+            try activeCaptureRegistry.persist(capture)
 
             self.recorder = recorder
             currentID = id
-            startedAt = Date()
+            startedAt = capture.startedAt
             isRecording = true
+            guard recorder.record() else {
+                await finish(reason: .encodingFailed(reason: WatchRecorderError.failedToStart.localizedDescription))
+                return
+            }
         } catch {
             lastError = error.localizedDescription
-            deactivateSession()
+            if let preparedCapture,
+               activeCaptureRegistry.load()?.id != preparedCapture.id
+            {
+                try? FileManager.default.removeItem(at: preparedCapture.fileURL)
+            }
+            recorder = nil
+            isRecording = false
+            startedAt = nil
+            runtime.end()
         }
     }
 
-    func stop(store: WatchCaptureStore) {
-        guard isRecording, let recorder else { return }
-        let createdAt = startedAt ?? Date()
-        let duration = recorder.currentTime
+    /// User-initiated stop.
+    func stop() async {
+        await finish(reason: .userStopped)
+    }
+
+    /// Reconciles a capture whose marker survived process termination. A
+    /// playable file enters the same persisted transfer queue as a normal
+    /// stop; an unusable file is reported visibly before cleanup.
+    func recoverInterruptedCapture() async {
+        guard !didRecoverInterruptedCapture else { return }
+        didRecoverInterruptedCapture = true
+        guard let capture = activeCaptureRegistry.load() else { return }
+
+        // A crash between queue persistence and marker cleanup must not create
+        // a duplicate transfer on the next launch.
+        if store.containsCapture(id: capture.id) {
+            do {
+                try activeCaptureRegistry.clear(matching: capture.id)
+            } catch {
+                allowRecoveryRetry(for: capture)
+                lastError = "Recording was queued, but recovery cleanup was deferred."
+            }
+            return
+        }
+
+        let inspection = await inspectAudio(at: capture.fileURL)
+        let finalisation = WatchRecordingFinaliser.finalise(
+            capture: capture,
+            reason: .runtimeInvalidated(reason: "Recording ended while the watch app was unavailable."),
+            recorderDuration: 0,
+            inspection: inspection
+        )
+        complete(finalisation, recovery: true)
+    }
+
+    /// Single exit path for a recording. Stops the recorder, releases the
+    /// runtime, then lets `WatchRecordingEndPolicy` decide whether the audio
+    /// captured so far is worth sending to the iPhone.
+    private func finish(reason: WatchRecordingEndReason) async {
+        guard !isFinalising, isRecording, let recorder else { return }
+        isFinalising = true
+        let capture = activeCaptureRegistry.load()
+            ?? WatchActiveCapture(
+                id: currentID,
+                fileURL: Self.fileURL(for: currentID),
+                startedAt: startedAt ?? Date()
+            )
+        // Preserve the live value for a user stop. System-driven delegate
+        // callbacks may already see zero, so asset inspection below remains
+        // the authoritative fallback.
+        let recorderDuration = recorder.currentTime
         recorder.stop()
         self.recorder = nil
         isRecording = false
         startedAt = nil
-        deactivateSession()
+        runtime.end()
 
-        let finished = FinishedRecording(
-            id: currentID,
-            url: Self.fileURL(for: currentID),
-            createdAt: createdAt,
-            duration: duration
+        let inspection = await inspectAudio(at: capture.fileURL)
+        let finalisation = WatchRecordingFinaliser.finalise(
+            capture: capture,
+            reason: reason,
+            recorderDuration: recorderDuration,
+            inspection: inspection
         )
-        guard duration > 0.2, FileManager.default.fileExists(atPath: finished.url.path) else {
-            // Accidental tap — do not queue an empty capture.
-            try? FileManager.default.removeItem(at: finished.url)
-            return
+        complete(finalisation, recovery: false)
+        isFinalising = false
+    }
+
+    private func complete(_ finalisation: WatchRecordingFinalisation, recovery: Bool) {
+        lastError = finalisation.outcome.message
+
+        switch finalisation.outcome.disposition {
+        case .discard:
+            do {
+                if FileManager.default.fileExists(atPath: finalisation.capture.fileURL.path) {
+                    try FileManager.default.removeItem(at: finalisation.capture.fileURL)
+                }
+                try activeCaptureRegistry.clear(matching: finalisation.capture.id)
+                if recovery {
+                    lastError = "An interrupted recording could not be recovered."
+                }
+            } catch {
+                allowRecoveryRetry(for: finalisation.capture)
+                lastError = "Recording cleanup failed: \(error.localizedDescription)"
+            }
+        case .enqueue:
+            do {
+                let enqueued = try activeCaptureRegistry.clearAfterSuccessfulEnqueue(
+                    matching: finalisation.capture.id
+                ) {
+                    store.enqueue(
+                        FinishedRecording(
+                            id: finalisation.capture.id,
+                            url: finalisation.capture.fileURL,
+                            createdAt: finalisation.capture.startedAt,
+                            duration: finalisation.duration
+                        )
+                    )
+                }
+                guard enqueued else {
+                    allowRecoveryRetry(for: finalisation.capture)
+                    lastError = "Recording was saved but could not be queued. It will be recovered next time."
+                    return
+                }
+            } catch {
+                // The queue write has succeeded; retaining the marker is safe
+                // because enqueue is idempotent on capture id at relaunch.
+                allowRecoveryRetry(for: finalisation.capture)
+                lastError = "Recording was queued, but recovery cleanup was deferred."
+            }
         }
-        store.enqueue(finished)
     }
 
-    /// Terminal failure path for recorder errors the user did not initiate:
-    /// clears the recording state so the UI cannot stay stuck in the
-    /// recording pose, and discards the unusable partial file.
-    private func abortRecording(message: String) {
-        guard isRecording else { return }
-        lastError = message
-        recorder?.stop()
-        recorder = nil
-        isRecording = false
-        startedAt = nil
-        deactivateSession()
-        try? FileManager.default.removeItem(at: Self.fileURL(for: currentID))
+    /// A retained marker still owns audio that must be reconciled. Let the next
+    /// start retry recovery rather than blocking recording until app relaunch.
+    private func allowRecoveryRetry(for capture: WatchActiveCapture) {
+        guard activeCaptureRegistry.load()?.id == capture.id else { return }
+        didRecoverInterruptedCapture = false
     }
 
-    private func deactivateSession() {
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    private func inspectAudio(at url: URL) async -> WatchAudioInspection {
+        guard FileManager.default.fileExists(atPath: url.path),
+              let values = try? url.resourceValues(forKeys: [.fileSizeKey]),
+              let fileSize = values.fileSize,
+              fileSize > 0
+        else { return .unplayable }
+
+        let asset = AVURLAsset(url: url)
+        do {
+            let isPlayable = try await asset.load(.isPlayable)
+            let assetDuration = try await asset.load(.duration)
+            let duration = assetDuration.seconds
+            guard isPlayable, duration.isFinite, duration > 0 else { return .unplayable }
+            return WatchAudioInspection(isPlayable: true, duration: duration)
+        } catch {
+            return .unplayable
+        }
     }
 }
 
 extension WatchAudioRecorder: AVAudioRecorderDelegate {
     nonisolated func audioRecorderEncodeErrorDidOccur(_ recorder: AVAudioRecorder, error: Error?) {
-        let message = error?.localizedDescription ?? "Audio encoding failed"
+        let recorderID = ObjectIdentifier(recorder)
+        let detail = error?.localizedDescription
         Task { @MainActor in
-            self.lastError = message
-            self.abortRecording(message: message)
+            guard self.recorder.map(ObjectIdentifier.init) == recorderID else { return }
+            await self.finish(reason: .encodingFailed(reason: detail))
         }
     }
 
     nonisolated func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
-        // A user-initiated stop clears the state itself; only unsuccessful
-        // finishes (interruption, encoder failure) need the terminal path.
+        // A user-initiated stop has already cleared the state, so `finish` is a
+        // no-op there. An unsuccessful finish means the system stopped the
+        // recorder under us — treat it as lost runtime and keep the partial.
         guard !flag else { return }
+        let recorderID = ObjectIdentifier(recorder)
         Task { @MainActor in
-            self.abortRecording(message: "Recording stopped unexpectedly.")
+            guard self.recorder.map(ObjectIdentifier.init) == recorderID else { return }
+            await self.finish(reason: .runtimeInvalidated(reason: nil))
         }
     }
 }

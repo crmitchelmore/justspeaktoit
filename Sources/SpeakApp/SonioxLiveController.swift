@@ -32,6 +32,7 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
   private var currentInterim: String = ""
   private var fullTranscript: String = ""
   private var stopContinuation: CheckedContinuation<Void, Never>?
+  private var stopGeneration = LiveTranscriptionStopGeneration()
 
   init(
     appSettings: AppSettings,
@@ -51,7 +52,7 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
     logger.info("Configured Soniox with model: \(model)")
   }
 
-  // swiftlint:disable:next function_body_length
+  // swiftlint:disable:next cyclomatic_complexity function_body_length
   func start() async throws {
     guard await ensurePermissions() else {
       throw TranscriptionManagerError.microphonePermissionMissing
@@ -99,14 +100,20 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
       newTranscriber.finalizationDelegate = self
 
       newTranscriber.start(
-        onTranscript: { [weak self] text, isFinal in
-          Task { @MainActor [weak self] in
-            self?.handleTranscript(text: text, isFinal: isFinal)
+        onTranscript: { [weak self, weak newTranscriber] text, isFinal in
+          Task { @MainActor [weak self, weak newTranscriber] in
+            guard let self else { return }
+            // Cached controllers are reused between recordings, so a message
+            // queued by the previous stream can land here after the next
+            // recording started. Only the current stream owns this state.
+            guard LiveTranscriptionRun.isCurrent(newTranscriber, activeStream: self.transcriber) else { return }
+            self.handleTranscript(text: text, isFinal: isFinal)
           }
         },
-        onError: { [weak self] error in
-          Task { @MainActor [weak self] in
+        onError: { [weak self, weak newTranscriber] error in
+          Task { @MainActor [weak self, weak newTranscriber] in
             guard let self else { return }
+            guard LiveTranscriptionRun.isCurrent(newTranscriber, activeStream: self.transcriber) else { return }
             // Always release a pending stop() continuation so we don't burn the
             // 2s timeout when an error/close arrives during shutdown.
             if let continuation = self.stopContinuation {
@@ -165,9 +172,10 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
 
   // MARK: - SonioxFinalizationDelegate
 
-  nonisolated func sonioxDidFinishStream() {
-    Task { @MainActor [weak self] in
+  nonisolated func sonioxDidFinishStream(_ transcriber: SonioxLiveTranscriber) {
+    Task { @MainActor [weak self, weak transcriber] in
       guard let self else { return }
+      guard LiveTranscriptionRun.isCurrent(transcriber, activeStream: self.transcriber) else { return }
       if let continuation = self.stopContinuation {
         self.stopContinuation = nil
         continuation.resume()
@@ -197,11 +205,15 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
 
       // Wait for `<fin>`/`finished:true` or a 2s timeout. Both paths nil-out
       // stopContinuation idempotently.
+      let generation = stopGeneration.begin()
       await withCheckedContinuation { continuation in
         stopContinuation = continuation
         Task { @MainActor [weak self] in
           try? await Task.sleep(for: .seconds(2))
-          guard let self, let cont = self.stopContinuation else { return }
+          guard let self,
+            self.stopGeneration.isCurrent(generation),
+            let cont = self.stopContinuation
+          else { return }
           self.stopContinuation = nil
           cont.resume()
         }

@@ -6,6 +6,73 @@ import os.log
 
 private let logger = SpeakLogger.logger(category: "NativeOSXLiveTranscriber")
 
+protocol NativeSpeechRecognitionTask: AnyObject {
+  func cancel()
+}
+
+extension SFSpeechRecognitionTask: NativeSpeechRecognitionTask {}
+
+struct NativeSpeechRecognitionResult {
+  let text: String
+  let segments: [TranscriptionSegment]
+  let confidence: Double?
+  let isFinal: Bool
+
+  init(text: String, segments: [TranscriptionSegment] = [], confidence: Double? = nil, isFinal: Bool) {
+    self.text = text
+    self.segments = segments
+    self.confidence = confidence
+    self.isFinal = isFinal
+  }
+
+  init(_ result: SFSpeechRecognitionResult) {
+    self.text = result.bestTranscription.formattedString
+    self.segments = result.bestTranscription.segments.map { segment in
+      TranscriptionSegment(
+        startTime: segment.timestamp,
+        endTime: segment.timestamp + segment.duration,
+        text: segment.substring,
+        isFinal: result.isFinal,
+        confidence: Double(segment.confidence)
+      )
+    }
+    self.confidence = result.transcriptionSegmentsConfidence
+    self.isFinal = result.isFinal
+  }
+}
+
+/// Owns the callback identity for one native recognition task at a time.
+/// Tests inject task factories here so delayed callbacks exercise this exact
+/// production guard without microphone or speech-recognition permissions.
+@MainActor
+final class NativeSpeechRecognitionTaskLifecycle {
+  typealias Callback = (NativeSpeechRecognitionResult?, Error?) -> Void
+  typealias Factory = (@escaping Callback) -> any NativeSpeechRecognitionTask
+
+  private var activeRun: LiveTranscriptionRun.Token?
+  private var task: (any NativeSpeechRecognitionTask)?
+
+  func start(factory: Factory, onEvent: @escaping Callback) {
+    retire()
+    let run = LiveTranscriptionRun.Token()
+    activeRun = run
+    task = factory { [weak self, weak run] result, error in
+      Task { @MainActor [weak self, weak run] in
+        guard let self,
+          LiveTranscriptionRun.isCurrent(run, activeStream: self.activeRun)
+        else { return }
+        onEvent(result, error)
+      }
+    }
+  }
+
+  func retire() {
+    activeRun = nil
+    task?.cancel()
+    task = nil
+  }
+}
+
 final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
   weak var delegate: LiveTranscriptionSessionDelegate?
   private(set) var isRunning: Bool = false
@@ -15,11 +82,11 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
   private let audioDeviceManager: AudioInputDeviceManager
   private var speechRecognizer: SFSpeechRecognizer?
   private var audioEngine = AVAudioEngine()
-  private var recognitionTask: SFSpeechRecognitionTask?
+  private let recognitionTaskLifecycle = NativeSpeechRecognitionTaskLifecycle()
   private var request: SFSpeechAudioBufferRecognitionRequest?
   private var currentLocaleIdentifier: String?
   private var currentModel: String?
-  private var latestResult: SFSpeechRecognitionResult?
+  private var latestResult: NativeSpeechRecognitionResult?
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
   /// Guards against calling finish() more than once per session.
   private var hasFinished: Bool = false
@@ -28,11 +95,6 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
   /// Last `formattedString` received from the recognizer, used to detect
   /// implicit text resets where Apple silently clears the transcript.
   private var lastFormattedString: String = ""
-  /// Monotonic counter incremented on each recognition restart so that
-  /// error callbacks from cancelled tasks are ignored. Main-actor isolated:
-  /// every read happens inside a `@MainActor` callback task, so the writes must
-  /// be serialised against them for the stale-callback check to mean anything.
-  @MainActor private var recognitionGeneration: Int = 0
 
   init(
     permissionsManager: PermissionsManager,
@@ -101,35 +163,27 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
       await audioDeviceManager.endUsingPreferredInput(session: sessionContext)
       throw TranscriptionManagerError.recognizerUnavailable
     }
-    // Monotonically increase so late callbacks from a previous session can never
-    // match the generation of this one. Resetting to 0 would let a stale task
-    // whose generation happened to be 0 be treated as current. The bump and the
-    // task creation run on the main actor, where every generation read happens,
-    // so a callback can never observe a half-updated counter.
     await MainActor.run {
       // Publish session state before starting recognition so final/error
       // callbacks (all main-actor ordered) observe a fully started session.
       self.activeInputSession = sessionContext
       self.isRunning = true
-      self.recognitionGeneration += 1
       self.startRecognitionTask(with: recognizer)
     }
   }
 
   func stop() async {
     guard isRunning else { return }
-    // Bump the generation before tearing the request/task down so any callback
-    // that fires during teardown is already stale. Ordered on the main actor
-    // with the generation reads in the recognition callbacks.
-    await MainActor.run {
-      self.recognitionGeneration += 1
+    // Retire the run before teardown: cancel() can still deliver queued events.
+    let finishingRequest = await MainActor.run { () -> SFSpeechAudioBufferRecognitionRequest? in
+      let pending = self.request
+      self.request = nil
+      self.recognitionTaskLifecycle.retire()
+      return pending
     }
-    request?.endAudio()
+    finishingRequest?.endAudio()
     audioEngine.stop()
     audioEngine.inputNode.removeTap(onBus: 0)
-    recognitionTask?.cancel()
-    request = nil
-    recognitionTask = nil
     isRunning = false
 
     // Always ensure the delegate is called so the continuation in
@@ -181,34 +235,20 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
     await audioDeviceManager.endUsingPreferredInput(session: session)
   }
 
-  private func finish(with result: SFSpeechRecognitionResult) {
+  private func finish(with result: NativeSpeechRecognitionResult) {
     // Guard against double finish - can happen if recognition callback delivers
     // a final result at the same time stop() is called
     guard !hasFinished else { return }
     hasFinished = true
 
-    Task { await self.endActiveInputSession() }
-
-    let segments = result.bestTranscription.segments.map { segment in
-      TranscriptionSegment(
-        startTime: segment.timestamp,
-        endTime: segment.timestamp + segment.duration,
-        text: segment.substring,
-        isFinal: result.isFinal,
-        confidence: Double(segment.confidence)
-      )
-    }
-
-    let currentText = result.bestTranscription.formattedString
+    let segments = result.segments
+    let currentText = result.text
     let fullText = [committedText, currentText].filter { !$0.isEmpty }.joined(separator: " ")
     let duration = (segments.last?.endTime ?? 0) - (segments.first?.startTime ?? 0)
     let outcome = TranscriptionResult(
       text: fullText,
       segments: segments,
-      confidence: result.bestTranscription.segments.isEmpty
-        ? nil
-        : result
-          .transcriptionSegmentsConfidence,
+      confidence: result.confidence,
       duration: duration,
       modelIdentifier: currentModel ?? AppleLocalModels.legacySpeechModelID,
       cost: nil,
@@ -226,27 +266,27 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
   /// rather than clearing it.
   @MainActor
   private func startRecognitionTask(with recognizer: SFSpeechRecognizer) {
-    let generation = recognitionGeneration
     guard let activeRequest = request else { return }
-    recognitionTask = recognizer.recognitionTask(with: activeRequest) { [weak self] result, error in
-      guard let self else { return }
-      if let result {
-        Task { @MainActor [weak self] in
-          guard let self, generation == self.recognitionGeneration else { return }
+    recognitionTaskLifecycle.start(
+      factory: { callback in
+        recognizer.recognitionTask(with: activeRequest) { result, error in
+          callback(result.map { NativeSpeechRecognitionResult($0) }, error)
+        }
+      },
+      onEvent: { [weak self] result, error in
+        guard let self else { return }
+        if let result {
           self.latestResult = result
-          let currentText = result.bestTranscription.formattedString
+          let currentText = result.text
           self.commitIfImplicitReset(currentText: currentText, isFinal: result.isFinal)
           self.lastFormattedString = currentText
 
           let displayText = [self.committedText, currentText]
             .filter { !$0.isEmpty }.joined(separator: " ")
-          let confidence = result.bestTranscription.segments.isEmpty
-            ? nil
-            : result.transcriptionSegmentsConfidence
           let update = LiveTranscriptionUpdate(
             text: displayText,
             isFinal: false,
-            confidence: confidence
+            confidence: result.confidence
           )
           self.delegate?.liveTranscriber(self, didUpdateWith: update)
           self.delegate?.liveTranscriber(self, didUpdatePartial: displayText)
@@ -256,18 +296,20 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
             self.lastFormattedString = ""
             self.restartRecognitionTask()
           }
-        }
-      } else if let error {
-        Task { @MainActor [weak self] in
-          guard let self, generation == self.recognitionGeneration else { return }
+        } else if let error {
           self.delegate?.liveTranscriber(self, didFail: error)
-        }
-        Task { [weak self] in
-          guard let self else { return }
-          let shouldEnd = await MainActor.run { generation == self.recognitionGeneration }
-          if shouldEnd { await self.endActiveInputSession() }
+          self.endInputSessionAfterRecognitionError()
         }
       }
+    )
+  }
+
+  @MainActor
+  private func endInputSessionAfterRecognitionError() {
+    guard let session = activeInputSession else { return }
+    activeInputSession = nil
+    Task { @MainActor [audioDeviceManager] in
+      await audioDeviceManager.endUsingPreferredInput(session: session)
     }
   }
 
@@ -291,10 +333,11 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
   private func restartRecognitionTask() {
     guard isRunning, let recognizer = speechRecognizer else { return }
 
-    recognitionGeneration += 1
-    recognitionTask?.cancel()
-    recognitionTask = nil
+    recognitionTaskLifecycle.retire()
 
+    // Minting the replacement request retires the previous run's identity, so
+    // anything the cancelled task still delivers is dropped by the guard in
+    // `startRecognitionTask(with:)`.
     request = makeRecognitionRequest(for: recognizer)
     latestResult = nil
     lastFormattedString = ""

@@ -44,8 +44,6 @@ public final class DeepgramTTSClient: ObservableObject {
             throw DeepgramTTSError.missingAPIKey
         }
 
-        logger.info("TTS request: \(text.prefix(50))...")
-
         let audioData = try await synthesize(text: text, apiKey: apiKey)
         try await playAudio(audioData)
     }

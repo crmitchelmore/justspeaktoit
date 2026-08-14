@@ -3,6 +3,10 @@ import os.log
 import Security
 import SpeakCore
 
+extension Notification.Name {
+    static let secureAppStorageDidChange = Notification.Name("SecureAppStorageDidChange")
+}
+
 // MARK: - Legacy Error Type (kept for compatibility)
 
 enum SecureAppStorageError: LocalizedError {
@@ -122,6 +126,7 @@ actor SecureAppStorage {
     func storeSecret(_ value: String, identifier: String, label _: String? = nil) async throws {
         do {
             try await storage.storeSecret(value, identifier: identifier)
+            NotificationCenter.default.post(name: .secureAppStorageDidChange, object: nil)
         } catch let error as SecureStorageError {
             throw SecureAppStorageError(from: error)
         }
@@ -138,6 +143,7 @@ actor SecureAppStorage {
     func removeSecret(identifier: String) async throws {
         do {
             try await storage.removeSecret(identifier: identifier)
+            NotificationCenter.default.post(name: .secureAppStorageDidChange, object: nil)
         } catch let error as SecureStorageError {
             throw SecureAppStorageError(from: error)
         }

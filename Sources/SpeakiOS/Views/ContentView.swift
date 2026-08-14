@@ -1,4 +1,5 @@
 #if os(iOS)
+import AVFoundation
 import SwiftUI
 import SpeakCore
 import os.log
@@ -10,6 +11,14 @@ private let logger = SpeakLogger.logger(category: "ContentView")
 /// Integrates with Live Activity for lock screen presence.
 @MainActor
 final class TranscriberCoordinator: ObservableObject {
+    private enum LifecycleError: LocalizedError {
+        case sessionFinalising
+
+        var errorDescription: String? {
+            "The previous transcription is still finalising."
+        }
+    }
+
     @Published private(set) var isRunning = false
     @Published private(set) var partialText = ""
     @Published private(set) var error: Error?
@@ -17,11 +26,12 @@ final class TranscriberCoordinator: ObservableObject {
     @Published private(set) var confidence: Double?
     @Published private(set) var wordCount: Int = 0
 
-    private let audioSessionManager: AudioSessionManager
+    let audioSessionManager: AudioSessionManager
     private let activityManager = TranscriptionActivityManager.shared
     private let sharedState = SharedTranscriptionState.shared
 
     private var transcriptionSession: IOSTranscriptionSession?
+    private var stoppingSession: IOSTranscriptionSession?
     private var startTime: Date?
     /// Last time the App Group shared state was written for a partial result.
     private var lastSharedStateWriteAt: Date = .distantPast
@@ -45,11 +55,16 @@ final class TranscriberCoordinator: ObservableObject {
     }
 
     // swiftlint:disable:next function_body_length
-    func start() async throws {
+    func start(
+        preRollBuffers: [AVAudioPCMBuffer] = [],
+        analyzerFallbackAllowed: Bool = true
+    ) async throws {
+        guard stoppingSession == nil else { throw LifecycleError.sessionFinalising }
         let settings = AppSettings.shared
         // Wait for the initial keychain load so auto-start on a cold launch
         // doesn't read empty API keys and fall back to Apple Speech.
         await settings.ensureKeysLoaded()
+        error = nil
         currentModel = settings.transcriptionMode == .batch
             ? settings.batchTranscriptionModel
             : settings.selectedModel
@@ -100,7 +115,10 @@ final class TranscriberCoordinator: ObservableObject {
         }
         transcriptionSession = session
         do {
-            try await session.start()
+            try await session.start(
+                preRollBuffers: preRollBuffers,
+                analyzerFallbackAllowed: analyzerFallbackAllowed
+            )
         } catch {
             session.cancel()
             transcriptionSession = nil
@@ -136,7 +154,7 @@ final class TranscriberCoordinator: ObservableObject {
         // Update Live Activity (if enabled)
         if AppSettings.shared.liveActivitiesEnabled {
             activityManager.updateActivity(
-                status: .listening,
+                status: .recording,
                 lastSnippet: text,
                 wordCount: wordCount,
                 duration: elapsedSeconds
@@ -151,41 +169,23 @@ final class TranscriberCoordinator: ObservableObject {
         }
     }
 
-    func stop() async -> TranscriptionResult {
+    func stop(rearmHandsFree: Bool = false) async -> TranscriptionResult {
         isRunning = false
         sharedState.clearRecordingState()
         let duration = elapsedSeconds
 
-        // Streaming results can complete immediately. Batch recordings remain
-        // in a processing state until the upload returns.
         if AppSettings.shared.liveActivitiesEnabled {
-            if transcriptionSession?.isBatch == true {
-                activityManager.updateActivity(
-                    status: .processing,
-                    lastSnippet: "Transcribing recording…",
-                    wordCount: 0,
-                    duration: duration
-                )
-            } else {
-                activityManager.completeActivity(finalWordCount: wordCount, duration: duration)
-            }
+            activityManager.updateActivity(
+                status: .finalising,
+                lastSnippet: "Finalising transcript…",
+                wordCount: wordCount,
+                duration: duration
+            )
         }
 
-        if let session = transcriptionSession {
-            transcriptionSession = nil
-            do {
-                let result = try await session.stop()
-                if session.isBatch {
-                    partialText = result.text
-                    wordCount = result.text.split(whereSeparator: \.isWhitespace).count
-                    if AppSettings.shared.liveActivitiesEnabled {
-                        activityManager.completeActivity(finalWordCount: wordCount, duration: duration)
-                    }
-                }
-                return finishStop(with: result)
-            } catch {
-                handleError(error)
-            }
+        if let session = transcriptionSession,
+           let result = await stop(session: session, duration: duration, rearmHandsFree: rearmHandsFree) {
+            return result
         }
 
         startTime = nil
@@ -199,6 +199,44 @@ final class TranscriberCoordinator: ObservableObject {
             rawPayload: nil,
             debugInfo: nil
         )
+    }
+
+    private func stop(
+        session: IOSTranscriptionSession,
+        duration: Int,
+        rearmHandsFree: Bool
+    ) async -> TranscriptionResult? {
+        transcriptionSession = nil
+        stoppingSession = session
+        defer {
+            if stoppingSession === session {
+                stoppingSession = nil
+            }
+        }
+        do {
+            let result = try await session.stop()
+            guard !Task.isCancelled else {
+                startTime = nil
+                return result
+            }
+            if session.isBatch {
+                partialText = result.text
+                wordCount = result.text.split(whereSeparator: \.isWhitespace).count
+            }
+            if AppSettings.shared.liveActivitiesEnabled {
+                activityManager.completeActivity(
+                    finalWordCount: wordCount,
+                    duration: duration,
+                    keepPrimed: rearmHandsFree,
+                    primedMessage: "Hands-free armed",
+                    primedStatus: rearmHandsFree ? .armed : .idle
+                )
+            }
+            return finishStop(with: result)
+        } catch {
+            handleError(error)
+            return nil
+        }
     }
 
     private func finishStop(with result: TranscriptionResult) -> TranscriptionResult {
@@ -216,7 +254,9 @@ final class TranscriberCoordinator: ObservableObject {
 
     func cancel() {
         transcriptionSession?.cancel()
+        stoppingSession?.cancel()
         transcriptionSession = nil
+        stoppingSession = nil
         isRunning = false
         startTime = nil
         if AppSettings.shared.liveActivitiesEnabled {
@@ -229,7 +269,8 @@ final class TranscriberCoordinator: ObservableObject {
 
 // swiftlint:disable:next type_body_length
 public struct ContentView: View {
-    @StateObject private var coordinator = TranscriberCoordinator()
+    @StateObject private var coordinator: TranscriberCoordinator
+    @StateObject private var handsFree: IOSHandsFreeDictationCoordinator
     @ObservedObject private var settings = AppSettings.shared
     @State private var showingError = false
     @State private var errorMessage = ""
@@ -249,7 +290,48 @@ public struct ContentView: View {
     /// surface a given session once and never clobber the user's in-app edits.
     @State private var lastSurfacedAt: Date?
 
-    public init() {}
+    public init() {
+        let coordinator = TranscriberCoordinator()
+        _coordinator = StateObject(wrappedValue: coordinator)
+        _handsFree = StateObject(
+            wrappedValue: IOSHandsFreeDictationCoordinator(
+                audioSessionManager: coordinator.audioSessionManager,
+                startCapture: { preRoll in
+                    let settings = AppSettings.shared
+                    guard HandsFreeDictationPolicy.supportsCapture(
+                        modelID: settings.selectedModel,
+                        isStreaming: settings.transcriptionMode == .streaming
+                    )
+                    else { return .rejected(.unsupportedConfiguration) }
+                    do {
+                        try await coordinator.start(
+                            preRollBuffers: preRoll,
+                            analyzerFallbackAllowed: false
+                        )
+                        return .started
+                    } catch {
+                        return .rejected(HandsFreeDictationMachine.Failure(error))
+                    }
+                },
+                stopCapture: {
+                    _ = await coordinator.stop(rearmHandsFree: true)
+                    return coordinator.error == nil ? .completed : .failed(.captureFailed)
+                },
+                cancelCapture: { coordinator.cancel() },
+                silenceDuration: {
+                    UserDefaults.standard.object(forKey: "silenceDuration") as? Double
+                        ?? HandsFreeDictationPolicy.defaultSilenceHoldSeconds
+                },
+                captureIsSupported: {
+                    HandsFreeDictationPolicy.supportsCapture(
+                        modelID: AppSettings.shared.selectedModel,
+                        isStreaming: AppSettings.shared.transcriptionMode == .streaming
+                    )
+                },
+                liveActivitiesEnabled: { AppSettings.shared.liveActivitiesEnabled }
+            )
+        )
+    }
 
     public var body: some View {
         NavigationStack {
@@ -331,6 +413,19 @@ public struct ContentView: View {
                             backgroundService.isRunning ? "Recording via Action Button" : "Recording"
                         )
                     }
+                } else if handsFree.isArmed {
+                    ToolbarItem(placement: .topBarLeading) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "waveform.badge.mic")
+                                .font(.caption)
+                            Text(handsFreeStatusLabel)
+                                .font(.caption)
+                        }
+                        .foregroundStyle(.secondary)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Hands-free dictation \(handsFreeStatusLabel.lowercased())")
+                        .accessibilityIdentifier("handsFreeArmedIndicator")
+                    }
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
@@ -381,6 +476,15 @@ public struct ContentView: View {
                     showingError = true
                 }
             }
+            .onChange(of: handsFree.failureMessage) { _, newError in
+                if let newError {
+                    errorMessage = newError
+                    showingError = true
+                }
+            }
+            .onChange(of: settings.handsFreeDictationEnabled) { _, enabled in
+                if !enabled { Task { await handsFree.disarm() } }
+            }
             .task {
                 // Auto-start recording if enabled
                 if AppSettings.shared.autoStartRecording && !coordinator.isRunning {
@@ -394,7 +498,11 @@ public struct ContentView: View {
             }
             .onAppear { refreshBackgroundState() }
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active { refreshBackgroundState() }
+                if phase == .active {
+                    refreshBackgroundState()
+                } else {
+                    Task { await handsFree.disarm() }
+                }
             }
             .onChange(of: backgroundService.isRunning) { wasRunning, isRunning in
                 // A live background session just finished — surface its result
@@ -439,14 +547,14 @@ public struct ContentView: View {
                         await toggleRecording()
                     }
                 } label: {
-                    Image(systemName: isAnyRecording ? "stop.fill" : "mic.fill")
+                    Image(systemName: primaryActionSymbol)
                         .font(.system(size: primarySymbolSize))
                         .frame(width: primaryControlSize, height: primaryControlSize)
                 }
                 .buttonStyle(.glassProminent)
                 .tint(isAnyRecording ? .red : .brandAccent)
                 .clipShape(Circle())
-                .accessibilityLabel(isAnyRecording ? "Stop recording" : "Start recording")
+                .accessibilityLabel(primaryActionLabel)
                 .accessibilityIdentifier("recordToggleButton")
 
                 // Secondary actions (only visible when there's text and not recording)
@@ -498,14 +606,14 @@ public struct ContentView: View {
                     await toggleRecording()
                 }
             } label: {
-                Image(systemName: isAnyRecording ? "stop.fill" : "mic.fill")
+                Image(systemName: primaryActionSymbol)
                     .font(.system(size: primarySymbolSize))
                     .frame(width: primaryControlSize, height: primaryControlSize)
             }
             .buttonStyle(.borderedProminent)
             .tint(isAnyRecording ? .red : .accentColor)
             .clipShape(Circle())
-            .accessibilityLabel(isAnyRecording ? "Stop recording" : "Start recording")
+            .accessibilityLabel(primaryActionLabel)
             .accessibilityIdentifier("recordToggleButton")
 
             // Secondary actions (only visible when there's text and not recording)
@@ -579,6 +687,29 @@ public struct ContentView: View {
         coordinator.isRunning || backgroundService.isRunning
     }
 
+    private var handsFreeStatusLabel: String {
+        switch handsFree.state {
+        case .off: return "Off"
+        case .arming: return "Arming"
+        case .armed: return "Armed"
+        case .recording: return "Recording"
+        case .finalising: return "Finalising"
+        }
+    }
+
+    private var primaryActionSymbol: String {
+        if isAnyRecording { return "stop.fill" }
+        if handsFree.isArmed { return "mic.slash.fill" }
+        return "mic.fill"
+    }
+
+    private var primaryActionLabel: String {
+        if isAnyRecording { return "Stop recording" }
+        if handsFree.isArmed { return "Disarm hands-free dictation" }
+        if settings.handsFreeDictationActive { return "Arm hands-free dictation" }
+        return "Start recording"
+    }
+
     private var currentText: String {
         // A live background (Action Button) session takes precedence so opening
         // the app mid-recording shows it live.
@@ -626,7 +757,11 @@ public struct ContentView: View {
     // MARK: - Actions
 
     private func toggleRecording() async {
-        if backgroundService.isRunning {
+        if handsFree.state == .recording {
+            await handsFree.finishCurrentUtterance()
+        } else if handsFree.isArmed {
+            await handsFree.disarm()
+        } else if backgroundService.isRunning {
             let result = await backgroundService.stopRecording(
                 destination: settings.hardwareTriggerDestination
             )
@@ -640,6 +775,10 @@ public struct ContentView: View {
                 showingPostProcessing = true
             }
         } else {
+            if settings.handsFreeDictationActive {
+                await handsFree.toggle()
+                return
+            }
             // A background (Action Button) session owns the mic; don't start a
             // second, conflicting in-app recording. The user stops the background
             // one the same way they started it.

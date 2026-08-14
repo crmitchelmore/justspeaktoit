@@ -35,6 +35,7 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
   private var currentTurnOrder: Int = -1
   private var finalSegmentIndexByTurnOrder: [Int: Int] = [:]
   private var stopContinuation: CheckedContinuation<Void, Never>?
+  private var stopGeneration = LiveTranscriptionStopGeneration()
 
   init(
     appSettings: AppSettings,
@@ -54,7 +55,6 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
     logger.info("Configured AssemblyAI with model: \(model)")
   }
 
-  // swiftlint:disable:next function_body_length
   // swiftlint:disable:next function_body_length
   func start() async throws {
     guard await ensurePermissions() else {
@@ -106,24 +106,30 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
         .filter { !$0.isEmpty }
 
       let provider = AssemblyAITranscriptionProvider()
-      transcriber = provider.createLiveTranscriber(
+      let newTranscriber = provider.createLiveTranscriber(
         apiKey: apiKey,
         sampleRate: 16000,
         model: currentModel ?? appSettings.liveTranscriptionModel,
         keyterms: keyterms,
         language: currentLanguage
       )
+      transcriber = newTranscriber
 
-      transcriber?.start(
-        onTranscript: { [weak self] turn in
-          Task { @MainActor [weak self] in
+      newTranscriber.start(
+        onTranscript: { [weak self, weak newTranscriber] turn in
+          Task { @MainActor [weak self, weak newTranscriber] in
             guard let self else { return }
+            // Cached controllers are reused between recordings, so a message
+            // queued by the previous stream can land here after the next
+            // recording started. Only the current stream owns this state.
+            guard LiveTranscriptionRun.isCurrent(newTranscriber, activeStream: self.transcriber) else { return }
             self.handleTurn(turn)
           }
         },
-        onError: { [weak self] error in
-          Task { @MainActor [weak self] in
+        onError: { [weak self, weak newTranscriber] error in
+          Task { @MainActor [weak self, weak newTranscriber] in
             guard let self else { return }
+            guard LiveTranscriptionRun.isCurrent(newTranscriber, activeStream: self.transcriber) else { return }
             if !self.isRunning { return }
             self.delegate?.liveTranscriber(self, didFail: error)
           }
@@ -385,11 +391,15 @@ final class AssemblyAILiveController: NSObject, LiveTranscriptionController {
       // resume is idempotent.
       let budget = appSettings.liveModelCapabilities.postStopFinalizeBudget
       if budget > 0, serverBegan {
+        let generation = stopGeneration.begin()
         await withCheckedContinuation { continuation in
           stopContinuation = continuation
           Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(budget))
-            guard let self, let cont = self.stopContinuation else { return }
+            guard let self,
+              self.stopGeneration.isCurrent(generation),
+              let cont = self.stopContinuation
+            else { return }
             self.stopContinuation = nil
             cont.resume()
           }

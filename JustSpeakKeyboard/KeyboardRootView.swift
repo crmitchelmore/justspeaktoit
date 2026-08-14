@@ -2,10 +2,15 @@ import SpeakCore
 import SwiftUI
 import UIKit
 
+// swiftlint:disable file_length
+
+// swiftlint:disable type_body_length
 /// Compact dictation-first keyboard surface.
 ///
 /// Layout is a live transcript strip above one control row:
-/// globe · language chip · mic/stop · delete · return. There is deliberately
+/// globe · language chip · profile chip · mic/stop · delete · return. Each chip
+/// appears only when it has somewhere to switch to, and the mic drops its
+/// caption once both are present so the row never wraps. There is deliberately
 /// no QWERTY layer — the globe key returns to the system keyboard for typing.
 struct KeyboardRootView: View {
     @ObservedObject var model: KeyboardViewModel
@@ -71,19 +76,17 @@ struct KeyboardRootView: View {
                     .accessibilityHint("Touch and hold to choose another keyboard")
             }
 
-            if let chip = model.languageChipLabel, model.mode == .direct {
-                Button {
-                    model.cycleLanguage()
-                } label: {
-                    Text(chip)
-                        .font(.footnote.weight(.semibold))
-                        .padding(.horizontal, 10)
-                        .frame(height: 46)
-                }
-                .background(keyBackground)
-                .disabled(model.isCapturing)
-                .accessibilityLabel("Dictation language \(chip). Tap to switch.")
-                .accessibilityIdentifier("keyboardLanguageChip")
+            if let chip = model.languageChipLabel, model.showsLanguageChip, !isBlocked {
+                chipButton(
+                    label: chip,
+                    accessibilityLabel: "Dictation language \(chip). Tap to switch.",
+                    identifier: "keyboardLanguageChip",
+                    action: model.cycleLanguage
+                )
+            }
+
+            if let chip = model.profileChipLabel, !isBlocked {
+                profileMenu(label: chip)
             }
 
             micButton
@@ -113,6 +116,55 @@ struct KeyboardRootView: View {
             .accessibilityIdentifier("keyboardReturnButton")
         }
         .foregroundStyle(.primary)
+    }
+
+    /// One quick-switch chip: a key-sized button whose single tap advances the
+    /// preference ring, disabled while capture or post-processing runs.
+    private func chipButton(
+        label: String,
+        accessibilityLabel: String,
+        identifier: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.footnote.weight(.semibold))
+                .lineLimit(1)
+                .padding(.horizontal, 8)
+                .frame(minWidth: 44, minHeight: 46)
+        }
+        .background(keyBackground)
+        .disabled(model.isBusy)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityIdentifier(identifier)
+    }
+
+    private func profileMenu(label: String) -> some View {
+        Menu {
+            ForEach(model.profileOptions) { profile in
+                Button {
+                    model.selectProfile(profile.id)
+                } label: {
+                    Label(
+                        "\(profile.displayName) · \(profile.route.displayName)",
+                        systemImage: profile.id == model.selectedProfileIdentifier ? "checkmark" : "circle"
+                    )
+                }
+            }
+        } label: {
+            Text(label)
+                .font(.footnote.weight(.semibold))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .padding(.horizontal, 8)
+                .frame(minWidth: 44, minHeight: 46)
+        }
+        .background(keyBackground)
+        .disabled(model.isBusy)
+        .accessibilityLabel(
+            "Dictation profile \(model.profileDisplayName), \(model.profileRouteDisplayName). Choose profile."
+        )
+        .accessibilityIdentifier("keyboardProfileChip")
     }
 
     private var micButton: some View {
@@ -202,7 +254,8 @@ struct KeyboardRootView: View {
     private static func failureCopy(_ failure: KeyboardDictationMachine.Failure) -> String {
         switch failure {
         case .microphoneUnavailable:
-            return "The keyboard can't use the microphone. Allow it in Settings, or open Just Speak and enable Instant Dictation."
+            return "The keyboard can't use the microphone. Allow it in Settings, "
+                + "or open Just Speak and enable Instant Dictation."
         case .speechRecognitionUnavailable:
             return "Speech recognition isn't available. Allow it in Settings, then try again."
         case .audioInterrupted:
@@ -255,6 +308,8 @@ struct KeyboardRootView: View {
             return "The handoff ended safely. Tap the mic to retry."
         case .targetChanged:
             return "The destination changed, so nothing was inserted. Tap the mic to retry."
+        case .profileUnavailable:
+            return "This profile is unavailable. Open Just Speak to check its model and credentials."
         }
     }
 
@@ -311,6 +366,7 @@ struct KeyboardRootView: View {
         case "checkmark.circle.fill": return .green
         case "exclamationmark.triangle.fill", "lock.trianglebadge.exclamationmark": return .orange
         case "waveform": return .red
+        case "wand.and.sparkles": return .blue
         default: return .secondary
         }
     }
@@ -331,7 +387,15 @@ struct KeyboardRootView: View {
         return micDisabled ? Color.gray.opacity(0.5) : .blue
     }
 
+    /// The caption is dropped once both quick-switch chips are on the row, so
+    /// the single control row keeps a full-size mic key on the narrowest
+    /// supported iPhone instead of wrapping or truncating.
     private var micCaption: String? {
+        if model.languageChipLabel != nil,
+           model.showsLanguageChip,
+           model.profileChipLabel != nil {
+            return nil
+        }
         if isActivelyCapturing {
             return "Stop"
         }
@@ -385,13 +449,18 @@ struct KeyboardRootView: View {
     private var controlsDisabled: Bool {
         switch model.mode {
         case .direct:
-            return model.isCapturing
+            return model.isBusy
         case .handoff:
             let presentation = model.handoff.presentation
             return presentation == .recording || presentation == .transcribing
         case .blocked:
             return false
         }
+    }
+
+    private var isBlocked: Bool {
+        if case .blocked = model.mode { return true }
+        return false
     }
 
     private var showsCancel: Bool {
@@ -407,6 +476,7 @@ struct KeyboardRootView: View {
         }
     }
 }
+// swiftlint:enable type_body_length
 
 struct InputModeSwitchButton: UIViewRepresentable {
     let action: (UIButton, UIEvent) -> Void

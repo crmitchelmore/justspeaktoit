@@ -87,11 +87,19 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
     self.stdoutPipe = stdoutPipe
     self.stderrPipe = stderrPipe
 
-    stdoutPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+    // `stdoutPipe` is this run's identity. The handler runs on a pipe queue and
+    // hops to the main actor, so a Task it spawned can still land after the
+    // sidecar is torn down — and this controller is reused across recordings,
+    // so that stale output would repaint the next recording's transcript.
+    // `hasFinished` cannot catch it: `start()` resets it to false (issue #668).
+    stdoutPipe.fileHandleForReading.readabilityHandler = { [weak self, weak stdoutPipe] handle in
       let data = handle.availableData
       guard !data.isEmpty else { return }
-      Task { @MainActor [weak self] in
-        self?.handleSidecarOutput(data)
+      Task { @MainActor [weak self, weak stdoutPipe] in
+        guard let self,
+          LiveTranscriptionRun.isCurrent(stdoutPipe, activeStream: self.stdoutPipe)
+        else { return }
+        self.handleSidecarOutput(data)
       }
     }
 

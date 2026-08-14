@@ -27,7 +27,7 @@ struct WatchContentView: View {
     private var recordButton: some View {
         Button {
             Task {
-                await recorder.toggle(store: captureStore)
+                await recorder.toggle()
             }
         } label: {
             VStack(spacing: 6) {

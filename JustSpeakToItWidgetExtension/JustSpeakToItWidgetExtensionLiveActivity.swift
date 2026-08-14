@@ -58,7 +58,7 @@ struct JustSpeakToItWidgetExtensionLiveActivity: Widget {
 
                         Spacer()
 
-                        if context.state.status == .listening {
+                        if context.state.status == .recording || context.state.status == .listening {
                             if #available(iOS 18, *) {
                                 Button(intent: StopTranscriptionRecordingIntent()) {
                                     Label("Stop & Copy", systemImage: "stop.circle.fill")
@@ -76,7 +76,7 @@ struct JustSpeakToItWidgetExtensionLiveActivity: Widget {
             } compactLeading: {
                 transcriptionStatusIndicator(for: context.state.status)
             } compactTrailing: {
-                if context.state.status == .listening {
+                if context.state.status == .recording || context.state.status == .listening {
                     Circle()
                         .fill(.red)
                         .frame(width: 8, height: 8)
@@ -85,7 +85,7 @@ struct JustSpeakToItWidgetExtensionLiveActivity: Widget {
                         .font(.caption2)
                 }
             } minimal: {
-                if context.state.status == .listening {
+                if context.state.status == .recording || context.state.status == .listening {
                     Circle()
                         .fill(.red)
                         .frame(width: 8, height: 8)
@@ -113,6 +113,19 @@ private func transcriptionStatusIndicator(
     for status: TranscriptionActivityAttributes.TranscriptionStatus
 ) -> some View {
     switch status {
+    case .arming:
+        Image(systemName: "ellipsis")
+            .symbolEffect(.variableColor.iterative)
+    case .armed:
+        Image(systemName: "waveform.badge.mic")
+            .foregroundStyle(.secondary)
+    case .recording:
+        Image(systemName: "waveform")
+            .symbolEffect(.variableColor.iterative.reversing)
+            .foregroundStyle(.red)
+    case .finalising:
+        Image(systemName: "ellipsis")
+            .symbolEffect(.variableColor.iterative)
     case .listening:
         Image(systemName: "waveform")
             .symbolEffect(.variableColor.iterative.reversing)
@@ -186,7 +199,7 @@ struct LockScreenTranscriptionView: View {
                 }
             }
 
-            if state.status == .listening {
+            if state.status == .recording || state.status == .listening {
                 if #available(iOS 18, *) {
                     Button(intent: StopTranscriptionRecordingIntent()) {
                         Image(systemName: "stop.circle.fill")

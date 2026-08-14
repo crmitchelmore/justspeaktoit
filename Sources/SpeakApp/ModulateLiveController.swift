@@ -30,6 +30,7 @@ final class ModulateLiveController: NSObject, LiveTranscriptionController {
   private var utterances: [ModulateUtterance] = []
   private var streamDurationMs: Int?
   private var stopContinuation: CheckedContinuation<Void, Never>?
+  private var stopGeneration = LiveTranscriptionStopGeneration()
   private var sessionFeatureConfiguration = ModulateFeatureConfiguration(
     speakerDiarization: true,
     emotionSignal: false,
@@ -108,11 +109,15 @@ final class ModulateLiveController: NSObject, LiveTranscriptionController {
 
       // Wait for the final response (resumed in finished/error callbacks) or a 2s timeout.
       // Both paths nil-out stopContinuation under the MainActor before resuming, so resume is idempotent.
+      let generation = stopGeneration.begin()
       await withCheckedContinuation { continuation in
         stopContinuation = continuation
         Task { @MainActor [weak self] in
           try? await Task.sleep(for: .seconds(2))
-          guard let self, let cont = self.stopContinuation else { return }
+          guard let self,
+            self.stopGeneration.isCurrent(generation),
+            let cont = self.stopContinuation
+          else { return }
           self.stopContinuation = nil
           cont.resume()
         }
@@ -226,19 +231,31 @@ final class ModulateLiveController: NSObject, LiveTranscriptionController {
 
     self.transcriber = transcriber
     transcriber.start(
-      onUtterance: { [weak self] utterance in
-        Task { @MainActor [weak self] in
-          self?.handleUtterance(utterance)
+      onUtterance: { [weak self, weak transcriber] utterance in
+        Task { @MainActor [weak self, weak transcriber] in
+          guard let self else { return }
+          // Cached controllers are reused between recordings, so a message
+          // queued by the previous stream can land here after the next
+          // recording started. Only the current stream owns this state.
+          guard LiveTranscriptionRun.isCurrent(transcriber, activeStream: self.transcriber) else { return }
+          self.handleUtterance(utterance)
         }
       },
-      onDone: { [weak self] durationMs in
-        Task { @MainActor [weak self] in
-          self?.handleDone(durationMs: durationMs)
+      onDone: { [weak self, weak transcriber] durationMs in
+        Task { @MainActor [weak self, weak transcriber] in
+          guard let self else { return }
+          // Cached controllers are reused between recordings, so a message
+          // queued by the previous stream can land here after the next
+          // recording started. Only the current stream owns this state.
+          guard LiveTranscriptionRun.isCurrent(transcriber, activeStream: self.transcriber) else { return }
+          self.handleDone(durationMs: durationMs)
         }
       },
-      onError: { [weak self] error in
-        Task { @MainActor [weak self] in
-          self?.handleStreamingError(error)
+      onError: { [weak self, weak transcriber] error in
+        Task { @MainActor [weak self, weak transcriber] in
+          guard let self else { return }
+          guard LiveTranscriptionRun.isCurrent(transcriber, activeStream: self.transcriber) else { return }
+          self.handleStreamingError(error)
         }
       }
     )
@@ -266,6 +283,8 @@ final class ModulateLiveController: NSObject, LiveTranscriptionController {
   }
 
   private func handleStreamingError(_ error: Error) {
+    let failedInputSession = activeInputSession
+    activeInputSession = nil
     hasFinished = true
     audioEngine.stop()
     audioEngine.inputNode.removeTap(onBus: 0)
@@ -280,8 +299,9 @@ final class ModulateLiveController: NSObject, LiveTranscriptionController {
       continuation.resume()
     }
 
-    Task { @MainActor [weak self] in
-      await self?.endActiveInputSession()
+    Task { @MainActor [audioDeviceManager] in
+      guard let failedInputSession else { return }
+      await audioDeviceManager.endUsingPreferredInput(session: failedInputSession)
     }
 
     delegate?.liveTranscriber(self, didFail: error)

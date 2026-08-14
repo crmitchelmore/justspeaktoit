@@ -218,6 +218,7 @@ extension SettingsView {
       case .openai: return .green
       case .azure: return .brandLagoonDeep
       case .deepgram: return .brandAccentWarm
+      case .soniox: return .brandLagoon
       case .system: return .gray
       }
     }()
@@ -227,6 +228,7 @@ extension SettingsView {
       case .openai: return "brain"
       case .azure: return "cloud"
       case .deepgram: return "bolt.circle"
+      case .soniox: return "globe"
       case .system: return "speaker.wave.2"
       }
     }()
@@ -236,7 +238,22 @@ extension SettingsView {
       case .openai: return "https://platform.openai.com"
       case .azure: return "https://azure.microsoft.com/en-us/services/cognitive-services/text-to-speech/"
       case .deepgram: return "https://deepgram.com"
+      case .soniox: return "https://soniox.com"
       case .system: return ""
+      }
+    }()
+    // Soniox uses one account key for transcription and speech generation, so
+    // this is the only card for it — the transcription list skips it.
+    let descriptionText: String = {
+      switch provider {
+      case .azure:
+        return "For Azure Text-to-Speech, use format: 'your-api-key:your-region' (e.g., 'abc123:eastus')"
+      case .soniox:
+        return "Stored securely in your macOS Keychain. Used for Soniox transcription and for "
+          + "Soniox TTS v2 voice output in 60+ languages."
+      default:
+        return "Stored securely in your macOS Keychain. Used only for "
+          + "\(provider.displayName) text-to-speech voice synthesis."
       }
     }()
 
@@ -278,16 +295,16 @@ extension SettingsView {
     }
 
     return apiKeyCard(
-      title: "\(provider.displayName) (TTS)",
+      title: provider == .soniox ? "Soniox API Key" : "\(provider.displayName) (TTS)",
       systemImage: systemImage,
       tint: tintColor,
       statusIcon: isStored ? "checkmark.seal.fill" : "key.fill",
       statusTint: tintColor,
       isStored: isStored,
-      descriptionText: provider == .azure
-        ? "For Azure Text-to-Speech, use format: 'your-api-key:your-region' (e.g., 'abc123:eastus')"
-        : "Stored securely in your macOS Keychain. Used only for \(provider.displayName) text-to-speech voice synthesis.",
-      keyFieldLabel: "\(provider.displayName) TTS API Key",
+      descriptionText: descriptionText,
+      keyFieldLabel: provider == .soniox
+        ? "Soniox API Key"
+        : "\(provider.displayName) TTS API Key",
       keyBinding: ttsBinding(for: provider.rawValue),
       onSave: { saveTTSProviderAPIKey(provider) },
       onValidate: isStored ? { checkTTSProviderKeyValidity(provider) } : nil,
@@ -823,7 +840,9 @@ extension SettingsView {
           try await environment.secureStorage.storeSecret(
             value,
             identifier: provider.apiKeyIdentifier,
-            label: "\(provider.displayName) TTS API Key"
+            label: provider.sharesTranscriptionCredential
+              ? "\(provider.displayName) API Key"
+              : "\(provider.displayName) TTS API Key"
           )
 
           let result = validation.updatingOutcome(
@@ -881,6 +900,11 @@ extension SettingsView {
   }
 
   private func removeTTSProviderAPIKey(_ provider: TTSProvider) {
+    // Shared credentials also power live transcription; drop cached controllers
+    // before the key disappears so no stale session can keep using it.
+    if provider.sharesTranscriptionCredential {
+      environment.transcription.invalidateLiveControllerCache()
+    }
     Task {
       do {
         try await environment.secureStorage.removeSecret(identifier: provider.apiKeyIdentifier)

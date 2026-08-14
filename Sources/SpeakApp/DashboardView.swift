@@ -773,6 +773,7 @@ struct DashboardView: View {
     case .openai: return .green
     case .azure: return .brandLagoonDeep
     case .deepgram: return .brandAccentWarm
+    case .soniox: return .brandLagoon
     case .system: return .gray
     }
   }

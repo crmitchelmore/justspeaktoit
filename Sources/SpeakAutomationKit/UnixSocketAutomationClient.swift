@@ -15,6 +15,10 @@ public protocol AutomationRequesting {
 /// handles a single JSON-RPC request at a time, so an event loop would add
 /// concurrency risk for no benefit.
 public struct UnixSocketAutomationClient: AutomationRequesting {
+    /// Socket IO must outlive the app-side command deadline long enough for the
+    /// server to encode and write its structured timeout response.
+    static let responseGracePeriod: TimeInterval = 1
+
     public let socketPath: String
 
     public init(socketPath: String = AutomationEndpoint.socketPath()) {
@@ -26,7 +30,7 @@ public struct UnixSocketAutomationClient: AutomationRequesting {
         let payload = try AutomationCoding.encoder().encode(validated)
         let frame = try AutomationFraming.frame(payload)
 
-        let descriptor = try self.connect(timeout: validated.resolvedTimeout)
+        let descriptor = try self.connect(timeout: validated.resolvedTimeout + Self.responseGracePeriod)
         defer { close(descriptor) }
 
         try self.writeAll(descriptor: descriptor, data: frame)

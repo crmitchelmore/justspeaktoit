@@ -22,6 +22,11 @@ final class AutomationTransportTests: XCTestCase {
         XCTAssertEqual(decoded.schemaVersion, AutomationSchema.currentVersion)
     }
 
+    func testClientResponseGrace_outlivesTheCommandDeadline() {
+        XCTAssertGreaterThan(UnixSocketAutomationClient.responseGracePeriod, 0)
+        XCTAssertLessThanOrEqual(UnixSocketAutomationClient.responseGracePeriod, 2)
+    }
+
     func testResponse_roundTripsWithISO8601Dates() throws {
         let entry = AutomationHistoryEntry(
             id: "H1",

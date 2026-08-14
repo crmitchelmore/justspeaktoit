@@ -15,13 +15,6 @@ final class AppAutomationHandler: AutomationCommandHandling {
     private let transcription: TranscriptionManager
     private let appVersion: String
 
-    /// How long `start_dictation` waits for the session to come up before
-    /// reporting what it sees. Session start does permission checks and provider
-    /// warm-up, so an immediate return would usually report "not started" for a
-    /// session that is about to run.
-    private static let startConfirmationTimeout: TimeInterval = 5
-    private static let startPollInterval: Duration = .milliseconds(50)
-
     init(
         main: MainManager,
         history: HistoryManager,
@@ -155,38 +148,24 @@ final class AppAutomationHandler: AutomationCommandHandling {
     }
 
     private func startDictation() async throws -> AutomationResult {
-        guard self.main.activeSession == nil else {
+        guard self.main.activeSession == nil, !self.main.isEndingSession else {
             throw AutomationError(
                 code: .alreadyRecording,
                 message: "A dictation session is already running. Stop it before starting another."
             )
         }
-        // `toggleRecordingFromUI` does not clear `state`, so a `.failed` left by the
-        // previous session must not be read as this session failing.
-        let staleFailure = Self.failureMessage(from: self.main.state)
-        self.main.toggleRecordingFromUI()
-
-        let deadline = Date().addingTimeInterval(Self.startConfirmationTimeout)
-        while Date() < deadline {
-            if self.main.activeSession != nil {
-                return AutomationResult(sessionActive: true)
-            }
-            if let message = Self.failureMessage(from: self.main.state), message != staleFailure {
-                throw AutomationError(code: .transcriptionFailed, message: message)
-            }
-            try? await Task.sleep(for: Self.startPollInterval)
+        // Await the real session boundary rather than polling a detached UI task.
+        // Permission and provider setup can legitimately exceed five seconds; the
+        // server's request deadline reports that delay while the idempotent command
+        // continues and can be collected by retrying the same request id.
+        let outcome = await self.main.startSession(trigger: .uiButton)
+        guard outcome == .started, self.main.activeSession != nil else {
+            throw AutomationError(
+                code: .transcriptionFailed,
+                message: Self.failureMessage(from: self.main.state) ?? "Dictation could not be started."
+            )
         }
-        // The session may still be coming up. Stop it so the caller's view ("nothing
-        // started") matches the app, instead of leaving a session that makes the
-        // next attempt fail with `already_recording`.
-        if self.main.activeSession != nil {
-            await self.main.endSession(trigger: .uiButton)
-        }
-        throw AutomationError(
-            code: .timedOut,
-            message: "Dictation did not start within \(Int(Self.startConfirmationTimeout))s. "
-                + "Check microphone permission in the app."
-        )
+        return AutomationResult(sessionActive: true)
     }
 
     private static func failureMessage(from state: MainManager.State) -> String? {

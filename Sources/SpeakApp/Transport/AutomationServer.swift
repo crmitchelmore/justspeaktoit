@@ -68,7 +68,7 @@ final class AutomationServer {
             guard let self else { return }
             let client = accept(descriptor, nil, nil)
             guard client >= 0 else { return }
-            Self.applyReceiveTimeout(to: client)
+            Self.configureAcceptedSocket(client)
             self.serve(client: client)
         }
         source.setCancelHandler {
@@ -91,15 +91,7 @@ final class AutomationServer {
     /// Creates, binds and listens on the owner-only automation socket.
     private nonisolated static func makeListeningSocket(at socketPath: String) throws -> Int32 {
         let directory = (socketPath as NSString).deletingLastPathComponent
-        try FileManager.default.createDirectory(
-            atPath: directory,
-            withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o700]
-        )
-        // `attributes` is ignored when the directory already exists, so an
-        // Application Support folder created earlier with a wider mode would leave
-        // the socket parent readable by other local users.
-        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory)
+        try Self.prepareSocketDirectory(at: directory)
         // A socket file survives a crash, and bind() fails on an existing path, so
         // clear any stale one before binding.
         try? FileManager.default.removeItem(atPath: socketPath)
@@ -151,6 +143,36 @@ final class AutomationServer {
             throw AutomationError(code: .internalError, message: "Could not listen on the automation socket.")
         }
         return descriptor
+    }
+
+    /// Creates an owner-only leaf directory or verifies that an existing one is
+    /// already private. Never chmod an existing override parent: a caller may
+    /// deliberately place the socket under a shared system directory such as
+    /// `/tmp`, whose permissions the app must not change.
+    private nonisolated static func prepareSocketDirectory(at directory: String) throws {
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: directory, isDirectory: &isDirectory) {
+            guard isDirectory.boolValue else {
+                throw AutomationError(code: .invalidArgument, message: "Automation socket parent is not a directory.")
+            }
+            let attributes = try FileManager.default.attributesOfItem(atPath: directory)
+            let owner = (attributes[.ownerAccountID] as? NSNumber)?.uint32Value
+            let permissions = (attributes[.posixPermissions] as? NSNumber)?.uint16Value ?? 0o777
+            guard owner == geteuid(), permissions & 0o777 == 0o700 else {
+                throw AutomationError(
+                    code: .invalidArgument,
+                    message: "Automation socket parent must be owned by the current user with permissions 0700."
+                )
+            }
+            return
+        }
+
+        try FileManager.default.createDirectory(
+            atPath: directory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory)
     }
 
     func stop() {
@@ -296,15 +318,43 @@ final class AutomationServer {
     }
 
     private nonisolated static func send(_ response: AutomationResponse, to client: Int32) {
-        guard let payload = try? AutomationCoding.encoder().encode(response),
-              let frame = try? AutomationFraming.frame(payload) else { return }
+        guard let payload = try? AutomationCoding.encoder().encode(response) else { return }
+        let frame: Data
+        do {
+            frame = try AutomationFraming.frame(payload)
+        } catch {
+            // History and transcript text are user data and can exceed the wire
+            // bound. Return a small structured failure rather than closing the
+            // socket and making the client misdiagnose an app timeout.
+            let failure = AutomationResponse.failure(
+                id: response.id,
+                command: response.command,
+                error: AutomationError(
+                    code: .internalError,
+                    message: "Automation reply exceeds the size limit. Request less history or a smaller result."
+                )
+            )
+            guard let fallbackPayload = try? AutomationCoding.encoder().encode(failure),
+                  let fallbackFrame = try? AutomationFraming.frame(fallbackPayload) else { return }
+            frame = fallbackFrame
+        }
         try? Self.write(descriptor: client, data: frame)
     }
 
     /// Bounds how long a half-open client can hold a serving slot. Only covers the
     /// request read and the reply write — the command itself runs on the main actor
     /// with its own deadline, so a slow transcription is not cut short here.
-    private nonisolated static func applyReceiveTimeout(to descriptor: Int32) {
+    /// Applies the safety properties every accepted connection needs before any
+    /// request bytes are read or reply bytes are written.
+    nonisolated static func configureAcceptedSocket(_ descriptor: Int32) {
+        var noSignal: Int32 = 1
+        setsockopt(
+            descriptor,
+            SOL_SOCKET,
+            SO_NOSIGPIPE,
+            &noSignal,
+            socklen_t(MemoryLayout<Int32>.size)
+        )
         var timeout = timeval(tv_sec: Int(AutomationLimits.defaultTimeout), tv_usec: 0)
         setsockopt(descriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
         setsockopt(descriptor, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))

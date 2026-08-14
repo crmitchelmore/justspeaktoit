@@ -199,8 +199,14 @@ just enabled it and still see this, check the path:
 ls -l ~/Library/Application\ Support/SpeakApp/Automation/automation.sock
 ```
 
-**Running a second app instance.** Point both the app and the CLI at a different
-socket with `SPEAK_AUTOMATION_SOCKET=/path/to/automation.sock`.
+**Running a second app instance.** Point both the app and the CLI at a socket in
+an owner-only directory. The app rejects a shared parent rather than changing
+its permissions:
+
+```bash
+install -d -m 700 "$HOME/.speak-automation"
+export SPEAK_AUTOMATION_SOCKET="$HOME/.speak-automation/automation.sock"
+```
 
 **`timed_out` on `transcribe`.** Long recordings on a cloud provider can exceed
 the default; raise it with `--timeout 900`.

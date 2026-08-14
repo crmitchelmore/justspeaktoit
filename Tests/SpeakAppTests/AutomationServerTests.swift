@@ -1,5 +1,6 @@
 #if os(macOS)
 import Foundation
+import SpeakAutomationKit
 import SpeakCore
 import XCTest
 @testable import SpeakApp
@@ -23,6 +24,7 @@ final class AutomationServerTests: XCTestCase {
         self.directory = URL(fileURLWithPath: "/tmp", isDirectory: true)
             .appendingPathComponent("speak-automation-\(UUID().uuidString.prefix(8))", isDirectory: true)
         try FileManager.default.createDirectory(at: self.directory, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: self.directory.path)
         // Resolved the same way the app and the `speak` CLI resolve it, so the
         // test exercises the documented override rather than a private path.
         self.socketPath = AutomationEndpoint.socketPath(
@@ -54,6 +56,18 @@ final class AutomationServerTests: XCTestCase {
         XCTAssertEqual(self.handler.handledCommands, [.status])
     }
 
+    func testOversizedReply_returnsABoundedStructuredFailure() async throws {
+        self.handler.responseText = String(repeating: "x", count: AutomationLimits.maxFrameBytes + 1)
+
+        let response = try await self.send(AutomationRequest(id: "req-large", command: .history))
+
+        XCTAssertFalse(response.ok)
+        XCTAssertEqual(response.id, "req-large")
+        XCTAssertEqual(response.command, .history)
+        XCTAssertEqual(response.error?.code, .internalError)
+        XCTAssertTrue(response.error?.message.contains("size limit") == true)
+    }
+
     func testSocketFile_isReadableOnlyByItsOwner() throws {
         let attributes = try FileManager.default.attributesOfItem(atPath: self.socketPath)
         let permissions = try XCTUnwrap(attributes[.posixPermissions] as? NSNumber)
@@ -63,6 +77,43 @@ final class AutomationServerTests: XCTestCase {
             0o600,
             "Any other local user must not be able to drive dictation through the socket"
         )
+    }
+
+    func testExistingSharedSocketParent_isRejectedWithoutChangingItsPermissions() throws {
+        let sharedDirectory = URL(fileURLWithPath: "/tmp", isDirectory: true)
+            .appendingPathComponent("speak-automation-shared-\(UUID().uuidString.prefix(8))", isDirectory: true)
+        try FileManager.default.createDirectory(at: sharedDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: sharedDirectory) }
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: sharedDirectory.path)
+        let insecureServer = AutomationServer(socketPath: sharedDirectory.appendingPathComponent("a.sock").path)
+
+        XCTAssertThrowsError(try insecureServer.start(handler: self.handler))
+        let attributes = try FileManager.default.attributesOfItem(atPath: sharedDirectory.path)
+        let permissions = try XCTUnwrap(attributes[.posixPermissions] as? NSNumber)
+        XCTAssertEqual(permissions.uint16Value, 0o755, "The override must not chmod a caller-owned parent")
+    }
+
+    func testAcceptedSocket_suppressesSIGPIPEWhenThePeerDisconnects() throws {
+        var descriptors = [Int32](repeating: -1, count: 2)
+        XCTAssertEqual(socketpair(AF_UNIX, SOCK_STREAM, 0, &descriptors), 0)
+        defer {
+            for descriptor in descriptors where descriptor >= 0 {
+                close(descriptor)
+            }
+        }
+
+        AutomationServer.configureAcceptedSocket(descriptors[0])
+        var noSignal: Int32 = 0
+        var size = socklen_t(MemoryLayout<Int32>.size)
+        XCTAssertEqual(getsockopt(descriptors[0], SOL_SOCKET, SO_NOSIGPIPE, &noSignal, &size), 0)
+        XCTAssertEqual(noSignal, 1, "A client disconnect must produce EPIPE rather than terminate the app")
+
+        close(descriptors[1])
+        descriptors[1] = -1
+        var byte: UInt8 = 0
+        let written = withUnsafePointer(to: &byte) { Darwin.write(descriptors[0], $0, 1) }
+        XCTAssertEqual(written, -1)
+        XCTAssertEqual(errno, EPIPE)
     }
 
     // MARK: - Idempotency
@@ -98,7 +149,7 @@ final class AutomationServerTests: XCTestCase {
 
         let clock = ContinuousClock()
         let started = clock.now
-        let timedOut = try await self.send(request)
+        let timedOut = try await self.sendWithProductionClient(request)
         let elapsed = clock.now - started
 
         XCTAssertFalse(timedOut.ok)
@@ -144,6 +195,23 @@ final class AutomationServerTests: XCTestCase {
             }
         }
     }
+
+    /// Uses the shipped client to pin the relationship between the command
+    /// deadline and the slightly longer socket deadline.
+    private func sendWithProductionClient(_ request: AutomationRequest) async throws -> AutomationResponse {
+        let path = self.socketPath!
+        return try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    continuation.resume(
+                        returning: try UnixSocketAutomationClient(socketPath: path).send(request)
+                    )
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
 }
 
 // MARK: - Stub handler
@@ -155,6 +223,7 @@ private final class StubAutomationHandler: AutomationCommandHandling {
     private(set) var handledCommands: [AutomationCommand] = []
     /// Holds the command past the caller's deadline when set.
     var delay: Duration?
+    var responseText: String?
 
     func handle(_ request: AutomationRequest) async -> AutomationResponse {
         self.handledCommands.append(request.command)
@@ -164,7 +233,7 @@ private final class StubAutomationHandler: AutomationCommandHandling {
         return .success(
             id: request.id,
             command: request.command,
-            result: AutomationResult(text: "handled-\(request.command.rawValue)")
+            result: AutomationResult(text: self.responseText ?? "handled-\(request.command.rawValue)")
         )
     }
 }

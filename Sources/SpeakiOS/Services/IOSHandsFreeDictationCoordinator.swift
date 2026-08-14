@@ -36,7 +36,7 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
     private var ownsLiveActivity = false
 
     init(
-        audioSessionManager: AudioSessionManager = AudioSessionManager(),
+        audioSessionManager: AudioSessionManager,
         startCapture: @escaping StartCapture,
         stopCapture: @escaping StopCapture,
         cancelCapture: @escaping () -> Void,

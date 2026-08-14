@@ -207,33 +207,57 @@ public struct HandsFreeDictationMachine: Equatable, Sendable {
     public mutating func handle(_ event: Event) -> [Effect] {
         switch event {
         case .userToggled:
-            return state == .off ? handle(.userArmed) : handle(.userDisarmed)
+            return handleUserToggled()
         case .userArmed:
-            guard state == .off else { return [] }
-            lastFailure = nil
-            state = .arming
-            return [.startDetector]
+            return handleUserArmed()
         case .userDisarmed:
             return handleUserDisarmed()
         case .detectorStarted:
-            guard state == .arming else { return [] }
-            state = .armed
-            return []
+            return handleDetectorStarted()
         case .speechDetected:
-            guard state == .armed else { return [] }
-            state = .recording
-            return [.startCapture]
+            return handleSpeechDetected()
         case .silenceElapsed:
-            guard state == .recording else { return [] }
-            state = .finalising
-            return [.stopCapture]
+            return handleSilenceElapsed()
         case .captureFinished:
-            guard state == .finalising else { return [] }
-            state = .armed
-            return []
+            return handleCaptureFinished()
         case .sessionFailed(let failure):
             return handleFailure(failure)
         }
+    }
+
+    private mutating func handleUserToggled() -> [Effect] {
+        state == .off ? handleUserArmed() : handleUserDisarmed()
+    }
+
+    private mutating func handleUserArmed() -> [Effect] {
+        guard state == .off else { return [] }
+        lastFailure = nil
+        state = .arming
+        return [.startDetector]
+    }
+
+    private mutating func handleDetectorStarted() -> [Effect] {
+        guard state == .arming else { return [] }
+        state = .armed
+        return []
+    }
+
+    private mutating func handleSpeechDetected() -> [Effect] {
+        guard state == .armed else { return [] }
+        state = .recording
+        return [.startCapture]
+    }
+
+    private mutating func handleSilenceElapsed() -> [Effect] {
+        guard state == .recording else { return [] }
+        state = .finalising
+        return [.stopCapture]
+    }
+
+    private mutating func handleCaptureFinished() -> [Effect] {
+        guard state == .finalising else { return [] }
+        state = .armed
+        return []
     }
 
     private mutating func handleUserDisarmed() -> [Effect] {

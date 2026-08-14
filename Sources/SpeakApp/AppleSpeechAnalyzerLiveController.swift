@@ -68,6 +68,7 @@ final class AppleSpeechAnalyzerLiveController: LiveTranscriptionController {
   }
 
   @available(macOS 26.0, *)
+  // swiftlint:disable:next function_body_length
   private func startSpeechAnalyzer(preRollBuffers: [AVAudioPCMBuffer]) async throws {
     // Published before the session exists so the handler can never observe a
     // window in which this run is not yet the active one. The handler hops to

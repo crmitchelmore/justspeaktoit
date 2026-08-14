@@ -470,8 +470,8 @@ final class MainManager: ObservableObject {
 
   // Internal rather than private so the hands-free coordinator can start the
   // same session the hotkey would have.
-  // swiftlint:disable:next function_body_length
   @discardableResult
+  // swiftlint:disable:next cyclomatic_complexity function_body_length
   func startSession(
     trigger: SessionTriggerSource,
     preRollBuffers: [AVAudioPCMBuffer] = []

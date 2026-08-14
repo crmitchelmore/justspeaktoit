@@ -180,37 +180,9 @@ final class TranscriberCoordinator: ObservableObject {
             )
         }
 
-        if let session = transcriptionSession {
-            transcriptionSession = nil
-            stoppingSession = session
-            defer {
-                if stoppingSession === session {
-                    stoppingSession = nil
-                }
-            }
-            do {
-                let result = try await session.stop()
-                guard !Task.isCancelled else {
-                    startTime = nil
-                    return result
-                }
-                if session.isBatch {
-                    partialText = result.text
-                    wordCount = result.text.split(whereSeparator: \.isWhitespace).count
-                }
-                if AppSettings.shared.liveActivitiesEnabled {
-                    activityManager.completeActivity(
-                        finalWordCount: wordCount,
-                        duration: duration,
-                        keepPrimed: rearmHandsFree,
-                        primedMessage: "Hands-free armed",
-                        primedStatus: rearmHandsFree ? .armed : .idle
-                    )
-                }
-                return finishStop(with: result)
-            } catch {
-                handleError(error)
-            }
+        if let session = transcriptionSession,
+           let result = await stop(session: session, duration: duration, rearmHandsFree: rearmHandsFree) {
+            return result
         }
 
         startTime = nil
@@ -224,6 +196,44 @@ final class TranscriberCoordinator: ObservableObject {
             rawPayload: nil,
             debugInfo: nil
         )
+    }
+
+    private func stop(
+        session: IOSTranscriptionSession,
+        duration: Int,
+        rearmHandsFree: Bool
+    ) async -> TranscriptionResult? {
+        transcriptionSession = nil
+        stoppingSession = session
+        defer {
+            if stoppingSession === session {
+                stoppingSession = nil
+            }
+        }
+        do {
+            let result = try await session.stop()
+            guard !Task.isCancelled else {
+                startTime = nil
+                return result
+            }
+            if session.isBatch {
+                partialText = result.text
+                wordCount = result.text.split(whereSeparator: \.isWhitespace).count
+            }
+            if AppSettings.shared.liveActivitiesEnabled {
+                activityManager.completeActivity(
+                    finalWordCount: wordCount,
+                    duration: duration,
+                    keepPrimed: rearmHandsFree,
+                    primedMessage: "Hands-free armed",
+                    primedStatus: rearmHandsFree ? .armed : .idle
+                )
+            }
+            return finishStop(with: result)
+        } catch {
+            handleError(error)
+            return nil
+        }
     }
 
     private func finishStop(with result: TranscriptionResult) -> TranscriptionResult {

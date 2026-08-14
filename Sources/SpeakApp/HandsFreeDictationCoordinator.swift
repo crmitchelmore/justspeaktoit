@@ -104,7 +104,10 @@ final class HandsFreeDictationCoordinator {
       case .startCapture:
         let outcome = await callbacks.startCapture(preRoll.takeSnapshot())
         if case .rejected(let failure) = outcome {
-          await apply(machine.handle(.sessionFailed(failure)))
+          // A refused start captured nothing, so it must not cancel a capture.
+          // The usual reason for a refusal is that the user already records by
+          // hand, and that recording is not ours to stop.
+          await apply(machine.handle(.captureStartRejected(failure)))
         }
       case .stopCapture:
         startFinalisation()

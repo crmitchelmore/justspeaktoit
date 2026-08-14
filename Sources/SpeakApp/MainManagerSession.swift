@@ -1,12 +1,14 @@
 import SpeakCore
 import Foundation
 
-enum SessionTriggerSource {
+enum SessionTriggerSource: Equatable {
   case hold
   case doubleTap
   case singleTap
   case uiButton
   case silenceDetection
+  /// Started or stopped by hands-free dictation's voice-activity detector.
+  case handsFree
 
   var historyGesture: HistoryTrigger.HotKeyGesture {
     switch self {
@@ -18,7 +20,7 @@ enum SessionTriggerSource {
       return .singleTap
     case .uiButton:
       return .uiButton
-    case .silenceDetection:
+    case .silenceDetection, .handsFree:
       return .uiButton  // Treat as UI-initiated for history purposes
     }
   }

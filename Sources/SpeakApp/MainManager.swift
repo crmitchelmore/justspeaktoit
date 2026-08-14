@@ -82,6 +82,10 @@ final class MainManager: ObservableObject {
       }
     }
   }
+
+  /// Hands-free ("armed") dictation. Created eagerly but inert until the user
+  /// arms it, which only the hands-free setting allows.
+  private(set) lazy var handsFreeCoordinator = makeHandsFreeCoordinator()
   /// Guards against re-entrant calls to endSession (e.g. silence detection + user hotkey racing).
   var isEndingSession = false
   let recordingStopTimeout: TimeInterval = 8
@@ -161,6 +165,19 @@ final class MainManager: ObservableObject {
       .receive(on: RunLoop.main)
       .sink { [weak self] profile in
         self?.recordingSoundPlayer.profile = profile
+      }
+      .store(in: &cancellables)
+
+    // Turning hands-free off or selecting an incompatible transcription route
+    // must tear down a live detector, not just stop future arming.
+    Publishers.CombineLatest3(
+      appSettings.$handsFreeDictationEnabled,
+      appSettings.$transcriptionMode,
+      appSettings.$liveTranscriptionModel
+    )
+      .receive(on: RunLoop.main)
+      .sink { [weak self] _ in
+        self?.disarmHandsFreeIfDisabled()
       }
       .store(in: &cancellables)
 
@@ -317,13 +334,51 @@ final class MainManager: ObservableObject {
     cleanupAfterFailure(message: "Recording cancelled", preserveFile: false)
   }
 
+  /// Hands-free replaces press-to-talk with press-to-arm.
+  private func handleHoldStartGesture() async {
+    guard appSettings.hotKeyActivationStyle.allowsHold else { return }
+    if await handleHandsFreeHotKey() { return }
+    await startSession(trigger: .hold)
+  }
+
+  /// The arming press already consumed the gesture, so releasing the key must
+  /// not stop a hands-free capture the detector is still driving.
+  private func handleHoldEndGesture() async {
+    guard appSettings.hotKeyActivationStyle.allowsHold else { return }
+    guard !handsFreeArmsHotKey else { return }
+    await endSession(trigger: .hold)
+  }
+
+  private func handleSingleTapGesture() async {
+    guard appSettings.hotKeyActivationStyle.allowsDoubleTap else { return }
+    guard !handsFreeArmsHotKey else { return }
+    guard let session = activeSession, session.gesture == .doubleTap else { return }
+    await endSession(trigger: .singleTap)
+  }
+
+  /// Double-tap toggles: it arms hands-free dictation when that mode is on,
+  /// otherwise it starts a session or ends the one it started.
+  private func handleDoubleTapGesture() async {
+    guard appSettings.hotKeyActivationStyle.allowsDoubleTap else { return }
+    let now = ProcessInfo.processInfo.systemUptime
+    guard now - lastDoubleTapEventUptime >= 0.25 else { return }
+    lastDoubleTapEventUptime = now
+
+    if await handleHandsFreeHotKey() { return }
+
+    if let session = activeSession {
+      guard session.gesture == .doubleTap else { return }
+      await endSession(trigger: .doubleTap)
+    } else {
+      await startSession(trigger: .doubleTap)
+    }
+  }
+
   private func configureHotKeys() {
     hotKeyTokens.append(
       hotKeyManager.register(gesture: .holdStart) { [weak self] in
         Task { @MainActor in
-          guard let self else { return }
-          guard self.appSettings.hotKeyActivationStyle.allowsHold else { return }
-          await self.startSession(trigger: .hold)
+          await self?.handleHoldStartGesture()
         }
       }
     )
@@ -331,9 +386,7 @@ final class MainManager: ObservableObject {
     hotKeyTokens.append(
       hotKeyManager.register(gesture: .holdEnd) { [weak self] in
         Task { @MainActor in
-          guard let self else { return }
-          guard self.appSettings.hotKeyActivationStyle.allowsHold else { return }
-          await self.endSession(trigger: .hold)
+          await self?.handleHoldEndGesture()
         }
       }
     )
@@ -341,20 +394,7 @@ final class MainManager: ObservableObject {
     hotKeyTokens.append(
       hotKeyManager.register(gesture: .doubleTap) { [weak self] in
         Task { @MainActor in
-          guard let self else { return }
-          guard self.appSettings.hotKeyActivationStyle.allowsDoubleTap else { return }
-          let now = ProcessInfo.processInfo.systemUptime
-          if now - self.lastDoubleTapEventUptime < 0.25 {
-            return
-          }
-          self.lastDoubleTapEventUptime = now
-
-          if let session = self.activeSession {
-            guard session.gesture == .doubleTap else { return }
-            await self.endSession(trigger: .doubleTap)
-          } else {
-            await self.startSession(trigger: .doubleTap)
-          }
+          await self?.handleDoubleTapGesture()
         }
       }
     )
@@ -362,11 +402,7 @@ final class MainManager: ObservableObject {
     hotKeyTokens.append(
       hotKeyManager.register(gesture: .singleTap) { [weak self] in
         Task { @MainActor in
-          guard let self else { return }
-          guard self.appSettings.hotKeyActivationStyle.allowsDoubleTap else { return }
-          if let session = self.activeSession, session.gesture == .doubleTap {
-            await self.endSession(trigger: .singleTap)
-          }
+          await self?.handleSingleTapGesture()
         }
       }
     )
@@ -432,9 +468,15 @@ final class MainManager: ObservableObject {
     return "Loading local model and transcribing. First run can take a minute."
   }
 
-  // swiftlint:disable:next function_body_length
-  private func startSession(trigger: SessionTriggerSource) async {
-    guard activeSession == nil else { return }
+  // Internal rather than private so the hands-free coordinator can start the
+  // same session the hotkey would have.
+  @discardableResult
+  // swiftlint:disable:next cyclomatic_complexity function_body_length
+  func startSession(
+    trigger: SessionTriggerSource,
+    preRollBuffers: [AVAudioPCMBuffer] = []
+  ) async -> HandsFreeCaptureStartOutcome {
+    guard activeSession == nil else { return .rejected(.captureFailed) }
 
     // Per-app dictation profile: resolve the frontmost app and apply its
     // overrides for this session only. Applied before the API-key check so the
@@ -448,9 +490,20 @@ final class MainManager: ObservableObject {
       frontmostBundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier
     )
 
+    if trigger == .handsFree {
+      guard HandsFreeDictationPolicy.supportsCapture(
+        modelID: appSettings.liveTranscriptionModel,
+        isStreaming: appSettings.transcriptionMode == .liveNative
+      )
+      else {
+        profileApplier.end(settings: appSettings, postProcessing: postProcessingManager)
+        return .rejected(.unsupportedConfiguration)
+      }
+    }
+
     if await presentMissingLiveAPIKeyAlertIfNeeded() {
       profileApplier.end(settings: appSettings, postProcessing: postProcessingManager)
-      return
+      return .rejected(.captureFailed)
     }
 
     if audioInputDeviceManager.devices.isEmpty {
@@ -462,7 +515,7 @@ final class MainManager: ObservableObject {
         headline: "No microphone connected",
         message: "Plug in a USB or Bluetooth microphone and try again."
       )
-      return
+      return .rejected(.audioUnavailable)
     }
 
     // Failsafe: if live transcription is still running but we have no activeSession,
@@ -529,8 +582,12 @@ final class MainManager: ObservableObject {
       recordCaptureStart(for: session)
       startAudioLevelMonitoring()
       if isStreamingTranscriptionMode {
-        try await transcriptionManager.startLiveTranscription()
+        try await transcriptionManager.startLiveTranscription(
+          preRollBuffers: preRollBuffers,
+          analyzerFallbackAllowed: trigger != .handsFree
+        )
       }
+      return .started
     } catch {
       session.errors.append(
         HistoryError(
@@ -540,6 +597,7 @@ final class MainManager: ObservableObject {
         )
       )
       cleanupAfterFailure(message: error.localizedDescription, preserveFile: false)
+      return .rejected(HandsFreeDictationMachine.Failure(error))
     }
   }
 
@@ -574,6 +632,7 @@ final class MainManager: ObservableObject {
         // Ignored: sleep cancellation simply means we stop immediately.
       }
     }
+    guard sessionProcessingShouldContinue(session) else { return }
 
     if appSettings.recordingSoundsEnabled {
       recordingSoundPlayer.play(.stop, volume: appSettings.recordingSoundVolume)
@@ -607,12 +666,14 @@ final class MainManager: ObservableObject {
 
     do {
       let summary = try await stopRecordingWithTimeout()
+      guard sessionProcessingShouldContinue(session) else { return }
       session.recordingSummary = summary
       session.recordingEnded = summary.startedAt.addingTimeInterval(summary.duration)
 
       if isStreamingTranscriptionMode {
         session.transcriptionStarted = Date()
         let result = try await transcriptionManager.stopLiveTranscription()
+        guard sessionProcessingShouldContinue(session) else { return }
         session.transcriptionEnded = Date()
         session.transcriptionResult = result
         session.modelsUsed.insert(result.modelIdentifier)
@@ -703,6 +764,7 @@ final class MainManager: ObservableObject {
           }
         }
         let result = try await transcriptionManager.transcribeFile(at: summary.url)
+        guard sessionProcessingShouldContinue(session) else { return }
         session.transcriptionEnded = Date()
         session.transcriptionResult = result
         session.modelsUsed.insert(result.modelIdentifier)
@@ -797,6 +859,7 @@ final class MainManager: ObservableObject {
             }
           }
         )
+        guard sessionProcessingShouldContinue(session) else { return }
         switch outcomeResult {
         case .success(let outcome):
           session.postProcessingEnded = Date()

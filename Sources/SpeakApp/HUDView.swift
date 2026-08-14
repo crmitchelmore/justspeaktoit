@@ -70,7 +70,7 @@ struct HUDOverlay: View {
           .accessibilityValue("\(Int(manager.audioLevel * 100)) percent")
           .accessibilityAddTraits(.updatesFrequently)
       }
-      if manager.snapshot.phase.isTerminal == false {
+      if manager.snapshot.phase.isTerminal == false, manager.snapshot.phase != .armed {
         Text(elapsedText)
           .font(.caption.monospacedDigit())
           .foregroundStyle(.secondary)
@@ -273,6 +273,8 @@ struct HUDOverlay: View {
 
   private var phaseColor: Color {
     switch manager.snapshot.phase {
+    case .armed:
+      return .brandLagoon
     case .recording:
       return .red
     case .transcribing:

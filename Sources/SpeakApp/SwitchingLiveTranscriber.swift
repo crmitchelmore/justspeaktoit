@@ -102,6 +102,13 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   }
 
   func start() async throws {
+    try await start(preRollBuffers: [], analyzerFallbackAllowed: true)
+  }
+
+  func start(
+    preRollBuffers: [AVAudioPCMBuffer],
+    analyzerFallbackAllowed: Bool = true
+  ) async throws {
     if let activeRun {
       await stop(activeRun)
     }
@@ -118,10 +125,14 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     controller.configure(language: currentLanguage, model: model)
     let run = activate(controller)
     do {
-      try await controller.start()
+      if let analyzer = controller as? AppleSpeechAnalyzerLiveController {
+        try await analyzer.start(preRollBuffers: preRollBuffers)
+      } else {
+        try await controller.start()
+      }
       invalidateBeforeNextStart = false
     } catch {
-      if AppleLocalModels.isSpeechAnalyzerModel(model) {
+      if AppleLocalModels.isSpeechAnalyzerModel(model), analyzerFallbackAllowed {
         print(
           "[SwitchingLiveTranscriber] SpeechAnalyzer failed "
             + "(\(error.localizedDescription)); using legacy Apple Speech")

@@ -1,4 +1,5 @@
 #if os(iOS)
+import AVFoundation
 import Foundation
 import SpeakCore
 
@@ -167,11 +168,21 @@ final class IOSTranscriptionSession {
     }
 
     func start() async throws {
+        try await start(preRollBuffers: [], analyzerFallbackAllowed: true)
+    }
+
+    func start(
+        preRollBuffers: [AVAudioPCMBuffer],
+        analyzerFallbackAllowed: Bool = true
+    ) async throws {
         switch backend {
         case .batch(let transcriber):
             try await transcriber.start()
         case .apple(let transcriber):
-            try await transcriber.start()
+            try await transcriber.start(
+                preRollBuffers: preRollBuffers,
+                analyzerFallbackAllowed: analyzerFallbackAllowed
+            )
         case .openAI(let transcriber):
             try await transcriber.start()
         case .shared(let transcriber):

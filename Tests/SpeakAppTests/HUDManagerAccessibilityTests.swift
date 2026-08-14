@@ -29,6 +29,26 @@ final class HUDManagerAccessibilityTests: XCTestCase {
       HUDManager.accessibilityAnnouncement(for: .failure(message: "Network unavailable"), subheadline: nil),
       "Failed. Network unavailable"
     )
+    XCTAssertEqual(
+      HUDManager.accessibilityAnnouncement(for: .armed, subheadline: "Hands-free dictation is armed"),
+      "Hands-free dictation armed. Hands-free dictation is armed"
+    )
+  }
+
+  @MainActor
+  func testArmedPhase_IsVisibleAndAnnouncedWithoutStartingARecording() {
+    var announcements: [String] = []
+    let manager = HUDManager(
+      appSettings: AppSettings(),
+      accessibilityAnnouncementPoster: { announcements.append($0) }
+    )
+
+    manager.beginArmed()
+
+    XCTAssertEqual(manager.snapshot.phase, .armed)
+    XCTAssertTrue(manager.snapshot.phase.isVisible)
+    XCTAssertFalse(manager.snapshot.phase.isTerminal)
+    XCTAssertEqual(announcements, ["Hands-free dictation armed. Hands-free dictation is armed"])
   }
 
   @MainActor

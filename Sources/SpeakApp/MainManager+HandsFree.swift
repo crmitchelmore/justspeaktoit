@@ -23,9 +23,11 @@ extension MainManager {
         },
         stopCapture: { [weak self] in
           guard let self else { return .failed(.captureFailed) }
+          guard !self.isEndingSession, let session = self.activeSession else {
+            return .failed(.captureFailed)
+          }
           await self.endSession(trigger: .handsFree)
-          if case .completed = self.state { return .completed }
-          return .failed(.captureFailed)
+          return session.outputDelivered == nil ? .failed(.captureFailed) : .completed
         },
         cancelCapture: { [weak self] in
           self?.userRequestedStopDueToError()

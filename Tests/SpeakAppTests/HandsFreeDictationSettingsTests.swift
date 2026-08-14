@@ -28,7 +28,7 @@ final class HandsFreeDictationSettingsTests: XCTestCase {
     }
 
     @MainActor
-    func testHandsFreeDictationIsOffByDefault() {
+    func testHandsFreeDictation_IsOffByDefault() {
         let settings = AppSettings(defaults: defaults)
 
         XCTAssertFalse(settings.handsFreeDictationEnabled)
@@ -36,7 +36,7 @@ final class HandsFreeDictationSettingsTests: XCTestCase {
     }
 
     @MainActor
-    func testEnablingPersistsUnderTheKeyBothPlatformsShare() {
+    func testEnablingHandsFree_PersistsUnderTheSharedKey() {
         let settings = AppSettings(defaults: defaults)
 
         settings.handsFreeDictationEnabled = true
@@ -45,7 +45,7 @@ final class HandsFreeDictationSettingsTests: XCTestCase {
     }
 
     @MainActor
-    func testStoredValueIsRestoredOnRelaunch() {
+    func testStoredHandsFreeValue_IsRestoredOnRelaunch() {
         defaults.set(true, forKey: sharedDefaultsKey)
 
         let settings = AppSettings(defaults: defaults)
@@ -54,18 +54,24 @@ final class HandsFreeDictationSettingsTests: XCTestCase {
     }
 
     @MainActor
-    func testDefaultsKeyMatchesTheIOSKeyExactly() {
+    func testDefaultsKey_MatchesTheIOSKeyExactly() {
         XCTAssertEqual(AppSettings.DefaultsKey.handsFreeDictationEnabled.rawValue, sharedDefaultsKey)
     }
 
     /// An enabled setting synced from a newer OS must not change behaviour on a
     /// machine without `SpeechDetector`.
     @MainActor
-    func testActiveTracksDetectorSupport() {
+    func testActiveState_TracksDetectorAndCaptureSupport() {
         let settings = AppSettings(defaults: defaults)
         settings.handsFreeDictationEnabled = true
+        settings.transcriptionMode = .liveNative
+        settings.liveTranscriptionModel = AppleLocalModels.dictationTranscriberModelID
 
         XCTAssertEqual(settings.handsFreeDictationSupported, AppleLocalModels.supportsSpeechDetector)
         XCTAssertEqual(settings.handsFreeDictationActive, AppleLocalModels.supportsSpeechDetector)
+
+        settings.liveTranscriptionModel = AppleLocalModels.legacySpeechModelID
+
+        XCTAssertFalse(settings.handsFreeDictationActive)
     }
 }

@@ -200,7 +200,6 @@ public final class iOSLiveTranscriber: ObservableObject {
             }
             _ = try? audioRecorder.startRecording(format: recordingFormat)
             for buffer in preRollBuffers {
-                audioRecorder.writeBuffer(buffer)
                 if let converted = converter.convert(buffer) {
                     session.send(converted)
                 }
@@ -210,6 +209,7 @@ public final class iOSLiveTranscriber: ObservableObject {
             speechAnalyzerSession = session
             speechAnalyzerConverter = converter
         } catch {
+            audioRecorder.cancelRecording()
             audioEngine.stop()
             inputNode.removeTap(onBus: 0)
             await session.cancel()

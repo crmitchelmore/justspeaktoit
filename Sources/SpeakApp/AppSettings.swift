@@ -703,7 +703,12 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   /// The setting only takes effect where the detector exists, so an enabled
   /// setting carried over from a newer OS cannot change behaviour on an older one.
   var handsFreeDictationActive: Bool {
-    handsFreeDictationEnabled && handsFreeDictationSupported
+    handsFreeDictationEnabled
+      && handsFreeDictationSupported
+      && HandsFreeDictationPolicy.supportsCapture(
+        modelID: liveTranscriptionModel,
+        isStreaming: transcriptionMode == .liveNative
+      )
   }
 
   /// Silence threshold (0.0 to 1.0) - audio levels below this are considered silence

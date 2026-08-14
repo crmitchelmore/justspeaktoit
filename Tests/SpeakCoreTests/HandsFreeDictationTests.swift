@@ -6,7 +6,7 @@ import XCTest
 final class HandsFreeDictationTests: XCTestCase {
     // MARK: - Arming
 
-    func testStartsDisarmedAndIgnoresVoiceActivity() {
+    func testInitialState_IsDisarmedAndIgnoresVoiceActivity() {
         var machine = HandsFreeDictationMachine()
 
         XCTAssertEqual(machine.state, .off)
@@ -16,7 +16,7 @@ final class HandsFreeDictationTests: XCTestCase {
         XCTAssertEqual(machine.state, .off, "Nothing may capture while disarmed")
     }
 
-    func testUserToggleArmsAndStartsTheDetector() {
+    func testUserToggle_ArmsAndStartsTheDetector() {
         var machine = HandsFreeDictationMachine()
 
         XCTAssertEqual(machine.handle(.userToggled), [.startDetector])
@@ -28,7 +28,7 @@ final class HandsFreeDictationTests: XCTestCase {
         XCTAssertEqual(machine.state, .armed)
     }
 
-    func testArmingClearsThePreviousFailure() {
+    func testArming_ClearsThePreviousFailure() {
         var machine = HandsFreeDictationMachine()
         _ = machine.handle(.userToggled)
         _ = machine.handle(.detectorStarted)
@@ -44,7 +44,7 @@ final class HandsFreeDictationTests: XCTestCase {
 
     // MARK: - The armed cycle
 
-    func testSpeechStartsCaptureAndSilenceStopsIt() {
+    func testSpeechAndSilence_StartAndStopCapture() {
         var machine = HandsFreeDictationMachine()
         _ = machine.handle(.userToggled)
         _ = machine.handle(.detectorStarted)
@@ -57,7 +57,7 @@ final class HandsFreeDictationTests: XCTestCase {
         XCTAssertEqual(machine.state, .finalising)
     }
 
-    func testCooldownRearmsWithoutRestartingTheDetector() {
+    func testCaptureFinished_RearmsWithoutRestartingTheDetector() {
         var machine = HandsFreeDictationMachine()
         _ = machine.handle(.userToggled)
         _ = machine.handle(.detectorStarted)
@@ -68,7 +68,7 @@ final class HandsFreeDictationTests: XCTestCase {
         XCTAssertEqual(machine.state, .armed)
     }
 
-    func testSpeechDuringCooldownDoesNotRetrigger() {
+    func testSpeechDuringFinalising_DoesNotRetrigger() {
         var machine = HandsFreeDictationMachine()
         _ = machine.handle(.userToggled)
         _ = machine.handle(.detectorStarted)
@@ -79,7 +79,7 @@ final class HandsFreeDictationTests: XCTestCase {
         XCTAssertEqual(machine.state, .finalising)
     }
 
-    func testRepeatedSpeechWhileCapturingIsIgnored() {
+    func testRepeatedSpeechWhileCapturing_IsIgnored() {
         var machine = HandsFreeDictationMachine()
         _ = machine.handle(.userToggled)
         _ = machine.handle(.detectorStarted)
@@ -89,7 +89,7 @@ final class HandsFreeDictationTests: XCTestCase {
         XCTAssertEqual(machine.state, .recording)
     }
 
-    func testCaptureCannotFinishBeforeFinalisingStarts() {
+    func testCaptureFinishedBeforeFinalising_IsIgnored() {
         var machine = HandsFreeDictationMachine()
         _ = machine.handle(.userToggled)
         _ = machine.handle(.detectorStarted)
@@ -99,7 +99,7 @@ final class HandsFreeDictationTests: XCTestCase {
         XCTAssertEqual(machine.state, .recording)
     }
 
-    func testLateCaptureFinishedDuringCooldownIsIgnored() {
+    func testLateCaptureFinishedAfterRearm_IsIgnored() {
         var machine = HandsFreeDictationMachine()
         _ = machine.handle(.userToggled)
         _ = machine.handle(.detectorStarted)
@@ -110,7 +110,7 @@ final class HandsFreeDictationTests: XCTestCase {
         XCTAssertEqual(machine.state, .armed)
     }
 
-    func testMultipleUtterancesReuseTheSameArmedSession() {
+    func testMultipleUtterances_ReuseTheSameArmedSession() {
         var machine = HandsFreeDictationMachine()
         _ = machine.handle(.userToggled)
         _ = machine.handle(.detectorStarted)
@@ -127,7 +127,7 @@ final class HandsFreeDictationTests: XCTestCase {
 
     // MARK: - Disarming
 
-    func testDisarmingWhileListeningStopsTheDetector() {
+    func testDisarmingWhileListening_StopsTheDetector() {
         var machine = HandsFreeDictationMachine()
         _ = machine.handle(.userToggled)
         _ = machine.handle(.detectorStarted)
@@ -136,7 +136,7 @@ final class HandsFreeDictationTests: XCTestCase {
         XCTAssertEqual(machine.state, .off)
     }
 
-    func testDisarmingWhileArmingMakesLateDetectorStartAuthoritativelyIgnored() {
+    func testDisarmingWhileArming_IgnoresLateDetectorStart() {
         var machine = HandsFreeDictationMachine()
         _ = machine.handle(.userArmed)
 
@@ -145,7 +145,7 @@ final class HandsFreeDictationTests: XCTestCase {
         XCTAssertEqual(machine.state, .off)
     }
 
-    func testDisarmingWhileCapturingStopsCaptureFirst() {
+    func testDisarmingWhileCapturing_StopsCaptureFirst() {
         var machine = HandsFreeDictationMachine()
         _ = machine.handle(.userToggled)
         _ = machine.handle(.detectorStarted)
@@ -155,7 +155,7 @@ final class HandsFreeDictationTests: XCTestCase {
         XCTAssertEqual(machine.state, .off)
     }
 
-    func testDisarmingWhileCoolingDownStopsTheDetector() {
+    func testDisarmingWhileFinalising_StopsCaptureAndDetector() {
         var machine = HandsFreeDictationMachine()
         _ = machine.handle(.userToggled)
         _ = machine.handle(.detectorStarted)
@@ -168,7 +168,7 @@ final class HandsFreeDictationTests: XCTestCase {
 
     // MARK: - Failures
 
-    func testFailureWhileListeningDisarmsAndReports() {
+    func testFailureWhileListening_DisarmsAndReports() {
         var machine = HandsFreeDictationMachine()
         _ = machine.handle(.userToggled)
         _ = machine.handle(.detectorStarted)
@@ -181,7 +181,7 @@ final class HandsFreeDictationTests: XCTestCase {
         XCTAssertEqual(machine.lastFailure, .detectorUnavailable)
     }
 
-    func testFailureWhileCapturingStopsCaptureAndReports() {
+    func testFailureWhileCapturing_StopsCaptureAndReports() {
         var machine = HandsFreeDictationMachine()
         _ = machine.handle(.userToggled)
         _ = machine.handle(.detectorStarted)
@@ -194,7 +194,7 @@ final class HandsFreeDictationTests: XCTestCase {
         XCTAssertEqual(machine.state, .off)
     }
 
-    func testLateFailureAfterDisarmIsIgnored() {
+    func testLateFailureAfterDisarm_IsIgnored() {
         var machine = HandsFreeDictationMachine()
 
         XCTAssertEqual(
@@ -205,7 +205,7 @@ final class HandsFreeDictationTests: XCTestCase {
         XCTAssertNil(machine.lastFailure)
     }
 
-    func testEveryStateSurvivesEveryEvent() {
+    func testEveryState_HandlesEveryEvent() {
         let events: [HandsFreeDictationMachine.Event] = [
             .userToggled,
             .userArmed,
@@ -252,7 +252,7 @@ final class HandsFreeDictationTests: XCTestCase {
 final class HandsFreeVoiceActivityTests: XCTestCase {
     // MARK: - Error classification
 
-    func testFailureClassifiesModelErrors() {
+    func testFailureInitialiser_ClassifiesModelErrors() {
         XCTAssertEqual(
             HandsFreeDictationMachine.Failure(AppleLocalModelError.speechDetectorUnavailable),
             .detectorUnavailable
@@ -275,7 +275,7 @@ final class HandsFreeVoiceActivityTests: XCTestCase {
         )
     }
 
-    func testEveryFailureHasAUserFacingMessage() {
+    func testEveryFailure_HasAUserFacingMessage() {
         let failures: [HandsFreeDictationMachine.Failure] = [
             .detectorUnavailable, .assetsUnavailable, .localeUnsupported,
             .audioUnavailable, .captureFailed, .unsupportedConfiguration
@@ -287,7 +287,7 @@ final class HandsFreeVoiceActivityTests: XCTestCase {
 
     // MARK: - Voice activity debounce
 
-    func testSpeechIsReportedOnTheLeadingEdgeOnly() {
+    func testSpeechDetection_IsReportedOnTheLeadingEdgeOnly() {
         var tracker = HandsFreeVoiceActivityTracker()
 
         XCTAssertEqual(tracker.observe(speechDetected: true, atSeconds: 0.1), .speechDetected)
@@ -295,7 +295,7 @@ final class HandsFreeVoiceActivityTests: XCTestCase {
         XCTAssertNil(tracker.observe(speechDetected: true, atSeconds: 1.0))
     }
 
-    func testSilenceIsReportedOnlyAfterTheHoldWindow() {
+    func testSilenceDetection_IsReportedOnlyAfterTheHoldWindow() {
         var tracker = HandsFreeVoiceActivityTracker()
         _ = tracker.observe(speechDetected: true, atSeconds: 0)
 
@@ -310,7 +310,7 @@ final class HandsFreeVoiceActivityTests: XCTestCase {
         )
     }
 
-    func testSpeechResumingWithinTheHoldWindowCancelsTheStop() {
+    func testSpeechResumingWithinTheHoldWindow_CancelsTheStop() {
         var tracker = HandsFreeVoiceActivityTracker()
         _ = tracker.observe(speechDetected: true, atSeconds: 0)
         _ = tracker.observe(speechDetected: false, atSeconds: 1.0)
@@ -323,7 +323,7 @@ final class HandsFreeVoiceActivityTests: XCTestCase {
         )
     }
 
-    func testSilenceBeforeAnySpeechIsNotReported() {
+    func testSilenceBeforeAnySpeech_IsNotReported() {
         var tracker = HandsFreeVoiceActivityTracker()
 
         for step in 0 ..< 20 {
@@ -331,7 +331,7 @@ final class HandsFreeVoiceActivityTests: XCTestCase {
         }
     }
 
-    func testSilenceIsReportedOncePerUtterance() {
+    func testSilenceDetection_IsReportedOncePerUtterance() {
         var tracker = HandsFreeVoiceActivityTracker()
         _ = tracker.observe(speechDetected: true, atSeconds: 0)
         _ = tracker.observe(speechDetected: false, atSeconds: 1.0)
@@ -341,7 +341,7 @@ final class HandsFreeVoiceActivityTests: XCTestCase {
         XCTAssertEqual(tracker.observe(speechDetected: true, atSeconds: 10.0), .speechDetected)
     }
 
-    func testNonMonotonicTimestampsCannotStopCaptureEarly() {
+    func testNonMonotonicTimestamps_CannotStopCaptureEarly() {
         var tracker = HandsFreeVoiceActivityTracker()
         _ = tracker.observe(speechDetected: true, atSeconds: 5.0)
         _ = tracker.observe(speechDetected: false, atSeconds: 6.0)
@@ -354,7 +354,7 @@ final class HandsFreeVoiceActivityTests: XCTestCase {
         )
     }
 
-    func testResetDropsThePartObservedUtterance() {
+    func testReset_DropsThePartObservedUtterance() {
         var tracker = HandsFreeVoiceActivityTracker()
         _ = tracker.observe(speechDetected: true, atSeconds: 0)
         _ = tracker.observe(speechDetected: false, atSeconds: 1.0)
@@ -365,7 +365,7 @@ final class HandsFreeVoiceActivityTests: XCTestCase {
         XCTAssertEqual(tracker.observe(speechDetected: true, atSeconds: 11.0), .speechDetected)
     }
 
-    func testTrackerFeedsTheMachineThroughAWholeUtterance() {
+    func testTracker_FeedsTheMachineThroughAWholeUtterance() {
         var tracker = HandsFreeVoiceActivityTracker()
         var machine = HandsFreeDictationMachine()
         _ = machine.handle(.userToggled)
@@ -387,7 +387,7 @@ final class HandsFreeVoiceActivityTests: XCTestCase {
         XCTAssertEqual(machine.state, .finalising)
     }
 
-    func testPolicyBudgetsAreOrderedForUsableHandsFreeDictation() {
+    func testPolicyBudgets_AreOrderedForUsableHandsFreeDictation() {
         XCTAssertLessThan(
             HandsFreeDictationPolicy.speechStartBudgetSeconds,
             HandsFreeDictationPolicy.defaultSilenceHoldSeconds
@@ -402,7 +402,7 @@ final class HandsFreeVoiceActivityTests: XCTestCase {
     }
 
 
-    func testPreRollKeepsOnlyTheConfiguredWindowAndDrainsOnce() throws {
+    func testPreRoll_KeepsOnlyTheConfiguredWindowAndDrainsOnce() throws {
         let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 1_000, channels: 1))
         let preRoll = HandsFreeAudioPreRollBuffer(duration: 0.5)
         for _ in 0 ..< 4 {
@@ -414,6 +414,17 @@ final class HandsFreeVoiceActivityTests: XCTestCase {
         let snapshot = preRoll.takeSnapshot()
 
         XCTAssertEqual(snapshot.reduce(0) { $0 + Int($1.frameLength) }, 400)
+        XCTAssertTrue(preRoll.takeSnapshot().isEmpty)
+    }
+
+    func testPreRoll_IgnoresEmptyAudioBuffers() throws {
+        let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 1_000, channels: 1))
+        let emptyBuffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1))
+        emptyBuffer.frameLength = 0
+        let preRoll = HandsFreeAudioPreRollBuffer()
+
+        preRoll.append(emptyBuffer)
+
         XCTAssertTrue(preRoll.takeSnapshot().isEmpty)
     }
 }

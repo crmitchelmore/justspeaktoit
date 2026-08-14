@@ -5,6 +5,15 @@ import Foundation
 // MARK: - Session diagnostics and failure handling (extracted from MainManager)
 
 extension MainManager {
+    func sessionProcessingShouldContinue(_ session: ActiveSession) -> Bool {
+        guard activeSession === session else { return false }
+        guard !Task.isCancelled else {
+            cleanupAfterFailure(message: "Recording cancelled", preserveFile: false)
+            return false
+        }
+        return true
+    }
+
     func ensureBatchAPIKeyAvailable(for session: ActiveSession, message: String) async -> Bool {
         guard await transcriptionManager.hasValidBatchAPIKey() else {
             await handleMissingAPIKey(session, phase: .transcription, message: message)

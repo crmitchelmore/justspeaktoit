@@ -70,7 +70,7 @@ struct HUDOverlay: View {
           .accessibilityValue("\(Int(manager.audioLevel * 100)) percent")
           .accessibilityAddTraits(.updatesFrequently)
       }
-      if manager.snapshot.phase.isTerminal == false {
+      if manager.snapshot.phase.isTerminal == false, manager.snapshot.phase != .armed {
         Text(elapsedText)
           .font(.caption.monospacedDigit())
           .foregroundStyle(.secondary)

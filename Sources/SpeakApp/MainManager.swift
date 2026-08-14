@@ -168,9 +168,13 @@ final class MainManager: ObservableObject {
       }
       .store(in: &cancellables)
 
-    // Turning hands-free dictation off must tear down a live detector, not
-    // just stop future arming.
-    appSettings.$handsFreeDictationEnabled
+    // Turning hands-free off or selecting an incompatible transcription route
+    // must tear down a live detector, not just stop future arming.
+    Publishers.CombineLatest3(
+      appSettings.$handsFreeDictationEnabled,
+      appSettings.$transcriptionMode,
+      appSettings.$liveTranscriptionModel
+    )
       .receive(on: RunLoop.main)
       .sink { [weak self] _ in
         self?.disarmHandsFreeIfDisabled()
@@ -628,7 +632,7 @@ final class MainManager: ObservableObject {
         // Ignored: sleep cancellation simply means we stop immediately.
       }
     }
-    guard !Task.isCancelled, activeSession === session else { return }
+    guard sessionProcessingShouldContinue(session) else { return }
 
     if appSettings.recordingSoundsEnabled {
       recordingSoundPlayer.play(.stop, volume: appSettings.recordingSoundVolume)
@@ -662,14 +666,14 @@ final class MainManager: ObservableObject {
 
     do {
       let summary = try await stopRecordingWithTimeout()
-      guard !Task.isCancelled, activeSession === session else { return }
+      guard sessionProcessingShouldContinue(session) else { return }
       session.recordingSummary = summary
       session.recordingEnded = summary.startedAt.addingTimeInterval(summary.duration)
 
       if isStreamingTranscriptionMode {
         session.transcriptionStarted = Date()
         let result = try await transcriptionManager.stopLiveTranscription()
-        guard !Task.isCancelled, activeSession === session else { return }
+        guard sessionProcessingShouldContinue(session) else { return }
         session.transcriptionEnded = Date()
         session.transcriptionResult = result
         session.modelsUsed.insert(result.modelIdentifier)
@@ -760,7 +764,7 @@ final class MainManager: ObservableObject {
           }
         }
         let result = try await transcriptionManager.transcribeFile(at: summary.url)
-        guard !Task.isCancelled, activeSession === session else { return }
+        guard sessionProcessingShouldContinue(session) else { return }
         session.transcriptionEnded = Date()
         session.transcriptionResult = result
         session.modelsUsed.insert(result.modelIdentifier)
@@ -855,7 +859,7 @@ final class MainManager: ObservableObject {
             }
           }
         )
-        guard !Task.isCancelled, activeSession === session else { return }
+        guard sessionProcessingShouldContinue(session) else { return }
         switch outcomeResult {
         case .success(let outcome):
           session.postProcessingEnded = Date()

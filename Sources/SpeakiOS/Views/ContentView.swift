@@ -8,6 +8,14 @@ import SpeakCore
 /// Integrates with Live Activity for lock screen presence.
 @MainActor
 final class TranscriberCoordinator: ObservableObject {
+    private enum LifecycleError: LocalizedError {
+        case sessionFinalising
+
+        var errorDescription: String? {
+            "The previous transcription is still finalising."
+        }
+    }
+
     @Published private(set) var isRunning = false
     @Published private(set) var partialText = ""
     @Published private(set) var error: Error?
@@ -48,6 +56,7 @@ final class TranscriberCoordinator: ObservableObject {
         preRollBuffers: [AVAudioPCMBuffer] = [],
         analyzerFallbackAllowed: Bool = true
     ) async throws {
+        guard stoppingSession == nil else { throw LifecycleError.sessionFinalising }
         let settings = AppSettings.shared
         // Wait for the initial keychain load so auto-start on a cold launch
         // doesn't read empty API keys and fall back to Apple Speech.

@@ -231,7 +231,7 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
     }
 
     private func handleActivity(_ update: AppleSpeechActivityUpdate) async {
-        guard machine.isArmed else { return }
+        guard machine.state == .armed || machine.state == .recording else { return }
         let hold = HandsFreeDictationPolicy.silenceHoldSeconds(configured: silenceDuration())
         guard let event = tracker.observe(
             speechDetected: update.speechDetected,

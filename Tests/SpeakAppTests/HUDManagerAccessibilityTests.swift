@@ -36,7 +36,7 @@ final class HUDManagerAccessibilityTests: XCTestCase {
   }
 
   @MainActor
-  func testArmedPhaseIsVisibleAndAnnouncedWithoutStartingARecording() {
+  func testArmedPhase_IsVisibleAndAnnouncedWithoutStartingARecording() {
     var announcements: [String] = []
     let manager = HUDManager(
       appSettings: AppSettings(),

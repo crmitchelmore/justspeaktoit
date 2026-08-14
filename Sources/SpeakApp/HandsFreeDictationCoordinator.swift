@@ -215,8 +215,8 @@ final class HandsFreeDictationCoordinator {
         sourceFormat: inputFormat,
         targetFormat: session.audioFormat
       )
-      inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { buffer, _ in
-        self.preRoll.append(buffer)
+      inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [preRoll, session] buffer, _ in
+        preRoll.append(buffer)
         guard let converted = converter.convert(buffer) else { return }
         session.send(converted)
       }
@@ -232,7 +232,7 @@ final class HandsFreeDictationCoordinator {
   }
 
   private func handleActivity(_ update: AppleSpeechActivityUpdate) async {
-    guard machine.isArmed else { return }
+    guard machine.state == .armed || machine.state == .recording else { return }
     guard let event = tracker.observe(
       speechDetected: update.speechDetected,
       atSeconds: update.seconds,

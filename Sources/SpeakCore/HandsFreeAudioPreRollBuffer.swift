@@ -45,6 +45,7 @@ public final class HandsFreeAudioPreRollBuffer: @unchecked Sendable {
     }
 
     private static func copy(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+        guard buffer.frameLength > 0 else { return nil }
         guard let copy = AVAudioPCMBuffer(
             pcmFormat: buffer.format,
             frameCapacity: buffer.frameLength
@@ -61,7 +62,8 @@ public final class HandsFreeAudioPreRollBuffer: @unchecked Sendable {
             guard let sourceData = sourceBuffer.mData, let destinationData = destinationBuffer.mData else {
                 continue
             }
-            memcpy(destinationData, sourceData, Int(sourceBuffer.mDataByteSize))
+            let byteCount = Int(min(sourceBuffer.mDataByteSize, destinationBuffer.mDataByteSize))
+            memcpy(destinationData, sourceData, byteCount)
         }
         return copy
     }

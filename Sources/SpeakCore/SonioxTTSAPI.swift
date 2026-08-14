@@ -6,10 +6,6 @@ import Foundation
 /// user-facing behaviour is preserved.
 public enum SonioxTTSAPIError: Error, Sendable, Equatable {
     case invalidResponse
-    /// HTTP 401/403 — the key is missing, wrong or revoked.
-    case unauthorized(statusCode: Int, message: String)
-    /// Any other non-2xx response.
-    case httpError(statusCode: Int, message: String)
     /// The request exceeded Soniox's per-request text limit.
     case textTooLong(limit: Int, characterCount: Int)
     /// Stable provider error classification plus the request identifier used by support.
@@ -46,6 +42,15 @@ public struct SonioxTTSFailure: Equatable, Sendable {
     public let type: SonioxTTSFailureType
     public let message: String
     public let requestID: String?
+
+    /// True when Soniox refused the credential.
+    ///
+    /// The status code is the fallback signal: a proxy or a future release can
+    /// answer 401 or 403 with an unknown `error_type`, or with no error body at
+    /// all, and the caller must still tell the user to check the key.
+    public var isAuthenticationFailure: Bool {
+        type == .unauthenticated || statusCode == 401 || statusCode == 403
+    }
 }
 
 /// Output containers the app requests from Soniox.

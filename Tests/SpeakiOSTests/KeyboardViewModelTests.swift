@@ -401,9 +401,7 @@ final class KeyboardViewModelTests: XCTestCase {
     private func makeModel(
         engine: FakeEngine,
         policy: KeyboardCapturePlanner.DirectCapturePolicy = .enabled,
-        capabilities: @escaping () -> KeyboardViewModel.DirectCaptureCapabilities = {
-            Self.availableCapabilities
-        }
+        capabilities: (@MainActor () -> KeyboardViewModel.DirectCaptureCapabilities)? = nil
     ) -> KeyboardViewModel {
         makeHarness(engine: engine, policy: policy, capabilities: capabilities).model
     }
@@ -411,9 +409,7 @@ final class KeyboardViewModelTests: XCTestCase {
     private func makeHarness(
         engine: FakeEngine,
         policy: KeyboardCapturePlanner.DirectCapturePolicy = .enabled,
-        capabilities: @escaping () -> KeyboardViewModel.DirectCaptureCapabilities = {
-            Self.availableCapabilities
-        },
+        capabilities: (@MainActor () -> KeyboardViewModel.DirectCaptureCapabilities)? = nil,
         configurePreferences: (KeyboardDictationPreferencesStore) -> Void = { _ in },
         instantReady: Bool = false
     ) -> Harness {
@@ -432,7 +428,7 @@ final class KeyboardViewModelTests: XCTestCase {
             handoffStore: handoffStore,
             preferences: preferences,
             directCapturePolicy: policy,
-            directCaptureCapabilities: capabilities
+            directCaptureCapabilities: capabilities ?? { Self.availableCapabilities }
         )
         return Harness(
             model: model,

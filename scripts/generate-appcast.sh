@@ -108,6 +108,7 @@ cat << EOF
       <title>Version ${VERSION}</title>
       <sparkle:version>${BUILD_NUMBER}</sparkle:version>
       <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
+      <sparkle:fullReleaseNotesLink>https://github.com/crmitchelmore/justspeaktoit/releases</sparkle:fullReleaseNotesLink>
       <pubDate>${PUB_DATE}</pubDate>
       <description><![CDATA[
         ${RELEASE_NOTES_HTML}

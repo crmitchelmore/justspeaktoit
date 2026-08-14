@@ -377,6 +377,42 @@ final class KeyboardViewModelTests: XCTestCase {
         )
     }
 
+    func testWhitespaceOnlyHypothesis_leavesNoStraySpaceWhenAudioIsInterrupted() throws {
+        let engine = FakeEngine()
+        let document = DocumentProxy(before: "Host")
+        let model = makeModel(engine: engine)
+        activate(model, document: document)
+        model.micTapped()
+        let runID = try XCTUnwrap(engine.startedRunIDs.last)
+        engine.emit(.captureStarted, for: runID)
+        engine.emit(.hypothesis(" "), for: runID)
+        XCTAssertNotEqual(document.text, "Host", "The session must own a separator to remove")
+
+        engine.emit(.interrupted, for: runID)
+
+        XCTAssertEqual(document.text, "Host")
+        XCTAssertEqual(model.directState, .failed(.audioInterrupted))
+    }
+
+    func testWhitespaceOnlyHypothesis_removalKeepsHostTextWhenTheAnchorIsLost() {
+        let document = DocumentProxy(before: "Host")
+        let session = KeyboardDocumentSession(
+            insertText: document.insertText,
+            deleteBackward: document.deleteBackward,
+            contextBeforeInput: { document.contextBeforeInput },
+            contextAfterInput: { document.after }
+        )
+        session.begin()
+        XCTAssertEqual(
+            session.apply(KeyboardTranscriptEdit(deleteCount: 0, insertion: " ")),
+            .applied
+        )
+        document.after = " external text"
+
+        XCTAssertEqual(session.removeSeparatorIfTranscriptIsEmpty(), .anchorLost)
+        XCTAssertEqual(document.before, "Host  ")
+    }
+
     private static let documentID = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
     private static let availableCapabilities = KeyboardViewModel.DirectCaptureCapabilities(
         microphonePermission: .granted,

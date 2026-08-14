@@ -315,8 +315,15 @@ final class KeyboardViewModel: ObservableObject {
         for effect in effects {
             perform(effect)
         }
-        if directState == .failed(.noSpeech) {
+        // Every failure that can follow a started capture must clean up the
+        // session-owned separator. An interruption or a target change after a
+        // whitespace-only hypothesis ends in `.failed`, and would otherwise
+        // leave a stray space in the host document.
+        switch directState {
+        case .failed(.noSpeech), .failed(.audioInterrupted), .failed(.targetChanged):
             _ = documentSession?.removeSeparatorIfTranscriptIsEmpty()
+        default:
+            break
         }
     }
 

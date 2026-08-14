@@ -5,9 +5,23 @@
 // from the same Markdown that `generate-release-notes.mjs` produces for the
 // GitHub release, so there is a single release-note source.
 
-export const CATALOGUE_SCHEMA_VERSION = 1;
+export const CATALOGUE_SCHEMA_VERSION = 2;
 export const DEFAULT_CATALOGUE_PATH = "Sources/SpeakCore/Resources/ReleaseNotes.json";
 export const DEFAULT_ENTRY_LIMIT = 12;
+export const RELEASE_PLATFORMS = Object.freeze(["mac", "ios"]);
+
+export const normalisePlatform = (value) => {
+    const platform = String(value ?? "").trim().toLowerCase();
+    if (!RELEASE_PLATFORMS.includes(platform)) {
+        throw new Error(`Release-note platform must be mac or ios, got "${value ?? ""}"`);
+    }
+    return platform;
+};
+
+export const platformForTag = (tag, fallback = "mac") => {
+    const match = String(tag ?? "").trim().match(/^(mac|ios)-v/i);
+    return match ? match[1].toLowerCase() : normalisePlatform(fallback);
+};
 
 export const normaliseVersion = (value) => String(value ?? "")
     .trim()
@@ -46,30 +60,43 @@ export const sanitiseNotes = (markdown) => String(markdown ?? "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
-export const catalogueEntry = ({ version, tag, publishedAt, markdown }) => {
+export const catalogueEntry = ({ platform, version, tag, publishedAt, markdown }) => {
     const resolvedVersion = normaliseVersion(version ?? tag);
     if (!resolvedVersion) throw new Error("A release-note entry needs a version");
+    const resolvedPlatform = normalisePlatform(platform ?? platformForTag(tag));
     const notes = sanitiseNotes(markdown);
     if (!notes) throw new Error(`Release notes for ${resolvedVersion} were empty`);
     return {
+        platform: resolvedPlatform,
         version: resolvedVersion,
-        tag: tag ?? `mac-v${resolvedVersion}`,
+        tag: tag ?? `${resolvedPlatform}-v${resolvedVersion}`,
         publishedAt: publishedAt ?? new Date().toISOString(),
         markdown: notes,
     };
 };
 
 export const mergeEntries = (existing, incoming, limit = DEFAULT_ENTRY_LIMIT) => {
-    const byVersion = new Map();
+    const byPlatformVersion = new Map();
+    const add = (entry) => {
+        if (!entry?.version) return;
+        const platform = normalisePlatform(entry.platform ?? platformForTag(entry.tag));
+        const version = normaliseVersion(entry.version);
+        byPlatformVersion.set(`${platform}:${version}`, { ...entry, platform, version });
+    };
     for (const entry of existing ?? []) {
-        if (entry?.version) byVersion.set(normaliseVersion(entry.version), entry);
+        add(entry);
     }
     for (const entry of incoming ?? []) {
-        if (entry?.version) byVersion.set(normaliseVersion(entry.version), entry);
+        add(entry);
     }
-    return [...byVersion.values()]
-        .sort((a, b) => compareVersions(a.version, b.version))
-        .slice(0, Math.max(1, limit));
+    const counts = new Map();
+    return [...byPlatformVersion.values()]
+        .sort((a, b) => compareVersions(a.version, b.version) || a.platform.localeCompare(b.platform))
+        .filter((entry) => {
+            const count = counts.get(entry.platform) ?? 0;
+            counts.set(entry.platform, count + 1);
+            return count < Math.max(1, limit);
+        });
 };
 
 export const buildCatalogue = ({ entries, generatedAt = new Date().toISOString() }) => ({

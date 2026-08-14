@@ -96,8 +96,29 @@ public enum ReleaseNotesMarkdown {
     }
 }
 
+/// Release tracks have independent versions and notes even when their
+/// marketing-version strings happen to match.
+public enum ReleaseNotesPlatform: String, Codable, CaseIterable, Hashable, Sendable {
+    case mac
+    case ios
+
+    public static var current: ReleaseNotesPlatform {
+        #if os(iOS)
+        .ios
+        #else
+        .mac
+        #endif
+    }
+
+    init(tag: String) {
+        self = tag.lowercased().hasPrefix("ios-v") ? .ios : .mac
+    }
+}
+
 /// Notes for one shipped version.
 public struct ReleaseNoteEntry: Identifiable, Hashable, Sendable, Codable {
+    /// The independently versioned release track these notes describe.
+    public let platform: ReleaseNotesPlatform
     /// Marketing version without any tag prefix, for example `2.45.0`.
     public let version: String
     /// The Git tag the notes were generated from, for example `mac-v2.45.0`.
@@ -106,9 +127,16 @@ public struct ReleaseNoteEntry: Identifiable, Hashable, Sendable, Codable {
     public let publishedAt: String
     public let markdown: String
 
-    public var id: String { version }
+    public var id: String { "\(platform.rawValue):\(version)" }
 
-    public init(version: String, tag: String, publishedAt: String, markdown: String) {
+    public init(
+        version: String,
+        tag: String,
+        publishedAt: String,
+        markdown: String,
+        platform: ReleaseNotesPlatform? = nil
+    ) {
+        self.platform = platform ?? ReleaseNotesPlatform(tag: tag)
         self.version = ReleaseNotesVersion.normalised(version)
         self.tag = tag
         self.publishedAt = publishedAt
@@ -121,7 +149,8 @@ public struct ReleaseNoteEntry: Identifiable, Hashable, Sendable, Codable {
             version: try container.decode(String.self, forKey: .version),
             tag: try container.decodeIfPresent(String.self, forKey: .tag) ?? "",
             publishedAt: try container.decodeIfPresent(String.self, forKey: .publishedAt) ?? "",
-            markdown: try container.decode(String.self, forKey: .markdown)
+            markdown: try container.decode(String.self, forKey: .markdown),
+            platform: try container.decodeIfPresent(ReleaseNotesPlatform.self, forKey: .platform)
         )
     }
 
@@ -187,7 +216,10 @@ public struct ReleaseNotesCatalog: Sendable, Equatable {
     public let generatedAt: Date?
 
     public init(entries: [ReleaseNoteEntry], generatedAt: Date? = nil) {
-        self.entries = entries.sorted { ReleaseNotesVersion.isDescending($0.version, $1.version) }
+        self.entries = entries.sorted {
+            if $0.version == $1.version { return $0.platform.rawValue < $1.platform.rawValue }
+            return ReleaseNotesVersion.isDescending($0.version, $1.version)
+        }
         self.generatedAt = generatedAt
     }
 
@@ -210,15 +242,22 @@ public struct ReleaseNotesCatalog: Sendable, Equatable {
         )
     }
 
-    public var latest: ReleaseNoteEntry? { entries.first }
+    public func entries(for platform: ReleaseNotesPlatform) -> [ReleaseNoteEntry] {
+        entries.filter { $0.platform == platform }
+    }
 
-    public var isEmpty: Bool { entries.isEmpty }
+    public var latest: ReleaseNoteEntry? { entries(for: .current).first }
+
+    public var isEmpty: Bool { entries(for: .current).isEmpty }
 
     /// Notes for a version, tolerating tag prefixes such as `mac-v`.
-    public func entry(forVersion version: String) -> ReleaseNoteEntry? {
+    public func entry(
+        forVersion version: String,
+        platform: ReleaseNotesPlatform = .current
+    ) -> ReleaseNoteEntry? {
         let wanted = ReleaseNotesVersion.normalised(version)
         guard !wanted.isEmpty else { return nil }
-        return entries.first { $0.version == wanted }
+        return entries.first { $0.platform == platform && $0.version == wanted }
     }
 
     /// The marketing version of the running app, for example `2.45.0`.
@@ -244,12 +283,13 @@ public struct ReleaseNotesBrowser: Equatable, Sendable {
 
     public init(
         catalog: ReleaseNotesCatalog = .bundled,
-        installedVersion: String = ReleaseNotesCatalog.installedVersion()
+        installedVersion: String = ReleaseNotesCatalog.installedVersion(),
+        platform: ReleaseNotesPlatform = .current
     ) {
-        self.entries = catalog.entries
+        self.entries = catalog.entries(for: platform)
         self.installedVersion = ReleaseNotesVersion.normalised(installedVersion)
-        self.selectedVersion = catalog.entry(forVersion: installedVersion)?.version
-            ?? catalog.latest?.version
+        self.selectedVersion = catalog.entry(forVersion: installedVersion, platform: platform)?.version
+            ?? self.entries.first?.version
     }
 
     public var isEmpty: Bool { entries.isEmpty }
@@ -257,7 +297,6 @@ public struct ReleaseNotesBrowser: Equatable, Sendable {
     public var installedEntry: ReleaseNoteEntry? {
         entries.first { $0.version == installedVersion }
     }
-
     /// True when the catalogue carries notes for the running build. It is false
     /// for development and unreleased builds, and for builds older than the
     /// oldest bundled entry.

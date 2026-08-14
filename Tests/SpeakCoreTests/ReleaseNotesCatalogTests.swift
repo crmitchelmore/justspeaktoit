@@ -49,6 +49,31 @@ final class ReleaseNotesCatalogTests: XCTestCase {
         XCTAssertNil(catalog.entry(forVersion: ""))
     }
 
+    func testPlatformTracks_doNotOverwriteMatchingVersions() {
+        let catalog = ReleaseNotesCatalog(entries: [
+            ReleaseNoteEntry(
+                version: "2.45.0",
+                tag: "mac-v2.45.0",
+                publishedAt: "2026-08-08T09:05:28Z",
+                markdown: "macOS notes"
+            ),
+            ReleaseNoteEntry(
+                version: "2.45.0",
+                tag: "ios-v2.45.0",
+                publishedAt: "2026-08-08T09:05:28Z",
+                markdown: "iOS notes"
+            ),
+        ])
+
+        XCTAssertEqual(catalog.entry(forVersion: "2.45.0", platform: .mac)?.markdown, "macOS notes")
+        XCTAssertEqual(catalog.entry(forVersion: "2.45.0", platform: .ios)?.markdown, "iOS notes")
+        XCTAssertEqual(
+            ReleaseNotesBrowser(catalog: catalog, installedVersion: "2.45.0", platform: .ios)
+                .selectedEntry?.markdown,
+            "iOS notes"
+        )
+    }
+
     func testDecode_readsPublicationDate() throws {
         let entry = try XCTUnwrap(makeCatalog().latest)
         let published = try XCTUnwrap(entry.publishedDate)
@@ -66,10 +91,10 @@ final class ReleaseNotesCatalogTests: XCTestCase {
         let catalog = ReleaseNotesCatalog.bundled
 
         XCTAssertFalse(catalog.isEmpty, "The app must ship release notes so they are readable offline")
-        XCTAssertEqual(
-            catalog.entries.map(\.version),
-            catalog.entries.map(\.version).sorted(by: ReleaseNotesVersion.isDescending)
-        )
+        for platform in ReleaseNotesPlatform.allCases {
+            let versions = catalog.entries(for: platform).map(\.version)
+            XCTAssertEqual(versions, versions.sorted(by: ReleaseNotesVersion.isDescending))
+        }
         for entry in catalog.entries {
             XCTAssertFalse(entry.markdown.isEmpty, "\(entry.version) shipped without notes")
             XCTAssertFalse(entry.blocks.isEmpty, "\(entry.version) produced no renderable content")
@@ -221,7 +246,10 @@ final class ReleaseNotesCatalogTests: XCTestCase {
     func testBrowser_defaultsToBundledCatalogForTheInstalledBuild() {
         let browser = ReleaseNotesBrowser()
 
-        XCTAssertEqual(browser.entries.map(\.version), ReleaseNotesCatalog.bundled.entries.map(\.version))
+        XCTAssertEqual(
+            browser.entries.map(\.version),
+            ReleaseNotesCatalog.bundled.entries(for: .current).map(\.version)
+        )
         XCTAssertEqual(browser.installedVersion, ReleaseNotesCatalog.installedVersion())
         XCTAssertNotNil(browser.selectedEntry, "A browsable catalogue must always open on some version")
     }

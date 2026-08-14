@@ -60,6 +60,7 @@ test("GitHub's auto-generated compare footer is stripped", () => {
 test("entries default their tag and reject empty notes", () => {
     const entry = catalogueEntry({ version: "2.46.0", publishedAt: "2026-08-09T00:00:00Z", markdown: "## Overview\n\nNew." });
     assert.deepEqual(entry, {
+        platform: "mac",
         version: "2.46.0",
         tag: "mac-v2.46.0",
         publishedAt: "2026-08-09T00:00:00Z",
@@ -83,6 +84,20 @@ test("merging replaces a version in place, orders newest first and honours the l
     assert.equal(merged[1].markdown, "regenerated");
 });
 
+test("matching macOS and iOS versions remain separate and limits apply per platform", () => {
+    const merged = mergeEntries([], [
+        catalogueEntry({ platform: "mac", version: "2.45.0", markdown: "mac current" }),
+        catalogueEntry({ platform: "ios", version: "2.45.0", markdown: "ios current" }),
+        catalogueEntry({ platform: "mac", version: "2.44.0", markdown: "mac previous" }),
+        catalogueEntry({ platform: "ios", version: "2.44.0", markdown: "ios previous" }),
+    ], 1);
+
+    assert.deepEqual(
+        merged.map((entry) => `${entry.platform}:${entry.version}`),
+        ["ios:2.45.0", "mac:2.45.0"],
+    );
+});
+
 test("catalogue round-trips through the shipped JSON shape", () => {
     const catalogue = buildCatalogue({
         entries: [catalogueEntry({ version: "mac-v2.45.0", markdown: "## Overview\n\nShipped." })],
@@ -90,7 +105,7 @@ test("catalogue round-trips through the shipped JSON shape", () => {
     });
     const parsed = parseCatalogue(serialiseCatalogue(catalogue));
 
-    assert.equal(parsed.schemaVersion, 1);
+    assert.equal(parsed.schemaVersion, 2);
     assert.equal(parsed.generatedAt, "2026-08-09T00:00:00Z");
     assert.deepEqual(parsed.entries.map((entry) => entry.version), ["2.45.0"]);
     assert.deepEqual(parseCatalogue(null).entries, []);
@@ -103,7 +118,7 @@ test("an unusable --limit stops the run instead of emptying the catalogue", () =
         generatedAt: "2026-08-09T00:00:00Z",
     }));
 
-    for (const limit of ["abc", "0", "-3"]) {
+    for (const limit of ["abc", "0", "-3", "1.5", "12oops", "9999999999999999999999999"]) {
         const cataloguePath = join(mkdtempSync(join(tmpdir(), "release-notes-")), "ReleaseNotes.json");
         writeFileSync(cataloguePath, existing);
 
@@ -117,4 +132,25 @@ test("an unusable --limit stops the run instead of emptying the catalogue", () =
         assert.match(result.stderr, /--limit must be a positive whole number/);
         assert.equal(readFileSync(cataloguePath, "utf8"), existing, `--limit ${limit} rewrote the catalogue`);
     }
+});
+
+test("a malformed existing catalogue fails without rewriting it", () => {
+    const script = fileURLToPath(new URL("../../scripts/update-release-notes-catalogue.mjs", import.meta.url));
+    const directory = mkdtempSync(join(tmpdir(), "release-notes-"));
+    const cataloguePath = join(directory, "ReleaseNotes.json");
+    const notesPath = join(directory, "notes.md");
+    const malformed = "{ definitely-not-json }\n";
+    writeFileSync(cataloguePath, malformed);
+    writeFileSync(notesPath, "## Overview\n\nShipped.");
+
+    const result = spawnSync(process.execPath, [
+        script,
+        "--platform", "mac",
+        "--version", "2.46.0",
+        "--notes-file", notesPath,
+        "--catalogue", cataloguePath,
+    ], { encoding: "utf8" });
+
+    assert.notEqual(result.status, 0);
+    assert.equal(readFileSync(cataloguePath, "utf8"), malformed);
 });

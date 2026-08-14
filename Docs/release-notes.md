@@ -51,17 +51,18 @@ compiled into SpeakCore's resource bundle and read through
 `ReleaseNotesCatalog.bundled`; `ReleaseNotesBrowser` selects the installed
 version by default and keeps earlier versions browsable.
 
-`.github/workflows/release-mac.yml` refreshes the catalogue *before* the archive
-is built, so every published build contains the notes for its own version. It
-runs the updater twice:
+Every distribution workflow refreshes and then verifies the catalogue before
+upload. The direct macOS release generates the new tag's notes before archiving
+and runs the updater twice:
 
 ```bash
 # 1. Restore the history released since the checked-in file was last refreshed.
-node scripts/update-release-notes-catalogue.mjs --backfill
+node scripts/update-release-notes-catalogue.mjs --backfill --platform mac
 
 # 2. Merge in the notes for the tag being released.
 node scripts/update-release-notes-catalogue.mjs \
-  --version 2.46.0 --tag mac-v2.46.0 --notes-file "$RUNNER_TEMP/release-notes.md"
+  --platform mac --version 2.46.0 --tag mac-v2.46.0 \
+  --notes-file "$RUNNER_TEMP/release-notes.md"
 ```
 
 The rebuilt catalogue lives only in the runner's checkout — the release job does
@@ -72,11 +73,20 @@ checked-in file therefore only needs to be a reasonable starting point; run the
 same backfill locally (it needs an authenticated `gh` CLI) when refreshing it:
 
 ```bash
-node scripts/update-release-notes-catalogue.mjs --backfill --limit 12
+node scripts/update-release-notes-catalogue.mjs --backfill --platform mac --limit 12
 ```
 
-Entries are keyed by marketing version, sorted newest first, capped at
-`--limit` (12 by default) and stripped of the compare-URL footer and generator
-HTML comment. Notes for a build that has not been released yet are absent by
-design; the app then opens on the newest bundled version and says so. A build
-older than every bundled entry simply says it is showing the latest notes.
+The Mac App Store workflow backfills the same `mac-v*` history and verifies the
+archive against the explicit version, so direct and App Store builds show the
+same notes. The iOS workflow requires a `release_notes_source_tag`; automated
+paired releases pass their new `mac-v*` tag, while an iOS-only release must name
+the existing `mac-v*` or `ios-v*` tag that describes its changes. It generates
+from that tag, stores the entry on the iOS track, and verifies the archived app.
+
+Entries are keyed by platform plus marketing version, sorted newest first and
+capped at `--limit` per platform (12 by default). This keeps coincident macOS
+and iOS version numbers distinct. Compare-URL footers and generator HTML
+comments are stripped. Notes for a build that has not been released yet are
+absent by design; the app then opens on the newest bundled version and says so.
+A build older than every bundled entry simply says it is showing the latest
+notes.

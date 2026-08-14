@@ -150,9 +150,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          node scripts/update-release-notes-catalogue.mjs --backfill \
+          node scripts/update-release-notes-catalogue.mjs --backfill --platform mac \
             || echo "::warning::Release-note backfill failed; bundling the checked-in history instead"
           node scripts/update-release-notes-catalogue.mjs \
+            --platform mac \
             --version "${{ steps.version.outputs.version }}" \
             --tag "${GITHUB_REF_NAME}" \
             --notes-file "$RUNNER_TEMP/release-notes.md"
@@ -172,6 +173,20 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             PRODUCT_BUNDLE_IDENTIFIER=com.justspeaktoit.mac \
             ENABLE_HARDENED_RUNTIME=YES
+
+      - name: Verify archived release notes
+        run: |
+          APP_PATH="$RUNNER_TEMP/$PRODUCT_NAME.xcarchive/Products/Applications/$PRODUCT_NAME.app"
+          CATALOGUE_PATH=$(find "$APP_PATH" -name ReleaseNotes.json -print -quit)
+          if [ -z "$CATALOGUE_PATH" ]; then
+            echo "::error::Archived app does not contain ReleaseNotes.json"
+            exit 1
+          fi
+          node scripts/update-release-notes-catalogue.mjs \
+            --verify \
+            --platform mac \
+            --version "${{ steps.version.outputs.version }}" \
+            --catalogue "$CATALOGUE_PATH"
 
       - name: Export App (Developer ID / Ad-Hoc)
         env:

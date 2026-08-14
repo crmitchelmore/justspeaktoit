@@ -7,11 +7,12 @@
 // the notes for its own version):
 //
 //   node scripts/update-release-notes-catalogue.mjs \
-//     --version 2.46.0 --tag mac-v2.46.0 --notes-file "$RUNNER_TEMP/release-notes.md"
+//     --platform mac --version 2.46.0 --tag mac-v2.46.0 \
+//     --notes-file "$RUNNER_TEMP/release-notes.md"
 //
 // Backfill from published GitHub releases (requires the `gh` CLI):
 //
-//   node scripts/update-release-notes-catalogue.mjs --backfill --limit 12
+//   node scripts/update-release-notes-catalogue.mjs --backfill --platform mac --limit 12
 
 import { execFileSync } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -22,8 +23,10 @@ import {
     buildCatalogue,
     catalogueEntry,
     mergeEntries,
+    normalisePlatform,
     normaliseVersion,
     parseCatalogue,
+    platformForTag,
     serialiseCatalogue,
 } from "./release-notes-catalogue-lib.mjs";
 
@@ -34,12 +37,21 @@ const valueAfter = (name) => {
 const hasFlag = (name) => process.argv.includes(name);
 
 const cataloguePath = resolve(valueAfter("--catalogue") ?? DEFAULT_CATALOGUE_PATH);
-// A non-numeric --limit must stop the run: `Math.max(1, NaN)` is NaN, so the
-// catalogue would otherwise be silently rewritten with no entries at all.
 const requestedLimit = valueAfter("--limit");
-const limit = hasFlag("--limit") ? Number.parseInt(requestedLimit ?? "", 10) : DEFAULT_ENTRY_LIMIT;
-if (!Number.isFinite(limit) || limit < 1) {
+const parsedLimit = Number(requestedLimit);
+if (hasFlag("--limit") && (
+    !/^[1-9][0-9]*$/.test(requestedLimit ?? "")
+    || !Number.isSafeInteger(parsedLimit)
+)) {
     console.error(`--limit must be a positive whole number, got "${requestedLimit ?? ""}"`);
+    process.exit(2);
+}
+const limit = hasFlag("--limit") ? parsedLimit : DEFAULT_ENTRY_LIMIT;
+let platform;
+try {
+    platform = normalisePlatform(valueAfter("--platform") ?? "mac");
+} catch (error) {
+    console.error(error.message);
     process.exit(2);
 }
 const repository = valueAfter("--repository") ?? process.env.GITHUB_REPOSITORY ?? "crmitchelmore/justspeaktoit";
@@ -47,7 +59,8 @@ const repository = valueAfter("--repository") ?? process.env.GITHUB_REPOSITORY ?
 const readCatalogue = async () => {
     try {
         return parseCatalogue(await readFile(cataloguePath, "utf8"));
-    } catch {
+    } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
         return parseCatalogue(null);
     }
 };
@@ -62,20 +75,26 @@ const backfillEntries = () => {
         "--json", "tagName,publishedAt,isDraft",
     ]));
     return releases
-        .filter((release) => !release.isDraft && release.tagName.startsWith("mac-v"))
+        .filter((release) => !release.isDraft && release.tagName.startsWith(`${platform}-v`))
         .slice(0, limit)
-        .map((release) => {
+        .flatMap((release) => {
             const { body } = JSON.parse(gh([
                 "release", "view", release.tagName,
                 "--repo", repository,
                 "--json", "body",
             ]));
-            return catalogueEntry({
-                version: release.tagName,
-                tag: release.tagName,
-                publishedAt: release.publishedAt,
-                markdown: body,
-            });
+            try {
+                return [catalogueEntry({
+                    platform,
+                    version: release.tagName,
+                    tag: release.tagName,
+                    publishedAt: release.publishedAt,
+                    markdown: body,
+                })];
+            } catch (error) {
+                console.error(`::warning::Skipping ${release.tagName}: ${error.message}`);
+                return [];
+            }
         });
 };
 
@@ -84,18 +103,40 @@ const singleEntry = async () => {
     const version = valueAfter("--version") ?? process.env.GITHUB_REF_NAME;
     if (!notesFile || !version) {
         console.error(
-            "Usage: update-release-notes-catalogue.mjs --version <version> --notes-file <path> [--tag <tag>]"
-            + "\n   or: update-release-notes-catalogue.mjs --backfill [--limit <count>]"
+            "Usage: update-release-notes-catalogue.mjs --platform <mac|ios> --version <version>"
+            + " --notes-file <path> [--tag <tag>]"
+            + "\n   or: update-release-notes-catalogue.mjs --backfill --platform <mac|ios> [--limit <count>]"
         );
         process.exit(2);
     }
     return [catalogueEntry({
+        platform,
         version,
-        tag: valueAfter("--tag") ?? `mac-v${normaliseVersion(version)}`,
+        tag: valueAfter("--tag") ?? `${platform}-v${normaliseVersion(version)}`,
         publishedAt: valueAfter("--published-at"),
         markdown: await readFile(resolve(notesFile), "utf8"),
     })];
 };
+
+if (hasFlag("--verify")) {
+    const expectedVersion = normaliseVersion(valueAfter("--version"));
+    if (!expectedVersion) {
+        console.error("--verify requires --version <version>");
+        process.exit(2);
+    }
+    const catalogue = await readCatalogue();
+    const entry = catalogue.entries.find((candidate) => (
+        normalisePlatform(candidate.platform ?? platformForTag(candidate.tag)) === platform
+        && normaliseVersion(candidate.version) === expectedVersion
+        && String(candidate.markdown ?? "").trim().length > 0
+    ));
+    if (!entry) {
+        console.error(`Bundled catalogue has no non-empty ${platform} notes for ${expectedVersion}`);
+        process.exit(1);
+    }
+    console.error(`Verified bundled ${platform} release notes for ${expectedVersion}`);
+    process.exit(0);
+}
 
 const incoming = hasFlag("--backfill") ? backfillEntries() : await singleEntry();
 const existing = await readCatalogue();

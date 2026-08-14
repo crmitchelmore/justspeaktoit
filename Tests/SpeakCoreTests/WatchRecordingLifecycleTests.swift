@@ -201,7 +201,7 @@ final class WatchRecordingLifecycleTests: XCTestCase {
         let activeCapture = WatchActiveCapture(
             id: UUID(),
             fileURL: directory.appendingPathComponent("capture.m4a"),
-            startedAt: Date()
+            startedAt: Date(timeIntervalSince1970: 1_700_000_000)
         )
         try registry.persist(activeCapture)
 

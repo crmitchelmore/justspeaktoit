@@ -14,9 +14,16 @@ public enum AutomationIntentSupport {
         "aac", "aif", "aiff", "caf", "flac", "m4a", "mp3", "mp4", "ogg", "opus", "wav", "webm"
     ]
 
+    /// Upper bound on the audio payload a file-transcription intent will
+    /// stage. Well above every provider's own upload limit (OpenRouter caps
+    /// inline audio at 50 MB) but low enough that a spoofed or accidental
+    /// multi-gigabyte file fails fast instead of stalling or killing the app.
+    public static let maximumAudioFileBytes = 500 * 1024 * 1024
+
     public enum AudioFileValidationError: LocalizedError, Equatable {
         case missingExtension(filename: String)
         case unsupportedType(fileExtension: String)
+        case fileTooLarge(byteCount: Int, limit: Int)
 
         public var errorDescription: String? {
             switch self {
@@ -26,6 +33,10 @@ public enum AutomationIntentSupport {
                 let supported = AutomationIntentSupport.supportedAudioExtensions.sorted()
                     .joined(separator: ", ")
                 return "\".\(fileExtension)\" files aren't supported. Supported formats: \(supported)."
+            case .fileTooLarge(let byteCount, let limit):
+                let size = ByteCountFormatter.string(fromByteCount: Int64(byteCount), countStyle: .file)
+                let cap = ByteCountFormatter.string(fromByteCount: Int64(limit), countStyle: .file)
+                return "The audio file is \(size), which is over the \(cap) limit for file transcription."
             }
         }
     }
@@ -44,16 +55,33 @@ public enum AutomationIntentSupport {
         return fileExtension
     }
 
+    /// Rejects audio payloads over `maximumAudioFileBytes` before any bytes
+    /// are staged to disk or handed to a provider.
+    public static func validateAudioFileSize(_ byteCount: Int) throws {
+        guard byteCount <= maximumAudioFileBytes else {
+            throw AudioFileValidationError.fileTooLarge(
+                byteCount: byteCount,
+                limit: maximumAudioFileBytes
+            )
+        }
+    }
+
     // MARK: - Polish prompt mapping
 
     /// The system prompt / user message pair sent to the LLM by Polish Text.
     public struct PolishRequest: Equatable {
         public let systemPrompt: String
         public let userMessage: String
+        /// Whether the user supplied their own prompt, replacing the cleanup
+        /// contract. Local execution paths need this to know they must honour
+        /// the prompt pair verbatim instead of rebuilding the stock cleanup
+        /// payload (or to fail clearly when they cannot follow a prompt).
+        public let isCustomPrompt: Bool
 
-        public init(systemPrompt: String, userMessage: String) {
+        public init(systemPrompt: String, userMessage: String, isCustomPrompt: Bool) {
             self.systemPrompt = systemPrompt
             self.userMessage = userMessage
+            self.isCustomPrompt = isCustomPrompt
         }
     }
 
@@ -79,10 +107,11 @@ public enum AutomationIntentSupport {
         guard !trimmedPrompt.isEmpty else {
             return PolishRequest(
                 systemPrompt: defaultSystemPrompt,
-                userMessage: TranscriptCleanupPolicy.userMessage(transcript: text)
+                userMessage: TranscriptCleanupPolicy.userMessage(transcript: text),
+                isCustomPrompt: false
             )
         }
-        return PolishRequest(systemPrompt: trimmedPrompt, userMessage: text)
+        return PolishRequest(systemPrompt: trimmedPrompt, userMessage: text, isCustomPrompt: true)
     }
 
     // MARK: - Transcript selection

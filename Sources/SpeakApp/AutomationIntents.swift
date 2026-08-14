@@ -70,6 +70,12 @@ struct StartDictationIntent: AppIntent {
   )
   static var openAppWhenRun: Bool = false
 
+  /// Deliberately runs without authentication: starting dictation returns no
+  /// user data (the transcript only comes back through Stop Dictation, which
+  /// does require authentication), and hands-free "start dictating" automations
+  /// are a core use of this intent.
+  static var authenticationPolicy: IntentAuthenticationPolicy { .alwaysAllowed }
+
   @MainActor
   func perform() async throws -> some IntentResult & ProvidesDialog {
     let environment = try await automationEnvironment()
@@ -96,6 +102,8 @@ struct StopDictationIntent: AppIntent {
     "Stops the active dictation session, delivers the text as configured, and returns the transcript."
   )
   static var openAppWhenRun: Bool = false
+  /// Returns private transcript data, so never run on a locked device.
+  static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
 
   @MainActor
   func perform() async throws -> some IntentResult & ReturnsValue<String> {
@@ -133,6 +141,9 @@ struct TranscribeAudioFileIntent: AppIntent {
     "Transcribes an audio file with your configured transcription provider and returns the text."
   )
   static var openAppWhenRun: Bool = false
+  /// Sends user audio to the configured provider and returns its transcript,
+  /// so never run on a locked device.
+  static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
 
   // No supportedContentTypes: that Parameter initializer needs macOS 15 and
   // the app targets macOS 14. The extension check below validates instead.
@@ -145,14 +156,38 @@ struct TranscribeAudioFileIntent: AppIntent {
     let fileExtension = try AutomationIntentSupport.validatedAudioExtension(
       forFilename: file.filename
     )
-    let temporaryURL = FileManager.default.temporaryDirectory
-      .appendingPathComponent(UUID().uuidString)
-      .appendingPathExtension(fileExtension)
-    try file.data.write(to: temporaryURL)
+    let temporaryURL = try await Self.stageAudioForTranscription(file: file, fileExtension: fileExtension)
     defer { try? FileManager.default.removeItem(at: temporaryURL) }
     let result = try await environment.transcription.transcribeFile(at: temporaryURL)
     await Self.recordInHistory(result, in: environment)
     return .result(value: result.text)
+  }
+
+  /// Stages the intent's audio in a uniquely named temporary file, enforcing
+  /// the automation size cap first. Non-isolated async, so the copy runs off
+  /// the main actor and a large payload never stalls the UI; the file-backed
+  /// representation is preferred over materializing `IntentFile.data` in
+  /// memory when available.
+  private static func stageAudioForTranscription(
+    file: IntentFile,
+    fileExtension: String
+  ) async throws -> URL {
+    let temporaryURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString)
+      .appendingPathExtension(fileExtension)
+    if let sourceURL = file.fileURL {
+      let scoped = sourceURL.startAccessingSecurityScopedResource()
+      defer { if scoped { sourceURL.stopAccessingSecurityScopedResource() } }
+      if let byteCount = try? sourceURL.resourceValues(forKeys: [.fileSizeKey]).fileSize {
+        try AutomationIntentSupport.validateAudioFileSize(byteCount)
+      }
+      try FileManager.default.copyItem(at: sourceURL, to: temporaryURL)
+    } else {
+      let data = file.data
+      try AutomationIntentSupport.validateAudioFileSize(data.count)
+      try data.write(to: temporaryURL)
+    }
+    return temporaryURL
   }
 
   /// Files transcribed through Shortcuts land in history like any other
@@ -166,11 +201,19 @@ struct TranscribeAudioFileIntent: AppIntent {
   ) async {
     guard !result.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
     let now = Date()
+    // Same local-vs-batch classification the MainManager flows use, derived
+    // from the model that actually ran: Apple speech and downloaded local
+    // models record `.transcriptionLocal`, remote providers `.transcriptionBatch`.
+    let isLocalModel = AppleLocalModels.isSpeechAnalyzerModel(result.modelIdentifier)
+      || ModelRouting.family(for: result.modelIdentifier).isDownloadedLocal
     await environment.history.append(
       HistoryItem(
         modelsUsed: [result.modelIdentifier],
         modelUsages: [
-          ModelUsage(modelIdentifier: result.modelIdentifier, phase: .transcriptionBatch)
+          ModelUsage(
+            modelIdentifier: result.modelIdentifier,
+            phase: isLocalModel ? .transcriptionLocal : .transcriptionBatch
+          )
         ],
         rawTranscription: result.text,
         postProcessedTranscription: nil,
@@ -196,7 +239,7 @@ struct TranscribeAudioFileIntent: AppIntent {
           outputDelivered: nil
         ),
         trigger: HistoryTrigger(
-          gesture: .uiButton,
+          gesture: .automation,
           hotKeyDescription: "Shortcuts",
           outputMethod: .none,
           destinationApplication: nil
@@ -217,6 +260,8 @@ struct GetLastTranscriptionIntent: AppIntent {
     "Returns the most recent transcription from history, preferring the polished text."
   )
   static var openAppWhenRun: Bool = false
+  /// Returns private transcript data, so never run on a locked device.
+  static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
 
   @MainActor
   func perform() async throws -> some IntentResult & ReturnsValue<String> {
@@ -247,6 +292,9 @@ struct PolishTextIntent: AppIntent {
     "Cleans up text with your post-processing model. A custom prompt overrides the cleanup instructions."
   )
   static var openAppWhenRun: Bool = false
+  /// Can send user-provided text to the configured remote provider, so never
+  /// run on a locked device.
+  static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
 
   @Parameter(title: "Text")
   var text: String
@@ -270,7 +318,8 @@ struct PolishTextIntent: AppIntent {
     let polished = try await environment.postProcessing.polish(
       text: text,
       systemPrompt: request.systemPrompt,
-      userMessage: request.userMessage
+      userMessage: request.userMessage,
+      usesCustomPrompt: request.isCustomPrompt
     )
     guard !polished.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
       throw AutomationIntentError.noPolishOutput

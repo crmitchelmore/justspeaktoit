@@ -25,7 +25,7 @@ enum SessionTriggerSource: Equatable {
     case .silenceDetection, .handsFree:
       return .uiButton  // Treat as UI-initiated for history purposes
     case .automation:
-      return .uiButton  // Shortcuts / App Intents; recorded like a UI trigger
+      return .automation  // Shortcuts / App Intents, kept distinct in history
     }
   }
 }

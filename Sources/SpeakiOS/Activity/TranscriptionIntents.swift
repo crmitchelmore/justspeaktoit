@@ -72,6 +72,10 @@ public struct StartTranscriptionIntent: AudioRecordingIntent, ForegroundContinua
     )
 
     public static var openAppWhenRun: Bool = false
+    /// Deliberately runs without authentication: starting a recording returns
+    /// no user data, and locked-device capture via the Action Button / Siri is
+    /// a core use of this intent.
+    public static var authenticationPolicy: IntentAuthenticationPolicy { .alwaysAllowed }
 
     public init() {}
 
@@ -117,6 +121,11 @@ public struct StartTranscriptionRecordingIntent: AudioRecordingIntent, Foregroun
     )
 
     public static var openAppWhenRun: Bool = false
+    /// Deliberately runs without authentication: the Action Button toggle must
+    /// work on a locked phone (start, then stop, without unlocking), and the
+    /// intent returns no transcript — results only land in the configured
+    /// destination. This locked-capture flow is a deliberate product choice.
+    public static var authenticationPolicy: IntentAuthenticationPolicy { .alwaysAllowed }
 
     public init() {}
 
@@ -159,6 +168,11 @@ public struct StopTranscriptionRecordingIntent: AudioRecordingIntent, LiveActivi
     )
 
     public static var openAppWhenRun: Bool = false
+    /// Deliberately runs without authentication: this is the Live Activity's
+    /// stop button, which must work from the lock screen, and the dialog only
+    /// reports a word count — the transcript itself is never returned. Use
+    /// `StopDictationIntent` (authenticated) to get the text in a Shortcut.
+    public static var authenticationPolicy: IntentAuthenticationPolicy { .alwaysAllowed }
 
     public init() {}
 
@@ -202,6 +216,11 @@ public struct StopTranscriptionRecordingIntent: AudioRecordingIntent, LiveActivi
 public struct ToggleTranscriptionControlIntent: SetValueIntent, AudioRecordingIntent, ForegroundContinuableIntent {
     public static var title: LocalizedStringResource = "Toggle Transcription"
 
+    /// Deliberately runs without authentication: Control Center is reachable
+    /// from the lock screen and this toggle returns no transcript — results
+    /// only land in the configured destination.
+    public static var authenticationPolicy: IntentAuthenticationPolicy { .alwaysAllowed }
+
     @Parameter(title: "Recording")
     public var value: Bool
 
@@ -228,6 +247,8 @@ struct CopyLastSentenceIntent: AppIntent {
 
     // Make this available from Live Activity
     static var openAppWhenRun: Bool = false
+    /// Returns and copies private transcript data, so never run on a locked device.
+    static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
 
     func perform() async throws -> some IntentResult {
         let lastSentence = SharedTranscriptionState.shared.lastTranscribedSentence
@@ -250,6 +271,8 @@ struct CopyFullTranscriptIntent: AppIntent {
     static var description = IntentDescription("Copies the entire transcription to the clipboard")
 
     static var openAppWhenRun: Bool = false
+    /// Returns and copies private transcript data, so never run on a locked device.
+    static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
 
     func perform() async throws -> some IntentResult {
         let fullText = SharedTranscriptionState.shared.currentTranscriptText

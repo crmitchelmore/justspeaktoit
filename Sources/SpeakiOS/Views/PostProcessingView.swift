@@ -111,9 +111,11 @@ public final class iOSPostProcessingManager: ObservableObject {
     ) async throws -> String {
         guard !text.isEmpty else { return text }
         if model == AppleLocalModels.foundationModelID {
-            return try await AppleFoundationModelPolisher.process(
-                text: text,
-                systemPrompt: systemPrompt
+            // Send the caller's prompt pair verbatim: rebuilding the cleanup
+            // payload here would discard a custom Shortcuts prompt.
+            return try await AppleFoundationModelPolisher.respond(
+                systemPrompt: systemPrompt,
+                userMessage: userMessage
             )
         }
         guard !apiKey.isEmpty else { throw PostProcessingError.apiKeyMissing }

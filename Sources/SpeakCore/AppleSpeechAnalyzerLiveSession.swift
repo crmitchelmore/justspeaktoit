@@ -28,11 +28,12 @@ public final class AppleSpeechAnalyzerLiveSession: @unchecked Sendable {
         engine: AppleSpeechAnalyzerEngine = .speechTranscriber,
         onUpdate: @escaping @Sendable (AppleSpeechAnalyzerUpdate) -> Void
     ) async throws {
-        let module = try await AppleSpeechAnalyzerTranscriber.makeModule(
+        let configuration = try await AppleSpeechAnalyzerTranscriber.makeModule(
             engine: engine,
             localeIdentifier: localeIdentifier,
             progressive: true
         )
+        let module = configuration.module
         guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(
             compatibleWith: [module.speechModule]
         ) else {
@@ -46,7 +47,7 @@ public final class AppleSpeechAnalyzerLiveSession: @unchecked Sendable {
         self.inputContinuation = continuation
         self.resultTask = Self.makeResultTask(
             results: module.resultStream(),
-            engine: engine,
+            engine: configuration.engine,
             onUpdate: onUpdate
         )
 

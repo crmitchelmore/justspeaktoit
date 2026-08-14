@@ -160,17 +160,46 @@ struct AppleSpeechAnalyzerModuleResult: Sendable {
 }
 
 @available(macOS 26.0, iOS 26.0, *)
+struct AppleSpeechAnalyzerModuleConfiguration {
+    let engine: AppleSpeechAnalyzerEngine
+    let module: AppleSpeechAnalyzerModule
+}
+
+enum AppleSpeechAnalyzerRouting {
+    static func resolve<Value: Sendable>(
+        preferredModelID: String,
+        speechTranscriberAvailable: Bool,
+        supportedValue: @Sendable (String) async -> Value?
+    ) async -> (modelID: String, value: Value)? {
+        let alternativeModelID = preferredModelID == AppleLocalModels.dictationTranscriberModelID
+            ? AppleLocalModels.speechTranscriberModelID
+            : AppleLocalModels.dictationTranscriberModelID
+        let candidates = [preferredModelID, alternativeModelID].filter {
+            $0 != AppleLocalModels.speechTranscriberModelID || speechTranscriberAvailable
+        }
+
+        for modelID in candidates {
+            if let value = await supportedValue(modelID) {
+                return (modelID, value)
+            }
+        }
+        return nil
+    }
+}
+
+@available(macOS 26.0, iOS 26.0, *)
 public enum AppleSpeechAnalyzerTranscriber {
     public static func transcribeFile(
         at url: URL,
         localeIdentifier: String?,
         engine: AppleSpeechAnalyzerEngine = .speechTranscriber
     ) async throws -> TranscriptionResult {
-        let module = try await makeModule(
+        let configuration = try await makeModule(
             engine: engine,
             localeIdentifier: localeIdentifier,
             progressive: false
         )
+        let module = configuration.module
         let analyzer = SpeechAnalyzer(modules: [module.speechModule])
         let audioFile = try AVAudioFile(forReading: url)
         let duration = audioFile.processingFormat.sampleRate > 0
@@ -190,7 +219,7 @@ public enum AppleSpeechAnalyzerTranscriber {
             segments: segments,
             confidence: averageConfidence(in: segments),
             duration: duration,
-            modelIdentifier: engine.modelID,
+            modelIdentifier: configuration.engine.modelID,
             cost: nil,
             rawPayload: nil,
             debugInfo: nil
@@ -204,43 +233,49 @@ public enum AppleSpeechAnalyzerTranscriber {
         engine: AppleSpeechAnalyzerEngine,
         localeIdentifier: String?,
         progressive: Bool
-    ) async throws -> AppleSpeechAnalyzerModule {
+    ) async throws -> AppleSpeechAnalyzerModuleConfiguration {
         let requestedLocale = Locale(identifier: localeIdentifier ?? Locale.current.identifier)
+        guard let route = await AppleSpeechAnalyzerRouting.resolve(
+            preferredModelID: engine.modelID,
+            speechTranscriberAvailable: SpeechTranscriber.isAvailable,
+            supportedValue: { modelID in
+                if modelID == AppleLocalModels.speechTranscriberModelID {
+                    return await SpeechTranscriber.supportedLocale(equivalentTo: requestedLocale)
+                }
+                return await DictationTranscriber.supportedLocale(equivalentTo: requestedLocale)
+            }
+        ) else {
+            throw AppleLocalModelError.localeUnsupported(requestedLocale.identifier)
+        }
 
-        switch engine {
+        let resolvedEngine = AppleSpeechAnalyzerEngine(modelID: route.modelID)
+        switch resolvedEngine {
         case .speechTranscriber:
-            guard SpeechTranscriber.isAvailable else {
-                throw AppleLocalModelError.speechTranscriberUnavailable
-            }
-            guard let supportedLocale = await SpeechTranscriber.supportedLocale(
-                equivalentTo: requestedLocale
-            ) else {
-                throw AppleLocalModelError.localeUnsupported(requestedLocale.identifier)
-            }
             let transcriber = SpeechTranscriber(
-                locale: supportedLocale,
+                locale: route.value,
                 preset: progressive
                     ? .timeIndexedProgressiveTranscription
                     : .timeIndexedTranscriptionWithAlternatives
             )
             try await ensureAssets(for: [transcriber])
-            return .speech(transcriber)
+            return AppleSpeechAnalyzerModuleConfiguration(
+                engine: resolvedEngine,
+                module: .speech(transcriber)
+            )
 
         case .dictationTranscriber:
-            guard let supportedLocale = await DictationTranscriber.supportedLocale(
-                equivalentTo: requestedLocale
-            ) else {
-                throw AppleLocalModelError.localeUnsupported(requestedLocale.identifier)
-            }
             // The progressive preset lacks time indexing; add it so segment
             // ordering and durations match the SpeechTranscriber presets.
             var preset: DictationTranscriber.Preset = progressive
                 ? .progressiveLongDictation
                 : .timeIndexedLongDictation
             preset.attributeOptions.insert(.audioTimeRange)
-            let transcriber = DictationTranscriber(locale: supportedLocale, preset: preset)
+            let transcriber = DictationTranscriber(locale: route.value, preset: preset)
             try await ensureAssets(for: [transcriber])
-            return .dictation(transcriber)
+            return AppleSpeechAnalyzerModuleConfiguration(
+                engine: resolvedEngine,
+                module: .dictation(transcriber)
+            )
         }
     }
 

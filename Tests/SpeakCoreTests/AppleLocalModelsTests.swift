@@ -85,6 +85,42 @@ final class AppleLocalModelsTests: XCTestCase {
         )
     }
 
+    func testAnalyzerRouting_fallsBackWhenPreferredEngineDoesNotSupportLocale() async {
+        let route = await AppleSpeechAnalyzerRouting.resolve(
+            preferredModelID: AppleLocalModels.dictationTranscriberModelID,
+            speechTranscriberAvailable: true,
+            supportedValue: { modelID in
+                modelID == AppleLocalModels.speechTranscriberModelID ? "en-GB" : nil
+            }
+        )
+
+        XCTAssertEqual(route?.modelID, AppleLocalModels.speechTranscriberModelID)
+        XCTAssertEqual(route?.value, "en-GB")
+    }
+
+    func testAnalyzerRouting_returnsNilWhenNoEngineSupportsLocale() async {
+        let route: (modelID: String, value: String)? = await AppleSpeechAnalyzerRouting.resolve(
+            preferredModelID: AppleLocalModels.speechTranscriberModelID,
+            speechTranscriberAvailable: true,
+            supportedValue: { _ in nil }
+        )
+
+        XCTAssertNil(route)
+    }
+
+    func testAnalyzerRouting_skipsUnavailableSpeechTranscriber() async {
+        let route = await AppleSpeechAnalyzerRouting.resolve(
+            preferredModelID: AppleLocalModels.speechTranscriberModelID,
+            speechTranscriberAvailable: false,
+            supportedValue: { modelID in
+                modelID == AppleLocalModels.dictationTranscriberModelID ? "fr-FR" : nil
+            }
+        )
+
+        XCTAssertEqual(route?.modelID, AppleLocalModels.dictationTranscriberModelID)
+        XCTAssertEqual(route?.value, "fr-FR")
+    }
+
     func testNormalizedLiveModel_mapsAnalyzerModelsToBestAvailable() {
         XCTAssertEqual(
             ModelCatalog.normalizedLiveTranscriptionModel(AppleLocalModels.dictationTranscriberModelID),

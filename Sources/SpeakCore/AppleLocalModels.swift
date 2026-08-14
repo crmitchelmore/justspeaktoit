@@ -23,9 +23,9 @@ public enum AppleLocalModels {
         return false
     }
 
-    /// `DictationTranscriber` ships with every OS 26 install — it reuses the
-    /// system keyboard-dictation assets, so unlike `SpeechTranscriber` it does
-    /// not require an Apple Intelligence-capable device.
+    /// Device-level catalogue capability. `DictationTranscriber` ships with OS
+    /// 26 and does not require Apple Intelligence, but locale support is async;
+    /// the shared SpeechAnalyzer module factory resolves that before dispatch.
     public static var supportsDictationTranscriber: Bool {
         if #available(macOS 26.0, iOS 26.0, *) {
             return true

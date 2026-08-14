@@ -9,6 +9,7 @@ final class KeyboardDictationMachineTests: XCTestCase {
         let path = KeyboardCapturePlanner.path(
             hasFullAccess: false,
             sharedContainerAvailable: true,
+            directCapturePolicy: .enabled,
             microphonePermission: .granted,
             speechRecognitionPermission: .granted,
             speechRecognizerAvailable: true
@@ -21,6 +22,7 @@ final class KeyboardDictationMachineTests: XCTestCase {
         let path = KeyboardCapturePlanner.path(
             hasFullAccess: true,
             sharedContainerAvailable: false,
+            directCapturePolicy: .enabled,
             microphonePermission: .granted,
             speechRecognitionPermission: .granted,
             speechRecognizerAvailable: true
@@ -33,6 +35,7 @@ final class KeyboardDictationMachineTests: XCTestCase {
         let path = KeyboardCapturePlanner.path(
             hasFullAccess: true,
             sharedContainerAvailable: true,
+            directCapturePolicy: .enabled,
             microphonePermission: .undetermined,
             speechRecognitionPermission: .undetermined,
             speechRecognizerAvailable: true
@@ -45,6 +48,7 @@ final class KeyboardDictationMachineTests: XCTestCase {
         let deniedMic = KeyboardCapturePlanner.path(
             hasFullAccess: true,
             sharedContainerAvailable: true,
+            directCapturePolicy: .enabled,
             microphonePermission: .denied,
             speechRecognitionPermission: .granted,
             speechRecognizerAvailable: true
@@ -52,6 +56,7 @@ final class KeyboardDictationMachineTests: XCTestCase {
         let deniedSpeech = KeyboardCapturePlanner.path(
             hasFullAccess: true,
             sharedContainerAvailable: true,
+            directCapturePolicy: .enabled,
             microphonePermission: .granted,
             speechRecognitionPermission: .denied,
             speechRecognizerAvailable: true
@@ -59,6 +64,7 @@ final class KeyboardDictationMachineTests: XCTestCase {
         let noRecognizer = KeyboardCapturePlanner.path(
             hasFullAccess: true,
             sharedContainerAvailable: true,
+            directCapturePolicy: .enabled,
             microphonePermission: .granted,
             speechRecognitionPermission: .granted,
             speechRecognizerAvailable: false
@@ -70,6 +76,13 @@ final class KeyboardDictationMachineTests: XCTestCase {
     }
 
     func testPlannerWithDirectCaptureDisabled_selectsHandoffBeforePermissions() {
+        let defaultPath = KeyboardCapturePlanner.path(
+            hasFullAccess: true,
+            sharedContainerAvailable: true,
+            microphonePermission: .undetermined,
+            speechRecognitionPermission: .undetermined,
+            speechRecognizerAvailable: true
+        )
         let path = KeyboardCapturePlanner.path(
             hasFullAccess: true,
             sharedContainerAvailable: true,
@@ -78,8 +91,18 @@ final class KeyboardDictationMachineTests: XCTestCase {
             speechRecognitionPermission: .undetermined,
             speechRecognizerAvailable: true
         )
+        let blocked = KeyboardCapturePlanner.path(
+            hasFullAccess: false,
+            sharedContainerAvailable: true,
+            directCapturePolicy: .disabled,
+            microphonePermission: .undetermined,
+            speechRecognitionPermission: .undetermined,
+            speechRecognizerAvailable: true
+        )
 
+        XCTAssertEqual(defaultPath, .handoff)
         XCTAssertEqual(path, .handoff)
+        XCTAssertEqual(blocked, .blocked(.fullAccessRequired))
     }
 
     // MARK: - Happy path

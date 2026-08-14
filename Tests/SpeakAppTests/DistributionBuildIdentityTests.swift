@@ -147,6 +147,9 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(manifest.contains("iosActiveCompilationConditions.append(\"IOS_KEYBOARD_FEATURE\")"))
         XCTAssertTrue(manifest.contains("environment[\"TUIST_IOS_KEYBOARD_DIRECT_CAPTURE\"] ?? \"\""))
         XCTAssertTrue(manifest.contains("IOS_KEYBOARD_DIRECT_CAPTURE"))
+        XCTAssertTrue(manifest.contains("let iosKeyboardInfoPlist: InfoPlist = isIOSKeyboardDirectCaptureEnabled"))
+        XCTAssertTrue(manifest.contains("? .file(path: \"JustSpeakKeyboard/Info.plist\")"))
+        XCTAssertTrue(manifest.contains("infoPlist: iosKeyboardInfoPlist"))
         XCTAssertTrue(manifest.contains("settings: .settings(base: iosTestSettings)"))
         XCTAssertTrue(
             manifest.contains(
@@ -287,6 +290,8 @@ final class DistributionBuildIdentityTests: XCTestCase {
             )
         )
         XCTAssertTrue(workflow.contains("Keyboard feature is off, but JustSpeakKeyboard.appex was embedded"))
+        XCTAssertTrue(workflow.contains("Handoff-only keyboard unexpectedly declares $usage_key"))
+        XCTAssertTrue(workflow.contains("Direct-capture keyboard is missing $usage_key"))
 
         let keyboardInputStart = try XCTUnwrap(workflow.range(of: "      include_keyboard:\n")?.lowerBound)
         let directInputStart = try XCTUnwrap(workflow.range(of: "      enable_direct_capture:\n")?.lowerBound)

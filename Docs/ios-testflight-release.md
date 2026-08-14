@@ -66,7 +66,7 @@ The command must exit successfully. The release workflow performs the same exact
 
 1. Install or update the processed build from TestFlight and confirm its version/build in the app.
 2. In iOS Settings, enable **Just Speak to It** under **General** → **Keyboard** → **Keyboards**. Enable Full Access only when the app's current onboarding requires it.
-3. Open a text field in another app, switch to the Just Speak to It keyboard, and start transcription. In a normal handoff-only build, no microphone or Speech permission prompt may come from the keyboard.
+3. Open a text field in another app, switch to the Just Speak to It keyboard, and start transcription. In a normal handoff-only build, the keyboard must not present a microphone or Speech permission prompt. Treat any such prompt as a failure.
 4. Confirm the containing app records through the iPhone microphone, returns the nonce-matched result through the App Group, and the keyboard inserts the text at the cursor. If Instant Dictation is not ready, confirm the keyboard shows the reconnect state and leaves the field unchanged.
 5. Confirm stale results are not reused and normal Apple keyboard switching remains available.
 

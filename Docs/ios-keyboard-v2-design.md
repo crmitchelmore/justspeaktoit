@@ -36,7 +36,7 @@ extension with `RequestsOpenAccess` and user-granted Full Access **can** in
 practice activate an audio session and use the Speech framework. Apple
 documents Full Access as gating shared containers and network access, not
 microphone capture, and does not state that extensions may record; the
-extension must separately declare `NSMicrophoneUsageDescription`/
+direct-capture build must separately declare `NSMicrophoneUsageDescription`/
 `NSSpeechRecognitionUsageDescription` and the user must grant both. **Treat
 in-extension capture as an unverified platform assumption** until the
 physical-device matrix signs it off: first-run permission behaviour on real
@@ -159,8 +159,9 @@ One compact layout (~170 pt portrait iPhone; v1 was 300 pt):
   host context.
 - The App Group carries handoff records, language selection, and a non-secret
   profile projection. Never audio, credentials, custom prompts, or surrounding text.
-- Extension Info.plist declares microphone and speech-recognition usage
-  strings; both permissions are user-granted and revocable in Settings.
+- Direct-capture builds add microphone and speech-recognition usage strings to
+  the extension Info.plist; handoff-only builds omit them. Both permissions are
+  user-granted and revocable in Settings when direct capture is enabled.
 
 ## Open risks (device-matrix items)
 

@@ -76,7 +76,7 @@ struct KeyboardRootView: View {
                     .accessibilityHint("Touch and hold to choose another keyboard")
             }
 
-            if let chip = model.languageChipLabel, model.showsLanguageChip {
+            if let chip = model.languageChipLabel, model.showsLanguageChip, !isBlocked {
                 chipButton(
                     label: chip,
                     accessibilityLabel: "Dictation language \(chip). Tap to switch.",
@@ -391,8 +391,8 @@ struct KeyboardRootView: View {
     /// the single control row keeps a full-size mic key on the narrowest
     /// supported iPhone instead of wrapping or truncating.
     private var micCaption: String? {
-        if model.mode == .direct,
-           model.languageChipLabel != nil,
+        if model.languageChipLabel != nil,
+           model.showsLanguageChip,
            model.profileChipLabel != nil {
             return nil
         }

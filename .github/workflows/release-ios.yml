@@ -292,6 +292,17 @@ jobs:
             KEYBOARD_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$KEYBOARD_PATH/Info.plist")
             [ "$KEYBOARD_VERSION" = "$VERSION" ] || { echo "Keyboard version mismatch: expected '$VERSION', got '$KEYBOARD_VERSION'"; exit 1; }
             [ "$KEYBOARD_BUILD" = "$BUILD_NUMBER" ] || { echo "Keyboard build mismatch: expected '$BUILD_NUMBER', got '$KEYBOARD_BUILD'"; exit 1; }
+            for usage_key in NSMicrophoneUsageDescription NSSpeechRecognitionUsageDescription; do
+              if [ "$TUIST_IOS_KEYBOARD_DIRECT_CAPTURE" = "1" ]; then
+                /usr/libexec/PlistBuddy -c "Print :$usage_key" "$KEYBOARD_PATH/Info.plist" >/dev/null 2>&1 || {
+                  echo "::error::Direct-capture keyboard is missing $usage_key."
+                  exit 1
+                }
+              elif /usr/libexec/PlistBuddy -c "Print :$usage_key" "$KEYBOARD_PATH/Info.plist" >/dev/null 2>&1; then
+                echo "::error::Handoff-only keyboard unexpectedly declares $usage_key."
+                exit 1
+              fi
+            done
           else
             [ ! -e "$KEYBOARD_PATH" ] || {
               echo "::error::Keyboard feature is off, but JustSpeakKeyboard.appex was embedded in the archive."

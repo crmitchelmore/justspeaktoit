@@ -5,7 +5,9 @@
 > independent, default-off candidate — see
 > [iOS Keyboard v2 design](ios-keyboard-v2-design.md). Normal automated builds
 > use `include_keyboard=true` and `enable_direct_capture=false`, so the
-> extension does not read or request microphone/Speech permissions.
+> extension does not read or request microphone/Speech permissions. It reads
+> bounded context immediately before and after the cursor locally to prove its
+> replacement anchor, but never persists or transmits that host context.
 
 ## Product decision
 

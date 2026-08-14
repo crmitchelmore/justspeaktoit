@@ -124,6 +124,24 @@ if isIOSKeyboardDirectCaptureEnabled {
     iosKeyboardSettings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] = "$(inherited) IOS_KEYBOARD_DIRECT_CAPTURE"
 }
 
+let iosKeyboardInfoPlist: InfoPlist = isIOSKeyboardDirectCaptureEnabled
+    ? .file(path: "JustSpeakKeyboard/Info.plist")
+    : .extendingDefault(with: [
+        "CFBundleDisplayName": "Just Speak",
+        "CFBundleShortVersionString": "$(MARKETING_VERSION)",
+        "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
+        "NSExtension": [
+            "NSExtensionAttributes": [
+                "IsASCIICapable": true,
+                "PrefersRightToLeft": false,
+                "PrimaryLanguage": "en-GB",
+                "RequestsOpenAccess": true
+            ],
+            "NSExtensionPointIdentifier": "com.apple.keyboard-service",
+            "NSExtensionPrincipalClass": "$(PRODUCT_MODULE_NAME).KeyboardViewController"
+        ]
+    ])
+
 var watchAppSettings: [String: SettingValue] = [
     "CURRENT_PROJECT_VERSION": "1",
     "MARKETING_VERSION": "\(version)"
@@ -313,7 +331,7 @@ let keyboardTarget: Target = .target(
     product: .appExtension,
     bundleId: "com.justspeaktoit.ios.keyboard",
     deploymentTargets: .iOS("17.0"),
-    infoPlist: .file(path: "JustSpeakKeyboard/Info.plist"),
+    infoPlist: iosKeyboardInfoPlist,
     sources: ["JustSpeakKeyboard/**/*.swift"],
     entitlements: .file(path: "JustSpeakKeyboard/JustSpeakKeyboard.entitlements"),
     dependencies: [

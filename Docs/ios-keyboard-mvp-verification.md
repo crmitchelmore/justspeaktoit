@@ -257,8 +257,9 @@ dictation), and touch targets of at least 44 points.
   the network (Apple's server dictation for locales without on-device support,
   and the fallback path's user-selected cloud transcription).
 - Microphone capture and Apple Speech inside the extension are *not* granted by
-  Full Access. The extension declares `NSMicrophoneUsageDescription` and
-  `NSSpeechRecognitionUsageDescription`, and the user must authorise both.
+  Full Access. Direct-capture builds declare `NSMicrophoneUsageDescription` and
+  `NSSpeechRecognitionUsageDescription`; handoff-only builds omit both. The user
+  must authorise both permissions when testing direct capture.
   Whether iOS presents those prompts to a keyboard extension — and honours the
   grants — is the unverified platform assumption tracked in "Direct path:
   permissions" above; the handoff path covers devices that refuse.

@@ -36,7 +36,7 @@ public enum KeyboardCapturePlanner {
     public static func path(
         hasFullAccess: Bool,
         sharedContainerAvailable: Bool,
-        directCapturePolicy: DirectCapturePolicy = .enabled,
+        directCapturePolicy: DirectCapturePolicy = .disabled,
         microphonePermission: Permission,
         speechRecognitionPermission: Permission,
         speechRecognizerAvailable: Bool

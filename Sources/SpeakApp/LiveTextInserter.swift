@@ -122,9 +122,9 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
     lastError = nil
     self.target = target ?? .capture()
     let targetApp = self.target?.applicationName ?? "unknown"
+    let strategyName = String(describing: strategy)
     logger.info(
-      "Started live insertion session (\(String(describing: strategy))), target app: \(targetApp), " +
-        "deferring AX readiness checks"
+      "Started live insertion session (\(strategyName)), target app: \(targetApp), deferring AX readiness checks"
     )
   }
 

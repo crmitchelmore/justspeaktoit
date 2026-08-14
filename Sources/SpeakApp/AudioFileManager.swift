@@ -281,6 +281,8 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
         newRecorder = try AVAudioRecorder(url: fileURL, settings: EncoderProfile.settings)
         newRecorder.isMeteringEnabled = true
         guard newRecorder.prepareToRecord() else {
+          _ = newRecorder.deleteRecording()
+          try? FileManager.default.removeItem(at: fileURL)
           throw AudioFileManagerError.failedToCreateRecorder
         }
       }

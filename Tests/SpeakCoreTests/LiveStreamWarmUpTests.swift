@@ -134,11 +134,13 @@ final class LiveStreamWarmTrackerTests: XCTestCase {
         XCTAssertNil(tracker.hostNeedingWarmUp(for: .gladia, now: self.base, enabled: false))
         XCTAssertFalse(tracker.isWarm(host: host, now: self.base))
 
-        tracker.markWarmed(host: host, at: self.base)
+        XCTAssertEqual(tracker.hostNeedingWarmUp(for: .gladia, now: self.base), host)
+        XCTAssertTrue(tracker.markWarmed(host: host, at: self.base))
         XCTAssertNil(tracker.hostNeedingWarmUp(for: .apple, now: self.base))
         XCTAssertFalse(tracker.isWarm(host: host, now: self.base))
 
-        tracker.markWarmed(host: host, at: self.base)
+        XCTAssertEqual(tracker.hostNeedingWarmUp(for: .gladia, now: self.base), host)
+        XCTAssertTrue(tracker.markWarmed(host: host, at: self.base))
         XCTAssertNil(tracker.hostNeedingWarmUp(for: nil, now: self.base))
         XCTAssertFalse(tracker.isWarm(host: host, now: self.base))
     }

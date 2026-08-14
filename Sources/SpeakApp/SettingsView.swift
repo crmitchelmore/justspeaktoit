@@ -47,6 +47,7 @@ struct SettingsView: View {
   @State var showSystemPromptPreview = false
   @State var systemPromptPreview = ""
   @State var showingConfigTransfer = false
+  @State var showingReleaseNotes = false
   @State private var soundPreviewPlayer: RecordingSoundPlayer?
   @State var huggingFaceRepoID: String = "argmaxinc/whisperkit-coreml"
   @State var huggingFaceModelName: String = "tiny"

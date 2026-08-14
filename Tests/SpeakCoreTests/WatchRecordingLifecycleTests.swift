@@ -5,11 +5,7 @@ final class WatchRecordingLifecycleTests: XCTestCase {
     private let usableDuration: TimeInterval = 42
 
     private var capture: WatchActiveCapture {
-        WatchActiveCapture(
-            id: UUID(),
-            fileURL: URL(fileURLWithPath: "/tmp/watch-capture.m4a"),
-            startedAt: Date(timeIntervalSince1970: 1_700_000_000)
-        )
+        WatchActiveCapture(id: UUID(), startedAt: Date(timeIntervalSince1970: 1_700_000_000))
     }
 
     // MARK: - Runtime loss keeps the partial capture
@@ -171,7 +167,6 @@ final class WatchRecordingLifecycleTests: XCTestCase {
         let originalRegistry = WatchActiveCaptureRegistry(fileURL: markerURL)
         let activeCapture = WatchActiveCapture(
             id: UUID(),
-            fileURL: directory.appendingPathComponent("capture.m4a"),
             startedAt: Date(timeIntervalSince1970: 1_700_000_000)
         )
         try originalRegistry.persist(activeCapture)
@@ -193,6 +188,67 @@ final class WatchRecordingLifecycleTests: XCTestCase {
         try FileManager.default.removeItem(at: directory)
     }
 
+    // MARK: - Recovery across an app update
+
+    func testCaptureAudioPath_isDerivedFromTheIdentity() {
+        let directory = URL(fileURLWithPath: "/containers/current/Captures", isDirectory: true)
+        let capture = WatchActiveCapture(id: UUID(), startedAt: Date())
+
+        let derived = capture.fileURL(in: directory)
+
+        XCTAssertEqual(derived, directory.appendingPathComponent("\(capture.id.uuidString).m4a"))
+        XCTAssertEqual(derived, WatchActiveCapture.fileURL(for: capture.id, in: directory))
+    }
+
+    func testRecoveredCapture_findsItsAudioInANewContainerAfterAnAppUpdate() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let markerURL = directory.appendingPathComponent("active-capture.json")
+        let capture = WatchActiveCapture(id: UUID(), startedAt: Date(timeIntervalSince1970: 1_700_000_000))
+        try WatchActiveCaptureRegistry(fileURL: markerURL).persist(capture)
+
+        // An app update moves the container. The marker must not send recovery
+        // to the old path, or the audio is read as unplayable and thrown away.
+        let containerBeforeUpdate = URL(fileURLWithPath: "/containers/A1/Captures", isDirectory: true)
+        let containerAfterUpdate = URL(fileURLWithPath: "/containers/B2/Captures", isDirectory: true)
+        let recovered = try XCTUnwrap(WatchActiveCaptureRegistry(fileURL: markerURL).load())
+
+        XCTAssertEqual(recovered, capture)
+        XCTAssertEqual(recovered.fileURL(in: containerAfterUpdate).lastPathComponent, "\(capture.id.uuidString).m4a")
+        XCTAssertNotEqual(
+            recovered.fileURL(in: containerAfterUpdate),
+            recovered.fileURL(in: containerBeforeUpdate)
+        )
+        try FileManager.default.removeItem(at: directory)
+    }
+
+    func testMarkerWrittenByAnEarlierVersion_loadsAndIgnoresItsStoredPath() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let markerURL = directory.appendingPathComponent("active-capture.json")
+        let id = UUID()
+        let legacyMarker = """
+        {
+          "id": "\(id.uuidString)",
+          "fileURL": "file:///containers/A1/Captures/\(id.uuidString).m4a",
+          "startedAt": "2023-11-14T22:13:20Z"
+        }
+        """
+        try Data(legacyMarker.utf8).write(to: markerURL, options: .atomic)
+
+        let recovered = try XCTUnwrap(WatchActiveCaptureRegistry(fileURL: markerURL).load())
+
+        XCTAssertEqual(recovered.id, id)
+        XCTAssertEqual(recovered.startedAt, Date(timeIntervalSince1970: 1_700_000_000))
+        let container = URL(fileURLWithPath: "/containers/B2/Captures", isDirectory: true)
+        XCTAssertEqual(
+            recovered.fileURL(in: container),
+            container.appendingPathComponent("\(id.uuidString).m4a")
+        )
+        try FileManager.default.removeItem(at: directory)
+    }
+
     func testFailedQueuePersistence_leavesActiveCaptureMarkerForNextLaunch() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -200,7 +256,6 @@ final class WatchRecordingLifecycleTests: XCTestCase {
         let registry = WatchActiveCaptureRegistry(fileURL: markerURL)
         let activeCapture = WatchActiveCapture(
             id: UUID(),
-            fileURL: directory.appendingPathComponent("capture.m4a"),
             startedAt: Date(timeIntervalSince1970: 1_700_000_000)
         )
         try registry.persist(activeCapture)
@@ -222,11 +277,7 @@ final class WatchRecordingLifecycleTests: XCTestCase {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let markerURL = directory.appendingPathComponent("active-capture.json")
         let registry = WatchActiveCaptureRegistry(fileURL: markerURL)
-        let activeCapture = WatchActiveCapture(
-            id: UUID(),
-            fileURL: directory.appendingPathComponent("capture.m4a"),
-            startedAt: Date()
-        )
+        let activeCapture = WatchActiveCapture(id: UUID(), startedAt: Date())
         try registry.persist(activeCapture)
 
         let enqueued = try registry.clearAfterSuccessfulEnqueue(matching: activeCapture.id) { true }

@@ -40,6 +40,30 @@ final class KeyboardHandoffTests: XCTestCase {
         XCTAssertNil(store.activeRecord())
     }
 
+    func testHandoffKeepsTheExactSelectedProfileThroughEveryTransition() throws {
+        let selection = KeyboardDictationProfileCatalog.selection(
+            for: KeyboardAppProfileConfiguration(
+                transcriptionMode: .batch,
+                transcriptionModelIdentifier: "openai/gpt-transcribe",
+                languageIdentifier: "en_GB",
+                postProcessingEnabled: true,
+                postProcessingModelIdentifier: "openai/gpt-5-mini"
+            )
+        )
+        let profile = selection.selectedProfile
+        let request = try store.createRequest(profile: profile)
+
+        let switchedSelection = selection.selecting(KeyboardDictationProfileCatalog.directIdentifier)
+
+        XCTAssertEqual(switchedSelection.selectedProfile.route, .directAppleSpeech)
+        XCTAssertEqual(request.profile, profile)
+        XCTAssertEqual(try store.markRecording(requestID: request.requestID).profile, profile)
+        XCTAssertEqual(try store.updateInterim(requestID: request.requestID, transcript: "Text").profile, profile)
+        XCTAssertEqual(try store.requestFinish(requestID: request.requestID).profile, profile)
+        XCTAssertEqual(try store.markTranscribing(requestID: request.requestID).profile, profile)
+        XCTAssertEqual(try store.complete(requestID: request.requestID, transcript: "Text").profile, profile)
+    }
+
     func testKeyboardCanRequestFinishBeforeContainingAppTranscribes() throws {
         let request = try store.createRequest()
         try store.markRecording(requestID: request.requestID)

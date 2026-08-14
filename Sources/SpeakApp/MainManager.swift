@@ -36,6 +36,15 @@ final class MainManager: ObservableObject {
     appSettings.speedMode.usesLivePolish && appSettings.textOutputMethod != .clipboardOnly
   }
 
+  /// Whether the experimental streaming-insertion setting can apply to this
+  /// configuration (issue #611). The per-app allowlist is checked at session
+  /// start against the captured output target.
+  private var streamingInsertionEligible: Bool {
+    appSettings.streamingInsertionEnabled
+      && appSettings.textOutputMethod != .clipboardOnly
+      && isStreamingTranscriptionMode
+  }
+
   var isStreamingTranscriptionMode: Bool {
     appSettings.transcriptionMode == .liveNative
       || (appSettings.transcriptionMode == .localModel && appSettings.localTranscriptionMode == .streaming)
@@ -67,12 +76,22 @@ final class MainManager: ObservableObject {
   var activeSession: ActiveSession? {
     didSet {
       // Every session-teardown path clears `activeSession`, so this is the one
-      // place profile overrides are reverted back to the user's own settings.
+      // place profile overrides are reverted back to the user's own settings —
+      // and the one place capture pre-warming can safely resume.
       if activeSession == nil {
         profileApplier.end(settings: appSettings, postProcessing: postProcessingManager)
+        captureWarmer?.sessionDidEnd()
       }
     }
   }
+
+  /// Hands-free ("armed") dictation. Created eagerly but inert until the user
+  /// arms it, which only the hands-free setting allows.
+  private(set) lazy var handsFreeCoordinator = makeHandsFreeCoordinator()
+
+  /// Keeps the audio recorder and the streaming provider's network path warm
+  /// while idle so hotkey→capture does not pay setup cost (issue #663).
+  private var captureWarmer: CaptureWarmCoordinator?
   /// Guards against re-entrant calls to endSession (e.g. silence detection + user hotkey racing).
   var isEndingSession = false
   let recordingStopTimeout: TimeInterval = 8
@@ -89,7 +108,6 @@ final class MainManager: ObservableObject {
   /// Tracks whether the HUD window is visible to skip unnecessary UI updates
   var isHUDOccluded: Bool = false
   var occlusionObserver: NSObjectProtocol?
-  private var willTerminateObserver: NSObjectProtocol?
 
   struct RetryData {
     let transcriptionResult: TranscriptionResult
@@ -155,24 +173,25 @@ final class MainManager: ObservableObject {
       }
       .store(in: &cancellables)
 
-    transcriptionManager.$livePartialText
+    // Turning hands-free off or selecting an incompatible transcription route
+    // must tear down a live detector, not just stop future arming.
+    Publishers.CombineLatest3(
+      appSettings.$handsFreeDictationEnabled,
+      appSettings.$transcriptionMode,
+      appSettings.$liveTranscriptionModel
+    )
       .receive(on: RunLoop.main)
-      .sink { [weak self] text in
-        self?.handleLiveTextUpdate(text)
+      .sink { [weak self] _ in
+        self?.disarmHandsFreeIfDisabled()
       }
       .store(in: &cancellables)
 
-    // Forward live transcription updates to HUD manager
-    Publishers.CombineLatest3(
-      transcriptionManager.$livePartialText,
-      transcriptionManager.$liveTextIsFinal,
-      transcriptionManager.$liveTextConfidence
-    )
-    .receive(on: RunLoop.main)
-    .sink { [weak self] text, isFinal, confidence in
-      self?.hudManager.updateLiveTranscription(text: text, isFinal: isFinal, confidence: confidence)
-    }
-    .store(in: &cancellables)
+    transcriptionManager.$liveTranscript
+      .receive(on: RunLoop.main)
+      .sink { [weak self] snapshot in
+        self?.handleLiveTranscriptSnapshot(snapshot)
+      }
+      .store(in: &cancellables)
 
     // Subscribe to live polish updates
     livePolishManager.$polishedTail
@@ -217,14 +236,50 @@ final class MainManager: ObservableObject {
     configureHotKeys()
     setupCaptureHealthBindings()
 
-    // Observe app termination to clean up timer
-    willTerminateObserver = NotificationCenter.default.addObserver(
-      forName: NSApplication.willTerminateNotification,
-      object: nil,
-      queue: .main
-    ) { [weak self] _ in
-      self?.stopAudioLevelMonitoring()
+    Publishers.CombineLatest(
+      appSettings.$connectionPreWarmingEnabled,
+      permissionsManager.$statuses.map { $0[.microphone]?.isGranted == true }
+    )
+    .removeDuplicates { lhs, rhs in lhs.0 == rhs.0 && lhs.1 == rhs.1 }
+    .dropFirst()
+    .receive(on: RunLoop.main)
+    .sink { [weak self] enabled, permissionGranted in
+      guard enabled, permissionGranted else { return }
+      self?.warmUpConnectionIfEnabled()
     }
+    .store(in: &cancellables)
+
+    let warmer = CaptureWarmCoordinator(
+      appSettings: appSettings,
+      permissionsManager: permissionsManager,
+      audioInputDeviceManager: audioInputDeviceManager,
+      audioFileManager: audioFileManager
+    )
+    captureWarmer = warmer
+    warmer.start()
+  }
+
+  /// Completes asynchronous warm-resource teardown before AppKit permits the
+  /// process to exit, so the prepared recorder cannot leave an empty file.
+  func prepareForTermination() async {
+    self.stopAudioLevelMonitoring()
+    await self.captureWarmer?.invalidate()
+  }
+
+  /// Applies a live-transcript snapshot to the preview and the HUD.
+  ///
+  /// Delivery is deferred onto the run loop, so a snapshot published by one
+  /// recording can arrive after the next one has already started. Snapshots
+  /// that no longer belong to the current live session are dropped instead of
+  /// repainting the previous recording's text over the live view (issue #643).
+  private func handleLiveTranscriptSnapshot(_ snapshot: LiveTranscriptSnapshot) {
+    guard snapshot.sessionID == transcriptionManager.liveTranscript.sessionID else { return }
+    handleLiveTextUpdate(snapshot.text)
+    hudManager.updateLiveTranscription(
+      text: snapshot.text,
+      isFinal: snapshot.isFinal,
+      confidence: snapshot.confidence
+    )
   }
 
   /// Handle live text updates and trigger live polish if enabled
@@ -242,8 +297,9 @@ final class MainManager: ObservableObject {
       }
     }
 
-    // Live insertion during recording (for streaming + accessibility mode)
-    if state == .recording && liveInsertionEnabled {
+    // Live insertion during recording (live-polish full-value mode or the
+    // experimental ranged streaming mode; `update` no-ops when inactive).
+    if state == .recording && liveTextInserter.isActive {
       liveTextInserter.update(with: text)
     }
 
@@ -269,7 +325,8 @@ final class MainManager: ObservableObject {
   func toggleRecordingFromUI() {
     guard !isEndingSession else { return }
     if activeSession == nil {
-      Task { await startSession(trigger: .uiButton) }
+      let triggerTiming = SessionTriggerTiming.nonHotKey()
+      Task { await startSession(trigger: .uiButton, triggerTiming: triggerTiming) }
     } else {
       Task { await endSession(trigger: .uiButton) }
     }
@@ -303,13 +360,54 @@ final class MainManager: ObservableObject {
     cleanupAfterFailure(message: "Recording cancelled", preserveFile: false)
   }
 
+  /// Hands-free replaces press-to-talk with press-to-arm.
+  private func handleHoldStartGesture(triggerTiming: SessionTriggerTiming) async {
+    guard appSettings.hotKeyActivationStyle.allowsHold else { return }
+    if await handleHandsFreeHotKey() { return }
+    await startSession(trigger: .hold, triggerTiming: triggerTiming)
+  }
+
+  /// The arming press already consumed the gesture, so releasing the key must
+  /// not stop a hands-free capture the detector is still driving.
+  private func handleHoldEndGesture() async {
+    guard appSettings.hotKeyActivationStyle.allowsHold else { return }
+    guard !handsFreeArmsHotKey else { return }
+    await endSession(trigger: .hold)
+  }
+
+  private func handleSingleTapGesture() async {
+    guard appSettings.hotKeyActivationStyle.allowsDoubleTap else { return }
+    guard !handsFreeArmsHotKey else { return }
+    guard let session = activeSession, session.gesture == .doubleTap else { return }
+    await endSession(trigger: .singleTap)
+  }
+
+  /// Double-tap toggles: it arms hands-free dictation when that mode is on,
+  /// otherwise it starts a session or ends the one it started.
+  private func handleDoubleTapGesture(triggerTiming: SessionTriggerTiming) async {
+    guard appSettings.hotKeyActivationStyle.allowsDoubleTap else { return }
+    let now = ProcessInfo.processInfo.systemUptime
+    guard now - lastDoubleTapEventUptime >= 0.25 else { return }
+    lastDoubleTapEventUptime = now
+
+    if await handleHandsFreeHotKey() { return }
+
+    if let session = activeSession {
+      guard session.gesture == .doubleTap else { return }
+      await endSession(trigger: .doubleTap)
+    } else {
+      await startSession(trigger: .doubleTap, triggerTiming: triggerTiming)
+    }
+  }
+
   private func configureHotKeys() {
     hotKeyTokens.append(
       hotKeyManager.register(gesture: .holdStart) { [weak self] in
+        // Stamped here, before the actor hop, so the latency dashboard measures
+        // from the key press rather than from where `startSession` gets to run.
+        let triggerTiming = SessionTriggerTiming.recognisedHotKey()
         Task { @MainActor in
-          guard let self else { return }
-          guard self.appSettings.hotKeyActivationStyle.allowsHold else { return }
-          await self.startSession(trigger: .hold)
+          await self?.handleHoldStartGesture(triggerTiming: triggerTiming)
         }
       }
     )
@@ -317,30 +415,16 @@ final class MainManager: ObservableObject {
     hotKeyTokens.append(
       hotKeyManager.register(gesture: .holdEnd) { [weak self] in
         Task { @MainActor in
-          guard let self else { return }
-          guard self.appSettings.hotKeyActivationStyle.allowsHold else { return }
-          await self.endSession(trigger: .hold)
+          await self?.handleHoldEndGesture()
         }
       }
     )
 
     hotKeyTokens.append(
       hotKeyManager.register(gesture: .doubleTap) { [weak self] in
+        let triggerTiming = SessionTriggerTiming.recognisedHotKey()
         Task { @MainActor in
-          guard let self else { return }
-          guard self.appSettings.hotKeyActivationStyle.allowsDoubleTap else { return }
-          let now = ProcessInfo.processInfo.systemUptime
-          if now - self.lastDoubleTapEventUptime < 0.25 {
-            return
-          }
-          self.lastDoubleTapEventUptime = now
-
-          if let session = self.activeSession {
-            guard session.gesture == .doubleTap else { return }
-            await self.endSession(trigger: .doubleTap)
-          } else {
-            await self.startSession(trigger: .doubleTap)
-          }
+          await self?.handleDoubleTapGesture(triggerTiming: triggerTiming)
         }
       }
     )
@@ -348,11 +432,7 @@ final class MainManager: ObservableObject {
     hotKeyTokens.append(
       hotKeyManager.register(gesture: .singleTap) { [weak self] in
         Task { @MainActor in
-          guard let self else { return }
-          guard self.appSettings.hotKeyActivationStyle.allowsDoubleTap else { return }
-          if let session = self.activeSession, session.gesture == .doubleTap {
-            await self.endSession(trigger: .singleTap)
-          }
+          await self?.handleSingleTapGesture()
         }
       }
     )
@@ -385,6 +465,7 @@ final class MainManager: ObservableObject {
   /// This is called at app launch and when recording starts.
   private func warmUpConnectionIfEnabled() {
     guard appSettings.connectionPreWarmingEnabled else { return }
+    guard permissionsManager.status(for: .microphone).isGranted else { return }
     let client = openRouterClient
     Task.detached {
       await client.warmUp()
@@ -418,9 +499,17 @@ final class MainManager: ObservableObject {
     return "Loading local model and transcribing. First run can take a minute."
   }
 
-  // swiftlint:disable:next function_body_length
-  private func startSession(trigger: SessionTriggerSource) async {
-    guard activeSession == nil else { return }
+  // Internal rather than private so the hands-free coordinator can start the
+  // same session the hotkey would have.
+  @discardableResult
+  // swiftlint:disable:next cyclomatic_complexity function_body_length
+  func startSession(
+    trigger: SessionTriggerSource,
+    preRollBuffers: [AVAudioPCMBuffer] = [],
+    triggerTiming: SessionTriggerTiming = .nonHotKey()
+  ) async -> HandsFreeCaptureStartOutcome {
+    guard activeSession == nil else { return .rejected(.captureFailed) }
+    captureWarmer?.sessionWillBegin()
 
     // Per-app dictation profile: resolve the frontmost app and apply its
     // overrides for this session only. Applied before the API-key check so the
@@ -434,13 +523,27 @@ final class MainManager: ObservableObject {
       frontmostBundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier
     )
 
+    if trigger == .handsFree {
+      guard HandsFreeDictationPolicy.supportsCapture(
+        modelID: appSettings.liveTranscriptionModel,
+        isStreaming: appSettings.transcriptionMode == .liveNative
+      )
+      else {
+        profileApplier.end(settings: appSettings, postProcessing: postProcessingManager)
+        captureWarmer?.sessionDidEnd()
+        return .rejected(.unsupportedConfiguration)
+      }
+    }
+
     if await presentMissingLiveAPIKeyAlertIfNeeded() {
       profileApplier.end(settings: appSettings, postProcessing: postProcessingManager)
-      return
+      captureWarmer?.sessionDidEnd()
+      return .rejected(.captureFailed)
     }
 
     if audioInputDeviceManager.devices.isEmpty {
       profileApplier.end(settings: appSettings, postProcessing: postProcessingManager)
+      captureWarmer?.sessionDidEnd()
       let message = "No microphone connected. Plug in a USB or Bluetooth microphone and try again."
       state = .failed(message)
       lastErrorMessage = message
@@ -448,11 +551,14 @@ final class MainManager: ObservableObject {
         headline: "No microphone connected",
         message: "Plug in a USB or Bluetooth microphone and try again."
       )
-      return
+      return .rejected(.audioUnavailable)
     }
 
     // Failsafe: if live transcription is still running but we have no activeSession,
     // cancel it so the app can always recover without requiring a restart.
+    //
+    // The switcher serialises this teardown with a replacement start and guards
+    // ownership by run, including when both runs reuse the same controller.
     if transcriptionManager.isLiveTranscribing {
       logger.warning("Live transcription still running without an active session; cancelling to recover")
       transcriptionManager.cancelLiveTranscription()
@@ -461,48 +567,72 @@ final class MainManager: ObservableObject {
     clearRetryData()
 
     let gesture = trigger.historyGesture
-    let session = ActiveSession(gesture: gesture, hotKeyDescription: appSettings.selectedHotKey.displayString)
+    let session = ActiveSession(
+      gesture: gesture,
+      hotKeyDescription: appSettings.selectedHotKey.displayString,
+      triggerTiming: triggerTiming
+    )
     session.outputTarget = TextOutputTarget.capture()
     session.diagnosticContext = makeHistoryDiagnosticContext()
     activeSession = session
-    state = .recording
-
-    if appSettings.recordingSoundsEnabled {
-      recordingSoundPlayer.play(.start, volume: appSettings.recordingSoundVolume)
-    }
     lastErrorMessage = nil
+    livePreview = ""
     polishedLivePreview = ""
-    session.events.append(
-      HistoryEvent(
-        kind: .recordingStarted,
-        description: "Recording started via \(gesture.rawValue)"
-      )
-    )
+    // Every recording starts from a blank live transcript, including batch
+    // modes that never open a live session (issue #643).
+    transcriptionManager.resetLiveTranscriptDisplay()
 
     // Reset live polish for new session
     livePolishManager.reset()
 
-    // Start live text insertion if enabled
-    if liveInsertionEnabled {
-      liveTextInserter.begin(target: session.outputTarget)
+    // Start live text insertion if enabled. The experimental streaming mode
+    // patches partials into allowlisted apps via ranged AX replacement; other
+    // apps (or with the setting off) keep today's behaviour.
+    let useRangedStreaming = streamingInsertionEligible
+      && StreamingInsertionAllowlist.allows(session.outputTarget)
+    if liveInsertionEnabled || useRangedStreaming {
+      liveTextInserter.begin(
+        target: session.outputTarget,
+        strategy: useRangedStreaming ? .rangedStreaming : .fullValue
+      )
       if !liveTextInserter.isActive {
         logger.warning("Live text insertion failed to start - will use standard delivery")
       }
     }
 
-    if appSettings.showHUDDuringSessions {
-      permissionsManager.refresh(.microphone)
-      hudManager.updateCaptureHealth(buildCaptureHealthSnapshot())
-      hudManager.beginRecording(profileName: profileApplier.activeProfileName)
-    }
+    // Claim the recorder staged while idle. Returns nil — and the cold path
+    // runs — whenever the environment moved since it was staged.
+    let warmContext = captureWarmer?.claimWarmContext()
 
     do {
-      _ = try await audioFileManager.startRecording()
-      recordCaptureStart(for: session)
+      let recording = try await audioFileManager.startRecording(
+        warmContext: warmContext,
+        owner: .dictation
+      )
+      recordCaptureStart(for: session, wasWarm: recording.usedWarmRecorder)
+      state = .recording
+      session.events.append(
+        HistoryEvent(
+          kind: .recordingStarted,
+          description: "Recording started via \(gesture.rawValue)"
+        )
+      )
+      if appSettings.recordingSoundsEnabled {
+        recordingSoundPlayer.play(.start, volume: appSettings.recordingSoundVolume)
+      }
+      if appSettings.showHUDDuringSessions {
+        permissionsManager.refresh(.microphone)
+        hudManager.updateCaptureHealth(buildCaptureHealthSnapshot())
+        hudManager.beginRecording(profileName: profileApplier.activeProfileName)
+      }
       startAudioLevelMonitoring()
       if isStreamingTranscriptionMode {
-        try await transcriptionManager.startLiveTranscription()
+        try await transcriptionManager.startLiveTranscription(
+          preRollBuffers: preRollBuffers,
+          analyzerFallbackAllowed: trigger != .handsFree
+        )
       }
+      return .started
     } catch {
       session.errors.append(
         HistoryError(
@@ -512,17 +642,20 @@ final class MainManager: ObservableObject {
         )
       )
       cleanupAfterFailure(message: error.localizedDescription, preserveFile: false)
+      return .rejected(HandsFreeDictationMachine.Failure(error))
     }
   }
 
   /// Latency checkpoint: the recorder is live. hotkey → capture-start is the
-  /// cold-start figure competitors market, so log it explicitly every session.
-  private func recordCaptureStart(for session: ActiveSession) {
+  /// cold-start figure competitors market, so log it explicitly every session,
+  /// tagged with whether the pre-warmed recorder was used (issue #663) so the
+  /// dashboard percentiles can be read against the warm/cold split.
+  private func recordCaptureStart(for session: ActiveSession, wasWarm: Bool) {
     session.captureStarted = Date()
-    if let coldStartMs = SessionLatencyMetrics.milliseconds(
-      from: session.recordingStarted, to: session.captureStarted
-    ) {
-      self.logger.info("Latency: capture started \(coldStartMs)ms after trigger (cold start)")
+    session.captureStartedUptime = ProcessInfo.processInfo.systemUptime
+    if let coldStartMs = session.captureStartMilliseconds {
+      let path = wasWarm ? "pre-warmed" : "cold"
+      self.logger.info("Latency: capture started \(coldStartMs)ms after trigger (\(path, privacy: .public))")
     }
   }
 
@@ -546,6 +679,7 @@ final class MainManager: ObservableObject {
         // Ignored: sleep cancellation simply means we stop immediately.
       }
     }
+    guard sessionProcessingShouldContinue(session) else { return }
 
     if appSettings.recordingSoundsEnabled {
       recordingSoundPlayer.play(.stop, volume: appSettings.recordingSoundVolume)
@@ -579,12 +713,14 @@ final class MainManager: ObservableObject {
 
     do {
       let summary = try await stopRecordingWithTimeout()
+      guard sessionProcessingShouldContinue(session) else { return }
       session.recordingSummary = summary
       session.recordingEnded = summary.startedAt.addingTimeInterval(summary.duration)
 
       if isStreamingTranscriptionMode {
         session.transcriptionStarted = Date()
         let result = try await transcriptionManager.stopLiveTranscription()
+        guard sessionProcessingShouldContinue(session) else { return }
         session.transcriptionEnded = Date()
         session.transcriptionResult = result
         session.modelsUsed.insert(result.modelIdentifier)
@@ -675,6 +811,7 @@ final class MainManager: ObservableObject {
           }
         }
         let result = try await transcriptionManager.transcribeFile(at: summary.url)
+        guard sessionProcessingShouldContinue(session) else { return }
         session.transcriptionEnded = Date()
         session.transcriptionResult = result
         session.modelsUsed.insert(result.modelIdentifier)
@@ -769,6 +906,7 @@ final class MainManager: ObservableObject {
             }
           }
         )
+        guard sessionProcessingShouldContinue(session) else { return }
         switch outcomeResult {
         case .success(let outcome):
           session.postProcessingEnded = Date()
@@ -847,7 +985,7 @@ final class MainManager: ObservableObject {
 
       // Handle live text insertion finalization
       var liveFinalizationResult: LiveTextInserter.FinalizationResult = .deferred
-      if liveInsertionEnabled && liveTextInserter.isActive {
+      if liveTextInserter.isActive {
         liveFinalizationResult = liveTextInserter.applyPolishedFinal(finalText)
         liveTextInserter.end()
       }

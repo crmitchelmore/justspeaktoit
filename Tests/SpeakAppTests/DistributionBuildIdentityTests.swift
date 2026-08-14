@@ -122,7 +122,7 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(infoPlist.contains("$(PRODUCT_MODULE_NAME).KeyboardViewController"))
     }
 
-    func testIOSKeyboardIsAnExplicitOffByDefaultBuildFeature() throws {
+    func testIOSKeyboardBuild_hasIndependentDirectCapturePolicy() throws {
         let manifest = try String(
             contentsOf: repositoryRoot.appendingPathComponent("Project.swift"),
             encoding: .utf8
@@ -139,12 +139,16 @@ final class DistributionBuildIdentityTests: XCTestCase {
             contentsOf: repositoryRoot.appendingPathComponent("Sources/SpeakiOS/Views/SettingsView.swift"),
             encoding: .utf8
         )
-
         XCTAssertTrue(manifest.contains("environment[\"TUIST_IOS_KEYBOARD\"] ?? \"\""))
         XCTAssertTrue(manifest.contains("let isIOSKeyboardEnabled = [\"1\", \"true\", \"yes\"]"))
         XCTAssertTrue(manifest.contains("if isIOSKeyboardEnabled {"))
         XCTAssertTrue(manifest.contains("projectTargets.append(keyboardTarget)"))
         XCTAssertTrue(manifest.contains("iosActiveCompilationConditions.append(\"IOS_KEYBOARD_FEATURE\")"))
+        XCTAssertTrue(manifest.contains("environment[\"TUIST_IOS_KEYBOARD_DIRECT_CAPTURE\"] ?? \"\""))
+        XCTAssertTrue(manifest.contains("IOS_KEYBOARD_DIRECT_CAPTURE"))
+        XCTAssertTrue(manifest.contains("let iosKeyboardInfoPlist: InfoPlist = isIOSKeyboardDirectCaptureEnabled"))
+        XCTAssertTrue(manifest.contains("? .file(path: \"JustSpeakKeyboard/Info.plist\")"))
+        XCTAssertTrue(manifest.contains("infoPlist: iosKeyboardInfoPlist"))
         XCTAssertTrue(manifest.contains("settings: .settings(base: iosTestSettings)"))
         XCTAssertTrue(
             manifest.contains(
@@ -153,9 +157,11 @@ final class DistributionBuildIdentityTests: XCTestCase {
         )
         XCTAssertTrue(featureFlags.contains("#if IOS_KEYBOARD_FEATURE"))
         XCTAssertTrue(featureFlags.contains("static var iOSKeyboardEnabled: Bool"))
+        XCTAssertTrue(featureFlags.contains("static var iOSKeyboardDirectCaptureEnabled: Bool"))
         XCTAssertTrue(app.contains("guard FeatureFlags.iOSKeyboardEnabled else"))
         XCTAssertTrue(app.contains("KeyboardInstantDictationStore.shared.setEnabled(false)"))
         XCTAssertTrue(settings.contains("if iOSKeyboardEnabled"))
+        XCTAssertTrue(settings.contains("KeyboardDictationPreferencesStore.shared.mirrorAppPreference"))
     }
 
     func testWatchAppBuildFeature_isOffByDefault() throws {
@@ -226,7 +232,7 @@ final class DistributionBuildIdentityTests: XCTestCase {
         for source in [controller, handoff, rootView] {
             XCTAssertFalse(source.contains("extensionContext.open"))
         }
-        XCTAssertTrue(handoff.contains("if requestID == nil, isInstantReady"))
+        XCTAssertTrue(handoff.contains("guard isInstantReady, let currentDocumentIdentifier"))
         XCTAssertTrue(handoff.contains("KeyboardHandoffSignal.postRequestChanged"))
         XCTAssertTrue(rootView.contains("Open Just Speak once"))
         XCTAssertTrue(rootView.contains("keyboardLiveTranscript"))
@@ -238,15 +244,22 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(instantCoordinator.contains("updateInterim"))
         XCTAssertFalse(instantCoordinator.contains(".write("))
         XCTAssertFalse(instantCoordinator.contains(".upload("))
-        XCTAssertTrue(instantCoordinator.contains("saveToHistory: true"))
+        XCTAssertTrue(instantCoordinator.contains("saveToHistory: false"))
+        XCTAssertTrue(instantCoordinator.contains("saveToHistory(transcript, result: result)"))
+        XCTAssertTrue(instantCoordinator.contains("saveToHistory(result.text, result: result)"))
+        XCTAssertTrue(instantCoordinator.contains("iOSHistoryManager.shared.recordTranscription"))
     }
 
+    // swiftlint:disable:next function_body_length
     func testIOSReleaseWorkflowSignsAndValidatesKeyboardExtension() throws {
         let workflow = try String(
             contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/release-ios.yml"),
             encoding: .utf8
         )
-
+        let autoRelease = try String(
+            contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/auto-release.yml"),
+            encoding: .utf8
+        )
         XCTAssertTrue(workflow.contains("IOS_KEYBOARD_APPSTORE_PROFILE"))
         XCTAssertTrue(workflow.contains("ios-keyboard-appstore.provisionprofile"))
         XCTAssertTrue(workflow.contains("com.justspeaktoit.ios.keyboard"))
@@ -269,13 +282,24 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(workflow.contains("iCloud container mismatch"))
         XCTAssertTrue(workflow.contains("iCloud.com.justspeaktoit.ios"))
         XCTAssertTrue(workflow.contains("TUIST_IOS_KEYBOARD: ${{ inputs.include_keyboard && '1' || '0' }}"))
+        XCTAssertTrue(
+            workflow.contains(
+                "TUIST_IOS_KEYBOARD_DIRECT_CAPTURE: ${{ inputs.include_keyboard && inputs.enable_direct_capture"
+            )
+        )
         XCTAssertTrue(workflow.contains("Keyboard feature is off, but JustSpeakKeyboard.appex was embedded"))
-
+        XCTAssertTrue(workflow.contains("Handoff-only keyboard unexpectedly declares $usage_key"))
+        XCTAssertTrue(workflow.contains("Direct-capture keyboard is missing $usage_key"))
         let keyboardInputStart = try XCTUnwrap(workflow.range(of: "      include_keyboard:\n")?.lowerBound)
+        let directInputStart = try XCTUnwrap(workflow.range(of: "      enable_direct_capture:\n")?.lowerBound)
         let environmentStart = try XCTUnwrap(workflow.range(of: "\nenv:\n")?.lowerBound)
-        let keyboardInput = workflow[keyboardInputStart..<environmentStart]
-        XCTAssertTrue(keyboardInput.contains("default: false"))
+        let keyboardInput = workflow[keyboardInputStart..<directInputStart]
+        XCTAssertTrue(keyboardInput.contains("default: true"))
         XCTAssertTrue(keyboardInput.contains("type: boolean"))
+        let directInput = workflow[directInputStart..<environmentStart]
+        XCTAssertTrue(directInput.contains("default: false"))
+        XCTAssertTrue(autoRelease.contains("-f include_keyboard=true"))
+        XCTAssertTrue(autoRelease.contains("-f enable_direct_capture=false"))
 
         let profileBootstrap = try String(
             contentsOf: repositoryRoot.appendingPathComponent("scripts/create-ios-app-store-profile.rb"),

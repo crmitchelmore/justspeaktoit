@@ -58,6 +58,9 @@ final class KeyboardViewController: UIInputViewController {
             },
             contextBeforeInput: { [weak self] in
                 self?.textDocumentProxy.documentContextBeforeInput
+            },
+            contextAfterInput: { [weak self] in
+                self?.textDocumentProxy.documentContextAfterInput
             }
         )
     }

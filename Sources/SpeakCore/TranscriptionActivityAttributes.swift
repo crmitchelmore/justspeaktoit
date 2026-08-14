@@ -41,6 +41,10 @@ public struct TranscriptionActivityAttributes: ActivityAttributes {
     /// Transcription session status
     public enum TranscriptionStatus: String, Codable, Hashable {
         case idle
+        case arming
+        case armed
+        case recording
+        case finalising
         case listening
         case processing
         case paused
@@ -80,7 +84,10 @@ public final class TranscriptionActivityManager: ObservableObject {
     /// background recording) must not proceed when this returns `false`, or the
     /// system-policy check will assert (EXC_BREAKPOINT).
     @discardableResult
-    public func startActivity(provider: String) -> Bool {
+    public func startActivity(
+        provider: String,
+        initialStatus: TranscriptionActivityAttributes.TranscriptionStatus = .recording
+    ) -> Bool {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else {
             print("[ActivityManager] Live Activities not enabled")
             return false
@@ -95,7 +102,7 @@ public final class TranscriptionActivityManager: ObservableObject {
             currentActivity = activity
             isActivityRunning = true
             let state = TranscriptionActivityAttributes.ContentState(
-                status: .listening,
+                status: initialStatus,
                 provider: provider
             )
             Task {
@@ -106,7 +113,7 @@ public final class TranscriptionActivityManager: ObservableObject {
 
         let attributes = TranscriptionActivityAttributes()
         let initialState = TranscriptionActivityAttributes.ContentState(
-            status: .listening,
+            status: initialStatus,
             provider: provider
         )
 
@@ -181,7 +188,8 @@ public final class TranscriptionActivityManager: ObservableObject {
         finalWordCount: Int,
         duration: Int,
         keepPrimed: Bool = false,
-        primedMessage: String = "Ready for the Action Button"
+        primedMessage: String = "Ready for the Action Button",
+        primedStatus: TranscriptionActivityAttributes.TranscriptionStatus = .idle
     ) {
         guard let activity = currentActivity else { return }
 
@@ -199,7 +207,7 @@ public final class TranscriptionActivityManager: ObservableObject {
                 try? await Task.sleep(for: .seconds(5))
                 guard !Task.isCancelled, activity.activityState == .active else { return }
                 let idleState = TranscriptionActivityAttributes.ContentState(
-                    status: .idle,
+                    status: primedStatus,
                     lastSnippet: primedMessage,
                     provider: finalState.provider
                 )

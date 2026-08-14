@@ -121,6 +121,16 @@ extension SettingsView {
               : "Text will replace the entire contents of the focused text field.")
               .font(.caption)
               .foregroundStyle(.secondary)
+
+            settingsToggle(
+              "Stream text while dictating (experimental)",
+              isOn: settingsBinding(\AppSettings.streamingInsertionEnabled),
+              tint: .brandLagoon
+            )
+            .speakTooltip(
+              "Type words into supported apps (TextEdit, Notes) as you speak, correcting them live. "
+                + "Other apps keep the normal paste-at-end behaviour."
+            )
           }
           VStack(alignment: .leading, spacing: 8) {
             if DistributionChannel.current.supportsAccessibilityTextInsertion {
@@ -268,6 +278,35 @@ extension SettingsView {
         }
       }
       .speakTooltip("Pick the microphone Speak should use. We fall back to the system default if a device disconnects.")
+
+      SettingsCard(title: "Fast Start", systemImage: "bolt.circle", tint: Color.brandAccentWarm) {
+        VStack(alignment: .leading, spacing: 12) {
+          Text("Prepare recording ahead of time so dictation begins the moment you press your shortcut.")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+
+          settingsToggle(
+            "Prepare recording while idle",
+            isOn: settingsBinding(\AppSettings.audioPreWarmingEnabled),
+            tint: .brandAccentWarm
+          )
+          .speakTooltip(
+            "Sets up the recorder in advance so your shortcut starts capture immediately. "
+              + "The microphone is never opened until you actually start dictating."
+          )
+
+          settingsToggle(
+            "Warm supported connections",
+            isOn: settingsBinding(\AppSettings.connectionPreWarmingEnabled),
+            tint: .brandAccentWarm
+          )
+          .speakTooltip(
+            "Probes supported provider endpoints ahead of time without opening a live session. "
+              + "No audio, API key, or transcription request is sent while idle."
+          )
+        }
+      }
+      .speakTooltip("Trade a little idle work for a faster start when you press your dictation shortcut.")
 
       SettingsCard(title: "Recording Sounds", systemImage: "speaker.wave.2", tint: Color.brandLagoon) {
         VStack(alignment: .leading, spacing: 12) {

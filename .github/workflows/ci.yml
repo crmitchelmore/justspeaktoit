@@ -106,9 +106,8 @@ jobs:
           echo "SIMULATOR_ID=$SIMULATOR_ID" >> "$GITHUB_ENV"
 
       - name: Generate iOS App Project
-        # Internal CI builds include the flagged-off keyboard extension so it
-        # keeps compiling and its flag-gated tests run. Release and TestFlight
-        # builds stay gated behind the manual `include_keyboard` input.
+        # CI includes the keyboard in its shipping handoff-only shape so the
+        # extension and its flow tests compile without enabling direct capture.
         env:
           TUIST_IOS_KEYBOARD: "1"
         run: tuist generate --no-open
@@ -130,8 +129,8 @@ jobs:
         # The watch app target only exists when generated with
         # TUIST_WATCH_APP=1 (it needs its own provisioning profile for release
         # signing, so it is excluded from release builds). Build it unsigned
-        # here so the flagged target cannot rot. Cheap: four small source
-        # files plus one shared protocol file.
+        # here so the flagged target cannot rot. Cheap: six small source files
+        # plus two shared core files.
         run: |
           set -o pipefail
           TUIST_WATCH_APP=1 tuist generate --no-open

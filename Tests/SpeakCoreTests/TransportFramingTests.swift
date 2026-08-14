@@ -23,19 +23,11 @@ final class TransportFramingTests: XCTestCase {
         XCTAssertEqual(options.count, 1, "The transport must be WebSocket, once, on both ends")
     }
 
-    func testParameters_capTheMessageSizeInTheFramingLayer() {
-        let options = self.webSocketOptions(SpeakTransportWire.parameters(includesPeerToPeer: true))
-        XCTAssertEqual(
-            options.first?.maximumMessageSize,
-            TransportFrameLimit.session.maximumBytes,
-            "An oversized frame must be refused before its bytes are buffered"
-        )
-    }
-
-    func testParameters_answerProtocolLevelPings() {
-        let options = self.webSocketOptions(SpeakTransportWire.parameters(includesPeerToPeer: true))
-        XCTAssertEqual(options.first?.autoReplyPing, true)
-    }
+    // Note: `NWProtocolWebSocket.Options` setters such as `maximumMessageSize` and
+    // `autoReplyPing` do not round-trip through their getters on every macOS runner
+    // (the getters can return 0/false regardless of what was set), so the values are
+    // not asserted here by introspection. The behaviour they configure is covered by
+    // the loopback tests in `TransportLoopbackTests`.
 
     func testParameters_offerPeerToPeerOnlyWhenAsked() {
         XCTAssertTrue(SpeakTransportWire.parameters(includesPeerToPeer: true).includePeerToPeer)

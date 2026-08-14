@@ -187,6 +187,7 @@ struct CheckForUpdatesView: View {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var environment: AppEnvironment?
+    private var terminationTask: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -197,6 +198,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         DispatchQueue.global(qos: .utility).async { _ = AVAudioEngine() } // Sentry JUSTSPEAKTOIT-A
         checkAndOfferDMGCleanup()
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let mainManager = environment?.main else { return .terminateNow }
+        guard terminationTask == nil else { return .terminateLater }
+
+        terminationTask = Task { @MainActor in
+            await mainManager.prepareForTermination()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
     
     private func checkAndOfferDMGCleanup() {

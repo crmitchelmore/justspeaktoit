@@ -2,6 +2,42 @@
 
 The "Send to Mac" feature is now fully implemented on both sides.
 
+## Wire Protocol
+
+Both ends build their `NWParameters` from `SpeakTransportWire`
+(`Sources/SpeakCore/TransportChannel.swift`), so the client and the server cannot
+frame messages differently.
+
+| Item | Value |
+|------|-------|
+| Transport | WebSocket (RFC 6455) over TCP, via `NWProtocolWebSocket` |
+| Discovery | Bonjour, `_speaktransport._tcp` |
+| Client endpoint | The Bonjour service endpoint, or `ws://<host>:<port>/speak` |
+| Frame | One binary WebSocket message per `TransportMessage`, JSON, ISO 8601 dates |
+| Frame ceiling before authentication | 4 KiB |
+| Frame ceiling after authentication | 1 MiB |
+
+Notes:
+
+- A WebSocket client must address the Mac either by Bonjour service endpoint or
+  by URL. A bare host-and-port endpoint cannot complete the handshake, because
+  the handshake needs an HTTP request line.
+- The server accepts any request path.
+- `NWProtocolWebSocket.Options.maximumMessageSize` applies the 1 MiB ceiling
+  inside the framing layer, so an oversized frame is refused before its bytes are
+  buffered.
+- A device must send `hello`, then `authenticate` with the pairing code, before
+  the server accepts any message that carries text. Until then it is held to the
+  4 KiB ceiling. Anything else closes the connection.
+- A `hello` whose `protocolVersion` differs from the server's receives
+  `ErrorMessage.protocolMismatch`, which names both versions, and the server then
+  closes the connection.
+- `TransportLoopbackTests` connects the shipping `MacConnection` to the shipping
+  `TransportServer` over a loopback socket and covers each of these rules.
+  Codable-only tests cannot: before issue #688 both ends agreed on every message
+  shape and still could not exchange one byte, because the phone spoke WebSocket
+  while the Mac read a hand-rolled four-byte length prefix.
+
 ## What Was Added
 
 ### TransportServer (`Sources/SpeakApp/Transport/TransportServer.swift`)

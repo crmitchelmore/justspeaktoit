@@ -71,6 +71,30 @@ public struct SonioxTTSRealtimeCancel: Encodable, Equatable, Sendable {
     }
 }
 
+/// Connection-scoped keepalive.
+///
+/// Soniox closes a real-time socket that stays idle. Send this message every 20
+/// to 30 seconds while the socket is open. The message applies to the whole
+/// connection, so it carries no stream ID.
+///
+/// A keepalive does not replace speech generation. Soniox also closes a
+/// connection that generates no audio for more than 3 minutes, even when
+/// keepalives continue.
+public struct SonioxTTSRealtimeKeepAlive: Encodable, Equatable, Sendable {
+    /// Send a keepalive at this interval, or more frequently.
+    public static let recommendedInterval: TimeInterval = 20
+    /// Soniox closes a connection that generates no audio for this long.
+    public static let generationCap: TimeInterval = 180
+
+    public let keepAlive = true
+
+    public init() {}
+
+    enum CodingKeys: String, CodingKey {
+        case keepAlive = "keep_alive"
+    }
+}
+
 /// Server events are scoped by stream ID so late events cannot affect a replacement stream.
 public enum SonioxTTSRealtimeEvent: Equatable, Sendable {
     case audio(streamID: String, data: Data, isFinal: Bool)
@@ -102,6 +126,7 @@ extension SonioxTTSRealtimeEvent: Decodable {
             self = .terminated(streamID: streamID)
             return
         }
+        let isAudioEnd = try values.decodeIfPresent(Bool.self, forKey: .audioEnd) ?? false
         if let encodedAudio = try values.decodeIfPresent(String.self, forKey: .audio) {
             guard let audio = Data(base64Encoded: encodedAudio) else {
                 throw DecodingError.dataCorruptedError(
@@ -110,11 +135,13 @@ extension SonioxTTSRealtimeEvent: Decodable {
                     debugDescription: "Soniox audio chunk is not valid base64"
                 )
             }
-            self = .audio(
-                streamID: streamID,
-                data: audio,
-                isFinal: try values.decodeIfPresent(Bool.self, forKey: .audioEnd) ?? false
-            )
+            self = .audio(streamID: streamID, data: audio, isFinal: isAudioEnd)
+            return
+        }
+        // Soniox can close the audio phase with a frame that carries no samples.
+        // Keep the handshake, and give the player an empty final chunk.
+        if isAudioEnd {
+            self = .audio(streamID: streamID, data: Data(), isFinal: true)
             return
         }
         if let errorType = try values.decodeIfPresent(String.self, forKey: .errorType) {

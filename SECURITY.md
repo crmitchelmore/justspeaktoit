@@ -31,7 +31,9 @@ This app follows these security practices:
 - **Keychain storage**: All API keys and secrets are stored in the macOS/iOS Keychain
 - **Privacy-scoped diagnostics**: Production macOS builds send anonymous crash,
   performance, and app-session diagnostics to Sentry EU. Default PII collection
-  is disabled, and transcript content and API keys must never be included.
+  is disabled, automatic HTTP-error capture is limited to the app's own update
+  domain, and every event is scrubbed of credentials before transmission, so
+  transcript content and API keys are not included.
   The iOS app does not currently initialise Sentry or another developer-operated
   analytics SDK.
 - **Local processing**: Transcription can be performed entirely on-device

@@ -181,6 +181,11 @@ public struct HandsFreeDictationMachine: Equatable, Sendable {
         case silenceElapsed
         /// The capture pipeline finished on its own (final transcript delivered).
         case captureFinished
+        /// The owner refused to start the capture, so nothing was captured.
+        /// Distinct from ``sessionFailed(_:)`` because there is no capture to
+        /// cancel: a refusal usually means another recording already owns the
+        /// microphone, and cancelling would destroy that recording.
+        case captureStartRejected(Failure)
         /// Arming or capture failed; hands-free drops back to disarmed.
         case sessionFailed(Failure)
     }
@@ -220,6 +225,8 @@ public struct HandsFreeDictationMachine: Equatable, Sendable {
             return handleSilenceElapsed()
         case .captureFinished:
             return handleCaptureFinished()
+        case .captureStartRejected(let failure):
+            return handleCaptureStartRejected(failure)
         case .sessionFailed(let failure):
             return handleFailure(failure)
         }
@@ -276,6 +283,17 @@ public struct HandsFreeDictationMachine: Equatable, Sendable {
     /// Convenience for call sites holding a thrown error rather than a reason.
     public mutating func handle(sessionError: Error) -> [Effect] {
         handle(.sessionFailed(Failure(sessionError)))
+    }
+
+    /// A refused capture start disarms and reports, but never emits
+    /// ``Effect/cancelCapture``. The refusal means this machine owns no
+    /// capture, so a cancel would stop a recording that belongs to somebody
+    /// else — for example one the user started by hand from the menu bar.
+    private mutating func handleCaptureStartRejected(_ failure: Failure) -> [Effect] {
+        guard state != .off else { return [] }
+        state = .off
+        lastFailure = failure
+        return [.stopDetector, .reportFailure(failure)]
     }
 
     private mutating func handleFailure(_ failure: Failure) -> [Effect] {

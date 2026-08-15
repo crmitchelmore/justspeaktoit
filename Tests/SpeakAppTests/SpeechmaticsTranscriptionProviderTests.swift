@@ -48,6 +48,41 @@ final class SpeechmaticsTranscriptionProviderTests: XCTestCase {
     XCTAssertEqual(config["max_delay"] as? Double, 0.7)
   }
 
+  func testStartRecognitionPayload_automaticLanguageUsesSystemLocale() throws {
+    let payload = try SpeechmaticsLiveTranscriber.startRecognitionPayload(
+      language: nil,
+      systemLocaleIdentifier: "fr_FR"
+    )
+
+    XCTAssertEqual(try Self.language(inPayload: payload), "fr")
+  }
+
+  func testStartRecognitionPayload_explicitLanguageIgnoresSystemLocale() throws {
+    let payload = try SpeechmaticsLiveTranscriber.startRecognitionPayload(
+      language: "de_DE",
+      systemLocaleIdentifier: "fr_FR"
+    )
+
+    XCTAssertEqual(try Self.language(inPayload: payload), "de")
+  }
+
+  func testStartRecognitionPayload_blankSystemLocaleFallsBackToEnglish() throws {
+    let payload = try SpeechmaticsLiveTranscriber.startRecognitionPayload(
+      language: nil,
+      systemLocaleIdentifier: "   "
+    )
+
+    XCTAssertEqual(try Self.language(inPayload: payload), "en")
+  }
+
+  private static func language(inPayload payload: String) throws -> String {
+    let object = try XCTUnwrap(
+      JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any]
+    )
+    let config = try XCTUnwrap(object["transcription_config"] as? [String: Any])
+    return try XCTUnwrap(config["language"] as? String)
+  }
+
   func testTranscriptEvent_parsesPartialMetadataTranscript() throws {
     let json = #"""
     {

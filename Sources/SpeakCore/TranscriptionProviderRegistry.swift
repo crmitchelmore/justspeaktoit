@@ -52,6 +52,12 @@ public struct TranscriptionProviderMetadata: Sendable, Identifiable {
 
 // MARK: - Provider Error
 
+/// The failure cases that every transcription provider shares.
+///
+/// The descriptions are user-visible: they reach the HUD, the history entry and
+/// the diagnostics report. Keep the established wording. `httpError` keeps the
+/// status code and the response body, because that context is what makes a
+/// provider failure diagnosable.
 public enum TranscriptionProviderError: LocalizedError {
     case apiKeyMissing
     case invalidResponse
@@ -60,11 +66,11 @@ public enum TranscriptionProviderError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .apiKeyMissing:
-            return "API key is missing for the transcription provider."
+            return "API key is required but not provided."
         case .invalidResponse:
-            return "Received an invalid response from the transcription service."
-        case .httpError(let code, let message):
-            return "HTTP error \(code): \(message)"
+            return "The server returned an invalid response."
+        case .httpError(let code, let body):
+            return "Server responded with status \(code): \(body)"
         }
     }
 }

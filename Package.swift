@@ -102,12 +102,22 @@ let package = Package(
             dependencies: ["SpeakCore"]
         ),
         .testTarget(
+            name: "SpeakHotKeysTests",
+            dependencies: ["SpeakHotKeys"]
+        ),
+        .testTarget(
             name: "SpeakSyncTests",
             dependencies: ["SpeakSync"]
         ),
         .testTarget(
             name: "SpeakAppTests",
-            dependencies: ["SpeakApp", "SpeakHotKeys"]
+            dependencies: [
+                "SpeakApp",
+                "SpeakHotKeys",
+                // The Sentry event tests inspect the serialised payload, so the
+                // test target needs the SDK types, not just SpeakApp.
+                .product(name: "Sentry", package: "sentry-cocoa")
+            ]
         ),
         .testTarget(
             name: "SpeakAppSnapshotTests",

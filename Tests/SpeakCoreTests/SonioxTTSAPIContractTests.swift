@@ -38,6 +38,39 @@ final class SonioxTTSAPIContractTests: XCTestCase {
         XCTAssertEqual(captured?.value(forHTTPHeaderField: "Content-Type"), "application/json")
     }
 
+    /// A gateway can refuse the key with a body the app cannot classify. The
+    /// status code must still reach the caller so it can name the real cause.
+    func testRefusedKey_ReportsTheStatusCodeWithAnUnrecognisedBody() async {
+        SonioxTTSMockURLProtocol.handler = { request in
+            (
+                HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 401,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!,
+                Data("<html>Forbidden</html>".utf8)
+            )
+        }
+        let request = SonioxTTSRequest(
+            language: "en",
+            voice: SonioxTTSCatalog.defaultVoice(for: SonioxTTSCatalog.defaultModel),
+            audioFormat: .mp3
+        )
+
+        do {
+            _ = try await SonioxTTSAPI(session: mockSession())
+                .synthesize(text: "Hello", apiKey: "placeholder", request: request)
+            XCTFail("Expected the refused key to raise an error")
+        } catch let SonioxTTSAPIError.apiFailure(failure) {
+            XCTAssertEqual(failure.statusCode, 401)
+            XCTAssertEqual(failure.type, .unknown("unknown"))
+            XCTAssertTrue(failure.isAuthenticationFailure)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
     func testValidation_UsesSelectedRegionalAPIHost() async {
         let recorder = SonioxTTSRequestRecorder()
         SonioxTTSMockURLProtocol.handler = { request in

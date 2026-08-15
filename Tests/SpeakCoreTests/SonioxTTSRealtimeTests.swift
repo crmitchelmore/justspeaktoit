@@ -107,6 +107,40 @@ final class SonioxTTSRealtimeTests: XCTestCase {
         )
     }
 
+    func testResponse_decodesAudioEndOnlyFrameAsFinalEmptyAudio() throws {
+        let event = try JSONDecoder().decode(
+            SonioxTTSRealtimeEvent.self,
+            from: Data(#"{"stream_id":"one","audio_end":true}"#.utf8)
+        )
+
+        XCTAssertEqual(event, .audio(streamID: "one", data: Data(), isFinal: true))
+    }
+
+    func testAudioEndOnlyFrame_completesTheNormalLifecycle() throws {
+        var lifecycle = SonioxTTSRealtimeLifecycle()
+        lifecycle.recordTextEnd()
+        try lifecycle.record(JSONDecoder().decode(
+            SonioxTTSRealtimeEvent.self,
+            from: Data(#"{"stream_id":"one","audio_end":true}"#.utf8)
+        ))
+        try lifecycle.record(.terminated(streamID: "one"))
+
+        XCTAssertTrue(lifecycle.receivedAudioEnd)
+        XCTAssertTrue(lifecycle.isTerminated)
+    }
+
+    func testKeepAlive_encodesConnectionScopedMessageWithoutStreamID() throws {
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(SonioxTTSRealtimeKeepAlive())
+        ) as? [String: Any])
+
+        XCTAssertEqual(object["keep_alive"] as? Bool, true)
+        XCTAssertNil(object["stream_id"])
+        XCTAssertEqual(object.count, 1)
+        XCTAssertLessThanOrEqual(SonioxTTSRealtimeKeepAlive.recommendedInterval, 30)
+        XCTAssertEqual(SonioxTTSRealtimeKeepAlive.generationCap, 180)
+    }
+
     func testResponse_rejectsInvalidBase64Audio() {
         XCTAssertThrowsError(try JSONDecoder().decode(
             SonioxTTSRealtimeEvent.self,

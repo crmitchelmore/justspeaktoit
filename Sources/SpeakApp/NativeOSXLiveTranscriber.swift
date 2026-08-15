@@ -335,9 +335,10 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
 
     recognitionTaskLifecycle.retire()
 
-    // Minting the replacement request retires the previous run's identity, so
-    // anything the cancelled task still delivers is dropped by the guard in
-    // `startRecognitionTask(with:)`.
+    // `retire()` above dropped the previous run's `LiveTranscriptionRun.Token`,
+    // so anything the cancelled task still delivers fails the identity check in
+    // `NativeSpeechRecognitionTaskLifecycle` and is discarded. The replacement
+    // request below feeds the next task, which mints its own token.
     request = makeRecognitionRequest(for: recognizer)
     latestResult = nil
     lastFormattedString = ""

@@ -66,7 +66,14 @@ extension MainManager {
       silenceStartTime = nil
       return
     }
-    guard state == .recording, activeSession != nil else {
+    guard state == .recording, let session = activeSession else {
+      silenceStartTime = nil
+      return
+    }
+    // Hands-free captures end on the speech detector's own silence hold. Two
+    // owners of the same stop race each other, and the loser then reports a
+    // failed session after every utterance, so level-based auto-stop stays out.
+    guard session.trigger != .handsFree else {
       silenceStartTime = nil
       return
     }

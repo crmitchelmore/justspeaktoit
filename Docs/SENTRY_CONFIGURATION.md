@@ -15,13 +15,36 @@ Production macOS builds currently configure:
 - Environment: `production`
 - Release: `justspeaktoit-mac@<version>+<build>`
 - Performance trace sample rate: 20%
-- Automatic session tracking: enabled by the Sentry SDK default
-- Automatic breadcrumbs: enabled
-- Failed HTTP-request capture: enabled
+- Automatic session tracking: enabled, 30-second background interval
+- Automatic breadcrumbs: enabled, network breadcrumbs included, 100 kept
+- Network performance tracking: enabled
+- Failed HTTP-request capture: enabled for `justspeaktoit.com` only
+- Credential redaction: `beforeSend` and `beforeBreadcrumb` scrub every event
 - Default PII collection: disabled
+
+Every value above is set explicitly in `SentryManager.configure`, even where it
+matches the current SDK default, so a Sentry update cannot widen collection
+through a changed default. `SentryManagerTests` asserts each one.
 
 Debug builds and XCTest runs initialise the SDK in disabled mode and do not send
 events.
+
+## Credential redaction
+
+The app authenticates to transcription and speech providers with header names the
+SDK sanitiser does not know (`xi-api-key`, `x-gladia-key`,
+`Ocp-Apim-Subscription-Key`), and two providers carry the key in the URL query
+(`token`, `api_key`). Two controls keep those credentials on the device:
+
+1. `failedRequestTargets` restricts automatic HTTP-error capture to the app's own
+   update domain, so no provider response is captured.
+2. `SentryEventScrubber`, installed as `beforeSend` and `beforeBreadcrumb`,
+   redacts request headers, URL query items, query strings, cookies, breadcrumb
+   data, contexts, tags and extra data of every event.
+
+Both use `SpeakCore`'s `SensitiveHeaderRedactor`, which is the single registry of
+credential-carrying names. A new provider header or query item belongs there and
+nowhere else.
 
 ## Privacy requirements
 

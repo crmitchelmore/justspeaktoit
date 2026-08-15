@@ -315,10 +315,10 @@ public struct ContentView: View {
                     return coordinator.error == nil ? .completed : .failed(.captureFailed)
                 },
                 cancelCapture: { coordinator.cancel() },
-                silenceDuration: {
-                    UserDefaults.standard.object(forKey: "silenceDuration") as? Double
-                        ?? HandsFreeDictationPolicy.defaultSilenceHoldSeconds
-                },
+                // iOS has no silence-hold setting, so the shared policy value is
+                // the only source. The macOS "silenceDuration" preference lives
+                // in the Mac app's own defaults and never reaches this app.
+                silenceDuration: { HandsFreeDictationPolicy.defaultSilenceHoldSeconds },
                 captureIsSupported: {
                     HandsFreeDictationPolicy.supportsCapture(
                         modelID: AppSettings.shared.selectedModel,

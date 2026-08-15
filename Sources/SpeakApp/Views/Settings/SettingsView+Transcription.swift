@@ -723,22 +723,31 @@ extension SettingsView {
     }
   }
 
+  /// Stages a preset, then makes it the active setup only after the model is ready.
+  ///
+  /// The previous setup keeps recording while the download runs, so a failed or
+  /// cancelled download leaves the last usable model selected. The row shows the
+  /// failure, which lets the user try again.
   private func configureAndDownload(_ preset: LocalTranscriptionStarterPreset) {
-    settings.transcriptionMode = .localModel
-    settings.localTranscriptionMode = preset.mode
+    starterPresetActivationTask = StarterPresetActivation.configureAndDownload(
+      isReady: starterPresetInstallState(for: preset) == .installed,
+      supersedes: starterPresetActivationTask,
+      prepare: { await installStarterPreset(preset) },
+      activate: { preset.activate(in: settings) }
+    )
+  }
 
+  /// Downloads and prepares the model behind a preset.
+  ///
+  /// - Returns: `true` only when the model manager reports the model as installed.
+  private func installStarterPreset(_ preset: LocalTranscriptionStarterPreset) async -> Bool {
     switch preset.engine {
     case .parakeet:
-      settings.localStreamingModelSource = FluidAudioParakeetModel.id
-      guard fluidAudioModels.installState != .installed else { return }
-      Task { await fluidAudioModels.install() }
+      await fluidAudioModels.install()
+      return fluidAudioModels.installState == .installed
     case .whisperKit(let model):
-      settings.localTranscriptionModel = model.id
-      if preset.mode == .streaming {
-        settings.localStreamingModelSource = WhisperKitStreamingModel.id(for: model)
-      }
-      guard !localModels.isInstalled(model.id) else { return }
-      Task { await localModels.install(model) }
+      await localModels.install(model)
+      return localModels.isInstalled(model.id)
     }
   }
 

@@ -186,6 +186,9 @@ private final class SonioxPCMAudioPlayer: SonioxPCMAudioPlaying {
 
     func resume(streamID: String) {
         guard self.streamID == streamID else { return }
+        // An interruption, for example a telephone call, deactivates the audio
+        // session. The engine cannot start again until the session is active.
+        try? AVAudioSession.sharedInstance().setActive(true)
         if engine?.isRunning == false { try? engine?.start() }
         if player?.isPlaying == false { player?.play() }
     }
@@ -226,6 +229,7 @@ final class SonioxRealtimeTTSClient: ObservableObject {
     private let audioPlayer: SonioxPCMAudioPlaying
     private let cancelGracePeriod: Duration
     private let receiveTimeout: Duration
+    private let keepAliveInterval: Duration
     private let logger = Logger(subsystem: "com.justspeaktoit.ios", category: "SonioxTTS")
     private var activeStream: ActiveStream?
     private var notificationObservers: [NSObjectProtocol] = []
@@ -251,12 +255,14 @@ final class SonioxRealtimeTTSClient: ObservableObject {
         audioPlayer: SonioxPCMAudioPlaying,
         cancelGracePeriod: Duration = .seconds(1),
         receiveTimeout: Duration = .seconds(15),
+        keepAliveInterval: Duration = .seconds(Int(SonioxTTSRealtimeKeepAlive.recommendedInterval)),
         observesAudioLifecycle: Bool = false
     ) {
         self.webSocketFactory = webSocketFactory
         self.audioPlayer = audioPlayer
         self.cancelGracePeriod = cancelGracePeriod
         self.receiveTimeout = receiveTimeout
+        self.keepAliveInterval = keepAliveInterval
         if observesAudioLifecycle { observeAudioLifecycle() }
     }
 
@@ -286,6 +292,8 @@ final class SonioxRealtimeTTSClient: ObservableObject {
         var lifecycle = SonioxTTSRealtimeLifecycle()
         var providerFailure: SonioxTTSFailure?
         let startedAt = Date()
+        let keepAlive = startKeepAlive(generation: generation, connection: connection)
+        defer { keepAlive.cancel() }
 
         do {
             try audioPlayer.prepare(streamID: streamID)
@@ -350,7 +358,35 @@ final class SonioxRealtimeTTSClient: ObservableObject {
                 throw CancellationError()
             }
             finish(generation: generation, streamID: streamID, connection: connection)
+            // Soniox frequently closes the socket after a failure message and
+            // sends no terminated message. Report the classified failure, which
+            // holds the failure type and the request ID, and not the socket error.
+            if let providerFailure { throw SonioxIOSVoiceOutputError.provider(providerFailure) }
             throw error
+        }
+    }
+
+    /// Sends a keepalive while the stream is open.
+    ///
+    /// Soniox closes a socket that stays idle for more than 20 to 30 seconds.
+    /// The keepalive applies to the connection, not to one stream. Soniox also
+    /// closes a connection that generates no audio for more than 3 minutes, so
+    /// the keepalive alone cannot hold a silent connection open.
+    private func startKeepAlive(
+        generation: UUID,
+        connection: SonioxTTSWebSocketConnection
+    ) -> Task<Void, Never> {
+        let interval = keepAliveInterval
+        return Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: interval)
+                } catch {
+                    return
+                }
+                guard let self, self.isCurrent(generation) else { return }
+                try? await connection.send(JSONEncoder().encode(SonioxTTSRealtimeKeepAlive()))
+            }
         }
     }
 
@@ -415,7 +451,11 @@ final class SonioxRealtimeTTSClient: ObservableObject {
         connection.close()
         isSpeaking = false
     }
+}
 
+/// Keeps streamed speech audible across interruptions, route changes and
+/// application lifecycle changes.
+extension SonioxRealtimeTTSClient {
     private func observeAudioLifecycle() {
         let centre = NotificationCenter.default
         notificationObservers.append(centre.addObserver(
@@ -429,8 +469,8 @@ final class SonioxRealtimeTTSClient: ObservableObject {
             forName: AVAudioSession.routeChangeNotification,
             object: nil,
             queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in self?.handleAudioLifecycleResume() }
+        ) { [weak self] notification in
+            Task { @MainActor in self?.handleRouteChange(notification) }
         })
         notificationObservers.append(centre.addObserver(
             forName: UIApplication.didEnterBackgroundNotification,
@@ -454,9 +494,22 @@ final class SonioxRealtimeTTSClient: ObservableObject {
         guard activeStream != nil,
               let rawValue = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
               let type = AVAudioSession.InterruptionType(rawValue: rawValue) else { return }
+        let rawOptions = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+        handleAudioInterruption(
+            type: type,
+            options: AVAudioSession.InterruptionOptions(rawValue: rawOptions)
+        )
+    }
+
+    /// Pauses at the start of an interruption. Continues at the end of an
+    /// interruption only when the system permits it with `.shouldResume`.
+    func handleAudioInterruption(
+        type: AVAudioSession.InterruptionType,
+        options: AVAudioSession.InterruptionOptions
+    ) {
         if type == .began {
             handleAudioInterruption(began: true)
-        } else {
+        } else if options.contains(.shouldResume) {
             handleAudioInterruption(began: false)
         }
     }
@@ -464,6 +517,25 @@ final class SonioxRealtimeTTSClient: ObservableObject {
     func handleAudioInterruption(began: Bool) {
         guard let streamID = activeStream?.streamID else { return }
         if began {
+            audioPlayer.pause(streamID: streamID)
+        } else {
+            audioPlayer.resume(streamID: streamID)
+        }
+    }
+
+    private func handleRouteChange(_ notification: Notification) {
+        let rawValue = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
+        handleRouteChange(
+            reason: rawValue.flatMap(AVAudioSession.RouteChangeReason.init(rawValue:)) ?? .unknown
+        )
+    }
+
+    /// Continues playback across route changes, but not when the output device
+    /// disappears. Headphones and Bluetooth devices route to the loudspeaker
+    /// when they disconnect, so the stream pauses instead.
+    func handleRouteChange(reason: AVAudioSession.RouteChangeReason) {
+        guard let streamID = activeStream?.streamID else { return }
+        if reason == .oldDeviceUnavailable {
             audioPlayer.pause(streamID: streamID)
         } else {
             audioPlayer.resume(streamID: streamID)

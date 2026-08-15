@@ -559,14 +559,11 @@ enum WireUp {
     settings: AppSettings,
     secureStorage: SecureAppStorage
   ) async {
-    // Only configure if user hasn't explicitly set a preference
-    // Check if it's still the default Apple value
-    let currentModel = settings.liveTranscriptionModel
-    let isDefaultApple = AppleLocalModels.isAppleSpeechModel(currentModel)
-
-    // If user has already changed from default, respect their choice
-    guard isDefaultApple else {
-      print("[WireUp] User has custom transcription model, skipping auto-config")
+    // Only configure if the user has never chosen a live transcription model.
+    // Checking the stored choice (rather than "is it still Apple?") means a
+    // deliberate Apple Speech selection survives every launch.
+    guard !settings.hasExplicitLiveTranscriptionModelChoice else {
+      print("[WireUp] User has chosen a transcription model, skipping auto-config")
       return
     }
 
@@ -575,6 +572,12 @@ enum WireUp {
 
     if hasDeepgramKey {
       await MainActor.run {
+        // Re-check after the keychain await: the user may have chosen a model
+        // while this task was suspended, and that choice must win.
+        guard !settings.hasExplicitLiveTranscriptionModelChoice else {
+          print("[WireUp] User chose a transcription model during auto-config, skipping")
+          return
+        }
         settings.liveTranscriptionModel = "deepgram/nova-3-streaming"
         print("[WireUp] Deepgram API key found, setting as default transcription provider")
       }

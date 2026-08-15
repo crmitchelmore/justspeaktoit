@@ -102,6 +102,10 @@ let package = Package(
             dependencies: ["SpeakCore"]
         ),
         .testTarget(
+            name: "SpeakHotKeysTests",
+            dependencies: ["SpeakHotKeys"]
+        ),
+        .testTarget(
             name: "SpeakSyncTests",
             dependencies: ["SpeakSync"]
         ),

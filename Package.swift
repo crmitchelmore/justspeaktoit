@@ -22,7 +22,11 @@ let package = Package(
         )
     ],
     dependencies: [
-        .package(url: "https://github.com/realm/SwiftLint.git", from: "0.55.0"),
+        // SwiftLint intentionally lives in Tooling/Package.swift, not here: it
+        // pins an exact swift-syntax version that conflicts with
+        // swift-snapshot-testing's constraint, and sharing one graph let a test
+        // dependency silently downgrade the linter (issue #677). Run it via
+        // `make lint` / scripts/swiftlint.sh.
         .package(url: "https://github.com/nicklockwood/SwiftFormat.git", from: "0.53.6"),
         .package(url: "https://github.com/sparkle-project/Sparkle.git", from: "2.6.0"),
         .package(url: "https://github.com/getsentry/sentry-cocoa.git", from: "9.3.0"),

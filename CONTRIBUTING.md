@@ -105,8 +105,8 @@ We use Conventional Commits:
 ### Linting
 
 ```bash
-# Run SwiftLint
-swift package plugin --allow-writing-to-package-directory swiftlint --strict
+# Run SwiftLint (resolves the isolated Tooling/ graph, pinned in Tooling/Package.resolved)
+make lint
 
 # Run SwiftFormat
 swift package plugin --allow-writing-to-package-directory swiftformat

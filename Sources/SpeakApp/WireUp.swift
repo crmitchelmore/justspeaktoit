@@ -3,6 +3,9 @@ import Combine
 import Foundation
 import SpeakCore
 import SpeakSync
+import os.log
+
+private let logger = SpeakLogger.logger(category: "WireUp")
 
 // swiftlint:disable file_length
 
@@ -573,7 +576,7 @@ enum WireUp {
         do {
           try await keySync.syncNow()
         } catch {
-          print("[WireUp] CloudKit API-key sync failed: \(error.localizedDescription)")
+          logger.error("CloudKit API-key sync failed: \(error.localizedDescription, privacy: .public)")
         }
       }
     }
@@ -581,7 +584,7 @@ enum WireUp {
       await configureDefaultTranscriptionProvider(settings: settings, secureStorage: secureStorage)
     }
 
-    print("[WireUp] AppEnvironment.bootstrap complete")
+    logger.info("AppEnvironment.bootstrap complete")
   }
 
   // MARK: - TTS Factory
@@ -618,7 +621,7 @@ enum WireUp {
     // Checking the stored choice (rather than "is it still Apple?") means a
     // deliberate Apple Speech selection survives every launch.
     guard !settings.hasExplicitLiveTranscriptionModelChoice else {
-      print("[WireUp] User has chosen a transcription model, skipping auto-config")
+      logger.info("User has chosen a transcription model, skipping auto-config")
       return
     }
 
@@ -630,14 +633,14 @@ enum WireUp {
         // Re-check after the keychain await: the user may have chosen a model
         // while this task was suspended, and that choice must win.
         guard !settings.hasExplicitLiveTranscriptionModelChoice else {
-          print("[WireUp] User chose a transcription model during auto-config, skipping")
+          logger.info("User chose a transcription model during auto-config, skipping")
           return
         }
         settings.liveTranscriptionModel = "deepgram/nova-3-streaming"
-        print("[WireUp] Deepgram API key found, setting as default transcription provider")
+        logger.info("Deepgram API key found, setting as default transcription provider")
       }
     } else {
-      print("[WireUp] No Deepgram API key found, using Apple on-device transcription as default")
+      logger.info("No Deepgram API key found, using Apple on-device transcription as default")
     }
   }
 }

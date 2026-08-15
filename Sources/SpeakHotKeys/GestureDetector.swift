@@ -11,7 +11,7 @@ public final class GestureDetector {
   public var configuration: HotKeyConfiguration
   public var onGesture: ((HotKeyEvent) -> Void)?
 
-  private let log = Logger(subsystem: "com.justspeaktoit.hotkeys", category: "GestureDetector")
+  private let log = Logger(subsystem: HotKeyLogging.subsystem, category: "GestureDetector")
 
   private var isKeyDown = false
   private var holdFired = false

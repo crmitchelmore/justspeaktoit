@@ -18,15 +18,22 @@ public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Se
     private let language: String?
     private let sampleRate: Int
     private let session: URLSession
-    private let logger = Logger(subsystem: "com.justspeaktoit", category: "SonioxLiveClient")
+    private let logger = SpeakLogger.logger(category: "SonioxLiveClient")
     private let stateLock = NSLock()
     private let pendingSendGroup = DispatchGroup()
+    /// Upper bound on how long a close waits for queued frames to reach the
+    /// transport; a wedged send must never leave the socket open forever.
+    private static let stopFlushBudget: DispatchTimeInterval = .milliseconds(750)
 
     private var webSocketTask: URLSessionWebSocketTask?
     private var onTranscript: ((String, Bool) -> Void)?
     private var onError: ((Error) -> Void)?
     private var isStopping = false
     private var accumulatedFinalText = ""
+
+    /// Holds audio captured between the recording cue and the socket reaching
+    /// `.running`, then replays it in order (issue #641).
+    let preroll: StreamingAudioPreroll
 
     public init(
         apiKey: String,
@@ -40,6 +47,7 @@ public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Se
         self.language = language
         self.sampleRate = sampleRate
         self.session = session
+        self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
     }
 
     public func start(
@@ -52,14 +60,49 @@ public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Se
             self.onTranscript = onTranscript
             self.onError = onError
         }
+        preroll.reset()
         connectWebSocket()
     }
 
+    /// Sends raw PCM Int16 audio data to Soniox.
+    ///
+    /// Audio captured before the socket is running is parked in the pre-roll
+    /// buffer and replayed, in order, on the first send that finds a live
+    /// transport — so speech that starts with the cue is never dropped.
     public func sendAudio(_ audioData: Data) {
-        guard let task = currentWebSocketTask(), task.state == .running else { return }
+        guard let task = currentWebSocketTask(), task.state == .running else {
+            guard !isStoppingState() else { return }
+            preroll.append(audioData)
+            return
+        }
+        for chunk in drainPreroll() {
+            transmit(chunk, on: task)
+        }
+        transmit(audioData, on: task)
+    }
+
+    private func drainPreroll() -> [Data] {
+        let held = preroll.drain()
+        guard !held.isEmpty else { return held }
+        let bytes = held.reduce(0) { $0 + $1.count }
+        let leadingMilliseconds = Int((Double(bytes) / 2.0 / Double(max(sampleRate, 1))) * 1000)
+        logger.info(
+            "Soniox: replaying \(held.count) pre-roll chunks (\(leadingMilliseconds) ms of leading audio)"
+        )
+        return held
+    }
+
+    private func transmit(_ audioData: Data, on task: URLSessionWebSocketTask) {
+        transmit(.data(audioData), on: task)
+    }
+
+    /// Every frame — audio, replayed pre-roll and the finalize handshake — goes
+    /// through here so `stop()` can wait for the transport to take them before
+    /// cancelling the socket.
+    private func transmit(_ message: URLSessionWebSocketTask.Message, on task: URLSessionWebSocketTask) {
         let sendGroup = pendingSendGroup
         sendGroup.enter()
-        task.send(.data(audioData)) { [weak self] error in
+        task.send(message) { [weak self] error in
             defer { sendGroup.leave() }
             guard let self, let error else { return }
             if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
@@ -68,29 +111,66 @@ public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Se
     }
 
     public func stop() {
-        // Best-effort finalize: ask Soniox to commit in-flight tokens and flush
-        // before closing so trailing words aren't lost.
-        if let task = currentWebSocketTask(), task.state == .running {
-            task.send(.string(#"{"type":"finalize"}"#)) { _ in }
-            task.send(.data(Data())) { _ in }
-        }
         let task = withStateLock { () -> URLSessionWebSocketTask? in
             guard !isStopping else { return nil }
             isStopping = true
             return webSocketTask
         }
-        guard let task else { return }
-        if task.state == .running {
-            task.cancel(with: .normalClosure, reason: nil)
+        guard let task else {
+            preroll.reset()
+            return
         }
+
+        // Best-effort finalize: ask Soniox to commit in-flight tokens and flush
+        // before closing so trailing words aren't lost.
+        if task.state == .running {
+            for chunk in drainPreroll() {
+                transmit(chunk, on: task)
+            }
+            transmit(.string(#"{"type":"finalize"}"#), on: task)
+            transmit(.data(Data()), on: task)
+        }
+
+        let unsentPreroll = preroll.snapshot
+        if unsentPreroll.byteCount > 0 {
+            logger.warning(
+                "Soniox: discarding \(unsentPreroll.chunkCount) pre-roll chunks — transport never became ready"
+            )
+        }
+        preroll.reset()
+        closeAfterPendingSends(task)
+    }
+
+    /// `cancel(with:reason:)` fails whatever URLSession has not yet handed to
+    /// the network, so the close waits (bounded) for the replayed pre-roll and
+    /// the finalize frames to land before the socket goes away.
+    private func closeAfterPendingSends(_ task: URLSessionWebSocketTask) {
+        let sendGroup = pendingSendGroup
+        let logger = self.logger
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            if sendGroup.wait(timeout: .now() + Self.stopFlushBudget) == .timedOut {
+                logger.warning("Soniox: closing with sends still in flight after the stop flush budget")
+            }
+            if task.state == .running {
+                task.cancel(with: .normalClosure, reason: nil)
+            }
+            self?.clearWebSocketTask(task)
+        }
+    }
+
+    /// Only the task this stop owns may be cleared: a newer session may already
+    /// have published its own socket.
+    private func clearWebSocketTask(_ task: URLSessionWebSocketTask) {
         withStateLock {
             if webSocketTask === task { webSocketTask = nil }
         }
     }
+}
 
-    // MARK: - Private
+// MARK: - Private
 
-    private func connectWebSocket() {
+private extension SonioxLiveClient {
+    func connectWebSocket() {
         var components = URLComponents()
         components.scheme = "wss"
         components.host = Self.websocketHost
@@ -117,7 +197,7 @@ public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Se
         receiveMessages()
     }
 
-    private func sendInitialConfig() {
+    func sendInitialConfig() {
         guard let task = currentWebSocketTask() else { return }
         var payload: [String: Any] = [
             "api_key": apiKey,
@@ -140,7 +220,7 @@ public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Se
         }
     }
 
-    private func receiveMessages() {
+    func receiveMessages() {
         guard let task = currentWebSocketTask() else { return }
         task.receive { [weak self] result in
             guard let self else { return }
@@ -155,7 +235,7 @@ public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Se
         }
     }
 
-    private func handleMessage(_ message: URLSessionWebSocketTask.Message) {
+    func handleMessage(_ message: URLSessionWebSocketTask.Message) {
         switch message {
         case .string(let text):
             parseResponse(text)
@@ -166,7 +246,7 @@ public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Se
         }
     }
 
-    private func parseResponse(_ json: String) {
+    func parseResponse(_ json: String) {
         guard let data = json.data(using: .utf8),
               let response = try? JSONDecoder().decode(SonioxStreamResponse.self, from: data) else {
             return
@@ -212,7 +292,7 @@ public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Se
         if response.finished == true { flushFinal() }
     }
 
-    private func flushFinal() {
+    func flushFinal() {
         let text: String? = withStateLock {
             let snapshot = accumulatedFinalText.trimmingCharacters(in: .whitespacesAndNewlines)
             return snapshot.isEmpty ? nil : snapshot
@@ -220,7 +300,7 @@ public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Se
         if let text { currentOnTranscript()?(text, true) }
     }
 
-    private func mapConnectionError(_ error: Error) -> Error {
+    func mapConnectionError(_ error: Error) -> Error {
         let nsError = error as NSError
         let description = nsError.localizedDescription.lowercased()
         if nsError.code == 401 || nsError.code == 403
@@ -231,16 +311,16 @@ public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Se
         return error
     }
 
-    private func withStateLock<T>(_ block: () -> T) -> T {
+    func withStateLock<T>(_ block: () -> T) -> T {
         stateLock.lock()
         defer { stateLock.unlock() }
         return block()
     }
 
-    private func currentWebSocketTask() -> URLSessionWebSocketTask? { withStateLock { webSocketTask } }
-    private func isStoppingState() -> Bool { withStateLock { isStopping } }
-    private func currentOnTranscript() -> ((String, Bool) -> Void)? { withStateLock { onTranscript } }
-    private func currentOnError() -> ((Error) -> Void)? { withStateLock { onError } }
+    func currentWebSocketTask() -> URLSessionWebSocketTask? { withStateLock { webSocketTask } }
+    func isStoppingState() -> Bool { withStateLock { isStopping } }
+    func currentOnTranscript() -> ((String, Bool) -> Void)? { withStateLock { onTranscript } }
+    func currentOnError() -> ((Error) -> Void)? { withStateLock { onError } }
 }
 
 private struct SonioxStreamResponse: Decodable {

@@ -335,7 +335,8 @@ public enum LiveTranscriptionClientFactory {
             return ElevenLabsLiveClient(
                 apiKey: apiKey,
                 modelID: route.apiModelName,
-                language: language
+                language: language,
+                sampleRate: route.sampleRate
             )
         case .cartesia:
             return CartesiaLiveClient(

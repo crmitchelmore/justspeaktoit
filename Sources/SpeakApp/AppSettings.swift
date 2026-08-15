@@ -613,7 +613,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
         }
       }
     } catch {
-      print("[AppSettings] Failed to update login item: \(error)")
+      log.error("Failed to update login item: \(error.localizedDescription, privacy: .public)")
     }
   }
 
@@ -912,7 +912,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   }
 
   private let defaults: UserDefaults
-  private let log = Logger(subsystem: "com.github.speakapp", category: "AppSettings")
+  private let log = SpeakLogger.logger(category: "AppSettings")
 
   /// When true, `store` skips writing to `UserDefaults` while the published
   /// in-memory values still update. Used by `SessionProfileApplier` so

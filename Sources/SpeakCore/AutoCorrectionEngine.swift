@@ -14,7 +14,7 @@ public final class AutoCorrectionEngine: ObservableObject {
   private let store: AutoCorrectionStore
   private let lexiconService: PersonalLexiconService
   private let promotionThreshold: () -> Int
-  private let log = Logger(subsystem: "com.github.speakapp", category: "AutoCorrectionEngine")
+  private let log = SpeakLogger.logger(category: "AutoCorrectionEngine")
 
   /// - Parameters:
   ///   - store: Persistence for correction candidates.

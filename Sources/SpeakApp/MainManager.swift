@@ -72,7 +72,7 @@ final class MainManager: ObservableObject {
   let textProcessor: TranscriptionTextProcessor
   let autoCorrectionTracker: AutoCorrectionTracker
   let profileStore: DictationProfileStore
-  let logger = Logger(subsystem: "com.github.speakapp", category: "MainManager")
+  let logger = SpeakLogger.logger(category: "MainManager")
   private let recordingSoundPlayer = RecordingSoundPlayer()
   /// Applies/reverts per-app dictation profile overrides for a session.
   private let profileApplier = SessionProfileApplier()
@@ -645,38 +645,68 @@ final class MainManager: ObservableObject {
     let warmContext = captureWarmer?.claimWarmContext()
 
     do {
-      let recording = try await audioFileManager.startRecording(
-        warmContext: warmContext,
-        owner: .dictation
+      // Issue #641: the start cue is played by the sequencer *after* capture is
+      // proven live (and, in streaming modes, after the audio tap is running),
+      // so the user is never invited to speak into a microphone that isn't
+      // listening yet. The pre-warm path (issue #663) runs inside the same
+      // step — a claimed staged recorder still has to prove it is capturing.
+      let startStream: RecordingStartSequencer.Step? = isStreamingTranscriptionMode
+        ? { [transcriptionManager, preRollBuffers, trigger] in
+          try await transcriptionManager.startLiveTranscription(
+            preRollBuffers: preRollBuffers,
+            analyzerFallbackAllowed: trigger != .handsFree
+          )
+        }
+        : nil
+      let sequencer = RecordingStartSequencer(
+        isSessionCurrent: { [weak self] in self?.activeSession === session },
+        startCapture: { [weak self] in
+          guard let self else { return }
+          let recording = try await self.audioFileManager.startRecording(
+            warmContext: warmContext,
+            owner: .dictation
+          )
+          // The stop could have landed while `startRecording()` was suspended.
+          // Publish nothing for a session that is already over — throw away the
+          // capture that just came up instead.
+          guard self.activeSession === session else {
+            await self.discardStartedCapture()
+            throw RecordingStartAbort.sessionEnded
+          }
+          self.recordCaptureStart(for: session, wasWarm: recording.usedWarmRecorder)
+          self.state = .recording
+          session.events.append(
+            HistoryEvent(
+              kind: .recordingStarted,
+              description: "Recording started via \(gesture.rawValue)"
+            )
+          )
+          // A hands-free capture always moves the HUD to the recording pane,
+          // even when the user hides the HUD for their own sessions: the armed
+          // pane otherwise claims the app only listens while it in fact
+          // records. Showing that the microphone captures is a privacy duty,
+          // not a taste.
+          if self.appSettings.showHUDDuringSessions || trigger == .handsFree {
+            self.permissionsManager.refresh(.microphone)
+            self.hudManager.updateCaptureHealth(self.buildCaptureHealthSnapshot())
+            self.hudManager.beginRecording(profileName: self.profileApplier.activeProfileName)
+          }
+          self.startAudioLevelMonitoring()
+        },
+        discardCapture: { [weak self] in await self?.discardStartedCapture() },
+        startStream: startStream,
+        discardStream: { [weak self] in self?.transcriptionManager.cancelLiveTranscription() },
+        playCue: { [weak self] in self?.playRecordingStartCue(for: session) }
       )
-      recordCaptureStart(for: session, wasWarm: recording.usedWarmRecorder)
-      state = .recording
-      session.events.append(
-        HistoryEvent(
-          kind: .recordingStarted,
-          description: "Recording started via \(gesture.rawValue)"
-        )
-      )
-      if appSettings.recordingSoundsEnabled {
-        recordingSoundPlayer.play(.start, volume: appSettings.recordingSoundVolume)
-      }
-      // A hands-free capture always moves the HUD to the recording pane, even
-      // when the user hides the HUD for their own sessions: the armed pane
-      // otherwise claims the app only listens while it in fact records.
-      // Showing that the microphone captures is a privacy duty, not a taste.
-      if appSettings.showHUDDuringSessions || trigger == .handsFree {
-        permissionsManager.refresh(.microphone)
-        hudManager.updateCaptureHealth(buildCaptureHealthSnapshot())
-        hudManager.beginRecording(profileName: profileApplier.activeProfileName)
-      }
-      startAudioLevelMonitoring()
-      if isStreamingTranscriptionMode {
-        try await transcriptionManager.startLiveTranscription(
-          preRollBuffers: preRollBuffers,
-          analyzerFallbackAllowed: trigger != .handsFree
-        )
-      }
+      let timeline = try await sequencer.run()
+      recordStartTimeline(for: session, timeline: timeline)
       return .started
+    } catch is RecordingStartAbort {
+      // Not a failure: the session ended while startup was suspended, and the
+      // sequencer has already torn down whatever it brought up. Touching the
+      // shared failure path here would clobber the session that replaced it.
+      logger.info("Recording start abandoned: the session ended before capture was ready")
+      return .rejected(.captureFailed)
     } catch {
       session.errors.append(
         HistoryError(
@@ -690,10 +720,25 @@ final class MainManager: ObservableObject {
     }
   }
 
+  /// Plays the "recording started" cue, unless the user already stopped (or a
+  /// newer session replaced this one) while capture was coming up — a late cue
+  /// after the stop cue would be worse than no cue at all.
+  private func playRecordingStartCue(for session: ActiveSession) {
+    guard self.activeSession === session, self.state == .recording else {
+      self.logger.info("Skipping start cue: session ended before capture was ready")
+      return
+    }
+    guard appSettings.recordingSoundsEnabled else { return }
+    recordingSoundPlayer.play(.start, volume: appSettings.recordingSoundVolume)
+  }
+
   /// Latency checkpoint: the recorder is live. hotkey → capture-start is the
   /// cold-start figure competitors market, so log it explicitly every session,
   /// tagged with whether the pre-warmed recorder was used (issue #663) so the
   /// dashboard percentiles can be read against the warm/cold split.
+  ///
+  /// Called from the start sequencer's capture step, so the checkpoint is taken
+  /// the moment capture is *proven* live rather than when it was requested.
   private func recordCaptureStart(for session: ActiveSession, wasWarm: Bool) {
     session.captureStarted = Date()
     session.captureStartedUptime = ProcessInfo.processInfo.systemUptime
@@ -701,6 +746,30 @@ final class MainManager: ObservableObject {
       let path = wasWarm ? "pre-warmed" : "cold"
       self.logger.info("Latency: capture started \(coldStartMs)ms after trigger (\(path, privacy: .public))")
     }
+  }
+
+  /// Throws away capture that came up for a session nobody is listening to any
+  /// more (the user stopped, or a replacement session started, while the start
+  /// was suspended). Without this the recorder keeps running and the file is
+  /// never claimed by any session.
+  private func discardStartedCapture() async {
+    stopAudioLevelMonitoring()
+    await audioFileManager.cancelRecording(deleteFile: true)
+  }
+
+  /// Records the full start timeline (capture, streaming tap, cue) in history
+  /// so a clipped-start report can be diagnosed from the session alone
+  /// (issue #641).
+  private func recordStartTimeline(for session: ActiveSession, timeline: RecordingStartTimeline) {
+    let summary = timeline.diagnosticSummary
+    guard !summary.isEmpty else { return }
+    self.logger.info("Recording start timeline: \(summary, privacy: .public)")
+    session.events.append(
+      HistoryEvent(
+        kind: .recordingStarted,
+        description: "Start timeline — \(summary)"
+      )
+    )
   }
 
   // swiftlint:disable cyclomatic_complexity function_body_length

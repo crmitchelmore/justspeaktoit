@@ -16,7 +16,7 @@ final class FnKeyBackend {
   var onKeyDown: ((String) -> Void)?
   var onKeyUp: ((String) -> Void)?
 
-  private let log = Logger(subsystem: "com.justspeaktoit.hotkeys", category: "FnKeyBackend")
+  private let log = Logger(subsystem: HotKeyLogging.subsystem, category: "FnKeyBackend")
   private let functionKeyCode: CGKeyCode = 63
   private let fnAllowedFlags: CGEventFlags = [.maskSecondaryFn, .maskNonCoalesced]
 

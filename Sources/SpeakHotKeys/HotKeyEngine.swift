@@ -3,6 +3,14 @@ import AppKit
 import Foundation
 import os.log
 
+/// Unified logging subsystem for SpeakHotKeys, matching the host app's bundle
+/// identifier so hotkey logs show up under the same `log stream` filter as the
+/// rest of the app. (SpeakHotKeys has no SpeakCore dependency, so it cannot use
+/// `SpeakLogger` directly.)
+enum HotKeyLogging {
+  static let subsystem = Bundle.main.bundleIdentifier ?? "com.justspeaktoit"
+}
+
 /// The main hotkey engine — manages backends and gesture detection.
 ///
 /// Supports two modes:
@@ -33,7 +41,7 @@ public final class HotKeyEngine: ObservableObject {
 
   public let gestureDetector: GestureDetector
 
-  private let log = Logger(subsystem: "com.justspeaktoit.hotkeys", category: "HotKeyEngine")
+  private let log = Logger(subsystem: HotKeyLogging.subsystem, category: "HotKeyEngine")
   private let fnBackend = FnKeyBackend()
   private let carbonBackend = CarbonKeyBackend()
   private var listeners: [HotKeyGesture: [UUID: (HotKeyEvent) -> Void]] = [:]

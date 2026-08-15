@@ -8,7 +8,7 @@ public final class PersonalLexiconService: ObservableObject {
   }
 
   private let store: PersonalLexiconStore
-  private let log = Logger(subsystem: "com.github.speakapp", category: "PersonalLexicon")
+  private let log = SpeakLogger.logger(category: "PersonalLexicon")
   private var regexCache: [String: NSRegularExpression] = [:]
 
   public init(store: PersonalLexiconStore) {

@@ -46,7 +46,7 @@ public final class OpenClawClient: @unchecked Sendable {
     let urlSession: URLSession
     var config: ConnectConfig?
     var pendingRequests: [String: (Result<AnyCodable?, Error>) -> Void] = [:]
-    let logger = Logger(subsystem: "com.justspeaktoit.ios", category: "OpenClawClient")
+    let logger = SpeakLogger.logger(category: "OpenClawClient")
     var requestCounter = 0
     var isConnected = false
     var connectNonce: String?

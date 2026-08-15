@@ -90,20 +90,40 @@ public final class iOSPostProcessingManager: ObservableObject {
         model: String,
         apiKey: String
     ) async throws -> String {
+        try await polish(
+            text: text,
+            systemPrompt: Self.effectiveSystemPrompt(),
+            userMessage: TranscriptCleanupPolicy.userMessage(transcript: text),
+            model: model,
+            apiKey: apiKey
+        )
+    }
+
+    /// Variant with an explicit prompt pair, used by the Polish Text App
+    /// Intent so a custom Shortcuts prompt can replace the default cleanup
+    /// contract (see `AutomationIntentSupport.polishRequest`).
+    public func polish(
+        text: String,
+        systemPrompt: String,
+        userMessage: String,
+        model: String,
+        apiKey: String
+    ) async throws -> String {
         guard !text.isEmpty else { return text }
-        let effectivePrompt = Self.effectiveSystemPrompt()
         if model == AppleLocalModels.foundationModelID {
-            return try await AppleFoundationModelPolisher.process(
-                text: text,
-                systemPrompt: effectivePrompt
+            // Send the caller's prompt pair verbatim: rebuilding the cleanup
+            // payload here would discard a custom Shortcuts prompt.
+            return try await AppleFoundationModelPolisher.respond(
+                systemPrompt: systemPrompt,
+                userMessage: userMessage
             )
         }
         guard !apiKey.isEmpty else { throw PostProcessingError.apiKeyMissing }
 
         var result = ""
         for try await chunk in sendChatStreaming(
-            systemPrompt: effectivePrompt,
-            userMessage: TranscriptCleanupPolicy.userMessage(transcript: text),
+            systemPrompt: systemPrompt,
+            userMessage: userMessage,
             model: model,
             apiKey: apiKey
         ) {

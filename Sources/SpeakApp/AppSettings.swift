@@ -327,6 +327,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     case streamingInsertionEnabled
     case clipboardInsertionTriggers
     case enableSendToMac
+    case enableAutomationServer
     case autoCorrectionsEnabled
     case autoCorrectionsPromotionThreshold
     case recordingSoundsEnabled
@@ -841,6 +842,18 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     didSet { store(enableSendToMac, key: .enableSendToMac) }
   }
 
+  // MARK: - Automation (speak CLI / MCP)
+
+  /// Enable the local automation socket used by the `speak` CLI and the bundled
+  /// MCP server.
+  ///
+  /// Off by default and deliberately opt-in: the socket lets any process running
+  /// as this user start the microphone and read past transcripts, so it is not a
+  /// capability to hand out without the user asking for it.
+  @Published var enableAutomationServer: Bool {
+    didSet { store(enableAutomationServer, key: .enableAutomationServer) }
+  }
+
   // MARK: - Auto-Corrections
 
   /// Enable automatic detection of user corrections after transcription
@@ -1154,6 +1167,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     // Transport Settings
     enableSendToMac =
       defaults.object(forKey: DefaultsKey.enableSendToMac.rawValue) as? Bool ?? false
+    enableAutomationServer =
+      defaults.object(forKey: DefaultsKey.enableAutomationServer.rawValue) as? Bool ?? false
 
     // History Settings
     historyFlushInterval =

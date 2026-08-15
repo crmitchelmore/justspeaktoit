@@ -53,6 +53,8 @@ struct SettingsView: View {
   @State var huggingFaceModelName: String = "tiny"
   @State var huggingFaceImportError: String?
   @State var isLocalTranscriptionAdvancedExpanded = false
+  /// Tracks the newest starter-preset download so a stale one cannot activate.
+  @State var starterPresetActivationTask: Task<Void, Never>?
   #if !APP_STORE
   @State var streamingHuggingFaceRepoID: String =
     "csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26"

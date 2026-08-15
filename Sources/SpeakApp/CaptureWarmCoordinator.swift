@@ -99,6 +99,8 @@ final class CaptureWarmCoordinator { // swiftlint:disable:this type_body_length
   private var workspaceObservers: [NSObjectProtocol] = []
   private var observers: [NSObjectProtocol] = []
   private var audioWarmTask: Task<Void, Never>?
+  private var audioWarmGeneration = 0
+  private var knownRecordingsDirectory: URL?
   private var endpointProbeTask: Task<Void, Never>?
 
   init(
@@ -225,12 +227,24 @@ final class CaptureWarmCoordinator { // swiftlint:disable:this type_body_length
 
   // MARK: - Audio input
 
+  /// Hands the current environment to the recorder actor.
+  ///
+  /// Reconciles run one after another, newest wins. Cancelling the previous
+  /// task is not enough on its own: a task that has already passed its
+  /// cancellation check can still reach the actor after a newer one, which
+  /// would stage a recorder for an environment that no longer holds. Each task
+  /// therefore waits for its predecessor and re-checks the generation it was
+  /// created for before it enqueues anything.
   private func reconcileAudioWarmUp() {
     let context = self.currentContext()
     let enabled = self.appSettings.audioPreWarmingEnabled
-    self.audioWarmTask?.cancel()
+    let previous = self.audioWarmTask
+    previous?.cancel()
+    self.audioWarmGeneration &+= 1
+    let generation = self.audioWarmGeneration
     self.audioWarmTask = Task { [weak self] in
-      guard !Task.isCancelled, let self else { return }
+      await previous?.value
+      guard !Task.isCancelled, let self, self.audioWarmGeneration == generation else { return }
       await self.warmAudio(context, enabled)
     }
   }
@@ -341,6 +355,7 @@ final class CaptureWarmCoordinator { // swiftlint:disable:this type_body_length
     self.rewarm(on: self.audioInputDeviceManager.$activeDeviceUID)
     self.rewarm(on: self.audioInputDeviceManager.$selectedDeviceUID)
     self.rewarm(on: self.appSettings.$recordingsDirectory)
+    self.sweepStagingOnRecordingsDirectoryChange()
     self.rewarm(on: self.appSettings.$audioPreWarmingEnabled)
     self.rewarm(on: self.appSettings.$connectionPreWarmingEnabled)
     self.rewarm(on: self.permissionsManager.$statuses)
@@ -350,6 +365,25 @@ final class CaptureWarmCoordinator { // swiftlint:disable:this type_body_length
     self.invalidateEndpoint(on: self.appSettings.$preferredLocaleIdentifier)
     self.invalidateEndpoint(on: self.appSettings.$assemblyAIKeyterms)
     self.invalidateEndpoint(on: self.appSettings.$trackedAPIKeyIdentifiers)
+  }
+
+  /// Sweeps both staging folders when the user moves their recordings.
+  ///
+  /// The launch sweep only knows the directory in use, so a staged file left
+  /// beside the old one by a crashed run would stay there for ever. The first
+  /// value only records where the recordings are; a sweep needs a real change.
+  private func sweepStagingOnRecordingsDirectoryChange() {
+    self.appSettings.$recordingsDirectory
+      .removeDuplicates()
+      .receive(on: RunLoop.main)
+      .sink { [weak self] directory in
+        guard let self else { return }
+        defer { self.knownRecordingsDirectory = directory }
+        guard let previous = self.knownRecordingsDirectory, previous != directory else { return }
+        AudioFileManager.scheduleStagedLeftoverSweep(in: previous)
+        AudioFileManager.scheduleStagedLeftoverSweep(in: directory)
+      }
+      .store(in: &self.cancellables)
   }
 
   private func rewarm<P: Publisher>(on publisher: P) where P.Output: Equatable, P.Failure == Never {
@@ -427,8 +461,9 @@ final class CaptureWarmCoordinator { // swiftlint:disable:this type_body_length
   fileprivate func handleRecordingLifecycle(_ event: AudioRecordingLifecycleEvent) {
     switch event {
     case .auxiliaryStarted:
-      self.isSessionActive = true
-      self.scheduler.cancel()
+      // An auxiliary recording owns the microphone exactly as a dictation
+      // session does, so it suspends warm-up the same way.
+      self.sessionWillBegin()
     case .auxiliaryEnded:
       self.sessionDidEnd()
     }

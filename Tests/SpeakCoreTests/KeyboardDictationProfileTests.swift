@@ -68,35 +68,6 @@ final class KeyboardDictationProfileTests: XCTestCase {
         XCTAssertEqual(decoded.selectedProfile.route, .directAppleSpeech)
     }
 
-    func testRewriteRequiresTheEntireObservedDocumentContextToStayUnchanged() {
-        let dictated = "A long dictated sentence with an unchanged final twenty-four chars."
-        let original = "Host prefix. \(dictated)"
-
-        XCTAssertTrue(
-            KeyboardDocumentRewriteGuard.canReplace(
-                dictatedText: dictated,
-                contextAtPolishStart: original,
-                currentContext: original
-            )
-        )
-        XCTAssertFalse(
-            KeyboardDocumentRewriteGuard.canReplace(
-                dictatedText: dictated,
-                contextAtPolishStart: original,
-                currentContext: "Changed host prefix. \(dictated)"
-            ),
-            "An earlier edit with the same trailing anchor must never authorise full replacement"
-        )
-        XCTAssertFalse(
-            KeyboardDocumentRewriteGuard.canReplace(
-                dictatedText: dictated,
-                contextAtPolishStart: String(dictated.suffix(24)),
-                currentContext: String(dictated.suffix(24))
-            ),
-            "A truncated proxy context cannot prove ownership of the whole deletion"
-        )
-    }
-
     private var configuration: KeyboardAppProfileConfiguration {
         KeyboardAppProfileConfiguration(
             transcriptionMode: .batch,

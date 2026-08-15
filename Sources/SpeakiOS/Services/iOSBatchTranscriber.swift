@@ -64,12 +64,22 @@ public final class IOSBatchTranscriber {
         }
         audioSessionManager.deactivate()
         startTime = nil
-        defer {
-            if !retainRecording {
-                AudioRecordingPersistence.deleteRecording(at: recording.url)
-            }
+
+        // A non-retained recording is temporary, but it is still the only copy
+        // of what the user said. Delete it after the transcript is safely in
+        // hand, never on the error path: the keyboard reports the failure to
+        // the user, and the preserved file stays visible in the Recordings
+        // screen, which lists every file in the recordings directory. From
+        // there the user can play it back, retry it, or delete it.
+        let result = try await client.transcribeFile(
+            at: recording.url,
+            model: model,
+            language: language
+        )
+        if !retainRecording {
+            AudioRecordingPersistence.deleteRecording(at: recording.url)
         }
-        return try await client.transcribeFile(at: recording.url, model: model, language: language)
+        return result
     }
 
     public func cancel() {

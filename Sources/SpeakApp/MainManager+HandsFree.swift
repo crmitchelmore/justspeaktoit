@@ -1,6 +1,20 @@
 import SpeakCore
 import Foundation
 
+/// Decides whether hands-free dictation may act on the session that is active
+/// right now.
+///
+/// A hands-free capture can end out of band: the user presses stop, and the
+/// detector only learns about it when its silence hold elapses. By then the
+/// user may already record again by hand. Hands-free therefore ends and cancels
+/// captures it started, and nothing else.
+enum HandsFreeCaptureOwnership {
+  static func ownsSession(_ session: ActiveSession?, isEndingSession: Bool) -> Bool {
+    guard !isEndingSession, let session else { return false }
+    return session.trigger == .handsFree
+  }
+}
+
 /// Hands-free ("armed") dictation wiring: the hotkey arms a listening session
 /// instead of recording, and Apple's `SpeechDetector` starts and stops capture.
 ///
@@ -23,14 +37,34 @@ extension MainManager {
         },
         stopCapture: { [weak self] in
           guard let self else { return .failed(.captureFailed) }
-          guard !self.isEndingSession, let session = self.activeSession else {
-            return .failed(.captureFailed)
+          // Hands-free ends only the capture it started. The session may have
+          // ended by another route — the user pressed stop, or the app hit its
+          // own limit — and the user may already record again by hand. Either
+          // way this capture is over and ended cleanly, so hands-free stays
+          // armed rather than reporting a failure after every utterance.
+          guard
+            HandsFreeCaptureOwnership.ownsSession(
+              self.activeSession,
+              isEndingSession: self.isEndingSession
+            ),
+            let session = self.activeSession
+          else {
+            return .completed
           }
           await self.endSession(trigger: .handsFree)
           return session.outputDelivered == nil ? .failed(.captureFailed) : .completed
         },
         cancelCapture: { [weak self] in
-          self?.userRequestedStopDueToError()
+          guard let self else { return }
+          // Same rule for the cancel path: never stop a recording that
+          // hands-free did not start.
+          guard
+            HandsFreeCaptureOwnership.ownsSession(
+              self.activeSession,
+              isEndingSession: self.isEndingSession
+            )
+          else { return }
+          self.userRequestedStopDueToError()
         },
         silenceDuration: { [weak self] in
           self?.appSettings.silenceDuration ?? HandsFreeDictationPolicy.defaultSilenceHoldSeconds
@@ -68,6 +102,7 @@ extension MainManager {
   }
 
   private func presentHandsFreeState(_ state: HandsFreeDictationMachine.State) {
+    setHandsFreeState(state)
     switch state {
     case .arming:
       guard activeSession == nil else { return }

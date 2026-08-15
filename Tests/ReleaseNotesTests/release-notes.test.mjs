@@ -1,11 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
     appcastBuildNumber,
     buildPrompt,
+    collectReleaseContext,
+    commitPlatform,
     cumulativeSparkleHTML,
     deterministicNotes,
     fetchPublishedSparkleReleases,
+    filterCommitsForTrack,
     generateReleaseNotes,
     markdownToHTML,
     parseCommits,
@@ -74,6 +81,62 @@ test("generator falls back without an API key", async () => {
     assert.equal(result.usedFallback, true);
     assert.match(result.notes, /### New and improved/);
     assert.match(result.notes, /fallback=deterministic/);
+});
+
+test("commit platform classification reads Conventional Commit scopes", () => {
+    assert.equal(commitPlatform("feat(ios): add keyboard themes"), "ios");
+    assert.equal(commitPlatform("fix(mac)!: rework the updater"), "mac");
+    assert.equal(commitPlatform("perf(macos): faster launch"), "mac");
+    assert.equal(commitPlatform("feat(mac,ios): shared history"), "shared");
+    assert.equal(commitPlatform("fix: unscoped shared change"), "shared");
+    assert.equal(commitPlatform("chore(deps): bump Sparkle"), "shared");
+    assert.equal(commitPlatform("Merge branch 'main'"), "shared");
+});
+
+test("track filtering drops only the other platform's commits", () => {
+    const commits = [
+        { sha: "a", subject: "feat(mac): menu bar polish" },
+        { sha: "b", subject: "fix(ios): keyboard crash" },
+        { sha: "c", subject: "feat: shared transcription engine" },
+        { sha: "d", subject: "perf(mac,ios): faster model load" },
+    ];
+    assert.deepEqual(filterCommitsForTrack(commits, "mac").map((commit) => commit.sha), ["a", "c", "d"]);
+    assert.deepEqual(filterCommitsForTrack(commits, "ios").map((commit) => commit.sha), ["b", "c", "d"]);
+    assert.deepEqual(filterCommitsForTrack(commits, "legacy"), commits);
+});
+
+test("mac release context excludes iOS-only commits from the prompt and fallback notes", () => {
+    const repo = mkdtempSync(join(tmpdir(), "release-notes-test-"));
+    const git = (...args) => execFileSync(
+        "git",
+        ["-c", "user.name=Test", "-c", "user.email=test@example.com", ...args],
+        { cwd: repo, encoding: "utf8" }
+    );
+    try {
+        git("init", "--initial-branch=main");
+        writeFileSync(join(repo, "file.txt"), "one\n");
+        git("add", "file.txt");
+        git("commit", "-m", "chore: initial import");
+        git("tag", "mac-v1.0.0");
+        writeFileSync(join(repo, "file.txt"), "two\n");
+        git("commit", "-am", "feat(mac): add dictation window");
+        writeFileSync(join(repo, "file.txt"), "three\n");
+        git("commit", "-am", "feat(ios): add keyboard themes");
+        writeFileSync(join(repo, "file.txt"), "four\n");
+        git("commit", "-am", "fix: stop dropping the final word");
+        git("tag", "mac-v1.1.0");
+
+        const releaseContext = collectReleaseContext({ tag: "mac-v1.1.0", cwd: repo });
+        assert.equal(releaseContext.previousTag, "mac-v1.0.0");
+        assert.deepEqual(releaseContext.commits.map((commit) => commit.subject), [
+            "feat(mac): add dictation window",
+            "fix: stop dropping the final word",
+        ]);
+        assert.doesNotMatch(buildPrompt(releaseContext), /keyboard themes/);
+        assert.doesNotMatch(deterministicNotes(releaseContext), /keyboard themes/);
+    } finally {
+        rmSync(repo, { recursive: true, force: true });
+    }
 });
 
 test("release tracks keep macOS, iOS, and legacy histories separate", () => {

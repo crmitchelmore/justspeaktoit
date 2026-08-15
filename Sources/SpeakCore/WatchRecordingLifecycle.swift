@@ -16,15 +16,40 @@ import Foundation
 
 /// Durable identity for a recording that has started but has not yet reached
 /// the transfer queue.
+///
+/// Identity only, deliberately: an absolute file path does not survive an app
+/// update or a restore, because the container directory is different in the new
+/// installation. A marker written before the update would then point at a dead
+/// path, the audio would look unplayable, and a recoverable recording would be
+/// discarded while its file stayed behind forever. The path is derived from the
+/// id instead — see `fileURL(in:)`.
 public struct WatchActiveCapture: Codable, Equatable, Sendable {
     public let id: UUID
-    public let fileURL: URL
     public let startedAt: Date
 
-    public init(id: UUID, fileURL: URL, startedAt: Date) {
+    public init(id: UUID, startedAt: Date) {
         self.id = id
-        self.fileURL = fileURL
         self.startedAt = startedAt
+    }
+
+    /// Markers written by earlier versions also hold a `fileURL`. Naming the
+    /// keys keeps that stale value out of the decoded capture.
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case startedAt
+    }
+
+    /// Where the audio for this capture lives inside `directory`.
+    public func fileURL(in directory: URL) -> URL {
+        Self.fileURL(for: id, in: directory)
+    }
+
+    /// The one place that builds a capture path, so the recorder and recovery
+    /// can never disagree about it.
+    public static func fileURL(for id: UUID, in directory: URL) -> URL {
+        directory
+            .appendingPathComponent(id.uuidString)
+            .appendingPathExtension("m4a")
     }
 }
 

@@ -267,4 +267,17 @@ final class LocalModelManagerTests: XCTestCase {
         XCTAssertTrue(userPrompt.contains("\"transcript\":\"hello world\""))
         XCTAssertTrue(userPrompt.contains("hello world"))
     }
+
+    /// The explicit-prompt path (Polish Text with a custom Shortcuts prompt)
+    /// must preserve the caller's prompt verbatim — not swap in the stock
+    /// cleanup policy — while still appending the local-engine constraint.
+    func testExplicitLocalSystemPrompt_preservesCustomPromptVerbatim() {
+        let systemPrompt = LocalPostProcessingModelManager.explicitLocalSystemPrompt(
+            " Summarise this in one sentence. "
+        )
+
+        XCTAssertTrue(systemPrompt.hasPrefix("Summarise this in one sentence."))
+        XCTAssertFalse(systemPrompt.contains(TranscriptCleanupPolicy.baseSystemPrompt))
+        XCTAssertTrue(systemPrompt.contains("never enter thinking mode"))
+    }
 }

@@ -126,6 +126,40 @@ jobs:
           echo "Stamped version: $VERSION (build $BUILD_NUMBER, commit ${COMMIT_SHA:0:7})"
           grep -A1 "CFBundleShortVersionString\|CFBundleVersion\|GitCommitSHA" Config/AppInfo.plist
 
+      # Notes are generated before the archive so the shipped app bundles the
+      # release notes for its own version and can show them offline.
+      - name: Generate detailed release notes
+        if: startsWith(github.ref, 'refs/tags/mac-v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          RELEASE_NOTES_MODEL: gpt-5.6-luna
+          RELEASE_NOTES_REASONING_EFFORT: medium
+        run: |
+          node scripts/generate-release-notes.mjs \
+            --tag "${GITHUB_REF_NAME}" \
+            --build-number "$BUILD_NUMBER" \
+            --output "$RUNNER_TEMP/release-notes.md" \
+            --html-output "$RUNNER_TEMP/release-notes.html"
+
+      # The catalogue is rebuilt in the runner's checkout and never committed
+      # back, so the checked-in file is only ever a starting point and goes
+      # stale between releases. Backfilling from the published releases first
+      # restores the versions released since it was last refreshed; the new
+      # tag's own notes are then merged on top.
+      - name: Bundle release notes into the app
+        if: startsWith(github.ref, 'refs/tags/mac-v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node scripts/update-release-notes-catalogue.mjs --backfill --platform mac \
+            || echo "::warning::Release-note backfill failed; bundling the checked-in history instead"
+          node scripts/update-release-notes-catalogue.mjs \
+            --platform mac \
+            --version "${{ steps.version.outputs.version }}" \
+            --tag "${GITHUB_REF_NAME}" \
+            --notes-file "$RUNNER_TEMP/release-notes.md"
+
       - name: Build Release Archive
         run: |
           # Archive unsigned to avoid automatic-development signing on CI runners.
@@ -141,6 +175,20 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             PRODUCT_BUNDLE_IDENTIFIER=com.justspeaktoit.mac \
             ENABLE_HARDENED_RUNTIME=YES
+
+      - name: Verify archived release notes
+        run: |
+          APP_PATH="$RUNNER_TEMP/$PRODUCT_NAME.xcarchive/Products/Applications/$PRODUCT_NAME.app"
+          CATALOGUE_PATH=$(find "$APP_PATH" -name ReleaseNotes.json -print -quit)
+          if [ -z "$CATALOGUE_PATH" ]; then
+            echo "::error::Archived app does not contain ReleaseNotes.json"
+            exit 1
+          fi
+          node scripts/update-release-notes-catalogue.mjs \
+            --verify \
+            --platform mac \
+            --version "${{ steps.version.outputs.version }}" \
+            --catalogue "$CATALOGUE_PATH"
 
       - name: Export App (Developer ID / Ad-Hoc)
         env:
@@ -318,18 +366,6 @@ jobs:
           bash scripts/retry-staple.sh "$DMG_PATH"
           
           echo "DMG_PATH=$DMG_PATH" >> $GITHUB_ENV
-
-      - name: Generate detailed release notes
-        if: startsWith(github.ref, 'refs/tags/mac-v')
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          RELEASE_NOTES_MODEL: gpt-5.6-luna
-          RELEASE_NOTES_REASONING_EFFORT: medium
-        run: |
-          node scripts/generate-release-notes.mjs \
-            --tag "${GITHUB_REF_NAME}" \
-            --output "$RUNNER_TEMP/release-notes.md" \
-            --html-output "$RUNNER_TEMP/release-notes.html"
 
       - name: Generate Appcast for Sparkle Updates
         if: startsWith(github.ref, 'refs/tags/mac-v')

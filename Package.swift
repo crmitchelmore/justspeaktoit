@@ -49,6 +49,10 @@ let package = Package(
         ),
         .target(
             name: "SpeakCore",
+            resources: [
+                // Bundled release notes so the in-app "What's New" screen works offline.
+                .process("Resources")
+            ],
             swiftSettings: [
                 // Strict concurrency checking (warnings-only under Swift 5 language
                 // mode). Tuist consumes this same package target, so the setting
@@ -113,12 +117,23 @@ let package = Package(
             dependencies: ["SpeakCore"]
         ),
         .testTarget(
+            name: "SpeakHotKeysTests",
+            dependencies: ["SpeakHotKeys"]
+        ),
+        .testTarget(
             name: "SpeakSyncTests",
             dependencies: ["SpeakSync"]
         ),
         .testTarget(
             name: "SpeakAppTests",
-            dependencies: ["SpeakApp", "SpeakAutomationKit", "SpeakHotKeys"]
+            dependencies: [
+                "SpeakApp",
+                "SpeakAutomationKit",
+                "SpeakHotKeys",
+                // The Sentry event tests inspect the serialised payload, so the
+                // test target needs the SDK types, not just SpeakApp.
+                .product(name: "Sentry", package: "sentry-cocoa")
+            ]
         ),
         .testTarget(
             name: "SpeakAppSnapshotTests",

@@ -193,6 +193,47 @@ final class HandsFreeDictationTests: XCTestCase {
         XCTAssertEqual(machine.state, .off)
     }
 
+    // MARK: - Refused capture starts
+
+    func testRejectedCaptureStart_DisarmsWithoutCancellingAnyCapture() {
+        var machine = HandsFreeDictationMachine()
+        _ = machine.handle(.userToggled)
+        _ = machine.handle(.detectorStarted)
+        _ = machine.handle(.speechDetected)
+
+        let effects = machine.handle(.captureStartRejected(.captureFailed))
+
+        XCTAssertEqual(effects, [.stopDetector, .reportFailure(.captureFailed)])
+        XCTAssertFalse(
+            effects.contains(.cancelCapture),
+            "A refused start owns no capture, so it must never cancel one"
+        )
+        XCTAssertEqual(machine.state, .off)
+        XCTAssertEqual(machine.lastFailure, .captureFailed)
+    }
+
+    func testRejectedCaptureStartWhileFinalising_StillLeavesTheCaptureAlone() {
+        var machine = HandsFreeDictationMachine()
+        _ = machine.handle(.userToggled)
+        _ = machine.handle(.detectorStarted)
+        _ = machine.handle(.speechDetected)
+        _ = machine.handle(.silenceElapsed)
+
+        XCTAssertEqual(
+            machine.handle(.captureStartRejected(.unsupportedConfiguration)),
+            [.stopDetector, .reportFailure(.unsupportedConfiguration)]
+        )
+        XCTAssertEqual(machine.state, .off)
+    }
+
+    func testRejectedCaptureStartAfterDisarm_IsIgnored() {
+        var machine = HandsFreeDictationMachine()
+
+        XCTAssertEqual(machine.handle(.captureStartRejected(.captureFailed)), [])
+        XCTAssertEqual(machine.state, .off)
+        XCTAssertNil(machine.lastFailure)
+    }
+
     func testLateFailureAfterDisarm_IsIgnored() {
         var machine = HandsFreeDictationMachine()
 
@@ -213,6 +254,7 @@ final class HandsFreeDictationTests: XCTestCase {
             .speechDetected,
             .silenceElapsed,
             .captureFinished,
+            .captureStartRejected(.captureFailed),
             .sessionFailed(.captureFailed)
         ]
         let paths: [(HandsFreeDictationMachine.State, [HandsFreeDictationMachine.Event])] = [
@@ -241,6 +283,14 @@ final class HandsFreeDictationTests: XCTestCase {
                 }
                 if effects.contains(.startCapture) {
                     XCTAssertEqual(machine.state, .recording)
+                }
+                // A refused start never cancels a capture, from any state: the
+                // recording that refused it belongs to somebody else.
+                if case .captureStartRejected = event {
+                    XCTAssertFalse(
+                        effects.contains(.cancelCapture),
+                        "\(expectedState) + \(event) cancelled a capture it does not own"
+                    )
                 }
             }
         }

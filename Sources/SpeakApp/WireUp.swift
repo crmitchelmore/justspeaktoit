@@ -8,6 +8,12 @@ import SpeakSync
 
 @MainActor
 final class AppEnvironment: ObservableObject {
+  /// Process-wide access point for the App Intents (Shortcuts) surface, set at
+  /// bootstrap. Intents can fire before the SwiftUI scene has bootstrapped the
+  /// environment (e.g. when Shortcuts launches the app), so it is optional and
+  /// intent handlers wait briefly for it — see `AutomationIntents.swift`.
+  fileprivate(set) static var shared: AppEnvironment?
+
   let settings: AppSettings
   let permissions: PermissionsManager
   let history: HistoryManager
@@ -393,6 +399,10 @@ enum WireUp {
     var settingsOverride: AppSettings?
     var permissionsOverride: PermissionsManager?
     var keychainServiceOverride: String?
+    /// Whether to clear the files a pre-warmed recorder staged in an earlier
+    /// run. Only the real app does this: a test bootstrap resolves the user's
+    /// own recordings directory, which it must never touch.
+    var sweepsStagedLeftovers = true
 
     static let `default` = BootstrapOptions()
   }
@@ -413,6 +423,9 @@ enum WireUp {
       permissionsManager: permissions,
       audioDeviceManager: audioDevices
     )
+    if options.sweepsStagedLeftovers {
+      AudioFileManager.scheduleStagedLeftoverSweep(in: settings.recordingsDirectory)
+    }
     let secureStorage = SecureAppStorage(
       permissionsManager: permissions,
       appSettings: settings,
@@ -500,6 +513,7 @@ enum WireUp {
     )
 
     configureServices(environment: environment, settings: settings, secureStorage: secureStorage)
+    AppEnvironment.shared = environment
     return environment
   }
 
@@ -600,14 +614,11 @@ enum WireUp {
     settings: AppSettings,
     secureStorage: SecureAppStorage
   ) async {
-    // Only configure if user hasn't explicitly set a preference
-    // Check if it's still the default Apple value
-    let currentModel = settings.liveTranscriptionModel
-    let isDefaultApple = AppleLocalModels.isAppleSpeechModel(currentModel)
-
-    // If user has already changed from default, respect their choice
-    guard isDefaultApple else {
-      print("[WireUp] User has custom transcription model, skipping auto-config")
+    // Only configure if the user has never chosen a live transcription model.
+    // Checking the stored choice (rather than "is it still Apple?") means a
+    // deliberate Apple Speech selection survives every launch.
+    guard !settings.hasExplicitLiveTranscriptionModelChoice else {
+      print("[WireUp] User has chosen a transcription model, skipping auto-config")
       return
     }
 
@@ -616,6 +627,12 @@ enum WireUp {
 
     if hasDeepgramKey {
       await MainActor.run {
+        // Re-check after the keychain await: the user may have chosen a model
+        // while this task was suspended, and that choice must win.
+        guard !settings.hasExplicitLiveTranscriptionModelChoice else {
+          print("[WireUp] User chose a transcription model during auto-config, skipping")
+          return
+        }
         settings.liveTranscriptionModel = "deepgram/nova-3-streaming"
         print("[WireUp] Deepgram API key found, setting as default transcription provider")
       }

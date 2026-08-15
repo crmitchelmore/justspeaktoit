@@ -158,7 +158,7 @@ final class AppAutomationHandler: AutomationCommandHandling {
         // Permission and provider setup can legitimately exceed five seconds; the
         // server's request deadline reports that delay while the idempotent command
         // continues and can be collected by retrying the same request id.
-        let outcome = await self.main.startSession(trigger: .uiButton)
+        let outcome = await self.main.startSession(trigger: .automation)
         guard outcome == .started, self.main.activeSession != nil else {
             throw AutomationError(
                 code: .transcriptionFailed,
@@ -178,7 +178,7 @@ final class AppAutomationHandler: AutomationCommandHandling {
             throw AutomationError(code: .notRecording, message: "No dictation session is running.")
         }
         let sessionID = session.id
-        await self.main.endSession(trigger: .uiButton)
+        await self.main.endSession(trigger: .automation)
 
         switch self.main.state {
         case .completed(let item):

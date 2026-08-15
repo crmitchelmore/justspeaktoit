@@ -25,48 +25,89 @@ enum SentryManager {
     /// without crashing. DEBUG builds use a disabled DSN to avoid sending data.
     static func start() {
         #if canImport(Sentry)
-        let dsn = "https://6da8db9be62a737d295a727db0f6ce7e@o4510682832240640"
-            + ".ingest.de.sentry.io/4510790595903568"
-        SentrySDK.start { options in
-            options.dsn = dsn
-            // Set app version from bundle
-            if let info = Bundle.main.infoDictionary,
-               let version = info["CFBundleShortVersionString"] as? String,
-               let build = info["CFBundleVersion"] as? String {
-                options.releaseName = "justspeaktoit-mac@\(version)+\(build)"
-                options.dist = build
-            }
-            let isTestRun = NSClassFromString("XCTestCase") != nil
-            #if DEBUG
-            // Exercises full SDK init so linking/config issues surface in dev.
-            options.enabled = false
-            options.environment = "debug"
-            #else
-            if isTestRun {
-                options.enabled = false
-                options.environment = "test"
-            } else {
-                options.environment = "production"
-            }
-            #endif
-
-            // Enable performance monitoring
-            options.tracesSampleRate = 0.2  // 20% of transactions
-
-            // Attach stack traces to all events
-            options.attachStacktrace = true
-
-            // Enable automatic breadcrumbs
-            options.enableAutoBreadcrumbTracking = true
-
-            // Capture HTTP client errors
-            options.enableCaptureFailedRequests = true
-
-            // Don't send PII by default
-            options.sendDefaultPii = false
-        }
+        SentrySDK.start { options in configure(options) }
         #endif
     }
+
+    #if canImport(Sentry)
+    /// Applies the app's collection contract to a fresh options object.
+    ///
+    /// This is separate from `start()` so a test can inspect every
+    /// privacy-relevant value: a Sentry update that changes a default cannot
+    /// widen collection without a diff here and a failing test.
+    /// - Parameter options: The options object the SDK is about to start with
+    static func configure(_ options: Sentry.Options) {
+        let dsn = "https://6da8db9be62a737d295a727db0f6ce7e@o4510682832240640"
+            + ".ingest.de.sentry.io/4510790595903568"
+        options.dsn = dsn
+        // Set app version from bundle
+        if let info = Bundle.main.infoDictionary,
+           let version = info["CFBundleShortVersionString"] as? String,
+           let build = info["CFBundleVersion"] as? String {
+            options.releaseName = "justspeaktoit-mac@\(version)+\(build)"
+            options.dist = build
+        }
+        let isTestRun = NSClassFromString("XCTestCase") != nil
+        #if DEBUG
+        // Exercises full SDK init so linking/config issues surface in dev.
+        options.enabled = false
+        options.environment = "debug"
+        #else
+        if isTestRun {
+            options.enabled = false
+            options.environment = "test"
+        } else {
+            options.environment = "production"
+        }
+        #endif
+
+        // Enable performance monitoring
+        options.tracesSampleRate = 0.2  // 20% of transactions
+
+        // Attach stack traces to all events
+        options.attachStacktrace = true
+
+        // Every privacy-relevant option below is set even where the value matches
+        // the current SDK default. A Sentry 9.x update must not be able to widen
+        // collection through a changed default: the collection contract is what
+        // this block says, and a change to it shows up as a diff here and as a
+        // failure in SentryManagerTests.
+
+        // Breadcrumbs: automatic UI and network breadcrumbs, both scrubbed by
+        // `beforeBreadcrumb` below.
+        options.enableAutoBreadcrumbTracking = true
+        options.enableNetworkBreadcrumbs = true
+        options.maxBreadcrumbs = 100
+
+        // Sessions: release-health sessions, which carry no request or user data.
+        options.enableAutoSessionTracking = true
+        options.sessionTrackingIntervalMillis = 30_000
+
+        // Network spans for performance monitoring.
+        options.enableNetworkTracking = true
+
+        // Capture HTTP client errors, but only for the app's own domain (the
+        // update feed). Braces: provider traffic carries the user's billable
+        // credential in a header or a query item, so no provider response is
+        // captured at all. `failedRequestTargets` matches the URL by substring.
+        options.enableCaptureFailedRequests = true
+        options.failedRequestTargets = [Self.failedRequestTarget]
+
+        // Belt: every event and breadcrumb, whatever its source, loses its
+        // credentials before transmission. The target restriction above limits
+        // what is captured; this keeps what is sent safe even if a later
+        // integration captures provider traffic again.
+        options.beforeSend = { event in SentryEventScrubber.scrub(event) }
+        options.beforeBreadcrumb = { crumb in SentryEventScrubber.scrub(crumb) }
+
+        // Don't send PII by default
+        options.sendDefaultPii = false
+    }
+
+    /// The only host whose failed requests are captured automatically. The app
+    /// sends no credential to it.
+    static let failedRequestTarget = "justspeaktoit.com"
+    #endif
 
     /// Capture an error with optional context
     static func capture(error: Error, context: [String: Any]? = nil) {

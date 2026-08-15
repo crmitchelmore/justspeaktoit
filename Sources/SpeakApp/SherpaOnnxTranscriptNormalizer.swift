@@ -1,10 +1,27 @@
 import Foundation
 
 enum SherpaOnnxTranscriptNormalizer {
-  static func normalize(_ text: String) -> String {
+  /// Rescues the all-caps output of the legacy sherpa-onnx models.
+  ///
+  /// - Parameters:
+  ///   - text: One sidecar partial or final result.
+  ///   - modelID: The model that produced the text. Models with native casing
+  ///     keep their own output; `nil` gets the rescue, which is what the
+  ///     uppercase zipformer models need.
+  static func normalize(_ text: String, modelID: String? = nil) -> String {
     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !emitsNativeCasing(modelID: modelID) else { return trimmed }
     guard isUppercaseDominated(trimmed) else { return trimmed }
     return sentenceCase(trimmed.lowercased())
+  }
+
+  /// Whether the model supplies its own casing and punctuation.
+  ///
+  /// Parakeet v3 does, and the rescue below damages it: `HTTP API JSON` becomes
+  /// `Http api json` because the text reads as uppercase-dominated (issue #679).
+  static func emitsNativeCasing(modelID: String?) -> Bool {
+    guard let modelID else { return false }
+    return modelID.lowercased().contains("parakeet")
   }
 
   private static func isUppercaseDominated(_ text: String) -> Bool {

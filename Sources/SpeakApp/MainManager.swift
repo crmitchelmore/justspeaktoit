@@ -26,6 +26,10 @@ final class MainManager: ObservableObject {
   @Published var lastErrorMessage: String?
   @Published private(set) var canRetryPostProcessing: Bool = false
 
+  /// Runtime state of hands-free dictation. Published so the menu bar can show
+  /// that the microphone is armed while the HUD is hidden or behind a window.
+  @Published private(set) var handsFreeState: HandsFreeDictationMachine.State = .off
+
   /// Set when a live-recording attempt is aborted because the selected
   /// transcription provider has no API key stored. Observed by `MainView`
   /// to present an alert with an "Add API Key" deep-link CTA.
@@ -88,6 +92,13 @@ final class MainManager: ObservableObject {
   /// Hands-free ("armed") dictation. Created eagerly but inert until the user
   /// arms it, which only the hands-free setting allows.
   private(set) lazy var handsFreeCoordinator = makeHandsFreeCoordinator()
+
+  /// Publishes the hands-free runtime state. The coordinator reports every
+  /// change here so the menu bar and the HUD tell the same story.
+  func setHandsFreeState(_ state: HandsFreeDictationMachine.State) {
+    guard handsFreeState != state else { return }
+    handsFreeState = state
+  }
 
   /// Keeps the audio recorder and the streaming provider's network path warm
   /// while idle so hotkey→capture does not pay setup cost (issue #663).
@@ -332,6 +343,34 @@ final class MainManager: ObservableObject {
     }
   }
 
+  // MARK: - Automation (App Intents / Shortcuts)
+
+  /// Whether a dictation session is currently active. Automation callers use
+  /// this instead of `state` so an in-flight stop still reads as active.
+  var isDictationSessionActive: Bool {
+    activeSession != nil
+  }
+
+  /// Starts a dictation session on behalf of a Shortcuts action, reusing the
+  /// exact hotkey/UI session pipeline. Returns false when no session started;
+  /// `state` and `missingLiveAPIKeyAlert` carry the reason.
+  @discardableResult
+  func startDictationFromAutomation() async -> Bool {
+    await startSession(trigger: .automation)
+    return activeSession != nil
+  }
+
+  /// Ends the active dictation session on behalf of a Shortcuts action and
+  /// returns the delivered history item, or nil when the session failed (the
+  /// failure message is available via `state` / `lastErrorMessage`).
+  func stopDictationFromAutomation() async -> HistoryItem? {
+    await endSession(trigger: .automation)
+    if case .completed(let item) = state {
+      return item
+    }
+    return nil
+  }
+
   func retryPostProcessing() {
     guard canRetryPostProcessing, let retryData = cachedRetryData else { return }
     guard activeSession == nil else { return }
@@ -570,6 +609,7 @@ final class MainManager: ObservableObject {
     let session = ActiveSession(
       gesture: gesture,
       hotKeyDescription: appSettings.selectedHotKey.displayString,
+      trigger: trigger,
       triggerTiming: triggerTiming
     )
     session.outputTarget = TextOutputTarget.capture()
@@ -620,7 +660,11 @@ final class MainManager: ObservableObject {
       if appSettings.recordingSoundsEnabled {
         recordingSoundPlayer.play(.start, volume: appSettings.recordingSoundVolume)
       }
-      if appSettings.showHUDDuringSessions {
+      // A hands-free capture always moves the HUD to the recording pane, even
+      // when the user hides the HUD for their own sessions: the armed pane
+      // otherwise claims the app only listens while it in fact records.
+      // Showing that the microphone captures is a privacy duty, not a taste.
+      if appSettings.showHUDDuringSessions || trigger == .handsFree {
         permissionsManager.refresh(.microphone)
         hudManager.updateCaptureHealth(buildCaptureHealthSnapshot())
         hudManager.beginRecording(profileName: profileApplier.activeProfileName)

@@ -129,7 +129,7 @@ jobs:
         # The watch app target only exists when generated with
         # TUIST_WATCH_APP=1 (it needs its own provisioning profile for release
         # signing, so it is excluded from release builds). Build it unsigned
-        # here so the flagged target cannot rot. Cheap: six small source files
+        # here so the flagged target cannot rot. Cheap: five small source files
         # plus two shared core files.
         run: |
           set -o pipefail
@@ -138,6 +138,41 @@ jobs:
             -workspace "Just Speak to It.xcworkspace" \
             -scheme JustSpeakWatchApp \
             -destination generic/platform=watchOS \
+            CODE_SIGNING_ALLOWED=NO \
+            -skipPackagePluginValidation \
+            -quiet \
+            2>&1 | tail -30
+
+  build-ios-keyboard-direct-capture:
+    name: Build iOS Keyboard (direct capture)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install Tuist
+        run: brew install tuist
+
+      - name: Generate iOS App Project (direct capture)
+        # The direct-capture shape only exists behind two flags, so its `#if
+        # IOS_KEYBOARD_DIRECT_CAPTURE` branches and its file-based Info.plist
+        # compile nowhere else. Build them here so the flagged code cannot rot.
+        env:
+          TUIST_IOS_KEYBOARD: "1"
+          TUIST_IOS_KEYBOARD_DIRECT_CAPTURE: "1"
+        run: tuist generate --no-open
+
+      - name: Build Keyboard Extension (unsigned)
+        # Build only: the shipping handoff shape already runs the flow tests in
+        # the Build iOS Library job, and this leg exists to catch compile rot.
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -workspace "Just Speak to It.xcworkspace" \
+            -scheme JustSpeakKeyboard \
+            -destination generic/platform=iOS \
             CODE_SIGNING_ALLOWED=NO \
             -skipPackagePluginValidation \
             -quiet \

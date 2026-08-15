@@ -10,6 +10,9 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
     private let apiKey: String
     private let modelID: String
     private let language: String?
+    /// PCM16 rate of the audio the caller streams in; only used to size and
+    /// report the pre-roll, since the endpoint takes the rate from the stream.
+    private let sampleRate: Int
     private let session: URLSession
     private let bufferPool: AudioBufferPool
     private let logger = Logger(subsystem: "com.speak.app", category: "ElevenLabsLiveClient")
@@ -33,18 +36,27 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
     private var finishContinuation: CheckedContinuation<String?, Never>?
     private static let finishDrainBudget: TimeInterval = 1.0
 
+    /// Holds audio captured between the recording cue and the socket reaching
+    /// `.running`, then replays it in order (issue #641). Sized from the rate
+    /// the caller is actually feeding us, so the budget is the intended
+    /// duration rather than a guess.
+    let preroll: StreamingAudioPreroll
+
     public init(
         apiKey: String,
         modelID: String = "scribe_v1",
         language: String? = nil,
+        sampleRate: Int = LiveTranscriptionProviderID.elevenlabs.expectedSampleRate,
         session: URLSession = .shared,
         bufferPool: AudioBufferPool = AudioBufferPool(poolSize: 10, bufferSize: 4096)
     ) {
         self.apiKey = apiKey
         self.modelID = modelID
         self.language = language
+        self.sampleRate = sampleRate
         self.session = session
         self.bufferPool = bufferPool
+        self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
     }
 
     /// Starts a live transcription session.
@@ -61,6 +73,7 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
             self.onTranscript = onTranscript
             self.onError = onError
         }
+        preroll.reset()
 
         var urlComponents = URLComponents(string: "wss://api.elevenlabs.io/v1/speech-to-text/stream")!
         var queryItems = [URLQueryItem(name: "model_id", value: modelID)]
@@ -98,11 +111,42 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
     }
 
     /// Sends raw PCM Int16 audio data to the transcription service.
+    ///
+    /// Audio captured before the socket is running is parked in the pre-roll
+    /// buffer and replayed, in order, on the first send that finds a live
+    /// transport — so speech that starts with the cue is never dropped.
     public func sendAudio(_ audioData: Data) {
         guard let task = currentWebSocketTask(), task.state == .running else {
+            bufferPrerollAudio(audioData)
             return
         }
 
+        flushPreroll(to: task)
+        transmit(audioData, on: task)
+    }
+
+    /// Parks pre-connection audio unless the session is already stopping, in
+    /// which case there is nothing left to replay it to.
+    private func bufferPrerollAudio(_ audioData: Data) {
+        guard !isStoppingState() else { return }
+        preroll.append(audioData)
+    }
+
+    /// Replays audio captured before the transport was ready.
+    private func flushPreroll(to task: URLSessionWebSocketTask) {
+        let held = preroll.drain()
+        guard !held.isEmpty else { return }
+        let bytes = held.reduce(0) { $0 + $1.count }
+        let leadingMilliseconds = Int((Double(bytes) / 2.0 / Double(max(sampleRate, 1))) * 1000)
+        logger.info(
+            "ElevenLabs: replaying \(held.count) pre-roll chunks (\(leadingMilliseconds) ms of leading audio)"
+        )
+        for chunk in held {
+            transmit(chunk, on: task)
+        }
+    }
+
+    private func transmit(_ audioData: Data, on task: URLSessionWebSocketTask) {
         var buffer = bufferPool.checkout()
         buffer.append(audioData)
 
@@ -128,48 +172,14 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
     }
 
     /// Sends Float32 audio samples converted to Int16 linear PCM.
+    ///
+    /// Routed through ``sendAudio(_:)`` so pre-connection audio gets the same
+    /// pre-roll treatment as the PCM path.
+    /// - Parameters:
+    ///   - samples: Array of Float32 audio samples (-1.0 to 1.0).
+    ///   - frameCount: Number of frames to send.
     public func sendAudioSamples(_ samples: UnsafePointer<Float>, frameCount: Int) {
-        var buffer = bufferPool.checkout()
-        buffer.reserveCapacity(frameCount * MemoryLayout<Int16>.size)
-
-        // Single-pass Float32 → Int16 conversion into a preallocated array,
-        // appended in one bulk copy instead of 2 bytes per sample.
-        var int16Samples = [Int16](repeating: 0, count: frameCount)
-        for sampleIndex in 0..<frameCount {
-            let sample = samples[sampleIndex]
-            let clampedSample = max(-1.0, min(1.0, sample))
-            int16Samples[sampleIndex] = Int16(clampedSample * Float(Int16.max)).littleEndian
-        }
-        int16Samples.withUnsafeBytes { rawBuffer in
-            if let baseAddress = rawBuffer.baseAddress {
-                buffer.append(baseAddress.assumingMemoryBound(to: UInt8.self), count: rawBuffer.count)
-            }
-        }
-
-        guard let task = currentWebSocketTask(), task.state == .running else {
-            bufferPool.returnBuffer(&buffer)
-            return
-        }
-
-        let dataToSend = buffer
-        let message = URLSessionWebSocketTask.Message.data(dataToSend)
-
-        task.send(message) { [weak self] error in
-            guard let self else { return }
-
-            // Capture the immutable copy: a captured `var` in this @Sendable
-            // completion would be a strict-concurrency violation.
-            var returnBuffer = dataToSend
-            self.bufferPool.returnBuffer(&returnBuffer)
-
-            if let error {
-                if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) {
-                    return
-                }
-                self.logger.error("Failed to send audio: \(error.localizedDescription)")
-                self.currentOnError()?(error)
-            }
-        }
+        sendAudio(PCM16Converter.data(from: samples, frameCount: frameCount))
     }
 
     /// The streaming endpoint has no documented end-of-stream frame, so
@@ -197,6 +207,12 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
             finishContinuation = continuation
             finishLock.unlock()
 
+            // Anything still parked from the connecting window belongs in the
+            // stream before we wait for the trailing final.
+            if let task = currentWebSocketTask(), task.state == .running {
+                flushPreroll(to: task)
+            }
+
             DispatchQueue.global().asyncAfter(deadline: .now() + Self.finishDrainBudget) { [weak self] in
                 self?.resolveFinish()
             }
@@ -213,6 +229,13 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
             webSocketTask = nil
             return task
         }
+        let unsentPreroll = preroll.snapshot
+        if unsentPreroll.byteCount > 0 {
+            logger.warning(
+                "ElevenLabs: discarding \(unsentPreroll.chunkCount) pre-roll chunks — transport never became ready"
+            )
+        }
+        preroll.reset()
         bufferPool.logMetrics()
         task?.cancel(with: .normalClosure, reason: nil)
         resolveFinish()

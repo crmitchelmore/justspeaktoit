@@ -113,15 +113,15 @@ public enum SonioxIOSVoiceOutputError: LocalizedError {
         case .api(let error):
             switch error {
             case .apiFailure(let failure):
-                failure.requestID.map { "\(failure.message) (request \($0))" } ?? failure.message
+                if failure.isAuthenticationFailure {
+                    "Soniox rejected the API key"
+                } else {
+                    failure.requestID.map { "\(failure.message) (request \($0))" } ?? failure.message
+                }
             case .textTooLong(let limit, _):
                 "Soniox accepts up to \(limit) characters per request"
             case .invalidResponse:
                 "Invalid response from Soniox"
-            case .unauthorized:
-                "Soniox rejected the API key"
-            case .httpError(let statusCode, _):
-                "Soniox request failed (HTTP \(statusCode))"
             }
         }
     }

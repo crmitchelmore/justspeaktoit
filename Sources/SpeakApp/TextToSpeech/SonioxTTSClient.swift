@@ -37,15 +37,37 @@ actor SonioxTTSClient: TextToSpeechClient {
     )
     let request = makeRequest(text: text, resolution: resolution, settings: settings)
 
-    let data: Data
-    do {
-      data = try await api.synthesize(text: text, apiKey: apiKey, request: request)
-    } catch let error as SonioxTTSAPIError {
-      throw ttsError(for: error)
+    // Soniox caps one request at 5,000 characters. Longer input becomes a
+    // sequence of requests split at sentence ends, and the parts are joined
+    // into the single file the caller expects.
+    let segments = SonioxTTSTextChunker.chunks(text)
+    guard !segments.isEmpty else {
+      throw TTSError.synthesisFailure("Text cannot be empty")
     }
 
-    let outputURL = try await saveAudioData(data, format: settings.format)
-    let duration = try await getAudioDuration(url: outputURL)
+    var partURLs: [URL] = []
+    var duration: TimeInterval = 0
+    // Soniox bills the generated audio, so every part is priced from its own
+    // measured duration rather than from a character estimate.
+    var cost: Decimal = 0
+    do {
+      for segment in segments {
+        let data = try await api.synthesize(text: segment, apiKey: apiKey, request: request)
+        let partURL = try await saveAudioData(data, format: settings.format)
+        partURLs.append(partURL)
+        let partDuration = try await getAudioDuration(url: partURL)
+        duration += partDuration
+        cost += Decimal(partDuration / 3600) * SonioxTTSAPI.costPerHourOfSpeech
+      }
+    } catch let error as SonioxTTSAPIError {
+      TTSAudioJoiner.discard(partURLs)
+      throw ttsError(for: error)
+    } catch {
+      TTSAudioJoiner.discard(partURLs)
+      throw error
+    }
+
+    let outputURL = try TTSAudioJoiner.join(partURLs, format: settings.format)
 
     return TTSResult(
       audioURL: outputURL,
@@ -53,9 +75,7 @@ actor SonioxTTSClient: TextToSpeechClient {
       voice: resolution.providerVoiceID,
       duration: duration,
       characterCount: text.count,
-      // Soniox bills the generated audio, so the measured duration is a closer
-      // figure than a character estimate.
-      cost: Decimal(duration / 3600) * SonioxTTSAPI.costPerHourOfSpeech
+      cost: cost
     )
   }
 
@@ -91,10 +111,6 @@ actor SonioxTTSClient: TextToSpeechClient {
 
   private func ttsError(for error: SonioxTTSAPIError) -> TTSError {
     switch error {
-    case .unauthorized:
-      return TTSError.apiKeyMissing(provider)
-    case .httpError(let statusCode, let message):
-      return TTSError.synthesisFailure("HTTP \(statusCode): \(message)")
     case .invalidResponse:
       return TTSError.synthesisFailure("Invalid response")
     case .textTooLong(let limit, let characterCount):
@@ -102,9 +118,13 @@ actor SonioxTTSClient: TextToSpeechClient {
         "Soniox accepts up to \(limit) characters per request (this text is \(characterCount))"
       )
     case .apiFailure(let failure):
-      switch failure.type {
-      case .unauthenticated:
+      // The status code decides an authentication failure when the payload
+      // carries no recognised `error_type`, so a revoked key still points the
+      // user at Settings instead of showing a generic synthesis failure.
+      if failure.isAuthenticationFailure {
         return TTSError.apiKeyMissing(provider)
+      }
+      switch failure.type {
       case .voiceNotFound, .voiceNotReady:
         return TTSError.invalidVoice(failure.message)
       default:

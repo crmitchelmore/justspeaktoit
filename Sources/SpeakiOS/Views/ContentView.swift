@@ -2,6 +2,9 @@
 import AVFoundation
 import SwiftUI
 import SpeakCore
+import os.log
+
+private let logger = SpeakLogger.logger(category: "ContentView")
 
 // swiftlint:disable file_length
 /// Foreground recording coordinator backed by the shared iOS transcription factory.
@@ -765,7 +768,7 @@ public struct ContentView: View {
             displayText = result.text
         } else if coordinator.isRunning {
             let result = await coordinator.stop()
-            print("[ContentView] Final result: \(result.text.count) chars, duration: \(result.duration)s")
+            logger.info("Final result: \(result.text.count) chars, duration: \(result.duration)s")
 
             // Auto post-process if enabled
             if settings.autoPostProcess && settings.hasOpenRouterKey && !result.text.isEmpty {

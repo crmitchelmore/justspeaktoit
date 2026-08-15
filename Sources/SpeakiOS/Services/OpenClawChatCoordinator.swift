@@ -6,6 +6,8 @@ import SpeakCore
 import SwiftUI
 import os.log
 
+private let storeLogger = SpeakLogger.logger(category: "ConversationStore")
+
 // MARK: - Conversation Persistence
 
 /// Manages persisting OpenClaw conversations to disk.
@@ -76,7 +78,7 @@ public final class ConversationStore: ObservableObject {
             let data = try Data(contentsOf: fileURL)
             conversations = try decoder.decode([OpenClawClient.Conversation].self, from: data)
         } catch {
-            print("[ConversationStore] Failed to load: \(error)")
+            storeLogger.error("Failed to load: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -85,7 +87,7 @@ public final class ConversationStore: ObservableObject {
             let data = try encoder.encode(conversations)
             try data.write(to: fileURL, options: .atomic)
         } catch {
-            print("[ConversationStore] Failed to save: \(error)")
+            storeLogger.error("Failed to save: \(error.localizedDescription, privacy: .public)")
         }
     }
 }
@@ -128,7 +130,7 @@ public final class OpenClawChatCoordinator: ObservableObject {
     var headsetPauseTarget: Any?
     var cachedKeywordRegex: (keyword: String, regex: NSRegularExpression)?
 
-    let logger = Logger(subsystem: "com.justspeaktoit.ios", category: "OpenClawChat")
+    let logger = SpeakLogger.logger(category: "OpenClawChat")
 
     /// Manages the Live Activity for OpenClaw recording sessions.
     let openClawActivityManager = OpenClawActivityManager()

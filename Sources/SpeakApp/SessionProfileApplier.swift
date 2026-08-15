@@ -29,7 +29,7 @@ final class SessionProfileApplier {
   /// Name of the profile applied to the current session, for HUD display.
   private(set) var activeProfileName: String?
   private var snapshot: Snapshot?
-  private let log = Logger(subsystem: "com.github.speakapp", category: "SessionProfileApplier")
+  private let log = SpeakLogger.logger(category: "SessionProfileApplier")
 
   /// Resolves the profile for the frontmost app and applies its overrides.
   /// A `nil` resolution leaves every setting untouched (the default profile).

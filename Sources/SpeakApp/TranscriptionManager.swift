@@ -3,6 +3,9 @@ import AppKit
 @preconcurrency import AVFoundation
 import Foundation
 import Speech
+import os.log
+
+private let logger = SpeakLogger.logger(category: "TranscriptionManager")
 
 // swiftlint:disable file_length
 
@@ -179,7 +182,7 @@ final class TranscriptionManager: ObservableObject {
     guard !isLiveTranscribing else { throw TranscriptionManagerError.liveSessionAlreadyRunning }
     let model = try liveTranscriptionModelForCurrentMode()
     let language = appSettings.preferredModelLanguage
-    print("[TranscriptionManager] startLiveTranscription - model: \(model), language: \(language ?? "automatic")")
+    logger.info("startLiveTranscription - model: \(model), language: \(language ?? "automatic")")
     // Opened before the controller starts: the first partial can arrive while
     // `start()` is still awaiting, and it must land in the new session.
     beginLiveTranscriptDisplaySession()
@@ -228,7 +231,7 @@ final class TranscriptionManager: ObservableObject {
           self.stopGeneration == generation,
           let cont = self.continuation
         else { return }
-        print("[TranscriptionManager] Safety timeout: continuation not resumed after 10s, forcing error")
+        logger.error("Safety timeout: continuation not resumed after 10s, forcing error")
         self.continuation = nil
         self.stopTimeoutTask = nil
         self.isLiveTranscribing = false
@@ -513,7 +516,7 @@ extension TranscriptionManager: LiveTranscriptionSessionDelegate {
     // guards but this is belt-and-suspenders safety
     guard let cont = continuation else {
       // Already finished or no continuation - log but don't crash
-      print("[TranscriptionManager] didFinishWith called but no continuation (already finished?)")
+      logger.warning("didFinishWith called but no continuation (already finished?)")
       return
     }
     cancelStopTimeout()

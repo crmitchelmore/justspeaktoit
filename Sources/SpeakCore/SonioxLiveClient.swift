@@ -18,7 +18,7 @@ public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Se
     private let language: String?
     private let sampleRate: Int
     private let session: URLSession
-    private let logger = Logger(subsystem: "com.justspeaktoit", category: "SonioxLiveClient")
+    private let logger = SpeakLogger.logger(category: "SonioxLiveClient")
     private let stateLock = NSLock()
     private let pendingSendGroup = DispatchGroup()
     /// Upper bound on how long a close waits for queued frames to reach the

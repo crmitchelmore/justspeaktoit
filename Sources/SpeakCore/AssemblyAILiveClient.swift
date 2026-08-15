@@ -20,7 +20,7 @@ public final class AssemblyAILiveClient: StreamingTranscriptionClient, @unchecke
     private let speechModel: String
     private let sampleRate: Int
     private let session: URLSession
-    private let logger = Logger(subsystem: "com.justspeaktoit", category: "AssemblyAILiveClient")
+    private let logger = SpeakLogger.logger(category: "AssemblyAILiveClient")
     private let stateLock = NSLock()
 
     private var webSocketTask: URLSessionWebSocketTask?

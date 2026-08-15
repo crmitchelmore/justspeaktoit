@@ -1,4 +1,8 @@
+import SpeakCore
 import StoreKit
+import os.log
+
+private let logger = SpeakLogger.logger(category: "TipStore")
 
 /// Manages in-app purchase tip products using StoreKit 2.
 @MainActor
@@ -41,7 +45,7 @@ public final class TipStore: ObservableObject {
             products = try await Product.products(for: productIDs)
                 .sorted { $0.price < $1.price }
         } catch {
-            print("Failed to load tip products: \(error)")
+            logger.error("Failed to load tip products: \(error.localizedDescription, privacy: .public)")
         }
     }
 

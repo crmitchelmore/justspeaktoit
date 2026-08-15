@@ -87,7 +87,7 @@ final class LocalPostProcessingModelManager: ObservableObject {
   #endif
 
   private let fileManager: FileManager
-  private let logger = Logger(subsystem: "com.github.speakapp", category: "LocalPostProcessing")
+  private let logger = SpeakLogger.logger(category: "LocalPostProcessing")
   #if !APP_STORE
   private let baseDirectory: URL
   private let modelsDirectory: URL

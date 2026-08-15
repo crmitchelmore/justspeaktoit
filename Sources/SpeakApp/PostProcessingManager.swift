@@ -16,7 +16,7 @@ final class PostProcessingManager: ObservableObject {
   private let client: ChatLLMClient
   private let settings: AppSettings
   private let personalLexicon: PersonalLexiconService
-  private let log = Logger(subsystem: "com.github.speakapp", category: "PostProcessing")
+  private let log = SpeakLogger.logger(category: "PostProcessing")
 
   static let defaultPrompt = TranscriptCleanupPolicy.baseSystemPrompt
 

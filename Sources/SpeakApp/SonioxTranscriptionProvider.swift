@@ -82,7 +82,7 @@ struct SonioxTranscriptionProvider: TranscriptionProvider {
     private let baseURL = URL(string: "https://api.soniox.com/v1")!
     private let pollingDelay: Duration
     private let maximumPollingAttempts: Int
-    private let logger = Logger(subsystem: "com.speak.app", category: "SonioxTranscriptionProvider")
+    private let logger = SpeakLogger.logger(category: "SonioxTranscriptionProvider")
 
     init(
         session: URLSession = .shared,
@@ -597,7 +597,7 @@ final class SonioxLiveTranscriber: @unchecked Sendable {
     private let language: String?
     private let sampleRate: Int
     private let session: URLSession
-    private let logger = Logger(subsystem: "com.speak.app", category: "SonioxLiveTranscriber")
+    private let logger = SpeakLogger.logger(category: "SonioxLiveTranscriber")
     private let stateLock = NSLock()
     private let pendingSendGroup = DispatchGroup()
 

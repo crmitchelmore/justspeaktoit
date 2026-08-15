@@ -1,4 +1,5 @@
 import AVFoundation
+import SpeakCore
 import CoreAudio
 import os.log
 
@@ -38,7 +39,7 @@ final class AudioInputDeviceManager: ObservableObject {
   @Published private(set) var activeDeviceUID: String?
 
   private let appSettings: AppSettings
-  private let logger = Logger(subsystem: "com.github.speakapp", category: "AudioInput")
+  private let logger = SpeakLogger.logger(category: "AudioInput")
   private var devicesListener: AudioObjectPropertyListenerBlock?
   private var defaultDeviceListener: AudioObjectPropertyListenerBlock?
   private var sessionTracker = AudioInputDeviceSessionTracker()

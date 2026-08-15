@@ -45,7 +45,7 @@ open class BaseStreamingLiveController: NSObject {
 
     public init(providerID: String, logCategory: String) {
         self.providerID = providerID
-        self.log = Logger(subsystem: "com.justspeaktoit", category: logCategory)
+        self.log = SpeakLogger.logger(category: logCategory)
         super.init()
     }
 

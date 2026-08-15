@@ -72,7 +72,7 @@ final class MainManager: ObservableObject {
   let textProcessor: TranscriptionTextProcessor
   let autoCorrectionTracker: AutoCorrectionTracker
   let profileStore: DictationProfileStore
-  let logger = Logger(subsystem: "com.github.speakapp", category: "MainManager")
+  let logger = SpeakLogger.logger(category: "MainManager")
   private let recordingSoundPlayer = RecordingSoundPlayer()
   /// Applies/reverts per-app dictation profile overrides for a session.
   private let profileApplier = SessionProfileApplier()

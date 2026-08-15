@@ -82,7 +82,7 @@ final class ModulateLiveTranscriber: @unchecked Sendable {
   private let featureConfiguration: ModulateFeatureConfiguration
   private let session: URLSession
   private let bufferPool: AudioBufferPool
-  private let logger = Logger(subsystem: "com.speak.app", category: "ModulateLiveTranscriber")
+  private let logger = SpeakLogger.logger(category: "ModulateLiveTranscriber")
   private let stateLock = NSLock()
   private let pendingSendGroup = DispatchGroup()
 

@@ -30,6 +30,9 @@ import AppKit
 import ApplicationServices
 import Foundation
 import SpeakCore
+import os.log
+
+private let logger = SpeakLogger.logger(category: "TextOutput")
 
 struct TextOutputResult {
   let method: HistoryTrigger.OutputMethod
@@ -385,7 +388,7 @@ struct SmartTextOutput: TextOutputting {
       }
       // Skip accessibility for known problematic apps
       if isProblematic(target: target) {
-        print("[SmartTextOutput] Skipping accessibility for problematic app, using clipboard")
+        logger.info("Skipping accessibility for problematic app, using clipboard")
         return clipboardOutput.output(text: text, target: target)
       }
 
@@ -405,7 +408,7 @@ struct SmartTextOutput: TextOutputting {
         let isSettable = AXUIElementIsAttributeSettable(
           focusedElement, kAXValueAttribute as CFString, &settable)
         guard isSettable == .success && settable.boolValue else {
-          print("[SmartTextOutput] Value attribute not settable, falling back to clipboard")
+          logger.info("Value attribute not settable, falling back to clipboard")
           return clipboardOutput.output(text: text, target: target)
         }
 
@@ -416,7 +419,7 @@ struct SmartTextOutput: TextOutputting {
           if verifyTextInserted(text: text, element: focusedElement) {
             return result
           } else {
-            print("[SmartTextOutput] Text insertion not verified, falling back to clipboard")
+            logger.info("Text insertion not verified, falling back to clipboard")
           }
         }
       }
@@ -458,6 +461,7 @@ struct SmartTextOutput: TextOutputting {
     AXUIElementCopyAttributeValue(element, kAXRoleDescriptionAttribute as CFString, &roleDesc)
     let roleStr = (role as? String) ?? "unknown"
     let roleDescStr = (roleDesc as? String) ?? "unknown"
-    print("[SmartTextOutput] Focused element - role: \(roleStr), description: \(roleDescStr)")
+    logger.debug(
+      "Focused element - role: \(roleStr, privacy: .public), description: \(roleDescStr, privacy: .public)")
   }
 }

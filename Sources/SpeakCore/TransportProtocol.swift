@@ -310,17 +310,18 @@ public final class PairingManager: @unchecked Sendable {
 
 /// Provides consistent device identification.
 public struct DeviceIdentity {
+    static let deviceIdDefaultsKey = "speakDeviceId"
+
     public static var deviceId: String {
         #if os(iOS)
-        // Keep any previously persisted ID so existing pairings survive.
-        if let id = UserDefaults.standard.string(forKey: "speakDeviceId") {
-            return id
-        }
-        // Prefer identifierForVendor: stable across reinstalls while any app
-        // from the same vendor remains installed, unlike a random UUID.
-        let id = UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString
-        UserDefaults.standard.set(id, forKey: "speakDeviceId")
-        return id
+        return mobileDeviceId(
+            store: KeychainDeviceIdentityStore(),
+            defaults: .standard,
+            // Prefer identifierForVendor: stable while any app from the same
+            // vendor remains installed, unlike a random UUID. Either way the
+            // value is captured once and then served from the Keychain.
+            makeDeviceId: { UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString }
+        )
         #else
         // On macOS, use hardware UUID
         let platformExpert = IOServiceGetMatchingService(
@@ -339,6 +340,35 @@ public struct DeviceIdentity {
         }
         return UUID().uuidString
         #endif
+    }
+
+    /// Resolves the mobile device ID, most durable source first:
+    ///
+    /// 1. Keychain — survives app deletion/reinstall.
+    /// 2. UserDefaults — the pre-Keychain location; migrated into the Keychain
+    ///    on first read so existing pairings keep their identity.
+    /// 3. Freshly generated — persisted to the Keychain and mirrored to
+    ///    UserDefaults (rollback to older builds keeps the same ID, and the
+    ///    mirror is the fallback if the Keychain write failed).
+    ///
+    /// Platform-neutral (the iOS-only part is generating the default ID above)
+    /// so tests can inject every collaborator.
+    static func mobileDeviceId(
+        store: any DeviceIdentityStoring,
+        defaults: UserDefaults,
+        makeDeviceId: () -> String
+    ) -> String {
+        if let id = store.loadDeviceId() {
+            return id
+        }
+        if let legacy = defaults.string(forKey: deviceIdDefaultsKey) {
+            store.storeDeviceId(legacy)
+            return legacy
+        }
+        let id = makeDeviceId()
+        store.storeDeviceId(id)
+        defaults.set(id, forKey: deviceIdDefaultsKey)
+        return id
     }
 
     public static var deviceName: String {

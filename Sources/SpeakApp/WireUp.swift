@@ -347,6 +347,10 @@ enum WireUp {
     var settingsOverride: AppSettings?
     var permissionsOverride: PermissionsManager?
     var keychainServiceOverride: String?
+    /// Whether to clear the files a pre-warmed recorder staged in an earlier
+    /// run. Only the real app does this: a test bootstrap resolves the user's
+    /// own recordings directory, which it must never touch.
+    var sweepsStagedLeftovers = true
 
     static let `default` = BootstrapOptions()
   }
@@ -367,6 +371,9 @@ enum WireUp {
       permissionsManager: permissions,
       audioDeviceManager: audioDevices
     )
+    if options.sweepsStagedLeftovers {
+      AudioFileManager.scheduleStagedLeftoverSweep(in: settings.recordingsDirectory)
+    }
     let secureStorage = SecureAppStorage(
       permissionsManager: permissions,
       appSettings: settings,

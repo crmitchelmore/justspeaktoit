@@ -145,6 +145,84 @@ final class LiveStreamWarmTrackerTests: XCTestCase {
         XCTAssertFalse(tracker.isWarm(host: host, now: self.base))
     }
 
+    func testIdleRefreshes_StopAfterTheCap() {
+        var tracker = LiveStreamWarmTracker(freshness: 90, maxIdleRefreshes: 3)
+        var now = self.base
+        guard let host = tracker.hostNeedingWarmUp(for: .deepgram, now: now) else {
+            return XCTFail("expected a host to warm")
+        }
+        XCTAssertTrue(tracker.markWarmed(host: host, at: now))
+
+        for cycle in 1...3 {
+            XCTAssertNotNil(
+                tracker.refreshDeadline(for: .deepgram),
+                "cycle \(cycle) should still be scheduled"
+            )
+            now = now.addingTimeInterval(91)
+            XCTAssertEqual(tracker.hostNeedingWarmUp(for: .deepgram, now: now), host)
+            XCTAssertTrue(tracker.markWarmed(host: host, at: now))
+        }
+
+        XCTAssertTrue(tracker.hasReachedIdleRefreshLimit)
+        XCTAssertNil(tracker.refreshDeadline(for: .deepgram))
+    }
+
+    func testIdleRefreshCap_DoesNotBlockAnOnDemandProbe() {
+        var tracker = LiveStreamWarmTracker(freshness: 90, maxIdleRefreshes: 1)
+        guard let host = tracker.hostNeedingWarmUp(for: .deepgram, now: self.base) else {
+            return XCTFail("expected a host to warm")
+        }
+        tracker.markWarmed(host: host, at: self.base)
+        let refreshedAt = self.base.addingTimeInterval(91)
+        XCTAssertEqual(tracker.hostNeedingWarmUp(for: .deepgram, now: refreshedAt), host)
+        tracker.markWarmed(host: host, at: refreshedAt)
+        XCTAssertNil(tracker.refreshDeadline(for: .deepgram))
+
+        // The cap stops the timer, not the warm-up itself: a stale host is
+        // still reported the next time somebody asks.
+        XCTAssertEqual(
+            tracker.hostNeedingWarmUp(for: .deepgram, now: refreshedAt.addingTimeInterval(91)),
+            host
+        )
+    }
+
+    func testRealTrigger_GivesTheIdleRefreshCycleItsBudgetBack() {
+        var tracker = LiveStreamWarmTracker(freshness: 90, maxIdleRefreshes: 1)
+        guard let host = tracker.hostNeedingWarmUp(for: .deepgram, now: self.base) else {
+            return XCTFail("expected a host to warm")
+        }
+        tracker.markWarmed(host: host, at: self.base)
+        let refreshedAt = self.base.addingTimeInterval(91)
+        XCTAssertEqual(tracker.hostNeedingWarmUp(for: .deepgram, now: refreshedAt), host)
+        tracker.markWarmed(host: host, at: refreshedAt)
+        XCTAssertTrue(tracker.hasReachedIdleRefreshLimit)
+
+        tracker.invalidate()
+
+        XCTAssertFalse(tracker.hasReachedIdleRefreshLimit)
+        guard let warmedAgain = tracker.hostNeedingWarmUp(for: .deepgram, now: refreshedAt) else {
+            return XCTFail("expected the host to be warmed again")
+        }
+        tracker.markWarmed(host: warmedAgain, at: refreshedAt)
+        XCTAssertEqual(
+            tracker.refreshDeadline(for: .deepgram),
+            refreshedAt.addingTimeInterval(90)
+        )
+    }
+
+    func testProbeFailure_DoesNotCountTowardsTheIdleCap() {
+        var tracker = LiveStreamWarmTracker(freshness: 90, maxIdleRefreshes: 1)
+        guard let host = tracker.hostNeedingWarmUp(for: .deepgram, now: self.base) else {
+            return XCTFail("expected a host to warm")
+        }
+        tracker.markFailed(host: host)
+        XCTAssertEqual(tracker.hostNeedingWarmUp(for: .deepgram, now: self.base), host)
+        tracker.markWarmed(host: host, at: self.base)
+
+        XCTAssertFalse(tracker.hasReachedIdleRefreshLimit)
+        XCTAssertNotNil(tracker.refreshDeadline(for: .deepgram))
+    }
+
     func testInvalidate_ForgetsTheWarmHost() {
         var tracker = LiveStreamWarmTracker()
         guard let host = tracker.hostNeedingWarmUp(for: .xai, now: self.base) else {

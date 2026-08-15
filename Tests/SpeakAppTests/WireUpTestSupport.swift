@@ -18,6 +18,9 @@ func makeWireUpTestOptions(
     return WireUp.BootstrapOptions(
         settingsOverride: testSettings,
         permissionsOverride: permissionsOverride,
-        keychainServiceOverride: "com.justspeaktoit.tests.wireup.\(UUID().uuidString)"
+        keychainServiceOverride: "com.justspeaktoit.tests.wireup.\(UUID().uuidString)",
+        // A test suite carries no recordings directory of its own, so settings
+        // resolve the user's real one. Tests must never sweep it.
+        sweepsStagedLeftovers: false
     )
 }

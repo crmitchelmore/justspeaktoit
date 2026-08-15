@@ -4,6 +4,8 @@ import Foundation
 import Speech
 import os.log
 
+private let logger = SpeakLogger.logger(category: "NativeOSXLiveTranscriber")
+
 protocol NativeSpeechRecognitionTask: AnyObject {
   func cancel()
 }
@@ -289,9 +291,7 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
           self.delegate?.liveTranscriber(self, didUpdateWith: update)
           self.delegate?.liveTranscriber(self, didUpdatePartial: displayText)
           if result.isFinal {
-            print(
-              "[NativeOSXLiveTranscriber] Mid-session isFinal – "
-                + "committing \(displayText.count) chars, restarting")
+            logger.info("Mid-session isFinal – committing \(displayText.count) chars, restarting")
             self.committedText = displayText
             self.lastFormattedString = ""
             self.restartRecognitionTask()
@@ -322,9 +322,7 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
       lastFormattedString.count >= 10,
       currentText.count < lastFormattedString.count / 2
     else { return }
-    print(
-      "[NativeOSXLiveTranscriber] Implicit text reset – "
-        + "committing \(lastFormattedString.count) chars")
+    logger.info("Implicit text reset – committing \(self.lastFormattedString.count) chars")
     committedText = [committedText, lastFormattedString]
       .filter { !$0.isEmpty }.joined(separator: " ")
   }
@@ -337,9 +335,10 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
 
     recognitionTaskLifecycle.retire()
 
-    // Minting the replacement request retires the previous run's identity, so
-    // anything the cancelled task still delivers is dropped by the guard in
-    // `startRecognitionTask(with:)`.
+    // `retire()` above dropped the previous run's `LiveTranscriptionRun.Token`,
+    // so anything the cancelled task still delivers fails the identity check in
+    // `NativeSpeechRecognitionTaskLifecycle` and is discarded. The replacement
+    // request below feeds the next task, which mints its own token.
     request = makeRecognitionRequest(for: recognizer)
     latestResult = nil
     lastFormattedString = ""

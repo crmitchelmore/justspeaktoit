@@ -88,6 +88,35 @@ final class SonioxTTSRequestTests: XCTestCase {
         XCTAssertEqual(failure.requestID, "request-1")
     }
 
+    /// A revoked key must reach the user as a key problem even when the body
+    /// carries no `error_type` the app recognises.
+    func testAuthenticationFailure_IsRecognisedFromTheStatusCodeAlone() {
+        let empty = SonioxTTSAPI.failure(from: Data(), statusCode: 401)
+        let unknownType = SonioxTTSAPI.failure(
+            from: Data(#"{"error_type":"key_revoked","error_message":"Key revoked"}"#.utf8),
+            statusCode: 403
+        )
+        let declaredType = SonioxTTSAPI.failure(
+            from: Data(#"{"error_type":"unauthenticated","error_message":"No key"}"#.utf8),
+            statusCode: 200
+        )
+
+        XCTAssertTrue(empty.isAuthenticationFailure)
+        XCTAssertTrue(unknownType.isAuthenticationFailure)
+        XCTAssertTrue(declaredType.isAuthenticationFailure)
+    }
+
+    func testOtherFailures_AreNotTreatedAsAuthenticationProblems() {
+        let rateLimited = SonioxTTSAPI.failure(
+            from: Data(#"{"error_type":"rate_limited","error_message":"Slow down"}"#.utf8),
+            statusCode: 429
+        )
+        let serverError = SonioxTTSAPI.failure(from: Data(), statusCode: 500)
+
+        XCTAssertFalse(rateLimited.isAuthenticationFailure)
+        XCTAssertFalse(serverError.isAuthenticationFailure)
+    }
+
     func testAccountVoiceRequest_UsesCloneID() {
         let accountVoice = SonioxTTSAccountVoice(
             id: "clone-id",

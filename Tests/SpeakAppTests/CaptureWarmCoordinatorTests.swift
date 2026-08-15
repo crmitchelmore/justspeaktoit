@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import SpeakCore
 import XCTest
 
 @testable import SpeakApp
@@ -31,7 +32,7 @@ final class CaptureWarmCoordinatorTests: XCTestCase {
         var now = Date(timeIntervalSince1970: 1_700_000_000)
         let harness = self.makeHarness(now: { now })
         harness.coordinator.start()
-        await self.drainTasks()
+        await self.drainTasks(untilProbeCount: 1, in: harness.warmer)
 
         let firstProbeHosts = await harness.warmer.hosts()
         XCTAssertEqual(firstProbeHosts, ["api.deepgram.com"])
@@ -39,10 +40,37 @@ final class CaptureWarmCoordinatorTests: XCTestCase {
 
         now = now.addingTimeInterval(90)
         harness.scheduler.fire()
-        await self.drainTasks()
+        await self.drainTasks(untilProbeCount: 2, in: harness.warmer)
 
         let refreshedProbeHosts = await harness.warmer.hosts()
         XCTAssertEqual(refreshedProbeHosts, ["api.deepgram.com", "api.deepgram.com"])
+        await harness.coordinator.invalidate()
+    }
+
+    func testIdleRefreshes_StopAtTheCapAndResumeAfterTheNextSession() async {
+        var now = Date(timeIntervalSince1970: 1_700_000_000)
+        let harness = self.makeHarness(now: { now })
+        harness.coordinator.start()
+        await self.drainTasks(untilProbeCount: 1, in: harness.warmer)
+        XCTAssertEqual(harness.scheduler.delay, 90)
+
+        for refresh in 0..<LiveStreamWarmTracker.maxIdleRefreshes {
+            now = now.addingTimeInterval(90)
+            harness.scheduler.fire()
+            await self.drainTasks(untilProbeCount: refresh + 2, in: harness.warmer)
+        }
+
+        let idleProbes = await harness.warmer.hosts()
+        XCTAssertEqual(idleProbes.count, LiveStreamWarmTracker.maxIdleRefreshes + 1)
+        XCTAssertNil(harness.scheduler.delay, "the idle refresh loop must stop at the cap")
+
+        harness.coordinator.sessionWillBegin()
+        harness.coordinator.sessionDidEnd()
+        await self.drainTasks()
+
+        let afterSession = await harness.warmer.hosts()
+        XCTAssertEqual(afterSession.count, LiveStreamWarmTracker.maxIdleRefreshes + 2)
+        XCTAssertEqual(harness.scheduler.delay, 90)
         await harness.coordinator.invalidate()
     }
 
@@ -162,6 +190,19 @@ final class CaptureWarmCoordinatorTests: XCTestCase {
 
     private func drainTasks() async {
         for _ in 0..<5 { await Task.yield() }
+    }
+
+    // A fixed number of yields is not enough on a loaded CI runner; poll the
+    // observable probe count with a deadline before settling with a final drain.
+    private func drainTasks(untilProbeCount expected: Int, in warmer: EndpointWarmerSpy) async {
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline {
+            let count = await warmer.hosts().count
+            if count >= expected { break }
+            await Task.yield()
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        await self.drainTasks()
     }
 }
 

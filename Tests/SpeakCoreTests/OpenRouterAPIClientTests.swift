@@ -72,6 +72,69 @@ final class OpenRouterAPIClientTests: XCTestCase {
         )
     }
 
+    /// A provider response that arrived is the user's transcript. Duration is
+    /// enrichment read from the local file afterwards, so a container that
+    /// AVFoundation cannot parse must degrade the duration, not the transcript.
+    func testTranscribeFile_WhenDurationMetadataFails_KeepsTheTranscript() async throws {
+        OpenRouterMockURLProtocol.requestHandler = { request in
+            try makeOpenRouterChatResponse(for: request)
+        }
+
+        let client = OpenRouterAPIClient(
+            apiKeyProvider: { nil },
+            session: makeMockSession(),
+            apiKeyOverride: "test-openrouter-key"
+        )
+        // The bytes are not a readable MPEG-4 container, so `AVURLAsset` fails
+        // to load the duration of this file.
+        let audioURL = try makeAudioFile(extension: "m4a", data: Data("fakeaudiodata".utf8))
+        defer {
+            try? FileManager.default.removeItem(at: audioURL)
+        }
+
+        let result = try await client.transcribeFile(
+            at: audioURL,
+            model: "google/gemini-2.0-flash-001",
+            language: "en_GB"
+        )
+
+        XCTAssertEqual(result.text, "hello world")
+        XCTAssertEqual(result.duration, 0)
+        XCTAssertNotNil(result.rawPayload)
+        // Unknown duration must not invent segment timing.
+        XCTAssertEqual(result.segments.count, 1)
+        XCTAssertEqual(result.segments.first?.startTime, 0)
+        XCTAssertEqual(result.segments.first?.endTime, 0)
+    }
+
+    func testLocalFallback_WhenDurationMetadataFails_KeepsTheTranscript() async throws {
+        OpenRouterMockURLProtocol.requestHandler = { _ in
+            XCTFail("The local fallback must not send a request")
+            throw OpenRouterClientError.invalidResponse
+        }
+
+        let client = OpenRouterAPIClient(
+            apiKeyProvider: { nil },
+            session: makeMockSession(),
+            apiKeyOverride: nil
+        )
+        let audioURL = try makeAudioFile(extension: "m4a", data: Data("fakeaudiodata".utf8))
+        defer {
+            try? FileManager.default.removeItem(at: audioURL)
+        }
+
+        let result = try await client.transcribeFile(
+            at: audioURL,
+            model: "local/whisper",
+            language: "en_GB"
+        )
+
+        XCTAssertTrue(result.text.contains(audioURL.lastPathComponent))
+        XCTAssertEqual(result.duration, 0)
+        XCTAssertEqual(result.segments.count, 1)
+        XCTAssertEqual(result.segments.first?.endTime, 0)
+    }
+
     func testTranscribeFileWithOversizedAudio_ThrowsBeforeEncodingPayload() async throws {
         OpenRouterMockURLProtocol.requestHandler = { _ in
             XCTFail("Oversized audio should be rejected before sending a request")

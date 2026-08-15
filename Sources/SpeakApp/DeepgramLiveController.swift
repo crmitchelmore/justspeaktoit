@@ -24,7 +24,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
   private var currentModel: String?
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
   private var audioEngine = AVAudioEngine()
-  private let logger = Logger(subsystem: "com.speak.app", category: "DeepgramLiveController")
+  private let logger = SpeakLogger.logger(category: "DeepgramLiveController")
   private let audioProcessor = DeepgramAudioProcessor()
   /// Guards against calling didFinishWith more than once per session.
   private var hasFinished: Bool = false
@@ -62,10 +62,10 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
   }
 
   func start() async throws {
-    print("[DeepgramLiveController] Starting Deepgram live transcription...")
+    logger.info("Starting Deepgram live transcription")
 
     guard await ensurePermissions() else {
-      print("[DeepgramLiveController] ERROR: Permissions missing")
+      logger.error("Microphone permissions missing")
       throw TranscriptionManagerError.microphonePermissionMissing
     }
 
@@ -81,7 +81,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
       guard audioInputFormatIsUsable(inputFormat) else {
         throw TranscriptionManagerError.noUsableAudioInput
       }
-      print("[DeepgramLiveController] Input format: \(inputFormat.sampleRate)Hz, \(inputFormat.channelCount) channels")
+      logger.info("Input format: \(inputFormat.sampleRate)Hz, \(inputFormat.channelCount) channels")
 
       let outputFormat = try makeDeepgramOutputFormat()
       let transcriber = try makeDeepgramTranscriber(apiKey: apiKey)
@@ -95,7 +95,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
       try await startAudioEngineAfterInputDeviceSettles(audioEngine)
       isRunning = true
       streamingStartTime = Date()
-      print("[DeepgramLiveController] Started successfully")
+      logger.info("Started successfully")
     } catch {
       await cleanupAfterFailedStart()
       throw error
@@ -104,7 +104,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
 
   /// Handle transcript from Deepgram - accumulate final segments, track interim
   private func handleTranscript(text: String, isFinal: Bool) {
-    print("[DeepgramLiveController] Transcript received (length: \(text.count), final: \(isFinal))")
+    logger.debug("Transcript received (length: \(text.count), final: \(isFinal))")
 
     if isFinal {
       // Commit this segment - create a basic segment (no timing from this callback)
@@ -120,7 +120,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
         fullTranscript += " " + text
       }
       currentInterim = ""
-      print("[DeepgramLiveController] Final segment #\(finalSegments.count) (length: \(text.count)) - fullTranscript length: \(fullTranscript.count)")
+      logger.debug("Final segment #\(self.finalSegments.count) len=\(text.count) total=\(self.fullTranscript.count)")
 
       // Notify delegate of updated full transcript
       delegate?.liveTranscriber(self, didUpdatePartial: fullTranscript)
@@ -254,11 +254,11 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
   }
 
   func stop() async {
-    print("[DeepgramLiveController] Stopping...")
+    logger.info("Stopping")
     guard isRunning else { return }
     // Guard against double finish - this should only be called once per session
     guard !hasFinished else {
-      print("[DeepgramLiveController] Already finished, skipping duplicate stop")
+      logger.debug("Already finished, skipping duplicate stop")
       return
     }
     hasFinished = true
@@ -275,7 +275,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
 
     // Build final result including any unfinalised interim text
     let result = buildFinalResult()
-    print("[DeepgramLiveController] Built result (\(result.text.count) chars)")
+    logger.info("Built result (\(result.text.count) chars)")
 
     await MainActor.run {
       delegate?.liveTranscriber(self, didFinishWith: result)
@@ -298,20 +298,20 @@ private extension DeepgramLiveController {
     do {
       let apiKey = try await secureStorage.secret(identifier: "deepgram.apiKey")
       guard !apiKey.isEmpty else {
-        print("[DeepgramLiveController] ERROR: Deepgram API key is empty")
+        logger.error("Deepgram API key is empty")
         throw DeepgramError.missingAPIKey
       }
-      print("[DeepgramLiveController] API key retrieved")
+      logger.debug("API key retrieved")
       return apiKey
     } catch let error as SecureAppStorageError {
       if case .valueNotFound = error {
-        print("[DeepgramLiveController] ERROR: Deepgram API key is missing")
+        logger.error("Deepgram API key is missing")
         throw DeepgramError.missingAPIKey
       }
-      print("[DeepgramLiveController] ERROR: Failed to retrieve API key: \(error.localizedDescription)")
+      logger.error("Failed to retrieve API key: \(error.localizedDescription, privacy: .public)")
       throw error
     } catch {
-      print("[DeepgramLiveController] ERROR: Failed to retrieve API key: \(error.localizedDescription)")
+      logger.error("Failed to retrieve API key: \(error.localizedDescription, privacy: .public)")
       throw error
     }
   }
@@ -334,17 +334,17 @@ private extension DeepgramLiveController {
       channels: 1,
       interleaved: true
     ) else {
-      print("[DeepgramLiveController] ERROR: Failed to create output format")
+      logger.error("Failed to create output format")
       throw DeepgramError.connectionFailed
     }
     deepgramFormat = outputFormat
-    print("[DeepgramLiveController] Output format: \(deepgramSampleRate)Hz mono PCM16")
+    logger.info("Output format: \(self.deepgramSampleRate)Hz mono PCM16")
     return outputFormat
   }
 
   func makeDeepgramTranscriber(apiKey: String) throws -> DeepgramLiveClient {
     let provider = DeepgramTranscriptionProvider()
-    print("[DeepgramLiveController] Creating transcriber with model: \(currentModel ?? "nova-3")")
+    logger.info("Creating transcriber with model: \(self.currentModel ?? "nova-3")")
     let transcriber = provider.createLiveTranscriber(
       apiKey: apiKey,
       model: currentModel ?? "nova-3",
@@ -367,7 +367,7 @@ private extension DeepgramLiveController {
           guard let self else { return }
           guard LiveTranscriptionRun.isCurrent(transcriber, activeStream: self.transcriber) else { return }
           if !self.isRunning { return }
-          print("[DeepgramLiveController] ERROR: \(error.localizedDescription)")
+          self.logger.error("Transcriber error: \(error.localizedDescription, privacy: .public)")
           self.delegate?.liveTranscriber(self, didFail: error)
         }
       }
@@ -418,7 +418,7 @@ private extension DeepgramLiveController {
         text += " "
       }
       text += trimmedInterim
-      print("[DeepgramLiveController] Including unfinalised interim (length: \(trimmedInterim.count))")
+      logger.debug("Including unfinalised interim (length: \(trimmedInterim.count))")
     }
 
     let streamingDuration: TimeInterval

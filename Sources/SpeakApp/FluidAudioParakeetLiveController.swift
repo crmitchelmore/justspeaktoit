@@ -24,7 +24,7 @@ final class FluidAudioParakeetLiveController: LiveTranscriptionController {
   private var latestText = ""
   private var processingError: Error?
   private var isStopping = false
-  private let logger = Logger(subsystem: "com.github.speakapp", category: "FluidAudioLive")
+  private let logger = SpeakLogger.logger(category: "FluidAudioLive")
 
   init(
     appSettings: AppSettings,

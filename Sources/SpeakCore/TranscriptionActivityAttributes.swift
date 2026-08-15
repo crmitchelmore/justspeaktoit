@@ -1,6 +1,7 @@
 #if os(iOS)
 import ActivityKit
 import Foundation
+import os.log
 
 /// ActivityKit attributes for live transcription sessions.
 /// Defines the static and dynamic content shown in Live Activities and Dynamic Island.
@@ -89,7 +90,7 @@ public final class TranscriptionActivityManager: ObservableObject {
         initialStatus: TranscriptionActivityAttributes.TranscriptionStatus = .recording
     ) -> Bool {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else {
-            print("[ActivityManager] Live Activities not enabled")
+            SpeakLogger.activity.info("Live Activities not enabled")
             return false
         }
 
@@ -125,10 +126,11 @@ public final class TranscriptionActivityManager: ObservableObject {
             )
             currentActivity = activity
             isActivityRunning = true
-            print("[ActivityManager] Started activity: \(activity.id)")
+            SpeakLogger.activity.info("Started activity: \(activity.id, privacy: .public)")
             return true
         } catch {
-            print("[ActivityManager] Failed to start activity: \(error)")
+            SpeakLogger.activity.error(
+                "Failed to start activity: \(error.localizedDescription, privacy: .public)")
             return false
         }
     }

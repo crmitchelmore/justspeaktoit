@@ -5,6 +5,8 @@ import AppKit
 import Foundation
 import os.log
 
+private let logger = SpeakLogger.logger(category: "SwitchingLiveTranscriber")
+
 // MARK: - Switching Live Transcriber
 
 struct LiveTranscriptionControllerReusePolicy {
@@ -97,7 +99,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   func configure(language: String?, model: String) {
     currentLanguage = language
     currentModel = model
-    print("[SwitchingLiveTranscriber] Configured with model: \(model)")
+    logger.info("Configured with model: \(model)")
     applyDelegateAndConfiguration()
   }
 
@@ -114,9 +116,9 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     }
 
     let model = currentModel ?? appSettings.liveTranscriptionModel
-    print("[SwitchingLiveTranscriber] Starting with model: \(model)")
+    logger.info("Starting with model: \(model)")
     if shouldResetControllersBeforeStart(at: nowProvider()) {
-      print("[SwitchingLiveTranscriber] Resetting cached live controllers before start")
+      logger.info("Resetting cached live controllers before start")
       resetControllers()
     }
 
@@ -133,9 +135,8 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       invalidateBeforeNextStart = false
     } catch {
       if AppleLocalModels.isSpeechAnalyzerModel(model), analyzerFallbackAllowed {
-        print(
-          "[SwitchingLiveTranscriber] SpeechAnalyzer failed "
-            + "(\(error.localizedDescription)); using legacy Apple Speech")
+        logger.warning(
+          "SpeechAnalyzer failed (\(error.localizedDescription, privacy: .public)); using legacy Apple Speech")
         let nativeController = controllers.native
         nativeController.configure(
           language: currentLanguage,
@@ -159,7 +160,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   }
 
   func stop() async {
-    print("[SwitchingLiveTranscriber] Stopping...")
+    logger.info("Stopping")
     guard let activeRun else { return }
     await stop(activeRun)
   }

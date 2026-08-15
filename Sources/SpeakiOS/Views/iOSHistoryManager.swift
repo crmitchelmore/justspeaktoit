@@ -1,8 +1,12 @@
 // swiftlint:disable file_length
 #if os(iOS)
 import Foundation
+import SpeakCore
 import SpeakSync
 import UIKit
+import os.log
+
+private let logger = SpeakLogger.logger(category: "iOSHistoryManager")
 
 // MARK: - History Manager
 
@@ -135,6 +139,12 @@ public final class iOSHistoryManager: ObservableObject {
         }
     }
 
+    /// Forces the lazy disk load so out-of-UI readers (App Intents) see the
+    /// persisted history instead of the empty pre-load state.
+    public func ensureLoaded() {
+        loadHistoryFromDiskIfNeeded()
+    }
+
     /// Persists any debounced remote sync changes immediately. Called from the
     /// lifecycle observers; safe to call at any time.
     public func flushPendingChanges() {
@@ -165,7 +175,7 @@ public final class iOSHistoryManager: ObservableObject {
             } catch {
                 // Leave the item unsynced so a later full sync retries it,
                 // rather than marking it synced after a failed upload.
-                print("[iOSHistoryManager] Failed to upload item: \(error)")
+                logger.error("Failed to upload item: \(error.localizedDescription, privacy: .public)")
             }
         }
     }
@@ -277,7 +287,8 @@ public final class iOSHistoryManager: ObservableObject {
                 syncedIDs.insert(id)
                 saveSyncedIDs()
             } catch {
-                print("[iOSHistoryManager] Failed to upload reprocessed item: \(error)")
+                logger.error(
+                    "Failed to upload reprocessed item: \(error.localizedDescription, privacy: .public)")
             }
         }
     }
@@ -329,7 +340,7 @@ public final class iOSHistoryManager: ObservableObject {
             hasLoadedFromDisk = true
             pruneStaleSyncedIDs()
         } catch {
-            print("[iOSHistoryManager] Failed to load history: \(error)")
+            logger.error("Failed to load history: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -344,7 +355,7 @@ public final class iOSHistoryManager: ObservableObject {
                 options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
             )
         } catch {
-            print("[iOSHistoryManager] Failed to save history: \(error)")
+            logger.error("Failed to save history: \(error.localizedDescription, privacy: .public)")
         }
     }
 

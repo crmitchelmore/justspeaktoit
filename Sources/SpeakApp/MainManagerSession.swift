@@ -9,6 +9,8 @@ enum SessionTriggerSource: Equatable {
   case silenceDetection
   /// Started or stopped by hands-free dictation's voice-activity detector.
   case handsFree
+  /// Started or stopped by Shortcuts / App Intents.
+  case automation
 
   var historyGesture: HistoryTrigger.HotKeyGesture {
     switch self {
@@ -22,6 +24,8 @@ enum SessionTriggerSource: Equatable {
       return .uiButton
     case .silenceDetection, .handsFree:
       return .uiButton  // Treat as UI-initiated for history purposes
+    case .automation:
+      return .automation  // Shortcuts / App Intents, kept distinct in history
     }
   }
 }
@@ -55,6 +59,10 @@ struct SessionTriggerTiming: Equatable {
 final class ActiveSession {
   let id = UUID()
   let gesture: HistoryTrigger.HotKeyGesture
+  /// What started this session. History only records the gesture, but the
+  /// runtime needs the exact source: hands-free captures own their own stop
+  /// rules, so level-based auto-stop must keep away from them.
+  let trigger: SessionTriggerSource
   let hotKeyDescription: String
   var recordingSummary: RecordingSummary?
   var transcriptionResult: TranscriptionResult?
@@ -99,9 +107,11 @@ final class ActiveSession {
   init(
     gesture: HistoryTrigger.HotKeyGesture,
     hotKeyDescription: String,
+    trigger: SessionTriggerSource = .uiButton,
     triggerTiming: SessionTriggerTiming = .nonHotKey()
   ) {
     self.gesture = gesture
+    self.trigger = trigger
     self.hotKeyDescription = hotKeyDescription
     self.triggerTiming = triggerTiming
     self.recordingStarted = triggerTiming.occurredAt

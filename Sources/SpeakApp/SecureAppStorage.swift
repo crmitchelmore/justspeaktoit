@@ -104,13 +104,14 @@ actor SecureAppStorage {
             synchronizable: false
         )
 
+        // Configuration metadata only — never log secret values or identifiers here.
         if ProcessInfo.processInfo.environment["SPEAK_DEBUG_KEYCHAIN"] == "1" {
             let details = [
                 "service: \(configuration.service)",
                 "synchronizable: \(configuration.synchronizable)",
                 "accessGroup: \(configuration.accessGroup ?? "nil")"
             ].joined(separator: ", ")
-            Logger(subsystem: "com.github.speakapp", category: "SecureAppStorage").debug(
+            SpeakLogger.keychain.debug(
                 "Keychain config — \(details, privacy: .public)"
             )
         }

@@ -1,6 +1,7 @@
 @preconcurrency import CoreML
 import FluidAudio
 import Foundation
+import SpeakCore
 import OSLog
 
 enum FluidAudioParakeetModel {
@@ -64,7 +65,7 @@ final class FluidAudioModelManager: ObservableObject {
 
   private let fileManager: FileManager
   private let modelsDirectory: URL
-  private let logger = Logger(subsystem: "com.github.speakapp", category: "FluidAudioModel")
+  private let logger = SpeakLogger.logger(category: "FluidAudioModel")
 
   init(
     fileManager: FileManager = .default,

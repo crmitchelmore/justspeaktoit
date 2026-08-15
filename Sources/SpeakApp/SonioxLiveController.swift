@@ -21,7 +21,7 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
   private var currentModel: String?
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
   private var audioEngine = AVAudioEngine()
-  private let logger = Logger(subsystem: "com.speak.app", category: "SonioxLiveController")
+  private let logger = SpeakLogger.logger(category: "SonioxLiveController")
   private let audioProcessor = SonioxAudioProcessor()
   private var hasFinished: Bool = false
 

@@ -35,10 +35,13 @@ All implementation code is documented in `IMPLEMENTATION_GUIDE_E2E_ENCRYPTION.md
    - New `EncryptedMessage` type
    - Encoder/decoder updates
 
-3. ✅ **Modifications to `Sources/SpeakiOS/Services/SendToMacService.swift`**
+3. ✅ **Modifications to `Sources/SpeakCore/MacConnection.swift`**
    - Encryption instance lifecycle
    - Auto-encrypt sensitive messages
    - Auto-decrypt incoming encrypted messages
+   - Note: the client moved here from `Sources/SpeakiOS/Services/SendToMacService.swift`
+     when both ends adopted the shared WebSocket framing (issue #688). Sending and
+     receiving now go through `TransportChannel`, which is where encryption would hook in.
 
 4. ✅ **Modifications to `Sources/SpeakApp/Transport/TransportServer.swift`**
    - Server-side encryption instance

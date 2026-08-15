@@ -504,7 +504,7 @@ public final class CloudKitKeySync: ObservableObject {
         case superseded
     }
 
-    private let log = Logger(subsystem: "com.justspeaktoit", category: "CloudKitKeySync")
+    private let log = SpeakLogger.logger(category: "CloudKitKeySync")
     private let stateStorage: any CloudKitKeySyncSecretStoring
     private var secureStorage: any CloudKitKeySyncSecretStoring
     private let dependencies: CloudKitKeySyncDependencies

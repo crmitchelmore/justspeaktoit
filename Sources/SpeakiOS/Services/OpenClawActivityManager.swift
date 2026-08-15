@@ -2,6 +2,9 @@
 import ActivityKit
 import Foundation
 import SpeakCore
+import os.log
+
+private let logger = SpeakLogger.logger(category: "OpenClawActivity")
 
 // MARK: - OpenClaw Activity Attributes
 
@@ -92,7 +95,7 @@ public final class OpenClawActivityManager: ObservableObject {
             currentActivity = activity
             isActivityRunning = true
         } catch {
-            print("[OpenClawActivityManager] Failed to start activity: \(error)")
+            logger.error("Failed to start activity: \(error.localizedDescription, privacy: .public)")
         }
     }
 

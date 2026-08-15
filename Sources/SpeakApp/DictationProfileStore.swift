@@ -13,7 +13,7 @@ final class DictationProfileStore: ObservableObject {
   }
 
   private let defaults: UserDefaults
-  private let log = Logger(subsystem: "com.github.speakapp", category: "DictationProfileStore")
+  private let log = SpeakLogger.logger(category: "DictationProfileStore")
 
   init(defaults: UserDefaults = .standard) {
     self.defaults = defaults

@@ -1,4 +1,5 @@
 import AppKit
+import SpeakCore
 import SpeakSync
 
 extension AppDelegate {
@@ -10,7 +11,9 @@ extension AppDelegate {
             do {
                 try await CloudKitKeySync.shared.handleRemoteNotification()
             } catch {
-                print("[AppDelegate] CloudKit API-key notification sync failed: \(error.localizedDescription)")
+                SpeakLogger.sync.error(
+                    "CloudKit API-key notification sync failed: \(error.localizedDescription, privacy: .public)"
+                )
             }
         }
     }

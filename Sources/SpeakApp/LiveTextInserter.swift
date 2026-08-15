@@ -3,6 +3,9 @@ import AppKit
 import ApplicationServices
 import Foundation
 import SpeakCore
+import os.log
+
+private let logger = SpeakLogger.logger(category: "LiveTextInserter")
 
 /// Handles live incremental text insertion during streaming transcription.
 /// Tracks what's been inserted and handles updates/replacements.
@@ -100,7 +103,7 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
   func begin(target: TextOutputTarget? = nil, strategy: InsertionStrategy = .fullValue) {
     guard canUseAccessibility() else {
       lastError = TextOutputError.accessibilityPermissionMissing
-      print("[LiveTextInserter] Cannot start: accessibility permission missing")
+      logger.error("Cannot start: accessibility permission missing")
       return
     }
 
@@ -119,16 +122,16 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
     lastError = nil
     self.target = target ?? .capture()
     let targetApp = self.target?.applicationName ?? "unknown"
-    print(
-      "[LiveTextInserter] Started live insertion session (\(strategy)), target app: \(targetApp), " +
-        "deferring AX readiness checks"
+    let strategyName = String(describing: strategy)
+    logger.info(
+      "Started live insertion session (\(strategyName)), target app: \(targetApp), deferring AX readiness checks"
     )
   }
 
   /// End the live insertion session
   func end() {
     if isActive {
-      print("[LiveTextInserter] Ended session, inserted \(insertedText.count) characters")
+      logger.info("Ended session, inserted \(self.insertedText.count) characters")
     }
     isActive = false
   }
@@ -234,17 +237,17 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
       insertedText = ""
       confirmedCharCount = 0
       usingClipboardFallback = true
-      print("[LiveTextInserter] \(reason), deferring to standard delivery")
+      logger.info("\(reason, privacy: .public), deferring to standard delivery")
       return
     }
 
     guard canDeferToStandardDelivery else {
-      print("[LiveTextInserter] \(reason)")
+      logger.info("\(reason, privacy: .public)")
       return
     }
 
     usingClipboardFallback = true
-    print("[LiveTextInserter] \(reason), deferring to standard delivery")
+    logger.info("\(reason, privacy: .public), deferring to standard delivery")
   }
 
   private func appendText(_ text: String) {
@@ -281,20 +284,20 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
       if !firstInsertionVerified {
         if verifyInsertion(expected: newValue, element: focusedElement) {
           firstInsertionVerified = true
-          print("[LiveTextInserter] First insertion verified successfully")
+          logger.debug("First insertion verified successfully")
         } else {
           insertedText = newValue
           confirmedCharCount = insertedText.count
           shouldPauseIncrementalUpdates = true
           lastError = TextOutputError.unableToVerifyInsertion
-          print("[LiveTextInserter] First insertion verification failed, pausing incremental updates")
+          logger.warning("First insertion verification failed, pausing incremental updates")
           return
         }
       }
 
       insertedText += text
       confirmedCharCount = insertedText.count
-      print("[LiveTextInserter] Appended \(text.count) chars, total: \(insertedText.count)")
+      logger.debug("Appended \(text.count) chars, total: \(self.insertedText.count)")
     } else {
       deferToStandardDelivery(
         reason: "appendText failed with AXError: \(setResult.rawValue)",
@@ -501,7 +504,7 @@ extension LiveTextInserter {
       // inaccuracy of calling a near-final transcript delivered. Contrast the
       // .unknown case below, which fails because the field may still hold only
       // the first partial.
-      print("[LiveTextInserter] Streaming finalize: focused element lost, keeping streamed text")
+      logger.warning("Streaming finalize: focused element lost, keeping streamed text")
       lastError = TextOutputError.unableToFindFocusedElement
       return .applied
     }
@@ -517,7 +520,7 @@ extension LiveTextInserter {
       insertedText = ""
       confirmedCharCount = 0
       usingClipboardFallback = true
-      print("[LiveTextInserter] Streaming finalize: streamed text absent, deferring to standard delivery")
+      logger.info("Streaming finalize: streamed text absent, deferring to standard delivery")
       return .deferred
     case .unknown:
       // Cannot prove where the text is: keep whatever is there rather than risk
@@ -530,7 +533,7 @@ extension LiveTextInserter {
       // not the transcript. Announcing "Delivered" over a truncated transcript
       // would hide real data loss, so the caller is told the delivery failed.
       lastError = TextOutputError.unableToVerifyInsertion
-      print("[LiveTextInserter] Streaming finalize: region unverified, keeping streamed text")
+      logger.warning("Streaming finalize: region unverified, keeping streamed text")
       return .failed(TextOutputError.unableToVerifyInsertion)
     }
 
@@ -557,7 +560,7 @@ extension LiveTextInserter {
     // would suppress the "Delivered" HUD and record a HistoryError against a
     // delivery the user can see, which is a worse report than the mild
     // inaccuracy of treating a near-final transcript as delivered.
-    print("[LiveTextInserter] Streaming finalize failed after writes; keeping streamed text")
+    logger.warning("Streaming finalize failed after writes; keeping streamed text")
     return .applied
   }
 
@@ -615,7 +618,7 @@ extension LiveTextInserter {
     switch inspectStreamingRegion(on: field) {
     case .matched:
       firstInsertionVerified = true
-      print("[LiveTextInserter] First streaming insertion verified")
+      logger.debug("First streaming insertion verified")
     case .absent:
       abandonStreaming(
         reason: "first streaming insertion never reached the field",
@@ -654,7 +657,7 @@ extension LiveTextInserter {
     )
     if case let .matched(resolvedAnchor) = state, resolvedAnchor != anchor {
       self.streamingAnchorUTF16 = resolvedAnchor
-      print("[LiveTextInserter] Streaming anchor re-synced to \(resolvedAnchor)")
+      logger.debug("Streaming anchor re-synced to \(resolvedAnchor)")
     }
     return state
   }
@@ -706,7 +709,7 @@ extension LiveTextInserter {
   /// Stops incremental patching; finalization performs a single clean pass.
   private func pauseStreaming(reason: String) {
     shouldPauseIncrementalUpdates = true
-    print("[LiveTextInserter] Streaming paused: \(reason)")
+    logger.info("Streaming paused: \(reason, privacy: .public)")
   }
 
   /// Streaming failure policy: if nothing has reached the app yet, fall back to

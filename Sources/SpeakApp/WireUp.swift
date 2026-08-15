@@ -11,6 +11,12 @@ private let logger = SpeakLogger.logger(category: "WireUp")
 
 @MainActor
 final class AppEnvironment: ObservableObject {
+  /// Process-wide access point for the App Intents (Shortcuts) surface, set at
+  /// bootstrap. Intents can fire before the SwiftUI scene has bootstrapped the
+  /// environment (e.g. when Shortcuts launches the app), so it is optional and
+  /// intent handlers wait briefly for it — see `AutomationIntents.swift`.
+  fileprivate(set) static var shared: AppEnvironment?
+
   let settings: AppSettings
   let permissions: PermissionsManager
   let history: HistoryManager
@@ -464,6 +470,7 @@ enum WireUp {
     )
 
     configureServices(environment: environment, settings: settings, secureStorage: secureStorage)
+    AppEnvironment.shared = environment
     return environment
   }
 

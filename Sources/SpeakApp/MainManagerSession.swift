@@ -9,6 +9,8 @@ enum SessionTriggerSource: Equatable {
   case silenceDetection
   /// Started or stopped by hands-free dictation's voice-activity detector.
   case handsFree
+  /// Started or stopped by Shortcuts / App Intents.
+  case automation
 
   var historyGesture: HistoryTrigger.HotKeyGesture {
     switch self {
@@ -22,6 +24,8 @@ enum SessionTriggerSource: Equatable {
       return .uiButton
     case .silenceDetection, .handsFree:
       return .uiButton  // Treat as UI-initiated for history purposes
+    case .automation:
+      return .automation  // Shortcuts / App Intents, kept distinct in history
     }
   }
 }

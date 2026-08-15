@@ -343,6 +343,34 @@ final class MainManager: ObservableObject {
     }
   }
 
+  // MARK: - Automation (App Intents / Shortcuts)
+
+  /// Whether a dictation session is currently active. Automation callers use
+  /// this instead of `state` so an in-flight stop still reads as active.
+  var isDictationSessionActive: Bool {
+    activeSession != nil
+  }
+
+  /// Starts a dictation session on behalf of a Shortcuts action, reusing the
+  /// exact hotkey/UI session pipeline. Returns false when no session started;
+  /// `state` and `missingLiveAPIKeyAlert` carry the reason.
+  @discardableResult
+  func startDictationFromAutomation() async -> Bool {
+    await startSession(trigger: .automation)
+    return activeSession != nil
+  }
+
+  /// Ends the active dictation session on behalf of a Shortcuts action and
+  /// returns the delivered history item, or nil when the session failed (the
+  /// failure message is available via `state` / `lastErrorMessage`).
+  func stopDictationFromAutomation() async -> HistoryItem? {
+    await endSession(trigger: .automation)
+    if case .completed(let item) = state {
+      return item
+    }
+    return nil
+  }
+
   func retryPostProcessing() {
     guard canRetryPostProcessing, let retryData = cachedRetryData else { return }
     guard activeSession == nil else { return }

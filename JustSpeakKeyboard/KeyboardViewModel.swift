@@ -218,6 +218,13 @@ final class KeyboardViewModel: ObservableObject {
             // the bounded replacement region unprovable and pauses the run.
             if machine.isCapturing,
                changedDocument || documentSession?.anchorIsCurrent() != true {
+                // A new field means the proxy now reads a document this session
+                // never wrote to. Drop the anchor first, so the `.targetChanged`
+                // failure path cannot delete separator whitespace from the new
+                // field on an exact scalar collision between the two contexts.
+                if changedDocument {
+                    documentSession?.invalidate()
+                }
                 dispatch(.targetChanged)
             }
         case .handoff:
@@ -315,8 +322,15 @@ final class KeyboardViewModel: ObservableObject {
         for effect in effects {
             perform(effect)
         }
-        if directState == .failed(.noSpeech) {
+        // Every failure that can follow a started capture must clean up the
+        // session-owned separator. An interruption or a target change after a
+        // whitespace-only hypothesis ends in `.failed`, and would otherwise
+        // leave a stray space in the host document.
+        switch directState {
+        case .failed(.noSpeech), .failed(.audioInterrupted), .failed(.targetChanged):
             _ = documentSession?.removeSeparatorIfTranscriptIsEmpty()
+        default:
+            break
         }
     }
 

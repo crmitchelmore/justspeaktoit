@@ -29,7 +29,7 @@ public final class VoiceCommandProcessor {
     private let configuration: Configuration
 
     /// Built-in voice commands and their variations
-    private static let clipboardTriggers: Set<String> = [
+    private static let clipboardTriggers: [String] = [
         "copy pasta",
         "copypasta",
         "copy paste",
@@ -77,33 +77,88 @@ public final class VoiceCommandProcessor {
         let clipboardContent = configuration.clipboardText() ?? ""
         guard !clipboardContent.isEmpty else { return text }
 
-        var result = text
-        let lowercased = text.lowercased()
+        guard let range = Self.triggerRange(in: text, triggers: resolvedTriggers()) else { return text }
 
-        // Check custom triggers first (from settings)
+        var result = text
+        result.replaceSubrange(range, with: clipboardContent)
+        // Re-process in case there are multiple triggers (with updated positions).
+        return expandClipboardCommands(in: result, depth: depth + 1)
+    }
+
+    /// The trigger phrases to match, in a stable order.
+    ///
+    /// Custom phrases come first and duplicates collapse case-insensitively, so a
+    /// custom phrase that repeats a built-in is one trigger, not two.
+    private func resolvedTriggers() -> [String] {
         let customTriggers = configuration.customTriggers()
             .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
             .filter { !$0.isEmpty }
 
-        let allTriggers = Self.clipboardTriggers.union(Set(customTriggers))
+        var seen = Set<String>()
+        return (customTriggers + Self.clipboardTriggers)
+            .filter { seen.insert($0).inserted }
+            .sorted { lhs, rhs in
+                lhs.count == rhs.count ? lhs < rhs : lhs.count > rhs.count
+            }
+    }
 
-        for trigger in allTriggers {
-            if let range = lowercased.range(of: trigger) {
-                let lowerOffset = lowercased.distance(from: lowercased.startIndex, to: range.lowerBound)
-                let upperOffset = lowercased.distance(from: lowercased.startIndex, to: range.upperBound)
-                let originalRange = Range(
-                    uncheckedBounds: (
-                        result.index(result.startIndex, offsetBy: lowerOffset),
-                        result.index(result.startIndex, offsetBy: upperOffset)
-                    )
-                )
-                result.replaceSubrange(originalRange, with: clipboardContent)
-                // Re-process in case there are multiple triggers (with updated positions)
-                return expandClipboardCommands(in: result, depth: depth + 1)
+    /// The range to replace: the earliest trigger in the text, and the longest
+    /// trigger of the several that can start there.
+    ///
+    /// Set iteration order used to decide this, so "paste clipboard" expanded to
+    /// either the clipboard content or `<clipboard content> clipboard` across
+    /// launches when a custom "paste" trigger was also configured (issue #687).
+    private static func triggerRange(in text: String, triggers: [String]) -> Range<String.Index>? {
+        var best: Range<String.Index>?
+        for trigger in triggers {
+            guard let range = earliestWholePhraseRange(of: trigger, in: text) else { continue }
+            guard let current = best else {
+                best = range
+                continue
+            }
+            if range.lowerBound < current.lowerBound {
+                best = range
+            } else if range.lowerBound == current.lowerBound, range.upperBound > current.upperBound {
+                best = range
             }
         }
+        return best
+    }
 
-        return result
+    /// The first case-insensitive match of `trigger` that is a whole phrase.
+    ///
+    /// Triggers never fire inside a longer word: "copypasta" must not expand in
+    /// "copypastas".
+    private static func earliestWholePhraseRange(
+        of trigger: String,
+        in text: String
+    ) -> Range<String.Index>? {
+        var searchStart = text.startIndex
+        while searchStart < text.endIndex,
+            let range = text.range(
+                of: trigger,
+                options: [.caseInsensitive],
+                range: searchStart..<text.endIndex
+            ) {
+            if isWholePhrase(range, in: text) { return range }
+            searchStart = text.index(after: range.lowerBound)
+        }
+        return nil
+    }
+
+    private static func isWholePhrase(_ range: Range<String.Index>, in text: String) -> Bool {
+        if range.lowerBound > text.startIndex,
+            isWordCharacter(text[text.index(before: range.lowerBound)]) {
+            return false
+        }
+        if range.upperBound < text.endIndex, isWordCharacter(text[range.upperBound]) {
+            return false
+        }
+        return true
+    }
+
+    private static func isWordCharacter(_ character: Character) -> Bool {
+        character.isLetter || character.isNumber
     }
 }

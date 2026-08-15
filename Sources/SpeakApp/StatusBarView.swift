@@ -1,3 +1,4 @@
+import SpeakCore
 import AppKit
 import Combine
 
@@ -78,6 +79,8 @@ final class StatusBarController {
         self?.refresh()
       }
       .store(in: &cancellables)
+
+    observeHandsFreeState()
 
     appSettings.$compactStatusBarIcon
       .receive(on: RunLoop.main)
@@ -220,7 +223,7 @@ final class StatusBarController {
 
   private func updateButton(for state: MainManager.State) {
     guard let button = statusItem.button else { return }
-    let appearance = Self.appearance(for: state)
+    let appearance = Self.appearance(for: state, handsFree: mainManager.handsFreeState)
 
     if appSettings.compactStatusBarIcon {
       button.image = NSImage(
@@ -247,9 +250,19 @@ final class StatusBarController {
     let tint: NSColor?
   }
 
-  private static func appearance(for state: MainManager.State) -> StatusAppearance {
+  /// Session state wins the icon, because a running session is the stronger
+  /// claim on the microphone. Between sessions an armed hands-free detector
+  /// still holds the microphone open, so it gets its own glyph.
+  private static func appearance(
+    for state: MainManager.State,
+    handsFree: HandsFreeDictationMachine.State
+  ) -> StatusAppearance {
     switch state {
     case .idle, .completed:
+      guard handsFree == .off else {
+        return StatusAppearance(
+          label: "Listening…", compactSymbol: "waveform.badge.mic", tint: .systemTeal)
+      }
       return StatusAppearance(label: "Speak", compactSymbol: "waveform", tint: nil)
     case .recording:
       return StatusAppearance(label: "Recording…", compactSymbol: "mic.fill", tint: .systemRed)
@@ -279,6 +292,23 @@ final class StatusBarController {
 
   @objc private func quitApp() {
     NSApp.terminate(nil)
+  }
+}
+
+// MARK: - Hands-free indicator
+
+extension StatusBarController {
+  /// The armed microphone needs an indicator outside the HUD, which the user
+  /// can switch off or cover with a window.
+  fileprivate func observeHandsFreeState() {
+    mainManager.$handsFreeState
+      .removeDuplicates()
+      .receive(on: RunLoop.main)
+      .sink { [weak self] _ in
+        guard let self else { return }
+        self.updateButton(for: self.mainManager.state)
+      }
+      .store(in: &cancellables)
   }
 }
 // @Implement: This file should provide the UI for the status bar. It should briefly show the core settings of the app (which model we're currently using and if we're using post-processing). To open the main window of the app.What is the current insert method, and what are brief stats from recordings?

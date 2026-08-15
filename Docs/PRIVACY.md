@@ -79,12 +79,15 @@ Sentry SDK sends:
 - Crash and error reports
 - Performance traces (sampled at 20%)
 - Automatic app sessions, associated with a persistent random installation ID
-- Automatic diagnostic breadcrumbs and failed HTTP-request metadata
+- Automatic diagnostic breadcrumbs, and failed HTTP-request metadata for the
+  app's own update domain only
 
 Sentry is disabled in debug builds and test runs. `sendDefaultPii` is disabled,
 and the data is not used to track users across other companies' apps or websites.
-Just Speak to It does not intentionally send transcript text, microphone audio,
-clipboard contents, API keys, email addresses, or names to Sentry.
+Just Speak to It does not send transcript text, microphone audio, clipboard
+contents, API keys, email addresses, or names to Sentry. Every event passes
+through a redaction step that removes credentials from request headers, URL query
+items and breadcrumb data before transmission.
 
 The macOS dashboard's transcription history and usage charts are stored locally;
 they are not product-analytics events sent to the developer.

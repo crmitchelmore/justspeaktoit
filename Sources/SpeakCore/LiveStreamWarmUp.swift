@@ -110,16 +110,41 @@ public struct LiveStreamWarmTracker: Equatable, Sendable {
     /// lifetimes, so a user dictating repeatedly re-warms at most once a minute.
     public static let defaultFreshness: TimeInterval = 90
 
+    /// How many times freshness may be renewed while the app stays idle before
+    /// the tracker stops asking for a refresh. Warm-up exists to save time on
+    /// the next dictation, so an app nobody has touched for several minutes
+    /// should stop probing the provider on a timer. The next real trigger —
+    /// session end, a settings change, a wake from sleep — clears the tracker
+    /// and starts the cycle again.
+    public static let maxIdleRefreshes = 5
+
     private let freshness: TimeInterval
+    private let maxIdleRefreshes: Int
     private var warmedHost: String?
     private var warmedAt: Date?
     private var inFlightHost: String?
+    private var idleRefreshCount = 0
 
-    public init(freshness: TimeInterval = LiveStreamWarmTracker.defaultFreshness) {
+    public init(
+        freshness: TimeInterval = LiveStreamWarmTracker.defaultFreshness,
+        maxIdleRefreshes: Int = LiveStreamWarmTracker.maxIdleRefreshes
+    ) {
         self.freshness = freshness
+        self.maxIdleRefreshes = maxIdleRefreshes
+    }
+
+    /// Whether the idle refresh cycle has run its course. The owner keeps
+    /// serving on-demand probes; it only stops scheduling new ones.
+    public var hasReachedIdleRefreshLimit: Bool {
+        self.idleRefreshCount >= self.maxIdleRefreshes
     }
 
     /// The host that should be warmed now, or `nil` when there is nothing to do.
+    ///
+    /// The idle cap is deliberately not applied here: a trigger that asks
+    /// directly — a device change, for example — still gets its probe, even
+    /// after the timer has stopped. One probe on a real event costs little,
+    /// and refusing it would make warm-up less useful than the timer it caps.
     public mutating func hostNeedingWarmUp(
         for provider: LiveTranscriptionProviderID?,
         now: Date,
@@ -142,6 +167,11 @@ public struct LiveStreamWarmTracker: Equatable, Sendable {
     public mutating func markWarmed(host: String, at date: Date) -> Bool {
         guard self.inFlightHost == host else { return false }
         self.inFlightHost = nil
+        // Warming a host that was already warm means freshness expired while
+        // the app sat idle: that is one refresh cycle towards the cap.
+        if self.warmedHost == host {
+            self.idleRefreshCount += 1
+        }
         self.warmedHost = host
         self.warmedAt = date
         return true
@@ -157,11 +187,13 @@ public struct LiveStreamWarmTracker: Equatable, Sendable {
         }
     }
 
-    /// Forgets the probe (provider changed, network changed, disabled).
+    /// Forgets the probe (provider changed, network changed, disabled) and
+    /// gives the idle refresh cycle its full budget again.
     public mutating func invalidate() {
         self.warmedHost = nil
         self.warmedAt = nil
         self.inFlightHost = nil
+        self.idleRefreshCount = 0
     }
 
     /// Whether `host` is currently considered warm at `now`.
@@ -170,13 +202,15 @@ public struct LiveStreamWarmTracker: Equatable, Sendable {
         return now.timeIntervalSince(warmedAt) < self.freshness
     }
 
-    /// When the current provider should next be probed. Owners schedule this
-    /// deadline so freshness expires while the app remains otherwise idle.
+    /// When the current provider should next be probed, or `nil` when the idle
+    /// refresh cycle is over. Owners schedule this deadline so freshness
+    /// expires while the app remains otherwise idle.
     public func refreshDeadline(
         for provider: LiveTranscriptionProviderID?,
         enabled: Bool = true
     ) -> Date? {
-        guard enabled, let host = provider?.streamWarmUp.host else { return nil }
+        guard enabled, !self.hasReachedIdleRefreshLimit else { return nil }
+        guard let host = provider?.streamWarmUp.host else { return nil }
         guard self.warmedHost == host, let warmedAt = self.warmedAt else { return nil }
         return warmedAt.addingTimeInterval(self.freshness)
     }

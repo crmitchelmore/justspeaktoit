@@ -108,7 +108,9 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
             case .startCapture:
                 let outcome = await startCapture(preRoll.takeSnapshot())
                 if case .rejected(let failure) = outcome {
-                    await apply(machine.handle(.sessionFailed(failure)))
+                    // A refused start captured nothing, so it disarms without
+                    // cancelling a recording that belongs to somebody else.
+                    await apply(machine.handle(.captureStartRejected(failure)))
                 }
             case .stopCapture:
                 startFinalisation()

@@ -47,6 +47,10 @@ let package = Package(
         ),
         .target(
             name: "SpeakCore",
+            resources: [
+                // Bundled release notes so the in-app "What's New" screen works offline.
+                .process("Resources")
+            ],
             swiftSettings: [
                 // Strict concurrency checking (warnings-only under Swift 5 language
                 // mode). Tuist consumes this same package target, so the setting
@@ -96,6 +100,10 @@ let package = Package(
         .testTarget(
             name: "SpeakCoreTests",
             dependencies: ["SpeakCore"]
+        ),
+        .testTarget(
+            name: "SpeakHotKeysTests",
+            dependencies: ["SpeakHotKeys"]
         ),
         .testTarget(
             name: "SpeakSyncTests",

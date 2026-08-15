@@ -74,4 +74,18 @@ final class HandsFreeDictationSettingsTests: XCTestCase {
 
         XCTAssertFalse(settings.handsFreeDictationActive)
     }
+
+    /// Level-based auto-stop asks the session who owns its silence, so the
+    /// hands-free trigger must survive on the session that hands-free started.
+    func testSessionKeepsItsTrigger_SoSilenceHasOneOwner() {
+        let handsFree = ActiveSession(
+            gesture: .uiButton,
+            hotKeyDescription: "Fn",
+            trigger: .handsFree
+        )
+        let manual = ActiveSession(gesture: .uiButton, hotKeyDescription: "Fn")
+
+        XCTAssertEqual(handsFree.trigger, .handsFree)
+        XCTAssertNotEqual(manual.trigger, .handsFree)
+    }
 }

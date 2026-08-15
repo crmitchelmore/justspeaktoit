@@ -23,7 +23,7 @@ public final class KeyboardHandoffStore: @unchecked Sendable {
     private let lock = NSLock()
 
     public convenience init() {
-        self.init(defaults: UserDefaults(suiteName: Self.appGroupIdentifier))
+        self.init(defaults: AppGroupAvailability.verifiedDefaults())
     }
 
     /// Injectable for deterministic tests. Passing `nil` models a missing or

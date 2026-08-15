@@ -96,6 +96,68 @@ final class SpeechTokenizerTests: XCTestCase {
         XCTAssertEqual(counts["um"], 3)
     }
 
+    // MARK: - Filler matches (consumed token ranges)
+
+    func testMatchFillers_multiWordPhraseConsumesEveryToken() {
+        let tokens = ["it", "was", "sort", "of", "strange", "you", "know"]
+        let matches = SpeechTokenizer.matchFillers(in: tokens, phrases: defaultFillers)
+        XCTAssertEqual(matches.counts["sort of"], 1)
+        XCTAssertEqual(matches.counts["you know"], 1)
+        XCTAssertEqual(matches.consumedTokenIndices, [2, 3, 5, 6])
+    }
+
+    func testMatchFillers_singleWordFillerConsumesItsToken() {
+        let tokens = ["um", "hello", "um"]
+        let matches = SpeechTokenizer.matchFillers(in: tokens, phrases: defaultFillers)
+        XCTAssertEqual(matches.counts["um"], 2)
+        XCTAssertEqual(matches.consumedTokenIndices, [0, 2])
+    }
+
+    func testMatchFillers_repeatedMultiWordPhraseConsumesAllSpans() {
+        let tokens = ["sort", "of", "sort", "of", "planning"]
+        let matches = SpeechTokenizer.matchFillers(in: tokens, phrases: defaultFillers)
+        XCTAssertEqual(matches.counts["sort of"], 2)
+        XCTAssertEqual(matches.consumedTokenIndices, [0, 1, 2, 3])
+        XCTAssertFalse(matches.consumedTokenIndices.contains(4))
+    }
+
+    func testMatchFillers_longestPhraseWinsAndConsumedSpansDoNotOverlap() {
+        let config = SpeechInsightsConfiguration(fillerPhrases: ["you know what", "you know"])
+        let tokens = ["you", "know", "what", "then", "you", "know"]
+        let matches = SpeechTokenizer.matchFillers(in: tokens, phrases: config.fillerTokenSequences)
+        XCTAssertEqual(matches.counts["you know what"], 1)
+        XCTAssertEqual(matches.counts["you know"], 1)
+        XCTAssertEqual(matches.consumedTokenIndices, [0, 1, 2, 4, 5])
+    }
+
+    func testMatchFillers_noMatchesConsumesNothing() {
+        let matches = SpeechTokenizer.matchFillers(
+            in: ["completely", "clean", "sentence"],
+            phrases: defaultFillers
+        )
+        XCTAssertTrue(matches.counts.isEmpty)
+        XCTAssertTrue(matches.consumedTokenIndices.isEmpty)
+    }
+
+    func testMatchFillers_emptyInputs() {
+        XCTAssertEqual(
+            SpeechTokenizer.matchFillers(in: [], phrases: defaultFillers),
+            SpeechTokenizer.FillerMatches(counts: [:], consumedTokenIndices: [])
+        )
+        XCTAssertEqual(
+            SpeechTokenizer.matchFillers(in: ["um"], phrases: []),
+            SpeechTokenizer.FillerMatches(counts: [:], consumedTokenIndices: [])
+        )
+    }
+
+    func testCountFillers_matchesMatchFillersCounts() {
+        let tokens = ["um", "it", "was", "sort", "of", "fine", "you", "know"]
+        XCTAssertEqual(
+            SpeechTokenizer.countFillers(in: tokens, phrases: defaultFillers),
+            SpeechTokenizer.matchFillers(in: tokens, phrases: defaultFillers).counts
+        )
+    }
+
     // MARK: - N-grams
 
     func testNgramCounts_bigrams() {

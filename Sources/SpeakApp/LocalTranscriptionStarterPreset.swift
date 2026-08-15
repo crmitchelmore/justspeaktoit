@@ -85,6 +85,26 @@ struct LocalTranscriptionStarterPreset: Identifiable, Equatable {
     }
   }
 
+  /// Routes recordings through this preset.
+  ///
+  /// Call this only when the model is installed. Settings that point at a model
+  /// that is not installed make every recording fail.
+  @MainActor
+  func activate(in settings: AppSettings) {
+    settings.transcriptionMode = .localModel
+    settings.localTranscriptionMode = mode
+
+    switch engine {
+    case .parakeet:
+      settings.localStreamingModelSource = FluidAudioParakeetModel.id
+    case .whisperKit(let model):
+      settings.localTranscriptionModel = model.id
+      if mode == .streaming {
+        settings.localStreamingModelSource = WhisperKitStreamingModel.id(for: model)
+      }
+    }
+  }
+
   static func preferredWhisperKitModel(
     from availableModels: [LocalTranscriptionModel],
     requiresStreaming: Bool

@@ -26,6 +26,9 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
   private var stderrPipe: Pipe?
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
   private var currentModel: String?
+  /// The model the running sidecar loaded. Held for the whole session so a
+  /// settings change mid-recording cannot retag the results of this one.
+  private var activeModelID: String?
   private var streamingStartTime: Date?
   private var latestText: String = ""
   private var hasFinished: Bool = false
@@ -66,6 +69,7 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
     }
 
     let modelID = currentModel ?? appSettings.localStreamingModelSource
+    activeModelID = modelID
     let bundle = try await runtimeManager.ensureReady(sourceID: modelID)
     let process = try makeProcess(bundle: bundle)
     let stdinPipe = Pipe()
@@ -282,7 +286,7 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
       guard let rawText = event.text?.trimmingCharacters(in: .whitespacesAndNewlines), !rawText.isEmpty else {
         return
       }
-      let text = SherpaOnnxTranscriptNormalizer.normalize(rawText)
+      let text = SherpaOnnxTranscriptNormalizer.normalize(rawText, modelID: activeModelID)
       latestText = text
       let update = LiveTranscriptionUpdate(text: text, isFinal: event.type == "session_final")
       delegate?.liveTranscriber(self, didUpdateWith: update)

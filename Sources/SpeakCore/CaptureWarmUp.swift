@@ -54,6 +54,79 @@ public struct CaptureWarmContext: Equatable, Sendable {
     }
 }
 
+// MARK: - Staging location
+
+/// Where a staged recorder writes before a session claims it, and which
+/// leftovers a launch sweep may remove.
+///
+/// `AVAudioRecorder.prepareToRecord()` creates the output file, so staging
+/// always puts a file on disk before anybody has spoken. That file must not sit
+/// in the user's recordings directory: a crash, a force quit or a power loss
+/// between staging and the hotkey leaves it there with nothing left running to
+/// remove it. Staging therefore happens in a folder of its own, and the file
+/// moves into the recordings directory at the moment a session claims it.
+///
+/// The move has to be a rename rather than a copy. A claimed recorder keeps
+/// writing through the file it opened during staging, so a cross-volume move
+/// (copy, then unlink) would send the session's audio to a file the user can no
+/// longer reach. Staging only uses the temporary directory when that directory
+/// is on the same volume as the recordings directory; a recordings directory on
+/// another volume — an external disk, for example — gets a hidden staging
+/// folder of its own instead.
+public enum CaptureStaging {
+    /// Name of the staging folder. The leading dot hides it from Finder in the
+    /// case where it sits beside the user's recordings.
+    public static let folderName = ".speak-staging"
+
+    /// How long a staged file must be untouched before a sweep may take it.
+    /// Comfortably longer than the gap between staging a recorder and claiming
+    /// it, so the sweep can never reach a file the running app still owns.
+    public static let leftoverAge: TimeInterval = 300
+
+    /// The largest a file left behind by in-place staging can be. A prepared
+    /// but never-started AAC file holds only a header; anything larger may hold
+    /// audio and is left alone.
+    public static let inPlaceStageMaxBytes = 1024
+
+    private static let namePrefix = "Recording-"
+    private static let nameSuffix = ".m4a"
+
+    /// The folder staged files are created in for `recordingsDirectory`.
+    public static func directory(
+        temporaryDirectory: URL,
+        recordingsDirectory: URL,
+        sharesVolume: Bool
+    ) -> URL {
+        let parent = sharesVolume ? temporaryDirectory : recordingsDirectory
+        return parent.appendingPathComponent(self.folderName, isDirectory: true)
+    }
+
+    /// Whether a file in the staging folder belongs to an earlier run and may
+    /// be removed.
+    public static func isLeftover(modifiedAt: Date, now: Date) -> Bool {
+        now.timeIntervalSince(modifiedAt) >= self.leftoverAge
+    }
+
+    /// Whether a file in the recordings directory is an abandoned staged file
+    /// from a build that staged in place. Deliberately narrow: the name must be
+    /// one staging produces, the file must be too small to hold audio, and it
+    /// must be as old as any other leftover.
+    public static func isAbandonedInPlaceStage(
+        fileName: String,
+        byteSize: Int,
+        modifiedAt: Date,
+        now: Date
+    ) -> Bool {
+        guard byteSize <= self.inPlaceStageMaxBytes else { return false }
+        guard self.isLeftover(modifiedAt: modifiedAt, now: now) else { return false }
+        guard fileName.hasPrefix(self.namePrefix), fileName.hasSuffix(self.nameSuffix) else {
+            return false
+        }
+        let stem = fileName.dropFirst(self.namePrefix.count).dropLast(self.nameSuffix.count)
+        return UUID(uuidString: String(stem)) != nil
+    }
+}
+
 /// Where the staged recorder currently stands.
 public enum CaptureWarmPhase: Equatable, Sendable {
     /// Nothing staged.

@@ -212,3 +212,118 @@ final class CaptureWarmStateMachineTests: XCTestCase {
         XCTAssertFalse(machine.claim(for: context))
     }
 }
+
+final class CaptureStagingTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_700_000_000)
+    private let temporaryDirectory = URL(fileURLWithPath: "/tmp/session", isDirectory: true)
+    private let recordingsDirectory = URL(fileURLWithPath: "/Users/test/Recordings", isDirectory: true)
+
+    // MARK: - Location
+
+    func testStagedFile_NeverLandsInTheRecordingsDirectory() {
+        for sharesVolume in [true, false] {
+            let directory = CaptureStaging.directory(
+                temporaryDirectory: self.temporaryDirectory,
+                recordingsDirectory: self.recordingsDirectory,
+                sharesVolume: sharesVolume
+            )
+            XCTAssertNotEqual(directory.standardizedFileURL, self.recordingsDirectory.standardizedFileURL)
+            XCTAssertEqual(directory.lastPathComponent, CaptureStaging.folderName)
+        }
+    }
+
+    func testSharedVolume_StagesInTheTemporaryDirectory() {
+        XCTAssertEqual(
+            CaptureStaging.directory(
+                temporaryDirectory: self.temporaryDirectory,
+                recordingsDirectory: self.recordingsDirectory,
+                sharesVolume: true
+            ),
+            self.temporaryDirectory.appendingPathComponent(CaptureStaging.folderName, isDirectory: true)
+        )
+    }
+
+    func testSeparateVolume_StagesBesideTheRecordingsSoClaimingStaysARename() {
+        XCTAssertEqual(
+            CaptureStaging.directory(
+                temporaryDirectory: self.temporaryDirectory,
+                recordingsDirectory: self.recordingsDirectory,
+                sharesVolume: false
+            ),
+            self.recordingsDirectory.appendingPathComponent(CaptureStaging.folderName, isDirectory: true)
+        )
+    }
+
+    func testStagingFolder_IsHiddenFromFinderAndFromRecordingListings() {
+        XCTAssertTrue(CaptureStaging.folderName.hasPrefix("."))
+    }
+
+    // MARK: - Sweep
+
+    func testFreshlyStagedFile_IsNeverSwept() {
+        XCTAssertFalse(
+            CaptureStaging.isLeftover(modifiedAt: self.now.addingTimeInterval(-30), now: self.now)
+        )
+        XCTAssertFalse(CaptureStaging.isLeftover(modifiedAt: self.now, now: self.now))
+    }
+
+    func testStagedFileFromAnEarlierRun_IsSwept() {
+        XCTAssertTrue(
+            CaptureStaging.isLeftover(
+                modifiedAt: self.now.addingTimeInterval(-CaptureStaging.leftoverAge),
+                now: self.now
+            )
+        )
+    }
+
+    func testAbandonedInPlaceStage_IsSweptFromTheRecordingsDirectory() {
+        XCTAssertTrue(
+            CaptureStaging.isAbandonedInPlaceStage(
+                fileName: "Recording-\(UUID().uuidString).m4a",
+                byteSize: 28,
+                modifiedAt: self.now.addingTimeInterval(-600),
+                now: self.now
+            )
+        )
+    }
+
+    func testFileHoldingAudio_IsLeftAlone() {
+        XCTAssertFalse(
+            CaptureStaging.isAbandonedInPlaceStage(
+                fileName: "Recording-\(UUID().uuidString).m4a",
+                byteSize: CaptureStaging.inPlaceStageMaxBytes + 1,
+                modifiedAt: self.now.addingTimeInterval(-600),
+                now: self.now
+            )
+        )
+    }
+
+    func testRecentOrForeignFiles_AreLeftAlone() {
+        let identifier = UUID().uuidString
+        XCTAssertFalse(
+            CaptureStaging.isAbandonedInPlaceStage(
+                fileName: "Recording-\(identifier).m4a",
+                byteSize: 28,
+                modifiedAt: self.now.addingTimeInterval(-30),
+                now: self.now
+            ),
+            "a file the running app may still own must survive"
+        )
+        for name in [
+            "Imported-\(identifier).m4a",
+            "Recording-\(identifier).wav",
+            "Recording-notauuid.m4a",
+            "Interview.m4a"
+        ] {
+            XCTAssertFalse(
+                CaptureStaging.isAbandonedInPlaceStage(
+                    fileName: name,
+                    byteSize: 28,
+                    modifiedAt: self.now.addingTimeInterval(-600),
+                    now: self.now
+                ),
+                "\(name) is not a staged file"
+            )
+        }
+    }
+}

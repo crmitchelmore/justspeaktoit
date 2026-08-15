@@ -162,6 +162,7 @@ final class HotKeyManager: ObservableObject {
 	}
 
 	func stopMonitoring() {
+		cancelScheduledRecovery()
 		permissionRequestTask?.cancel()
 		permissionRequestTask = nil
 		monitoringRequested = false
@@ -181,7 +182,12 @@ final class HotKeyManager: ObservableObject {
 		engine.stop()
 	}
 
+	/// Tears the engine down and rearms it with the current binding.
+	///
+	/// A hold that is in progress ends with a balanced `holdEnd`, so a recording
+	/// that started on hold never survives the reconnect.
 	func reconnectMonitoring() {
+		cancelScheduledRecovery()
 		guard monitoringRequested else {
 			startMonitoring()
 			return
@@ -203,6 +209,7 @@ final class HotKeyManager: ObservableObject {
 
 	/// Restart monitoring with the current hotkey from settings.
 	func restartWithCurrentHotKey() {
+		cancelScheduledRecovery()
 		let shouldRestart = monitoringRequested
 		engine.stop()
 		if shouldRestart {
@@ -234,15 +241,26 @@ final class HotKeyManager: ObservableObject {
 		monitoringState = .active
 	}
 
+	/// Rearms monitoring a moment after a lifecycle event.
+	///
+	/// Only the newest request may rearm. A manual reconnect or a binding change
+	/// cancels a pending recovery, so a stale lifecycle event cannot reset a newer
+	/// detector.
 	private func scheduleRecovery(reason: String) {
 		guard monitoringRequested else { return }
 		recoveryTask?.cancel()
 		recoveryTask = Task { @MainActor [weak self] in
 			try? await Task.sleep(for: .milliseconds(500))
 			guard !Task.isCancelled, let self, self.monitoringRequested else { return }
+			self.recoveryTask = nil
 			self.log.info("Rearming global hotkey after \(reason, privacy: .public)")
 			self.reconnectMonitoring()
 		}
+	}
+
+	private func cancelScheduledRecovery() {
+		recoveryTask?.cancel()
+		recoveryTask = nil
 	}
 
 	@discardableResult

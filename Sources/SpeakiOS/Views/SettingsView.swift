@@ -77,16 +77,79 @@ public final class AppSettings: ObservableObject {
 
     @Published public var selectedModel: String {
         didSet {
-            UserDefaults.standard.set(selectedModel, forKey: "selectedModel")
+            defaults.set(selectedModel, forKey: "selectedModel")
+            liveTranscriptionSelection.remember(selectedModel)
+            liveTranscriptionSelection.persist(to: defaults)
             publishKeyboardProfileSelection()
         }
     }
 
+    /// Per-placement memory of the user's live transcription model choices.
+    /// Keeping the on-device and remote picks apart is what stops a remote
+    /// choice such as Soniox being replaced by the catalogue default when the
+    /// user visits local mode.
+    public private(set) var liveTranscriptionSelection: LiveTranscriptionSelection
+
     @Published public var transcriptionMode: IOSTranscriptionMode {
         didSet {
-            UserDefaults.standard.set(transcriptionMode.rawValue, forKey: "transcriptionMode")
+            defaults.set(transcriptionMode.rawValue, forKey: "transcriptionMode")
             publishKeyboardProfileSelection()
         }
+    }
+
+    /// The remote sub-mode the user last chose, remembered while they are in
+    /// local mode so returning to remote restores streaming or batch.
+    @Published public var rememberedRemoteTranscriptionMode: IOSTranscriptionMode {
+        didSet { defaults.set(rememberedRemoteTranscriptionMode.rawValue, forKey: Self.rememberedRemoteModeKey) }
+    }
+
+    static let rememberedRemoteModeKey = "rememberedRemoteTranscriptionMode"
+
+    /// Identifiers this build can actually select for live transcription.
+    static var selectableLiveModelIDs: Set<String> {
+        Set((ModelCatalog.onDeviceLiveTranscription + supportedLiveModels).map(\.id))
+    }
+
+    /// Where transcription currently runs, derived from the active model.
+    var transcriptionLocation: IOSTranscriptionLocation {
+        ModelCatalog.isOnDeviceLiveTranscriptionModel(selectedModel) && transcriptionMode == .streaming
+            ? .local
+            : .remote
+    }
+
+    /// The remote sub-mode to show: the live value when remote is active,
+    /// otherwise the remembered one.
+    var remoteTranscriptionMode: IOSTranscriptionMode {
+        transcriptionLocation == .local ? rememberedRemoteTranscriptionMode : transcriptionMode
+    }
+
+    /// Switches between local and remote transcription, restoring the model and
+    /// sub-mode the user last chose on the side they return to. Defaults apply
+    /// only when that side has no remembered selection.
+    func selectTranscriptionLocation(_ location: IOSTranscriptionLocation) {
+        switch location {
+        case .local:
+            selectedModel = liveTranscriptionSelection.model(
+                for: .onDevice,
+                activeModel: selectedModel,
+                selectableModelIDs: Self.selectableLiveModelIDs
+            )
+            transcriptionMode = .streaming
+        case .remote:
+            selectRemoteTranscriptionMode(rememberedRemoteTranscriptionMode)
+        }
+    }
+
+    func selectRemoteTranscriptionMode(_ mode: IOSTranscriptionMode) {
+        rememberedRemoteTranscriptionMode = mode
+        if mode == .streaming {
+            selectedModel = liveTranscriptionSelection.model(
+                for: .remote,
+                activeModel: selectedModel,
+                selectableModelIDs: Self.selectableLiveModelIDs
+            )
+        }
+        transcriptionMode = mode
     }
 
     @Published public var batchTranscriptionModel: String {
@@ -95,7 +158,7 @@ public final class AppSettings: ObservableObject {
             if normalized != batchTranscriptionModel {
                 batchTranscriptionModel = normalized
             } else {
-                UserDefaults.standard.set(batchTranscriptionModel, forKey: "batchTranscriptionModel")
+                defaults.set(batchTranscriptionModel, forKey: "batchTranscriptionModel")
                 publishKeyboardProfileSelection()
             }
         }
@@ -203,15 +266,15 @@ public final class AppSettings: ObservableObject {
     }
 
     @Published public var liveActivitiesEnabled: Bool {
-        didSet { UserDefaults.standard.set(liveActivitiesEnabled, forKey: "liveActivitiesEnabled") }
+        didSet { defaults.set(liveActivitiesEnabled, forKey: "liveActivitiesEnabled") }
     }
 
     @Published public var visualDensity: AppVisualDensity {
-        didSet { UserDefaults.standard.set(visualDensity.rawValue, forKey: "visualDensity") }
+        didSet { defaults.set(visualDensity.rawValue, forKey: "visualDensity") }
     }
 
     @Published public var autoStartRecording: Bool {
-        didSet { UserDefaults.standard.set(autoStartRecording, forKey: "autoStartRecording") }
+        didSet { defaults.set(autoStartRecording, forKey: "autoStartRecording") }
     }
 
     /// Hands-free dictation: recording is driven by Apple's on-device speech
@@ -220,7 +283,7 @@ public final class AppSettings: ObservableObject {
     /// macOS so the two platforms stay in step.
     @Published public var handsFreeDictationEnabled: Bool {
         didSet {
-            UserDefaults.standard.set(handsFreeDictationEnabled, forKey: "handsFreeDictationEnabled")
+            defaults.set(handsFreeDictationEnabled, forKey: "handsFreeDictationEnabled")
         }
     }
 
@@ -237,7 +300,7 @@ public final class AppSettings: ObservableObject {
 
     @Published public var preferredLocaleIdentifier: String {
         didSet {
-            UserDefaults.standard.set(preferredLocaleIdentifier, forKey: "preferredLocale")
+            defaults.set(preferredLocaleIdentifier, forKey: "preferredLocale")
             KeyboardDictationPreferencesStore.shared.mirrorAppPreference(
                 selectedIdentifier: preferredLocaleIdentifier
             )
@@ -253,7 +316,7 @@ public final class AppSettings: ObservableObject {
     /// Siri, Shortcuts, Lock Screen widget, Back Tap, Control Center) stops.
     @Published public var hardwareTriggerDestination: HardwareTriggerDestination {
         didSet {
-            UserDefaults.standard.set(hardwareTriggerDestination.rawValue, forKey: "hardwareTriggerDestination")
+            defaults.set(hardwareTriggerDestination.rawValue, forKey: "hardwareTriggerDestination")
         }
     }
 
@@ -261,20 +324,20 @@ public final class AppSettings: ObservableObject {
 
     @Published public var postProcessingEnabled: Bool {
         didSet {
-            UserDefaults.standard.set(postProcessingEnabled, forKey: "postProcessingEnabled")
+            defaults.set(postProcessingEnabled, forKey: "postProcessingEnabled")
             publishKeyboardProfileSelection()
         }
     }
 
     @Published public var postProcessingModel: String {
         didSet {
-            UserDefaults.standard.set(postProcessingModel, forKey: "postProcessingModel")
+            defaults.set(postProcessingModel, forKey: "postProcessingModel")
             publishKeyboardProfileSelection()
         }
     }
 
     @Published public var autoPostProcess: Bool {
-        didSet { UserDefaults.standard.set(autoPostProcess, forKey: "autoPostProcess") }
+        didSet { defaults.set(autoPostProcess, forKey: "autoPostProcess") }
     }
 
     public static let defaultPostProcessingPrompt = TranscriptCleanupPolicy.baseSystemPrompt
@@ -283,8 +346,17 @@ public final class AppSettings: ObservableObject {
         !$0.id.hasPrefix("local/post-processing/")
     }
 
-    private init() { // swiftlint:disable:this function_body_length
-        let storedSelectedRaw = UserDefaults.standard.string(forKey: "selectedModel")
+    /// - Parameters:
+    ///   - defaults: Backing store. Injectable so persistence behaviour (including
+    ///     relaunch restoration) is testable without touching the user's defaults.
+    ///   - loadsSecureStorage: When false, the keychain bootstrap and default-provider
+    ///     selection are skipped. Tests use this to exercise persistence in isolation.
+    init( // swiftlint:disable:this function_body_length
+        defaults: UserDefaults = .standard,
+        loadsSecureStorage: Bool = true
+    ) {
+        self.defaults = defaults
+        let storedSelectedRaw = defaults.string(forKey: "selectedModel")
             ?? AppleLocalModels.preferredSpeechModelID
         let selectedRaw = ModelCatalog.normalizedLiveTranscriptionModel(storedSelectedRaw)
         // Normalise to canonical catalogue ids. Keep only models that this iOS
@@ -313,36 +385,44 @@ public final class AppSettings: ObservableObject {
         // legacy migration) in the Task below.
 
         // Default Live Activities to true if not set
-        let liveActivities = UserDefaults.standard.object(forKey: "liveActivitiesEnabled") as? Bool ?? true
+        let liveActivities = defaults.object(forKey: "liveActivitiesEnabled") as? Bool ?? true
         let density = AppVisualDensity(
-            rawValue: UserDefaults.standard.string(forKey: "visualDensity") ?? ""
+            rawValue: defaults.string(forKey: "visualDensity") ?? ""
         ) ?? .normal
-        let autoStart = UserDefaults.standard.bool(forKey: "autoStartRecording")
-        let handsFree = UserDefaults.standard.bool(forKey: "handsFreeDictationEnabled")
+        let autoStart = defaults.bool(forKey: "autoStartRecording")
+        let handsFree = defaults.bool(forKey: "handsFreeDictationEnabled")
         let preferredLocale = TranscriptionLanguageCatalog.normalizedIdentifier(
-            UserDefaults.standard.string(forKey: "preferredLocale")
+            defaults.string(forKey: "preferredLocale")
         )
 
         // Hardware trigger destination (Action Button, Siri, Shortcuts).
         // Default to .clipboard for backwards compatibility with prior versions.
-        let hardwareDestRaw = UserDefaults.standard.string(forKey: "hardwareTriggerDestination")
+        let hardwareDestRaw = defaults.string(forKey: "hardwareTriggerDestination")
         let hardwareDest = HardwareTriggerDestination(rawValue: hardwareDestRaw ?? "") ?? .clipboard
 
         // Post-processing settings
-        let postEnabled = UserDefaults.standard.bool(forKey: "postProcessingEnabled")
-        let storedPostModel = UserDefaults.standard.string(forKey: "postProcessingModel")
+        let postEnabled = defaults.bool(forKey: "postProcessingEnabled")
+        let storedPostModel = defaults.string(forKey: "postProcessingModel")
         let normalizedPostModel = ModelCatalog.normalizedPostProcessingModel(storedPostModel)
         let postModel = Self.postProcessingModels.contains { $0.id == normalizedPostModel }
             ? normalizedPostModel
             : ModelCatalog.defaultPostProcessingModel
-        let autoPost = UserDefaults.standard.bool(forKey: "autoPostProcess")
+        let autoPost = defaults.bool(forKey: "autoPostProcess")
         let batchModel = ModelCatalog.normalizedBatchTranscriptionModel(
-            UserDefaults.standard.string(forKey: "batchTranscriptionModel")
+            defaults.string(forKey: "batchTranscriptionModel")
         )
         let mode = IOSTranscriptionMode(
-            rawValue: UserDefaults.standard.string(forKey: "transcriptionMode") ?? ""
+            rawValue: defaults.string(forKey: "transcriptionMode") ?? ""
         ) ?? .streaming
 
+        var selection = LiveTranscriptionSelection(defaults: defaults)
+        // Existing installs upgrade with their active model remembered for the
+        // placement it belongs to; the other placement stays empty until chosen.
+        selection.rememberIfMissing(selected)
+        self.liveTranscriptionSelection = selection
+        self.rememberedRemoteTranscriptionMode = IOSTranscriptionMode(
+            rawValue: defaults.string(forKey: Self.rememberedRemoteModeKey) ?? ""
+        ) ?? mode
         self.selectedModel = selected
         self.transcriptionMode = mode
         self.batchTranscriptionModel = batchModel
@@ -370,6 +450,11 @@ public final class AppSettings: ObservableObject {
         // values from legacy iOS keychain locations first. Default-provider
         // selection runs afterwards so it sees the loaded keys. Assigning each
         // @Published value re-persists it via didSet, which is harmless.
+        // `didSet` never fires during init, so persist the seeded memory explicitly.
+        selection.persist(to: defaults)
+        defaults.set(self.rememberedRemoteTranscriptionMode.rawValue, forKey: Self.rememberedRemoteModeKey)
+
+        guard loadsSecureStorage else { return }
         initialKeyLoadTask = Task { @MainActor [weak self] in
             guard let self else { return }
             await Self.migrateLegacyKeysIfNeeded()
@@ -378,6 +463,8 @@ public final class AppSettings: ObservableObject {
             self.configureDefaultProviderIfNeeded()
         }
     }
+
+    private let defaults: UserDefaults
 
     /// Waits until the initial keychain load kicked off by `init` has finished.
     /// Idempotent and cheap once loaded. Recording paths await this before
@@ -412,7 +499,7 @@ public final class AppSettings: ObservableObject {
     /// Configure default transcription provider based on available API keys.
     /// Prefers Deepgram if API key is available, otherwise falls back to Apple Speech.
     private func configureDefaultProviderIfNeeded() {
-        let isFirstLaunch = !UserDefaults.standard.bool(forKey: "hasLaunchedBefore")
+        let isFirstLaunch = !defaults.bool(forKey: "hasLaunchedBefore")
         let needsDeepgramKey = selectedModel.hasPrefix("deepgram") && !hasDeepgramKey
 
         // Note: ElevenLabs key is loaded async; its fallback is handled at recording time.
@@ -422,16 +509,31 @@ public final class AppSettings: ObservableObject {
             } else {
                 selectedModel = AppleLocalModels.preferredSpeechModelID
             }
-            UserDefaults.standard.set(true, forKey: "hasLaunchedBefore")
+            defaults.set(true, forKey: "hasLaunchedBefore")
         }
     }
 
     /// Re-configure provider after onboarding or API key changes.
+    ///
+    /// Only fills a gap: once the user has picked a remote streaming model, a
+    /// newly saved key must not silently move them onto another provider.
     public func reconfigureDefaultProvider() {
         if hasDeepgramKey {
-            selectedModel = "deepgram/nova-3-streaming"
+            applyDefaultRemoteProviderIfNeeded("deepgram/nova-3-streaming")
         } else if hasElevenLabsKey {
-            selectedModel = "elevenlabs/scribe-v2-streaming"
+            applyDefaultRemoteProviderIfNeeded("elevenlabs/scribe-v2-streaming")
+        }
+    }
+
+    func applyDefaultRemoteProviderIfNeeded(_ modelID: String) {
+        guard liveTranscriptionSelection.rememberedModel(for: .remote) == nil else { return }
+        let isRemoteStreaming = transcriptionMode == .streaming
+            && !ModelCatalog.isOnDeviceLiveTranscriptionModel(selectedModel)
+        if isRemoteStreaming {
+            selectedModel = modelID
+        } else {
+            liveTranscriptionSelection.remember(modelID)
+            liveTranscriptionSelection.persist(to: defaults)
         }
     }
 
@@ -716,17 +818,9 @@ private struct BatchModelGroup: Identifiable {
     }
 }
 
-private enum IOSTranscriptionLocation: String, CaseIterable, Identifiable {
+enum IOSTranscriptionLocation: String, CaseIterable, Identifiable {
     case local
     case remote
-
-    var id: String { rawValue }
-    var displayName: String { rawValue.capitalized }
-}
-
-private enum IOSRemoteTranscriptionMode: String, CaseIterable, Identifiable {
-    case streaming
-    case batch
 
     var id: String { rawValue }
     var displayName: String { rawValue.capitalized }
@@ -820,7 +914,7 @@ public struct SettingsView: View {
                     }
                 } else {
                     Picker("Remote Mode", selection: remoteTranscriptionModeBinding) {
-                        ForEach(IOSRemoteTranscriptionMode.allCases) { mode in
+                        ForEach(IOSTranscriptionMode.allCases) { mode in
                             Text(mode.displayName).tag(mode)
                         }
                     }
@@ -2292,40 +2386,16 @@ private extension SettingsView {
     @MainActor
     private var transcriptionLocationBinding: Binding<IOSTranscriptionLocation> {
         Binding(
-            get: {
-                settings.transcriptionMode == .streaming
-                    && ModelCatalog.isOnDeviceLiveTranscriptionModel(settings.selectedModel)
-                    ? .local
-                    : .remote
-            },
-            set: { location in
-                switch location {
-                case .local:
-                    settings.selectedModel = ModelCatalog.defaultOnDeviceLiveTranscriptionModel
-                    settings.transcriptionMode = .streaming
-                case .remote:
-                    if ModelCatalog.isOnDeviceLiveTranscriptionModel(settings.selectedModel) {
-                        settings.selectedModel = ModelCatalog.defaultRemoteLiveTranscriptionModel
-                            ?? settings.selectedModel
-                    }
-                    settings.transcriptionMode = .streaming
-                }
-            }
+            get: { settings.transcriptionLocation },
+            set: { settings.selectTranscriptionLocation($0) }
         )
     }
 
     @MainActor
-    private var remoteTranscriptionModeBinding: Binding<IOSRemoteTranscriptionMode> {
+    private var remoteTranscriptionModeBinding: Binding<IOSTranscriptionMode> {
         Binding(
-            get: { settings.transcriptionMode == .batch ? .batch : .streaming },
-            set: { mode in
-                if mode == .streaming,
-                   ModelCatalog.isOnDeviceLiveTranscriptionModel(settings.selectedModel) {
-                    settings.selectedModel = ModelCatalog.defaultRemoteLiveTranscriptionModel
-                        ?? settings.selectedModel
-                }
-                settings.transcriptionMode = mode == .batch ? .batch : .streaming
-            }
+            get: { settings.remoteTranscriptionMode },
+            set: { settings.selectRemoteTranscriptionMode($0) }
         )
     }
 

@@ -61,8 +61,11 @@ jobs:
           path: ${{ runner.temp }}/snapshot-failures
           if-no-files-found: ignore
 
-      # Release-configuration tests run as the release gate in release-mac.yml;
-      # running them here too effectively doubled test time on 10x-billed macOS runners.
+      # Release-configuration tests run pre-merge in the release-validation job
+      # below (path-filtered to package-affecting changes to control cost on
+      # 10x-billed macOS runners). They are NOT duplicated inside this job:
+      # running both configurations serially in one job doubled its wall time.
+      # release-mac.yml re-runs them post-tag as defence in depth.
 
       - name: Build SpeakCore (App Store flavour)
         # SpeakCore has no package dependencies, so this cheaply compiles the
@@ -86,6 +89,59 @@ jobs:
                 --ignore-filename-regex='\.build|Tests/' 2>/dev/null | head -30 >> $GITHUB_STEP_SUMMARY || true
             fi
           fi
+
+  # Pre-merge Release-configuration gate (#694). A Release-only compile,
+  # optimisation, or test failure must fail the PR that introduces it — the
+  # post-tag run in release-mac.yml is defence in depth, not the first gate.
+  # Cost controls for 10x-billed macOS runners:
+  # - a cheap ubuntu job skips the macOS leg for docs-only changes (a skipped
+  #   job still satisfies a required check, so the gate can be marked required)
+  # - the workflow-level concurrency group cancels superseded runs
+  # - a release-specific .build cache avoids cold dependency builds
+  # - runs only on pull_request: pushes to main were just gated by their PR,
+  #   and tags are re-validated by release-mac.yml.
+  release-paths:
+    name: Detect Release-Relevant Changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'pull_request'
+    outputs:
+      package: ${{ steps.filter.outputs.package }}
+    steps:
+      - name: Filter changed paths
+        # No checkout needed: on pull_request events the action lists changed
+        # files via the GitHub API.
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            package:
+              - 'Package.swift'
+              - 'Package.resolved'
+              - 'Sources/**'
+              - 'Tests/**'
+              - 'Config/**'
+              - '.github/workflows/ci.yml'
+
+  release-validation:
+    name: Build & Test (Release)
+    runs-on: macos-latest
+    timeout-minutes: 45
+    needs: release-paths
+    if: needs.release-paths.outputs.package == 'true'
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Cache Swift packages (release)
+        uses: actions/cache@v6
+        with:
+          path: .build
+          key: ${{ runner.os }}-swift-release-${{ hashFiles('Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-swift-release-
+
+      - name: Test (Release)
+        run: swift test -c release
 
   build-ios:
     name: Build iOS Library

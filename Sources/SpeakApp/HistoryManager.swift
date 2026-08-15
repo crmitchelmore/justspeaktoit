@@ -96,6 +96,13 @@ final class HistoryManager: ObservableObject {
   /// Batch size threshold for triggering flush
   var batchSizeThreshold: Int
 
+  /// Fired after a locally created item is committed, so history sync can
+  /// upload it. Wired by `MacHistorySyncAdapter` at bootstrap.
+  var onItemAppended: ((HistoryItem) -> Void)?
+
+  /// Fired after a local removal, so history sync can delete the remote copy.
+  var onItemRemoved: ((UUID) -> Void)?
+
   /// Flag to track if we're currently flushing
   private var isFlushing = false
 
@@ -334,6 +341,8 @@ final class HistoryManager: ObservableObject {
 
     // Write to WAL instead of directly to disk
     await appendToWAL(WALEntry(operation: .append, item: item))
+
+    onItemAppended?(item)
   }
 
   func update(_ item: HistoryItem) async {
@@ -377,6 +386,7 @@ final class HistoryManager: ObservableObject {
     // Write to WAL instead of directly to disk
     if let diskItem {
       await appendToWAL(WALEntry(operation: .remove, item: diskItem))
+      onItemRemoved?(id)
     }
   }
 

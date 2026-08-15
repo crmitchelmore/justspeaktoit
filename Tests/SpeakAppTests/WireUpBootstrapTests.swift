@@ -50,6 +50,18 @@ final class WireUpBootstrapTests: XCTestCase {
         XCTAssertNotNil(env.transportServer)
     }
 
+    @MainActor
+    func testBootstrap_retainsHistorySyncAdapter() {
+        // HistorySyncEngine holds its delegate weakly; the environment must be
+        // the adapter's strong owner or history sync silently dies after the
+        // initial start() task completes (#685).
+        let env = WireUp.bootstrap(options: makeWireUpTestOptions())
+        XCTAssertNotNil(
+            env.historySyncAdapter,
+            "Bootstrap must retain the history sync adapter for the app's lifetime"
+        )
+    }
+
     // MARK: - Wiring Correctness
 
     @MainActor

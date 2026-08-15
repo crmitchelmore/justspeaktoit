@@ -2,6 +2,10 @@ import XCTest
 
 @testable import SpeakApp
 
+#if canImport(Sentry)
+import Sentry
+#endif
+
 /// Tests for SentryManager initialisation and API surface.
 ///
 /// Critical context: SentryManager.start() runs as the VERY FIRST thing in the app
@@ -95,4 +99,65 @@ final class SentryManagerTests: XCTestCase {
         // the important thing is it doesn't crash.
         _ = span
     }
+
+    // MARK: - Collection contract
+
+    #if canImport(Sentry)
+    /// The privacy-relevant options are pinned, so an SDK update cannot widen
+    /// collection through a changed default. A deliberate change to the contract
+    /// must change this test as well as `SentryManager.configure`.
+    func testConfigure_pinsThePrivacyRelevantOptions() {
+        let options = Sentry.Options()
+
+        SentryManager.configure(options)
+
+        XCTAssertFalse(options.sendDefaultPii, "PII must stay off")
+        XCTAssertTrue(options.enableAutoSessionTracking, "Session tracking is disclosed as on")
+        XCTAssertEqual(options.sessionTrackingIntervalMillis, 30_000)
+        XCTAssertTrue(options.enableAutoBreadcrumbTracking)
+        XCTAssertTrue(options.enableNetworkBreadcrumbs)
+        XCTAssertEqual(options.maxBreadcrumbs, 100)
+        XCTAssertTrue(options.enableNetworkTracking)
+        XCTAssertEqual(options.tracesSampleRate?.doubleValue, 0.2)
+    }
+
+    func testConfigure_restrictsFailedRequestCaptureToTheAppsOwnHost() {
+        let options = Sentry.Options()
+
+        SentryManager.configure(options)
+
+        XCTAssertTrue(options.enableCaptureFailedRequests)
+        XCTAssertEqual(
+            options.failedRequestTargets.compactMap { $0 as? String },
+            ["justspeaktoit.com"],
+            "Provider responses must not be captured automatically"
+        )
+    }
+
+    func testConfigure_installsTheCredentialScrubbers() {
+        let options = Sentry.Options()
+
+        SentryManager.configure(options)
+
+        XCTAssertNotNil(options.beforeSend, "Events must pass through the scrubber")
+        XCTAssertNotNil(options.beforeBreadcrumb, "Breadcrumbs must pass through the scrubber")
+    }
+
+    func testConfigure_beforeSendRedactsAProviderCredential() {
+        let apiKey = "abcdefghijklmnopqrstuvwxyz012345"
+        let options = Sentry.Options()
+        SentryManager.configure(options)
+
+        let request = SentryRequest()
+        request.url = "https://api.elevenlabs.io/v1/speech-to-text"
+        request.headers = ["xi-api-key": apiKey]
+        let event = Event(level: .error)
+        event.request = request
+
+        let sent = options.beforeSend?(event)
+
+        let serialized = String(describing: sent?.serialize() ?? [:])
+        XCTAssertFalse(serialized.contains(apiKey), "beforeSend must remove the credential")
+    }
+    #endif
 }

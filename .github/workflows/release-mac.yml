@@ -51,7 +51,9 @@ jobs:
 
       - name: Run Tests (Release Config)
         run: |
-          echo "Running tests in release configuration as release gate..."
+          # Defence in depth: the pre-merge gate is the release-validation job
+          # in ci.yml; this re-run protects tags cut from any unvalidated state.
+          echo "Re-running release-configuration tests as post-tag defence in depth..."
           swift test -c release
 
       # Release tests exercise real Keychain migration. Run them before replacing

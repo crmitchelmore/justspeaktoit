@@ -34,6 +34,7 @@ enum AudioFileManagerError: LocalizedError {
   case microphonePermissionMissing
   case failedToConfigureSession
   case failedToCreateRecorder
+  case failedToStartCapture
 
   var errorDescription: String? {
     switch self {
@@ -47,6 +48,8 @@ enum AudioFileManagerError: LocalizedError {
       return "Failed to configure the audio session."
     case .failedToCreateRecorder:
       return "Could not create the audio recorder."
+    case .failedToStartCapture:
+      return "The microphone did not start capturing. Check the input device and try again."
     }
   }
 }
@@ -394,6 +397,7 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
     let sessionContext = await audioDeviceManager.beginUsingPreferredInput()
 
     do {
+      let captureRequestedAt = Date()
       let directory: URL
       let prepared: PreparedRecorder
       if let claimed {
@@ -411,6 +415,8 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
 
       let started = try self.startCapture(with: prepared, in: directory)
       let startDate = Date()
+      let readyDelay = startDate.timeIntervalSince(captureRequestedAt)
+      logger.info("Audio capture confirmed live \(Int(readyDelay * 1000))ms after start request")
       recorder = started.recorder
       currentRecordingID = started.id
       currentRecordingURL = started.url
@@ -427,27 +433,55 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
         self.lifecycleHandler?(.auxiliaryStarted)
       }
       return RecordingStart(url: started.url, usedWarmRecorder: started.isWarm)
+    } catch let error as AudioFileManagerError {
+      // Capture that never started (or a recorder we could not build) must
+      // surface as itself: the start sequencer distinguishes them, and only a
+      // confirmed capture is allowed to play the cue.
+      await audioDeviceManager.endUsingPreferredInput(session: sessionContext)
+      throw error
     } catch {
       await audioDeviceManager.endUsingPreferredInput(session: sessionContext)
       throw AudioFileManagerError.failedToCreateRecorder
     }
   }
 
-  /// Opens the microphone, and falls back to a cold recorder once when a staged
-  /// one refuses to start. A staged recorder that fails is worth a few
-  /// milliseconds of extra latency, never the dictation itself.
+  /// Opens the microphone and only returns once the recorder proves it is
+  /// capturing, falling back to a cold recorder once when a staged one refuses
+  /// to start. A staged recorder that fails is worth a few milliseconds of
+  /// extra latency, never the dictation itself.
+  ///
+  /// Issue #641: the caller plays the start cue on the strength of this
+  /// returning, so readiness has to be proven rather than assumed. `record()`
+  /// answering false (or a recorder that never flips to `isRecording`) used to
+  /// be swallowed, leaving the user speaking into a microphone that was not
+  /// running. Warm and cold recorders are held to the same proof — a staged
+  /// recorder can be just as dead. On failure, `discard` removes
+  /// `prepared.url`: for a claimed warm recorder that is the destination its
+  /// staging file was renamed to, not the stale staging path
+  /// `AVAudioRecorder.url` still reports after the move.
   private func startCapture(with prepared: PreparedRecorder, in directory: URL) throws -> PreparedRecorder {
-    if prepared.recorder.record() { return prepared }
+    if self.proveCapture(of: prepared.recorder) { return prepared }
     self.discard(prepared)
-    guard prepared.isWarm else { throw AudioFileManagerError.failedToCreateRecorder }
-    self.logger.warning("Pre-warmed recorder failed to start; retrying from cold")
+    guard prepared.isWarm else { throw AudioFileManagerError.failedToStartCapture }
+    self.logger.warning("Pre-warmed recorder failed to prove capture; retrying from cold")
 
     let cold = try self.makeRecorder(in: directory)
-    guard cold.recorder.record() else {
+    guard self.proveCapture(of: cold.recorder) else {
       self.discard(cold)
-      throw AudioFileManagerError.failedToCreateRecorder
+      throw AudioFileManagerError.failedToStartCapture
     }
     return cold
+  }
+
+  /// True once the recorder both accepted `record()` and reports
+  /// `isRecording`. Stops it again on failure so `discard` always tears down a
+  /// quiescent recorder.
+  private func proveCapture(of recorder: AVAudioRecorder) -> Bool {
+    guard recorder.record(), recorder.isRecording else {
+      recorder.stop()
+      return false
+    }
+    return true
   }
 
   /// Creates and prepares a recorder in the recordings directory itself. Used

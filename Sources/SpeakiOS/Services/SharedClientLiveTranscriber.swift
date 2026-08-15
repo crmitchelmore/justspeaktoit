@@ -46,6 +46,10 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     /// Pools for tap-buffer copies and converter output so the hot path never allocates.
     private let tapBufferPool = PCMBufferPool(maximumBuffers: 4)
     private let outputBufferPool = PCMBufferPool(maximumBuffers: 2)
+    /// Audio handed to the client that no response has accounted for yet — set
+    /// on the audio-processing queue, read and cleared on the main actor, so it
+    /// carries its own lock (issue #641: the short-utterance loss).
+    private let unansweredAudio = UnansweredAudioSignal()
 
     public init(
         route: LiveTranscriptionRoute,
@@ -165,7 +169,11 @@ public final class SharedClientLiveTranscriber: ObservableObject {
             client?.stop()
             return
         }
-        guard finalizingClient.finishFlushesBufferedAudio || partialText != accumulated.text else {
+        guard StreamingFinalisationPolicy.shouldAwaitFinalisation(
+            finishFlushesBufferedAudio: finalizingClient.finishFlushesBufferedAudio,
+            hasUnfinalisedTranscript: partialText != accumulated.text,
+            hasUnansweredAudio: unansweredAudio.isSet
+        ) else {
             finalizingClient.stop()
             return
         }
@@ -226,6 +234,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         partialText = ""
         finalText = ""
         accumulated.reset()
+        unansweredAudio.clear()
         error = nil
         startTime = Date()
         isRunning = true
@@ -243,6 +252,9 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     }
 
     private func handleTranscript(text: String, isFinal: Bool) {
+        // The provider has answered for everything sent so far; anything
+        // captured after this point becomes outstanding again.
+        unansweredAudio.clear()
         if isFinal {
             // Providers disagree on whether a final is a standalone segment or
             // the whole utterance so far; `TranscriptAccumulator` folds both
@@ -361,7 +373,9 @@ private extension SharedClientLiveTranscriber {
             samples[index] = Int16(clamped * Float(Int16.max))
         }
         let data = samples.withUnsafeBufferPointer { Data(buffer: $0) }
-        client?.sendAudio(data)
+        guard let client else { return }
+        unansweredAudio.record()
+        client.sendAudio(data)
     }
 }
 

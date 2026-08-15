@@ -124,6 +124,47 @@ final class StreamingClientContractTests: XCTestCase {
         XCTAssertNil(transcript)
     }
 
+    // MARK: - Finalisation rule
+
+    /// Issue #641: a short utterance stopped before the provider's first
+    /// response. Nothing has been displayed and nothing finalised, so the
+    /// transcript strings alone cannot tell "no audio" from "no answer yet" —
+    /// the outstanding audio is what forces the bounded wait instead of an
+    /// immediate close that loses the words.
+    func testFinalisation_WaitsForAudioTheProviderHasNotAnsweredYet() {
+        XCTAssertTrue(StreamingFinalisationPolicy.shouldAwaitFinalisation(
+            finishFlushesBufferedAudio: false,
+            hasUnfinalisedTranscript: false,
+            hasUnansweredAudio: true
+        ))
+    }
+
+    func testFinalisation_ClosesImmediatelyWhenNothingIsOutstanding() {
+        XCTAssertFalse(StreamingFinalisationPolicy.shouldAwaitFinalisation(
+            finishFlushesBufferedAudio: false,
+            hasUnfinalisedTranscript: false,
+            hasUnansweredAudio: false
+        ))
+    }
+
+    func testFinalisation_WaitsForAnUncommittedInterim() {
+        XCTAssertTrue(StreamingFinalisationPolicy.shouldAwaitFinalisation(
+            finishFlushesBufferedAudio: false,
+            hasUnfinalisedTranscript: true,
+            hasUnansweredAudio: false
+        ))
+    }
+
+    /// A finish that flushes buffered audio (Deepgram's `CloseStream`) can
+    /// always still yield words, so it drains regardless.
+    func testFinalisation_AlwaysDrainsAProviderWhoseFinishFlushesAudio() {
+        XCTAssertTrue(StreamingFinalisationPolicy.shouldAwaitFinalisation(
+            finishFlushesBufferedAudio: true,
+            hasUnfinalisedTranscript: false,
+            hasUnansweredAudio: false
+        ))
+    }
+
     // MARK: - Accumulator rule
 
     func testTranscriptAccumulator_mergesSegmentAndCumulativeFinals() {

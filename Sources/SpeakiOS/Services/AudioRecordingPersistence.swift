@@ -1,6 +1,7 @@
 #if os(iOS)
 import AVFoundation
 import Foundation
+import SpeakCore
 import os.log
 
 /// Manages persistent audio recording alongside live transcription.
@@ -31,10 +32,7 @@ public final class AudioRecordingPersistence: ObservableObject {
     private var recordingID: UUID?
     private var startTime: Date?
 
-    private let logger = Logger(
-        subsystem: "com.justspeaktoit.ios",
-        category: "AudioPersistence"
-    )
+    private let logger = SpeakLogger.logger(category: "AudioPersistence")
 
     #if DEBUG
     // MARK: - Test Seams
@@ -162,7 +160,7 @@ public final class AudioRecordingPersistence: ObservableObject {
                 } catch {
                     // Log but don't throw — we don't want to interrupt the
                     // transcription pipeline for a write failure.
-                    print("[AudioPersistence] Write error: \(error)")
+                    self.logger.error("Write error: \(error.localizedDescription, privacy: .public)")
                 }
             }
         }

@@ -13,7 +13,7 @@ final class CarbonKeyBackend {
   var onKeyDown: ((String) -> Void)?
   var onKeyUp: ((String) -> Void)?
 
-  private let log = Logger(subsystem: "com.justspeaktoit.hotkeys", category: "CarbonKeyBackend")
+  private let log = Logger(subsystem: HotKeyLogging.subsystem, category: "CarbonKeyBackend")
   private var hotKeyRef: EventHotKeyRef?
   private var eventHandler: EventHandlerRef?
   private var currentKeyCode: UInt16 = 0

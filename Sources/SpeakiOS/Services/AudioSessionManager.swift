@@ -1,6 +1,10 @@
 #if os(iOS)
 import AVFoundation
 import Foundation
+import SpeakCore
+import os.log
+
+private let logger = SpeakLogger.logger(category: "AudioSessionManager")
 
 /// Manages iOS audio session configuration for recording and transcription.
 @MainActor
@@ -108,7 +112,7 @@ public final class AudioSessionManager: ObservableObject {
         updateCurrentRoute()
 
         let inputRoute = Self.routeDescription(ports: session.currentRoute.inputs)
-        print("[AudioSessionManager] Configured for recording: \(inputRoute)")
+        logger.info("Configured for recording: \(inputRoute, privacy: .public)")
     }
 
     /// Recording options common to both the isolated and mixable configurations.
@@ -206,9 +210,9 @@ public final class AudioSessionManager: ObservableObject {
         do {
             try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
             isConfigured = false
-            print("[AudioSessionManager] Deactivated")
+            logger.info("Deactivated")
         } catch {
-            print("[AudioSessionManager] Failed to deactivate: \(error.localizedDescription)")
+            logger.error("Failed to deactivate: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -256,16 +260,16 @@ public final class AudioSessionManager: ObservableObject {
 
         switch type {
         case .began:
-            print("[AudioSessionManager] Interruption began")
+            logger.info("Interruption began")
             notifyInterruptionObservers(began: true)
 
         case .ended:
-            print("[AudioSessionManager] Interruption ended")
+            logger.info("Interruption ended")
             // Check if we should resume
             if let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt {
                 let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
                 if options.contains(.shouldResume) {
-                    print("[AudioSessionManager] Should resume after interruption")
+                    logger.info("Should resume after interruption")
                 }
             }
             notifyInterruptionObservers(began: false)
@@ -301,7 +305,7 @@ public final class AudioSessionManager: ObservableObject {
               let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue)
         else { return }
 
-        print("[AudioSessionManager] Route changed: \(reason)")
+        logger.info("Route changed: \(String(describing: reason), privacy: .public)")
         updateCurrentRoute()
         notifyRouteChangeObservers()
     }

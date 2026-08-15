@@ -1,4 +1,5 @@
 import Foundation
+import SpeakCore
 import SpeakSync
 import os.log
 
@@ -9,10 +10,7 @@ final class MacHistorySyncAdapter: HistorySyncDelegate {
     private let historyManager: HistoryManager
     private var syncedIDs: Set<UUID> = []
     private let syncedIDsKey = "speak.sync.syncedMacHistoryIDs"
-    private let log = Logger(
-        subsystem: "com.justspeaktoit",
-        category: "MacHistorySync"
-    )
+    private let log = SpeakLogger.logger(category: "MacHistorySync")
 
     init(historyManager: HistoryManager) {
         self.historyManager = historyManager

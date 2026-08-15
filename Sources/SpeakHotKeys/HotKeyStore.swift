@@ -12,7 +12,7 @@ public final class HotKeyStore: ObservableObject {
   }
 
   private let defaultsKey: String
-  private let log = Logger(subsystem: "com.justspeaktoit.hotkeys", category: "HotKeyStore")
+  private let log = Logger(subsystem: HotKeyLogging.subsystem, category: "HotKeyStore")
 
   /// - Parameter defaultsKey: UserDefaults key to persist the binding under.
   public init(defaultsKey: String = "com.justspeaktoit.hotkeys.selectedHotKey") {

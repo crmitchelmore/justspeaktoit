@@ -1,6 +1,7 @@
 #if os(iOS)
 import AVFoundation
 import Foundation
+import SpeakCore
 import os.log
 
 /// Reusable pool of `AVAudioPCMBuffer`s so audio tap callbacks can copy the
@@ -19,7 +20,7 @@ final class PCMBufferPool: @unchecked Sendable {
     /// capture path; the counter makes that loss visible instead of silent.
     private var exhaustedCheckouts = 0
 
-    private let logger = Logger(subsystem: "com.justspeaktoit.ios", category: "PCMBufferPool")
+    private let logger = SpeakLogger.logger(category: "PCMBufferPool")
 
     init(maximumBuffers: Int) {
         self.maximumBuffers = maximumBuffers

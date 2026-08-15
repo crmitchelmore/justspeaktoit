@@ -75,7 +75,7 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
     private let apiKeyOverride: String?
     private let maximumInlineAudioBytes: Int64
     private let branding: OpenRouterBranding
-    private let logger = Logger(subsystem: "com.github.speakapp", category: "OpenRouter")
+    private let logger = SpeakLogger.logger(category: "OpenRouter")
 
     private struct ValidationAttemptResult {
         let success: Bool
@@ -289,7 +289,7 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
         }
 
         if allowsLocalFallback(for: cleanedModel) {
-            return try await localTranscriptionFallback(url: url, model: cleanedModel)
+            return await localTranscriptionFallback(url: url, model: cleanedModel)
         }
 
         throw OpenRouterClientError.apiKeyMissing
@@ -595,7 +595,7 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
             throw OpenRouterClientError.invalidResponse
         }
 
-        return try await buildTranscriptionResult(
+        return await buildTranscriptionResult(
             text: text,
             audioURL: url,
             model: model,
@@ -631,11 +631,9 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
 
     // MARK: - Local fallbacks
 
-    private func localTranscriptionFallback(url: URL, model: String) async throws
+    private func localTranscriptionFallback(url: URL, model: String) async
         -> TranscriptionResult {
-        let asset = AVURLAsset(url: url)
-        let durationTime = try await asset.load(.duration)
-        let duration = durationTime.seconds
+        let duration = await bestEffortDuration(of: url)
         let text = "Transcription placeholder for \(url.lastPathComponent)"
         let segment = TranscriptionSegment(startTime: 0, endTime: duration, text: text)
         return TranscriptionResult(
@@ -777,10 +775,8 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
         audioURL: URL,
         model: String,
         payload: Data
-    ) async throws -> TranscriptionResult {
-        let asset = AVURLAsset(url: audioURL)
-        let durationTime = try await asset.load(.duration)
-        let duration = durationTime.seconds
+    ) async -> TranscriptionResult {
+        let duration = await bestEffortDuration(of: audioURL)
         let segments = [TranscriptionSegment(startTime: 0, endTime: duration, text: text)]
 
         return TranscriptionResult(
@@ -793,6 +789,43 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
             rawPayload: String(data: payload, encoding: .utf8),
             debugInfo: nil
         )
+    }
+
+    /// Reads the recorded length of `audioURL`, and reports `0` when the local
+    /// file gives no usable value.
+    ///
+    /// Duration is enrichment that is added after the provider replies. A
+    /// container that AVFoundation cannot parse, or that holds no duration
+    /// metadata, must not discard a transcript the provider already made — the
+    /// audio is frequently a temporary file that is deleted immediately after,
+    /// so a thrown error loses the speech and the transcript together.
+    ///
+    /// `TranscriptionResult.duration` is a non-optional `TimeInterval`, and all
+    /// consumers already read `0` as "unknown": speech insights skip sessions
+    /// below the minimum length, and the history and recording lists show
+    /// `0:00`. Cost is separate metadata and stays `nil` here. The failure is
+    /// logged so a run with missing durations stays diagnosable.
+    private func bestEffortDuration(of audioURL: URL) async -> TimeInterval {
+        let asset = AVURLAsset(url: audioURL)
+        do {
+            let seconds = try await asset.load(.duration).seconds
+            guard seconds.isFinite, seconds > 0 else {
+                logger.warning(
+                    "Duration metadata for \(audioURL.lastPathComponent, privacy: .public) is not usable; reporting 0"
+                )
+                return 0
+            }
+            return seconds
+        } catch {
+            logger.warning(
+                """
+                Failed to load duration metadata for \
+                \(audioURL.lastPathComponent, privacy: .public): \
+                \(error.localizedDescription, privacy: .public). Keeping the transcript with duration 0
+                """
+            )
+            return 0
+        }
     }
 
     private nonisolated func applyBrandHeaders(_ request: inout URLRequest) {

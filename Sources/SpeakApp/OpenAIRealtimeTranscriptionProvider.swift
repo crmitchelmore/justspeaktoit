@@ -30,7 +30,7 @@ final class OpenAIRealtimeLiveTranscriber: @unchecked Sendable {
   private let prompt: String?
   private let sampleRate: Int
   private let session: URLSession
-  private let logger = Logger(subsystem: "com.speak.app", category: "OpenAIRealtimeLiveTranscriber")
+  private let logger = SpeakLogger.logger(category: "OpenAIRealtimeLiveTranscriber")
   private let stateLock = NSLock()
   private let pendingSendGroup = DispatchGroup()
 

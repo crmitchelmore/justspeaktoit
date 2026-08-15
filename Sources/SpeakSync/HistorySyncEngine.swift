@@ -1,6 +1,7 @@
 import CloudKit
 import Combine
 import Foundation
+import SpeakCore
 import os.log
 
 /// Delegate protocol that platforms implement to reconcile synced entries.
@@ -81,7 +82,7 @@ public final class HistorySyncEngine: ObservableObject {
     private weak var delegate: HistorySyncDelegate?
     private let transport: HistorySyncTransport
     private let defaults: UserDefaults
-    private let log = Logger(subsystem: "com.justspeaktoit", category: "HistorySync")
+    private let log = SpeakLogger.logger(category: "HistorySync")
 
     private convenience init() {
         self.init(

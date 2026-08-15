@@ -87,7 +87,7 @@ final class LocalPostProcessingModelManager: ObservableObject {
   #endif
 
   private let fileManager: FileManager
-  private let logger = Logger(subsystem: "com.github.speakapp", category: "LocalPostProcessing")
+  private let logger = SpeakLogger.logger(category: "LocalPostProcessing")
   #if !APP_STORE
   private let baseDirectory: URL
   private let modelsDirectory: URL
@@ -276,6 +276,41 @@ final class LocalPostProcessingModelManager: ObservableObject {
     systemPrompt: String,
     temperature: Double
   ) async throws -> String {
+    try await run(
+      modelID: modelID,
+      systemPrompt: Self.localSystemPrompt(systemPrompt),
+      userPrompt: Self.localUserPrompt(systemPrompt: systemPrompt, rawText: rawText),
+      rawText: rawText,
+      temperature: temperature
+    )
+  }
+
+  /// Runs the model with an explicit prompt pair, preserved verbatim (plus
+  /// the local-engine constraint). Used by the Polish Text App Intent when
+  /// the user supplies a custom prompt: rebuilding the stock cleanup payload
+  /// here would silently perform cleanup instead of honouring the prompt.
+  func processWithExplicitPrompt(
+    modelID: String,
+    systemPrompt: String,
+    userMessage: String,
+    temperature: Double
+  ) async throws -> String {
+    try await run(
+      modelID: modelID,
+      systemPrompt: Self.explicitLocalSystemPrompt(systemPrompt),
+      userPrompt: userMessage,
+      rawText: userMessage,
+      temperature: temperature
+    )
+  }
+
+  private func run(
+    modelID: String,
+    systemPrompt: String,
+    userPrompt: String,
+    rawText: String,
+    temperature: Double
+  ) async throws -> String {
     guard let model = model(for: modelID) else {
       throw LocalPostProcessingModelError.unknownModel(modelID)
     }
@@ -287,8 +322,8 @@ final class LocalPostProcessingModelManager: ObservableObject {
     let script = try sidecarScriptURL()
     let modelURL = modelFileURL(for: model)
     let request = LocalPostProcessingRequest(
-      systemPrompt: Self.localSystemPrompt(systemPrompt),
-      userPrompt: Self.localUserPrompt(systemPrompt: systemPrompt, rawText: rawText),
+      systemPrompt: systemPrompt,
+      userPrompt: userPrompt,
       rawText: rawText,
       temperature: temperature
     )
@@ -450,9 +485,22 @@ final class LocalPostProcessingModelManager: ObservableObject {
     return """
     \(cleanupPolicy)
 
-    Local engine constraint: never enter thinking mode, emit <think> tags, include reasoning, or ask questions.
+    \(localEngineConstraint)
     """
   }
+
+  /// System prompt for the explicit-prompt path: the caller's prompt verbatim,
+  /// with only the local-engine constraint appended.
+  nonisolated static func explicitLocalSystemPrompt(_ systemPrompt: String) -> String {
+    """
+    \(systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines))
+
+    \(localEngineConstraint)
+    """
+  }
+
+  nonisolated private static let localEngineConstraint =
+    "Local engine constraint: never enter thinking mode, emit <think> tags, include reasoning, or ask questions."
 
   nonisolated static func sanitizedModelOutput(_ output: String) -> String {
     output

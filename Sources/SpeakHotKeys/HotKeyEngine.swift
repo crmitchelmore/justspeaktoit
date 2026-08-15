@@ -91,13 +91,16 @@ public final class HotKeyEngine: ObservableObject {
   }
 
   /// Stop all monitoring.
+  ///
+  /// A hold that is in progress ends with a balanced `holdEnd`, so listeners
+  /// never keep a hold-started recording open after the backend goes away.
   public func stop() {
     fnBackend.stop()
     carbonBackend.stop()
-    gestureDetector.reset()
     isMonitoring = false
     isKeyDown = false
     activeHotKey = nil
+    gestureDetector.reset(source: "engine stop")
   }
 
   /// Update timing configuration.

@@ -97,14 +97,29 @@ final class KeyboardDocumentSession {
         return .applied
     }
 
-    /// Removes only the session-owned separator. It is called for an empty
-    /// final result; permission/startup failures never insert the separator.
+    /// Removes the session-owned separator, and any whitespace-only text this
+    /// session authored, when the run ends without usable speech. It touches
+    /// only characters this session inserted; permission and startup failures
+    /// never insert the separator.
     func removeSeparatorIfTranscriptIsEmpty() -> EditResult {
-        guard separatorInserted else { return .applied }
-        guard anchorIsCurrent(), expectedSnapshot?.beforeInput?.last == " " else {
+        guard separatorInserted || !authoredText.isEmpty else { return .applied }
+        guard authoredText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return .applied
+        }
+        guard anchorIsCurrent(), contextContainsAuthoredSuffix() else { return .anchorLost }
+
+        while !authoredText.isEmpty {
+            guard deleteOneCharacter() else { return .anchorLost }
+            authoredText.removeLast()
+        }
+
+        guard separatorInserted, let pendingSeparator else { return .applied }
+        guard expectedSnapshot?.beforeInput?.hasSuffix(pendingSeparator) == true else {
             return .anchorLost
         }
-        guard deleteOneCharacter() else { return .anchorLost }
+        for _ in 0..<pendingSeparator.count {
+            guard deleteOneCharacter() else { return .anchorLost }
+        }
         separatorInserted = false
         return .applied
     }

@@ -9,7 +9,8 @@ enum SessionTriggerSource: Equatable {
   case silenceDetection
   /// Started or stopped by hands-free dictation's voice-activity detector.
   case handsFree
-  /// Started or stopped by Shortcuts / App Intents.
+  /// Started or stopped by an automation surface (Shortcuts / App Intents,
+  /// the `speak` CLI, or the bundled MCP server).
   case automation
 
   var historyGesture: HistoryTrigger.HotKeyGesture {

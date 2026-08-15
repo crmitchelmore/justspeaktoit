@@ -13,7 +13,9 @@ let package = Package(
         .library(name: "SpeakCore", targets: ["SpeakCore"]),
         .library(name: "SpeakSync", targets: ["SpeakSync"]),
         .library(name: "SpeakiOSLib", targets: ["SpeakiOSLib"]),
+        .library(name: "SpeakAutomationKit", targets: ["SpeakAutomationKit"]),
         .executable(name: "SpeakApp", targets: ["SpeakApp"]),
+        .executable(name: "speak", targets: ["SpeakCLI"]),
         .executable(
             name: "local-transcription-benchmark",
             targets: ["LocalTranscriptionBenchmark"]
@@ -68,6 +70,19 @@ let package = Package(
             dependencies: ["SpeakCore", "SpeakSync"],
             path: "Sources/SpeakiOS"
         ),
+        // Automation client library: parsing, rendering, socket client and the
+        // MCP request handler. Split from the `speak` executable so every layer
+        // is unit-testable without spawning a process.
+        .target(
+            name: "SpeakAutomationKit",
+            dependencies: ["SpeakCore"],
+            path: "Sources/SpeakAutomationKit"
+        ),
+        .executableTarget(
+            name: "SpeakCLI",
+            dependencies: ["SpeakAutomationKit", "SpeakCore"],
+            path: "Sources/SpeakCLI"
+        ),
         .executableTarget(
             name: "SpeakApp",
             dependencies: [
@@ -113,6 +128,7 @@ let package = Package(
             name: "SpeakAppTests",
             dependencies: [
                 "SpeakApp",
+                "SpeakAutomationKit",
                 "SpeakHotKeys",
                 // The Sentry event tests inspect the serialised payload, so the
                 // test target needs the SDK types, not just SpeakApp.
@@ -130,6 +146,10 @@ let package = Package(
         .testTarget(
             name: "SpeakiOSTests",
             dependencies: ["SpeakiOSLib"]
+        ),
+        .testTarget(
+            name: "SpeakAutomationKitTests",
+            dependencies: ["SpeakAutomationKit", "SpeakCore"]
         ),
         .testTarget(
             name: "LocalTranscriptionBenchmarkTests",

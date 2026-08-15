@@ -223,6 +223,12 @@ jobs:
             ENABLE_HARDENED_RUNTIME=YES \
             OTHER_CODE_SIGN_FLAGS="--options runtime"
 
+      - name: Embed speak CLI
+        run: |
+          APP_PATH="$RUNNER_TEMP/export/$PRODUCT_NAME.app"
+          chmod +x scripts/build-speak-cli.sh
+          ./scripts/build-speak-cli.sh "$APP_PATH" "Developer ID Application"
+
       - name: Verify Hardened Runtime
         run: |
           APP_PATH="$RUNNER_TEMP/export/$PRODUCT_NAME.app"
@@ -451,6 +457,7 @@ jobs:
             depends_on macos: ">= :sonoma"
 
             app "JustSpeakToIt.app"
+            binary "#{appdir}/JustSpeakToIt.app/Contents/MacOS/speak"
 
             zap trash: [
               "~/Library/Application Support/JustSpeakToIt",

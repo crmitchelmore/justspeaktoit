@@ -97,8 +97,9 @@ public final class IOSBatchTranscriber {
 
     /// One-shot transcription of an existing audio file, reusing the same
     /// batch client the record-and-upload path uses. Used by callers that
-    /// supply their own file instead of recording one (e.g. audio captured
-    /// on Apple Watch and delivered via WatchConnectivity).
+    /// supply their own file instead of recording one: the Transcribe Audio
+    /// File App Intent (Shortcuts), and audio captured on Apple Watch and
+    /// delivered via WatchConnectivity.
     public static func transcribeFile(
         at url: URL,
         model: String,

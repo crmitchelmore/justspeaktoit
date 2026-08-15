@@ -62,9 +62,7 @@ final class PostProcessingManager: ObservableObject {
     }
 
     let systemPrompt = effectiveSystemPrompt(for: context, corrections: corrections)
-    let model = settings.postProcessingModel.isEmpty
-      ? "inception/mercury"
-      : settings.postProcessingModel
+    let model = resolvedModel()
 
     if let localResult = await processWithLocalModelIfNeeded(
       model: model,
@@ -254,10 +252,115 @@ final class PostProcessingManager: ObservableObject {
     #endif
   }
 
-  func hasRequiredAPIKey() async -> Bool {
+  /// A local model that cannot follow an arbitrary prompt was asked to run a
+  /// custom Polish Text prompt. Silently performing stock cleanup instead
+  /// would misrepresent the result, so the intent fails with this instead.
+  enum PolishPromptError: LocalizedError {
+    case customPromptUnsupported(model: String)
+
+    var errorDescription: String? {
+      switch self {
+      case .customPromptUnsupported(let model):
+        return "The configured post-processing model (\(model)) can't follow a custom prompt. "
+          + "Choose an AI post-processing model in Settings, or leave the custom prompt empty."
+      }
+    }
+  }
+
+  /// Runs a one-off post-processing pass with an explicit prompt pair and
+  /// returns the result, without touching session state. Used by the Polish
+  /// Text App Intent so a custom Shortcuts prompt can replace the default
+  /// cleanup contract (see `AutomationIntentSupport.polishRequest`) while the
+  /// configured model — including Apple Foundation and downloaded local models
+  /// that need no API key — and `postProcessingTemperature` still apply.
+  ///
+  /// `usesCustomPrompt` marks a prompt pair the user supplied themselves; the
+  /// local execution paths then honour it verbatim instead of rebuilding the
+  /// stock cleanup payload, and models that cannot follow a prompt (the
+  /// built-in rules) fail clearly rather than silently performing cleanup.
+  func polish(
+    text: String,
+    systemPrompt: String,
+    userMessage: String,
+    usesCustomPrompt: Bool = false
+  ) async throws -> String {
+    guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return text }
+    let model = resolvedModel()
+
+    if Self.isLocalPostProcessingModel(model) {
+      if usesCustomPrompt {
+        return try await polishLocallyWithCustomPrompt(
+          model: model,
+          systemPrompt: systemPrompt,
+          userMessage: userMessage
+        )
+      }
+      if let localResult = await processWithLocalModelIfNeeded(
+        model: model,
+        rawText: text,
+        systemPrompt: systemPrompt
+      ) {
+        return try localResult.get().processed
+      }
+    }
+
+    let response = try await client.sendChat(
+      systemPrompt: systemPrompt,
+      messages: [ChatMessage(role: .user, content: userMessage)],
+      model: model,
+      temperature: settings.postProcessingTemperature
+    )
+    return response.messages.last(where: { $0.role == .assistant })?.content ?? ""
+  }
+
+  /// Executes a user-supplied prompt pair on a local model, preserving both
+  /// prompt values. The built-in rules (and, in App Store builds, downloaded
+  /// models that cannot run) have no way to honour a prompt, so they throw.
+  private func polishLocallyWithCustomPrompt(
+    model: String,
+    systemPrompt: String,
+    userMessage: String
+  ) async throws -> String {
+    if Self.isAppleFoundationModel(model) {
+      return try await AppleFoundationModelPolisher.respond(
+        systemPrompt: systemPrompt,
+        userMessage: userMessage
+      )
+    }
+    guard !Self.isBuiltInLocalPostProcessingModel(model) else {
+      throw PolishPromptError.customPromptUnsupported(model: model)
+    }
+    #if APP_STORE
+    throw PolishPromptError.customPromptUnsupported(model: model)
+    #else
+    return try await LocalPostProcessingModelManager.shared.processWithExplicitPrompt(
+      modelID: model,
+      systemPrompt: systemPrompt,
+      userMessage: userMessage,
+      temperature: settings.postProcessingTemperature
+    )
+    #endif
+  }
+
+  /// The system prompt a polish with no lexicon context would use: the user's
+  /// configured base prompt (or active profile override) and output language.
+  /// Shortcuts has no destination app or correction history, so the lexicon
+  /// directives that `process` adds are deliberately omitted.
+  func effectiveSystemPrompt() -> String {
+    basePrompt()
+  }
+
+  /// The configured post-processing model, falling back to the default when
+  /// the setting is empty. Single source of truth so the key check, the session
+  /// path, and the automation path can never disagree about which model runs.
+  private func resolvedModel() -> String {
     let configuredModel = settings.postProcessingModel
       .trimmingCharacters(in: .whitespacesAndNewlines)
-    let resolvedModel = configuredModel.isEmpty ? "inception/mercury" : configuredModel
+    return configuredModel.isEmpty ? "inception/mercury" : configuredModel
+  }
+
+  func hasRequiredAPIKey() async -> Bool {
+    let resolvedModel = resolvedModel()
 
     if Self.isLocalPostProcessingModel(resolvedModel) {
       return true

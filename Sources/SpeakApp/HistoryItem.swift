@@ -96,6 +96,9 @@ struct HistoryTrigger: Codable, Hashable {
     case doubleTap
     case hold
     case uiButton
+    /// Started or stopped by Shortcuts / App Intents. Additive: older entries
+    /// never carry this value, so existing history still decodes.
+    case automation
   }
 
   enum OutputMethod: String, Codable {

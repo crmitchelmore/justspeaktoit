@@ -3,6 +3,23 @@ import { execFileSync } from "node:child_process";
 export const DEFAULT_MODEL = "gpt-5.6-luna";
 export const DEFAULT_REASONING_EFFORT = "medium";
 
+export const commitPlatform = (subject) => {
+    const match = String(subject ?? "").match(/^[a-z]+\(([^)]*)\)!?:/i);
+    if (!match) return "shared";
+    const scopes = match[1].toLowerCase().split(/[\s,/]+/).filter(Boolean);
+    const targetsIOS = scopes.includes("ios");
+    const targetsMac = scopes.includes("mac") || scopes.includes("macos");
+    if (targetsIOS && !targetsMac) return "ios";
+    if (targetsMac && !targetsIOS) return "mac";
+    return "shared";
+};
+
+export const filterCommitsForTrack = (commits, track) => {
+    if (track !== "mac" && track !== "ios") return commits;
+    const excluded = track === "mac" ? "ios" : "mac";
+    return commits.filter((commit) => commitPlatform(commit.subject) !== excluded);
+};
+
 const sectionForSubject = (subject) => {
     const match = subject.match(/^(feat|fix|perf|refactor|docs|build|ci|test|chore)(?:\([^)]*\))?!?:\s*(.*)$/i);
     if (!match) {
@@ -318,7 +335,7 @@ export const collectReleaseContext = ({ tag, previousTag, cwd = process.cwd(), r
 
     const range = resolvedPreviousTag ? `${resolvedPreviousTag}..${tag}` : tag;
     const rawLog = runGit(["log", "--reverse", "--format=%H%x1f%s%x1f%b%x1e", range], cwd);
-    const commits = parseCommits(rawLog);
+    const commits = filterCommitsForTrack(parseCommits(rawLog), releaseTrack(tag));
     const fileSummary = resolvedPreviousTag
         ? runGit(["diff", "--stat", "--summary", `${resolvedPreviousTag}..${tag}`], cwd)
         : runGit(["show", "--stat", "--summary", "--format=", tag], cwd);

@@ -8,13 +8,25 @@ import os.log
 final class MacHistorySyncAdapter: HistorySyncDelegate {
 
     private let historyManager: HistoryManager
+    private let defaults: UserDefaults
     private var syncedIDs: Set<UUID> = []
     private let syncedIDsKey = "speak.sync.syncedMacHistoryIDs"
     private let log = SpeakLogger.logger(category: "MacHistorySync")
 
-    init(historyManager: HistoryManager) {
+    /// True while a remote change is being applied to the local store, so the
+    /// resulting HistoryManager mutation is not echoed back to CloudKit.
+    private var isApplyingRemoteChange = false
+
+    init(historyManager: HistoryManager, defaults: UserDefaults = .standard) {
         self.historyManager = historyManager
+        self.defaults = defaults
         loadSyncedIDs()
+        historyManager.onItemAppended = { [weak self] item in
+            self?.uploadNewItem(item)
+        }
+        historyManager.onItemRemoved = { [weak self] id in
+            self?.deleteItem(id: id)
+        }
     }
 
     /// Start sync — call after creating the adapter.
@@ -25,6 +37,7 @@ final class MacHistorySyncAdapter: HistorySyncDelegate {
 
     /// Upload a newly created history item.
     func uploadNewItem(_ item: HistoryItem) {
+        guard !isApplyingRemoteChange else { return }
         Task {
             let entry = item.toSyncable()
             do {
@@ -37,6 +50,7 @@ final class MacHistorySyncAdapter: HistorySyncDelegate {
 
     /// Delete an item from CloudKit when removed locally.
     func deleteItem(id: UUID) {
+        guard !isApplyingRemoteChange else { return }
         syncedIDs.remove(id)
         saveSyncedIDs()
         Task {
@@ -54,6 +68,8 @@ final class MacHistorySyncAdapter: HistorySyncDelegate {
     }
 
     func didReceiveRemoteEntry(_ entry: SyncableHistoryEntry) async {
+        isApplyingRemoteChange = true
+        defer { isApplyingRemoteChange = false }
         if let local = historyManager.allItems.first(where: { $0.id == entry.id }) {
             if entry.updatedAt > local.updatedAt {
                 await historyManager.update(HistoryItem.fromSyncable(entry))
@@ -74,6 +90,8 @@ final class MacHistorySyncAdapter: HistorySyncDelegate {
     }
 
     func didDeleteRemoteEntry(id: UUID) async {
+        isApplyingRemoteChange = true
+        defer { isApplyingRemoteChange = false }
         await historyManager.remove(id: id)
         syncedIDs.remove(id)
         saveSyncedIDs()
@@ -87,16 +105,14 @@ final class MacHistorySyncAdapter: HistorySyncDelegate {
     // MARK: - Synced IDs Tracking
 
     private func loadSyncedIDs() {
-        if let strings = UserDefaults.standard.stringArray(
-            forKey: syncedIDsKey
-        ) {
+        if let strings = defaults.stringArray(forKey: syncedIDsKey) {
             syncedIDs = Set(strings.compactMap { UUID(uuidString: $0) })
         }
     }
 
     private func saveSyncedIDs() {
         let strings = syncedIDs.map(\.uuidString)
-        UserDefaults.standard.set(strings, forKey: syncedIDsKey)
+        defaults.set(strings, forKey: syncedIDsKey)
     }
 }
 

@@ -127,6 +127,7 @@ if isIOSKeyboardDirectCaptureEnabled {
 let iosKeyboardInfoPlist: InfoPlist = isIOSKeyboardDirectCaptureEnabled
     ? .file(path: "JustSpeakKeyboard/Info.plist")
     : .extendingDefault(with: [
+        "CFBundleDevelopmentRegion": "en",
         "CFBundleDisplayName": "Just Speak",
         "CFBundleShortVersionString": "$(MARKETING_VERSION)",
         "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",

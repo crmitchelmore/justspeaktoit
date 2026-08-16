@@ -34,6 +34,11 @@ jobs:
       - name: Build
         run: make build
 
+      - name: Check Package.resolved drift
+        # Resolving the app/test graph must reproduce the checked-in pins;
+        # tooling pins live separately in Tooling/Package.resolved (issue #677).
+        run: git diff --exit-code Package.resolved
+
       - name: Test (Debug)
         run: swift test --enable-code-coverage
 
@@ -241,9 +246,19 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Cache lint tooling
+        uses: actions/cache@v6
+        with:
+          path: Tooling/.build
+          key: ${{ runner.os }}-tooling-${{ hashFiles('Tooling/Package.resolved') }}
+
+      # SwiftLint resolves through the isolated Tooling/ graph so app/test
+      # dependency changes cannot downgrade the linter (issue #677).
       - name: SwiftLint
-        run: |
-          swift package --disable-dependency-cache plugin --allow-writing-to-package-directory swiftlint --strict --baseline .swiftlint-baseline.json
+        run: make lint
+
+      - name: Check tooling Package.resolved drift
+        run: git diff --exit-code Tooling/Package.resolved
 
       - name: Test release-notes generator
         run: node --test Tests/ReleaseNotesTests/*.test.mjs

@@ -3,8 +3,8 @@ import Foundation
 // MARK: - Domain Models
 
 // Personal lexicon rules capture canonical spellings and contextual hints for corrections.
-public struct PersonalLexiconRule: Identifiable, Codable, Equatable {
-  public enum Activation: String, Codable, CaseIterable {
+public struct PersonalLexiconRule: Identifiable, Codable, Equatable, Sendable {
+  public enum Activation: String, Codable, CaseIterable, Sendable {
     case automatic
     case requireContextMatch
     case manual
@@ -90,7 +90,7 @@ public struct PersonalLexiconContext: Equatable {
   public static let empty = PersonalLexiconContext(tags: [], destinationApplication: nil, recentTranscriptWindow: "")
 }
 
-public enum PersonalLexiconConfidence: String, Codable, CaseIterable {
+public enum PersonalLexiconConfidence: String, Codable, CaseIterable, Sendable {
   case high
   case medium
   case low

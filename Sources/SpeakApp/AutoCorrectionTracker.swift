@@ -34,7 +34,7 @@ final class AutoCorrectionTracker: ObservableObject {
   /// Maximum monitoring duration
   private let maxMonitorDuration: TimeInterval = 30.0
 
-  init(store: AutoCorrectionStore, lexiconService: PersonalLexiconService, appSettings: AppSettings) {
+  init(store: AutoCorrectionStoring, lexiconService: PersonalLexiconService, appSettings: AppSettings) {
     self.engine = AutoCorrectionEngine(
       store: store,
       lexiconService: lexiconService,
@@ -96,23 +96,28 @@ final class AutoCorrectionTracker: ObservableObject {
   }
 
   /// Manually promote a candidate to a correction rule.
-  func promoteCandidate(_ candidate: AutoCorrectionCandidate) async {
-    await engine.promoteCandidate(candidate)
+  /// Throws if the rule or candidate list could not be durably saved; the
+  /// candidate is retained for retry in that case.
+  func promoteCandidate(_ candidate: AutoCorrectionCandidate) async throws {
+    try await engine.promoteCandidate(candidate)
   }
 
   /// Dismiss a candidate (user doesn't want this correction).
-  func dismissCandidate(id: UUID) {
-    engine.dismissCandidate(id: id)
+  /// Throws if the dismissal could not be persisted.
+  func dismissCandidate(id: UUID) async throws {
+    try await engine.dismissCandidate(id: id)
   }
 
   /// Remove a candidate entirely.
-  func removeCandidate(id: UUID) {
-    engine.removeCandidate(id: id)
+  /// Throws if the removal could not be persisted.
+  func removeCandidate(id: UUID) async throws {
+    try await engine.removeCandidate(id: id)
   }
 
   /// Clear all candidates.
-  func clearAllCandidates() {
-    engine.clearAllCandidates()
+  /// Throws if the store could not be emptied.
+  func clearAllCandidates() async throws {
+    try await engine.clearAllCandidates()
   }
 
   // MARK: - Private Methods
@@ -142,6 +147,12 @@ final class AutoCorrectionTracker: ObservableObject {
       return
     }
 
-    await engine.recordEdit(original: insertedText, edited: currentString, app: insertionApp)
+    do {
+      try await engine.recordEdit(original: insertedText, edited: currentString, app: insertionApp)
+    } catch {
+      // Background monitoring has no UI surface; the engine has already
+      // retained any unpromoted candidate for retry, so log and move on.
+      log.error("Failed to record edit durably: \(error.localizedDescription, privacy: .public)")
+    }
   }
 }

@@ -181,7 +181,17 @@ extension MainManager {
         return FluidAudioParakeetModel.displayName
       }
       #if !APP_STORE
-      // Use the catalogue's cleaned-up name rather than the raw source ID
+      // Prefer the name stored with the streaming source: the slug-based ID is
+      // lossy (case, punctuation and path components are rewritten), so
+      // re-deriving a label from it can rename a source like "My_ASR.v2".
+      if let sourceName = Self.customStreamingSourceName(
+        for: modelID,
+        in: LocalModelManager.shared.streamingModelSources
+      ) {
+        return sourceName + " (Streaming)"
+      }
+      // Legacy fallback for identifiers with no stored source metadata: use
+      // the catalogue's cleaned-up name rather than the raw source ID
       // (e.g. "sherpa-onnx-streaming-zipformer-en-2023-06-26") so the HUD
       // capture-health label stays readable.
       return ModelCatalog.friendlyName(for: modelID)
@@ -200,4 +210,18 @@ extension MainManager {
     guard let suffixRange else { return displayName }
     return String(displayName[..<suffixRange.lowerBound])
   }
+
+  #if !APP_STORE
+  /// Resolves a custom streaming source identifier back to the model name the
+  /// user configured for it. Returns `nil` when no stored source matches so
+  /// callers can fall back to legacy slug-derived naming.
+  nonisolated static func customStreamingSourceName(
+    for modelID: String,
+    in sources: [LocalStreamingModelSource]
+  ) -> String? {
+    guard let source = sources.first(where: { $0.id == modelID }) else { return nil }
+    let name = source.modelName.trimmingCharacters(in: .whitespacesAndNewlines)
+    return name.isEmpty ? nil : name
+  }
+  #endif
 }

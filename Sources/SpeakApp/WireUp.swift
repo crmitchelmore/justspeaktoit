@@ -50,6 +50,11 @@ final class AppEnvironment: ObservableObject {
   @Published var apiKeysScrollTarget: String?
   @Published var sidebarNavigationTarget: SidebarItem?
 
+  /// Bridges HistoryManager mutations to CloudKit history sync. Retained here
+  /// because `HistorySyncEngine` only holds its delegate weakly; without this
+  /// owner the adapter deallocates after bootstrap and sync stops (#685).
+  fileprivate(set) var historySyncAdapter: MacHistorySyncAdapter?
+
   private(set) var statusBarController: StatusBarController?
   /// Voice-edit controller; created by `installVoiceEdit()` in AppEnvironment+VoiceEdit.
   var voiceEdit: VoiceEditController?
@@ -112,9 +117,6 @@ final class AppEnvironment: ObservableObject {
     self.transportServer = transportServer
     self.hudPresenter = hudPresenter
   }
-
-  /// Alias for permissions manager (for API consistency)
-  var permissionsManager: PermissionsManager { permissions }
 
   /// Installs the status bar controller and the observer that keeps it in sync
   /// with the visibility settings. Safe to call more than once; it is
@@ -321,6 +323,9 @@ final class AppEnvironment: ObservableObject {
 }
 
 extension AppEnvironment {
+  /// Alias for permissions manager (for API consistency)
+  var permissionsManager: PermissionsManager { permissions }
+
   fileprivate func switchToQuickVoice(_ index: Int) {
     let favorites = settings.ttsFavoriteVoices
     let arrayIndex = index - 1
@@ -564,6 +569,7 @@ enum WireUp {
     #endif
 
     let syncAdapter = MacHistorySyncAdapter(historyManager: environment.history)
+    environment.historySyncAdapter = syncAdapter
     Task { await syncAdapter.start() }
 
     Task { await secureStorage.preloadTrackedSecrets() }

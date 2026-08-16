@@ -210,7 +210,13 @@ struct PersonalCorrectionsView: View {
                 Spacer()
                 if autoCorrectionTracker.candidates.count > 0 {
                   Button("Clear All", role: .destructive) {
-                    autoCorrectionTracker.clearAllCandidates()
+                    Task {
+                      do {
+                        try await autoCorrectionTracker.clearAllCandidates()
+                      } catch {
+                        alertMessage = error.localizedDescription
+                      }
+                    }
                   }
                   .font(.caption)
                   .buttonStyle(.borderless)
@@ -293,7 +299,11 @@ struct PersonalCorrectionsView: View {
     HStack(spacing: 8) {
       Button {
         Task {
-          await autoCorrectionTracker.promoteCandidate(candidate)
+          do {
+            try await autoCorrectionTracker.promoteCandidate(candidate)
+          } catch {
+            alertMessage = error.localizedDescription
+          }
         }
       } label: {
         Image(systemName: "checkmark.circle")
@@ -303,7 +313,13 @@ struct PersonalCorrectionsView: View {
       .accessibilityLabel("Add as correction rule: \(candidate.original) to \(candidate.corrected)")
 
       Button {
-        autoCorrectionTracker.dismissCandidate(id: candidate.id)
+        Task {
+          do {
+            try await autoCorrectionTracker.dismissCandidate(id: candidate.id)
+          } catch {
+            alertMessage = error.localizedDescription
+          }
+        }
       } label: {
         Image(systemName: "xmark.circle")
       }
@@ -470,28 +486,38 @@ struct PersonalCorrectionsView: View {
           .foregroundStyle(.secondary)
       }
 
-      HStack(spacing: 12) {
-        Button("Edit") {
-          draft = RuleDraft(rule: rule)
-          showAdvancedOptions = draft.requiresAdvancedOptions
-          focusedField = .canonical
-        }
-        .buttonStyle(.bordered)
-        Button("Delete", role: .destructive) {
-          Task { await lexicon.deleteRule(id: rule.id) }
-        }
-        .buttonStyle(.bordered)
-        Spacer()
-        Text("Updated \(rule.updatedAt.formatted(date: .abbreviated, time: .shortened))")
-          .font(.caption2)
-          .foregroundStyle(.tertiary)
-      }
+      ruleRowActions(rule)
     }
     .padding(density.isCompact ? density.cardPadding : 20)
     .background(
       RoundedRectangle(cornerRadius: density.isCompact ? 8 : 22, style: .continuous)
         .fill(Color(nsColor: .controlBackgroundColor))
     )
+  }
+
+  private func ruleRowActions(_ rule: PersonalLexiconRule) -> some View {
+    HStack(spacing: 12) {
+      Button("Edit") {
+        draft = RuleDraft(rule: rule)
+        showAdvancedOptions = draft.requiresAdvancedOptions
+        focusedField = .canonical
+      }
+      .buttonStyle(.bordered)
+      Button("Delete", role: .destructive) {
+        Task {
+          do {
+            try await lexicon.deleteRule(id: rule.id)
+          } catch {
+            alertMessage = error.localizedDescription
+          }
+        }
+      }
+      .buttonStyle(.bordered)
+      Spacer()
+      Text("Updated \(rule.updatedAt.formatted(date: .abbreviated, time: .shortened))")
+        .font(.caption2)
+        .foregroundStyle(.tertiary)
+    }
   }
 
   private var previewSection: some View {

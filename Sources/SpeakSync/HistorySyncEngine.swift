@@ -1,6 +1,7 @@
 import CloudKit
 import Combine
 import Foundation
+import SpeakCore
 import os.log
 
 /// Delegate protocol that platforms implement to reconcile synced entries.
@@ -81,7 +82,7 @@ public final class HistorySyncEngine: ObservableObject {
     private weak var delegate: HistorySyncDelegate?
     private let transport: HistorySyncTransport
     private let defaults: UserDefaults
-    private let log = Logger(subsystem: "com.justspeaktoit", category: "HistorySync")
+    private let log = SpeakLogger.logger(category: "HistorySync")
 
     private convenience init() {
         self.init(
@@ -155,6 +156,14 @@ public final class HistorySyncEngine: ObservableObject {
     public func upload(entry: SyncableHistoryEntry) async throws {
         guard state.isCloudAvailable else {
             throw SyncError.cloudUnavailable
+        }
+        // Without a delegate the acknowledgement cannot be persisted, so the
+        // entry would upload again after relaunch. Fail before touching the
+        // transport and leave the entry pending.
+        guard delegate != nil else {
+            let syncError = SyncError.delegateUnavailable
+            state.error = syncError
+            throw syncError
         }
         let result = await transport.upload(entries: [entry])
         await applyUploadResult(result)

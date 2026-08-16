@@ -2,6 +2,9 @@
 import SwiftUI
 import AVFoundation
 import SpeakCore
+import os.log
+
+private let logger = SpeakLogger.logger(category: "RecordingsView")
 
 // MARK: - Recordings List View
 
@@ -140,7 +143,7 @@ public struct RecordingsView: View {
                 }
             }
         } catch {
-            print("[RecordingsView] Playback error: \(error)")
+            logger.error("Playback error: \(error.localizedDescription, privacy: .public)")
         }
     }
 

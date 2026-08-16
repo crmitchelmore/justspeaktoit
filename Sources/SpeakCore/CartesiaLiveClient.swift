@@ -17,7 +17,7 @@ public final class CartesiaLiveClient: StreamingTranscriptionClient, @unchecked 
     private let model: String
     private let sampleRate: Int
     private let session: URLSession
-    private let logger = Logger(subsystem: "com.justspeaktoit", category: "CartesiaLiveClient")
+    private let logger = SpeakLogger.logger(category: "CartesiaLiveClient")
     private let stateLock = NSLock()
     private let pendingSendGroup = DispatchGroup()
 

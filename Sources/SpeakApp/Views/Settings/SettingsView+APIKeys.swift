@@ -275,7 +275,7 @@ extension SettingsView {
         keyBinding: ttsBinding(for: provider.rawValue),
         onSave: { saveTTSProviderAPIKey(provider) },
         onValidate: isStored ? { checkTTSProviderKeyValidity(provider) } : nil,
-        onRemove: isStored ? { removeElevenLabsAPIKey() } : nil,
+        onRemove: isStored ? { removeTTSProviderAPIKey(provider) } : nil,
         isSaveDisabled: saveDisabled,
         isValidateDisabled: validateDisabled,
         isRemoveDisabled: removeDisabled,
@@ -822,6 +822,10 @@ extension SettingsView {
       !value.isEmpty
     else { return }
 
+    // Drop cached controllers before the replacement lands, so a cached session
+    // cannot keep using the key the user has just replaced.
+    invalidateSharedTranscriptionCache(for: provider)
+
     ttsProviderValidationStates[provider.rawValue] = .validating
 
     Task {
@@ -852,6 +856,10 @@ extension SettingsView {
           )
 
           await MainActor.run {
+            // Validation and storage take a network round trip. A session that
+            // started inside that window cached a controller built from the old
+            // key, so the cache is dropped again now the replacement is stored.
+            invalidateSharedTranscriptionCache(for: provider)
             ttsProviderAPIKeys[provider.rawValue] = ""
             ttsProviderValidationStates[provider.rawValue] = .finished(result)
           }
@@ -901,39 +909,23 @@ extension SettingsView {
     }
   }
 
+  /// Drops cached live controllers when this provider's key also powers
+  /// transcription, so no cached session can keep using a superseded key.
+  private func invalidateSharedTranscriptionCache(for provider: TTSProvider) {
+    guard provider.sharesTranscriptionCredential else { return }
+    environment.transcription.invalidateLiveControllerCache()
+  }
+
   private func removeTTSProviderAPIKey(_ provider: TTSProvider) {
-    // Shared credentials also power live transcription; drop cached controllers
-    // before the key disappears so no stale session can keep using it.
-    if provider.sharesTranscriptionCredential {
-      environment.transcription.invalidateLiveControllerCache()
-    }
+    // Drop cached controllers before the key disappears, so no stale session
+    // can keep using it.
+    invalidateSharedTranscriptionCache(for: provider)
     Task {
       do {
         try await environment.secureStorage.removeSecret(identifier: provider.apiKeyIdentifier)
         await MainActor.run {
           ttsProviderAPIKeys[provider.rawValue] = ""
           ttsProviderValidationStates[provider.rawValue] = .idle
-        }
-      } catch {
-        // Handle error silently
-      }
-    }
-  }
-
-  /// Shared removal helper for the ElevenLabs credential.
-  /// Invalidates the live controller cache before clearing Keychain and UI state
-  /// so no stale ElevenLabs session can be reused after removal (fail-safe ordering).
-  private func removeElevenLabsAPIKey() {
-    // Invalidate first — must happen before any Keychain or UI state mutation
-    environment.transcription.invalidateLiveControllerCache()
-    Task {
-      do {
-        try await environment.secureStorage.removeSecret(
-          identifier: TTSProvider.elevenlabs.apiKeyIdentifier
-        )
-        await MainActor.run {
-          ttsProviderAPIKeys[TTSProvider.elevenlabs.rawValue] = ""
-          ttsProviderValidationStates[TTSProvider.elevenlabs.rawValue] = .idle
         }
       } catch {
         // Handle error silently

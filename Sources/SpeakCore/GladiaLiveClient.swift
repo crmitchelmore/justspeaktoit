@@ -18,7 +18,7 @@ public final class GladiaLiveClient: StreamingTranscriptionClient, @unchecked Se
     private let language: String?
     private let sampleRate: Int
     private let session: URLSession
-    private let logger = Logger(subsystem: "com.justspeaktoit", category: "GladiaLiveClient")
+    private let logger = SpeakLogger.logger(category: "GladiaLiveClient")
     private let stateLock = NSLock()
 
     private var webSocketTask: URLSessionWebSocketTask?

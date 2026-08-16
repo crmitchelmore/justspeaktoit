@@ -1,27 +1,47 @@
 import Foundation
 import os.log
 
+/// Persistence contract for the personal lexicon. Abstracted so behavioural
+/// tests can inject delayed or failing stores.
+public protocol PersonalLexiconStoring: Sendable {
+  func load() async throws -> [PersonalLexiconRule]
+  func save(_ rules: [PersonalLexiconRule]) async throws
+}
+
+extension PersonalLexiconStore: PersonalLexiconStoring {}
+
 @MainActor
 public final class PersonalLexiconService: ObservableObject {
   @Published public private(set) var rules: [PersonalLexiconRule] = [] {
     didSet { regexCache.removeAll() }
   }
 
-  private let store: PersonalLexiconStore
-  private let log = Logger(subsystem: "com.github.speakapp", category: "PersonalLexicon")
+  private let store: PersonalLexiconStoring
+  private let log = SpeakLogger.logger(category: "PersonalLexicon")
   private var regexCache: [String: NSRegularExpression] = [:]
 
-  public init(store: PersonalLexiconStore) {
+  /// Tail of the serial operation chain. The initial load is the first link,
+  /// so every mutation awaits it and load/mutate/save never interleave.
+  private var operationTail: Task<Void, Never>?
+
+  public init(store: PersonalLexiconStoring) {
     self.store = store
-    Task { [weak self] in
+    operationTail = Task { @MainActor [weak self] in
       await self?.loadInitialRules()
     }
   }
 
+  /// Await completion of the initial load (and any queued operations).
+  public func waitUntilLoaded() async {
+    try? await enqueue { }
+  }
+
   public func refresh() async {
     do {
-      let loaded = try await store.load()
-      rules = Self.normalised(rules: loaded)
+      try await enqueue {
+        let loaded = try await self.store.load()
+        self.rules = Self.normalised(rules: loaded)
+      }
     } catch {
       log.error("Failed to refresh lexicon: \(error.localizedDescription, privacy: .public)")
     }
@@ -57,18 +77,17 @@ public final class PersonalLexiconService: ObservableObject {
     }
 
     rule = rule.updatingTimestamps()
+    let newRule = rule
 
-    rules.append(rule)
-    rules = Self.normalised(rules: rules)
-    await persistSnapshot()
+    try await enqueue {
+      try await self.mutateAndPersist { current in
+        current.append(newRule)
+      }
+    }
     return rule
   }
 
   public func updateRule(_ rule: PersonalLexiconRule) async throws {
-    guard let index = rules.firstIndex(where: { $0.id == rule.id }) else {
-      throw PersonalLexiconServiceError.unknownRule
-    }
-
     let sanitisedRule = rule.sanitised().updatingTimestamps()
     guard !sanitisedRule.canonical.isEmpty else {
       throw PersonalLexiconServiceError.invalidCanonical
@@ -77,21 +96,30 @@ public final class PersonalLexiconService: ObservableObject {
       throw PersonalLexiconServiceError.missingAlias
     }
 
-    rules[index] = sanitisedRule
-    rules = Self.normalised(rules: rules)
-    await persistSnapshot()
+    try await enqueue {
+      guard let index = self.rules.firstIndex(where: { $0.id == rule.id }) else {
+        throw PersonalLexiconServiceError.unknownRule
+      }
+      try await self.mutateAndPersist { current in
+        current[index] = sanitisedRule
+      }
+    }
   }
 
-  public func deleteRule(id: UUID) async {
-    rules.removeAll { $0.id == id }
-    await persistSnapshot()
+  public func deleteRule(id: UUID) async throws {
+    try await enqueue {
+      try await self.mutateAndPersist { current in
+        current.removeAll { $0.id == id }
+      }
+    }
   }
 
-  public func moveRules(from offsets: IndexSet, to destination: Int) async {
-    var mutable = rules
-    mutable.move(fromOffsets: offsets, toOffset: destination)
-    rules = mutable
-    await persistSnapshot()
+  public func moveRules(from offsets: IndexSet, to destination: Int) async throws {
+    try await enqueue {
+      try await self.mutateAndPersist(normalise: false) { current in
+        current.move(fromOffsets: offsets, toOffset: destination)
+      }
+    }
   }
 
   public func apply(to text: String, context: PersonalLexiconContext) -> PersonalLexiconApplicationResult {
@@ -156,23 +184,50 @@ public final class PersonalLexiconService: ObservableObject {
     rules.filter { $0.shouldAutoApply(in: context) }
   }
 
-  private func loadInitialRules() async {
+  // MARK: - Serialised persistence
+
+  /// Run `operation` after every previously queued operation (including the
+  /// initial load) has finished. Operations therefore never observe a
+  /// half-loaded store and an older load can never replace newer changes.
+  private func enqueue<T: Sendable>(
+    _ operation: @escaping @MainActor () async throws -> T
+  ) async throws -> T {
+    let previous = operationTail
+    let task = Task { @MainActor () throws -> T in
+      await previous?.value
+      return try await operation()
+    }
+    operationTail = Task { @MainActor in
+      _ = try? await task.value
+    }
+    return try await task.value
+  }
+
+  /// Apply `mutation` optimistically, persist the result, and roll the
+  /// in-memory state back if the save fails so memory always mirrors disk.
+  private func mutateAndPersist(
+    normalise: Bool = true,
+    _ mutation: (inout [PersonalLexiconRule]) -> Void
+  ) async throws {
+    let previous = rules
+    var mutated = previous
+    mutation(&mutated)
+    rules = normalise ? Self.normalised(rules: mutated) : mutated
     do {
-      let loaded = try await store.load()
-      await MainActor.run {
-        self.rules = Self.normalised(rules: loaded)
-      }
+      try await store.save(rules)
     } catch {
-      log.error("Failed to load lexicon: \(error.localizedDescription, privacy: .public)")
+      rules = previous
+      log.error("Failed to persist lexicon: \(error.localizedDescription, privacy: .public)")
+      throw error
     }
   }
 
-  private func persistSnapshot() async {
-    let snapshot = rules
+  private func loadInitialRules() async {
     do {
-      try await store.save(snapshot)
+      let loaded = try await store.load()
+      rules = Self.normalised(rules: loaded)
     } catch {
-      log.error("Failed to persist lexicon: \(error.localizedDescription, privacy: .public)")
+      log.error("Failed to load lexicon: \(error.localizedDescription, privacy: .public)")
     }
   }
 

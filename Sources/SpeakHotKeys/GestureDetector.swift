@@ -11,7 +11,7 @@ public final class GestureDetector {
   public var configuration: HotKeyConfiguration
   public var onGesture: ((HotKeyEvent) -> Void)?
 
-  private let log = Logger(subsystem: "com.justspeaktoit.hotkeys", category: "GestureDetector")
+  private let log = Logger(subsystem: HotKeyLogging.subsystem, category: "GestureDetector")
 
   private var isKeyDown = false
   private var holdFired = false
@@ -79,17 +79,31 @@ public final class GestureDetector {
     lastReleaseUptime = now
   }
 
+  /// Whether a hold is in progress: `holdStart` fired and `holdEnd` is still due.
+  public var isHoldInProgress: Bool { holdFired }
+
   /// Reset all state (e.g. when switching hotkey mode).
-  public func reset() {
+  ///
+  /// A hold that is in progress ends first with a balanced `holdEnd`. Teardown
+  /// removes the monitoring backend, so the matching key-up can no longer arrive.
+  /// Without the balanced end, the recording that `holdStart` started keeps the
+  /// microphone open until the user stops it by hand.
+  public func reset(source: String = "reset") {
     holdTimer?.cancel()
     holdTimer = nil
     pendingSingleTapWorkItem?.cancel()
     pendingSingleTapWorkItem = nil
+    let hadHoldInProgress = holdFired
     isKeyDown = false
     holdFired = false
     lastReleaseUptime = 0
     lastDoubleTapFireTime = 0
     doubleTapCooldownDeadline = 0
+
+    if hadHoldInProgress {
+      log.info("Ending an in-progress hold because the detector was reset")
+      fire(.holdEnd, source: source)
+    }
   }
 
   // MARK: - Private

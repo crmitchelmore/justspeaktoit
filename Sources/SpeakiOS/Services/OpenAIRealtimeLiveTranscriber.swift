@@ -4,6 +4,8 @@ import Foundation
 import SpeakCore
 import os.log
 
+private let logger = SpeakLogger.logger(category: "OpenAIRealtimeLiveTranscriber")
+
 // swiftlint:disable file_length
 
 private let openAIRealtimeOutputBufferPool = OpenAIRealtimePCMBufferPool(maximumBuffers: 2)
@@ -151,7 +153,7 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
         }
         resetState()
 
-        print("[OpenAIRealtimeLiveTranscriber] Started")
+        logger.info("Started")
     }
 
     public func stop() async -> TranscriptionResult {
@@ -269,7 +271,7 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
         isRunning = false
         audioSessionManager.deactivate()
 
-        print("[OpenAIRealtimeLiveTranscriber] Cancelled")
+        logger.info("Cancelled")
     }
 
     // MARK: - Private
@@ -441,7 +443,7 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
 
     private func handleInterruption() {
         guard isRunning else { return }
-        print("[OpenAIRealtimeLiveTranscriber] Handling interruption")
+        logger.info("Handling interruption")
         let err = iOSTranscriptionError.interrupted
         error = err
         onError?(err)
@@ -553,7 +555,7 @@ final class OpenAIRealtimeWebSocketClient: @unchecked Sendable {
     private let language: String?
     private let sampleRate: Int
     private let session: URLSession
-    private let logger = Logger(subsystem: "com.speak.ios", category: "OpenAIRealtimeWebSocket")
+    private let logger = SpeakLogger.logger(category: "OpenAIRealtimeWebSocket")
     private let stateLock = NSLock()
     private let pendingSendGroup = DispatchGroup()
 

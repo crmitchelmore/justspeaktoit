@@ -507,6 +507,44 @@ extension SettingsView {
       }
       .speakTooltip("Use your iPhone as a wireless microphone. Transcribe on iPhone, text appears on Mac.")
 
+      SettingsCard(title: "Automation", systemImage: "terminal", tint: Color.brandLagoon) {
+        VStack(alignment: .leading, spacing: 12) {
+          Text(
+            "Let the \"speak\" command-line tool and the bundled MCP server drive dictation on this Mac. "
+              + "While this is on, any app or script running under your macOS account can start the "
+              + "microphone and read your transcription history."
+          )
+          .font(.callout)
+          .foregroundStyle(.secondary)
+
+          settingsToggle(
+            "Enable automation (speak CLI and MCP)",
+            isOn: Binding(
+              get: { settings.enableAutomationServer },
+              set: { newValue in
+                settings.enableAutomationServer = newValue
+                if newValue {
+                  do {
+                    try environment.startAutomationServer()
+                  } catch {
+                    // Reflect reality: the socket did not open, so the toggle
+                    // must not claim automation is available.
+                    settings.enableAutomationServer = false
+                  }
+                } else {
+                  environment.stopAutomationServer()
+                }
+              }
+            ),
+            tint: Color.brandLagoon
+          )
+          .speakTooltip(
+            "When enabled, Speak listens on a private socket in your home folder for automation commands."
+          )
+        }
+      }
+      .speakTooltip("Control Speak from scripts, the terminal, or an AI agent over a local socket.")
+
       SettingsCard(title: "Housekeeping", systemImage: "tray.full", tint: Color.brandAccentWarm) {
         VStack(alignment: .leading, spacing: 12) {
           HStack(alignment: .top, spacing: 12) {

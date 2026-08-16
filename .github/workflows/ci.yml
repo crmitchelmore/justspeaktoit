@@ -34,6 +34,11 @@ jobs:
       - name: Build
         run: make build
 
+      - name: Check Package.resolved drift
+        # Resolving the app/test graph must reproduce the checked-in pins;
+        # tooling pins live separately in Tooling/Package.resolved (issue #677).
+        run: git diff --exit-code Package.resolved
+
       - name: Test (Debug)
         run: swift test --enable-code-coverage
 
@@ -56,8 +61,11 @@ jobs:
           path: ${{ runner.temp }}/snapshot-failures
           if-no-files-found: ignore
 
-      # Release-configuration tests run as the release gate in release-mac.yml;
-      # running them here too effectively doubled test time on 10x-billed macOS runners.
+      # Release-configuration tests run pre-merge in the release-validation job
+      # below (path-filtered to package-affecting changes to control cost on
+      # 10x-billed macOS runners). They are NOT duplicated inside this job:
+      # running both configurations serially in one job doubled its wall time.
+      # release-mac.yml re-runs them post-tag as defence in depth.
 
       - name: Build SpeakCore (App Store flavour)
         # SpeakCore has no package dependencies, so this cheaply compiles the
@@ -81,6 +89,59 @@ jobs:
                 --ignore-filename-regex='\.build|Tests/' 2>/dev/null | head -30 >> $GITHUB_STEP_SUMMARY || true
             fi
           fi
+
+  # Pre-merge Release-configuration gate (#694). A Release-only compile,
+  # optimisation, or test failure must fail the PR that introduces it — the
+  # post-tag run in release-mac.yml is defence in depth, not the first gate.
+  # Cost controls for 10x-billed macOS runners:
+  # - a cheap ubuntu job skips the macOS leg for docs-only changes (a skipped
+  #   job still satisfies a required check, so the gate can be marked required)
+  # - the workflow-level concurrency group cancels superseded runs
+  # - a release-specific .build cache avoids cold dependency builds
+  # - runs only on pull_request: pushes to main were just gated by their PR,
+  #   and tags are re-validated by release-mac.yml.
+  release-paths:
+    name: Detect Release-Relevant Changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'pull_request'
+    outputs:
+      package: ${{ steps.filter.outputs.package }}
+    steps:
+      - name: Filter changed paths
+        # No checkout needed: on pull_request events the action lists changed
+        # files via the GitHub API.
+        uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            package:
+              - 'Package.swift'
+              - 'Package.resolved'
+              - 'Sources/**'
+              - 'Tests/**'
+              - 'Config/**'
+              - '.github/workflows/ci.yml'
+
+  release-validation:
+    name: Build & Test (Release)
+    runs-on: macos-latest
+    timeout-minutes: 45
+    needs: release-paths
+    if: needs.release-paths.outputs.package == 'true'
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Cache Swift packages (release)
+        uses: actions/cache@v6
+        with:
+          path: .build
+          key: ${{ runner.os }}-swift-release-${{ hashFiles('Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-swift-release-
+
+      - name: Test (Release)
+        run: swift test -c release
 
   build-ios:
     name: Build iOS Library
@@ -129,7 +190,7 @@ jobs:
         # The watch app target only exists when generated with
         # TUIST_WATCH_APP=1 (it needs its own provisioning profile for release
         # signing, so it is excluded from release builds). Build it unsigned
-        # here so the flagged target cannot rot. Cheap: six small source files
+        # here so the flagged target cannot rot. Cheap: five small source files
         # plus two shared core files.
         run: |
           set -o pipefail
@@ -143,6 +204,41 @@ jobs:
             -quiet \
             2>&1 | tail -30
 
+  build-ios-keyboard-direct-capture:
+    name: Build iOS Keyboard (direct capture)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install Tuist
+        run: brew install tuist
+
+      - name: Generate iOS App Project (direct capture)
+        # The direct-capture shape only exists behind two flags, so its `#if
+        # IOS_KEYBOARD_DIRECT_CAPTURE` branches and its file-based Info.plist
+        # compile nowhere else. Build them here so the flagged code cannot rot.
+        env:
+          TUIST_IOS_KEYBOARD: "1"
+          TUIST_IOS_KEYBOARD_DIRECT_CAPTURE: "1"
+        run: tuist generate --no-open
+
+      - name: Build Keyboard Extension (unsigned)
+        # Build only: the shipping handoff shape already runs the flow tests in
+        # the Build iOS Library job, and this leg exists to catch compile rot.
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -workspace "Just Speak to It.xcworkspace" \
+            -scheme JustSpeakKeyboard \
+            -destination generic/platform=iOS \
+            CODE_SIGNING_ALLOWED=NO \
+            -skipPackagePluginValidation \
+            -quiet \
+            2>&1 | tail -30
+
   lint:
     name: Lint
     runs-on: macos-latest
@@ -150,9 +246,19 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Cache lint tooling
+        uses: actions/cache@v6
+        with:
+          path: Tooling/.build
+          key: ${{ runner.os }}-tooling-${{ hashFiles('Tooling/Package.resolved') }}
+
+      # SwiftLint resolves through the isolated Tooling/ graph so app/test
+      # dependency changes cannot downgrade the linter (issue #677).
       - name: SwiftLint
-        run: |
-          swift package --disable-dependency-cache plugin --allow-writing-to-package-directory swiftlint --strict --baseline .swiftlint-baseline.json
+        run: make lint
+
+      - name: Check tooling Package.resolved drift
+        run: git diff --exit-code Tooling/Package.resolved
 
       - name: Test release-notes generator
         run: node --test Tests/ReleaseNotesTests/*.test.mjs

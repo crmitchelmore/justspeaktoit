@@ -251,22 +251,3 @@ public struct KeyboardProfileSelection: Codable, Equatable, Sendable {
     public var displayName: String { selectedProfile.displayName }
     public var route: KeyboardDictationProfileRoute { selectedProfile.route }
 }
-
-/// Requires exact, full ownership evidence before a post-processing rewrite can
-/// delete text. If the proxy truncates the dictated region, or any host/user edit
-/// changes the observed context while processing runs, the raw text is retained.
-enum KeyboardDocumentRewriteGuard {
-    static func canReplace(
-        dictatedText: String,
-        contextAtPolishStart: String?,
-        currentContext: String?
-    ) -> Bool {
-        guard !dictatedText.isEmpty,
-              let contextAtPolishStart,
-              let currentContext,
-              contextAtPolishStart == currentContext else {
-            return false
-        }
-        return contextAtPolishStart.hasSuffix(dictatedText)
-    }
-}

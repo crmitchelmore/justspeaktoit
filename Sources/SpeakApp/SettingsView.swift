@@ -48,11 +48,14 @@ struct SettingsView: View {
   @State var showSystemPromptPreview = false
   @State var systemPromptPreview = ""
   @State var showingConfigTransfer = false
+  @State var showingReleaseNotes = false
   @State private var soundPreviewPlayer: RecordingSoundPlayer?
   @State var huggingFaceRepoID: String = "argmaxinc/whisperkit-coreml"
   @State var huggingFaceModelName: String = "tiny"
   @State var huggingFaceImportError: String?
   @State var isLocalTranscriptionAdvancedExpanded = false
+  /// Tracks the newest starter-preset download so a stale one cannot activate.
+  @State var starterPresetActivationTask: Task<Void, Never>?
   #if !APP_STORE
   @State var streamingHuggingFaceRepoID: String =
     "csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26"
@@ -69,48 +72,9 @@ struct SettingsView: View {
   #endif
   let openRouterKeyIdentifier = "openrouter.apiKey"
 
-  enum TranscriptionLocation: String, CaseIterable, Identifiable {
-    case remote
-    case local
-
-    var id: String { rawValue }
-
-    var displayName: String {
-      switch self {
-      case .remote: return "Remote"
-      case .local: return "Local"
-      }
-    }
-  }
-
-  enum RemoteTranscriptionMode: String, CaseIterable, Identifiable {
-    case streaming
-    case batch
-
-    var id: String { rawValue }
-
-    var displayName: String {
-      switch self {
-      case .streaming: return "Remote Streaming"
-      case .batch: return "Remote Batch"
-      }
-    }
-
-  }
-
-  enum LocalTranscriptionSource: String, CaseIterable, Identifiable {
-    case apple
-    case downloaded
-
-    var id: String { rawValue }
-
-    var displayName: String {
-      switch self {
-      case .apple: return "Apple Speech"
-      case .downloaded: return "Downloaded Model"
-      }
-    }
-  }
+  typealias TranscriptionLocation = AppSettings.TranscriptionLocation
+  typealias RemoteTranscriptionMode = AppSettings.RemoteTranscriptionMode
+  typealias LocalTranscriptionSource = AppSettings.LocalTranscriptionSource
 
   enum StarterPresetInstallState: Equatable {
     case notInstalled
@@ -515,56 +479,22 @@ struct SettingsView: View {
 
   var transcriptionLocationBinding: Binding<TranscriptionLocation> {
     Binding(
-      get: {
-        isLocalTranscriptionSelected ? .local : .remote
-      },
-      set: { location in
-        switch location {
-        case .remote:
-          if isLocalTranscriptionSelected {
-            settings.liveTranscriptionModel = ModelCatalog.defaultRemoteLiveTranscriptionModel
-              ?? settings.liveTranscriptionModel
-          }
-          settings.transcriptionMode = .liveNative
-        case .local:
-          settings.liveTranscriptionModel = ModelCatalog.defaultOnDeviceLiveTranscriptionModel
-          settings.transcriptionMode = .liveNative
-        }
-      }
+      get: { settings.transcriptionLocation },
+      set: { settings.selectTranscriptionLocation($0) }
     )
   }
 
   var localTranscriptionSourceBinding: Binding<LocalTranscriptionSource> {
     Binding(
-      get: { isAppleOnDeviceTranscriptionSelected ? .apple : .downloaded },
-      set: { source in
-        switch source {
-        case .apple:
-          settings.liveTranscriptionModel = ModelCatalog.defaultOnDeviceLiveTranscriptionModel
-          settings.transcriptionMode = .liveNative
-        case .downloaded:
-          settings.transcriptionMode = .localModel
-        }
-      }
+      get: { settings.localTranscriptionSource },
+      set: { settings.selectLocalTranscriptionSource($0) }
     )
   }
 
   var remoteTranscriptionModeBinding: Binding<RemoteTranscriptionMode> {
     Binding(
-      get: {
-        settings.transcriptionMode == .batchRemote ? .batch : .streaming
-      },
-      set: { mode in
-        if mode == .streaming {
-          if ModelCatalog.isOnDeviceLiveTranscriptionModel(settings.liveTranscriptionModel) {
-            settings.liveTranscriptionModel = ModelCatalog.defaultRemoteLiveTranscriptionModel
-              ?? settings.liveTranscriptionModel
-          }
-          settings.transcriptionMode = .liveNative
-        } else {
-          settings.transcriptionMode = .batchRemote
-        }
-      }
+      get: { settings.remoteTranscriptionMode },
+      set: { settings.selectRemoteTranscriptionMode($0) }
     )
   }
 
@@ -574,23 +504,13 @@ struct SettingsView: View {
       .replacingOccurrences(of: "Remote ", with: "")
   }
 
-  var isStreamingTranscriptionSelected: Bool {
-    settings.transcriptionMode == .liveNative
-      || (settings.transcriptionMode == .localModel && settings.localTranscriptionMode == .streaming)
-  }
+  var isStreamingTranscriptionSelected: Bool { settings.isStreamingTranscriptionSelected }
 
-  var isAppleOnDeviceTranscriptionSelected: Bool {
-    settings.transcriptionMode == .liveNative
-      && ModelCatalog.isOnDeviceLiveTranscriptionModel(settings.liveTranscriptionModel)
-  }
+  var isAppleOnDeviceTranscriptionSelected: Bool { settings.isAppleOnDeviceTranscriptionSelected }
 
-  var isLocalTranscriptionSelected: Bool {
-    settings.transcriptionMode == .localModel || isAppleOnDeviceTranscriptionSelected
-  }
+  var isLocalTranscriptionSelected: Bool { settings.isLocalTranscriptionSelected }
 
-  var isRemoteStreamingTranscriptionSelected: Bool {
-    settings.transcriptionMode == .liveNative && !isAppleOnDeviceTranscriptionSelected
-  }
+  var isRemoteStreamingTranscriptionSelected: Bool { settings.isRemoteStreamingTranscriptionSelected }
 
   var cloudPostProcessingModelBinding: Binding<String> {
     Binding(

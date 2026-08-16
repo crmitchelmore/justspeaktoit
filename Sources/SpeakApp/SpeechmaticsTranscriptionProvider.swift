@@ -195,7 +195,7 @@ final class SpeechmaticsLiveTranscriber: @unchecked Sendable {
   private let sampleRate: Int
   private let session: URLSession
   private let bufferPool: AudioBufferPool
-  private let logger = Logger(subsystem: "com.speak.app", category: "SpeechmaticsLiveTranscriber")
+  private let logger = SpeakLogger.logger(category: "SpeechmaticsLiveTranscriber")
   private let stateLock = NSLock()
   private let pendingSendGroup = DispatchGroup()
   private let outboundSendQueue = DispatchQueue(label: "com.speak.app.speechmatics.outbound")
@@ -388,9 +388,17 @@ final class SpeechmaticsLiveTranscriber: @unchecked Sendable {
   static func startRecognitionPayload(
     language: String? = nil,
     model: String = "enhanced",
-    sampleRate: Int = 16000
+    sampleRate: Int = 16000,
+    systemLocaleIdentifier: String = Locale.current.identifier
   ) throws -> String {
-    let languageCode = language.map(\.localeLanguageCode) ?? "en"
+    // Speechmatics realtime needs a concrete language, so Automatic (`nil`)
+    // resolves to the system language. A hard-coded `en` here transcribes a
+    // French speaker with the English model (issue #696).
+    let resolved = TranscriptionLanguageCatalog.localeIdentifier(
+      for: TranscriptionLanguageCatalog.normalizedIdentifier(language),
+      systemLocaleIdentifier: systemLocaleIdentifier
+    ).localeLanguageCode
+    let languageCode = resolved.isEmpty ? "en" : resolved
     let payload: [String: Any] = [
       "message": "StartRecognition",
       "audio_format": [

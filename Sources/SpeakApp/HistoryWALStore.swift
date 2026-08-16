@@ -1,4 +1,5 @@
 import Foundation
+import SpeakCore
 import os.log
 
 // MARK: - HistoryWALStore
@@ -14,7 +15,7 @@ actor HistoryWALStore {
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
     private var walHandle: FileHandle?
-    private let log = Logger(subsystem: "com.github.speakapp", category: "HistoryWALStore")
+    private let log = SpeakLogger.logger(category: "HistoryWALStore")
 
     init(storageURL: URL, walURL: URL) {
         self.storageURL = storageURL

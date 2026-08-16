@@ -179,16 +179,26 @@ public enum AppleFoundationModelPolisher {
         AppleLocalModels.supportsFoundationModels
     }
 
+    /// Transcript cleanup: wraps the text in the shared cleanup payload.
     public static func process(text: String, systemPrompt: String) async throws -> String {
+        try await respond(
+            systemPrompt: systemPrompt,
+            userMessage: TranscriptCleanupPolicy.userMessage(transcript: text)
+        )
+    }
+
+    /// Sends an explicit prompt pair verbatim. Used when the caller (for
+    /// example the Polish Text App Intent with a custom prompt) has already
+    /// decided the exact system prompt and user message; wrapping the text in
+    /// the cleanup payload here would fight instructions like "summarise this".
+    public static func respond(systemPrompt: String, userMessage: String) async throws -> String {
         #if canImport(FoundationModels)
         if #available(macOS 26.0, iOS 26.0, *) {
             guard SystemLanguageModel.default.isAvailable else {
                 throw AppleLocalModelError.foundationModelUnavailable
             }
             let session = LanguageModelSession(instructions: systemPrompt)
-            let response = try await session.respond(
-                to: TranscriptCleanupPolicy.userMessage(transcript: text)
-            )
+            let response = try await session.respond(to: userMessage)
             return response.content.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         #endif

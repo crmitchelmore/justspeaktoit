@@ -13,14 +13,20 @@ let package = Package(
         .library(name: "SpeakCore", targets: ["SpeakCore"]),
         .library(name: "SpeakSync", targets: ["SpeakSync"]),
         .library(name: "SpeakiOSLib", targets: ["SpeakiOSLib"]),
+        .library(name: "SpeakAutomationKit", targets: ["SpeakAutomationKit"]),
         .executable(name: "SpeakApp", targets: ["SpeakApp"]),
+        .executable(name: "speak", targets: ["SpeakCLI"]),
         .executable(
             name: "local-transcription-benchmark",
             targets: ["LocalTranscriptionBenchmark"]
         )
     ],
     dependencies: [
-        .package(url: "https://github.com/realm/SwiftLint.git", from: "0.55.0"),
+        // SwiftLint intentionally lives in Tooling/Package.swift, not here: it
+        // pins an exact swift-syntax version that conflicts with
+        // swift-snapshot-testing's constraint, and sharing one graph let a test
+        // dependency silently downgrade the linter (issue #677). Run it via
+        // `make lint` / scripts/swiftlint.sh.
         .package(url: "https://github.com/nicklockwood/SwiftFormat.git", from: "0.53.6"),
         .package(url: "https://github.com/sparkle-project/Sparkle.git", from: "2.6.0"),
         .package(url: "https://github.com/getsentry/sentry-cocoa.git", from: "9.3.0"),
@@ -47,6 +53,10 @@ let package = Package(
         ),
         .target(
             name: "SpeakCore",
+            resources: [
+                // Bundled release notes so the in-app "What's New" screen works offline.
+                .process("Resources")
+            ],
             swiftSettings: [
                 // Strict concurrency checking (warnings-only under Swift 5 language
                 // mode). Tuist consumes this same package target, so the setting
@@ -63,6 +73,19 @@ let package = Package(
             name: "SpeakiOSLib",
             dependencies: ["SpeakCore", "SpeakSync"],
             path: "Sources/SpeakiOS"
+        ),
+        // Automation client library: parsing, rendering, socket client and the
+        // MCP request handler. Split from the `speak` executable so every layer
+        // is unit-testable without spawning a process.
+        .target(
+            name: "SpeakAutomationKit",
+            dependencies: ["SpeakCore"],
+            path: "Sources/SpeakAutomationKit"
+        ),
+        .executableTarget(
+            name: "SpeakCLI",
+            dependencies: ["SpeakAutomationKit", "SpeakCore"],
+            path: "Sources/SpeakCLI"
         ),
         .executableTarget(
             name: "SpeakApp",
@@ -98,12 +121,23 @@ let package = Package(
             dependencies: ["SpeakCore"]
         ),
         .testTarget(
+            name: "SpeakHotKeysTests",
+            dependencies: ["SpeakHotKeys"]
+        ),
+        .testTarget(
             name: "SpeakSyncTests",
             dependencies: ["SpeakSync"]
         ),
         .testTarget(
             name: "SpeakAppTests",
-            dependencies: ["SpeakApp", "SpeakHotKeys"]
+            dependencies: [
+                "SpeakApp",
+                "SpeakAutomationKit",
+                "SpeakHotKeys",
+                // The Sentry event tests inspect the serialised payload, so the
+                // test target needs the SDK types, not just SpeakApp.
+                .product(name: "Sentry", package: "sentry-cocoa")
+            ]
         ),
         .testTarget(
             name: "SpeakAppSnapshotTests",
@@ -116,6 +150,10 @@ let package = Package(
         .testTarget(
             name: "SpeakiOSTests",
             dependencies: ["SpeakiOSLib"]
+        ),
+        .testTarget(
+            name: "SpeakAutomationKitTests",
+            dependencies: ["SpeakAutomationKit", "SpeakCore"]
         ),
         .testTarget(
             name: "LocalTranscriptionBenchmarkTests",

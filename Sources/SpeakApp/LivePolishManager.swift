@@ -14,7 +14,7 @@ final class LivePolishManager: ObservableObject {
 
   private let client: ChatLLMClient
   private let settings: AppSettings
-  private let log = Logger(subsystem: "com.github.speakapp", category: "LivePolish")
+  private let log = SpeakLogger.logger(category: "LivePolish")
 
   /// Debounce interval in seconds (reads from settings)
   private var debounceInterval: TimeInterval {

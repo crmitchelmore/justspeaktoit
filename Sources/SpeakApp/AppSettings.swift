@@ -327,6 +327,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     case streamingInsertionEnabled
     case clipboardInsertionTriggers
     case enableSendToMac
+    case enableAutomationServer
     case autoCorrectionsEnabled
     case autoCorrectionsPromotionThreshold
     case recordingSoundsEnabled
@@ -342,6 +343,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     case selectedHotKey
     case paidAccessRoutingEnabled
     case simpleModelChoices
+    case rememberedLocalTranscriptionSource
+    case rememberedRemoteTranscriptionMode
   }
 
   private static let defaultLocalTranscriptionModel = "local/whisperkit/tiny"
@@ -364,8 +367,42 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   @Published var liveTranscriptionModel: String {
     didSet {
       store(liveTranscriptionModel, key: .liveTranscriptionModel)
+      // Session-scoped profile overrides must not rewrite the user's own memory.
+      if !suppressesPersistence {
+        liveTranscriptionSelection.remember(liveTranscriptionModel)
+      }
       enforceSpeedModeConstraints()
     }
+  }
+
+  /// True once the user has explicitly chosen a live transcription model.
+  /// Launch-time auto-configuration checks this so a default can only fill a
+  /// gap, never replace a real choice.
+  var hasExplicitLiveTranscriptionModelChoice: Bool {
+    defaults.object(forKey: DefaultsKey.liveTranscriptionModel.rawValue) != nil
+  }
+
+  /// Per-placement memory of the user's live transcription model choices, so
+  /// switching between local and remote never discards the other side's model.
+  private(set) var liveTranscriptionSelection: LiveTranscriptionSelection {
+    didSet { persistLiveTranscriptionSelection() }
+  }
+
+  /// The local source the user last chose, remembered while they are on the
+  /// remote side so returning to Local restores it.
+  @Published var rememberedLocalTranscriptionSource: LocalTranscriptionSource {
+    didSet { store(rememberedLocalTranscriptionSource.rawValue, key: .rememberedLocalTranscriptionSource) }
+  }
+
+  /// The remote sub-mode the user last chose, remembered while they are on the
+  /// local side so returning to Remote restores it.
+  @Published var rememberedRemoteTranscriptionMode: RemoteTranscriptionMode {
+    didSet { store(rememberedRemoteTranscriptionMode.rawValue, key: .rememberedRemoteTranscriptionMode) }
+  }
+
+  private func persistLiveTranscriptionSelection() {
+    guard !suppressesPersistence else { return }
+    liveTranscriptionSelection.persist(to: defaults)
   }
 
   @Published var batchTranscriptionModel: String {
@@ -578,7 +615,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
         }
       }
     } catch {
-      print("[AppSettings] Failed to update login item: \(error)")
+      log.error("Failed to update login item: \(error.localizedDescription, privacy: .public)")
     }
   }
 
@@ -825,6 +862,18 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     didSet { store(enableSendToMac, key: .enableSendToMac) }
   }
 
+  // MARK: - Automation (speak CLI / MCP)
+
+  /// Enable the local automation socket used by the `speak` CLI and the bundled
+  /// MCP server.
+  ///
+  /// Off by default and deliberately opt-in: the socket lets any process running
+  /// as this user start the microphone and read past transcripts, so it is not a
+  /// capability to hand out without the user asking for it.
+  @Published var enableAutomationServer: Bool {
+    didSet { store(enableAutomationServer, key: .enableAutomationServer) }
+  }
+
   // MARK: - Auto-Corrections
 
   /// Enable automatic detection of user corrections after transcription
@@ -883,7 +932,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   }
 
   private let defaults: UserDefaults
-  private let log = Logger(subsystem: "com.github.speakapp", category: "AppSettings")
+  private let log = SpeakLogger.logger(category: "AppSettings")
 
   /// When true, `store` skips writing to `UserDefaults` while the published
   /// in-memory values still update. Used by `SessionProfileApplier` so
@@ -901,10 +950,11 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       AppVisualDensity(
         rawValue: defaults.string(forKey: DefaultsKey.visualDensity.rawValue)
           ?? AppVisualDensity.normal.rawValue) ?? .normal
-    transcriptionMode =
+    let loadedTranscriptionMode =
       TranscriptionMode(
         rawValue: defaults.string(forKey: DefaultsKey.transcriptionMode.rawValue)
           ?? TranscriptionMode.liveNative.rawValue) ?? .liveNative
+    transcriptionMode = loadedTranscriptionMode
     let liveModel = defaults.string(forKey: DefaultsKey.liveTranscriptionModel.rawValue)
       ?? AppleLocalModels.preferredSpeechModelID
     let legacyAssemblyAILiveIDs: Set<String> = [
@@ -927,6 +977,15 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       migratedLive = liveModel
     }
     liveTranscriptionModel = ModelCatalog.normalizedLiveTranscriptionModel(migratedLive)
+    liveTranscriptionSelection = LiveTranscriptionSelection(defaults: defaults)
+    rememberedLocalTranscriptionSource =
+      LocalTranscriptionSource(
+        rawValue: defaults.string(forKey: DefaultsKey.rememberedLocalTranscriptionSource.rawValue) ?? ""
+      ) ?? (loadedTranscriptionMode == .localModel ? .downloaded : .apple)
+    rememberedRemoteTranscriptionMode =
+      RemoteTranscriptionMode(
+        rawValue: defaults.string(forKey: DefaultsKey.rememberedRemoteTranscriptionMode.rawValue) ?? ""
+      ) ?? (loadedTranscriptionMode == .batchRemote ? .batch : .streaming)
     batchTranscriptionModel =
       Self.normalizedBatchModel(
         defaults.string(forKey: DefaultsKey.batchTranscriptionModel.rawValue))
@@ -1134,6 +1193,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     // Transport Settings
     enableSendToMac =
       defaults.object(forKey: DefaultsKey.enableSendToMac.rawValue) as? Bool ?? false
+    enableAutomationServer =
+      defaults.object(forKey: DefaultsKey.enableAutomationServer.rawValue) as? Bool ?? false
 
     // History Settings
     historyFlushInterval =
@@ -1168,6 +1229,12 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     ensureRecordingsDirectoryExists()
     applyAppVisibility()
     updateLoginItemRegistration()
+    // `didSet` never fires during init, so seed and persist the per-placement
+    // model memory explicitly. Existing installs upgrade with their current
+    // model remembered for the placement it belongs to; the other placement
+    // stays empty until the user chooses there.
+    liveTranscriptionSelection.rememberIfMissing(liveTranscriptionModel)
+    persistLiveTranscriptionSelection()
   }
 
   func registerAPIKeyIdentifier(_ identifier: String) {

@@ -3,6 +3,9 @@ import Combine
 import Foundation
 import SpeakCore
 import SpeakSync
+import os.log
+
+private let logger = SpeakLogger.logger(category: "WireUp")
 
 // swiftlint:disable file_length
 
@@ -12,6 +15,12 @@ import SpeakSync
 @MainActor
 // swiftlint:disable:next type_body_length
 final class AppEnvironment: ObservableObject {
+  /// Process-wide access point for the App Intents (Shortcuts) surface, set at
+  /// bootstrap. Intents can fire before the SwiftUI scene has bootstrapped the
+  /// environment (e.g. when Shortcuts launches the app), so it is optional and
+  /// intent handlers wait briefly for it — see `AutomationIntents.swift`.
+  fileprivate(set) static var shared: AppEnvironment?
+
   let settings: AppSettings
   let permissions: PermissionsManager
   let history: HistoryManager
@@ -34,6 +43,10 @@ final class AppEnvironment: ObservableObject {
   let profiles: DictationProfileStore
   let main: MainManager
   let transportServer: TransportServer
+  /// Local automation socket for the `speak` CLI and the bundled MCP server.
+  /// Created here (not injected) because it has no dependencies of its own; its
+  /// handler is attached in `configureServices` once the managers exist.
+  let automationServer = AutomationServer()
   private let hudPresenter: HUDWindowPresenter
 
   /// Coordinator state for cross-view navigation. When set, MainView selects
@@ -41,6 +54,11 @@ final class AppEnvironment: ObservableObject {
   /// matching `.id("transcription-<provider.id>")` section.
   @Published var apiKeysScrollTarget: String?
   @Published var sidebarNavigationTarget: SidebarItem?
+
+  /// Bridges HistoryManager mutations to CloudKit history sync. Retained here
+  /// because `HistorySyncEngine` only holds its delegate weakly; without this
+  /// owner the adapter deallocates after bootstrap and sync stops (#685).
+  fileprivate(set) var historySyncAdapter: MacHistorySyncAdapter?
 
   private(set) var statusBarController: StatusBarController?
   /// Voice-edit controller; created by `installVoiceEdit()` in AppEnvironment+VoiceEdit.
@@ -106,9 +124,6 @@ final class AppEnvironment: ObservableObject {
     self.transportServer = transportServer
     self.hudPresenter = hudPresenter
   }
-
-  /// Alias for permissions manager (for API consistency)
-  var permissionsManager: PermissionsManager { permissions }
 
   /// Installs the status bar controller and the observer that keeps it in sync
   /// with the visibility settings. Safe to call more than once; it is
@@ -315,6 +330,9 @@ final class AppEnvironment: ObservableObject {
 }
 
 extension AppEnvironment {
+  /// Alias for permissions manager (for API consistency)
+  var permissionsManager: PermissionsManager { permissions }
+
   fileprivate func switchToQuickVoice(_ index: Int) {
     let favorites = settings.ttsFavoriteVoices
     let arrayIndex = index - 1
@@ -345,6 +363,48 @@ extension AppEnvironment {
   }
 }
 
+// MARK: - Automation
+
+extension AppEnvironment {
+  /// Opens the local automation socket when the user has opted in.
+  ///
+  /// Off by default: the socket lets any process running as this user start the
+  /// microphone and read past transcripts, so it stays closed until asked for.
+  /// Best-effort at launch — a socket that cannot bind puts the preference back
+  /// to off rather than failing startup, exactly as "Send to Mac" does.
+  func startAutomationServerIfEnabled() {
+    guard settings.enableAutomationServer else { return }
+    do {
+      try startAutomationServer()
+    } catch {
+      SpeakLogger.logError(error, context: "Automation socket startup", logger: SpeakLogger.transport)
+      settings.enableAutomationServer = false
+    }
+  }
+
+  /// Opens the socket, wiring it onto the same managers the UI drives.
+  ///
+  /// Throws rather than logging so the Settings toggle can put the stored
+  /// preference back in step with reality.
+  func startAutomationServer() throws {
+    let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+    try automationServer.start(
+      handler: AppAutomationHandler(
+        main: main,
+        history: history,
+        transcription: transcription,
+        appVersion: version ?? "unknown"
+      )
+    )
+  }
+
+  /// Closes the socket, so nothing local can drive dictation once the user
+  /// turns automation off.
+  func stopAutomationServer() {
+    automationServer.stop()
+  }
+}
+
 @MainActor
 enum WireUp {
 
@@ -354,6 +414,10 @@ enum WireUp {
     var settingsOverride: AppSettings?
     var permissionsOverride: PermissionsManager?
     var keychainServiceOverride: String?
+    /// Whether to clear the files a pre-warmed recorder staged in an earlier
+    /// run. Only the real app does this: a test bootstrap resolves the user's
+    /// own recordings directory, which it must never touch.
+    var sweepsStagedLeftovers = true
 
     static let `default` = BootstrapOptions()
   }
@@ -374,6 +438,9 @@ enum WireUp {
       permissionsManager: permissions,
       audioDeviceManager: audioDevices
     )
+    if options.sweepsStagedLeftovers {
+      AudioFileManager.scheduleStagedLeftoverSweep(in: settings.recordingsDirectory)
+    }
     let secureStorage = SecureAppStorage(
       permissionsManager: permissions,
       appSettings: settings,
@@ -479,6 +546,7 @@ enum WireUp {
     )
 
     configureServices(environment: environment, settings: settings, secureStorage: secureStorage)
+    AppEnvironment.shared = environment
     return environment
   }
 
@@ -527,11 +595,14 @@ enum WireUp {
       }
     }
 
+    environment.startAutomationServerIfEnabled()
+
     #if APP_STORE
     NSApp.registerForRemoteNotifications()
     #endif
 
     let syncAdapter = MacHistorySyncAdapter(historyManager: environment.history)
+    environment.historySyncAdapter = syncAdapter
     Task { await syncAdapter.start() }
 
     Task { await secureStorage.preloadTrackedSecrets() }
@@ -544,7 +615,7 @@ enum WireUp {
         do {
           try await keySync.syncNow()
         } catch {
-          print("[WireUp] CloudKit API-key sync failed: \(error.localizedDescription)")
+          logger.error("CloudKit API-key sync failed: \(error.localizedDescription, privacy: .public)")
         }
       }
     }
@@ -552,7 +623,7 @@ enum WireUp {
       await configureDefaultTranscriptionProvider(settings: settings, secureStorage: secureStorage)
     }
 
-    print("[WireUp] AppEnvironment.bootstrap complete")
+    logger.info("AppEnvironment.bootstrap complete")
   }
 
   // MARK: - TTS Factory
@@ -585,14 +656,11 @@ enum WireUp {
     settings: AppSettings,
     secureStorage: SecureAppStorage
   ) async {
-    // Only configure if user hasn't explicitly set a preference
-    // Check if it's still the default Apple value
-    let currentModel = settings.liveTranscriptionModel
-    let isDefaultApple = AppleLocalModels.isAppleSpeechModel(currentModel)
-
-    // If user has already changed from default, respect their choice
-    guard isDefaultApple else {
-      print("[WireUp] User has custom transcription model, skipping auto-config")
+    // Only configure if the user has never chosen a live transcription model.
+    // Checking the stored choice (rather than "is it still Apple?") means a
+    // deliberate Apple Speech selection survives every launch.
+    guard !settings.hasExplicitLiveTranscriptionModelChoice else {
+      logger.info("User has chosen a transcription model, skipping auto-config")
       return
     }
 
@@ -601,11 +669,17 @@ enum WireUp {
 
     if hasDeepgramKey {
       await MainActor.run {
+        // Re-check after the keychain await: the user may have chosen a model
+        // while this task was suspended, and that choice must win.
+        guard !settings.hasExplicitLiveTranscriptionModelChoice else {
+          logger.info("User chose a transcription model during auto-config, skipping")
+          return
+        }
         settings.liveTranscriptionModel = "deepgram/nova-3-streaming"
-        print("[WireUp] Deepgram API key found, setting as default transcription provider")
+        logger.info("Deepgram API key found, setting as default transcription provider")
       }
     } else {
-      print("[WireUp] No Deepgram API key found, using Apple on-device transcription as default")
+      logger.info("No Deepgram API key found, using Apple on-device transcription as default")
     }
   }
 }

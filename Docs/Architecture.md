@@ -79,7 +79,7 @@ graph TD
 ## Data Flow Summary
 
 1. **Initiation**: A hotkey gesture or UI button triggers `MainManager.startSession`, which validates settings and spins up recording.
-2. **Recording**: `AudioFileManager` begins streaming audio; optional live transcription is started via `TranscriptionManager` using the current audio input from `AudioInputDeviceManager`. `HUDManager` enters `.recording`.
+2. **Recording**: `RecordingStartSequencer` brings capture up before the user is told anything: `AudioFileManager` must confirm the recorder is live, and streaming modes must have their audio tap running, *before* the start cue sounds. `HUDManager` enters `.recording` on the trigger, and the start timeline (capture-ready / stream-ready / cue offsets) is logged and appended to the session's history events. Audio captured while a provider's WebSocket is still connecting is held by `StreamingAudioPreroll` and replayed in order, so no opening speech is lost.
 3. **Live Feedback**: `TranscriptionManager` publishes partial text for live preview. Any permission errors are surfaced immediately through `HUDManager` and `MainManager` state.
 4. **Submission**: When recording stops, `MainManager` switches to `.processing`, asks `TranscriptionManager` to run batch transcription using either a provider client from `TranscriptionProviderRegistry` or the OpenRouter fallback.
 5. **Lexicon & Post-Processing**: Completed transcripts pass through `PersonalLexiconService` for substitutions and, if enabled, `PostProcessingManager` for LLM clean-up. HUD advances through `.transcribing` and `.postProcessing`.

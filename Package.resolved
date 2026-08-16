@@ -10,24 +10,6 @@
       }
     },
     {
-      "identity" : "collectionconcurrencykit",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/JohnSundell/CollectionConcurrencyKit.git",
-      "state" : {
-        "revision" : "b4f23e24b5a1bff301efc5e70871083ca029ff95",
-        "version" : "0.2.0"
-      }
-    },
-    {
-      "identity" : "cryptoswift",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/krzyzanowskim/CryptoSwift.git",
-      "state" : {
-        "revision" : "e45a26384239e028ec87fbcc788f513b67e10d8f",
-        "version" : "1.9.0"
-      }
-    },
-    {
       "identity" : "fluidaudio",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/FluidInference/FluidAudio.git",
@@ -43,15 +25,6 @@
       "state" : {
         "revision" : "d27a0ddf0cd1bc90ab038f5781fddc39b894430e",
         "version" : "9.25.0"
-      }
-    },
-    {
-      "identity" : "sourcekitten",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/jpsim/SourceKitten.git",
-      "state" : {
-        "revision" : "731ffe6a35344a19bab00cdca1c952d5b4fee4d8",
-        "version" : "0.37.2"
       }
     },
     {
@@ -109,15 +82,6 @@
       }
     },
     {
-      "identity" : "swift-filename-matcher",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/ileitch/swift-filename-matcher",
-      "state" : {
-        "revision" : "eef5ac0b6b3cdc64b3039b037bed2def8a1edaeb",
-        "version" : "2.0.1"
-      }
-    },
-    {
       "identity" : "swift-jinja",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/huggingface/swift-jinja.git",
@@ -140,8 +104,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/swiftlang/swift-syntax",
       "state" : {
-        "revision" : "15bf440e9a1e105996ae66a1446e91ffe0b3f8e9",
-        "version" : "604.0.0-prerelease-2025-12-15"
+        "revision" : "79e4b74a295b6eb74a8b585e3a39d29e70c1dbd1",
+        "version" : "603.0.2"
       }
     },
     {
@@ -163,48 +127,12 @@
       }
     },
     {
-      "identity" : "swiftlint",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/realm/SwiftLint.git",
-      "state" : {
-        "revision" : "9120756b6e20e483c35433c41a4c4a9d32fc898b",
-        "version" : "0.63.1"
-      }
-    },
-    {
-      "identity" : "swiftytexttable",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/scottrhoyt/SwiftyTextTable.git",
-      "state" : {
-        "revision" : "c6df6cf533d120716bff38f8ff9885e1ce2a4ac3",
-        "version" : "0.9.0"
-      }
-    },
-    {
-      "identity" : "swxmlhash",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/drmohundro/SWXMLHash.git",
-      "state" : {
-        "revision" : "a853604c9e9a83ad9954c7e3d2a565273982471f",
-        "version" : "7.0.2"
-      }
-    },
-    {
       "identity" : "xctest-dynamic-overlay",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/pointfreeco/xctest-dynamic-overlay",
       "state" : {
         "revision" : "8f6abcf4c8950e2679d5b2fee4ca284fd7c34886",
         "version" : "1.11.0"
-      }
-    },
-    {
-      "identity" : "yams",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/jpsim/Yams.git",
-      "state" : {
-        "revision" : "d41ba4e7164c0838c6d48351f7575f7f762151fe",
-        "version" : "6.1.0"
       }
     },
     {

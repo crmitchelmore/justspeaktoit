@@ -4,7 +4,7 @@ import Foundation
 
 /// A candidate correction detected from user edits after transcription insertion.
 /// When seen multiple times, candidates are promoted to PersonalLexiconRules.
-public struct AutoCorrectionCandidate: Identifiable, Codable, Equatable {
+public struct AutoCorrectionCandidate: Identifiable, Codable, Equatable, Sendable {
   public let id: UUID
   public var original: String        // The word(s) from transcription that was corrected
   public var corrected: String       // What the user changed it to
@@ -132,7 +132,7 @@ public struct WordChange: Equatable, Hashable {
 // MARK: - Rule Source
 
 /// Indicates how a PersonalLexiconRule was created.
-public enum PersonalLexiconRuleSource: String, Codable {
+public enum PersonalLexiconRuleSource: String, Codable, Sendable {
   case manual     // User created manually
   case automatic  // Auto-promoted from correction candidate
 }

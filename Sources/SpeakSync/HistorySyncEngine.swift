@@ -157,6 +157,14 @@ public final class HistorySyncEngine: ObservableObject {
         guard state.isCloudAvailable else {
             throw SyncError.cloudUnavailable
         }
+        // Without a delegate the acknowledgement cannot be persisted, so the
+        // entry would upload again after relaunch. Fail before touching the
+        // transport and leave the entry pending.
+        guard delegate != nil else {
+            let syncError = SyncError.delegateUnavailable
+            state.error = syncError
+            throw syncError
+        }
         let result = await transport.upload(entries: [entry])
         await applyUploadResult(result)
         state.pendingUploadCount = delegate?.pendingEntries().count ?? 0

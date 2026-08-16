@@ -111,7 +111,7 @@ jobs:
       - name: Filter changed paths
         # No checkout needed: on pull_request events the action lists changed
         # files via the GitHub API.
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@v4
         id: filter
         with:
           filters: |

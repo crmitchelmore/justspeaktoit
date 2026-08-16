@@ -134,4 +134,46 @@ final class CaptureHealthSnapshotTests: XCTestCase {
     manager.updateCaptureHealth(second)
     XCTAssertEqual(manager.captureHealth, second)
   }
+
+  // MARK: - Custom streaming source name resolution (#704)
+
+  #if !APP_STORE
+  func testCustomStreamingSourceName_preservesConfiguredNameExactly() {
+    // The slug-based ID rewrites case and punctuation ("My_ASR.v2" ->
+    // "my-asr-v2"); resolution must return the stored name untouched.
+    let source = LocalStreamingModelSource(repoID: "acme/models", modelName: "My_ASR.v2")
+    XCTAssertNotEqual(ModelCatalog.friendlyName(for: source.id), "My_ASR.v2")
+    XCTAssertEqual(
+      MainManager.customStreamingSourceName(for: source.id, in: [source]),
+      "My_ASR.v2"
+    )
+  }
+
+  func testCustomStreamingSourceName_matchesCorrectSourceAmongMany() {
+    let first = LocalStreamingModelSource(repoID: "acme/models", modelName: "Alpha-EN")
+    let second = LocalStreamingModelSource(repoID: "acme/models", modelName: "Beta-DE")
+    XCTAssertEqual(
+      MainManager.customStreamingSourceName(for: second.id, in: [first, second]),
+      "Beta-DE"
+    )
+  }
+
+  func testCustomStreamingSourceName_unknownID_returnsNilForLegacyFallback() {
+    let source = LocalStreamingModelSource(repoID: "acme/models", modelName: "Alpha-EN")
+    XCTAssertNil(
+      MainManager.customStreamingSourceName(
+        for: "local/streaming/huggingface/other/model",
+        in: [source]
+      )
+    )
+    XCTAssertNil(MainManager.customStreamingSourceName(for: source.id, in: []))
+  }
+
+  func testCustomStreamingSourceName_blankStoredName_returnsNil() {
+    // Sources decoded from legacy metadata may carry an empty name; the
+    // resolver must decline so callers use the slug-derived fallback.
+    let source = LocalStreamingModelSource(repoID: "acme/models", modelName: "   ")
+    XCTAssertNil(MainManager.customStreamingSourceName(for: source.id, in: [source]))
+  }
+  #endif
 }

@@ -66,13 +66,17 @@ install-verify: release ## Build release, install to /Applications, launch and v
 preflight: test-all verify ## Full pre-release check (tests + launch verification)
 
 .PHONY: lint
-lint: ## Run strict SwiftLint against the checked-in debt baseline
-	swift package plugin --allow-writing-to-package-directory swiftlint --strict --baseline .swiftlint-baseline.json
+lint: ## Run strict SwiftLint (isolated Tooling graph) against the checked-in debt baseline
+	./scripts/swiftlint.sh lint --strict --baseline .swiftlint-baseline.json
 
 .PHONY: format
 format: ## Auto-fix formatting and lint violations where possible
 	swift package plugin --allow-writing-to-package-directory swiftformat --recursive
-	swift package plugin --allow-writing-to-package-directory swiftlint --fix --format
+	./scripts/swiftlint.sh lint --fix --format
+
+.PHONY: update-tooling
+update-tooling: ## Intentionally upgrade the lint toolchain pinned in Tooling/Package.resolved
+	swift package --package-path Tooling update
 
 .PHONY: verify-checksums
 verify-checksums: ## Verify binary XCFramework and package checksums

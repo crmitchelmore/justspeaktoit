@@ -112,9 +112,11 @@ The iOS app is built via Xcode but sources come from Swift packages:
 
 ### Linting
 ```bash
-swift package plugin --allow-writing-to-package-directory swiftlint --strict --target SpeakApp
+make lint                                          # strict SwiftLint against the baseline
+./scripts/swiftlint.sh lint --strict Sources/SpeakApp  # lint a subset
 swift package plugin --allow-writing-to-package-directory swiftformat --target SpeakApp
 ```
+- SwiftLint resolves through the isolated `Tooling/` graph (pinned in `Tooling/Package.resolved`) so app/test dependency changes cannot downgrade the linter; upgrade it intentionally with `make update-tooling`.
 - CI SwiftLint also runs with `.swiftlint-baseline.json`; the baseline is line-number-sensitive, so prefer exact-line inline suppressions when unblocking lint to avoid baseline drift.
 
 ## MCP Tools

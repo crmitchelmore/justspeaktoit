@@ -4,38 +4,68 @@ import Foundation
 import OSLog
 import SpeakCore
 
+/// Live local streaming via FluidAudio's Parakeet EOU model.
+///
+/// Lifecycle is a run-identity state machine (mirroring the `activeRun`
+/// pattern in `SwitchingLiveTranscriber`): every start mints a run ID before
+/// any awaited work, every later allocation and callback requires that ID to
+/// still be current, and stop retires the ID and awaits owned cleanup. This
+/// guarantees a stop during suspended model preparation prevents microphone
+/// activation, late callbacks from a retired run cannot affect a replacement,
+/// and each run produces exactly one terminal delegate outcome (issue #715).
 @MainActor
 final class FluidAudioParakeetLiveController: LiveTranscriptionController {
+  typealias TranscriberProvider = @MainActor () async throws -> any FluidAudioStreamingTranscribing
+  typealias CaptureProvider = @MainActor () -> any FluidAudioAudioCapturing
+
   weak var delegate: LiveTranscriptionSessionDelegate?
-  private(set) var isRunning = false
+
+  private enum Phase: Equatable {
+    case idle
+    case starting
+    case running
+    case stopping
+  }
+
+  var isRunning: Bool { phase == .running }
 
   private let appSettings: AppSettings
   private let permissionsManager: PermissionsManager
   private let audioDeviceManager: AudioInputDeviceManager
   private let modelManager: FluidAudioModelManager
-  private var audioEngine = AVAudioEngine()
+  private let transcriberProvider: TranscriberProvider?
+  private let captureProvider: CaptureProvider
+
+  private var phase: Phase = .idle
+  private var runID: UUID?
+  private var startTask: Task<Void, any Error>?
+  private var capture: (any FluidAudioAudioCapturing)?
   private var audioPump: FluidAudioBufferPump?
   private var transcriptPump: FluidAudioTranscriptPump?
-  private var transcriber: StreamingEouAsrManager?
+  private var transcriber: (any FluidAudioStreamingTranscribing)?
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
   private var currentLanguage: String?
   private var currentModel = FluidAudioParakeetModel.id
   private var streamingStartTime: Date?
   private var latestText = ""
-  private var processingError: Error?
-  private var isStopping = false
+  private var processingError: (any Error)?
+  private var didDeliverFailure = false
   private let logger = SpeakLogger.logger(category: "FluidAudioLive")
 
   init(
     appSettings: AppSettings,
     permissionsManager: PermissionsManager,
     audioDeviceManager: AudioInputDeviceManager,
-    modelManager: FluidAudioModelManager
+    modelManager: FluidAudioModelManager,
+    transcriberProvider: TranscriberProvider? = nil,
+    captureProvider: @escaping CaptureProvider = { FluidAudioEngineCapture() }
   ) {
     self.appSettings = appSettings
     self.permissionsManager = permissionsManager
     self.audioDeviceManager = audioDeviceManager
     self.modelManager = modelManager
+    self.transcriberProvider = transcriberProvider
+    self.captureProvider = captureProvider
   }
 
   func configure(language: String?, model: String) {
@@ -44,90 +74,161 @@ final class FluidAudioParakeetLiveController: LiveTranscriptionController {
   }
 
   func start() async throws {
-    guard !isRunning, !isStopping else {
+    guard phase == .idle else {
       throw TranscriptionManagerError.liveSessionAlreadyRunning
     }
-    guard await permissionsManager.ensureGranted(.microphone).isGranted else {
-      throw TranscriptionManagerError.microphonePermissionMissing
-    }
-    if let language = currentLanguage,
-      !language.lowercased().hasPrefix("en") {
-      throw FluidAudioModelError.unsupportedLanguage(language)
-    }
-
-    let transcriber = try await modelManager.makeReadyManager()
-    await transcriber.reset()
-
-    let transcriptPump = FluidAudioTranscriptPump()
-    transcriptPump.start { [weak self] event in
-      await self?.handleTranscriptEvent(event)
-    }
-    self.transcriptPump = transcriptPump
-    await configureCallbacks(for: transcriber, transcriptPump: transcriptPump)
-
+    let run = UUID()
+    runID = run
+    phase = .starting
     latestText = ""
     processingError = nil
-    self.transcriber = transcriber
+    didDeliverFailure = false
 
-    let pump = FluidAudioBufferPump()
-    pump.start(manager: transcriber) { [weak self] error in
-      Task { @MainActor [weak self] in
-        self?.handleProcessingError(error)
-      }
+    // Startup runs in an owned task so a concurrent stop can cancel it and
+    // await its unwinding before tearing down whatever it already allocated.
+    let task = Task { @MainActor [weak self] in
+      guard let self else { throw CancellationError() }
+      try await self.performStart(run: run)
     }
-    audioPump = pump
-
-    let session = await audioDeviceManager.beginUsingPreferredInput()
-    activeInputSession = session
-    audioEngine = AVAudioEngine()
-
+    startTask = task
     do {
-      let inputNode = audioEngine.inputNode
-      inputNode.removeTap(onBus: 0)
-      let inputFormat = inputNode.outputFormat(forBus: 0)
-      guard audioInputFormatIsUsable(inputFormat) else {
-        throw TranscriptionManagerError.noUsableAudioInput
-      }
-      inputNode.installTap(onBus: 0, bufferSize: 2048, format: inputFormat) { [weak pump] buffer, _ in
-        pump?.enqueue(buffer)
-      }
-      try await startAudioEngineAfterInputDeviceSettles(audioEngine)
-      streamingStartTime = Date()
-      isRunning = true
+      try await task.value
+      if startTask == task { startTask = nil }
     } catch {
-      await cleanupAfterFailedStart()
+      if startTask == task { startTask = nil }
+      // When phase is `.stopping` a concurrent stop owns the teardown; it is
+      // already awaiting this task and cleans up once we unwind.
+      if runID == run, phase == .starting {
+        await teardownRunResources()
+        retire(run)
+      }
       throw error
     }
   }
 
   func stop() async {
-    guard isRunning, !isStopping else { return }
-    isStopping = true
-    isRunning = false
+    switch phase {
+    case .idle, .stopping:
+      return
+    case .starting:
+      guard let run = runID else { return }
+      phase = .stopping
+      let task = startTask
+      startTask = nil
+      task?.cancel()
+      _ = try? await task?.value
+      await teardownRunResources()
+      retire(run)
+    case .running:
+      guard let run = runID else { return }
+      await stopRunning(run)
+    }
+  }
 
-    audioEngine.stop()
-    audioEngine.inputNode.removeTap(onBus: 0)
-    let droppedBuffers = await audioPump?.finish() ?? 0
-    reportDroppedBuffers(droppedBuffers)
+  // MARK: - Startup
+
+  private func performStart(run: UUID) async throws {
+    guard await permissionsManager.ensureGranted(.microphone).isGranted else {
+      throw TranscriptionManagerError.microphonePermissionMissing
+    }
+    try ensureActive(run)
+    if let language = currentLanguage,
+      !language.lowercased().hasPrefix("en") {
+      throw FluidAudioModelError.unsupportedLanguage(language)
+    }
+
+    // Each resource is published to `self` immediately upon acquisition so a
+    // stop that cancelled this task can tear everything down after awaiting
+    // our unwinding.
+    let transcriber = try await makeTranscriber()
+    self.transcriber = transcriber
+    try ensureActive(run)
+    await transcriber.resetSession()
+    try ensureActive(run)
+
+    let transcriptPump = FluidAudioTranscriptPump()
+    transcriptPump.start { [weak self] event in
+      await self?.handleTranscriptEvent(event, run: run)
+    }
+    self.transcriptPump = transcriptPump
+    await transcriber.setPartialTranscriptHandler { [weak transcriptPump] text in
+      transcriptPump?.enqueue(.partial(text))
+    }
+    await transcriber.setUtteranceHandler { [weak transcriptPump] utterance in
+      transcriptPump?.enqueue(.utteranceBoundary(utterance))
+    }
+    try ensureActive(run)
+
+    let pump = FluidAudioBufferPump()
+    pump.start(
+      process: { buffer in
+        try await transcriber.streamAudio(buffer)
+      },
+      onError: { [weak self] error in
+        Task { @MainActor [weak self] in
+          self?.handleProcessingError(error, run: run)
+        }
+      }
+    )
+    audioPump = pump
+
+    activeInputSession = await audioDeviceManager.beginUsingPreferredInput()
+    try ensureActive(run)
+
+    let capture = captureProvider()
+    self.capture = capture
+    try await capture.start { [weak pump] buffer in
+      pump?.enqueue(buffer)
+    }
+    try ensureActive(run)
+    streamingStartTime = Date()
+    phase = .running
+  }
+
+  private func makeTranscriber() async throws -> any FluidAudioStreamingTranscribing {
+    if let transcriberProvider {
+      return try await transcriberProvider()
+    }
+    return try await modelManager.makeReadyManager()
+  }
+
+  /// Startup barrier: throws unless `run` is still the live starting run.
+  private func ensureActive(_ run: UUID) throws {
+    try Task.checkCancellation()
+    guard runID == run, phase == .starting else {
+      throw CancellationError()
+    }
+  }
+
+  // MARK: - Stop
+
+  private func stopRunning(_ run: UUID) async {
+    phase = .stopping
+
+    capture?.stop()
+    capture = nil
+
+    let pumpOutcome = await audioPump?.finish() ?? FluidAudioPumpOutcome()
     audioPump = nil
+    logPressureDiagnostics(pumpOutcome)
 
-    if processingError == nil {
+    if pumpOutcome.processingError == nil, processingError == nil {
       await applyLiveStopGrace(appSettings.liveStopGracePeriod)
     }
 
-    let result = await finishTranscription()
+    let result = await finishTranscription(pumpOutcome: pumpOutcome)
 
     if let transcriber {
-      await transcriber.reset()
+      await transcriber.resetSession()
     }
-    self.transcriber = nil
+    transcriber = nil
     await transcriptPump?.finish()
     transcriptPump = nil
     await endActiveInputSession()
 
     let duration = streamingStartTime.map { Date().timeIntervalSince($0) } ?? 0
     streamingStartTime = nil
-    isStopping = false
+    retire(run)
 
     switch result {
     case .success(let finalText):
@@ -141,80 +242,54 @@ final class FluidAudioParakeetLiveController: LiveTranscriptionController {
         duration: duration,
         modelIdentifier: currentModel,
         cost: nil,
-        rawPayload: nil,
+        rawPayload: Self.lossyAudioPayload(for: pumpOutcome),
         debugInfo: nil
       )
       delegate?.liveTranscriber(self, didFinishWith: transcription)
     case .failure(let error):
-      if processingError == nil {
-        delegate?.liveTranscriber(self, didFail: error)
-      }
+      deliverFailureIfNeeded(error)
     }
   }
 
-  private func configureCallbacks(
-    for transcriber: StreamingEouAsrManager,
-    transcriptPump: FluidAudioTranscriptPump
-  ) async {
-    await transcriber.setPartialTranscriptCallback { [weak transcriptPump] text in
-      transcriptPump?.enqueue(.partial(text))
-    }
-    await transcriber.setEouCallback { [weak transcriptPump] utterance in
-      transcriptPump?.enqueue(.utteranceBoundary(utterance))
-    }
-  }
-
-  private func handleTranscriptEvent(_ event: FluidAudioTranscriptEvent) {
-    switch event {
-    case .partial(let text):
-      latestText = text
-      delegate?.liveTranscriber(self, didUpdatePartial: text)
-    case .utteranceBoundary(let utterance):
-      delegate?.liveTranscriber(self, didDetectUtteranceBoundary: utterance)
-    }
-  }
-
-  private func finishTranscription() async -> Result<String, Error> {
-    if let processingError {
-      return .failure(processingError)
+  private func finishTranscription(pumpOutcome: FluidAudioPumpOutcome) async -> Result<String, any Error> {
+    if let error = processingError ?? pumpOutcome.processingError {
+      return .failure(error)
     }
     guard let transcriber else {
       return .failure(FluidAudioModelError.notInstalled)
     }
     do {
-      return .success(try await transcriber.finish())
+      return .success(try await transcriber.finishSession())
     } catch {
       return .failure(error)
     }
   }
 
-  private func handleProcessingError(_ error: Error) {
-    guard processingError == nil else { return }
-    processingError = error
-    delegate?.liveTranscriber(self, didFail: error)
-  }
-
-  private func cleanupAfterFailedStart() async {
-    audioEngine.stop()
-    audioEngine.inputNode.removeTap(onBus: 0)
-    let droppedBuffers = await audioPump?.finish() ?? 0
-    reportDroppedBuffers(droppedBuffers)
-    audioPump = nil
-    if let transcriber {
-      await transcriber.reset()
+  /// Cleanup for runs that never reached `.running`. Publishes no delegate
+  /// outcome: the start path throws to its caller instead.
+  private func teardownRunResources() async {
+    capture?.stop()
+    capture = nil
+    if let pump = audioPump {
+      audioPump = nil
+      logPressureDiagnostics(await pump.finish())
     }
-    transcriber = nil
-    await transcriptPump?.finish()
-    transcriptPump = nil
+    if let transcriber {
+      self.transcriber = nil
+      await transcriber.resetSession()
+    }
+    if let transcriptPump {
+      self.transcriptPump = nil
+      await transcriptPump.finish()
+    }
     await endActiveInputSession()
-    isRunning = false
-    isStopping = false
     streamingStartTime = nil
   }
 
-  private func reportDroppedBuffers(_ count: Int) {
-    guard count > 0 else { return }
-    logger.warning("Dropped \(count, privacy: .public) FluidAudio input buffers while processing lagged")
+  private func retire(_ run: UUID) {
+    guard runID == run else { return }
+    runID = nil
+    phase = .idle
   }
 
   private func endActiveInputSession() async {
@@ -224,149 +299,77 @@ final class FluidAudioParakeetLiveController: LiveTranscriptionController {
   }
 }
 
-private enum FluidAudioTranscriptEvent: Sendable {
-  case partial(String)
-  case utteranceBoundary(String)
-}
+// MARK: - Callbacks
 
-private final class FluidAudioTranscriptPump: @unchecked Sendable {
-  private let lock = NSLock()
-  private var continuation: AsyncStream<FluidAudioTranscriptEvent>.Continuation?
-  private var consumerTask: Task<Void, Never>?
-
-  func start(onEvent: @escaping @Sendable (FluidAudioTranscriptEvent) async -> Void) {
-    let pair = AsyncStream<FluidAudioTranscriptEvent>.makeStream(bufferingPolicy: .unbounded)
-    lock.lock()
-    continuation = pair.continuation
-    lock.unlock()
-    consumerTask = Task {
-      for await event in pair.stream {
-        await onEvent(event)
-      }
+extension FluidAudioParakeetLiveController {
+  private func handleTranscriptEvent(_ event: FluidAudioTranscriptEvent, run: UUID) {
+    guard runID == run else { return }
+    switch event {
+    case .partial(let text):
+      latestText = text
+      delegate?.liveTranscriber(self, didUpdatePartial: text)
+    case .utteranceBoundary(let utterance):
+      delegate?.liveTranscriber(self, didDetectUtteranceBoundary: utterance)
     }
   }
 
-  func enqueue(_ event: FluidAudioTranscriptEvent) {
-    lock.lock()
-    let continuation = continuation
-    lock.unlock()
-    continuation?.yield(event)
+  /// Prompt mid-run failure notification. Terminal-state authority stays with
+  /// `FluidAudioBufferPump.finish()`, so a stop that races this unstructured
+  /// hop still observes the error; the `didDeliverFailure` flag keeps the
+  /// delegate outcome exactly-once either way.
+  private func handleProcessingError(_ error: any Error, run: UUID) {
+    guard runID == run, processingError == nil else { return }
+    processingError = error
+    deliverFailureIfNeeded(error)
   }
 
-  func finish() async {
-    let continuation = takeContinuation()
-    continuation?.finish()
-    await consumerTask?.value
-    consumerTask = nil
-  }
-
-  private func takeContinuation() -> AsyncStream<FluidAudioTranscriptEvent>.Continuation? {
-    lock.lock()
-    let continuation = continuation
-    self.continuation = nil
-    lock.unlock()
-    return continuation
+  private func deliverFailureIfNeeded(_ error: any Error) {
+    guard !didDeliverFailure else { return }
+    didDeliverFailure = true
+    delegate?.liveTranscriber(self, didFail: error)
   }
 }
 
-private final class FluidAudioBufferPump: @unchecked Sendable {
-  private let lock = NSLock()
-  private var continuation: AsyncStream<AVAudioPCMBuffer>.Continuation?
-  private var consumerTask: Task<Void, Never>?
-  private var failed = false
-  private var droppedBufferCount = 0
+// MARK: - Lossy-run accounting
 
-  func start(
-    manager: StreamingEouAsrManager,
-    onError: @escaping @Sendable (Error) -> Void
-  ) {
-    let pair = AsyncStream<AVAudioPCMBuffer>.makeStream(bufferingPolicy: .bufferingNewest(32))
-    lock.lock()
-    continuation = pair.continuation
-    failed = false
-    droppedBufferCount = 0
-    lock.unlock()
+extension FluidAudioParakeetLiveController {
+  private struct LossyAudioMarker: Codable {
+    let provider: String
+    let lossyAudio: Bool
+    let droppedBufferCount: Int
+    let droppedAudioSeconds: Double
+    let queuedBufferHighWaterMark: Int
+  }
 
-    consumerTask = Task {
-      do {
-        for await buffer in pair.stream {
-          _ = try await manager.process(audioBuffer: buffer)
-        }
-      } catch {
-        let continuation = markFailed()
-        continuation?.finish()
-        onError(error)
-      }
+  /// Serialised into `TranscriptionResult.rawPayload` when the bounded queue
+  /// discarded captured audio, so a lossy run is never presented as a fully
+  /// healthy transcript (issue #715).
+  private static func lossyAudioPayload(for outcome: FluidAudioPumpOutcome) -> String? {
+    guard outcome.isLossy else { return nil }
+    let marker = LossyAudioMarker(
+      provider: "fluidaudio-parakeet",
+      lossyAudio: true,
+      droppedBufferCount: outcome.droppedBufferCount,
+      droppedAudioSeconds: (outcome.droppedAudioSeconds * 1000).rounded() / 1000,
+      queuedBufferHighWaterMark: outcome.queuedBufferHighWaterMark
+    )
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    guard let data = try? encoder.encode(marker) else { return nil }
+    return String(data: data, encoding: .utf8)
+  }
+
+  private func logPressureDiagnostics(_ outcome: FluidAudioPumpOutcome) {
+    if outcome.queuedBufferHighWaterMark > 0 {
+      logger.debug(
+        "FluidAudio queue high-water mark: \(outcome.queuedBufferHighWaterMark, privacy: .public) buffers")
     }
-  }
-
-  func enqueue(_ buffer: AVAudioPCMBuffer) {
-    guard let copiedBuffer = Self.copy(buffer) else { return }
-    lock.lock()
-    let continuation = failed ? nil : continuation
-    lock.unlock()
-    guard let continuation else { return }
-    if case .dropped = continuation.yield(copiedBuffer) {
-      lock.lock()
-      droppedBufferCount += 1
-      lock.unlock()
-    }
-  }
-
-  func finish() async -> Int {
-    let continuation = takeContinuation()
-    continuation?.finish()
-    await consumerTask?.value
-    consumerTask = nil
-    return currentDroppedBufferCount()
-  }
-
-  private func markFailed() -> AsyncStream<AVAudioPCMBuffer>.Continuation? {
-    lock.lock()
-    failed = true
-    let continuation = self.continuation
-    self.continuation = nil
-    lock.unlock()
-    return continuation
-  }
-
-  private func takeContinuation() -> AsyncStream<AVAudioPCMBuffer>.Continuation? {
-    lock.lock()
-    let continuation = self.continuation
-    self.continuation = nil
-    lock.unlock()
-    return continuation
-  }
-
-  private func currentDroppedBufferCount() -> Int {
-    lock.lock()
-    let count = droppedBufferCount
-    lock.unlock()
-    return count
-  }
-
-  private static func copy(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
-    let frameLength = buffer.frameLength
-    guard let copy = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: frameLength) else {
-      return nil
-    }
-    copy.frameLength = frameLength
-    let source = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: buffer.audioBufferList))
-    let destination = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: copy.audioBufferList))
-    for index in 0..<min(source.count, destination.count) {
-      guard let sourceData = source[index].mData, let destinationData = destination[index].mData else {
-        continue
-      }
-      let copiedByteCount = min(
-        Int(source[index].mDataByteSize),
-        Int(destination[index].mDataByteSize)
-      )
-      destinationData.copyMemory(
-        from: sourceData,
-        byteCount: copiedByteCount
-      )
-      destination[index].mDataByteSize = UInt32(copiedByteCount)
-    }
-    return copy
+    guard outcome.isLossy else { return }
+    logger.warning(
+      """
+      Dropped \(outcome.droppedBufferCount, privacy: .public) FluidAudio input buffers \
+      (~\(outcome.droppedAudioSeconds, format: .fixed(precision: 2), privacy: .public)s) \
+      while processing lagged; transcript marked lossy
+      """)
   }
 }

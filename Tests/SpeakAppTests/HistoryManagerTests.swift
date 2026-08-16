@@ -340,6 +340,32 @@ final class HistoryManagerTests: XCTestCase {
         XCTAssertEqual(manager.contentRevision, before)
     }
 
+    // MARK: - Mutation observers (history sync wiring)
+
+    func testAppend_firesOnItemAppended() async {
+        let manager = await makeManager()
+        var appended: [UUID] = []
+        manager.onItemAppended = { appended.append($0.id) }
+
+        let item = makeItem()
+        await manager.append(item)
+
+        XCTAssertEqual(appended, [item.id])
+    }
+
+    func testRemove_firesOnItemRemovedOnlyForExistingItems() async {
+        let manager = await makeManager()
+        var removed: [UUID] = []
+        manager.onItemRemoved = { removed.append($0) }
+
+        let item = makeItem()
+        await manager.append(item)
+        await manager.remove(id: item.id)
+        await manager.remove(id: UUID())
+
+        XCTAssertEqual(removed, [item.id], "Removing an unknown ID must not notify sync")
+    }
+
     func testRemoveAll_resetsStatistics() async throws {
         let manager = await makeManager()
         await manager.loadFromDisk()

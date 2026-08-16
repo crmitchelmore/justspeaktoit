@@ -233,8 +233,15 @@ struct HUDOverlay: View {
     }()
     let micIcon = micWarning ? "mic.slash.fill" : "mic.fill"
     let deviceLabel = health.noInputDevicesAvailable ? "No microphone connected" : health.inputDeviceName
-    HStack(spacing: 6) {
-      HStack(spacing: 4) {
+    // At accessibility text sizes the compact single-line row cannot hold the
+    // enlarged captions, so stack the items vertically and let labels wrap
+    // instead of clipping them.
+    let usesAccessibilityLayout = dynamicTypeSize.isAccessibilitySize
+    let rowLayout = usesAccessibilityLayout
+      ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+      : AnyLayout(HStackLayout(spacing: 6))
+    rowLayout {
+      HStack(alignment: .firstTextBaseline, spacing: 4) {
         Image(systemName: micIcon)
           .font(.system(size: 9, weight: .semibold))
           .foregroundStyle(micColor)
@@ -243,21 +250,23 @@ struct HUDOverlay: View {
         Text(deviceLabel)
           .font(.caption2)
           .foregroundStyle(health.noInputDevicesAvailable ? micColor : .secondary)
-          .lineLimit(1)
+          .lineLimit(usesAccessibilityLayout ? 3 : 1)
           .truncationMode(.tail)
           .help(deviceLabel)
           .accessibilityLabel("Input device: \(deviceLabel)")
       }
 
-      Text(verbatim: "·")
-        .font(.caption2.weight(.semibold))
-        .foregroundStyle(.tertiary)
-        .accessibilityHidden(true)
+      if !usesAccessibilityLayout {
+        Text(verbatim: "·")
+          .font(.caption2.weight(.semibold))
+          .foregroundStyle(.tertiary)
+          .accessibilityHidden(true)
+      }
 
       Text(health.providerLabel)
         .font(.caption2.weight(.medium))
         .foregroundStyle(.secondary)
-        .lineLimit(1)
+        .lineLimit(usesAccessibilityLayout ? 3 : 1)
         .truncationMode(.middle)
         .layoutPriority(1)
         .help(health.providerLabel)
@@ -267,7 +276,11 @@ struct HUDOverlay: View {
         .layoutPriority(2)
         .accessibilityLabel("Latency: \(health.latencyTier.displayName)")
     }
-    .frame(height: 18)
+    // Size to content with a compact floor: the row keeps its familiar 18pt
+    // height at standard type sizes but grows (never clips) when Dynamic Type
+    // enlarges the captions.
+    .frame(minHeight: 18)
+    .fixedSize(horizontal: false, vertical: true)
     .accessibilityElement(children: .combine)
   }
 

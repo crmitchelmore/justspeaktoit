@@ -9,6 +9,15 @@ updates:
       prefix: "chore(deps)"
     open-pull-requests-limit: 5
 
+  # Swift Package Manager (isolated lint tooling graph, issue #677)
+  - package-ecosystem: "swift"
+    directory: "/Tooling"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore(tooling)"
+    open-pull-requests-limit: 2
+
   # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"

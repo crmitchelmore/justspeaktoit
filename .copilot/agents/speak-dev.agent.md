@@ -40,8 +40,8 @@ make rebuild
 # Run tests
 make test
 
-# Lint (strict mode)
-swift package plugin --allow-writing-to-package-directory swiftlint --strict --target SpeakApp
+# Lint (strict mode, isolated Tooling/ graph)
+make lint
 
 # Format
 swift package plugin --allow-writing-to-package-directory swiftformat

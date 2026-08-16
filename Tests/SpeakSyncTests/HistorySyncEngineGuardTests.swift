@@ -98,6 +98,30 @@ final class HistorySyncEngineGuardTests: XCTestCase {
         XCTAssertEqual(transport.fetchCount, 0)
     }
 
+    func testUploadWithoutDelegate_throwsBeforeTouchingTransport() async {
+        // With no delegate the acknowledgement could never be persisted, so a
+        // "successful" upload would be re-uploaded after relaunch. The engine
+        // must fail before the transport call and leave the entry pending.
+        let transport = RecordingTransport()
+        let engine = HistorySyncEngine(
+            transport: transport, defaults: defaults, cloudAvailable: true, delegate: nil
+        )
+
+        do {
+            try await engine.upload(entry: makeEntry(text: "orphaned"))
+            XCTFail("Expected delegateUnavailable")
+        } catch SyncError.delegateUnavailable {
+            // Expected.
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertEqual(transport.uploadedBatches.count, 0)
+        guard case .some(SyncError.delegateUnavailable) = engine.state.error as? SyncError else {
+            XCTFail("Expected delegateUnavailable, got \(String(describing: engine.state.error))")
+            return
+        }
+    }
+
     // MARK: - Single-entry upload
 
     func testSingleUploadSuccess_acknowledgesEntryAndClearsError() async throws {

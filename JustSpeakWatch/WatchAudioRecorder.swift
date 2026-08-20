@@ -20,9 +20,25 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
         let duration: TimeInterval
     }
 
-    @Published private(set) var isRecording = false
+    /// Every path that starts, stops or aborts a recording goes through this
+    /// property, so publishing here keeps the watch-face complication honest
+    /// without each call site remembering to.
+    @Published private(set) var isRecording = false {
+        didSet {
+            guard oldValue != self.isRecording else { return }
+            WatchComplicationPublisher.shared.update(
+                isRecording: self.isRecording,
+                recordingStartedAt: self.isRecording ? self.startedAt : nil
+            )
+        }
+    }
     @Published private(set) var startedAt: Date?
-    @Published private(set) var lastError: String?
+    @Published private(set) var lastError: String? {
+        didSet {
+            guard oldValue != self.lastError else { return }
+            WatchComplicationPublisher.shared.update(recordingError: self.lastError)
+        }
+    }
 
     private let store: WatchCaptureStore
     private let runtime: WatchRecordingRuntime
@@ -229,11 +245,12 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
     }
 
     private func complete(_ finalisation: WatchRecordingFinalisation, recovery: Bool) {
-        lastError = finalisation.outcome.message
+        // The marker holds identity only, so the audio path comes from the id.
         let audioURL = Self.fileURL(for: finalisation.capture.id)
 
         switch finalisation.outcome.disposition {
         case .discard:
+            lastError = finalisation.outcome.message
             do {
                 if FileManager.default.fileExists(atPath: audioURL.path) {
                     try FileManager.default.removeItem(at: audioURL)
@@ -267,6 +284,10 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
                     lastError = "Recording was saved but could not be queued. It will be recovered next time."
                     return
                 }
+                // Publish the interruption detail only after the queue write.
+                // The complication then keeps the durable capture in its
+                // sending state while the in-app UI still explains the stop.
+                lastError = finalisation.outcome.message
             } catch {
                 // The queue write has succeeded; retaining the marker is safe
                 // because enqueue is idempotent on capture id at relaunch.

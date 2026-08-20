@@ -2,7 +2,6 @@
 import AppIntents
 import SpeakCore
 import UIKit
-import os.log
 
 // App Intent declarations intentionally stay together so Shortcuts metadata and
 // foreground-continuation behavior remain auditable in one place.
@@ -377,14 +376,10 @@ public final class SharedTranscriptionState {
     private let defaults: UserDefaults?
 
     private init() {
-        defaults = UserDefaults(suiteName: Self.appGroupIdentifier)
-        #if DEBUG
-        if defaults == nil {
-            SpeakLogger.logger(category: "SharedTranscriptionState")
-                .fault("App Group \(Self.appGroupIdentifier) unavailable; shared state is disabled.")
-            assertionFailure("App Group \(Self.appGroupIdentifier) unavailable; check entitlements.")
-        }
-        #endif
+        // Verified centrally so a missing effective entitlement fails the same
+        // way here as in every other App Group store: a logged fault and an
+        // unavailable, no-op store.
+        defaults = AppGroupAvailability.verifiedDefaults()
         #if DEBUG && targetEnvironment(simulator)
         if let value = ProcessInfo.processInfo.environment["JUSTSPEAKTOIT_SIMULATOR_TRANSCRIPT"]?
             .trimmingCharacters(in: .whitespacesAndNewlines),
@@ -405,6 +400,10 @@ public final class SharedTranscriptionState {
         return trimmedValue?.isEmpty == false ? trimmedValue : nil
     }
     #endif
+
+    public var isAvailable: Bool {
+        defaults != nil
+    }
 
     /// The full transcript currently shared with extensions and App Intents.
     public var currentTranscriptText: String { defaults?.string(forKey: "currentTranscriptText") ?? "" }

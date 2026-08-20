@@ -77,14 +77,14 @@ final class CaptureWarmCoordinatorTests: XCTestCase {
     func testSleepAndWake_CancelThenReprobeTheEndpoint() async {
         let harness = self.makeHarness()
         harness.coordinator.start()
-        await self.drainTasks()
+        await self.drainTasks(untilProbeCount: 1, in: harness.warmer)
 
         harness.workspaceCenter.post(name: NSWorkspace.willSleepNotification, object: nil)
-        await self.drainTasks()
+        await self.waitUntil { harness.scheduler.delay == nil }
         XCTAssertNil(harness.scheduler.delay)
 
         harness.workspaceCenter.post(name: NSWorkspace.didWakeNotification, object: nil)
-        await self.drainTasks()
+        await self.drainTasks(untilProbeCount: 2, in: harness.warmer)
         let probeHosts = await harness.warmer.hosts()
         XCTAssertEqual(probeHosts.count, 2)
         await harness.coordinator.invalidate()
@@ -93,14 +93,14 @@ final class CaptureWarmCoordinatorTests: XCTestCase {
     func testNetworkRecovery_InvalidatesAndReprobesTheEndpoint() async {
         let harness = self.makeHarness()
         harness.coordinator.start()
-        await self.drainTasks()
+        await self.drainTasks(untilProbeCount: 1, in: harness.warmer)
 
         harness.network.send(.unsatisfied)
-        await self.drainTasks()
+        await self.waitUntil { harness.scheduler.delay == nil }
         XCTAssertNil(harness.scheduler.delay)
 
         harness.network.send(.satisfied)
-        await self.drainTasks()
+        await self.drainTasks(untilProbeCount: 2, in: harness.warmer)
         let probeHosts = await harness.warmer.hosts()
         XCTAssertEqual(probeHosts.count, 2)
         await harness.coordinator.invalidate()
@@ -109,10 +109,10 @@ final class CaptureWarmCoordinatorTests: XCTestCase {
     func testTranscriptionModeChange_InvalidatesTheScheduledProbe() async {
         let harness = self.makeHarness()
         harness.coordinator.start()
-        await self.drainTasks()
+        await self.drainTasks(untilProbeCount: 1, in: harness.warmer)
 
         harness.settings.transcriptionMode = .batchRemote
-        await self.drainTasks()
+        await self.waitUntil { harness.scheduler.delay == nil }
 
         XCTAssertNil(harness.scheduler.delay)
         let probeHosts = await harness.warmer.hosts()
@@ -190,6 +190,15 @@ final class CaptureWarmCoordinatorTests: XCTestCase {
 
     private func drainTasks() async {
         for _ in 0..<5 { await Task.yield() }
+    }
+
+    private func waitUntil(_ condition: @escaping @MainActor () -> Bool) async {
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline, !condition() {
+            await Task.yield()
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        await self.drainTasks()
     }
 
     // A fixed number of yields is not enough on a loaded CI runner; poll the

@@ -367,6 +367,7 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
 - iOS distribution cert: store base64 in `.env` as `IOS_DISTRIBUTION_P12` (password in `.env` as `IOS_DISTRIBUTION_PASSWORD`)
 - GitHub secrets used by CI: `APP_STORE_CONNECT_API_KEY`, `APP_STORE_CONNECT_ISSUER_ID`, `APPLE_TEAM_ID`, `IOS_DISTRIBUTION_P12`, `IOS_DISTRIBUTION_PASSWORD`, `IOS_APPSTORE_PROFILE`, `IOS_WIDGET_APPSTORE_PROFILE`; `IOS_KEYBOARD_APPSTORE_PROFILE` is optional when the workflow can reuse or create a valid portal profile
 - Required entitlements: App Group `group.com.justspeaktoit.ios` and iCloud container `iCloud.com.justspeaktoit.ios`
+- The feature-flagged watch app and complication use their own App Group `group.com.justspeaktoit.watch` and bundle ids; see [`Docs/watch-provisioning.md`](Docs/watch-provisioning.md)
 - The keyboard extension accepts `IOS_KEYBOARD_APPSTORE_PROFILE` when set and otherwise uses the validated portal-profile fallback; see [`Docs/ios-testflight-release.md`](Docs/ios-testflight-release.md) before changing portal capabilities or regenerating profiles.
 - Never commit private keys or provisioning profile contents.
 

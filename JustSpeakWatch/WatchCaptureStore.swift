@@ -36,11 +36,19 @@ final class WatchCaptureStore: NSObject, ObservableObject {
     /// capture id, applied once the transfer completes.
     private var pendingAcks: [UUID: WatchCaptureAck] = [:]
 
+    /// Name of the persisted queue inside the shared container.
+    private static let queueFileName = "captures.json"
+
     override private init() {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        self.fileURL = base.appendingPathComponent("captures.json")
+        // The queue lives in the App Group container so the watch widget
+        // extension can read the state its complication renders. Installs that
+        // predate the App Group keep their queue via the one-off migration.
+        let container = WatchSharedContainer.shared
+        container.migrateLegacyFile(named: Self.queueFileName)
+        self.fileURL = container.url(named: Self.queueFileName)
         super.init()
         load()
+        WatchComplicationPublisher.shared.update(captures: captures)
     }
 
     // MARK: - Session lifecycle
@@ -200,8 +208,15 @@ final class WatchCaptureStore: NSObject, ObservableObject {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         guard let data = try? encoder.encode(captures) else { return false }
+        try? FileManager.default.createDirectory(
+            at: fileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
         do {
             try data.write(to: fileURL, options: .atomic)
+            // Every mutation funnels through save(), so publish only the
+            // queue state that has reached durable storage.
+            WatchComplicationPublisher.shared.update(captures: captures)
             return true
         } catch {
             return false

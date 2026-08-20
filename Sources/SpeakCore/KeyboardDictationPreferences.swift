@@ -111,13 +111,17 @@ public final class KeyboardDictationPreferencesStore {
     private let lock = NSLock()
 
     public convenience init() {
-        self.init(defaults: UserDefaults(suiteName: KeyboardHandoffStore.appGroupIdentifier))
+        self.init(defaults: AppGroupAvailability.verifiedDefaults())
     }
 
     /// Injectable for deterministic tests. Passing `nil` models a missing or
     /// inaccessible App Group.
     public init(defaults: UserDefaults?) {
         self.defaults = defaults
+    }
+
+    public var isAvailable: Bool {
+        defaults != nil
     }
 
     // MARK: - Dictation profile

@@ -190,8 +190,9 @@ jobs:
         # The watch app target only exists when generated with
         # TUIST_WATCH_APP=1 (it needs its own provisioning profile for release
         # signing, so it is excluded from release builds). Build it unsigned
-        # here so the flagged target cannot rot. Cheap: five small source files
-        # plus two shared core files.
+        # here so the flagged target cannot rot. Cheap: eight small source
+        # files plus five shared core files. The watch-face complication
+        # extension is embedded in the app, so this step covers it too.
         run: |
           set -o pipefail
           TUIST_WATCH_APP=1 tuist generate --no-open

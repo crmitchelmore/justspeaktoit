@@ -94,3 +94,50 @@ public enum KeyboardHandoffStoreError: Error, Equatable {
     case invalidTransition
     case invalidTranscript
 }
+
+public enum KeyboardLaunchPolicy {
+    public enum BlockReason: Equatable {
+        case fullAccessRequired
+        case sharedContainerUnavailable
+    }
+
+    public static func blockReason(
+        hasFullAccess: Bool,
+        sharedContainerAvailable: Bool
+    ) -> BlockReason? {
+        if !hasFullAccess {
+            return .fullAccessRequired
+        }
+        if !sharedContainerAvailable {
+            return .sharedContainerUnavailable
+        }
+        return nil
+    }
+}
+
+public struct KeyboardHandoffConsumer {
+    private let store: KeyboardHandoffStore
+
+    public init(store: KeyboardHandoffStore = .shared) {
+        self.store = store
+    }
+
+    /// Inserts only a matching result and clears it immediately afterwards.
+    @discardableResult
+    public func insertReadyResult(
+        requestID: UUID,
+        documentIdentifier: UUID? = nil,
+        now: Date = Date(),
+        insert: (String) -> Void
+    ) -> Bool {
+        guard let transcript = store.consumeResult(
+            requestID: requestID,
+            documentIdentifier: documentIdentifier,
+            now: now
+        ) else {
+            return false
+        }
+        insert(transcript)
+        return true
+    }
+}

@@ -304,7 +304,7 @@ struct QRCodeScannerView: View {
             // so imported keys are actually visible in Settings. The shared
             // manager applies the payload transactionally: a failed write
             // rolls every already-applied credential back (issue #699).
-            try await manager.applyImport(
+            try await ConfigTransferManager.shared.applyImport(
                 payload: payload,
                 storage: AppSettings.canonicalCredentialStorage
             )

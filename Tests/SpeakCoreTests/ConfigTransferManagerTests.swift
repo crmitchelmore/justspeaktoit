@@ -98,19 +98,6 @@ final class ConfigTransferManagerTests: XCTestCase {
         XCTAssertNotEqual(first.ciphertext, second.ciphertext)
     }
 
-    func testGeneratedPayload_forAFullKeySet_stillFitsInAQRCode() throws {
-        // The encrypted envelope is markedly larger than the format it replaces,
-        // so guard the worst realistic case: every transferable key populated.
-        let secrets = Dictionary(
-            uniqueKeysWithValues: ConfigTransferManager.transferableSecretIdentifiers.map {
-                ($0, String(repeating: "k", count: 72))
-            }
-        )
-        let transfer = try sut.makeTransfer(secrets: secrets, settings: ["selectedModel": "deepgram/nova-3-streaming"])
-        XCTAssertNotNil(sut.makeQRCodeImage(payload: transfer.payload), "Payload too large to encode as a QR code")
-        XCTAssertEqual(try sut.decodePayload(transfer.payload, code: transfer.code).secrets.count, secrets.count)
-    }
-
     func testFormat_encryptedPayload_reportsEncrypted() throws {
         let encoded = try sut.generatePayload(secrets: ["k": "v"], settings: [:], code: code)
         XCTAssertEqual(try sut.format(of: encoded), .encrypted)

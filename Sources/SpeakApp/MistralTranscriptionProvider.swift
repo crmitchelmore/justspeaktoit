@@ -12,16 +12,16 @@ struct MistralTranscriptionProvider: TranscriptionProvider {
 
   private let baseURL: URL
   private let session: URLSession
-  private let multipartDirectory: URL
+  private let multipartStaging: MultipartUploadStaging
 
   init(
     session: URLSession = .shared,
     baseURL: URL = URL(string: "https://api.mistral.ai/v1")!,
-    multipartDirectory: URL = FileManager.default.temporaryDirectory
+    multipartStaging: MultipartUploadStaging = .shared
   ) {
     self.session = session
     self.baseURL = baseURL
-    self.multipartDirectory = multipartDirectory
+    self.multipartStaging = multipartStaging
   }
 
   func transcribeFile(
@@ -46,12 +46,12 @@ struct MistralTranscriptionProvider: TranscriptionProvider {
     let modelName = modelID(from: model)
     let uploadBodyURL = try Self.makeMultipartUploadBody(
       sourceURL: url,
-      destinationDirectory: multipartDirectory,
+      staging: multipartStaging,
       boundary: boundary,
       model: modelName,
       language: languageCode(from: language)
     )
-    defer { try? FileManager.default.removeItem(at: uploadBodyURL) }
+    defer { self.multipartStaging.removeUploadBodyFile(at: uploadBodyURL) }
 
     let (data, response) = try await session.upload(for: request, fromFile: uploadBodyURL)
     guard let http = response as? HTTPURLResponse else {
@@ -99,22 +99,14 @@ struct MistralTranscriptionProvider: TranscriptionProvider {
 
   nonisolated static func makeMultipartUploadBody(
     sourceURL: URL,
-    destinationDirectory: URL,
+    staging: MultipartUploadStaging,
     boundary: String,
     model: String,
     language: String?
   ) throws -> URL {
-    let destinationURL = destinationDirectory
-      .appendingPathComponent("mistral-upload-\(UUID().uuidString).multipart")
-    try FileManager.default.createDirectory(
-      at: destinationDirectory,
-      withIntermediateDirectories: true
-    )
+    let destinationURL = try staging.createUploadBodyFile(providerID: "mistral")
 
     do {
-      guard FileManager.default.createFile(atPath: destinationURL.path, contents: nil) else {
-        throw CocoaError(.fileWriteUnknown)
-      }
       let output = try FileHandle(forWritingTo: destinationURL)
       defer { try? output.close() }
 
@@ -141,7 +133,7 @@ struct MistralTranscriptionProvider: TranscriptionProvider {
       try output.write(contentsOf: Data("\r\n--\(boundary)--\r\n".utf8))
       return destinationURL
     } catch {
-      try? FileManager.default.removeItem(at: destinationURL)
+      staging.removeUploadBodyFile(at: destinationURL)
       throw error
     }
   }

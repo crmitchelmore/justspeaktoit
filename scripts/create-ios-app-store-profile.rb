@@ -176,7 +176,7 @@ module IOSProfileBootstrap
 
     def fetch_bundle
       escaped_bundle_id = URI.encode_www_form_component(@bundle_id)
-      bundles = @client.list("/v1/bundleIds?filter%5Bidentifier%5D=#{escaped_bundle_id}")
+      bundles = @client.list("/v1/bundleIds?filter%5Bidentifier%5D=#{escaped_bundle_id}&limit=200")
       # The identifier filter matches substrings, so keep only exact matches.
       matches = bundles.select { |candidate| candidate.dig("attributes", "identifier") == @bundle_id }
       raise ValidationError, "Multiple registered bundle IDs found for #{@bundle_id}" if matches.length > 1
@@ -231,6 +231,8 @@ module IOSProfileBootstrap
     end
 
     def enabled_capabilities(bundle_resource_id)
+      # Deliberately no limit query parameter on the capability relationship
+      # endpoint; DistributionBuildIdentityTests pins this shape (from #562).
       capabilities = @client.list("/v1/bundleIds/#{bundle_resource_id}/bundleIdCapabilities")
       capabilities.map { |capability| capability.dig("attributes", "capabilityType") }.compact
     end
@@ -278,18 +280,42 @@ module IOSProfileBootstrap
         validate_profile!(created, bundle_resource_id, certificate_id)
       rescue ConflictError
         log "Provisioning profile #{profile_name} already exists (created concurrently); re-fetching"
-        profile = refetch("Provisioning profile #{profile_name}") { fetch_active_profile }
+        profile = refetch_conflicting_profile
         validate_profile!(profile, bundle_resource_id, certificate_id)
       end
     end
 
+    # App Store Connect rejects a duplicate profile name even when the existing
+    # profile is EXPIRED or INVALID, and fetch_active_profile keeps only ACTIVE
+    # profiles, so a stale same-name profile would otherwise surface as a
+    # misleading visibility timeout. Name the stale profile instead.
+    def refetch_conflicting_profile
+      refetch("Provisioning profile #{profile_name}") { fetch_active_profile }
+    rescue ValidationError => error
+      stale = fetch_profile_named
+      stale_state = stale&.dig("attributes", "profileState")
+      raise error if stale.nil? || stale_state == "ACTIVE"
+
+      raise ValidationError,
+            "Provisioning profile #{profile_name} (#{stale['id']}) already exists in state " \
+            "#{stale_state || 'unknown'}, which blocks creating a profile with the same name. " \
+            "Delete the stale profile in the Apple Developer portal, then rerun this workflow."
+    end
+
     def fetch_active_profile
+      fetch_profiles_named.find do |candidate|
+        candidate.dig("attributes", "profileState") == "ACTIVE"
+      end
+    end
+
+    def fetch_profile_named
+      fetch_profiles_named.first
+    end
+
+    def fetch_profiles_named
       escaped_profile_name = URI.encode_www_form_component(profile_name)
       profiles = @client.list("/v1/profiles?filter%5Bname%5D=#{escaped_profile_name}&limit=200")
-      profiles.find do |candidate|
-        candidate.dig("attributes", "name") == profile_name &&
-          candidate.dig("attributes", "profileState") == "ACTIVE"
-      end
+      profiles.select { |candidate| candidate.dig("attributes", "name") == profile_name }
     end
 
     # Fetches the canonical profile record and verifies it matches what this

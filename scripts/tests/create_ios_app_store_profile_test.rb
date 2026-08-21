@@ -13,7 +13,7 @@ module IOSProfileBootstrap
   # Scripted transport: each expectation is [method, path matcher, status,
   # body]. Requests are matched in order; an unexpected request fails the test.
   class FakeTransport
-    Call = Struct.new(:method, :path, :body)
+    Call = Struct.new(:http_method, :path, :body)
 
     attr_reader :calls
 
@@ -204,6 +204,43 @@ module IOSProfileBootstrap
         ["GET", "/v1/profiles?filter", 200, { "data" => [] }],
         ["POST", "/v1/profiles", 409, { "errors" => [] }],
         ["GET", "/v1/profiles?filter", 200, { "data" => [profile_resource] }],
+        ["GET", "/v1/profiles/#{PROFILE_ID}?include=bundleId,certificates", 200, { "data" => profile_detail }],
+      ]
+      script = [["GET", "/v1/bundleIds?filter", 200, { "data" => [bundle_resource] }]] +
+               certificate_and_profile_script(profile_steps)
+
+      provisioner, transport = build_provisioner(script)
+      assert_equal "UFJPRklMRQ==", provisioner.provision
+      assert transport.drained?
+    end
+
+    # Acceptance: a stale non-ACTIVE profile that blocks the name is reported
+    # as such, not as a visibility timeout.
+    def test_profile_conflict_with_stale_nonactive_profile_names_the_stale_profile
+      expired = profile_resource(state: "EXPIRED")
+      profile_steps = [
+        ["GET", "/v1/profiles?filter", 200, { "data" => [] }],
+        ["POST", "/v1/profiles", 409, { "errors" => [] }],
+        ["GET", "/v1/profiles?filter", 200, { "data" => [expired] }],
+        ["GET", "/v1/profiles?filter", 200, { "data" => [expired] }],
+        ["GET", "/v1/profiles?filter", 200, { "data" => [expired] }],
+        ["GET", "/v1/profiles?filter", 200, { "data" => [expired] }],
+      ]
+      script = [["GET", "/v1/bundleIds?filter", 200, { "data" => [bundle_resource] }]] +
+               certificate_and_profile_script(profile_steps)
+
+      provisioner, transport = build_provisioner(script, max_attempts: 3)
+      error = assert_raises(ValidationError) { provisioner.provision }
+      assert_match(/already exists in state EXPIRED/, error.message)
+      assert_match(/Delete the stale profile/, error.message)
+      refute_match(/did not become visible/, error.message)
+      assert transport.drained?
+    end
+
+    def test_active_profile_is_selected_when_a_stale_sibling_shares_the_name
+      expired = profile_resource(id: "P0", state: "EXPIRED")
+      profile_steps = [
+        ["GET", "/v1/profiles?filter", 200, { "data" => [expired, profile_resource] }],
         ["GET", "/v1/profiles/#{PROFILE_ID}?include=bundleId,certificates", 200, { "data" => profile_detail }],
       ]
       script = [["GET", "/v1/bundleIds?filter", 200, { "data" => [bundle_resource] }]] +

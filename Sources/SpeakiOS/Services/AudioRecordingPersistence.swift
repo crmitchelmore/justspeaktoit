@@ -14,6 +14,15 @@ public final class AudioRecordingPersistence: ObservableObject {
 
     @Published private(set) public var isRecording = false
     @Published private(set) public var currentFileURL: URL?
+    /// Persistence truth for the most recently stopped recording (issue #705):
+    /// dropped audio and write failures make `isComplete` false, so the saved
+    /// file is never presented as healthy when it has gaps.
+    @Published private(set) public var lastDiagnostics: RecordingPersistenceDiagnostics?
+
+    /// Invoked (off the audio thread) the first time a session drops audio or
+    /// fails a write, so the owning session can surface the problem while the
+    /// recording is still running rather than discovering it at stop.
+    nonisolated(unsafe) public var onPersistenceIssue: (@Sendable (RecordingPersistenceDiagnostics) -> Void)?
 
     // MARK: - Private
 
@@ -29,6 +38,14 @@ public final class AudioRecordingPersistence: ObservableObject {
     /// Pool for buffer copies handed to `ioQueue` so writes never touch the
     /// caller's (reused) buffer.
     private let writeBufferPool = PCMBufferPool(maximumBuffers: 8)
+    /// Bounded admission (issue #705): short I/O stalls are absorbed by
+    /// fallback allocations up to a duration budget sized from the sample
+    /// format; sustained overflow drops frames and records the gap instead of
+    /// silently presenting a complete recording. Replaced per session.
+    nonisolated(unsafe) private var admission = RecordingPersistenceAdmissionController()
+    /// Set once per session after the first drop/write failure so the
+    /// owning-session callback fires exactly once, off the audio thread.
+    nonisolated(unsafe) private var didReportIssue = false
     private var recordingID: UUID?
     private var startTime: Date?
 
@@ -118,12 +135,15 @@ public final class AudioRecordingPersistence: ObservableObject {
         stateLock.lock()
         ioQueue.async { [weak self] in self?.ioFile = file }
         isWriterOpen = true
+        admission = RecordingPersistenceAdmissionController()
+        didReportIssue = false
         stateLock.unlock()
 
         recordingID = rid
         startTime = Date()
         currentFileURL = url
         isRecording = true
+        lastDiagnostics = nil
 
         logger.info("Started persistent recording: \(filename)")
         return url
@@ -133,7 +153,8 @@ public final class AudioRecordingPersistence: ObservableObject {
     /// This method is nonisolated so it can be called from any thread: the
     /// buffer is copied immediately and the AAC encode + file write happen
     /// asynchronously on the persistence I/O queue.
-    nonisolated public func writeBuffer(_ buffer: AVAudioPCMBuffer) {
+    @discardableResult
+    nonisolated public func writeBuffer(_ buffer: AVAudioPCMBuffer) -> RecordingPersistenceAdmission? {
         // Admission and enqueue are one atomic step against `closeWriter`'s
         // barrier. Releasing the lock before `ioQueue.async` would let a stalled
         // caller enqueue *after* the session closed; that block would then
@@ -144,25 +165,117 @@ public final class AudioRecordingPersistence: ObservableObject {
         // `ioQueue` blocks never take `stateLock`, so the async submit can't deadlock.
         stateLock.lock()
         defer { stateLock.unlock() }
-        if isWriterOpen, let copy = writeBufferPool.copy(buffer) {
-            #if DEBUG
-            writeAdmissionStallHook?()
-            #endif
-            ioQueue.async { [weak self] in
-                guard let self else { return }
-                defer { self.writeBufferPool.recycle(copy) }
-                guard let file = self.ioFile else { return }
-                do {
-                    try file.write(from: copy)
-                    #if DEBUG
-                    self.didWriteBufferHook?(file.url)
-                    #endif
-                } catch {
-                    // Log but don't throw — we don't want to interrupt the
-                    // transcription pipeline for a write failure.
-                    self.logger.error("Write error: \(error.localizedDescription, privacy: .public)")
-                }
+        guard isWriterOpen else { return nil }
+
+        // Bounded admission (issue #705): the pool absorbs the steady state, a
+        // duration budget derived from the actual format absorbs short stalls
+        // via fallback allocations, and sustained overflow drops the frame
+        // while recording exactly how much audio was lost.
+        let sampleRate = buffer.format.sampleRate
+        let frameSeconds = sampleRate > 0 ? Double(buffer.frameLength) / sampleRate : 0
+        let admissionController = admission
+        let pooledCopy = writeBufferPool.copy(buffer)
+        let verdict = admissionController.admit(
+            frameSeconds: frameSeconds,
+            poolHasCapacity: pooledCopy != nil
+        )
+
+        let copy: AVAudioPCMBuffer?
+        switch verdict {
+        case .accepted:
+            copy = pooledCopy
+        case .acceptedViaOverflow:
+            copy = Self.fallbackCopy(of: buffer)
+        case .backpressured:
+            copy = nil
+        }
+
+        guard let copy else {
+            // Admission granted but the fallback allocation itself failed, or
+            // the frame was backpressured: either way it is a recorded gap.
+            if verdict != .backpressured {
+                admissionController.completeWrite(frameSeconds: frameSeconds, failed: true)
             }
+            reportIssueIfNeeded(admissionController)
+            return .backpressured
+        }
+
+        #if DEBUG
+        writeAdmissionStallHook?()
+        #endif
+        enqueueAdmittedWrite(
+            copy: copy,
+            isPooled: verdict == .accepted,
+            frameSeconds: frameSeconds,
+            controller: admissionController
+        )
+        return verdict
+    }
+
+    /// Submits one admitted copy to the I/O queue. Must be called while
+    /// `stateLock` is held so the submit is ordered ahead of `closeWriter`'s
+    /// barrier (see `writeBuffer`).
+    private nonisolated func enqueueAdmittedWrite(
+        copy: AVAudioPCMBuffer,
+        isPooled: Bool,
+        frameSeconds: Double,
+        controller: RecordingPersistenceAdmissionController
+    ) {
+        ioQueue.async { [weak self] in
+            guard let self else { return }
+            defer {
+                if isPooled { self.writeBufferPool.recycle(copy) }
+            }
+            guard let file = self.ioFile else {
+                controller.completeWrite(frameSeconds: frameSeconds, failed: false)
+                return
+            }
+            do {
+                try file.write(from: copy)
+                controller.completeWrite(frameSeconds: frameSeconds, failed: false)
+                #if DEBUG
+                self.didWriteBufferHook?(file.url)
+                #endif
+            } catch {
+                // Never interrupt the transcription pipeline for a write
+                // failure — but never pretend it didn't happen either.
+                controller.completeWrite(frameSeconds: frameSeconds, failed: true)
+                self.reportIssueIfNeeded(controller)
+                self.logger.error("Write error: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    /// Controlled fallback allocation for a pool-exhausted frame within the
+    /// admission budget.
+    private nonisolated static func fallbackCopy(of buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+        guard let copy = AVAudioPCMBuffer(
+            pcmFormat: buffer.format,
+            frameCapacity: buffer.frameLength
+        ) else { return nil }
+        copy.frameLength = buffer.frameLength
+        let source = UnsafeMutableAudioBufferListPointer(
+            UnsafeMutablePointer(mutating: buffer.audioBufferList)
+        )
+        let destination = UnsafeMutableAudioBufferListPointer(copy.mutableAudioBufferList)
+        for index in 0..<min(source.count, destination.count) {
+            guard let sourceData = source[index].mData,
+                  let destinationData = destination[index].mData else { continue }
+            memcpy(destinationData, sourceData, Int(source[index].mDataByteSize))
+            destination[index].mDataByteSize = source[index].mDataByteSize
+        }
+        return copy
+    }
+
+    /// Surfaces the first drop/failure of the session to the owning session,
+    /// exactly once, without blocking the audio thread.
+    private nonisolated func reportIssueIfNeeded(_ controller: RecordingPersistenceAdmissionController) {
+        guard !didReportIssue else { return }
+        didReportIssue = true
+        guard let onPersistenceIssue else { return }
+        let diagnostics = controller.diagnostics
+        DispatchQueue.global(qos: .utility).async {
+            onPersistenceIssue(diagnostics)
         }
     }
 
@@ -206,12 +319,29 @@ public final class AudioRecordingPersistence: ObservableObject {
         let fileSize = (try? FileManager.default
             .attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
 
+        // closeWriter drained the I/O queue, so the diagnostics are final:
+        // drops or write failures mark this saved file incomplete instead of
+        // presenting it as a healthy recording (issue #705).
+        let diagnostics = admission.diagnostics
+        lastDiagnostics = diagnostics
+        if !diagnostics.isComplete {
+            logger.error(
+                """
+                Recording persisted incomplete: dropped \
+                \(String(format: "%.2f", diagnostics.droppedSeconds), privacy: .public)s \
+                across \(diagnostics.droppedFrames) frames, \
+                \(diagnostics.writeFailures) write failures
+                """
+            )
+        }
+
         let info = RecordingInfo(
             id: recordingID ?? UUID(),
             url: url,
             startedAt: startTime ?? Date(),
             duration: duration,
-            fileSize: fileSize
+            fileSize: fileSize,
+            diagnostics: diagnostics
         )
 
         recordingID = nil
@@ -234,84 +364,6 @@ public final class AudioRecordingPersistence: ObservableObject {
         if let url {
             try? FileManager.default.removeItem(at: url)
             logger.info("Cancelled and deleted: \(url.lastPathComponent)")
-        }
-    }
-
-    // MARK: - Listing & Management
-
-    /// List all saved recordings, newest first.
-    ///
-    /// Durations are not read here: opening each file just to ask for its
-    /// length stalls the main thread on large libraries. Entries are returned
-    /// with `duration == 0`; load real values asynchronously per file with
-    /// `loadDuration(for:)`.
-    public static func listRecordings() -> [RecordingInfo] {
-        let dir = recordingsDirectory
-        guard let files = try? FileManager.default.contentsOfDirectory(
-            at: dir,
-            includingPropertiesForKeys: [.creationDateKey, .fileSizeKey],
-            options: .skipsHiddenFiles
-        ) else { return [] }
-
-        let validExt: Set<String> = ["m4a", "wav", "aac", "caf"]
-
-        return files
-            .filter { validExt.contains($0.pathExtension.lowercased()) }
-            .compactMap { url -> RecordingInfo? in
-                let res = try? url.resourceValues(
-                    forKeys: [.creationDateKey, .fileSizeKey]
-                )
-                let created = res?.creationDate ?? Date()
-                let size = Int64(res?.fileSize ?? 0)
-
-                let stem = url.deletingPathExtension().lastPathComponent
-                let cleanStem = stem
-                    .replacingOccurrences(of: "Recording-", with: "")
-                let rid = UUID(uuidString: String(cleanStem.suffix(8))) ?? UUID()
-
-                return RecordingInfo(
-                    id: rid,
-                    url: url,
-                    startedAt: created,
-                    duration: 0,
-                    fileSize: size
-                )
-            }
-            .sorted { $0.startedAt > $1.startedAt }
-    }
-
-    /// Load a recording's duration without blocking the calling thread.
-    /// `AVURLAsset` reads just the metadata it needs, off the main thread.
-    public static func loadDuration(for url: URL) async -> TimeInterval {
-        let asset = AVURLAsset(url: url)
-        guard let duration = try? await asset.load(.duration) else { return 0 }
-        let seconds = duration.seconds
-        return seconds.isFinite ? max(0, seconds) : 0
-    }
-
-    /// Delete a specific recording file.
-    public static func deleteRecording(at url: URL) {
-        try? FileManager.default.removeItem(at: url)
-    }
-}
-
-// MARK: - Supporting Types
-
-public struct RecordingInfo: Identifiable, Hashable {
-    public let id: UUID
-    public let url: URL
-    public let startedAt: Date
-    public let duration: TimeInterval
-    public let fileSize: Int64
-}
-
-public enum AudioPersistenceError: LocalizedError {
-    case alreadyRecording
-
-    public var errorDescription: String? {
-        switch self {
-        case .alreadyRecording:
-            return "A persistent recording session is already active."
         }
     }
 }

@@ -3,6 +3,9 @@ import SpeakCore
 import CoreAudio
 import os.log
 
+private let inputDeviceSettleDelay: Duration = .milliseconds(100)
+private let inputDeviceSettleAttempts = 5
+
 @MainActor
 // swiftlint:disable:next type_body_length
 final class AudioInputDeviceManager: ObservableObject {
@@ -144,6 +147,7 @@ final class AudioInputDeviceManager: ObservableObject {
     }
 
     if setDefaultInputDevice(to: targetDeviceID) {
+      await waitForInputDeviceToSettle(targetDeviceID)
       refreshDevices()
       logger.debug("Activated preferred input device with UID \(uid, privacy: .public)")
       return sessionTracker.beginSession(previousDeviceID: currentDefaultID, didChangeDevice: true)
@@ -159,6 +163,7 @@ final class AudioInputDeviceManager: ObservableObject {
     }
 
     if setDefaultInputDevice(to: previous) {
+      await waitForInputDeviceToSettle(previous)
       refreshDevices()
       logger.debug("Restored previous input device after session")
     } else {
@@ -375,6 +380,28 @@ final class AudioInputDeviceManager: ObservableObject {
       return false
     }
     return true
+  }
+
+  /// CoreAudio acknowledges a default-device change before AVAudioEngine's HAL
+  /// graph necessarily exposes the new input format. Creating an engine in that
+  /// window returns a zero-channel format, which every live provider correctly
+  /// rejects as an unavailable microphone. Wait for the selected device to be
+  /// both current and usable before callers bind their fresh audio engine.
+  private func waitForInputDeviceToSettle(_ deviceID: AudioDeviceID) async {
+    for attempt in 0..<inputDeviceSettleAttempts {
+      let sampleRate = doubleProperty(
+        selector: kAudioDevicePropertyNominalSampleRate,
+        deviceID: deviceID
+      ) ?? 0
+      if attempt > 0,
+        currentDefaultInputDeviceID() == deviceID,
+        inputChannelCount(for: deviceID) > 0,
+        sampleRate > 0 {
+        return
+      }
+      try? await Task.sleep(for: inputDeviceSettleDelay)
+    }
+    logger.warning("Timed out waiting for input device \(deviceID) to settle")
   }
 
   private func deviceID(forUID uid: String) -> AudioDeviceID? {

@@ -422,7 +422,10 @@ final class KeySyncFetchCompletionGate: @unchecked Sendable {
     private var pendingResult: Result<Void, Error>?
     private var isFinished = false
 
-    func register(_ continuation: CheckedContinuation<Void, Error>) {
+    /// Registers the continuation. Returns `true` while the fetch is still
+    /// pending; returns `false` when the gate already finished (the
+    /// continuation is resumed immediately and the operation must not start).
+    func register(_ continuation: CheckedContinuation<Void, Error>) -> Bool {
         let immediateResult: Result<Void, Error>? = lock.withLock {
             if let pendingResult {
                 self.pendingResult = nil
@@ -433,7 +436,9 @@ final class KeySyncFetchCompletionGate: @unchecked Sendable {
         }
         if let immediateResult {
             continuation.resume(with: immediateResult)
+            return false
         }
+        return true
     }
 
     func finish(with result: Result<Void, Error>) {
@@ -1482,7 +1487,12 @@ public final class CloudKitKeySync: ObservableObject {
         try await withTaskCancellationHandler {
             try Task.checkCancellation()
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                gate.register(continuation)
+                guard gate.register(continuation) else {
+                    // Cancellation already resumed the continuation; never
+                    // start the operation whose completion would be discarded.
+                    operation.cancel()
+                    return
+                }
                 operation.run { result in
                     gate.finish(with: result)
                 }

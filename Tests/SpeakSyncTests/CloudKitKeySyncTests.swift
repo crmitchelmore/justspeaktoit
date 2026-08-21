@@ -481,6 +481,37 @@ final class CloudKitKeySyncTests: XCTestCase {
         XCTAssertEqual(fetchOperation.runCount, 0)
     }
 
+    func testCompletionGate_FinishedBeforeRegister_ResumesImmediatelyAndReportsNotPending() async {
+        // Models cancellation firing between Task.checkCancellation() and
+        // gate.register: the bridge must not start the operation afterwards.
+        let gate = KeySyncFetchCompletionGate()
+        gate.finish(with: .failure(CancellationError()))
+
+        var stillPending = true
+        do {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                stillPending = gate.register(continuation)
+            }
+            XCTFail("Expected CancellationError")
+        } catch is CancellationError {
+            // Expected.
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertFalse(stillPending)
+    }
+
+    func testCompletionGate_RegisterBeforeFinish_ReportsPendingAndResumesOnFinish() async throws {
+        let gate = KeySyncFetchCompletionGate()
+
+        var stillPending = false
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            stillPending = gate.register(continuation)
+            gate.finish(with: .success(()))
+        }
+        XCTAssertTrue(stillPending)
+    }
+
     func testSleeperCancellation_ResumesTheMatchingWaiter() async throws {
         let sleeper = TestSleeper()
         let sleepTask = Task { try await sleeper.sleep(123) }

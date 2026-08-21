@@ -1,6 +1,7 @@
 #if os(iOS)
 import AVFoundation
 import Foundation
+import SpeakCore
 
 // MARK: - Saved-recording library
 

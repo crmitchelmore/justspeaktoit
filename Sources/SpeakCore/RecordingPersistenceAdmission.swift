@@ -16,7 +16,7 @@ public enum RecordingPersistenceAdmission: Equatable, Sendable {
 /// What a completed recording's persistence actually did — the truth the
 /// session and UI must report instead of presenting every saved file as a
 /// healthy complete recording (issue #705).
-public struct RecordingPersistenceDiagnostics: Equatable, Sendable {
+public struct RecordingPersistenceDiagnostics: Equatable, Hashable, Sendable {
     /// Frames admitted (pool or overflow) and handed to the writer.
     public var admittedFrames: Int = 0
     /// Audio duration admitted, in seconds of source PCM.

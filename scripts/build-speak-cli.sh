@@ -28,17 +28,43 @@ fi
 APP_PATH="$(cd "$APP_PATH" && pwd -P)"
 
 cd "$ROOT_DIR"
-echo "==> Building speak (release, arm64+x86_64)"
-swift build --product speak --configuration release \
-    --arch arm64 --arch x86_64
+# The two slices are built separately and joined with lipo: a single swift
+# build invocation passing both arch flags fails to plan the package graph
+# ("duplicate key found: ID(moduleName: \"CommandLineTool\", packageIdentity:
+# swiftformat)") because the SwiftFormat plugin dependency is modelled once
+# per architecture (issue #759).
+echo "==> Building speak (release, arm64)"
+swift build --product speak --configuration release --arch arm64
+echo "==> Building speak (release, x86_64)"
+swift build --product speak --configuration release --arch x86_64
 
-BINARY_PATH="$(swift build --product speak --configuration release \
-    --arch arm64 --arch x86_64 --show-bin-path)/speak"
+ARM64_BINARY="$(swift build --product speak --configuration release \
+    --arch arm64 --show-bin-path)/speak"
+X86_64_BINARY="$(swift build --product speak --configuration release \
+    --arch x86_64 --show-bin-path)/speak"
 
-if [[ ! -f "$BINARY_PATH" ]]; then
-    echo "error: built binary missing at $BINARY_PATH" >&2
-    exit 1
-fi
+for slice in "$ARM64_BINARY" "$X86_64_BINARY"; do
+    if [[ ! -f "$slice" ]]; then
+        echo "error: built binary missing at $slice" >&2
+        exit 1
+    fi
+done
+
+BINARY_PATH="$(mktemp -d)/speak"
+echo "==> Creating universal binary"
+lipo -create "$ARM64_BINARY" "$X86_64_BINARY" -output "$BINARY_PATH"
+
+# Deterministic validation: the embedded CLI must contain both slices, so a
+# regression back to a single-arch binary fails the release here, not on a
+# user's machine.
+UNIVERSAL_ARCHS="$(lipo -archs "$BINARY_PATH")"
+for required_arch in arm64 x86_64; do
+    if [[ " $UNIVERSAL_ARCHS " != *" $required_arch "* ]]; then
+        echo "error: universal speak binary is missing $required_arch (got: $UNIVERSAL_ARCHS)" >&2
+        exit 1
+    fi
+done
+echo "==> Universal binary contains: $UNIVERSAL_ARCHS"
 
 DESTINATION="$APP_PATH/Contents/MacOS/speak"
 echo "==> Embedding $BINARY_PATH -> $DESTINATION"

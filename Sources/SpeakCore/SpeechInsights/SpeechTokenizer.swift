@@ -72,7 +72,13 @@ public enum SpeechTokenizer {
         in surfaceTokens: [String],
         phrases: [[String]]
     ) -> FillerMatches {
-        guard !phrases.isEmpty, !surfaceTokens.isEmpty else {
+        // Enforce the documented contract locally: an empty phrase would match
+        // every index without advancing (an infinite loop), and an unsorted
+        // array would let a shorter phrase pre-empt a longer overlapping one.
+        let normalizedPhrases = phrases
+            .filter { !$0.isEmpty }
+            .sorted { $0.count > $1.count }
+        guard !normalizedPhrases.isEmpty, !surfaceTokens.isEmpty else {
             return FillerMatches(counts: [:], consumedTokenIndices: [])
         }
         var counts: [String: Int] = [:]
@@ -80,7 +86,7 @@ public enum SpeechTokenizer {
         var index = 0
         while index < surfaceTokens.count {
             var matched = false
-            for phrase in phrases where phrase.count <= surfaceTokens.count - index {
+            for phrase in normalizedPhrases where phrase.count <= surfaceTokens.count - index {
                 var isMatch = true
                 for (offset, word) in phrase.enumerated()
                 where surfaceTokens[index + offset] != word {

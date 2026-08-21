@@ -150,6 +150,30 @@ final class SpeechTokenizerTests: XCTestCase {
         )
     }
 
+    func testMatchFillers_ignoresEmptyPhrases() {
+        // An empty phrase must not match (it would otherwise loop forever
+        // without advancing) and must not suppress real phrase matches.
+        let matches = SpeechTokenizer.matchFillers(
+            in: ["um", "hello"],
+            phrases: [[], ["um"]]
+        )
+        XCTAssertEqual(matches.counts, ["um": 1])
+        XCTAssertEqual(matches.consumedTokenIndices, [0])
+
+        let onlyEmpty = SpeechTokenizer.matchFillers(in: ["um"], phrases: [[]])
+        XCTAssertEqual(onlyEmpty, SpeechTokenizer.FillerMatches(counts: [:], consumedTokenIndices: []))
+    }
+
+    func testMatchFillers_sortsUnsortedOverlappingPhrasesLongestFirst() {
+        // Shorter phrase listed first must not pre-empt the longer overlap.
+        let matches = SpeechTokenizer.matchFillers(
+            in: ["you", "know", "what", "happened"],
+            phrases: [["you", "know"], ["you", "know", "what"]]
+        )
+        XCTAssertEqual(matches.counts, ["you know what": 1])
+        XCTAssertEqual(matches.consumedTokenIndices, [0, 1, 2])
+    }
+
     func testCountFillers_matchesMatchFillersCounts() {
         let tokens = ["um", "it", "was", "sort", "of", "fine", "you", "know"]
         XCTAssertEqual(

@@ -77,5 +77,39 @@ final class SherpaOnnxRuntimeConfigTests: XCTestCase {
         XCTAssertTrue(script.contains("model_type=args.model_type"))
         XCTAssertTrue(script.contains("decoding_method=\"greedy_search\""))
     }
+
+    // MARK: - Bounded offline decode contract (issue #679)
+
+    func testSidecarScript_decouplesIngestionFromOfflineDecode() {
+        let script = SherpaOnnxRuntimeManager.sidecarScript
+
+        // A dedicated reader thread must always drain stdin so the pipe can
+        // never fill and block the app's real-time audio queue behind
+        // inference.
+        XCTAssertTrue(script.contains("threading.Thread(target=reader"))
+        XCTAssertTrue(script.contains("eof.set()"))
+        // Partials decode a bounded tail window at an adaptive cadence, and
+        // retention is explicitly capped rather than unbounded.
+        XCTAssertTrue(script.contains("partial_window_samples = 16000 * 60"))
+        XCTAssertTrue(script.contains("max_buffer_samples = 16000 * 60 * 60"))
+        XCTAssertTrue(script.contains("last_decode_seconds * 2.0"))
+        XCTAssertTrue(script.contains("emit(\"buffer_capped\""))
+        // The final decode covers every retained sample and is announced.
+        XCTAssertTrue(script.contains("emit(\"finalizing\""))
+        XCTAssertTrue(script.contains("final_window = buffered[:]"))
+        // The old quadratic whole-buffer partial loop must not return.
+        XCTAssertFalse(script.contains("samples_since_decode"))
+    }
+
+    func testFinalisationAllowance_scalesWithSessionDuration() {
+        // Short sessions keep the historical ten-second floor…
+        XCTAssertEqual(SherpaOnnxLiveController.finalisationAllowance(forSessionSeconds: 0), 10)
+        XCTAssertEqual(SherpaOnnxLiveController.finalisationAllowance(forSessionSeconds: 30), 10)
+        // …and long sessions get time proportional to what was recorded: a
+        // quarter of the duration is six-fold headroom at the measured ~0.04
+        // real-time factor.
+        XCTAssertEqual(SherpaOnnxLiveController.finalisationAllowance(forSessionSeconds: 240), 60)
+        XCTAssertEqual(SherpaOnnxLiveController.finalisationAllowance(forSessionSeconds: 1_200), 300)
+    }
 }
 #endif

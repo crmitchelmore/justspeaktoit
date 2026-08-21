@@ -534,9 +534,16 @@ def run_online(args):
 
 def run_offline(args):
     # Offline transducers (e.g. NVIDIA Parakeet TDT) decode a whole utterance
-    # at a time. Re-decode the accumulated audio after every ~2 s of new input
-    # to stream partial results, then decode once more at end of input for the
-    # session final.
+    # at a time. Ingestion and inference are decoupled (issue #679): a reader
+    # thread always drains stdin, so the pipe can never fill and block the
+    # app's real-time audio queue behind model inference. Partials decode a
+    # bounded tail window at an adaptive cadence (never more than ~half the
+    # wall clock), so partial latency and per-decode cost stay constant for
+    # long sessions instead of growing quadratically. The session final still
+    # decodes every retained sample.
+    import threading
+    import time
+
     recognizer = sherpa_onnx.OfflineRecognizer.from_transducer(
         encoder=args.encoder,
         decoder=args.decoder,
@@ -549,34 +556,79 @@ def run_offline(args):
         model_type=args.model_type,
         provider="cpu",
     )
-    buffered = array.array("f")
-    last_text = ""
-    samples_since_decode = 0
-    decode_interval = 16000 * 2
 
-    def decode_buffered():
+    # Bounded retention: one hour of 16 kHz mono float32 (~230 MB). Beyond it
+    # the oldest audio is dropped and the cap is reported once, so memory is
+    # bounded and truncation is explicit rather than silent.
+    max_buffer_samples = 16000 * 60 * 60
+    # Partials decode at most the trailing minute, keeping each partial decode
+    # constant-cost regardless of session length.
+    partial_window_samples = 16000 * 60
+
+    lock = threading.Lock()
+    buffered = array.array("f")
+    eof = threading.Event()
+    capped = threading.Event()
+
+    def reader():
+        while True:
+            samples = read_samples()
+            if samples is None:
+                break
+            if not samples:
+                continue
+            with lock:
+                buffered.extend(samples)
+                if len(buffered) > max_buffer_samples:
+                    del buffered[: len(buffered) - max_buffer_samples]
+                    capped.set()
+        eof.set()
+
+    thread = threading.Thread(target=reader, daemon=True)
+    thread.start()
+
+    def decode(window):
         stream = recognizer.create_stream()
-        stream.accept_waveform(16000, buffered)
+        stream.accept_waveform(16000, window)
         recognizer.decode_stream(stream)
         return stream.result.text
 
-    while True:
-        samples = read_samples()
-        if samples is None:
-            break
-        if not samples:
+    last_text = ""
+    decoded_upto = 0
+    last_decode_seconds = 0.0
+    did_report_cap = False
+
+    while not eof.is_set():
+        time.sleep(0.1)
+        if capped.is_set() and not did_report_cap:
+            did_report_cap = True
+            emit("buffer_capped", "retention window exceeded; oldest audio dropped")
+        with lock:
+            available = len(buffered)
+        # Adaptive cadence: at least two seconds of new audio, and at least
+        # twice the previous decode's duration, so decoding can never occupy
+        # more than about half of real time and ingestion always stays ahead.
+        required = int(16000 * max(2.0, last_decode_seconds * 2.0))
+        if available - decoded_upto < required:
             continue
-        buffered.extend(samples)
-        samples_since_decode += len(samples)
-        if samples_since_decode < decode_interval:
-            continue
-        samples_since_decode = 0
-        text = decode_buffered()
+        with lock:
+            if len(buffered) > partial_window_samples:
+                window = buffered[-partial_window_samples:]
+            else:
+                window = buffered[:]
+        started = time.monotonic()
+        text = decode(window)
+        last_decode_seconds = time.monotonic() - started
+        decoded_upto = available
         if text and text != last_text:
             last_text = text
             emit("partial", text)
 
-    final_text = (decode_buffered() if buffered else "") or last_text
+    thread.join()
+    with lock:
+        final_window = buffered[:]
+    emit("finalizing", "%.1f" % (len(final_window) / 16000.0))
+    final_text = (decode(final_window) if final_window else "") or last_text
     emit("session_final", final_text)
 
 

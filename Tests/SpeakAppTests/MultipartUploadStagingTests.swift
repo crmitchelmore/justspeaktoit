@@ -40,16 +40,27 @@ final class MultipartUploadStagingTests: XCTestCase {
   }
 
   func testCreateUploadBodyFile_throwsWhenFileCannotBeCreated() throws {
-    let staging = makeStaging()
-    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    try FileManager.default.setAttributes(
-      [.posixPermissions: 0o500],
-      ofItemAtPath: directory.path
-    )
+    let staging = makeStaging(fileManager: FailingCreateFileManager())
 
     XCTAssertThrowsError(try staging.createUploadBodyFile(providerID: "mistral")) { error in
       XCTAssertEqual((error as? CocoaError)?.code, .fileWriteUnknown)
     }
+  }
+
+  func testCreateUploadBodyFile_repairsLoosePermissionsOnExistingDirectory() throws {
+    // createDirectory applies attributes only on creation, so a staging
+    // directory left behind with loose permissions must be re-restricted.
+    let staging = makeStaging()
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    try FileManager.default.setAttributes(
+      [.posixPermissions: 0o755],
+      ofItemAtPath: directory.path
+    )
+
+    let url = try staging.createUploadBodyFile(providerID: "mistral")
+    defer { staging.removeUploadBodyFile(at: url) }
+
+    XCTAssertEqual(try posixPermissions(atPath: directory.path), 0o700)
   }
 
   func testPurge_removesStaleUploadBodies() throws {
@@ -124,9 +135,14 @@ final class MultipartUploadStagingTests: XCTestCase {
   // MARK: - Helpers
 
   private func makeStaging(
-    stalenessThreshold: TimeInterval = MultipartUploadStaging.defaultStalenessThreshold
+    stalenessThreshold: TimeInterval = MultipartUploadStaging.defaultStalenessThreshold,
+    fileManager: FileManager = .default
   ) -> MultipartUploadStaging {
-    MultipartUploadStaging(directory: directory, stalenessThreshold: stalenessThreshold)
+    MultipartUploadStaging(
+      directory: directory,
+      stalenessThreshold: stalenessThreshold,
+      fileManager: fileManager
+    )
   }
 
   private func seedFile(named name: String, age: TimeInterval) throws -> URL {
@@ -147,5 +163,17 @@ final class MultipartUploadStagingTests: XCTestCase {
   private func posixPermissions(atPath path: String) throws -> Int {
     let attributes = try FileManager.default.attributesOfItem(atPath: path)
     return (attributes[.posixPermissions] as? NSNumber)?.intValue ?? -1
+  }
+}
+
+/// Models a file-creation failure (e.g. disk full) after directory setup
+/// succeeded, so the surfaced-error seam stays covered deterministically.
+private final class FailingCreateFileManager: FileManager, @unchecked Sendable {
+  override func createFile(
+    atPath path: String,
+    contents data: Data?,
+    attributes attr: [FileAttributeKey: Any]? = nil
+  ) -> Bool {
+    false
   }
 }

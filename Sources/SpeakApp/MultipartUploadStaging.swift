@@ -18,7 +18,7 @@ final class MultipartUploadStaging: @unchecked Sendable {
 
   private let directory: URL
   private let stalenessThreshold: TimeInterval
-  private let fileManager = FileManager.default
+  private let fileManager: FileManager
   private let lock = NSLock()
   private var claimedPaths: Set<String> = []
   private let logger = SpeakLogger.logger(category: "MultipartUploadStaging")
@@ -26,10 +26,12 @@ final class MultipartUploadStaging: @unchecked Sendable {
   init(
     directory: URL = FileManager.default.temporaryDirectory
       .appendingPathComponent("speak-multipart-uploads", isDirectory: true),
-    stalenessThreshold: TimeInterval = MultipartUploadStaging.defaultStalenessThreshold
+    stalenessThreshold: TimeInterval = MultipartUploadStaging.defaultStalenessThreshold,
+    fileManager: FileManager = .default
   ) {
     self.directory = directory
     self.stalenessThreshold = stalenessThreshold
+    self.fileManager = fileManager
   }
 
   /// Creates an empty upload body file and claims it for the current upload so a
@@ -44,6 +46,12 @@ final class MultipartUploadStaging: @unchecked Sendable {
       at: self.directory,
       withIntermediateDirectories: true,
       attributes: [.posixPermissions: 0o700]
+    )
+    // createDirectory applies attributes only when it creates the directory,
+    // so enforce the restrictive mode on a pre-existing directory as well.
+    try self.fileManager.setAttributes(
+      [.posixPermissions: 0o700],
+      ofItemAtPath: self.directory.path
     )
     let url = self.directory
       .appendingPathComponent("\(providerID)-upload-\(UUID().uuidString).multipart")

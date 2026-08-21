@@ -47,21 +47,46 @@ public enum SpeechTokenizer {
         return TokenizedText(surfaceTokens: surfaces, lemmas: lemmas)
     }
 
-    /// Counts filler phrases over a surface-token stream.
+    /// Result of matching filler phrases over a surface-token stream: the
+    /// per-phrase counts plus every token index a match consumed, so callers
+    /// can exclude all words of a multi-word filler ("sort of", "you know")
+    /// from content-word statistics, not just single-word fillers.
+    public struct FillerMatches: Sendable, Equatable {
+        public let counts: [String: Int]
+        /// Indices into the matched token array consumed by a filler phrase.
+        public let consumedTokenIndices: Set<Int>
+
+        public init(counts: [String: Int], consumedTokenIndices: Set<Int>) {
+            self.counts = counts
+            self.consumedTokenIndices = consumedTokenIndices
+        }
+    }
+
+    /// Matches filler phrases over a surface-token stream, returning both the
+    /// per-phrase counts and the consumed token indices.
     ///
     /// Matching is greedy and non-overlapping: phrases are tried longest first
     /// and a match consumes its tokens, so "sort of" never also counts "of",
     /// and "you know" wins over any single-word "you" filler entry.
-    public static func countFillers(
+    public static func matchFillers(
         in surfaceTokens: [String],
         phrases: [[String]]
-    ) -> [String: Int] {
-        guard !phrases.isEmpty, !surfaceTokens.isEmpty else { return [:] }
+    ) -> FillerMatches {
+        // Enforce the documented contract locally: an empty phrase would match
+        // every index without advancing (an infinite loop), and an unsorted
+        // array would let a shorter phrase pre-empt a longer overlapping one.
+        let normalizedPhrases = phrases
+            .filter { !$0.isEmpty }
+            .sorted { $0.count > $1.count }
+        guard !normalizedPhrases.isEmpty, !surfaceTokens.isEmpty else {
+            return FillerMatches(counts: [:], consumedTokenIndices: [])
+        }
         var counts: [String: Int] = [:]
+        var consumed: Set<Int> = []
         var index = 0
         while index < surfaceTokens.count {
             var matched = false
-            for phrase in phrases where phrase.count <= surfaceTokens.count - index {
+            for phrase in normalizedPhrases where phrase.count <= surfaceTokens.count - index {
                 var isMatch = true
                 for (offset, word) in phrase.enumerated()
                 where surfaceTokens[index + offset] != word {
@@ -70,6 +95,9 @@ public enum SpeechTokenizer {
                 }
                 if isMatch {
                     counts[phrase.joined(separator: " "), default: 0] += 1
+                    for offset in 0..<phrase.count {
+                        consumed.insert(index + offset)
+                    }
                     index += phrase.count
                     matched = true
                     break
@@ -79,7 +107,16 @@ public enum SpeechTokenizer {
                 index += 1
             }
         }
-        return counts
+        return FillerMatches(counts: counts, consumedTokenIndices: consumed)
+    }
+
+    /// Counts filler phrases over a surface-token stream. Convenience wrapper
+    /// over `matchFillers(in:phrases:)` for callers that only need counts.
+    public static func countFillers(
+        in surfaceTokens: [String],
+        phrases: [[String]]
+    ) -> [String: Int] {
+        matchFillers(in: surfaceTokens, phrases: phrases).counts
     }
 
     /// Builds n-gram counts (space-joined) over a token stream.

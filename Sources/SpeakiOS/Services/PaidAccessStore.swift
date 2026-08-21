@@ -132,7 +132,9 @@ public final class PaidAccessStore: NSObject, ObservableObject {
         PaidAccessRouter(
             entitlement: self.entitlement,
             policy: self.policy,
-            isPaidRoutingPreferred: self.paidRoutingEnabled
+            // Same feature-flag guard as isPaidRoutingActive: while iOS paid
+            // routing is unwired, no accessor may prefer the paid rail.
+            isPaidRoutingPreferred: PaidAccessFeature.isAvailableOnIOS && self.paidRoutingEnabled
         )
     }
 

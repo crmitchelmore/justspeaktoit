@@ -368,12 +368,17 @@ export class Repository {
         input.expectedVersion,
       );
 
+    // changes() reports the row count of the immediately preceding statement
+    // in this batch's transaction, so the append-only audit row is written
+    // only when the optimistic UPDATE actually applied. A version-conflict
+    // retry therefore cannot record a transition that never occurred.
     const audit = this.db
       .prepare(
         `INSERT INTO entitlement_events
            (id, user_id, from_status, to_status, source, source_event_id,
             reason, correlation_id, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`,
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
+          WHERE changes() > 0`,
       )
       .bind(
         crypto.randomUUID(),
@@ -460,7 +465,7 @@ export class Repository {
       .prepare(
         `UPDATE webhook_events
             SET status = ?3, processed_at = ?4, failure_reason = ?5
-          WHERE provider = ?1 AND event_id = ?2`,
+          WHERE provider = ?1 AND event_id = ?2 AND status = 'received'`,
       )
       .bind(
         input.provider,

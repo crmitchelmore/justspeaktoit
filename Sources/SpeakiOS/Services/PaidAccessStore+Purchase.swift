@@ -64,15 +64,32 @@ extension PaidAccessStore {
 
         do {
             let result = try await product.purchase(options: [.appAccountToken(accountToken)])
-            if case .success(let verification) = result {
-                if await self.syncIfSubscription(verification, session: session),
-                   case .verified(let transaction) = verification {
-                    await transaction.finish()
-                }
-                await self.refreshEntitlement()
-            }
+            await self.handlePurchaseResult(result, session: session)
         } catch {
             self.lastError = "The purchase could not be completed."
+        }
+    }
+
+    private func handlePurchaseResult(
+        _ result: Product.PurchaseResult,
+        session: PaidAccessSession
+    ) async {
+        switch result {
+        case .success(let verification):
+            if await self.syncIfSubscription(verification, session: session),
+               case .verified(let transaction) = verification {
+                await transaction.finish()
+            }
+            await self.refreshEntitlement()
+        case .pending:
+            self.lastError = """
+                The purchase is awaiting approval (for example Ask to Buy). \
+                Access activates automatically once it is approved.
+                """
+        case .userCancelled:
+            break
+        @unknown default:
+            break
         }
     }
 

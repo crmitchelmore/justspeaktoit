@@ -447,7 +447,12 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
           await transaction.finish()
         }
         await self.refreshEntitlement()
-      case .userCancelled, .pending:
+      case .pending:
+        self.lastError = """
+          The purchase is awaiting approval (for example Ask to Buy). \
+          Access activates automatically once it is approved.
+          """
+      case .userCancelled:
         break
       @unknown default:
         break

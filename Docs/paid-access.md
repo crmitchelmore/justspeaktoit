@@ -177,7 +177,7 @@ npm run migrations:remote     # wrangler d1 migrations apply paid-access --remot
 npx wrangler d1 migrations list paid-access --remote
 ```
 
-`0001_init.sql` creates `users`, `auth_sessions`, `billing_customers`, `entitlements`, `entitlement_events`, `webhook_events`, `usage_ledger` and `audit_events`, plus triggers that make `entitlement_events`, `usage_ledger` and `audit_events` reject `UPDATE` and `DELETE`. Idempotency comes from two UNIQUE constraints: `webhook_events(provider, event_id)` and `usage_ledger(user_id, idempotency_key)`.
+`0001_init.sql` creates `users`, `auth_sessions`, `billing_customers`, `entitlements`, `entitlement_events`, `webhook_events`, `usage_ledger`, `request_claims` and `audit_events`, plus triggers that make `entitlement_events`, `usage_ledger` and `audit_events` reject `UPDATE` and `DELETE`. Idempotency comes from three UNIQUE constraints: `webhook_events(provider, event_id)`, `usage_ledger(user_id, idempotency_key)` and `request_claims(user_id, idempotency_key)`. `request_claims` rows carry `expires_at`, but expiry is applied on read only — nothing deletes them, so they accumulate until an operator purges them (see Retention below).
 
 Apply migrations before deploying the Worker version that depends on them.
 
@@ -398,6 +398,7 @@ To grant, extend or revoke access manually, apply a `manual`-source entitlement 
 | `entitlement_events` | 7 years from the end of the subscription | Retained for billing audit; never edited |
 | `entitlements` | 7 years from the end of the subscription | Retained for billing audit; never edited |
 | `audit_events` | 24 months | Monthly purge of older rows |
+| `request_claims` | 30 days after `expires_at` (rows can hold a stored response body) | Monthly purge of rows past `expires_at`; expiry is enforced on read only, never by deletion |
 | `users` | Life of the account, then 30 days | On a deletion request, clear `apple_sub` and `email` and disable the account within 30 days |
 
 Deletion and access requests arrive at **privacy@justspeaktoit.com**, the address published in [`paid-access-privacy.md`](paid-access-privacy.md). Handling a deletion request means disabling the account, revoking its sessions, and clearing the Apple identifier and email address, by hand; the append-only billing history stays, without identifiers that tie it to a person. The privacy notice promises no turnaround, because nothing here guarantees one — answer promptly, and do not publish a deadline until the work is automated.

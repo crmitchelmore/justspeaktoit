@@ -277,21 +277,24 @@ export class LiveSessionDurableObject implements DurableObject {
    * double close a no-op.
    */
   private async settle(closed: boolean): Promise<void> {
+    // Set synchronously, before any await: settle is reachable from several
+    // socket listeners, the alarm and fetch failure paths, and two of them
+    // routinely fire together. A later caller must observe the guard before
+    // the first storage await can interleave.
     if (this.settled) return;
+    this.settled = true;
     // The in-memory flag is lost when the Durable Object is evicted, so the
     // durable copy is what makes a double settle idempotent across restarts.
-    if ((await this.state.storage.get<boolean>(SETTLED_KEY)) === true) {
-      this.settled = true;
-      return;
-    }
-    this.settled = true;
-    await this.state.storage.put(SETTLED_KEY, true);
+    if ((await this.state.storage.get<boolean>(SETTLED_KEY)) === true) return;
 
     const metadata =
       this.metadata ?? (await this.state.storage.get<StoredSessionMetadata>(METADATA_KEY)) ?? null;
     // The credential only ever lived in memory; drop it as soon as the relay is over.
     this.metadata = null;
-    if (metadata === null) return;
+    if (metadata === null) {
+      await this.state.storage.put(SETTLED_KEY, true);
+      return;
+    }
 
     const elapsedSeconds = Math.max(0, Math.ceil((Date.now() - metadata.startedAtMs) / 1_000));
     const outcome: LiveSessionOutcome = {
@@ -301,7 +304,10 @@ export class LiveSessionDurableObject implements DurableObject {
       elapsedSeconds: Math.min(elapsedSeconds, metadata.maxSessionSeconds),
       closed,
     };
-    await this.state.storage.put(OUTCOME_KEY, outcome);
+    // One atomic write: a crash can never leave the session marked settled
+    // with no recorded outcome (which would strand reconciliation and leave
+    // metering to the coarser lease-expiry commit).
+    await this.state.storage.put({ [SETTLED_KEY]: true, [OUTCOME_KEY]: outcome });
     await this.state.storage.deleteAlarm();
 
     // Settle the reservation from the server's own measurement. A failure here

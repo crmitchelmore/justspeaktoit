@@ -211,6 +211,48 @@ describe('append-only enforcement', () => {
   });
 });
 
+describe('entitlement transition atomicity', () => {
+  it('writes no audit row when the optimistic update loses its version race', async () => {
+    const repo = repository();
+    const userId = await seedUser();
+    const current = await repo.ensureEntitlement(userId, NOW);
+
+    const attempt = (expectedVersion: number, reason: string) =>
+      repo.writeEntitlementTransition({
+        next: {
+          ...current,
+          status: 'active',
+          source: 'stripe',
+          sourceReference: 'sub_audit_test',
+          currentPeriodStart: NOW,
+          currentPeriodEnd: NOW + 3_600,
+          version: current.version + 1,
+          sourceEventAt: NOW,
+        },
+        expectedVersion,
+        fromStatus: current.status,
+        reason,
+        eventSource: 'stripe',
+        sourceEventId: null,
+        correlationId: 'corr-audit',
+        nowSeconds: NOW,
+      });
+
+    // Positive control: the matching version writes the row and its audit event.
+    expect(await attempt(current.version, 'winner')).toBe(true);
+    // The losing writer must not append an audit event for a transition that
+    // never happened — entitlement_events is append-only and cannot be fixed up.
+    expect(await attempt(current.version, 'loser')).toBe(false);
+
+    const events = await env.DB.prepare(
+      'SELECT reason FROM entitlement_events WHERE user_id = ?1',
+    )
+      .bind(userId)
+      .all<{ reason: string }>();
+    expect(events.results.map((row) => row.reason)).toEqual(['winner']);
+  });
+});
+
 describe('database constraints', () => {
   it('resolves the same Apple subject to one user across sign-ins', async () => {
     const repo = repository();
@@ -281,6 +323,48 @@ describe('database constraints', () => {
     const first = await repo.ensureEntitlement(userId, NOW);
     const second = await repo.ensureEntitlement(userId, NOW + 5);
     expect(second.id).toBe(first.id);
+  });
+});
+
+describe('webhook completion finality', () => {
+  it('keeps a terminal webhook status against a late redelivery', async () => {
+    const repo = repository();
+    const eventId = `evt-${crypto.randomUUID()}`;
+    expect(
+      await repo.claimWebhookEvent({
+        provider: 'stripe',
+        eventId,
+        eventType: 'invoice.paid',
+        payloadDigest: 'digest-1',
+        correlationId: 'corr-w1',
+        nowSeconds: NOW,
+      }),
+    ).toBe(true);
+    await repo.completeWebhookEvent({
+      provider: 'stripe',
+      eventId,
+      status: 'processed',
+      failureReason: null,
+      nowSeconds: NOW + 1,
+    });
+
+    // A retry that loses the race and reaches completion later must not
+    // rewrite the recorded outcome to failed.
+    await repo.completeWebhookEvent({
+      provider: 'stripe',
+      eventId,
+      status: 'failed',
+      failureReason: 'late duplicate',
+      nowSeconds: NOW + 2,
+    });
+
+    const row = await env.DB.prepare(
+      'SELECT status, failure_reason FROM webhook_events WHERE provider = ?1 AND event_id = ?2',
+    )
+      .bind('stripe', eventId)
+      .first<{ status: string; failure_reason: string | null }>();
+    expect(row?.status).toBe('processed');
+    expect(row?.failure_reason).toBeNull();
   });
 });
 

@@ -259,7 +259,7 @@ extension SettingsView {
           .font(.callout)
           .fixedSize(horizontal: false, vertical: true)
 
-        ForEach(paidAccess.policy.clientSupportedRoutes, id: \.model) { route in
+        ForEach(paidAccess.policy.clientSupportedRoutes, id: \.operation) { route in
           HStack {
             Text(route.operation.displayName)
               .font(.caption)

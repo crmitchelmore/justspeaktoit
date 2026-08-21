@@ -26,6 +26,7 @@ private final class TemporaryApplicationSupportFileManager: FileManager {
 }
 
 @MainActor
+// swiftlint:disable:next type_body_length
 final class HistoryManagerTests: XCTestCase {
 
     private var tempDir: URL!
@@ -290,6 +291,53 @@ final class HistoryManagerTests: XCTestCase {
         XCTAssertEqual(manager.statistics.totalSpend, 0)
         XCTAssertEqual(manager.statistics.averageSessionLength, 0)
         XCTAssertEqual(manager.statistics.sessionsWithErrors, 0)
+    }
+
+    // MARK: - Content Revision
+
+    func testContentRevision_bumpsOnEveryContentMutation() async throws {
+        let manager = await makeManager()
+        await manager.loadFromDisk()
+        var last = manager.contentRevision
+
+        func assertBumped(_ message: String, file: StaticString = #filePath, line: UInt = #line) {
+            XCTAssertNotEqual(manager.contentRevision, last, message, file: file, line: line)
+            last = manager.contentRevision
+        }
+
+        let item = makeItem(duration: 12)
+        await manager.append(item)
+        assertBumped("append must bump the content revision")
+
+        // An in-place update that leaves every statistics input unchanged
+        // (same duration, cost, errors) must still bump the revision — this is
+        // exactly the case where keying off `statistics` goes stale.
+        let statsBefore = manager.statistics
+        let updated = makeItem(id: item.id, createdAt: item.createdAt, duration: 12)
+        await manager.update(updated)
+        XCTAssertEqual(manager.statistics, statsBefore, "statistics inputs are unchanged")
+        assertBumped("statistics-neutral update must bump the content revision")
+
+        await manager.remove(id: item.id)
+        assertBumped("remove must bump the content revision")
+
+        await manager.append(makeItem(duration: 5))
+        assertBumped("second append must bump the content revision")
+
+        await manager.removeAll()
+        assertBumped("removeAll must bump the content revision")
+
+        await manager.loadFromDisk()
+        assertBumped("reload from disk must bump the content revision")
+    }
+
+    func testContentRevision_unchangedByPaginationOnly() async throws {
+        let manager = await makeManager()
+        await manager.loadFromDisk()
+        await manager.append(makeItem(duration: 3))
+        let before = manager.contentRevision
+        await manager.loadMore()
+        XCTAssertEqual(manager.contentRevision, before)
     }
 
     // MARK: - Mutation observers (history sync wiring)

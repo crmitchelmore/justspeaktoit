@@ -420,6 +420,23 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertFalse(profileBootstrap.contains("profiles.each do |stale_profile|"))
     }
 
+    func testSpeakCLIBuildScript_buildsPerArchAndValidatesTheUniversalBinary() throws {
+        let script = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("scripts/build-speak-cli.sh"),
+            encoding: .utf8
+        )
+
+        // A combined dual-arch swift build fails to plan the SwiftFormat
+        // plugin dependency (issue #759); the slices must be built separately
+        // and joined with lipo, and the result must be verified universal.
+        XCTAssertFalse(script.contains("--arch arm64 --arch x86_64"))
+        XCTAssertTrue(script.contains("swift build --product speak --configuration release --arch arm64"))
+        XCTAssertTrue(script.contains("swift build --product speak --configuration release --arch x86_64"))
+        XCTAssertTrue(script.contains("lipo -create"))
+        XCTAssertTrue(script.contains("lipo -archs"))
+        XCTAssertTrue(script.contains("universal speak binary is missing"))
+    }
+
     func testIOSReleaseWorkflowRequiresAnExplicitSemanticVersion() throws {
         let workflow = try String(
             contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/release-ios.yml"),

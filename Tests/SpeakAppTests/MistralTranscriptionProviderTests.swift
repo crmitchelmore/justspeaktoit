@@ -71,7 +71,7 @@ final class MistralTranscriptionProviderTests: XCTestCase {
     let directory = try makeTemporaryDirectory()
     let bodyURL = try MistralTranscriptionProvider.makeMultipartUploadBody(
       sourceURL: audioURL,
-      destinationDirectory: directory,
+      staging: MultipartUploadStaging(directory: directory),
       boundary: "TestBoundary",
       model: "voxtral-mini-latest",
       language: "en"
@@ -96,7 +96,7 @@ final class MistralTranscriptionProviderTests: XCTestCase {
     let directory = try makeTemporaryDirectory()
     let bodyURL = try MistralTranscriptionProvider.makeMultipartUploadBody(
       sourceURL: audioURL,
-      destinationDirectory: directory,
+      staging: MultipartUploadStaging(directory: directory),
       boundary: "TestBoundary",
       model: "voxtral-mini-latest",
       language: nil
@@ -292,12 +292,13 @@ final class MistralTranscriptionProviderTests: XCTestCase {
 
 private func makeProvider(
   multipartDirectory: URL = FileManager.default.temporaryDirectory
+    .appendingPathComponent("speak-multipart-uploads", isDirectory: true)
 ) -> MistralTranscriptionProvider {
   let configuration = URLSessionConfiguration.ephemeral
   configuration.protocolClasses = [MistralMockURLProtocol.self]
   return MistralTranscriptionProvider(
     session: URLSession(configuration: configuration),
-    multipartDirectory: multipartDirectory
+    multipartStaging: MultipartUploadStaging(directory: multipartDirectory)
   )
 }
 

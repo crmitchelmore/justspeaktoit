@@ -102,6 +102,14 @@ final class HistoryManager: ObservableObject {
   /// write. Never contains transcript text or file paths.
   @Published private(set) var persistenceError: String?
 
+  /// Monotonic revision bumped on every mutation of history content (load,
+  /// append, update, remove, clear-all — including CloudKit-driven merges,
+  /// which land through the same mutators). Derived views that depend on
+  /// record *content* (e.g. Speech Insights) should key their refresh on this
+  /// rather than `statistics`, which ignores transcript text and so misses
+  /// in-place edits that leave count/duration/cost unchanged.
+  @Published private(set) var contentRevision: UInt64 = 0
+
   let pageSize: Int
 
   /// Full list of items loaded from disk (for pagination)
@@ -372,6 +380,7 @@ final class HistoryManager: ObservableObject {
       hasMoreItems = sorted.count > pageSize
       cachedStatistics = stats
       statistics = stats
+      contentRevision &+= 1
       loadState = .ready
       // Make the queued mutations durable now that the store is reachable.
       // They remain in pendingWrites either way; flush commits them.
@@ -428,6 +437,7 @@ final class HistoryManager: ObservableObject {
     items = current
 
     updateStatisticsForAppend(item)
+    contentRevision &+= 1
 
     // Write to WAL instead of directly to disk
     await appendToWAL(WALEntry(operation: .append, item: item))
@@ -457,6 +467,7 @@ final class HistoryManager: ObservableObject {
       cachedStatistics = stats
       statistics = stats
     }
+    contentRevision &+= 1
 
     // Write to WAL instead of directly to disk
     await appendToWAL(WALEntry(operation: .update, item: item))
@@ -472,6 +483,7 @@ final class HistoryManager: ObservableObject {
     if let diskItem {
       updateStatisticsForRemove(diskItem)
     }
+    contentRevision &+= 1
 
     // Write to WAL instead of directly to disk
     if let diskItem {
@@ -487,6 +499,7 @@ final class HistoryManager: ObservableObject {
     let stats = Self.calculateStatistics(for: [])
     cachedStatistics = stats
     statistics = stats
+    contentRevision &+= 1
 
     // Write to WAL instead of directly to disk
     await appendToWAL(WALEntry(operation: .removeAll))

@@ -442,10 +442,8 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
       let result = try await product.purchase(options: [.appAccountToken(accountToken)])
       switch result {
       case .success(let verification):
-        if
-          await self.syncIfSubscription(verification, session: session),
-          case .verified(let transaction) = verification
-        {
+        let didSync = await self.syncIfSubscription(verification, session: session)
+        if didSync, case .verified(let transaction) = verification {
           await transaction.finish()
         }
         await self.refreshEntitlement()
@@ -461,10 +459,8 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
 
   private func handleTransactionUpdate(_ result: VerificationResult<Transaction>) async {
     guard let session = await self.currentSession() else { return }
-    if
-      await self.syncIfSubscription(result, session: session),
-      case .verified(let transaction) = result
-    {
+    let didSync = await self.syncIfSubscription(result, session: session)
+    if didSync, case .verified(let transaction) = result {
       await transaction.finish()
     }
     await self.refreshEntitlement()

@@ -82,16 +82,19 @@ struct SonioxTranscriptionProvider: TranscriptionProvider {
     private let baseURL = URL(string: "https://api.soniox.com/v1")!
     private let pollingDelay: Duration
     private let maximumPollingAttempts: Int
+    private let multipartStaging: MultipartUploadStaging
     private let logger = SpeakLogger.logger(category: "SonioxTranscriptionProvider")
 
     init(
         session: URLSession = .shared,
         pollingDelay: Duration = .seconds(2),
-        maximumPollingAttempts: Int = 90
+        maximumPollingAttempts: Int = 90,
+        multipartStaging: MultipartUploadStaging = .shared
     ) {
         self.session = session
         self.pollingDelay = pollingDelay
         self.maximumPollingAttempts = maximumPollingAttempts
+        self.multipartStaging = multipartStaging
     }
 
     func transcribeFile(
@@ -169,10 +172,11 @@ struct SonioxTranscriptionProvider: TranscriptionProvider {
 
         let uploadBodyURL = try Self.makeMultipartUploadBody(
             sourceURL: url,
+            staging: self.multipartStaging,
             boundary: boundary,
             mimeType: self.mimeType(for: url)
         )
-        defer { try? FileManager.default.removeItem(at: uploadBodyURL) }
+        defer { self.multipartStaging.removeUploadBodyFile(at: uploadBodyURL) }
 
         let data = try await self.upload(request, fromFile: uploadBodyURL)
         return try JSONDecoder().decode(SonioxFile.self, from: data)
@@ -180,30 +184,36 @@ struct SonioxTranscriptionProvider: TranscriptionProvider {
 
     private nonisolated static func makeMultipartUploadBody(
         sourceURL: URL,
+        staging: MultipartUploadStaging,
         boundary: String,
         mimeType: String
     ) throws -> URL {
-        let destinationURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("soniox-upload-\(UUID().uuidString).multipart")
-        FileManager.default.createFile(atPath: destinationURL.path, contents: nil)
-        let output = try FileHandle(forWritingTo: destinationURL)
-        defer { try? output.close() }
+        let destinationURL = try staging.createUploadBodyFile(providerID: "soniox")
 
-        let header =
-            "--\(boundary)\r\n"
-            + "Content-Disposition: form-data; name=\"file\"; filename=\"\(sourceURL.lastPathComponent)\"\r\n"
-            + "Content-Type: \(mimeType)\r\n\r\n"
-        try output.write(contentsOf: Data(header.utf8))
+        do {
+            let output = try FileHandle(forWritingTo: destinationURL)
+            defer { try? output.close() }
 
-        let input = try FileHandle(forReadingFrom: sourceURL)
-        defer { try? input.close() }
-        while true {
-            let chunk = try input.read(upToCount: 1024 * 1024) ?? Data()
-            guard !chunk.isEmpty else { break }
-            try output.write(contentsOf: chunk)
+            let header =
+                "--\(boundary)\r\n"
+                + "Content-Disposition: form-data; name=\"file\"; "
+                + "filename=\"\(sourceURL.lastPathComponent)\"\r\n"
+                + "Content-Type: \(mimeType)\r\n\r\n"
+            try output.write(contentsOf: Data(header.utf8))
+
+            let input = try FileHandle(forReadingFrom: sourceURL)
+            defer { try? input.close() }
+            while true {
+                let chunk = try input.read(upToCount: 1024 * 1024) ?? Data()
+                guard !chunk.isEmpty else { break }
+                try output.write(contentsOf: chunk)
+            }
+            try output.write(contentsOf: Data("\r\n--\(boundary)--\r\n".utf8))
+            return destinationURL
+        } catch {
+            staging.removeUploadBodyFile(at: destinationURL)
+            throw error
         }
-        try output.write(contentsOf: Data("\r\n--\(boundary)--\r\n".utf8))
-        return destinationURL
     }
 
     private func createTranscription(

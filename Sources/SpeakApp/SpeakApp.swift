@@ -198,6 +198,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.windows.first?.makeKeyAndOrderFront(nil)
         }
         DispatchQueue.global(qos: .utility).async { _ = AVAudioEngine() } // Sentry JUSTSPEAKTOIT-A
+        // Raw-audio multipart bodies abandoned by a crash or force quit (#706).
+        DispatchQueue.global(qos: .utility).async {
+            MultipartUploadStaging.shared.purgeStaleUploads()
+        }
         checkAndOfferDMGCleanup()
     }
 

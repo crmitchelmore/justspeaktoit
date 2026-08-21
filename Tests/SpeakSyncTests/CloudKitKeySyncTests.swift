@@ -409,6 +409,109 @@ final class CloudKitKeySyncTests: XCTestCase {
         XCTAssertEqual(harness.defaults.data(forKey: CloudKitKeySync.syncTokenKey), finalToken)
     }
 
+    func testDisable_PromptlyCancelsStalledProductionFetch() async throws {
+        let fetchOperation = FakeFetchOperation()
+        let harness = makeHarness(fetchOperation: { _, _ in fetchOperation })
+
+        let syncTask = Task { try await harness.sync.syncNow() }
+        try await eventually { fetchOperation.runCount == 1 }
+
+        // The fake never completes on its own and ignores cancel(), modelling a
+        // stalled network operation. Without the cancellation handler this await
+        // would hang on the in-flight fetch.
+        await harness.sync.disable()
+
+        XCTAssertGreaterThanOrEqual(fetchOperation.cancelCount, 1)
+        _ = try? await syncTask.value
+        XCTAssertFalse(harness.defaults.bool(forKey: CloudKitKeySync.enabledKey))
+        XCTAssertNil(harness.defaults.data(forKey: CloudKitKeySync.syncTokenKey))
+    }
+
+    func testFetchCancellation_RacingCompletion_DoesNotDoubleResume() async throws {
+        let fetchOperation = FakeFetchOperation()
+        fetchOperation.completesOnCancel = true
+        let harness = makeHarness(fetchOperation: { _, _ in fetchOperation })
+
+        let syncTask = Task { try await harness.sync.syncNow() }
+        try await eventually { fetchOperation.runCount == 1 }
+
+        // cancel() invokes the CloudKit completion while the cancellation handler
+        // resumes the gate itself; a late completion afterwards must be ignored.
+        // A double resume of the checked continuation would crash the test run.
+        await harness.sync.disable()
+        fetchOperation.complete(with: .success(()))
+        fetchOperation.complete(with: .failure(CKError(.networkFailure)))
+
+        _ = try? await syncTask.value
+        XCTAssertGreaterThanOrEqual(fetchOperation.cancelCount, 1)
+        XCTAssertFalse(harness.defaults.bool(forKey: CloudKitKeySync.enabledKey))
+    }
+
+    func testProductionFetchBridge_CompletesNormally() async throws {
+        let fetchOperation = FakeFetchOperation()
+        let harness = makeHarness(fetchOperation: { _, _ in fetchOperation })
+
+        let syncTask = Task { try await harness.sync.syncNow() }
+        try await eventually { fetchOperation.runCount == 1 }
+        fetchOperation.complete(with: .success(()))
+
+        try await syncTask.value
+
+        XCTAssertEqual(fetchOperation.cancelCount, 0)
+        XCTAssertEqual(fetchOperation.runCount, 1)
+    }
+
+    func testAwaitFetchCompletion_CancelledBeforeStart_NeverRunsOperation() async throws {
+        let fetchOperation = FakeFetchOperation()
+        let task = Task {
+            // Enter the bridge only once cancellation is already observed so the
+            // pre-add check is what rejects the fetch.
+            while !Task.isCancelled { await Task.yield() }
+            try await CloudKitKeySync.awaitFetchCompletion(of: fetchOperation)
+        }
+
+        task.cancel()
+
+        do {
+            try await task.value
+            XCTFail("Expected cancellation")
+        } catch is CancellationError {
+            // Expected.
+        }
+        XCTAssertEqual(fetchOperation.runCount, 0)
+    }
+
+    func testCompletionGate_FinishedBeforeRegister_ResumesImmediatelyAndReportsNotPending() async {
+        // Models cancellation firing between Task.checkCancellation() and
+        // gate.register: the bridge must not start the operation afterwards.
+        let gate = KeySyncFetchCompletionGate()
+        gate.finish(with: .failure(CancellationError()))
+
+        var stillPending = true
+        do {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                stillPending = gate.register(continuation)
+            }
+            XCTFail("Expected CancellationError")
+        } catch is CancellationError {
+            // Expected.
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertFalse(stillPending)
+    }
+
+    func testCompletionGate_RegisterBeforeFinish_ReportsPendingAndResumesOnFinish() async throws {
+        let gate = KeySyncFetchCompletionGate()
+
+        var stillPending = false
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            stillPending = gate.register(continuation)
+            gate.finish(with: .success(()))
+        }
+        XCTAssertTrue(stillPending)
+    }
+
     func testSleeperCancellation_ResumesTheMatchingWaiter() async throws {
         let sleeper = TestSleeper()
         let sleepTask = Task { try await sleeper.sleep(123) }
@@ -440,7 +543,10 @@ private extension CloudKitKeySyncTests {
         let key: SymmetricKey
     }
 
-    func makeHarness(accountName: String = "test-account") -> Harness {
+    func makeHarness(
+        accountName: String = "test-account",
+        fetchOperation: ((CloudKitKeySyncDatabase, Data?) -> any KeySyncFetchOperationRunning)? = nil
+    ) -> Harness {
         let suiteName = "CloudKitKeySyncTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
@@ -452,6 +558,10 @@ private extension CloudKitKeySyncTests {
         let secrets = MemorySecretStorage()
         let state = MemorySecretStorage()
         let key = SymmetricKey(data: Data(repeating: 7, count: 32))
+        // When a fetch-operation seam is injected, leave `fetchChanges` nil so the
+        // production continuation bridge (and its cancellation handling) runs.
+        let fetchChanges: ((CloudKitKeySyncDatabase, Data?) async throws -> KeySyncFetchResult)? =
+            fetchOperation == nil ? { _, token in try await cloud.fetch(token: token) } : nil
         let dependencies = CloudKitKeySyncDependencies(
             defaults: defaults,
             notificationCenter: notifications,
@@ -464,7 +574,8 @@ private extension CloudKitKeySyncTests {
             setupInfrastructure: { _ in },
             fetchRecord: { id, _ in cloud.records[id.recordName] },
             saveRecord: { record, _ in try await cloud.save(record) },
-            fetchChanges: { _, token in try await cloud.fetch(token: token) }
+            fetchChanges: fetchChanges,
+            makeFetchOperation: fetchOperation
         )
         let sync = CloudKitKeySync(
             secureStorage: secrets,
@@ -611,6 +722,42 @@ private final class FakeKeySyncCloud {
             )
         }
         return try fetchResults.removeFirst().get()
+    }
+}
+
+private final class FakeFetchOperation: KeySyncFetchOperationRunning, @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedCompletion: ((Result<Void, Error>) -> Void)?
+    private var storedRunCount = 0
+    private var storedCancelCount = 0
+    private var storedCompletesOnCancel = false
+
+    var runCount: Int { lock.withLock { storedRunCount } }
+    var cancelCount: Int { lock.withLock { storedCancelCount } }
+    var completesOnCancel: Bool {
+        get { lock.withLock { storedCompletesOnCancel } }
+        set { lock.withLock { storedCompletesOnCancel = newValue } }
+    }
+
+    func run(completion: @escaping @Sendable (Result<Void, Error>) -> Void) {
+        lock.withLock {
+            storedRunCount += 1
+            storedCompletion = completion
+        }
+    }
+
+    func cancel() {
+        let completion: ((Result<Void, Error>) -> Void)? = lock.withLock {
+            storedCancelCount += 1
+            guard storedCompletesOnCancel else { return nil }
+            return storedCompletion
+        }
+        completion?(.failure(CKError(.operationCancelled)))
+    }
+
+    func complete(with result: Result<Void, Error>) {
+        let completion = lock.withLock { storedCompletion }
+        completion?(result)
     }
 }
 

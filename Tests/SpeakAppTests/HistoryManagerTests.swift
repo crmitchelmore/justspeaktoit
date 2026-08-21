@@ -211,12 +211,12 @@ final class HistoryManagerTests: XCTestCase {
         let laterItem = makeItem()
         let flushedEntry = WALEntry(operation: .append, item: flushedItem)
         let laterEntry = WALEntry(operation: .append, item: laterItem)
-        await store.append(flushedEntry)
+        try await store.append(flushedEntry)
 
         async let commit: Void = store.commitSnapshot([flushedItem], flushing: [flushedEntry])
         async let append: Void = store.append(laterEntry)
         try await commit
-        await append
+        try await append
 
         let pending = try await store.loadWALEntries()
         XCTAssertEqual(pending.map(\.id), [laterEntry.id])

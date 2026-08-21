@@ -162,11 +162,25 @@ public final class iOSHistoryManager: ObservableObject {
 
     /// Adds a new transcription to history.
     public func add(_ item: iOSHistoryItem) {
-        loadHistoryFromDiskIfNeeded()
-        items.insert(item, at: 0)
-        saveHistory()
+        _ = upsertReportingDurability(item)
+    }
 
-        guard syncEnabled else { return }
+    /// Inserts (or replaces, by id) a history item and reports whether the
+    /// write actually reached disk (issue #674): callers that must not
+    /// acknowledge or delete source material until the entry is durable —
+    /// the Watch import pipeline — branch on this. Replacing by id keeps
+    /// duplicate imports of the same capture from creating duplicate rows.
+    @discardableResult
+    public func upsertReportingDurability(_ item: iOSHistoryItem) -> Bool {
+        loadHistoryFromDiskIfNeeded()
+        if let existing = items.firstIndex(where: { $0.id == item.id }) {
+            items[existing] = item
+        } else {
+            items.insert(item, at: 0)
+        }
+        guard saveHistoryReportingDurability() else { return false }
+
+        guard syncEnabled else { return true }
         Task {
             do {
                 try await HistorySyncEngine.shared.upload(entry: item.toSyncable())
@@ -178,6 +192,7 @@ public final class iOSHistoryManager: ObservableObject {
                 logger.error("Failed to upload item: \(error.localizedDescription, privacy: .public)")
             }
         }
+        return true
     }
 
     /// Creates and adds a history item from transcription result.
@@ -345,6 +360,13 @@ public final class iOSHistoryManager: ObservableObject {
     }
 
     private func saveHistory() {
+        _ = saveHistoryReportingDurability()
+    }
+
+    /// Persists history and reports whether the write reached disk, so
+    /// import paths can refuse to acknowledge data that was never saved.
+    @discardableResult
+    private func saveHistoryReportingDurability() -> Bool {
         do {
             let data = try encoder.encode(items)
             // `completeUntilFirstUserAuthentication` keeps the file readable and
@@ -354,8 +376,10 @@ public final class iOSHistoryManager: ObservableObject {
                 to: fileURL,
                 options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
             )
+            return true
         } catch {
             logger.error("Failed to save history: \(error.localizedDescription, privacy: .public)")
+            return false
         }
     }
 

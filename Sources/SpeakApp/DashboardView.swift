@@ -635,7 +635,10 @@ struct DashboardView: View {
 
   private var speechInsightsSection: some View {
     SpeechInsightsSection(model: speechInsights)
-      .task(id: history.statistics) {
+      // Keyed on the history content revision, not `statistics`: statistics
+      // ignore transcript text, so an in-place edit (CloudKit merge, local
+      // reprocess) would otherwise leave the insights stale.
+      .task(id: history.contentRevision) {
         speechInsights.refresh(using: history.allItems)
       }
   }

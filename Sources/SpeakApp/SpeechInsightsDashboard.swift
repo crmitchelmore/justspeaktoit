@@ -45,6 +45,11 @@ final class SpeechInsightsModel: ObservableObject {
     }
   }
 
+  /// Awaits the most recently scheduled refresh (used by tests).
+  func waitForPendingRefresh() async {
+    await refreshTask?.value
+  }
+
   private func performRefresh(records: [SpeechSessionRecord]) async {
     if summary == nil {
       isComputing = true

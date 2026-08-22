@@ -16,6 +16,15 @@ import Foundation
 /// `LiveTranscriptionRoute.sampleRate`), and `stop` tears it down. Transcript
 /// updates and errors are delivered through the closures passed to `start`.
 public protocol StreamingTranscriptionClient: AnyObject {
+    /// How this client's final `onTranscript` events are shaped: standalone
+    /// providers emit each finalised segment exactly once, cumulative
+    /// providers restate the transcript so far. Consumers must fold finals by
+    /// this declaration (`TranscriptAccumulator`), because text equality or
+    /// prefixes cannot distinguish a provider resend from two genuinely
+    /// identical utterances (issue #700). There is deliberately no default:
+    /// every conformer states its provider's documented semantics.
+    var finalShape: TranscriptFinalShape { get }
+
     /// Opens the session.
     /// - Parameters:
     ///   - onTranscript: `(text, isFinal)` for each interim/final transcript.

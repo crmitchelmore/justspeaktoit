@@ -1,6 +1,7 @@
 import AppKit
 import Carbon
 import Foundation
+import SpeakCore
 import SpeakHotKeys
 
 // swiftlint:disable file_length
@@ -169,6 +170,28 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
             return false
         }
     }
+
+    /// The build capability this action needs, or nil when every channel has it.
+    var requiredChannelFeature: ChannelFeature? {
+        switch self {
+        case .editSelectionByVoice:
+            return .voiceEdit
+        default:
+            return nil
+        }
+    }
+
+    /// Whether this action can work in `channel`. Unavailable actions are never
+    /// registered, dispatched or listed, so a build does not offer a flow that
+    /// can only end in "Nothing to edit" (issue #673).
+    func isAvailable(in channel: DistributionChannel) -> Bool {
+        guard let feature = requiredChannelFeature else { return true }
+        return channel.supports(feature)
+    }
+
+    static func availableCases(in channel: DistributionChannel = .current) -> [ShortcutAction] {
+        allCases.filter { $0.isAvailable(in: channel) }
+    }
 }
 
 /// Represents a keyboard shortcut binding.
@@ -285,8 +308,10 @@ final class ShortcutManager: ObservableObject {
         unregisterCarbonHotkeys()
     }
 
-    /// Registers a handler for a specific shortcut action.
+    /// Registers a handler for a specific shortcut action. Actions the current
+    /// distribution channel cannot support are ignored, so they can never fire.
     func register(action: ShortcutAction, handler: @escaping () -> Void) {
+        guard action.isAvailable(in: .current) else { return }
         handlers[action] = handler
     }
 
@@ -426,7 +451,7 @@ final class ShortcutManager: ObservableObject {
         }
 
         for (action, binding) in bindings {
-            guard binding.isEnabled else { continue }
+            guard binding.isEnabled, action.isAvailable(in: .current) else { continue }
             guard binding.isGlobal == isGlobal || !isGlobal else { continue }
 
             if event.keyCode == binding.keyCode && modifiers == binding.modifiers {
@@ -449,7 +474,7 @@ final class ShortcutManager: ObservableObject {
     private func registerCarbonHotkeys() {
         installCarbonEventHandler()
         for (action, binding) in bindings {
-            guard binding.isEnabled && binding.isGlobal else { continue }
+            guard binding.isEnabled && binding.isGlobal, action.isAvailable(in: .current) else { continue }
 
             var hotKeyRef: EventHotKeyRef?
             let carbonModifiers = carbonModifierFlags(from: binding.modifiers)
@@ -531,7 +556,9 @@ final class ShortcutManager: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             guard !self.isRecordingShortcut else { return }
-            guard let action = self.carbonHotKeyActions[hotKeyID.id] else { return }
+            guard let action = self.carbonHotKeyActions[hotKeyID.id], action.isAvailable(in: .current) else {
+                return
+            }
             guard let binding = self.bindings[action], binding.isEnabled && binding.isGlobal else { return }
             self.handlers[action]?()
         }

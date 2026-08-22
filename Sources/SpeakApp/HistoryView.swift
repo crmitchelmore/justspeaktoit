@@ -18,6 +18,8 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
   @State private var historyItems: [HistoryItem] = []
   @State private var selectedModelFilter: String? = nil
   @State private var availableModels: [String] = []
+  @State private var persistenceNotice: String?
+  @State private var historyLoadFailed = false
   @State private var historyStats: HistoryStatistics = .init(
     totalSessions: 0,
     cumulativeRecordingDuration: 0,
@@ -148,6 +150,7 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
       ScrollView {
         VStack(alignment: .leading, spacing: density.sectionSpacing) {
           header
+          persistenceBanner
           if isInitialLoad {
             skeletonLoadingView
           } else if filteredItems.isEmpty {
@@ -200,6 +203,14 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
       .onReceive(environment.history.$statistics) { stats in
         withAnimation(.easeInOut(duration: 0.2)) {
           historyStats = stats
+        }
+      }
+      .onReceive(environment.history.$persistenceError) { persistenceNotice = $0 }
+      .onReceive(environment.history.$loadState) { state in
+        if case .failed = state {
+          historyLoadFailed = true
+        } else {
+          historyLoadFailed = false
         }
       }
       .onChange(of: searchText) { _, _ in recomputeFilteredItems() }
@@ -259,6 +270,32 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
       compactHeader
     } else {
       normalHeader
+    }
+  }
+
+  /// Shown while history persistence is degraded (issue #695): the on-disk
+  /// snapshot is preserved and new sessions stay queued in memory.
+  @ViewBuilder
+  private var persistenceBanner: some View {
+    if let persistenceNotice {
+      HStack(spacing: 8) {
+        Image(systemName: "externaldrive.badge.exclamationmark")
+          .foregroundStyle(.orange)
+          .accessibilityHidden(true)
+        Text(persistenceNotice)
+          .font(.callout)
+          .fixedSize(horizontal: false, vertical: true)
+        Spacer(minLength: 0)
+        if historyLoadFailed {
+          Button("Retry") {
+            Task { await environment.history.retryLoad() }
+          }
+          .accessibilityLabel("Retry loading history")
+        }
+      }
+      .padding(10)
+      .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+      .accessibilityElement(children: .combine)
     }
   }
 

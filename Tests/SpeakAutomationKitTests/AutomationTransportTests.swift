@@ -178,7 +178,13 @@ final class AutomationTransportTests: XCTestCase {
         XCTAssertThrowsError(try client.send(AutomationRequest(command: .status))) { error in
             let automationError = error as? AutomationError
             XCTAssertEqual(automationError?.code, .appUnavailable)
-            XCTAssertTrue(automationError?.message.contains("isn't running") == true)
+            let message = automationError?.message ?? ""
+            // A missing socket means either the app is closed or automation is
+            // off; the message must name both and point at the switch.
+            XCTAssertTrue(message.contains("isn't running"), message)
+            XCTAssertTrue(message.contains("automation is turned off"), message)
+            XCTAssertTrue(message.contains("Settings → General → Automation"), message)
+            XCTAssertTrue(message.contains("/tmp/speak-automation-does-not-exist.sock"), message)
         }
     }
 

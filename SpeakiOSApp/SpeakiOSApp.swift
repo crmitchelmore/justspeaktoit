@@ -96,8 +96,15 @@ struct SpeakiOSApp: App {
                     keyboardInstantDictation.activate()
                 }
                 .onChange(of: scenePhase) { _, newPhase in
-                    guard FeatureFlags.iOSKeyboardEnabled, newPhase == .active else { return }
-                    keyboardInstantDictation.activate()
+                    guard newPhase == .active else { return }
+                    if FeatureFlags.iOSKeyboardEnabled {
+                        keyboardInstantDictation.activate()
+                    }
+                    // Foreground entry reconciles Watch imports interrupted by
+                    // suspension and replays unconfirmed acks (issue #674).
+                    if FeatureFlags.watchCaptureEnabled {
+                        WatchCaptureReceiver.shared.reconcilePendingWork()
+                    }
                 }
         }
     }

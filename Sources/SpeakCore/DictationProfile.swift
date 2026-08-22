@@ -88,7 +88,7 @@ public struct DictationProfile: Codable, Equatable, Identifiable, Sendable {
         polishIncludeLexiconDirectives: Bool? = nil,
         polishIncludeContextTags: Bool? = nil,
         languageIdentifier: String? = nil,
-        transcriptionRouting: DictationProfileTranscriptionRouting?
+        transcriptionRouting: DictationProfileTranscriptionRouting? = nil
     ) {
         self.id = id
         self.name = name
@@ -107,7 +107,9 @@ public struct DictationProfile: Codable, Equatable, Identifiable, Sendable {
     /// The pre-#690 initializer, kept for source and API compatibility (#791).
     /// A profile created this way carries no explicit routing, so the applier
     /// derives it from the model identifier exactly as it does for profiles
-    /// saved before routing metadata existed.
+    /// saved before routing metadata existed. Calls without `transcriptionRouting:`
+    /// resolve here (fewer parameters win); calls with it use the designated
+    /// initializer.
     public init(
         id: UUID = UUID(),
         name: String,

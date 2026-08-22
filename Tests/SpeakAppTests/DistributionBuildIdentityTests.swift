@@ -587,6 +587,14 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(retryWorkflow.contains("grep -oE 'arm: *\"[0-9a-f]{64}\"'"))
         XCTAssertTrue(retryWorkflow.contains("grep -oE 'intel: *\"[0-9a-f]{64}\"'"))
         XCTAssertTrue(retryWorkflow.contains("Could not read the DMG digests"))
+        // It builds the CLI from the tag but runs the pipeline files from
+        // main, fetched into the remote-tracking ref it then checks out from.
+        XCTAssertTrue(retryWorkflow.contains("ref: refs/tags/mac-v${{ github.event.inputs.version }}"))
+        XCTAssertTrue(retryWorkflow.contains(
+            "git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main"
+        ))
+        XCTAssertTrue(retryWorkflow.contains("git checkout origin/main -- \\\n            scripts/"))
+        XCTAssertTrue(retryWorkflow.contains("            .github/actions/publish-speak-cli\n"))
 
         // Signing tools never arrive through an unverified download while the
         // private key is on disk.

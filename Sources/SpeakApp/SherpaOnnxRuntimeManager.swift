@@ -541,6 +541,7 @@ def run_offline(args):
     # wall clock), so partial latency and per-decode cost stay constant for
     # long sessions instead of growing quadratically. The session final still
     # decodes every retained sample.
+    import collections
     import threading
     import time
 
@@ -566,11 +567,19 @@ def run_offline(args):
     partial_window_samples = 16000 * 60
 
     lock = threading.Lock()
-    buffered = array.array("f")
+    # Retained audio is a deque of PCM chunks rather than one flat array:
+    # evicting old audio drops whole leading chunks (plus a prefix of one
+    # small chunk), so a post-cap read costs the same as any other read
+    # instead of shifting the whole hour of samples while the reader holds
+    # the lock and stdin stops draining.
+    buffered = collections.deque()
+    retained = 0  # samples currently held in `buffered`
+    received = 0  # samples accepted from stdin since start; never decreases
     eof = threading.Event()
     capped = threading.Event()
 
     def reader():
+        nonlocal retained, received
         while True:
             samples = read_samples()
             if samples is None:
@@ -578,11 +587,40 @@ def run_offline(args):
             if not samples:
                 continue
             with lock:
-                buffered.extend(samples)
-                if len(buffered) > max_buffer_samples:
-                    del buffered[: len(buffered) - max_buffer_samples]
+                buffered.append(samples)
+                retained += len(samples)
+                received += len(samples)
+                while retained > max_buffer_samples:
+                    excess = retained - max_buffer_samples
+                    oldest = buffered[0]
+                    if len(oldest) <= excess:
+                        buffered.popleft()
+                        retained -= len(oldest)
+                    else:
+                        del oldest[:excess]
+                        retained -= excess
                     capped.set()
         eof.set()
+
+    def snapshot(limit):
+        # Concatenates the trailing `limit` retained samples (every retained
+        # sample when `limit` is None). Called with the lock held.
+        window = array.array("f")
+        if limit is None or retained <= limit:
+            for chunk in buffered:
+                window.extend(chunk)
+            return window
+        remaining = limit
+        tail = []
+        for chunk in reversed(buffered):
+            if len(chunk) >= remaining:
+                tail.append(chunk[len(chunk) - remaining:])
+                break
+            tail.append(chunk)
+            remaining -= len(chunk)
+        for chunk in reversed(tail):
+            window.extend(chunk)
+        return window
 
     thread = threading.Thread(target=reader, daemon=True)
     thread.start()
@@ -594,17 +632,24 @@ def run_offline(args):
         return stream.result.text
 
     last_text = ""
+    # `received` at the last partial decode. Progress is measured against
+    # samples accepted, not samples retained, so partials continue after the
+    # retention cap holds the buffer at a constant length.
     decoded_upto = 0
     last_decode_seconds = 0.0
     did_report_cap = False
 
-    while not eof.is_set():
-        time.sleep(0.1)
+    def report_cap_once():
+        nonlocal did_report_cap
         if capped.is_set() and not did_report_cap:
             did_report_cap = True
             emit("buffer_capped", "retention window exceeded; oldest audio dropped")
+
+    while not eof.is_set():
+        time.sleep(0.1)
+        report_cap_once()
         with lock:
-            available = len(buffered)
+            available = received
         # Adaptive cadence: at least two seconds of new audio, and at least
         # twice the previous decode's duration, so decoding can never occupy
         # more than about half of real time and ingestion always stays ahead.
@@ -612,10 +657,7 @@ def run_offline(args):
         if available - decoded_upto < required:
             continue
         with lock:
-            if len(buffered) > partial_window_samples:
-                window = buffered[-partial_window_samples:]
-            else:
-                window = buffered[:]
+            window = snapshot(partial_window_samples)
         started = time.monotonic()
         text = decode(window)
         last_decode_seconds = time.monotonic() - started
@@ -625,8 +667,11 @@ def run_offline(args):
             emit("partial", text)
 
     thread.join()
+    # The reader can reach the cap between the last poll and EOF; the
+    # truncation is still reported before the final transcript.
+    report_cap_once()
     with lock:
-        final_window = buffered[:]
+        final_window = snapshot(None)
     emit("finalizing", "%.1f" % (len(final_window) / 16000.0))
     final_text = (decode(final_window) if final_window else "") or last_text
     emit("session_final", final_text)

@@ -94,9 +94,22 @@ final class SherpaOnnxRuntimeConfigTests: XCTestCase {
         XCTAssertTrue(script.contains("max_buffer_samples = 16000 * 60 * 60"))
         XCTAssertTrue(script.contains("last_decode_seconds * 2.0"))
         XCTAssertTrue(script.contains("emit(\"buffer_capped\""))
+        // Retention is a deque of chunks evicted whole, so a post-cap read
+        // never shifts the entire buffer under the lock.
+        XCTAssertTrue(script.contains("buffered = collections.deque()"))
+        XCTAssertTrue(script.contains("buffered.popleft()"))
+        XCTAssertFalse(script.contains("del buffered[:"))
+        // Partial progress is measured against samples received, not retained,
+        // so partials continue once the cap holds the buffer at a fixed size.
+        XCTAssertTrue(script.contains("received += len(samples)"))
+        XCTAssertTrue(script.contains("available = received"))
+        XCTAssertFalse(script.contains("available = len(buffered)"))
+        // A cap reached just before EOF is still reported, before the final.
+        XCTAssertTrue(script.contains("thread.join()\n    # The reader can reach the cap"))
+        XCTAssertTrue(script.contains("report_cap_once()\n    with lock:\n        final_window = snapshot(None)"))
         // The final decode covers every retained sample and is announced.
         XCTAssertTrue(script.contains("emit(\"finalizing\""))
-        XCTAssertTrue(script.contains("final_window = buffered[:]"))
+        XCTAssertTrue(script.contains("final_window = snapshot(None)"))
         // The old quadratic whole-buffer partial loop must not return.
         XCTAssertFalse(script.contains("samples_since_decode"))
     }

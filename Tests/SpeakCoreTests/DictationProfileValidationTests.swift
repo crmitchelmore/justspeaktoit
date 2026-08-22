@@ -39,6 +39,33 @@ final class DictationProfileValidationTests: XCTestCase {
         XCTAssertNil(DictationProfile(name: "Blank", transcriptionModelID: "  ").resolvedTranscriptionOverride)
     }
 
+    func testLocalRoutingAndLocalIdentifiers_mustAgree() {
+        let localUnderLocal = DictationProfile(
+            name: "Local", transcriptionModelID: "local/whisperkit/tiny", transcriptionRouting: .localBatch
+        )
+        XCTAssertEqual(DictationProfileValidator.issues(for: localUnderLocal), [])
+
+        // A local identifier stored under remote batch would be sent to a cloud provider.
+        let localUnderRemote = DictationProfile(
+            name: "Mismatch", transcriptionModelID: "local/whisperkit/tiny", transcriptionRouting: .remoteBatch
+        )
+        XCTAssertEqual(
+            DictationProfileValidator.issues(for: localUnderRemote),
+            [.localModelUnderRemoteRouting(modelID: "local/whisperkit/tiny")]
+        )
+
+        // Local routing can only run a downloaded local model.
+        let remoteUnderLocal = DictationProfile(
+            name: "Mismatch", transcriptionModelID: "openai/whisper-1", transcriptionRouting: .localBatch
+        )
+        XCTAssertEqual(
+            DictationProfileValidator.issues(for: remoteUnderLocal),
+            [.unknownLocalModel(modelID: "openai/whisper-1")]
+        )
+        XCTAssertFalse(DictationProfileIssue.unknownLocalModel(modelID: "x").message.isEmpty)
+        XCTAssertFalse(DictationProfileIssue.localModelUnderRemoteRouting(modelID: "x").message.isEmpty)
+    }
+
     func testCodable_roundTripsRoutingAndDecodesLegacyProfilesWithoutIt() throws {
         let profile = DictationProfile(
             name: "Slack",

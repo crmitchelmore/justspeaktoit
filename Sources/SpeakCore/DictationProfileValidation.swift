@@ -12,6 +12,11 @@ public enum DictationProfileIssue: Equatable, Sendable {
     /// A polish model the post-processing pipeline would silently replace with the
     /// default model.
     case unsupportedPolishModel(modelID: String)
+    /// A local-model override whose identifier is not a downloaded local model.
+    case unknownLocalModel(modelID: String)
+    /// A local model stored under remote routing: the session would send a local
+    /// identifier to a cloud provider.
+    case localModelUnderRemoteRouting(modelID: String)
 
     public var message: String {
         switch self {
@@ -22,6 +27,10 @@ public enum DictationProfileIssue: Equatable, Sendable {
                 + "Use a provider/model identifier from a supported live provider, or pick a catalogue model."
         case .unsupportedPolishModel(let modelID):
             return "“\(modelID)” is not a polish model the app can run. Pick a catalogue model."
+        case .unknownLocalModel(let modelID):
+            return "“\(modelID)” is not a local model the app can run. Pick a downloaded model."
+        case .localModelUnderRemoteRouting(let modelID):
+            return "“\(modelID)” is a local model. Choose Local Model routing for it."
         }
     }
 }
@@ -32,15 +41,34 @@ public enum DictationProfileValidator {
         if profile.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             issues.append(.emptyName)
         }
-        if let override = profile.resolvedTranscriptionOverride,
-           override.routing == .remoteStreaming,
-           !isRoutableStreamingModel(override.modelID) {
-            issues.append(.unknownStreamingProvider(modelID: override.modelID))
+        if let override = profile.resolvedTranscriptionOverride {
+            issues.append(contentsOf: transcriptionIssues(modelID: override.modelID, routing: override.routing))
         }
         if let polishModel = trimmedNonEmpty(profile.polishModelID), !isSupportedPolishModel(polishModel) {
             issues.append(.unsupportedPolishModel(modelID: polishModel))
         }
         return issues
+    }
+
+    /// Routing and identifier must agree: a local identifier only runs under local
+    /// routing, and local routing only runs a local identifier.
+    private static func transcriptionIssues(
+        modelID: String,
+        routing: DictationProfileTranscriptionRouting
+    ) -> [DictationProfileIssue] {
+        switch routing {
+        case .remoteStreaming:
+            return isRoutableStreamingModel(modelID) ? [] : [.unknownStreamingProvider(modelID: modelID)]
+        case .remoteBatch:
+            return isLocalModel(modelID) ? [.localModelUnderRemoteRouting(modelID: modelID)] : []
+        case .localBatch:
+            return isLocalModel(modelID) ? [] : [.unknownLocalModel(modelID: modelID)]
+        }
+    }
+
+    /// Whether `modelID` is a downloaded-model identifier the local batch pipeline runs.
+    public static func isLocalModel(_ modelID: String) -> Bool {
+        modelID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().hasPrefix("local/")
     }
 
     /// Whether the live-transcription pipeline can start `modelID`: a catalogue entry, or a

@@ -93,6 +93,17 @@ extension ProfileEditorView {
           credentialPurpose: .batchTranscription,
           storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers)
         )
+      } else if draft.transcriptionChoice == .local {
+        ModelPicker(
+          title: "Local Model",
+          help: "Downloaded model that transcribes the finished recording on this Mac "
+            + "when this profile is active.",
+          options: ModelCatalog.localTranscriptionOptions,
+          value: $draft.localModel,
+          credentialPurpose: .batchTranscription,
+          storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers),
+          allowsCustom: false
+        )
       }
     }
   }

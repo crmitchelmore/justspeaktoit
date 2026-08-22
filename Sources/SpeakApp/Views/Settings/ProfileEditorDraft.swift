@@ -5,6 +5,7 @@ enum ProfileTranscriptionChoice: String, CaseIterable, Identifiable {
   case useDefault
   case streaming
   case batch
+  case local
 
   var id: String { rawValue }
 
@@ -13,6 +14,7 @@ enum ProfileTranscriptionChoice: String, CaseIterable, Identifiable {
     case .useDefault: return "Use Default"
     case .streaming: return "Remote Streaming"
     case .batch: return "Remote Batch"
+    case .local: return "Local Model"
     }
   }
 
@@ -22,14 +24,19 @@ enum ProfileTranscriptionChoice: String, CaseIterable, Identifiable {
     case .useDefault: return nil
     case .streaming: return .remoteStreaming
     case .batch: return .remoteBatch
+    case .local: return .localBatch
     }
   }
 
+  /// Every stored routing has its own choice, so reopening a profile can never
+  /// change how it runs: a local-model profile reopens as Local Model, not as
+  /// Remote Batch.
   init(routing: DictationProfileTranscriptionRouting?) {
     switch routing {
     case .none: self = .useDefault
     case .remoteStreaming: self = .streaming
-    case .remoteBatch, .localBatch: self = .batch
+    case .remoteBatch: self = .batch
+    case .localBatch: self = .local
     }
   }
 }
@@ -59,6 +66,7 @@ struct ProfileEditorDraft: Equatable {
   var transcriptionChoice: ProfileTranscriptionChoice = .useDefault
   var streamingModel = ""
   var batchModel = ""
+  var localModel = ""
   var polishChoice: ProfilePolishChoice = .useDefault
   var polishModel = ""
   var useCustomPrompt = false
@@ -77,11 +85,13 @@ struct ProfileEditorDraft: Equatable {
 
     streamingModel = settings.liveTranscriptionModel
     batchModel = settings.batchTranscriptionModel
+    localModel = settings.localTranscriptionModel
     if let override = profile?.resolvedTranscriptionOverride {
       transcriptionChoice = ProfileTranscriptionChoice(routing: override.routing)
       switch override.routing {
       case .remoteStreaming: streamingModel = override.modelID
-      case .remoteBatch, .localBatch: batchModel = override.modelID
+      case .remoteBatch: batchModel = override.modelID
+      case .localBatch: localModel = override.modelID
       }
     }
 
@@ -131,6 +141,7 @@ struct ProfileEditorDraft: Equatable {
     case .useDefault: transcriptionModelID = nil
     case .streaming: transcriptionModelID = Self.normalized(streamingModel)
     case .batch: transcriptionModelID = Self.normalized(batchModel)
+    case .local: transcriptionModelID = Self.normalized(localModel)
     }
 
     let isPolishOverridden = polishChoice == .enabled

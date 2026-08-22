@@ -125,6 +125,51 @@ final class ProfileEditorDraftTests: XCTestCase {
     XCTAssertEqual(draft.profile(id: saved.id), saved)
   }
 
+  func testLocalChoice_storesLocalBatchRouting() {
+    var draft = ProfileEditorDraft()
+    draft.name = "Private notes"
+    draft.transcriptionChoice = .local
+    draft.localModel = " local/whisperkit/tiny "
+
+    let profile = draft.profile(id: nil)
+
+    XCTAssertEqual(profile.transcriptionModelID, "local/whisperkit/tiny")
+    XCTAssertEqual(profile.transcriptionRouting, .localBatch)
+    XCTAssertTrue(draft.canSave)
+  }
+
+  func testDraft_reopensALocalProfileAsLocal_andSavesItUnchanged() {
+    // Opening and saving a local-model profile must not convert it to remote
+    // batch: the stored identifier would then be sent to a cloud provider.
+    let defaults = UserDefaults(suiteName: "ProfileEditorDraftTests-\(UUID().uuidString)")!
+    let settings = AppSettings(defaults: defaults)
+    for saved in [
+      DictationProfile(
+        id: UUID(), name: "Explicit", transcriptionModelID: "local/whisperkit/tiny", transcriptionRouting: .localBatch
+      ),
+      DictationProfile(id: UUID(), name: "Legacy", transcriptionModelID: "local/whisperkit/base")
+    ] {
+      let draft = ProfileEditorDraft(profile: saved, settings: settings)
+
+      XCTAssertEqual(draft.transcriptionChoice, .local, saved.name)
+      XCTAssertEqual(draft.localModel, saved.transcriptionModelID, saved.name)
+      let reopened = draft.profile(id: saved.id)
+      XCTAssertEqual(reopened.transcriptionModelID, saved.transcriptionModelID, saved.name)
+      XCTAssertEqual(reopened.transcriptionRouting, .localBatch, saved.name)
+      XCTAssertTrue(draft.canSave, saved.name)
+    }
+  }
+
+  func testLocalIdentifierUnderRemoteBatch_blocksSaving() {
+    var draft = ProfileEditorDraft()
+    draft.name = "Mismatch"
+    draft.transcriptionChoice = .batch
+    draft.batchModel = "local/whisperkit/tiny"
+
+    XCTAssertEqual(draft.issues, [.localModelUnderRemoteRouting(modelID: "local/whisperkit/tiny")])
+    XCTAssertFalse(draft.canSave)
+  }
+
   func testDraft_keepsAProfilesIdentityOnSave() {
     let id = UUID()
     var draft = ProfileEditorDraft()

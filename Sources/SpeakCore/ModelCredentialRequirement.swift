@@ -194,4 +194,22 @@ public enum ModelCredentialResolver {
         "soniox",
         "speechmatics"
     ]
+
+    /// Every API-key identifier the canonical catalogues can require, derived
+    /// from the same definitions the pickers and routing use. This is the
+    /// parity source for surfaces that must cover the whole credential set —
+    /// notably device-to-device configuration transfer (issue #699): a
+    /// provider added to any catalogue appears here automatically, and the
+    /// transfer parity test fails until its transfer capability is defined.
+    public static var allKnownAPIKeyIdentifiers: Set<String> {
+        var identifiers = Set(LiveTranscriptionProviderID.allCases.compactMap(\.apiKeyIdentifier))
+        identifiers.formUnion(directBatchProviderIdentifiers.map { "\($0).apiKey" })
+        // Direct OpenAI batch models, OpenRouter routing, and the voice-output
+        // credentials that use dedicated identifiers.
+        identifiers.insert("openai.apiKey")
+        identifiers.insert("openrouter.apiKey")
+        identifiers.insert("openai.tts.apiKey")
+        identifiers.insert("azure.speech.apiKey")
+        return identifiers
+    }
 }

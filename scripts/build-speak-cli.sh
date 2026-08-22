@@ -1,20 +1,25 @@
 #!/usr/bin/env bash
 # Build the `speak` automation CLI and embed it inside JustSpeakToIt.app.
 #
-# Usage: ./scripts/build-speak-cli.sh <path-to-JustSpeakToIt.app> [signing-identity]
+# Usage: ./scripts/build-speak-cli.sh <path-to-JustSpeakToIt.app> [signing-identity] [arm64|universal]
 #
 # The CLI is a thin client for the automation socket the app exposes, so it must
 # ship with the app rather than as an independent download: the Homebrew cask
 # links `Contents/MacOS/speak` onto the user's PATH.
+#
+# The embedded CLI always matches the app's own slices (issue #774): the arm64
+# primary download embeds an arm64-only CLI and the universal legacy download
+# embeds a universal one. The default is universal.
 
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_PATH="${1:-}"
 SIGN_IDENTITY="${2:-}"
+VARIANT="${3:-universal}"
 
 if [[ -z "$APP_PATH" ]]; then
-    echo "Usage: $0 <path-to-JustSpeakToIt.app> [signing-identity]" >&2
+    echo "Usage: $0 <path-to-JustSpeakToIt.app> [signing-identity] [arm64|universal]" >&2
     exit 1
 fi
 
@@ -23,48 +28,72 @@ if [[ ! -d "$APP_PATH" ]]; then
     exit 1
 fi
 
+case "$VARIANT" in
+    arm64) REQUIRED_ARCHS="arm64" ;;
+    universal) REQUIRED_ARCHS="arm64 x86_64" ;;
+    *)
+        echo "error: unknown variant '$VARIANT' (expected arm64 or universal)" >&2
+        exit 1
+        ;;
+esac
+
 # Resolve before the cd below, so a relative app path keeps pointing at the
 # bundle the caller meant.
 APP_PATH="$(cd "$APP_PATH" && pwd -P)"
 
 cd "$ROOT_DIR"
-# The two slices are built separately and joined with lipo: a single swift
-# build invocation passing both arch flags fails to plan the package graph
+# The slices are built separately and joined with lipo: a single swift build
+# invocation passing both arch flags fails to plan the package graph
 # ("duplicate key found: ID(moduleName: \"CommandLineTool\", packageIdentity:
 # swiftformat)") because the SwiftFormat plugin dependency is modelled once
 # per architecture (issue #759).
 echo "==> Building speak (release, arm64)"
 swift build --product speak --configuration release --arch arm64
-echo "==> Building speak (release, x86_64)"
-swift build --product speak --configuration release --arch x86_64
-
 ARM64_BINARY="$(swift build --product speak --configuration release \
     --arch arm64 --show-bin-path)/speak"
-X86_64_BINARY="$(swift build --product speak --configuration release \
-    --arch x86_64 --show-bin-path)/speak"
-
-for slice in "$ARM64_BINARY" "$X86_64_BINARY"; do
-    if [[ ! -f "$slice" ]]; then
-        echo "error: built binary missing at $slice" >&2
-        exit 1
-    fi
-done
 
 BINARY_PATH="$(mktemp -d)/speak"
-echo "==> Creating universal binary"
-lipo -create "$ARM64_BINARY" "$X86_64_BINARY" -output "$BINARY_PATH"
+if [[ "$VARIANT" == "universal" ]]; then
+    echo "==> Building speak (release, x86_64)"
+    swift build --product speak --configuration release --arch x86_64
+    X86_64_BINARY="$(swift build --product speak --configuration release \
+        --arch x86_64 --show-bin-path)/speak"
 
-# Deterministic validation: the embedded CLI must contain both slices, so a
-# regression back to a single-arch binary fails the release here, not on a
-# user's machine.
-UNIVERSAL_ARCHS="$(lipo -archs "$BINARY_PATH")"
-for required_arch in arm64 x86_64; do
-    if [[ " $UNIVERSAL_ARCHS " != *" $required_arch "* ]]; then
-        echo "error: universal speak binary is missing $required_arch (got: $UNIVERSAL_ARCHS)" >&2
+    for slice in "$ARM64_BINARY" "$X86_64_BINARY"; do
+        if [[ ! -f "$slice" ]]; then
+            echo "error: built binary missing at $slice" >&2
+            exit 1
+        fi
+    done
+
+    echo "==> Creating universal binary"
+    lipo -create "$ARM64_BINARY" "$X86_64_BINARY" -output "$BINARY_PATH"
+else
+    if [[ ! -f "$ARM64_BINARY" ]]; then
+        echo "error: built binary missing at $ARM64_BINARY" >&2
+        exit 1
+    fi
+    cp "$ARM64_BINARY" "$BINARY_PATH"
+fi
+
+# Deterministic validation: the embedded CLI must contain exactly the slices
+# its variant promises, so a regression (a single-arch universal binary, or an
+# x86_64 slice leaking into the arm64 download) fails the release here, not on
+# a user's machine.
+EMBEDDED_ARCHS="$(lipo -archs "$BINARY_PATH")"
+for required_arch in $REQUIRED_ARCHS; do
+    if [[ " $EMBEDDED_ARCHS " != *" $required_arch "* ]]; then
+        echo "error: $VARIANT speak binary is missing $required_arch (got: $EMBEDDED_ARCHS)" >&2
         exit 1
     fi
 done
-echo "==> Universal binary contains: $UNIVERSAL_ARCHS"
+for present_arch in $EMBEDDED_ARCHS; do
+    if [[ " $REQUIRED_ARCHS " != *" $present_arch "* ]]; then
+        echo "error: $VARIANT speak binary must not contain $present_arch (got: $EMBEDDED_ARCHS)" >&2
+        exit 1
+    fi
+done
+echo "==> $VARIANT binary contains: $EMBEDDED_ARCHS"
 
 DESTINATION="$APP_PATH/Contents/MacOS/speak"
 echo "==> Embedding $BINARY_PATH -> $DESTINATION"

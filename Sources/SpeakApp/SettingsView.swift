@@ -29,6 +29,7 @@ struct SettingsView: View {
   @ObservedObject var sherpaRuntime = SherpaOnnxRuntimeManager.shared
   #endif
   @ObservedObject var localPostProcessingModels = LocalPostProcessingModelManager.shared
+  @ObservedObject var cliInstaller = SpeakCLIInstaller.shared
   let tab: SettingsTab
   @Binding var sidebarSelection: SidebarItem?
   @State var newAPIKeyValue: String = ""

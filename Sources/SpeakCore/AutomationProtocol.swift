@@ -77,11 +77,15 @@ public struct AutomationError: Codable, Sendable, Equatable, LocalizedError {
         self.message
     }
 
+    /// The socket is absent both when the app is closed and when automation
+    /// is switched off in Settings; a client cannot tell the two apart, so the
+    /// message names both causes and the switch that fixes the second.
     public static func appUnavailable(socketPath: String) -> AutomationError {
         AutomationError(
             code: .appUnavailable,
-            message: "Just Speak To It isn't running (no automation socket at \(socketPath)). "
-                + "Launch the app and try again."
+            message: "Just Speak To It isn't running, or automation is turned off, so its automation "
+                + "service at \(socketPath) could not be reached. Launch the app, enable automation "
+                + "under Settings → General → Automation, and try again."
         )
     }
 }

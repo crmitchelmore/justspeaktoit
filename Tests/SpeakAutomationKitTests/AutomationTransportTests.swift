@@ -178,7 +178,46 @@ final class AutomationTransportTests: XCTestCase {
         XCTAssertThrowsError(try client.send(AutomationRequest(command: .status))) { error in
             let automationError = error as? AutomationError
             XCTAssertEqual(automationError?.code, .appUnavailable)
-            XCTAssertTrue(automationError?.message.contains("isn't running") == true)
+            let message = automationError?.message ?? ""
+            // A missing socket means either the app is closed or automation is
+            // off; the message must name both and point at the switch.
+            XCTAssertTrue(message.contains("isn't running"), message)
+            XCTAssertTrue(message.contains("automation is turned off"), message)
+            XCTAssertTrue(message.contains("could not be reached"), message)
+            XCTAssertTrue(message.contains("enable automation under Settings → General → Automation"), message)
+            XCTAssertTrue(message.contains("/tmp/speak-automation-does-not-exist.sock"), message)
+        }
+    }
+
+    func testClient_treatsAStaleSocketFileAsAppUnavailable() throws {
+        // A socket file left behind by a crashed app: connect() fails with
+        // ECONNREFUSED rather than ENOENT, and the caller must still be told
+        // the app is unavailable — not handed a raw socket error.
+        let path = NSTemporaryDirectory() + "speak-stale-\(UUID().uuidString.prefix(8)).sock"
+        let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
+        XCTAssertGreaterThanOrEqual(descriptor, 0)
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        let bytes = Array(path.utf8)
+        let capacity = MemoryLayout.size(ofValue: address.sun_path)
+        withUnsafeMutablePointer(to: &address.sun_path) { pointer in
+            pointer.withMemoryRebound(to: CChar.self, capacity: capacity) {
+                for (offset, byte) in bytes.enumerated() { $0[offset] = CChar(bitPattern: byte) }
+                $0[bytes.count] = 0
+            }
+        }
+        let bound = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.bind(descriptor, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        XCTAssertEqual(bound, 0)
+        close(descriptor) // nobody listens, but the file stays behind
+        defer { unlink(path) }
+
+        let client = UnixSocketAutomationClient(socketPath: path)
+        XCTAssertThrowsError(try client.send(AutomationRequest(command: .status))) { error in
+            XCTAssertEqual((error as? AutomationError)?.code, .appUnavailable)
         }
     }
 

@@ -7,6 +7,9 @@ import os.log
 /// Cross-platform ElevenLabs WebSocket client for live speech-to-text.
 /// Works on both macOS and iOS.
 public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
+    /// Final shape: FINAL_TRANSCRIPT events carry the newly finalised segment only.
+    public let finalShape: TranscriptFinalShape = .standaloneSegments
+
     private let apiKey: String
     private let modelID: String
     private let language: String?
@@ -26,7 +29,7 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
     /// Guarded by `stateLock`: the session's full transcript, folded from the
     /// finals ElevenLabs streams. `finishAndWait()` returns this, per the
     /// `FinalizingStreamingTranscriptionClient` contract.
-    private var accumulated = TranscriptAccumulator()
+    private var accumulated = TranscriptAccumulator(shape: .standaloneSegments)
 
     /// Bounded post-stop drain state: while `finishAndWait()` is pending, the
     /// trailing final is folded in and the full transcript is handed to the

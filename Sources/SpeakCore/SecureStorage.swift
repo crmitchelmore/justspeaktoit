@@ -6,9 +6,10 @@ import os
 
 // MARK: - Error Types
 
-public enum SecureStorageError: LocalizedError {
+public enum SecureStorageError: LocalizedError, Equatable {
     case permissionDenied
     case valueNotFound
+    case emptyIdentifier
     case unexpectedStatus(OSStatus)
 
     public var errorDescription: String? {
@@ -17,6 +18,8 @@ public enum SecureStorageError: LocalizedError {
             return "Keychain access was denied. Please review your Security & Privacy settings."
         case .valueNotFound:
             return "No value found for the requested identifier."
+        case .emptyIdentifier:
+            return "A secret identifier must not be empty."
         case .unexpectedStatus(let status):
             if let message = SecCopyErrorMessageString(status, nil) as String? {
                 return message
@@ -144,6 +147,7 @@ public actor SecureStorage {
     // MARK: - Public API
 
     public func storeSecret(_ value: String, identifier: String) async throws {
+        try Self.validateIdentifier(identifier)
         try await ensureCacheLoaded()
 
         guard await permissionsChecker.ensureKeychainAccess(forService: configuration.service) else {
@@ -176,6 +180,7 @@ public actor SecureStorage {
     }
 
     public func secret(identifier: String) async throws -> String {
+        try Self.validateIdentifier(identifier)
         try await ensureCacheLoaded()
 
         guard let cached = cache[identifier] else {
@@ -186,6 +191,7 @@ public actor SecureStorage {
     }
 
     public func removeSecret(identifier: String) async throws {
+        try Self.validateIdentifier(identifier)
         try await ensureCacheLoaded()
 
         guard await permissionsChecker.ensureKeychainAccess(forService: configuration.service) else {
@@ -217,11 +223,23 @@ public actor SecureStorage {
     }
 
     public func hasSecret(identifier: String) async -> Bool {
+        guard (try? Self.validateIdentifier(identifier)) != nil else { return false }
         try? await ensureCacheLoaded()
         if let cached = cache[identifier]?.trimmingCharacters(in: .whitespacesAndNewlines), !cached.isEmpty {
             return true
         }
         return false
+    }
+
+    /// Rejects empty (or whitespace-only) identifiers at every public
+    /// boundary, before any cache, keychain, registry or notification effect:
+    /// an empty identifier previously succeeded in memory, serialised as
+    /// `=value`, and was silently dropped by the parser on the next load
+    /// (issue #672).
+    private static func validateIdentifier(_ identifier: String) throws {
+        guard !identifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw SecureStorageError.emptyIdentifier
+        }
     }
 
     public func preload() async {
@@ -269,13 +287,10 @@ public actor SecureStorage {
             throw SecureStorageError.permissionDenied
         }
 
-        var query = baseQuery()
-        query[kSecReturnData as String] = true
+        var compatibilityPayload = try readPayload(account: configuration.masterAccount)
+        var overflowPayload = try readPayload(account: overflowAccount)
 
-        var item: CFTypeRef?
-        var status = SecItemCopyMatching(query as CFDictionary, &item)
-
-        if status == errSecItemNotFound {
+        if compatibilityPayload == nil, overflowPayload == nil {
             if try migrateLegacyServicePayloadIfNeeded() {
                 await reconcileCachedIdentifiers()
                 didLoadFromKeychain = true
@@ -283,25 +298,50 @@ public actor SecureStorage {
             }
 
             try await migrateLegacySecretsIfNeeded()
-            status = SecItemCopyMatching(query as CFDictionary, &item)
+            compatibilityPayload = try readPayload(account: configuration.masterAccount)
+            overflowPayload = try readPayload(account: overflowAccount)
         }
 
-        if status == errSecItemNotFound {
-            cache = [:]
-            await reconcileCachedIdentifiers()
-            didLoadFromKeychain = true
-            return
+        // Mixed-version contract (issue #672): the master account holds the
+        // legacy-format compatibility record every shipped parser can read,
+        // and the overflow account holds the versioned payload for values the
+        // legacy format cannot represent. The master account wins per key so
+        // an intermediate build that rewrote it (in any format) keeps its
+        // edits, while overflow-only secrets it never saw survive.
+        var secrets: [String: String] = [:]
+        if let overflowPayload {
+            switch Self.parsePayload(overflowPayload) {
+            case .secrets(let parsed):
+                secrets = parsed
+            case .unsupportedVersion(let marker):
+                try preserveUnsupportedPayload(overflowPayload, marker: marker)
+            }
+        }
+        if let compatibilityPayload {
+            switch Self.parsePayload(compatibilityPayload) {
+            case .secrets(let parsed):
+                secrets.merge(parsed) { _, master in master }
+            case .unsupportedVersion(let marker):
+                try preserveUnsupportedPayload(compatibilityPayload, marker: marker)
+            }
         }
 
-        guard status == errSecSuccess, let data = item as? Data,
-              let payload = String(data: data, encoding: .utf8)
-        else {
-            throw SecureStorageError.unexpectedStatus(status)
-        }
-
-        cache = Self.parse(payload: payload)
+        cache = secrets
         await reconcileCachedIdentifiers()
         didLoadFromKeychain = true
+    }
+
+    /// A payload with a newer version marker than this build understands is
+    /// copied aside before anything can overwrite it, and is never parsed as
+    /// legacy data (which would invent the marker as an identifier). The
+    /// first backup wins; a failed backup fails the load so the record cannot
+    /// be discarded.
+    private func preserveUnsupportedPayload(_ payload: String, marker: String) throws {
+        Self.logger.error(
+            "Unsupported secure-storage payload version \(marker, privacy: .public); preserving a backup"
+        )
+        guard try readPayload(account: unsupportedBackupAccount) == nil else { return }
+        try writePayload(payload, account: unsupportedBackupAccount)
     }
 
     private func reconcileCachedIdentifiers() async {
@@ -323,7 +363,7 @@ public actor SecureStorage {
     private func migrateLegacyServicePayloadIfNeeded() throws -> Bool {
         for legacyService in configuration.legacyServices
         where legacyService != configuration.service {
-            var query = baseQuery()
+            var query = baseQuery(account: configuration.masterAccount)
             query[kSecAttrService as String] = legacyService
             query[kSecReturnData as String] = true
 
@@ -341,7 +381,13 @@ public actor SecureStorage {
                 throw SecureStorageError.unexpectedStatus(status)
             }
 
-            cache = Self.parse(payload: payload)
+            guard case .secrets(let parsed) = Self.parsePayload(payload) else {
+                Self.logger.error(
+                    "Skipping legacy service migration: unsupported payload version"
+                )
+                continue
+            }
+            cache = parsed
             try writeCacheToKeychain()
             return true
         }
@@ -349,22 +395,46 @@ public actor SecureStorage {
         return false
     }
 
-    private func baseQuery() -> [String: Any] {
+    /// The overflow account holding the versioned payload for values the
+    /// legacy compatibility record cannot represent (issue #672).
+    private var overflowAccount: String { configuration.masterAccount + ".v2" }
+
+    /// Where a payload with an unknown newer version marker is preserved
+    /// before this build writes anything (issue #672).
+    private var unsupportedBackupAccount: String { configuration.masterAccount + ".unsupported-backup" }
+
+    private func baseQuery(account: String) -> [String: Any] {
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: configuration.service,
-            kSecAttrAccount as String: configuration.masterAccount,
+            kSecAttrAccount as String: account
         ]
-        
+
         if let accessGroup = configuration.accessGroup {
             query[kSecAttrAccessGroup as String] = accessGroup
         }
-        
+
         if configuration.synchronizable {
             query[kSecAttrSynchronizable as String] = kCFBooleanTrue
         }
-        
+
         return query
+    }
+
+    /// Reads one account's payload, or `nil` when the item does not exist.
+    private func readPayload(account: String) throws -> String? {
+        var query = baseQuery(account: account)
+        query[kSecReturnData as String] = true
+
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess, let data = item as? Data,
+              let payload = String(data: data, encoding: .utf8)
+        else {
+            throw SecureStorageError.unexpectedStatus(status)
+        }
+        return payload
     }
 
     private func migrateLegacySecretsIfNeeded() async throws {
@@ -375,7 +445,7 @@ public actor SecureStorage {
         
         let legacyAccounts = try fetchLegacyAccounts()
         let candidates = Set(trackedIdentifiers).union(legacyAccounts)
-            .subtracting([configuration.masterAccount])
+            .subtracting([configuration.masterAccount, overflowAccount, unsupportedBackupAccount])
 
         guard !candidates.isEmpty else { return }
 
@@ -458,15 +528,29 @@ public actor SecureStorage {
         SecItemDelete(query as CFDictionary)
     }
 
+    /// Persists the cache under the documented mixed-version contract
+    /// (issue #672): the master account carries the legacy-format
+    /// compatibility record for every representable entry, the overflow
+    /// account carries the versioned payload for the rest. If the second
+    /// write fails, the first is rolled back so the two accounts never
+    /// disagree about a half-applied save.
     private func writeCacheToKeychain() throws {
-        let payload = Self.serialize(cache: cache)
+        let compatibility = Self.serializeLegacyCompatibilityRecord(cache: cache)
+        let overflow = Self.serializeOverflowPayload(cache: cache)
 
-        let query = baseQuery()
-        
-        // DEBUG: Log the query to verify no synchronizable
-        Self.logger.debug("writeCacheToKeychain - baseQuery keys: \(query.keys, privacy: .private)")
-        Self.logger.debug("configuration.synchronizable: \(self.configuration.synchronizable, privacy: .private)")
-        Self.logger.debug("configuration.accessGroup: \(self.configuration.accessGroup ?? "nil", privacy: .private)")
+        let previousCompatibility = try readPayload(account: configuration.masterAccount)
+        try writePayload(compatibility, account: configuration.masterAccount)
+        do {
+            try writePayload(overflow, account: overflowAccount)
+        } catch {
+            try? writePayload(previousCompatibility ?? "", account: configuration.masterAccount)
+            throw error
+        }
+    }
+
+    /// Writes one account's payload; an empty payload deletes the item.
+    private func writePayload(_ payload: String, account: String) throws {
+        let query = baseQuery(account: account)
 
         if payload.isEmpty {
             let deleteStatus = SecItemDelete(query as CFDictionary)
@@ -479,9 +563,9 @@ public actor SecureStorage {
         let data = Data(payload.utf8)
         var attributesToUpdate: [String: Any] = [
             kSecValueData as String: data,
-            kSecAttrLabel as String: configuration.masterAccount,
+            kSecAttrLabel as String: account
         ]
-        
+
         // IMPORTANT: Only set these attributes when we have the entitlement
         // kSecAttrSynchronizable requires keychain-access-groups entitlement
         // kSecAttrAccessible with certain values may also require it on some configs
@@ -489,27 +573,21 @@ public actor SecureStorage {
             attributesToUpdate[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
             attributesToUpdate[kSecAttrSynchronizable as String] = kCFBooleanTrue
         }
-        
-        Self.logger.debug("attributesToUpdate keys: \(attributesToUpdate.keys, privacy: .private)")
 
         let status = SecItemUpdate(query as CFDictionary, attributesToUpdate as CFDictionary)
-        Self.logger.debug("SecItemUpdate status: \(status, privacy: .private)")
-        
+
         if status == errSecItemNotFound {
             var addQuery = query
             addQuery[kSecValueData as String] = data
-            addQuery[kSecAttrLabel as String] = configuration.masterAccount
-            
+            addQuery[kSecAttrLabel as String] = account
+
             // Only set these for entitled apps
             if configuration.accessGroup != nil && configuration.synchronizable {
                 addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
                 addQuery[kSecAttrSynchronizable as String] = kCFBooleanTrue
             }
-            
-            Self.logger.debug("SecItemAdd query keys: \(addQuery.keys, privacy: .private)")
+
             let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
-            Self.logger.debug("SecItemAdd status: \(addStatus, privacy: .private)")
-            
             guard addStatus == errSecSuccess else {
                 Self.logger.debug("ERROR: SecItemAdd failed with \(addStatus, privacy: .private)")
                 throw SecureStorageError.unexpectedStatus(addStatus)
@@ -522,12 +600,36 @@ public actor SecureStorage {
 
     // MARK: - Payload Format
     //
-    // The aggregate payload stores every secret in one keychain item. The current (v2)
-    // format percent-encodes each key and value, so a secret may contain any character —
-    // including the `;` pair separator and `=` key/value separator — without corrupting
-    // the payload. A version prefix distinguishes it from the legacy format (raw
-    // `key=value;key=value`, no encoding), which is still parsed transparently; the next
-    // save rewrites the item in the current format.
+    // Mixed-version contract (issue #672). Two keychain items per store:
+    //
+    // | Account                     | Format          | Contents                        |
+    // |-----------------------------|-----------------|---------------------------------|
+    // | masterAccount               | legacy `k=v;`   | every legacy-representable entry|
+    // | masterAccount.v2            | versioned v2    | entries legacy cannot represent |
+    // | masterAccount.unsupported-… | opaque          | backup of a newer-version item  |
+    //
+    // The master account stays in the legacy interchange format so *every*
+    // shipped parser — including pre-versioning builds after a rollback —
+    // reads correct plaintext values and never sees percent-encoded secrets
+    // or a version marker as an identifier. Values the legacy format cannot
+    // carry (containing `;`, or edge whitespace the legacy parser trims)
+    // live only in the versioned overflow item, which legacy builds never
+    // read. On load the two are merged with the master account winning per
+    // key. A payload carrying a *newer* version marker than this build
+    // understands is preserved to a backup account and never parsed as
+    // legacy or overwritten silently.
+    //
+    // Version migration table — extend this (and the fixtures in
+    // SecureStoragePayloadFormatTests) whenever a version is added; never
+    // change an existing format in place:
+    //
+    // | Marker  | Body                                   | Introduced |
+    // |---------|----------------------------------------|------------|
+    // | (none)  | raw `key=value;key=value`              | v1 (legacy)|
+    // | `v2:;`  | percent-encoded `key=value;` pairs     | #631       |
+
+    /// The payload version this build writes for the overflow item.
+    static let currentPayloadVersion = 2
 
     /// Prefix identifying the current payload format. The trailing `;` makes the marker
     /// unforgeable by the legacy serializer: a legacy payload always begins with an
@@ -543,12 +645,44 @@ public actor SecureStorage {
         return allowed
     }()
 
-    static func parse(payload: String) -> [String: String] {
-        guard payload.hasPrefix(payloadVersionPrefix) else {
-            return parseLegacyPayload(payload)
-        }
+    /// Explicit format-detection result: secrets, or a version this build
+    /// does not understand (never interpreted as legacy data).
+    enum ParsedPayload: Equatable {
+        case secrets([String: String])
+        case unsupportedVersion(String)
+    }
 
-        return payload
+    /// The `v<digits>:;` marker version, or `nil` for legacy payloads. The
+    /// mandatory `;` directly after the colon keeps legacy identifiers that
+    /// merely start with `v2:` parsing as legacy data.
+    static func versionMarker(of payload: String) -> Int? {
+        guard payload.first == "v", let colon = payload.firstIndex(of: ":") else { return nil }
+        let digits = payload[payload.index(after: payload.startIndex)..<colon]
+        guard !digits.isEmpty, digits.allSatisfy(\.isNumber) else { return nil }
+        let afterColon = payload.index(after: colon)
+        guard afterColon < payload.endIndex, payload[afterColon] == ";" else { return nil }
+        return Int(digits)
+    }
+
+    static func parsePayload(_ payload: String) -> ParsedPayload {
+        guard let version = versionMarker(of: payload) else {
+            return .secrets(parseLegacyPayload(payload))
+        }
+        guard version == currentPayloadVersion else {
+            return .unsupportedVersion("v\(version)")
+        }
+        return .secrets(parseVersionedBody(payload))
+    }
+
+    /// Convenience for callers that treat an unsupported version as empty.
+    /// The load path uses `parsePayload` so it can preserve a backup first.
+    static func parse(payload: String) -> [String: String] {
+        guard case .secrets(let secrets) = parsePayload(payload) else { return [:] }
+        return secrets
+    }
+
+    private static func parseVersionedBody(_ payload: String) -> [String: String] {
+        payload
             .dropFirst(payloadVersionPrefix.count)
             .split(separator: ";")
             .reduce(into: [String: String]()) { partialResult, item in
@@ -576,7 +710,7 @@ public actor SecureStorage {
     }
 
     /// Serializes to the current versioned format. An empty cache serializes to an empty
-    /// string (not a bare version prefix) so `writeCacheToKeychain` still deletes the item.
+    /// string (not a bare version prefix) so `writePayload` still deletes the item.
     static func serialize(cache: [String: String]) -> String {
         guard !cache.isEmpty else { return "" }
 
@@ -585,6 +719,36 @@ public actor SecureStorage {
             .map { "\(encodePayloadComponent($0.key))=\(encodePayloadComponent($0.value))" }
             .joined(separator: ";")
         return payloadVersionPrefix + body
+    }
+
+    /// Whether the legacy `key=value;` format can carry this entry verbatim:
+    /// the identifier must survive the `;`/first-`=` splits and the legacy
+    /// parser's pair trimming unchanged, and the value must survive the `;`
+    /// split and trailing trim. Anything else belongs to the overflow item —
+    /// a legacy reader must never receive a percent-encoded stand-in.
+    static func isLegacyRepresentable(identifier: String, value: String) -> Bool {
+        guard !identifier.isEmpty,
+              !identifier.contains(";"), !identifier.contains("="),
+              identifier.trimmingCharacters(in: .whitespacesAndNewlines) == identifier
+        else { return false }
+        guard !value.contains(";"),
+              value.trimmingCharacters(in: .whitespacesAndNewlines) == value
+        else { return false }
+        return true
+    }
+
+    /// The legacy-format compatibility record for the master account.
+    static func serializeLegacyCompatibilityRecord(cache: [String: String]) -> String {
+        cache
+            .filter { isLegacyRepresentable(identifier: $0.key, value: $0.value) }
+            .sorted { $0.key < $1.key }
+            .map { "\($0.key)=\($0.value)" }
+            .joined(separator: ";")
+    }
+
+    /// The versioned payload for entries the legacy format cannot represent.
+    static func serializeOverflowPayload(cache: [String: String]) -> String {
+        serialize(cache: cache.filter { !isLegacyRepresentable(identifier: $0.key, value: $0.value) })
     }
 
     private static func encodePayloadComponent(_ component: String) -> String {

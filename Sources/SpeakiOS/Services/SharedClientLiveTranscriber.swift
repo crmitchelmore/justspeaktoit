@@ -32,8 +32,9 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     private var client: StreamingTranscriptionClient?
     private let audioEngine = AVAudioEngine()
     private var startTime: Date?
-    /// Finalised text so far, folded from the client's finals.
-    private var accumulated = TranscriptAccumulator()
+    /// Finalised text so far, folded by the hosted client's declared final
+    /// shape once `start()` knows which client is in use (issue #700).
+    private var accumulated = TranscriptAccumulator(shape: .standaloneSegments)
 
     /// Persistent audio recorder — saves audio to disk alongside transcription,
     /// so a session survives the network dropping mid-stream.
@@ -90,6 +91,9 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         try await configureAudioSession()
 
         self.client = client
+        // Fold finals by the client's declared shape: standalone segments
+        // append (identical text repeats included), cumulative finals replace.
+        accumulated = TranscriptAccumulator(shape: client.finalShape)
         client.start(
             onTranscript: { [weak self] text, isFinal in
                 Task { @MainActor in self?.handleTranscript(text: text, isFinal: isFinal) }
@@ -256,9 +260,9 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         // captured after this point becomes outstanding again.
         unansweredAudio.clear()
         if isFinal {
-            // Providers disagree on whether a final is a standalone segment or
-            // the whole utterance so far; `TranscriptAccumulator` folds both
-            // shapes the same way the shared clients do.
+            // Folds by the client's declared final shape: standalone segments
+            // append (repeated identical text is a genuine repeat), cumulative
+            // finals replace (issue #700).
             accumulated.append(final: text)
             finalText = accumulated.text
             partialText = accumulated.text

@@ -83,9 +83,9 @@ public struct AutomationError: Codable, Sendable, Equatable, LocalizedError {
     public static func appUnavailable(socketPath: String) -> AutomationError {
         AutomationError(
             code: .appUnavailable,
-            message: "Just Speak To It isn't running, or automation is turned off "
-                + "(no automation socket at \(socketPath)). Launch the app, turn on "
-                + "Settings → General → Automation, and try again."
+            message: "Just Speak To It isn't running, or automation is turned off, so its automation "
+                + "service at \(socketPath) could not be reached. Launch the app, enable automation "
+                + "under Settings → General → Automation, and try again."
         )
     }
 }

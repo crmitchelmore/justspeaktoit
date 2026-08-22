@@ -28,6 +28,20 @@ enum AutomationDeadline {
         id: String,
         command: AutomationCommand
     ) async -> AutomationResponse {
+        await value(of: work, within: seconds, id: id, command: command, beforeSettling: nil)
+    }
+
+    /// Test seam: `beforeSettling` runs once the command has completed and before
+    /// its result reaches the gate, with the timer task in hand, so a test can
+    /// force the interleaving a starved CI runner produced — a cancelled timer
+    /// that runs to completion ahead of the result.
+    static func value(
+        of work: Task<AutomationResponse, Never>,
+        within seconds: TimeInterval,
+        id: String,
+        command: AutomationCommand,
+        beforeSettling: (@Sendable (Task<Void, Never>) async -> Void)?
+    ) async -> AutomationResponse {
         let outcome: AutomationResponse? = await withCheckedContinuation { continuation in
             let gate = Gate(continuation: continuation)
             let deadline = Task.detached {
@@ -41,6 +55,7 @@ enum AutomationDeadline {
             }
             Task.detached {
                 let response = await work.value
+                await beforeSettling?(deadline)
                 // Settle first, so the result is what answers the waiter; then
                 // release the timer rather than leaving it asleep for the rest of
                 // a long deadline.

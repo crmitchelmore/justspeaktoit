@@ -10,10 +10,32 @@ import XCTest
 /// already finished. The work task cancelled the timer before settling the
 /// gate, so on a starved runner the woken timer could reach the gate first.
 final class AutomationDeadlineTests: XCTestCase {
+    func testCancelledTimerThatRunsToCompletionFirst_doesNotSettleTheGate() async {
+        let work = Task<AutomationResponse, Never> {
+            .success(id: "fast", command: .status, result: AutomationResult(text: "done"))
+        }
+
+        // The CI interleaving, made deterministic: the timer is cancelled and
+        // runs all the way to completion before the finished command's result
+        // reaches the gate. With the old ordering the cancelled sleep returned at
+        // once and the timer settled `nil`, so this reply was `timed_out`.
+        let response = await AutomationDeadline.value(
+            of: work,
+            within: 30,
+            id: "fast",
+            command: .status
+        ) { timer in
+            timer.cancel()
+            await timer.value
+        }
+
+        XCTAssertTrue(response.ok, "A finished command was reported as \(String(describing: response.error))")
+        XCTAssertEqual(response.result?.text, "done")
+    }
+
     func testCommandThatFinishesFirst_isNeverReportedAsTimedOut() async {
-        // Many iterations: the bug was a scheduling race, so one exchange would
-        // prove nothing. With the result settling the gate before the timer is
-        // cancelled, no iteration can see the deadline win.
+        // The unconstrained race, many times over: a guard against regressions in
+        // the task plumbing that the forced interleaving above does not touch.
         for iteration in 0..<300 {
             let work = Task<AutomationResponse, Never> {
                 .success(id: "fast", command: .status, result: AutomationResult(text: "done"))

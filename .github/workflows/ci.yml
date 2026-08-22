@@ -189,8 +189,11 @@ jobs:
             -quiet \
             2>&1 | tee "$RUNNER_TEMP/ios-tests.log" | tail -50
 
+      # Both diagnostics also run when the job is cancelled (a superseded push
+      # cancels in-progress runs): a partial log still names the assertion
+      # that had already failed.
       - name: Show failing assertions
-        if: failure()
+        if: ${{ failure() || cancelled() }}
         run: |
           echo "::group::Assertion failures and crashes from the iOS test log"
           grep -nE 'error: |Fatal error|Assertion Failure|Failed to (get|find|launch)|Restarting after|crashed' \
@@ -198,7 +201,7 @@ jobs:
           echo "::endgroup::"
 
       - name: Upload iOS test results
-        if: failure()
+        if: ${{ failure() || cancelled() }}
         uses: actions/upload-artifact@v7.0.1
         with:
           name: ios-test-results

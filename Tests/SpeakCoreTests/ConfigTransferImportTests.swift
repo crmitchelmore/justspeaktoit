@@ -199,6 +199,61 @@ final class ConfigTransferImportTests: XCTestCase {
         XCTAssertEqual(identifiers, [], "nothing may be written for a refused payload")
     }
 
+    func testApplyImport_mapsSelectedModelToThePlatformLiveModelKey() async throws {
+        let storage = makeStorage()
+        let payload = ConfigTransferPayload(
+            secrets: [:],
+            settings: ["selectedModel": "deepgram/nova-3-streaming"]
+        )
+
+        try await manager.applyImport(
+            payload: payload,
+            storage: storage,
+            defaults: defaults,
+            liveModelDefaultsKey: "liveTranscriptionModel"
+        )
+
+        XCTAssertEqual(
+            defaults.string(forKey: "liveTranscriptionModel"), "deepgram/nova-3-streaming",
+            "Import must reverse the export-time key normalisation for the importing platform"
+        )
+        XCTAssertNil(defaults.string(forKey: "selectedModel"))
+    }
+
+    func testApplyImport_emptySecret_isRefusedBeforeAnyWrite() async throws {
+        let storage = makeStorage()
+        try await storage.storeSecret("dg-working", identifier: "deepgram.apiKey")
+        let payload = ConfigTransferPayload(
+            secrets: ["deepgram.apiKey": "", "gladia.apiKey": "gl-new"],
+            settings: [:]
+        )
+
+        do {
+            try await manager.applyImport(payload: payload, storage: storage, defaults: defaults)
+            XCTFail("Expected emptySecretValue")
+        } catch let error as ConfigTransferError {
+            XCTAssertEqual(error, .emptySecretValue("deepgram.apiKey"))
+        }
+
+        let deepgram = try await storage.secret(identifier: "deepgram.apiKey")
+        XCTAssertEqual(deepgram, "dg-working", "An empty imported value must not clobber a working credential")
+        let identifiers = await storage.knownIdentifiers()
+        XCTAssertFalse(identifiers.contains("gladia.apiKey"), "Nothing is written when validation fails")
+    }
+
+    func testApplyImport_emptySetting_isRefused() async throws {
+        let storage = makeStorage()
+        let payload = ConfigTransferPayload(secrets: [:], settings: ["selectedModel": ""])
+
+        do {
+            try await manager.applyImport(payload: payload, storage: storage, defaults: defaults)
+            XCTFail("Expected emptySettingValue")
+        } catch let error as ConfigTransferError {
+            XCTAssertEqual(error, .emptySettingValue("selectedModel"))
+        }
+        XCTAssertNil(defaults.string(forKey: "selectedModel"))
+    }
+
     func testApplyImport_unknownSettingKey_isRefusedBeforeAnyWrite() async throws {
         let storage = makeStorage()
         let payload = ConfigTransferPayload(

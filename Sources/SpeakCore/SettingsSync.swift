@@ -678,10 +678,16 @@ extension ConfigTransferManager {
     /// by process death can leave earlier writes applied; retrying the same
     /// import re-applies identical values and converges — it can never produce
     /// a configuration mixing two sources beyond the interrupted one.
+    ///
+    /// `liveModelDefaultsKey` mirrors `gatherSettings(defaults:liveModelDefaultsKey:)`:
+    /// the payload always carries the shared `selectedModel` key, and the importing
+    /// platform names the local UserDefaults key it reads its live transcription
+    /// model from, so the selection lands where that platform will find it.
     public func applyImport(
         payload: ConfigTransferPayload,
         storage: SecureStorage,
-        defaults: UserDefaults = .standard
+        defaults: UserDefaults = .standard,
+        liveModelDefaultsKey: String = "selectedModel"
     ) async throws {
         try Self.validateImport(payload: payload)
 
@@ -716,18 +722,32 @@ extension ConfigTransferManager {
         }
 
         for (key, value) in payload.settings {
-            defaults.set(value, forKey: key)
+            let localKey = key == "selectedModel" ? liveModelDefaultsKey : key
+            defaults.set(value, forKey: localKey)
         }
     }
 
     /// Refuses anything outside the bounded transfer policy before any write.
+    ///
+    /// Empty values are refused as well: export never produces them, and
+    /// storing an empty secret would overwrite a working destination credential
+    /// while unregistering its identifier.
     private static func validateImport(payload: ConfigTransferPayload) throws {
-        for identifier in payload.secrets.keys
-        where !transferableSecretIdentifiers.contains(identifier) {
-            throw ConfigTransferError.unknownSecretIdentifier(identifier)
+        for identifier in payload.secrets.keys.sorted() {
+            guard transferableSecretIdentifiers.contains(identifier) else {
+                throw ConfigTransferError.unknownSecretIdentifier(identifier)
+            }
+            if payload.secrets[identifier]?.isEmpty ?? true {
+                throw ConfigTransferError.emptySecretValue(identifier)
+            }
         }
-        for key in payload.settings.keys where !transferableSettingKeys.contains(key) {
-            throw ConfigTransferError.unknownSettingKey(key)
+        for key in payload.settings.keys.sorted() {
+            guard transferableSettingKeys.contains(key) else {
+                throw ConfigTransferError.unknownSettingKey(key)
+            }
+            if payload.settings[key]?.isEmpty ?? true {
+                throw ConfigTransferError.emptySettingValue(key)
+            }
         }
     }
 
@@ -766,6 +786,8 @@ public enum ConfigTransferError: LocalizedError, Equatable {
     case qrGenerationFailed
     case unknownSecretIdentifier(String)
     case unknownSettingKey(String)
+    case emptySecretValue(String)
+    case emptySettingValue(String)
     case rollbackFailed(identifiers: [String])
 
     public var errorDescription: String? {
@@ -795,6 +817,9 @@ public enum ConfigTransferError: LocalizedError, Equatable {
         case .unknownSettingKey:
             return "This configuration contains a setting this version does not recognise. "
                 + "Update both devices, then try again."
+        case .emptySecretValue, .emptySettingValue:
+            return "This configuration contains an empty value and was not applied. "
+                + "Generate a new code on the other device, then try again."
         case .rollbackFailed:
             return "The import failed and some credentials could not be restored. "
                 + "Review your API keys in Settings before dictating."

@@ -20,6 +20,31 @@ public struct SpeechSessionRecord: Identifiable, Hashable, Sendable {
     /// Transcription model identifier, when known.
     public let modelIdentifier: String?
 
+    /// Stable fingerprint over every aggregation input (`text`, `startedAt`,
+    /// `duration`). Persisted per session in the aggregate so reconciliation
+    /// can detect in-place edits (CloudKit merges, local reprocessing) to a
+    /// record whose UUID was already processed.
+    ///
+    /// Deterministic across launches and devices (FNV-1a, unlike `Hasher`
+    /// which is seeded per process). Extend the folded fields whenever a new
+    /// dimension starts to influence aggregation.
+    public var contentFingerprint: UInt64 {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325 // FNV-1a offset basis
+        let prime: UInt64 = 0x100_0000_01b3
+        func fold(_ byte: UInt8) {
+            hash = (hash ^ UInt64(byte)) &* prime
+        }
+        for byte in text.utf8 { fold(byte) }
+        fold(0) // field separator
+        withUnsafeBytes(of: startedAt.timeIntervalSince1970.bitPattern.littleEndian) {
+            for byte in $0 { fold(byte) }
+        }
+        withUnsafeBytes(of: duration.bitPattern.littleEndian) {
+            for byte in $0 { fold(byte) }
+        }
+        return hash
+    }
+
     public init(
         id: UUID,
         startedAt: Date,

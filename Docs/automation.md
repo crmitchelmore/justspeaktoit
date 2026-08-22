@@ -124,7 +124,24 @@ automation (speak CLI and MCP)**. Until then every client gets
 
 ### Install
 
-The CLI ships inside the app bundle and is symlinked by the Homebrew cask:
+**From the app (recommended):** Settings → General → **Automation CLI** → *Install CLI*.
+The app downloads the release's standalone `speak` build for your Mac's
+architecture, verifies the signed release manifest, the archive's size and
+SHA-256, the executable's architecture and its Developer ID signature, then
+installs it atomically at:
+
+```text
+~/Library/Application Support/SpeakApp/bin/speak
+```
+
+No administrator rights are needed and your shell profile is never edited.
+The card offers *Copy PATH command* — paste that line into `~/.zshrc` (or
+symlink the binary, e.g. `ln -s "$HOME/Library/Application Support/SpeakApp/bin/speak" ~/.local/bin/speak`).
+*Check for update* fetches the latest manifest; *Uninstall* removes only the
+files the installer wrote. A failed download or verification never replaces a
+working CLI.
+
+The CLI also ships inside the app bundle and is symlinked by the Homebrew cask:
 
 ```bash
 brew install --cask crmitchelmore/tap/justspeaktoit

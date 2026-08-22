@@ -538,6 +538,18 @@ final class DistributionBuildIdentityTests: XCTestCase {
         ].joined(separator: "\n            ")
         XCTAssertTrue(workflow.contains(releaseAssets))
 
+    }
+
+    func testDirectMacRelease_publishesCLIAssetsAndDelegatesTheTap() throws {
+        let workflow = try String(
+            contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/release-mac.yml"),
+            encoding: .utf8
+        )
+        let appcastScript = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("scripts/generate-appcast.sh"),
+            encoding: .utf8
+        )
+
         // The standalone CLI assets ride along when their optional step succeeded (issue #775).
         let cliAssets = [
             "${{ env.CLI_ARM64_ZIP }}", "${{ env.CLI_X86_64_ZIP }}",
@@ -565,6 +577,26 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertFalse(tapScript.contains("binary \"#{appdir}"))
         XCTAssertTrue(tapScript.contains("speak-#{version}-arm64.zip"))
         XCTAssertTrue(tapScript.contains("speak-#{version}-x86_64.zip"))
+
+        // The retry workflow reads the DMG digests back out of that two-line
+        // cask by label, not by layout, and refuses to proceed without them.
+        let retryWorkflow = try String(
+            contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/publish-speak-cli.yml"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(retryWorkflow.contains("grep -oE 'arm: *\"[0-9a-f]{64}\"'"))
+        XCTAssertTrue(retryWorkflow.contains("grep -oE 'intel: *\"[0-9a-f]{64}\"'"))
+        XCTAssertTrue(retryWorkflow.contains("Could not read the DMG digests"))
+
+        // Signing tools never arrive through an unverified download while the
+        // private key is on disk.
+        let signScript = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("scripts/sparkle-sign-file.sh"),
+            encoding: .utf8
+        )
+        XCTAssertFalse(signScript.contains("curl"))
+        XCTAssertTrue(appcastScript.contains("SPARKLE_TOOLS_SHA256="))
+        XCTAssertTrue(appcastScript.contains("curl --fail"))
     }
 
     func testLandingPageRedirects_routeBothFeedsAndDownloadsAheadOfTheIndexRewrite() throws {

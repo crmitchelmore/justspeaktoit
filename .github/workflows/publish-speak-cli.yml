@@ -100,8 +100,14 @@ jobs:
             echo "::error::The tap's cask is at $CASK_VERSION, not $VERSION; run the release workflow first"
             exit 1
           fi
-          ARM64_SHA256="$(sed -n 's/^  sha256 arm: "\([0-9a-f]*\)".*$/\1/p' "$CASK")"
-          UNIVERSAL_SHA256="$(sed -n 's/^  sha256 arm: "[0-9a-f]*", intel: "\([0-9a-f]*\)"$/\1/p' "$CASK")"
+          # The cask writes the two digests as `sha256 arm:   "…",` / `intel: "…"`
+          # on separate, aligned lines; read each by its label rather than by layout.
+          ARM64_SHA256="$(grep -oE 'arm: *"[0-9a-f]{64}"' "$CASK" | grep -oE '[0-9a-f]{64}' | head -n 1)"
+          UNIVERSAL_SHA256="$(grep -oE 'intel: *"[0-9a-f]{64}"' "$CASK" | grep -oE '[0-9a-f]{64}' | head -n 1)"
+          if [ -z "$ARM64_SHA256" ] || [ -z "$UNIVERSAL_SHA256" ]; then
+            echo "::error::Could not read the DMG digests from the tap's cask"
+            exit 1
+          fi
           CLI_ARM64_SHA256="$(shasum -a 256 "${{ steps.cli.outputs.arm64-zip }}" | awk '{print $1}')"
           CLI_X86_64_SHA256="$(shasum -a 256 "${{ steps.cli.outputs.x86_64-zip }}" | awk '{print $1}')"
           chmod +x scripts/update-homebrew-tap.sh

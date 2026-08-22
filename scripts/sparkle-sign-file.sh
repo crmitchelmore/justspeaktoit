@@ -26,18 +26,18 @@ PRIVATE_KEY_FILE="$(mktemp)"
 trap 'rm -f "$PRIVATE_KEY_FILE"' EXIT
 echo "$PRIVATE_KEY_BASE64" > "$PRIVATE_KEY_FILE"
 
+# Only a sign_update that arrived through the package graph (SwiftPM's
+# checksum-verified Sparkle artifact bundle) or is already installed may run
+# with the private key on disk. There is deliberately no download fallback:
+# a fetched binary would execute with access to the signing key.
 SIGN_UPDATE=""
 if [[ -f ".build/artifacts/sparkle/Sparkle/bin/sign_update" ]]; then
     SIGN_UPDATE=".build/artifacts/sparkle/Sparkle/bin/sign_update"
 elif command -v sign_update &> /dev/null; then
     SIGN_UPDATE="sign_update"
 else
-    echo "sign_update not found, downloading Sparkle tools..." >&2
-    SPARKLE_VERSION="2.8.1"
-    SPARKLE_TOOLS="$(mktemp -d)"
-    curl -sL "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz" \
-        | tar xJ -C "$SPARKLE_TOOLS"
-    SIGN_UPDATE="$SPARKLE_TOOLS/bin/sign_update"
+    echo "error: sign_update not found; run 'swift package resolve' so SwiftPM fetches Sparkle's artifact bundle" >&2
+    exit 1
 fi
 
 OUTPUT="$("$SIGN_UPDATE" --ed-key-file "$PRIVATE_KEY_FILE" "$FILE")"

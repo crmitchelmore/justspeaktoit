@@ -46,10 +46,22 @@ if [ -f ".build/artifacts/sparkle/Sparkle/bin/sign_update" ]; then
 elif command -v sign_update &> /dev/null; then
     SIGN_UPDATE="sign_update"
 else
+    # Last resort only (CI always has the SwiftPM artifact bundle): the
+    # tools run with the private key on disk, so the download must fail on
+    # HTTP errors and match a pinned digest before anything is extracted.
     echo "Warning: sign_update not found, downloading Sparkle tools..." >&2
     SPARKLE_VERSION="2.8.1"
-    curl -sL "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz" | tar xJ -C /tmp
-    SIGN_UPDATE="/tmp/bin/sign_update"
+    SPARKLE_TOOLS_SHA256="5cddb7695674ef7704268f38eccaee80e3accbf19e61c1689efff5b6116d85be"
+    SPARKLE_TOOLS_DIR="$(mktemp -d)"
+    curl --fail -sL "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz" \
+        -o "$SPARKLE_TOOLS_DIR/Sparkle.tar.xz"
+    ACTUAL_SHA256="$(shasum -a 256 "$SPARKLE_TOOLS_DIR/Sparkle.tar.xz" | awk '{print $1}')"
+    if [ "$ACTUAL_SHA256" != "$SPARKLE_TOOLS_SHA256" ]; then
+        echo "Error: Sparkle ${SPARKLE_VERSION} tools digest mismatch ($ACTUAL_SHA256); refusing to run a signing tool that does not match the pin" >&2
+        exit 1
+    fi
+    tar xJ -C "$SPARKLE_TOOLS_DIR" -f "$SPARKLE_TOOLS_DIR/Sparkle.tar.xz"
+    SIGN_UPDATE="$SPARKLE_TOOLS_DIR/bin/sign_update"
 fi
 
 # Generate EdDSA signature

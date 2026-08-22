@@ -30,6 +30,25 @@ jobs:
           ref: refs/tags/mac-v${{ github.event.inputs.version }}
           fetch-depth: 0
 
+      - name: Use the current pipeline scripts
+        run: |
+          # The CLI is built from the tag's sources, but the publication
+          # pipeline itself — build, verify, manifest, tap scripts and the
+          # composite action — comes from main, so a pipeline fix can
+          # republish a release whose own run failed (the point of this
+          # workflow). The first republish attempt for 2.63.1 reran the
+          # tag's broken verification script instead.
+          git fetch --no-tags origin main
+          git checkout origin/main -- \
+            scripts/build-speak-cli-standalone.sh \
+            scripts/verify-speak-cli.sh \
+            scripts/generate-cli-manifest.sh \
+            scripts/sparkle-sign-file.sh \
+            scripts/verify-cli-manifest.swift \
+            scripts/update-homebrew-tap.sh \
+            .github/actions/publish-speak-cli
+          git status --short
+
       - name: Setup Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:

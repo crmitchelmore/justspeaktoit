@@ -111,8 +111,10 @@ runs:
         APPLE_ID_PASSWORD: ${{ inputs.apple-id-password }}
         APPLE_TEAM_ID: ${{ inputs.apple-team-id }}
       run: |
-        # A bare executable cannot be stapled; Gatekeeper checks the ticket
-        # online, which verify-speak-cli.sh --notarised exercises below.
+        # A bare executable cannot be stapled and Gatekeeper cannot assess one
+        # (`spctl` answers "does not seem to be an app"), so notarytool's
+        # Accepted status here is the notarisation proof for the CLI; the
+        # verification below checks the archive and the Developer ID signature.
         for archive in "${{ steps.paths.outputs.arm64-zip }}" "${{ steps.paths.outputs.x86_64-zip }}"; do
           echo "==> Notarising $(basename "$archive")"
           OUTPUT="$(xcrun notarytool submit "$archive" \

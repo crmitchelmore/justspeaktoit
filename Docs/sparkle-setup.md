@@ -69,6 +69,18 @@ The app checks `https://justspeaktoit.com/appcast.xml`. Cloudflare Pages redirec
 
 GitHub resolves `latest` to the newest non-draft, non-prerelease release, so test or prerelease tags do not replace the production feed.
 
+### Architecture Feeds
+Each release publishes two downloads and two feeds (issue #774):
+
+| Feed | Download | Who follows it |
+|------|----------|----------------|
+| `https://justspeaktoit.com/appcast.xml` | `JustSpeakToIt-universal.dmg` (arm64 + x86_64) | Intel Macs, Rosetta-translated processes, and every install made before the split (it is the `SUFeedURL` baked into every build) |
+| `https://justspeaktoit.com/appcast-arm64.xml` | `JustSpeakToIt-arm64.dmg` (arm64 only) | Builds running natively on Apple Silicon |
+
+`UpdateFeedSelection` picks the feed at runtime through `SPUUpdaterDelegate.feedURLString(for:)`; `UpdateFeedSelectionTests` cover the decision. The legacy feed keeps its historical name because shipped builds carry it in Info.plist and the release-notes tooling reads `appcast.xml` for every past release. Keep the exact redirects for both feeds ahead of the `/index.html` rewrite in `landing-page/_redirects`.
+
+The release workflow asserts that each feed's enclosure names its own DMG, so an arm64-only build can never be offered through the universal feed.
+
 ## Testing
 
 1. Build and run the app locally

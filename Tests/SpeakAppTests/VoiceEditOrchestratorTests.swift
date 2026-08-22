@@ -4,66 +4,7 @@ import XCTest
 
 @MainActor
 final class VoiceEditOrchestratorTests: XCTestCase {
-    private struct StubError: LocalizedError {
-        let message: String
-
-        var errorDescription: String? { message }
-    }
-
-    /// Test double owning every orchestrator seam, so each test tweaks only what it needs.
-    @MainActor
-    private final class Harness {
-        var busy = false
-        var llmConfigured = true
-        var selection: VoiceEditOrchestrator.Selection? = .init(
-            text: "The quick brown fox jumps over the lazy dog",
-            source: .accessibility
-        )
-        var startError: Error?
-        var instructionResult: Result<String, Error> = .success("make this shorter")
-        var rewriteResult: Result<String, Error> = .success("Quick fox, lazy dog.")
-        var replacementOutcome: VoiceEditOrchestrator.ReplacementOutcome = .replaced
-        /// Suspends selection capture so tests can press the hotkey again mid-startup.
-        var captureGate: (() async -> Void)?
-
-        private(set) var events: [VoiceEditOrchestrator.Event] = []
-        private(set) var captureCount = 0
-        private(set) var startCount = 0
-        private(set) var finishCount = 0
-        private(set) var cancelCount = 0
-        private(set) var rewriteRequests: [(selection: String, instruction: String)] = []
-        private(set) var appliedRewrites: [String] = []
-
-        lazy var orchestrator = VoiceEditOrchestrator(
-            dependencies: .init(
-                isDictationBusy: { self.busy },
-                hasConfiguredLLM: { self.llmConfigured },
-                captureSelection: {
-                    self.captureCount += 1
-                    await self.captureGate?()
-                    return self.selection
-                },
-                startListening: {
-                    self.startCount += 1
-                    if let error = self.startError { throw error }
-                },
-                finishListening: {
-                    self.finishCount += 1
-                    return try self.instructionResult.get()
-                },
-                cancelListening: { self.cancelCount += 1 },
-                rewrite: { selection, instruction in
-                    self.rewriteRequests.append((selection.text, instruction))
-                    return try self.rewriteResult.get()
-                },
-                applyReplacement: { _, rewrite in
-                    self.appliedRewrites.append(rewrite)
-                    return self.replacementOutcome
-                },
-                onEvent: { self.events.append($0) }
-            )
-        )
-    }
+    private typealias Harness = VoiceEditOrchestratorHarness
 
     // MARK: - Happy path
 
@@ -119,12 +60,12 @@ final class VoiceEditOrchestratorTests: XCTestCase {
 
     func testClipboardReplacementOutcome_isPropagated() async {
         let harness = Harness()
-        harness.replacementOutcome = .leftOnClipboard
+        harness.replacementOutcome = .leftOnClipboard(.selectionChanged)
 
         await harness.orchestrator.toggle()
         await harness.orchestrator.toggle()
 
-        XCTAssertEqual(harness.events.last, .finished(.leftOnClipboard))
+        XCTAssertEqual(harness.events.last, .finished(.leftOnClipboard(.selectionChanged)))
         XCTAssertEqual(harness.orchestrator.phase, .idle)
     }
 
@@ -174,7 +115,7 @@ final class VoiceEditOrchestratorTests: XCTestCase {
 
     func testRecordingStartFailure_reportsAndStaysIdle() async {
         let harness = Harness()
-        harness.startError = StubError(message: "mic unavailable")
+        harness.startError = VoiceEditStubError(message: "mic unavailable")
 
         await harness.orchestrator.toggle()
 
@@ -199,7 +140,7 @@ final class VoiceEditOrchestratorTests: XCTestCase {
 
     func testTranscriptionFailure_isReported() async {
         let harness = Harness()
-        harness.instructionResult = .failure(StubError(message: "provider offline"))
+        harness.instructionResult = .failure(VoiceEditStubError(message: "provider offline"))
 
         await harness.orchestrator.toggle()
         await harness.orchestrator.toggle()
@@ -210,7 +151,7 @@ final class VoiceEditOrchestratorTests: XCTestCase {
 
     func testRewriteFailure_isReportedWithoutApplying() async {
         let harness = Harness()
-        harness.rewriteResult = .failure(StubError(message: "429 rate limited"))
+        harness.rewriteResult = .failure(VoiceEditStubError(message: "429 rate limited"))
 
         await harness.orchestrator.toggle()
         await harness.orchestrator.toggle()
@@ -234,29 +175,6 @@ final class VoiceEditOrchestratorTests: XCTestCase {
         XCTAssertTrue(harness.appliedRewrites.isEmpty)
     }
 
-    // MARK: - Cancellation
-
-    func testCancelDuringListening_stopsRecordingAndEmitsCancelled() async {
-        let harness = Harness()
-        await harness.orchestrator.toggle()
-
-        harness.orchestrator.cancel()
-
-        XCTAssertEqual(harness.cancelCount, 1)
-        XCTAssertEqual(harness.events.last, .cancelled)
-        XCTAssertEqual(harness.orchestrator.phase, .idle)
-        XCTAssertEqual(harness.finishCount, 0)
-    }
-
-    func testCancelWhenIdle_isANoOp() {
-        let harness = Harness()
-
-        harness.orchestrator.cancel()
-
-        XCTAssertTrue(harness.events.isEmpty)
-        XCTAssertEqual(harness.cancelCount, 0)
-    }
-
     func testSessionAfterFailure_startsCleanly() async {
         let harness = Harness()
         harness.selection = nil
@@ -273,7 +191,7 @@ final class VoiceEditOrchestratorTests: XCTestCase {
     func testSecondPressDuringStartup_doesNotStartAParallelSession() async {
         let harness = Harness()
         let captureEntered = expectation(description: "selection capture entered")
-        let gate = Gate()
+        let gate = VoiceEditTestGate()
         harness.captureGate = {
             captureEntered.fulfill()
             await gate.wait()
@@ -293,23 +211,5 @@ final class VoiceEditOrchestratorTests: XCTestCase {
         XCTAssertEqual(harness.startCount, 1)
         XCTAssertEqual(harness.events, [.listeningStarted(.accessibility)])
         XCTAssertEqual(harness.orchestrator.phase, .listening)
-    }
-}
-
-/// One-shot gate used to hold an orchestrator dependency at a suspension point.
-@MainActor
-private final class Gate {
-    private var continuation: CheckedContinuation<Void, Never>?
-    private var isOpen = false
-
-    func wait() async {
-        guard !self.isOpen else { return }
-        await withCheckedContinuation { self.continuation = $0 }
-    }
-
-    func open() {
-        self.isOpen = true
-        self.continuation?.resume()
-        self.continuation = nil
     }
 }

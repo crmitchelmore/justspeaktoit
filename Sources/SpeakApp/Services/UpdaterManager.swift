@@ -95,6 +95,12 @@ final class UpdaterManager: NSObject, ObservableObject {
 
 #if !APP_STORE
 extension UpdaterManager: SPUUpdaterDelegate {
+    /// Apple Silicon Macs follow the arm64 feed; everything else keeps the
+    /// universal feed baked into Info.plist (issue #774).
+    nonisolated func feedURLString(for updater: SPUUpdater) -> String? {
+        UpdateFeedSelection.current
+    }
+
     nonisolated func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
         Task { @MainActor in
             self.latestVersion = item.displayVersionString

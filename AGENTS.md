@@ -32,7 +32,7 @@ Releases are **fully automated** via conventional commits:
 
 1. Push to `main` with a releasable commit type (`feat:`, `fix:`, `perf:`, or breaking change)
 2. `auto-release.yml` determines the version bump and creates a `mac-v*` tag
-3. `release-mac.yml` builds, notarises, publishes to GitHub Releases, updates appcast.xml, and updates Homebrew tap
+3. `release-mac.yml` builds two downloads — `JustSpeakToIt-arm64.dmg` (Apple Silicon, primary) and `JustSpeakToIt-universal.dmg` (Intel/legacy) — notarises both, publishes them with `appcast.xml` (universal feed) and `appcast-arm64.xml` (Apple Silicon feed) to GitHub Releases, records their sizes in the job summary, and updates the per-architecture Homebrew cask
 
 Manual releases are still possible by creating and pushing a `mac-v*` tag directly.
 
@@ -50,7 +50,7 @@ The `VERSION` file is a **hint** used as fallback when no macOS tag is present. 
 ### Post-Release Support
 
 When a user reports that a freshly shipped macOS release won't install or launch, perform the remediation directly when the environment permits filesystem/app actions; otherwise provide these exact steps for the user to run locally:
-1. Download the latest `mac-v*` DMG.
+1. Download the latest `mac-v*` DMG for the user's Mac: `JustSpeakToIt-arm64.dmg` on Apple Silicon, `JustSpeakToIt-universal.dmg` on Intel.
 2. Back up the existing app to a persistent location, e.g. `mv /Applications/JustSpeakToIt.app ~/Desktop/JustSpeakToIt.app.bak-$(date +%s)`.
 3. Replace `/Applications/JustSpeakToIt.app` with the app from the DMG.
 4. Verify launch locally (e.g. `open -n /Applications/JustSpeakToIt.app`) before asking the user to retry.

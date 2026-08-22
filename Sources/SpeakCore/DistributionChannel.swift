@@ -82,6 +82,10 @@ public enum ChannelFeature: String, Sendable, CaseIterable {
     /// External runtimes (llama.cpp / sherpa-onnx) that install or spawn executable
     /// code and therefore cannot be offered in the App Store sandbox.
     case externalLocalModelRuntime
+    /// Downloading and installing the standalone `speak` CLI into the user's
+    /// Application Support folder — executable code the App Store sandbox
+    /// cannot place or run (issue #775).
+    case standaloneCLIInstaller
     /// Automatically prompting the user for Accessibility. Sandboxed builds cannot show the
     /// Accessibility prompt (`AXIsProcessTrustedWithOptions` is inert under the sandbox), so the
     /// user must add the app manually in System Settings. Input Monitoring is unaffected — it
@@ -90,6 +94,11 @@ public enum ChannelFeature: String, Sendable, CaseIterable {
     /// Cross-app text insertion via AXUIElement. The App Store sandbox blocks
     /// reading and mutating another app's accessibility hierarchy.
     case accessibilityTextInsertion
+    /// Voice Edit: reading another app's selection and replacing it through its
+    /// accessibility hierarchy or a simulated ⌘C/⌘V. Needs the same cross-app
+    /// access as `accessibilityTextInsertion`, so the App Store build must not
+    /// offer the shortcut at all rather than fail at apply time (issue #673).
+    case voiceEdit
     /// Freedom to reference other distribution channels or external purchases in UI copy.
     /// App Store review guidelines discourage this, so App Store builds must not.
     case crossChannelMessaging
@@ -110,8 +119,8 @@ public extension DistributionChannel {
     /// Whether `feature` is available in this build.
     func supports(_ feature: ChannelFeature) -> Bool {
         switch feature {
-        case .selfUpdate, .externalLocalModelRuntime, .automaticAccessibilityPrompt,
-             .accessibilityTextInsertion, .crossChannelMessaging:
+        case .selfUpdate, .externalLocalModelRuntime, .standaloneCLIInstaller, .automaticAccessibilityPrompt,
+             .accessibilityTextInsertion, .voiceEdit, .crossChannelMessaging:
             return self == .direct
         case .iCloudSync, .encryptedCloudKitKeySync:
             // iOS and Mac App Store builds carry the managed iCloud entitlements.
@@ -134,12 +143,18 @@ public extension DistributionChannel {
     /// Installable executable local runtimes such as sherpa-onnx and llama.cpp (direct only).
     var supportsExternalLocalModelRuntime: Bool { supports(.externalLocalModelRuntime) }
 
+    /// Whether this build can install the standalone `speak` CLI (direct only).
+    var supportsStandaloneCLIInstaller: Bool { supports(.standaloneCLIInstaller) }
+
     /// Whether the app can auto-prompt for Accessibility.
     /// When `false` (App Store), guide the user to add the app manually instead.
     var supportsAutomaticAccessibilityPrompt: Bool { supports(.automaticAccessibilityPrompt) }
 
     /// Whether this build may insert text directly into another app via AXUIElement.
     var supportsAccessibilityTextInsertion: Bool { supports(.accessibilityTextInsertion) }
+
+    /// Whether this build can offer Voice Edit (select text → speak → replaced in place).
+    var supportsVoiceEdit: Bool { supports(.voiceEdit) }
 
     /// Whether UI copy may reference other distribution channels (e.g. the direct
     /// download). `false` for App Store builds to stay within review guidelines.

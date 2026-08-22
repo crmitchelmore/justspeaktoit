@@ -2,38 +2,6 @@ import SpeakCore
 import AppKit
 import SwiftUI
 
-private enum ProfileTranscriptionChoice: String, CaseIterable, Identifiable {
-  case useDefault
-  case streaming
-  case batch
-
-  var id: String { rawValue }
-
-  var displayName: String {
-    switch self {
-    case .useDefault: return "Use Default"
-    case .streaming: return "Remote Streaming"
-    case .batch: return "Remote Batch"
-    }
-  }
-}
-
-private enum ProfilePolishChoice: String, CaseIterable, Identifiable {
-  case useDefault
-  case enabled
-  case disabled
-
-  var id: String { rawValue }
-
-  var displayName: String {
-    switch self {
-    case .useDefault: return "Use Default"
-    case .enabled: return "Enabled"
-    case .disabled: return "Disabled"
-    }
-  }
-}
-
 /// Sheet for creating or editing a single dictation profile.
 struct ProfileEditorView: View {
   @Environment(\.dismiss) private var dismiss
@@ -41,67 +9,13 @@ struct ProfileEditorView: View {
   private let originalID: UUID?
   private let onSave: (DictationProfile) -> Void
 
-  @State private var name: String
-  @State private var bundleIDs: [String]
-  @State fileprivate var transcriptionChoice: ProfileTranscriptionChoice
-  @State private var streamingModel: String
-  @State private var batchModel: String
-  @State fileprivate var polishChoice: ProfilePolishChoice
-  @State private var polishModel: String
-  @State private var useCustomPrompt: Bool
-  @State private var customPrompt: String
-  @State private var outputLanguage: String
-  @State private var includeLexiconDirectives: Bool
-  @State private var includeContextTags: Bool
-  @State private var languageIdentifier: String
+  @State private var draft: ProfileEditorDraft
 
   init(profile: DictationProfile?, settings: AppSettings, onSave: @escaping (DictationProfile) -> Void) {
     self.settings = settings
     self.originalID = profile?.id
     self.onSave = onSave
-
-    _name = State(initialValue: profile?.name ?? "")
-    _bundleIDs = State(initialValue: profile?.matchers.filter { $0.kind == .bundleID }.map(\.value) ?? [])
-
-    let transcriptionModelID = profile?.transcriptionModelID?
-      .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    let isLiveModel = ModelCatalog.liveTranscription.contains {
-      $0.id.caseInsensitiveCompare(transcriptionModelID) == .orderedSame
-    }
-    if transcriptionModelID.isEmpty {
-      _transcriptionChoice = State(initialValue: .useDefault)
-      _streamingModel = State(initialValue: settings.liveTranscriptionModel)
-      _batchModel = State(initialValue: settings.batchTranscriptionModel)
-    } else if isLiveModel {
-      _transcriptionChoice = State(initialValue: .streaming)
-      _streamingModel = State(initialValue: transcriptionModelID)
-      _batchModel = State(initialValue: settings.batchTranscriptionModel)
-    } else {
-      _transcriptionChoice = State(initialValue: .batch)
-      _streamingModel = State(initialValue: settings.liveTranscriptionModel)
-      _batchModel = State(initialValue: transcriptionModelID)
-    }
-
-    switch profile?.polishEnabled {
-    case .some(true):
-      _polishChoice = State(initialValue: .enabled)
-    case .some(false):
-      _polishChoice = State(initialValue: .disabled)
-    case .none:
-      _polishChoice = State(initialValue: .useDefault)
-    }
-    _polishModel = State(initialValue: profile?.polishModelID ?? settings.postProcessingModel)
-    let prompt = profile?.polishPrompt ?? ""
-    _useCustomPrompt = State(initialValue: !prompt.isEmpty)
-    _customPrompt = State(initialValue: prompt)
-    _outputLanguage = State(initialValue: profile?.polishOutputLanguage ?? "")
-    _includeLexiconDirectives = State(
-      initialValue: profile?.polishIncludeLexiconDirectives ?? settings.postProcessingIncludeLexiconDirectives
-    )
-    _includeContextTags = State(
-      initialValue: profile?.polishIncludeContextTags ?? settings.postProcessingIncludeContextTags
-    )
-    _languageIdentifier = State(initialValue: profile?.languageIdentifier ?? "")
+    _draft = State(initialValue: ProfileEditorDraft(profile: profile, settings: settings))
   }
 
   var body: some View {
@@ -112,11 +26,11 @@ struct ProfileEditorView: View {
         Spacer()
         Button("Cancel") { dismiss() }
         Button("Save") {
-          onSave(builtProfile)
+          onSave(draft.profile(id: originalID))
           dismiss()
         }
         .buttonStyle(.borderedProminent)
-        .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        .disabled(!draft.canSave)
       }
       .padding(16)
 
@@ -127,59 +41,21 @@ struct ProfileEditorView: View {
           VStack(alignment: .leading, spacing: 6) {
             Text("Name")
               .font(.subheadline.weight(.semibold))
-            TextField("e.g. Slack, Email, Code", text: $name)
+            TextField("e.g. Slack, Email, Code", text: $draft.name)
               .textFieldStyle(.roundedBorder)
           }
 
-          ProfileAppsSection(bundleIDs: $bundleIDs)
+          ProfileAppsSection(bundleIDs: $draft.bundleIDs)
 
           transcriptionSection
           polishSection
           languageSection
+          issuesSection
         }
         .padding(16)
       }
     }
     .frame(minWidth: 560, minHeight: 620)
-  }
-
-  fileprivate var builtProfile: DictationProfile {
-    let polishEnabled: Bool?
-    switch polishChoice {
-    case .useDefault: polishEnabled = nil
-    case .enabled: polishEnabled = true
-    case .disabled: polishEnabled = false
-    }
-
-    let transcriptionModelID: String?
-    switch transcriptionChoice {
-    case .useDefault:
-      transcriptionModelID = nil
-    case .streaming:
-      transcriptionModelID = normalized(streamingModel)
-    case .batch:
-      transcriptionModelID = normalized(batchModel)
-    }
-
-    let isPolishOverridden = polishChoice == .enabled
-    return DictationProfile(
-      id: originalID ?? UUID(),
-      name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-      matchers: bundleIDs.map(DictationProfileMatcher.bundleID),
-      transcriptionModelID: transcriptionModelID,
-      polishEnabled: polishEnabled,
-      polishModelID: isPolishOverridden ? normalized(polishModel) : nil,
-      polishPrompt: isPolishOverridden && useCustomPrompt ? normalized(customPrompt) : nil,
-      polishOutputLanguage: isPolishOverridden ? normalized(outputLanguage) : nil,
-      polishIncludeLexiconDirectives: isPolishOverridden ? includeLexiconDirectives : nil,
-      polishIncludeContextTags: isPolishOverridden ? includeContextTags : nil,
-      languageIdentifier: normalized(languageIdentifier)
-    )
-  }
-
-  private func normalized(_ value: String) -> String? {
-    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-    return trimmed.isEmpty ? nil : trimmed
   }
 }
 
@@ -190,7 +66,7 @@ extension ProfileEditorView {
     VStack(alignment: .leading, spacing: 8) {
       Text("Transcription")
         .font(.subheadline.weight(.semibold))
-      Picker("Transcription", selection: $transcriptionChoice) {
+      Picker("Transcription", selection: $draft.transcriptionChoice) {
         ForEach(ProfileTranscriptionChoice.allCases) { choice in
           Text(choice.displayName).tag(choice)
         }
@@ -198,21 +74,22 @@ extension ProfileEditorView {
       .pickerStyle(.segmented)
       .labelsHidden()
 
-      if transcriptionChoice == .streaming {
+      if draft.transcriptionChoice == .streaming {
         ModelPicker(
           title: "Streaming Model",
-          help: "Model used while recording when this profile is active.",
+          help: "Model used while recording when this profile is active. "
+            + "Custom identifiers must belong to a supported live provider.",
           options: ModelCatalog.liveTranscription,
-          value: $streamingModel,
+          value: $draft.streamingModel,
           credentialPurpose: .liveTranscription,
           storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers)
         )
-      } else if transcriptionChoice == .batch {
+      } else if draft.transcriptionChoice == .batch {
         ModelPicker(
           title: "Batch Model",
           help: "Model the finished recording is sent to when this profile is active.",
           options: ModelCatalog.batchTranscription,
-          value: $batchModel,
+          value: $draft.batchModel,
           credentialPurpose: .batchTranscription,
           storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers)
         )
@@ -224,7 +101,7 @@ extension ProfileEditorView {
     VStack(alignment: .leading, spacing: 8) {
       Text("Polish (Post-processing)")
         .font(.subheadline.weight(.semibold))
-      Picker("Polish", selection: $polishChoice) {
+      Picker("Polish", selection: $draft.polishChoice) {
         ForEach(ProfilePolishChoice.allCases) { choice in
           Text(choice.displayName).tag(choice)
         }
@@ -232,42 +109,61 @@ extension ProfileEditorView {
       .pickerStyle(.segmented)
       .labelsHidden()
 
-      if polishChoice == .enabled {
+      if draft.polishChoice == .enabled {
+        // Catalogue models only: a custom identifier would be normalised away
+        // at session time, so it cannot be offered here.
         ModelPicker(
           title: "Polish Model",
-          help: "LLM used to clean up the transcript for this profile.",
+          help: "LLM used to clean up the transcript for this profile. "
+            + "Runs after recording even when Live Polish is your usual speed mode.",
           options: ModelCatalog.postProcessing,
-          value: $polishModel,
+          value: $draft.polishModel,
           credentialPurpose: .postProcessing,
           storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers),
-          usesDetailedChooser: true
+          usesDetailedChooser: true,
+          allowsCustom: false
         )
 
-        Toggle("Custom polish prompt", isOn: $useCustomPrompt)
-        if useCustomPrompt {
-          TextEditor(text: $customPrompt)
-            .font(.body.monospaced())
-            .frame(minHeight: 120)
-            .overlay(
-              RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .strokeBorder(Color.secondary.opacity(0.3))
-            )
-          Text("Replaces the built-in cleanup instructions for this profile.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
+        if draft.usesRulesCleanup {
+          Text(
+            "The built-in rules cleaner fixes spacing, punctuation and capitalisation only. "
+              + "It does not use prompts, an output language or lexicon directives, so those options are hidden."
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        } else {
+          promptControls
         }
-
-        Picker("Output Language", selection: $outputLanguage) {
-          Text("Use Default").tag("")
-          ForEach(Self.outputLanguages, id: \.self) { language in
-            Text(language).tag(language)
-          }
-        }
-        .pickerStyle(.menu)
-
-        Toggle("Include personal lexicon directives", isOn: $includeLexiconDirectives)
-        Toggle("Include context tags", isOn: $includeContextTags)
       }
+    }
+  }
+
+  fileprivate var promptControls: some View {
+    Group {
+      Toggle("Custom polish prompt", isOn: $draft.useCustomPrompt)
+      if draft.useCustomPrompt {
+        TextEditor(text: $draft.customPrompt)
+          .font(.body.monospaced())
+          .frame(minHeight: 120)
+          .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+              .strokeBorder(Color.secondary.opacity(0.3))
+          )
+        Text("Replaces the built-in cleanup instructions for this profile.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+
+      Picker("Output Language", selection: $draft.outputLanguage) {
+        Text("Use Default").tag("")
+        ForEach(Self.outputLanguages, id: \.self) { language in
+          Text(language).tag(language)
+        }
+      }
+      .pickerStyle(.menu)
+
+      Toggle("Include personal lexicon directives", isOn: $draft.includeLexiconDirectives)
+      Toggle("Include context tags", isOn: $draft.includeContextTags)
     }
   }
 
@@ -275,7 +171,7 @@ extension ProfileEditorView {
     VStack(alignment: .leading, spacing: 8) {
       Text("Spoken Language")
         .font(.subheadline.weight(.semibold))
-      Picker("Spoken Language", selection: $languageIdentifier) {
+      Picker("Spoken Language", selection: $draft.languageIdentifier) {
         Text("Use Default").tag("")
         ForEach(TranscriptionLanguageCatalog.options) { option in
           Text(option.displayName).tag(option.id)
@@ -283,6 +179,23 @@ extension ProfileEditorView {
       }
       .pickerStyle(.menu)
       .labelsHidden()
+    }
+  }
+
+  /// Why the profile cannot be saved yet. Shown instead of letting a
+  /// configuration through that would not run as displayed.
+  @ViewBuilder
+  fileprivate var issuesSection: some View {
+    let issues = draft.issues
+    if !issues.isEmpty {
+      VStack(alignment: .leading, spacing: 4) {
+        ForEach(Array(issues.enumerated()), id: \.offset) { _, issue in
+          Label(issue.message, systemImage: "exclamationmark.triangle")
+            .font(.caption)
+            .foregroundStyle(.orange)
+        }
+      }
+      .accessibilityElement(children: .combine)
     }
   }
 

@@ -15,7 +15,10 @@ import Foundation
 public struct SpeechInsightsAggregate: Codable, Sendable, Equatable {
     /// Bump when the stored shape changes; loaders discard mismatched data
     /// and recompute from history.
-    public static let currentSchemaVersion = 1
+    ///
+    /// v2: added `sessionFingerprints` so reconciliation detects in-place
+    /// edits to already-processed sessions.
+    public static let currentSchemaVersion = 2
 
     /// Compact per-session stats retained for time-based metrics (WPM
     /// distribution, filler trend, longest session). Kept sorted by
@@ -51,6 +54,10 @@ public struct SpeechInsightsAggregate: Codable, Sendable, Equatable {
     public var schemaVersion: Int
     /// IDs of every session folded into this aggregate.
     public var processedSessionIDs: Set<UUID>
+    /// Content fingerprint of every processed session, keyed by session ID.
+    /// Lets reconciliation notice when a record was edited in place (text,
+    /// date or duration changed under an existing UUID) and rebuild.
+    public var sessionFingerprints: [UUID: UInt64]
     /// Total spoken words (all surface tokens, fillers included).
     public var totalWordCount: Int
     /// Total filler-phrase occurrences.
@@ -74,6 +81,7 @@ public struct SpeechInsightsAggregate: Codable, Sendable, Equatable {
     public init() {
         schemaVersion = Self.currentSchemaVersion
         processedSessionIDs = []
+        sessionFingerprints = [:]
         totalWordCount = 0
         totalFillerCount = 0
         fillerCounts = [:]

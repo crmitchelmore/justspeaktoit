@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 # Verify a standalone speak CLI release archive the way the app's installer
 # will (issue #775): a single `speak` at the archive root, exactly the promised
-# architecture, the release version linked in, a Developer ID signature with
-# the hardened runtime that satisfies the installer's requirement, and — once
-# notarised — Gatekeeper acceptance.
+# architecture, the release version linked in, and a Developer ID signature
+# with the hardened runtime that satisfies the installer's requirement.
+#
+# Notarisation of a bare executable cannot be checked here: `spctl --assess`
+# only assesses bundles, installers and disk images and answers "does not seem
+# to be an app" for a Mach-O file, and a ticket cannot be stapled to one. The
+# caller proves notarisation from `notarytool`'s Accepted status at submission;
+# `--notarised` records that the archive is expected to be in that state.
 #
 # Usage: ./scripts/verify-speak-cli.sh <zip> <arm64|x86_64> <version> [--signed] [--notarised]
 #
 #   --signed     fail unless the executable carries a Developer ID signature
-#   --notarised  also require Gatekeeper to accept the executable (implies --signed)
+#   --notarised  the caller has notarised the archive (implies --signed)
 
 set -euo pipefail
 
@@ -93,8 +98,10 @@ else
 fi
 
 if [[ "$REQUIRE_NOTARISED" == true ]]; then
-    spctl --assess --type execute --verbose=2 "$BINARY"
-    echo "==> Gatekeeper accepts speak"
+    # Gatekeeper cannot assess a bare executable (see the header); the
+    # Developer ID requirement above plus the caller's notarytool acceptance
+    # are the checks that apply to a CLI.
+    echo "==> notarised by the caller (notarytool Accepted); Gatekeeper assessment does not apply to a bare executable"
 fi
 
 can_run=false

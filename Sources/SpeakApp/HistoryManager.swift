@@ -55,6 +55,14 @@ final class HistoryManager: ObservableObject {
   @Published private(set) var hasMoreItems: Bool = false
   @Published private(set) var isLoadingMore: Bool = false
 
+  /// Monotonic revision bumped on every mutation of history content (load,
+  /// append, update, remove, clear-all — including CloudKit-driven merges,
+  /// which land through the same mutators). Derived views that depend on
+  /// record *content* (e.g. Speech Insights) should key their refresh on this
+  /// rather than `statistics`, which ignores transcript text and so misses
+  /// in-place edits that leave count/duration/cost unchanged.
+  @Published private(set) var contentRevision: UInt64 = 0
+
   let pageSize: Int
 
   /// Full list of items loaded from disk (for pagination)
@@ -303,6 +311,7 @@ final class HistoryManager: ObservableObject {
       hasMoreItems = sorted.count > pageSize
       cachedStatistics = stats
       statistics = stats
+      contentRevision &+= 1
     } catch {
       log.error("Failed to load history: \(error.localizedDescription, privacy: .public)")
     }
@@ -338,6 +347,7 @@ final class HistoryManager: ObservableObject {
     items = current
 
     updateStatisticsForAppend(item)
+    contentRevision &+= 1
 
     // Write to WAL instead of directly to disk
     await appendToWAL(WALEntry(operation: .append, item: item))
@@ -367,6 +377,7 @@ final class HistoryManager: ObservableObject {
       cachedStatistics = stats
       statistics = stats
     }
+    contentRevision &+= 1
 
     // Write to WAL instead of directly to disk
     await appendToWAL(WALEntry(operation: .update, item: item))
@@ -382,6 +393,7 @@ final class HistoryManager: ObservableObject {
     if let diskItem {
       updateStatisticsForRemove(diskItem)
     }
+    contentRevision &+= 1
 
     // Write to WAL instead of directly to disk
     if let diskItem {
@@ -397,6 +409,7 @@ final class HistoryManager: ObservableObject {
     let stats = Self.calculateStatistics(for: [])
     cachedStatistics = stats
     statistics = stats
+    contentRevision &+= 1
 
     // Write to WAL instead of directly to disk
     await appendToWAL(WALEntry(operation: .removeAll))

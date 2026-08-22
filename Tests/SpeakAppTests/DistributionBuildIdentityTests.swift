@@ -413,10 +413,10 @@ final class DistributionBuildIdentityTests: XCTestCase {
             contentsOf: repositoryRoot.appendingPathComponent("scripts/create-ios-app-store-profile.rb"),
             encoding: .utf8
         )
-        XCTAssertTrue(profileBootstrap.contains("path: \"/v1/bundleIds\""))
+        XCTAssertTrue(profileBootstrap.contains("@client.post(\"/v1/bundleIds\""))
         XCTAssertTrue(profileBootstrap.contains("/bundleIdCapabilities\""))
         XCTAssertFalse(profileBootstrap.contains("/bundleIdCapabilities?limit="))
-        XCTAssertTrue(profileBootstrap.contains("path: \"/v1/bundleIdCapabilities\""))
+        XCTAssertTrue(profileBootstrap.contains("@client.post(\"/v1/bundleIdCapabilities\""))
         XCTAssertTrue(profileBootstrap.contains("capabilityType: capability_type"))
         XCTAssertFalse(profileBootstrap.contains("method: Net::HTTP::Delete"))
         XCTAssertFalse(profileBootstrap.contains("profiles.each do |stale_profile|"))

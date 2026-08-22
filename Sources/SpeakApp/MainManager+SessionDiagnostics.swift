@@ -49,10 +49,18 @@ extension MainManager {
         stopAudioLevelMonitoring()
         livePolishManager.reset()
         liveTextInserter.reset()
-        if isStreamingTranscriptionMode { transcriptionManager.cancelLiveTranscription() }
+        // The recorder and live stream are shared with Voice Edit: only cancel
+        // them while dictation owns capture, and never a recording another
+        // flow started (issue #673).
+        let mayTearDownCapture = captureOwnership.mayTearDownCapture(.dictation)
+        if isStreamingTranscriptionMode, mayTearDownCapture {
+            transcriptionManager.cancelLiveTranscription()
+        }
         if let session = activeSession { attachFailureDiagnostics(to: session) }
         Task { [failedSession = activeSession] in
-            await audioFileManager.cancelRecording(deleteFile: !preserveFile)
+            if mayTearDownCapture {
+                await audioFileManager.cancelRecording(deleteFile: !preserveFile, ifOwnedBy: .dictation)
+            }
             if let session = failedSession {
                 let historyItem = session.buildHistoryItem(finalText: session.transcriptionResult?.text)
                 await historyManager.append(historyItem)

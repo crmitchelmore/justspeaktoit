@@ -11,6 +11,9 @@ import os.log
 /// carry `(text, is_final)`, so they map straight onto
 /// ``StreamingTranscriptionClient``. Shared by macOS and iOS.
 public final class GladiaLiveClient: StreamingTranscriptionClient, @unchecked Sendable {
+    /// Final shape: each final transcript event carries one utterance.
+    public let finalShape: TranscriptFinalShape = .standaloneSegments
+
     private static let baseURL = URL(string: "https://api.gladia.io")!
 
     private let apiKey: String

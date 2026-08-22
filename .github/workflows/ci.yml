@@ -263,3 +263,23 @@ jobs:
 
       - name: Test release-notes generator
         run: node --test Tests/ReleaseNotesTests/*.test.mjs
+
+  api-compatibility:
+    name: Public API compatibility
+    runs-on: macos-latest
+    timeout-minutes: 30
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The baseline treeish must be resolvable locally.
+          fetch-depth: 0
+
+      # Exported library products must not lose or incompatibly change
+      # public symbols in a non-major PR (issue #680). A PR title carrying
+      # the conventional '!' breaking marker declares the major release and
+      # is allowed through with the diff reported.
+      - name: Diagnose breaking public API changes
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: bash scripts/check-api-compatibility.sh "origin/${{ github.base_ref }}"

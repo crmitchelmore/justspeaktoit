@@ -7,6 +7,10 @@ import SpeakCore
 /// All side effects (Accessibility reads, audio recording, transcription, LLM calls, HUD
 /// updates) go through `Dependencies` closures so the state machine is unit-testable without
 /// Accessibility, audio, or network access.
+///
+/// Shared capture (the recorder and live transcriber) is reserved before the first
+/// suspension and released only after this flow's own teardown has finished, so normal
+/// dictation can neither start on top of a listening session nor cancel it (issue #673).
 @MainActor
 final class VoiceEditOrchestrator {
   enum Phase: Equatable {
@@ -15,6 +19,8 @@ final class VoiceEditOrchestrator {
     case listening
     /// Transcribing the instruction, rewriting, or applying the replacement.
     case processing
+    /// Escape was pressed; recorder/stream teardown is still in flight.
+    case cancelling
   }
 
   enum SelectionSource: Equatable {
@@ -22,7 +28,7 @@ final class VoiceEditOrchestrator {
     case accessibility
     /// Captured by simulating ⌘C into a saved-and-restored pasteboard.
     case clipboard
-    /// No live selection; falling back to the last inserted transcription.
+    /// No live selection; falling back to the range the last dictation was inserted into.
     case lastInsertion
   }
 
@@ -34,10 +40,11 @@ final class VoiceEditOrchestrator {
   enum ReplacementOutcome: Equatable {
     /// The selection was replaced via Accessibility and verified.
     case replaced
-    /// The rewrite was pasted over the selection via a simulated ⌘V.
+    /// The rewrite was pasted over the selection via a simulated ⌘V and verified.
     case pasted
-    /// Automatic replacement failed; the rewrite was left on the clipboard for manual ⌘V.
-    case leftOnClipboard
+    /// Automatic replacement was not performed; the rewrite was left on the clipboard
+    /// for manual ⌘V.
+    case leftOnClipboard(VoiceEditClipboardReason)
   }
 
   enum FailureReason: Equatable {
@@ -62,11 +69,15 @@ final class VoiceEditOrchestrator {
 
   struct Dependencies {
     var isDictationBusy: () -> Bool
+    /// Claims the shared recorder/transcriber; false when dictation holds them.
+    var reserveCapture: () -> Bool
+    var releaseCapture: () -> Void
     var hasConfiguredLLM: () async -> Bool
     var captureSelection: () async -> Selection?
     var startListening: () async throws -> Void
     var finishListening: () async throws -> String
-    var cancelListening: () -> Void
+    /// Tears down the recorder and live stream; returns once they are released.
+    var cancelListening: () async -> Void
     var rewrite: (_ selection: Selection, _ instruction: String) async throws -> String
     var applyReplacement: (_ selection: Selection, _ rewrite: String) async -> ReplacementOutcome
     var onEvent: (Event) -> Void
@@ -74,6 +85,7 @@ final class VoiceEditOrchestrator {
 
   private(set) var phase: Phase = .idle
   private var selection: Selection?
+  private var cancelTask: Task<Void, Never>?
   private let dependencies: Dependencies
 
   init(dependencies: Dependencies) {
@@ -81,7 +93,9 @@ final class VoiceEditOrchestrator {
   }
 
   /// Hotkey entry point: starts an edit session, or finishes the listening stage.
-  /// Ignored while a previous session is still processing.
+  /// Ignored while a previous session is still processing. A press while Escape's
+  /// teardown is still running waits for it and then starts cleanly, so a rapid
+  /// restart never meets the previous session's recorder.
   func toggle() async {
     switch phase {
     case .idle:
@@ -90,22 +104,36 @@ final class VoiceEditOrchestrator {
       await finish()
     case .processing:
       break
+    case .cancelling:
+      await cancelTask?.value
+      guard phase == .idle else { return }
+      await begin()
     }
   }
 
-  /// Cancels an in-flight listening session (Escape). No-op in other phases.
-  func cancel() {
+  /// Cancels an in-flight listening session (Escape) and returns once the recorder and
+  /// live stream have been released. No-op in other phases.
+  func cancel() async {
     guard phase == .listening else { return }
-    dependencies.cancelListening()
-    selection = nil
-    phase = .idle
-    dependencies.onEvent(.cancelled)
+    phase = .cancelling
+    // State moves back to idle inside the task, so every waiter — this call and a
+    // toggle that arrived meanwhile — observes the same settled state.
+    let task = Task { @MainActor [self] in
+      await dependencies.cancelListening()
+      selection = nil
+      dependencies.releaseCapture()
+      cancelTask = nil
+      phase = .idle
+      dependencies.onEvent(.cancelled)
+    }
+    cancelTask = task
+    await task.value
   }
 
   // MARK: - Private
 
   private func begin() async {
-    guard !dependencies.isDictationBusy() else {
+    guard !dependencies.isDictationBusy(), dependencies.reserveCapture() else {
       dependencies.onEvent(.failed(.dictationBusy))
       return
     }
@@ -133,7 +161,7 @@ final class VoiceEditOrchestrator {
 
   private func finish() async {
     guard let captured = selection else {
-      phase = .idle
+      complete(with: .cancelled)
       return
     }
     phase = .processing
@@ -171,6 +199,7 @@ final class VoiceEditOrchestrator {
 
   private func complete(with event: Event) {
     selection = nil
+    dependencies.releaseCapture()
     phase = .idle
     dependencies.onEvent(event)
   }

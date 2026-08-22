@@ -50,8 +50,8 @@ extension AudioRecordingPersistence {
     /// `Identifiable`/`Hashable`: SwiftUI diffing and any selection or
     /// pending-delete state keyed on `id` break if it changes between
     /// refreshes. (The file name's 8-character suffix is not a UUID, so it
-    /// cannot simply be parsed back.)
-    public static func stableRecordingID(for url: URL) -> UUID {
+    /// cannot simply be parsed back.) Pure, so callable from any isolation.
+    nonisolated public static func stableRecordingID(for url: URL) -> UUID {
         let digest = SHA256.hash(data: Data(url.lastPathComponent.utf8))
         let bytes = Array(digest.prefix(16))
         return UUID(uuid: (

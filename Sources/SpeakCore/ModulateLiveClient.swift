@@ -11,6 +11,9 @@ import os.log
 /// The first audio frame is prefixed with a streaming WAV header, as the API
 /// requires. Conforms to ``StreamingTranscriptionClient``.
 public final class ModulateLiveClient: StreamingTranscriptionClient, @unchecked Sendable {
+    /// Final shape: the done emit joins every utterance seen in the session.
+    public let finalShape: TranscriptFinalShape = .cumulativeTranscript
+
     private static let endpoint = "wss://modulate-developer-apis.com/api/velma-2-stt-streaming"
 
     private let apiKey: String

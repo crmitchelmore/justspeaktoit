@@ -60,18 +60,39 @@ final class StreamingClientContractTests: XCTestCase {
         XCTAssertNil(transcript)
     }
 
-    func testDeepgram_cumulativeFinalsAreNotDoubled() async {
-        // Arrange: a provider that resends the whole utterance must not be
-        // concatenated with itself.
+    func testDeepgram_repeatedIdenticalStandaloneFinalsAreBothKept() async {
+        // Issue #700: two legitimate standalone finals with identical text are
+        // two utterances, not a resend. Deepgram's is_final results are
+        // segment-shaped, so nothing may be inferred from text equality.
         let client = DeepgramLiveClient(apiKey: "k", model: "nova-3")
 
-        // Act
+        client.parseTranscriptResponse(Self.deepgramFinal("Yes."))
+        client.parseTranscriptResponse(Self.deepgramFinal("Yes."))
+        let transcript = await client.finishAndWait()
+
+        XCTAssertEqual(transcript, "Yes. Yes.")
+    }
+
+    func testDeepgram_prefixExtendingStandaloneFinalsAreBothKept() async {
+        // A later segment that happens to start with the earlier segment's
+        // words is still its own segment; prefix inference must not replace.
+        let client = DeepgramLiveClient(apiKey: "k", model: "nova-3")
+
         client.parseTranscriptResponse(Self.deepgramFinal("Hello"))
         client.parseTranscriptResponse(Self.deepgramFinal("Hello there"))
         let transcript = await client.finishAndWait()
 
-        // Assert
-        XCTAssertEqual(transcript, "Hello there")
+        XCTAssertEqual(transcript, "Hello Hello there")
+    }
+
+    func testDeepgram_blankFinalsAreIgnored() async {
+        let client = DeepgramLiveClient(apiKey: "k", model: "nova-3")
+
+        client.parseTranscriptResponse(Self.deepgramFinal("Hello."))
+        client.parseTranscriptResponse(Self.deepgramFinal("   "))
+        let transcript = await client.finishAndWait()
+
+        XCTAssertEqual(transcript, "Hello.")
     }
 
     // MARK: - ElevenLabs (segment-shaped finals)
@@ -88,6 +109,17 @@ final class StreamingClientContractTests: XCTestCase {
 
         // Assert
         XCTAssertEqual(transcript, "Hello there. This is a test.")
+    }
+
+    func testElevenLabs_repeatedIdenticalStandaloneFinalsAreBothKept() async {
+        // Issue #700: "Yes." followed by "Yes." is two utterances.
+        let client = ElevenLabsLiveClient(apiKey: "k")
+
+        client.parseTranscriptResponse(Self.elevenLabs("Yes.", isFinal: true))
+        client.parseTranscriptResponse(Self.elevenLabs("Yes.", isFinal: true))
+        let transcript = await client.finishAndWait()
+
+        XCTAssertEqual(transcript, "Yes. Yes.")
     }
 
     func testElevenLabs_finishAndWaitWithoutAnySpeechReturnsNil() async {
@@ -236,32 +268,85 @@ final class StreamingClientContractTests: XCTestCase {
         ))
     }
 
-    // MARK: - Accumulator rule
+    // MARK: - Accumulator rule (issue #700)
 
-    func testTranscriptAccumulator_mergesSegmentAndCumulativeFinals() {
-        // Arrange
-        var accumulator = TranscriptAccumulator()
+    func testAccumulator_standaloneShape_appendsEveryFinalIncludingIdenticalText() {
+        var accumulator = TranscriptAccumulator(shape: .standaloneSegments)
 
-        // Act / Assert: segments append…
-        accumulator.append(final: "Hello there.")
-        accumulator.append(final: "Second sentence.")
-        XCTAssertEqual(accumulator.text, "Hello there. Second sentence.")
+        accumulator.append(final: "Yes.")
+        accumulator.append(final: "Yes.")
+        XCTAssertEqual(accumulator.text, "Yes. Yes.")
 
-        // …a cumulative resend replaces…
-        accumulator.append(final: "Hello there. Second sentence. Third.")
-        XCTAssertEqual(accumulator.text, "Hello there. Second sentence. Third.")
+        // Prefix extension is its own segment, never a replacement.
+        accumulator.append(final: "Yes. Absolutely.")
+        XCTAssertEqual(accumulator.text, "Yes. Yes. Yes. Absolutely.")
 
-        // …blank finals are ignored, and the display view adds the interim.
+        // Blank finals are ignored; the display view appends the interim.
         accumulator.append(final: "   ")
-        XCTAssertEqual(accumulator.text, "Hello there. Second sentence. Third.")
+        XCTAssertEqual(accumulator.text, "Yes. Yes. Yes. Absolutely.")
         XCTAssertEqual(
-            accumulator.display(withInterim: "and a"),
-            "Hello there. Second sentence. Third. and a"
+            accumulator.display(withInterim: "and"),
+            "Yes. Yes. Yes. Absolutely. and"
         )
 
         accumulator.reset()
         XCTAssertTrue(accumulator.isEmpty)
         XCTAssertNil(accumulator.transcriptOrNil)
+    }
+
+    func testAccumulator_standaloneShape_dropsRetransmissionsOnlyByEventIdentity() {
+        var accumulator = TranscriptAccumulator(shape: .standaloneSegments)
+
+        accumulator.append(final: "Yes.", eventID: "turn-1")
+        // A retry of the same provider event must not double the words…
+        accumulator.append(final: "Yes.", eventID: "turn-1")
+        XCTAssertEqual(accumulator.text, "Yes.")
+
+        // …while a new event with identical text is a genuine repeat.
+        accumulator.append(final: "Yes.", eventID: "turn-2")
+        XCTAssertEqual(accumulator.text, "Yes. Yes.")
+
+        // Resetting forgets seen identities along with the text.
+        accumulator.reset()
+        accumulator.append(final: "Yes.", eventID: "turn-1")
+        XCTAssertEqual(accumulator.text, "Yes.")
+    }
+
+    func testAccumulator_cumulativeShape_replacesIncludingNonPrefixRevisions() {
+        var accumulator = TranscriptAccumulator(shape: .cumulativeTranscript)
+
+        accumulator.append(final: "hello there")
+        XCTAssertEqual(accumulator.text, "hello there")
+
+        // A cumulative correction that is not a prefix extension (casing and
+        // punctuation revised) replaces rather than appending a duplicate.
+        accumulator.append(final: "Hello there!")
+        XCTAssertEqual(accumulator.text, "Hello there!")
+
+        accumulator.append(final: "Hello there! Second turn.")
+        XCTAssertEqual(accumulator.text, "Hello there! Second turn.")
+
+        // A cumulative interim restates the whole transcript and stands alone.
+        XCTAssertEqual(
+            accumulator.display(withInterim: "Hello there! Second turn. And"),
+            "Hello there! Second turn. And"
+        )
+
+        // Blank finals are ignored.
+        accumulator.append(final: " ")
+        XCTAssertEqual(accumulator.text, "Hello there! Second turn.")
+    }
+
+    func testEveryStreamingClient_declaresItsDocumentedFinalShape() {
+        // The declaration is the contract consumers fold by; pin each one.
+        XCTAssertEqual(DeepgramLiveClient(apiKey: "k", model: "nova-3").finalShape, .standaloneSegments)
+        XCTAssertEqual(ElevenLabsLiveClient(apiKey: "k").finalShape, .standaloneSegments)
+        XCTAssertEqual(GladiaLiveClient(apiKey: "k").finalShape, .standaloneSegments)
+        XCTAssertEqual(CartesiaLiveClient(apiKey: "k").finalShape, .standaloneSegments)
+        XCTAssertEqual(XAILiveClient(apiKey: "k").finalShape, .cumulativeTranscript)
+        XCTAssertEqual(SonioxLiveClient(apiKey: "k").finalShape, .cumulativeTranscript)
+        XCTAssertEqual(AssemblyAILiveClient(apiKey: "k").finalShape, .cumulativeTranscript)
+        XCTAssertEqual(ModulateLiveClient(apiKey: "k").finalShape, .cumulativeTranscript)
     }
 
     // MARK: - Fixtures

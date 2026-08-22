@@ -538,10 +538,33 @@ final class DistributionBuildIdentityTests: XCTestCase {
         ].joined(separator: "\n            ")
         XCTAssertTrue(workflow.contains(releaseAssets))
 
-        // The cask hands each architecture its own download and checksum.
-        XCTAssertTrue(workflow.contains("arch arm: \"arm64\", intel: \"universal\""))
-        XCTAssertTrue(workflow.contains("sha256 arm: \"$ARM64_SHA256\", intel: \"$UNIVERSAL_SHA256\""))
-        XCTAssertTrue(workflow.contains("releases/download/mac-v#{version}/JustSpeakToIt-#{arch}.dmg"))
+        // The standalone CLI assets ride along when their optional step succeeded (issue #775).
+        let cliAssets = [
+            "${{ env.CLI_ARM64_ZIP }}", "${{ env.CLI_X86_64_ZIP }}",
+            "${{ env.CLI_MANIFEST }}", "${{ env.CLI_MANIFEST_SIG }}"
+        ].joined(separator: "\n            ")
+        XCTAssertTrue(workflow.contains(cliAssets))
+
+        // The tap is written by one script the workflow delegates to: the cask
+        // hands each architecture its own download and checksum, and depends
+        // on the speak formula instead of linking the binary inside the bundle.
+        let tapScript = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("scripts/update-homebrew-tap.sh"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(workflow.contains(
+            "./scripts/update-homebrew-tap.sh \"$VERSION\" \"$ARM64_SHA256\" \"$UNIVERSAL_SHA256\""
+        ))
+        XCTAssertTrue(tapScript.contains("arch arm: \"arm64\", intel: \"universal\""))
+        XCTAssertTrue(tapScript.contains("sha256 arm:   \"$ARM64_SHA256\",\n         intel: \"$UNIVERSAL_SHA256\""))
+        XCTAssertTrue(tapScript.contains(
+            "RELEASE_URL=\"https://github.com/crmitchelmore/justspeaktoit/releases/download/mac-v#{version}\""
+        ))
+        XCTAssertTrue(tapScript.contains("url \"${RELEASE_URL}/JustSpeakToIt-#{arch}.dmg\""))
+        XCTAssertTrue(tapScript.contains("depends_on formula: \"crmitchelmore/justspeaktoit/speak\""))
+        XCTAssertFalse(tapScript.contains("binary \"#{appdir}"))
+        XCTAssertTrue(tapScript.contains("speak-#{version}-arm64.zip"))
+        XCTAssertTrue(tapScript.contains("speak-#{version}-x86_64.zip"))
     }
 
     func testLandingPageRedirects_routeBothFeedsAndDownloadsAheadOfTheIndexRewrite() throws {

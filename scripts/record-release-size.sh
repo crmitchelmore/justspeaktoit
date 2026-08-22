@@ -35,10 +35,16 @@ DMG_BYTES="$(bytes "$DMG_PATH")"
 APP_KB="$(du -sk "$APP_PATH" | awk '{print $1}')"
 APP_BYTES=$((APP_KB * 1024))
 MAIN_BYTES="$(bytes "$MAIN_BINARY")"
-CLI_BYTES="$(bytes "$CLI_BINARY")"
 ARCHS="$(lipo -archs "$MAIN_BINARY")"
+# The primary download no longer embeds the CLI (issue #775); its standalone
+# archives are measured by build-speak-cli-standalone.sh.
+if [[ -f "$CLI_BINARY" ]]; then
+    CLI_CELL="$(megabytes "$(bytes "$CLI_BINARY")") MB"
+else
+    CLI_CELL="not embedded"
+fi
 
-ROW="| $VARIANT | $(megabytes "$DMG_BYTES") MB | $(megabytes "$APP_BYTES") MB | $(megabytes "$MAIN_BYTES") MB | $(megabytes "$CLI_BYTES") MB | $ARCHS |"
+ROW="| $VARIANT | $(megabytes "$DMG_BYTES") MB | $(megabytes "$APP_BYTES") MB | $(megabytes "$MAIN_BYTES") MB | $CLI_CELL | $ARCHS |"
 echo "$ROW"
 
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then

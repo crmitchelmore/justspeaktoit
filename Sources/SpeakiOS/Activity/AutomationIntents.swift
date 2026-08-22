@@ -60,7 +60,7 @@ struct StopDictationIntent: AudioRecordingIntent {
 
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
         let service = await TranscriptionRecordingService.shared
-        guard await service.isRunning else {
+        guard await service.isActive else {
             throw AutomationIntentError.noActiveRecording
         }
         let destination = await AppSettings.shared.hardwareTriggerDestination

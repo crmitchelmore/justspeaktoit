@@ -32,14 +32,20 @@ enum AutomationDeadline {
             let gate = Gate(continuation: continuation)
             let deadline = Task.detached {
                 try? await Task.sleep(for: .seconds(seconds))
+                // A cancelled timer lost the race. Without this guard the sleep
+                // returns the instant the command cancels it, and on a starved
+                // machine the timer could reach the gate before the command's own
+                // result did — reporting a finished command as timed out.
+                guard !Task.isCancelled else { return }
                 await gate.settle(nil)
             }
             Task.detached {
                 let response = await work.value
-                // Releases the timer as soon as it can no longer win, rather than
-                // leaving it asleep for the remainder of a long deadline.
-                deadline.cancel()
+                // Settle first, so the result is what answers the waiter; then
+                // release the timer rather than leaving it asleep for the rest of
+                // a long deadline.
                 await gate.settle(response)
+                deadline.cancel()
             }
         }
         return outcome ?? .failure(

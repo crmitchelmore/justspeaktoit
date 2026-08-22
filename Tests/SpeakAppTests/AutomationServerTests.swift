@@ -49,7 +49,9 @@ final class AutomationServerTests: XCTestCase {
     func testRequest_isAnsweredOverTheSocket() async throws {
         let response = try await self.send(AutomationRequest(id: "req-1", command: .status))
 
-        XCTAssertTrue(response.ok)
+        // The error is the diagnosis when this fails: on CI it once carried a
+        // `timed_out` for a command that had finished (issue #793).
+        XCTAssertTrue(response.ok, "Round trip answered with \(String(describing: response.error))")
         XCTAssertEqual(response.id, "req-1")
         XCTAssertEqual(response.command, .status)
         XCTAssertEqual(response.result?.text, "handled-status")

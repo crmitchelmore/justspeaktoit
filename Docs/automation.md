@@ -141,12 +141,20 @@ symlink the binary, e.g. `ln -s "$HOME/Library/Application Support/SpeakApp/bin/
 files the installer wrote. A failed download or verification never replaces a
 working CLI.
 
-The CLI also ships inside the app bundle and is symlinked by the Homebrew cask:
+**Homebrew:** the cask installs the app and depends on the `speak` formula, so
+`speak` lands on your PATH; the formula alone installs just the CLI:
 
 ```bash
-brew install --cask crmitchelmore/tap/justspeaktoit
+brew install --cask crmitchelmore/justspeaktoit/justspeaktoit   # app + CLI
+brew install crmitchelmore/justspeaktoit/speak                  # CLI only
 speak --version
 ```
+
+Older casks linked the copy inside the app bundle; upgrading removes that
+link and the formula provides the standalone binary instead. Both install
+paths deliver the same signed, notarised build for your Mac's architecture,
+published as `speak-<version>-<arch>.zip` alongside each release together with
+`speak-cli-manifest.json` and its signature.
 
 Running from a source checkout:
 
@@ -155,11 +163,9 @@ swift build --product speak
 .build/debug/speak status
 ```
 
-To use a binary directly from the app bundle:
-
-```bash
-/Applications/JustSpeakToIt.app/Contents/MacOS/speak status
-```
+The Apple Silicon download no longer carries a `speak` binary inside the app
+bundle; the universal (Intel-compatible) legacy download still does, at
+`/Applications/JustSpeakToIt.app/Contents/MacOS/speak`.
 
 ### Commands
 
@@ -254,17 +260,22 @@ Messages are newline-delimited JSON-RPC 2.0, per the MCP stdio transport.
 
 ### Claude Code
 
+With `speak` on your PATH (Homebrew, or the PATH command from the Automation
+CLI card):
+
 ```bash
-claude mcp add justspeaktoit -- /Applications/JustSpeakToIt.app/Contents/MacOS/speak mcp
+claude mcp add justspeaktoit -- speak mcp
 ```
 
-Or in an MCP client config file:
+Or in an MCP client config file, using the full path so it works regardless
+of the client's PATH (replace `<you>` with your user name, or use
+`$(brew --prefix)/bin/speak` for a Homebrew install):
 
 ```json
 {
   "mcpServers": {
     "justspeaktoit": {
-      "command": "/Applications/JustSpeakToIt.app/Contents/MacOS/speak",
+      "command": "/Users/<you>/Library/Application Support/SpeakApp/bin/speak",
       "args": ["mcp"]
     }
   }

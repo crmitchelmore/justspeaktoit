@@ -1,0 +1,177 @@
+name: Build and verify standalone speak CLI assets
+description: >-
+  Build the standalone `speak` CLI for arm64 and x86_64, sign, notarise and
+  verify each archive, then write and sign the release manifest the app's
+  installer and the Homebrew formula consume. Issue #775. Shared by the
+  release workflow and the stand-alone publish-speak-cli workflow so a failed
+  CLI publication can be retried without rebuilding the app.
+
+inputs:
+  version:
+    description: Marketing version being built (matches the mac-v tag)
+    required: true
+  signing-identity:
+    description: codesign identity for the executable
+    required: false
+    default: Developer ID Application
+  apple-id:
+    description: Apple ID used for notarisation
+    required: true
+  apple-id-password:
+    description: App-specific password for the Apple ID
+    required: true
+  apple-team-id:
+    description: Developer team identifier
+    required: true
+  sparkle-private-key:
+    description: Base64 Sparkle Ed25519 private key; the manifest is left unsigned when empty
+    required: false
+    default: ""
+  output-dir:
+    description: Directory receiving the archives and manifest
+    required: false
+    default: ""
+
+outputs:
+  arm64-zip:
+    description: Path to speak-<version>-arm64.zip
+    value: ${{ steps.paths.outputs.arm64-zip }}
+  x86_64-zip:
+    description: Path to speak-<version>-x86_64.zip
+    value: ${{ steps.paths.outputs.x86_64-zip }}
+  manifest:
+    description: Path to speak-cli-manifest.json
+    value: ${{ steps.paths.outputs.manifest }}
+  signature:
+    description: Path to speak-cli-manifest.json.sig (empty when unsigned)
+    value: ${{ steps.manifest.outputs.signature }}
+  automation-schema-version:
+    description: AutomationSchema.currentVersion the CLI was built against
+    value: ${{ steps.schema.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve CLI asset paths
+      id: paths
+      shell: bash
+      run: |
+        OUTPUT_DIR="${{ inputs.output-dir }}"
+        if [ -z "$OUTPUT_DIR" ]; then
+          OUTPUT_DIR="$RUNNER_TEMP/speak-cli"
+        fi
+        mkdir -p "$OUTPUT_DIR"
+        VERSION="${{ inputs.version }}"
+        {
+          echo "output-dir=$OUTPUT_DIR"
+          echo "arm64-zip=$OUTPUT_DIR/speak-${VERSION}-arm64.zip"
+          echo "x86_64-zip=$OUTPUT_DIR/speak-${VERSION}-x86_64.zip"
+          echo "manifest=$OUTPUT_DIR/speak-cli-manifest.json"
+        } >> "$GITHUB_OUTPUT"
+        {
+          echo ""
+          echo "### speak CLI assets (v${VERSION})"
+          echo ""
+          echo "| Arch | Compressed | Installed | Version |"
+          echo "|---|---:|---:|---|"
+        } >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Resolve automation protocol version
+      id: schema
+      shell: bash
+      run: |
+        # The manifest records the protocol this build speaks so the app can
+        # refuse a CLI from another era before downloading it.
+        SCHEMA_VERSION="$(sed -n 's/^[[:space:]]*public static let currentVersion = \([0-9][0-9]*\).*$/\1/p' \
+          Sources/SpeakCore/AutomationProtocol.swift | head -n 1)"
+        if [ -z "$SCHEMA_VERSION" ]; then
+          echo "::error::AutomationSchema.currentVersion not found in Sources/SpeakCore/AutomationProtocol.swift"
+          exit 1
+        fi
+        echo "version=$SCHEMA_VERSION" >> "$GITHUB_OUTPUT"
+        echo "Automation protocol version: $SCHEMA_VERSION"
+
+    - name: Build speak (arm64)
+      shell: bash
+      run: |
+        chmod +x scripts/build-speak-cli-standalone.sh
+        ./scripts/build-speak-cli-standalone.sh arm64 "${{ inputs.version }}" \
+          "${{ steps.paths.outputs.output-dir }}" "${{ inputs.signing-identity }}"
+
+    - name: Build speak (x86_64)
+      shell: bash
+      run: |
+        ./scripts/build-speak-cli-standalone.sh x86_64 "${{ inputs.version }}" \
+          "${{ steps.paths.outputs.output-dir }}" "${{ inputs.signing-identity }}"
+
+    - name: Notarise speak archives
+      shell: bash
+      env:
+        APPLE_ID: ${{ inputs.apple-id }}
+        APPLE_ID_PASSWORD: ${{ inputs.apple-id-password }}
+        APPLE_TEAM_ID: ${{ inputs.apple-team-id }}
+      run: |
+        # A bare executable cannot be stapled; Gatekeeper checks the ticket
+        # online, which verify-speak-cli.sh --notarised exercises below.
+        for archive in "${{ steps.paths.outputs.arm64-zip }}" "${{ steps.paths.outputs.x86_64-zip }}"; do
+          echo "==> Notarising $(basename "$archive")"
+          OUTPUT="$(xcrun notarytool submit "$archive" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_ID_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait --timeout 45m 2>&1)"
+          echo "$OUTPUT"
+          if ! grep -q "status: Accepted" <<< "$OUTPUT"; then
+            SUBMISSION_ID="$(grep -E "^\s*id:" <<< "$OUTPUT" | head -1 | awk '{print $2}')"
+            if [ -n "$SUBMISSION_ID" ]; then
+              xcrun notarytool log "$SUBMISSION_ID" \
+                --apple-id "$APPLE_ID" --password "$APPLE_ID_PASSWORD" --team-id "$APPLE_TEAM_ID" || true
+            fi
+            echo "::error::Notarisation of $(basename "$archive") was not accepted"
+            exit 1
+          fi
+        done
+
+    - name: Verify speak archives
+      shell: bash
+      run: |
+        chmod +x scripts/verify-speak-cli.sh
+        ./scripts/verify-speak-cli.sh "${{ steps.paths.outputs.arm64-zip }}" arm64 "${{ inputs.version }}" --notarised
+        ./scripts/verify-speak-cli.sh "${{ steps.paths.outputs.x86_64-zip }}" x86_64 "${{ inputs.version }}" --notarised
+
+    - name: Generate and sign CLI manifest
+      id: manifest
+      shell: bash
+      env:
+        SPARKLE_PRIVATE_KEY: ${{ inputs.sparkle-private-key }}
+      run: |
+        chmod +x scripts/generate-cli-manifest.sh scripts/sparkle-sign-file.sh
+        ./scripts/generate-cli-manifest.sh "${{ inputs.version }}" "${{ steps.schema.outputs.version }}" \
+          "${{ steps.paths.outputs.output-dir }}" \
+          "${{ steps.paths.outputs.arm64-zip }}" "${{ steps.paths.outputs.x86_64-zip }}"
+        MANIFEST="${{ steps.paths.outputs.manifest }}"
+        if [ -f "$MANIFEST.sig" ]; then
+          echo "signature=$MANIFEST.sig" >> "$GITHUB_OUTPUT"
+        else
+          echo "signature=" >> "$GITHUB_OUTPUT"
+          echo "::warning::speak CLI manifest is unsigned (no Sparkle private key supplied)"
+        fi
+        echo "Manifest:"
+        cat "$MANIFEST"
+
+    - name: Verify CLI manifest against the app's public key
+      shell: bash
+      run: |
+        # The app verifies with SUPublicEDKey from its Info.plist; check the
+        # published pair the same way before anything is uploaded.
+        MANIFEST="${{ steps.paths.outputs.manifest }}"
+        SIGNATURE="${{ steps.manifest.outputs.signature }}"
+        if [ -n "$SIGNATURE" ]; then
+          PUBLIC_KEY="$(/usr/libexec/PlistBuddy -c "Print :SUPublicEDKey" Config/AppInfo.plist)"
+        else
+          SIGNATURE="-"
+          PUBLIC_KEY="-"
+        fi
+        swift scripts/verify-cli-manifest.swift "$MANIFEST" "$SIGNATURE" "$PUBLIC_KEY" \
+          "${{ inputs.version }}" "${{ steps.schema.outputs.version }}" \
+          "${{ steps.paths.outputs.arm64-zip }}" "${{ steps.paths.outputs.x86_64-zip }}"

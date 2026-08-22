@@ -26,7 +26,10 @@ brew tap crmitchelmore/justspeaktoit
 brew install --cask justspeaktoit
 ```
 
-Homebrew installs the right build for your Mac automatically.
+Homebrew installs the right build for your Mac automatically, along with the
+standalone `speak` automation CLI (`brew install crmitchelmore/justspeaktoit/speak`
+installs just the CLI). Direct downloads can add the CLI later from
+Settings → General → Automation CLI.
 
 ### Direct download
 

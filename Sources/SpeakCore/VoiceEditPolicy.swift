@@ -58,6 +58,14 @@ public enum VoiceEditPolicy {
         return text
     }
 
+    /// The pre-#673 shape, kept for source and API compatibility: a rewrite
+    /// with no spoken instruction, so every accidental wrapper is removed.
+    /// Calls without `instruction:` resolve here; the designated overload
+    /// above takes the instruction into account.
+    public static func normalizedRewrite(_ raw: String, original: String) -> String {
+        normalizedRewrite(raw, original: original, instruction: "")
+    }
+
     // MARK: - Private helpers
 
     private struct VoiceEditPayload: Encodable {

@@ -3,6 +3,22 @@ import SwiftUI
 
 // MARK: - Data Models
 
+/// Percentiles of one latency interval together with how many sessions
+/// measured it. Not every session measures every interval (batch sessions
+/// have no partials, failed sessions stop part-way), so the count travels
+/// with the percentiles rather than being inferred from the session count.
+struct LatencyDistribution: Equatable {
+  let sampleCount: Int
+  let p50: Int?
+  let p95: Int?
+
+  init(samples: [Int]) {
+    self.sampleCount = samples.count
+    self.p50 = LatencyPercentiles.p50(of: samples)
+    self.p95 = LatencyPercentiles.p95(of: samples)
+  }
+}
+
 /// Latency percentiles for one transcription provider, aggregated over history.
 struct ProviderLatencyInsight: Identifiable {
   /// Provider identifier, e.g. "deepgram", "openai", "apple".
@@ -10,11 +26,13 @@ struct ProviderLatencyInsight: Identifiable {
   let providerName: String
   let sessionCount: Int
   /// Capture start → first live partial (streaming providers only).
-  let firstPartialP50: Int?
-  let firstPartialP95: Int?
+  let firstPartial: LatencyDistribution
+  /// Capture start → first character visible in the target app. Streaming
+  /// sessions measure their first live insert; one-shot sessions measure the
+  /// final paste, so both kinds contribute a sample (issue #611).
+  let firstInsert: LatencyDistribution
   /// Stop pressed → final insert complete.
-  let stopToFinalP50: Int?
-  let stopToFinalP95: Int?
+  let stopToFinal: LatencyDistribution
 }
 
 /// Provider-independent start latency (hotkey → audio capture running).
@@ -28,13 +46,15 @@ struct LatencyOverview {
 
 private struct ProviderLatencyAccumulator {
   var firstPartial: [Int] = []
+  var firstInsert: [Int] = []
   var stopToFinal: [Int] = []
   var sessions = 0
 }
 
 extension Array where Element == HistoryItem {
   /// Groups measured sessions by transcription provider and computes
-  /// p50/p95 for first-partial and stop→final latency.
+  /// p50/p95 (with sample counts) for first-partial, first-insert and
+  /// stop→final latency.
   func latencyInsightsByProvider() -> [ProviderLatencyInsight] {
     var byProvider: [String: ProviderLatencyAccumulator] = [:]
 
@@ -44,6 +64,7 @@ extension Array where Element == HistoryItem {
       var accumulator = byProvider[provider] ?? ProviderLatencyAccumulator()
       accumulator.sessions += 1
       if let value = latency.firstPartialMs { accumulator.firstPartial.append(value) }
+      if let value = latency.firstInsertMs { accumulator.firstInsert.append(value) }
       if let value = latency.stopToFinalMs { accumulator.stopToFinal.append(value) }
       byProvider[provider] = accumulator
     }
@@ -54,10 +75,9 @@ extension Array where Element == HistoryItem {
           id: provider,
           providerName: Self.providerDisplayName(provider),
           sessionCount: accumulator.sessions,
-          firstPartialP50: LatencyPercentiles.p50(of: accumulator.firstPartial),
-          firstPartialP95: LatencyPercentiles.p95(of: accumulator.firstPartial),
-          stopToFinalP50: LatencyPercentiles.p50(of: accumulator.stopToFinal),
-          stopToFinalP95: LatencyPercentiles.p95(of: accumulator.stopToFinal)
+          firstPartial: LatencyDistribution(samples: accumulator.firstPartial),
+          firstInsert: LatencyDistribution(samples: accumulator.firstInsert),
+          stopToFinal: LatencyDistribution(samples: accumulator.stopToFinal)
         )
       }
       .sorted { $0.sessionCount > $1.sessionCount }
@@ -128,9 +148,13 @@ struct LatencyInsightsView: View {
           providerTable
         }
         if !density.isCompact {
-          Text("p50 / p95 across measured sessions. First words: capture to first partial. Finish: stop to inserted.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
+          Text(
+            "p50 / p95 across measured sessions (sample count beside each row). "
+              + "First words: capture to first partial. First insert: capture to first visible character. "
+              + "Finish: stop to inserted."
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
         }
       }
     }
@@ -150,12 +174,23 @@ struct LatencyInsightsView: View {
   }
 
   private var overviewRow: some View {
-    HStack {
+    HStack(spacing: density.inlineSpacing) {
       Label("Start (hotkey → audio)", systemImage: "power")
         .font(density.isCompact ? .caption : .subheadline)
+      if overview.sessionCount > 0 {
+        Text("×\(overview.sessionCount)")
+          .font((density.isCompact ? Font.caption2 : Font.caption).monospacedDigit())
+          .foregroundStyle(.tertiary)
+      }
       Spacer()
       percentilePair(p50: overview.captureStartP50, p95: overview.captureStartP95)
     }
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(
+      "Start, hotkey to audio: p50 \(formatted(overview.captureStartP50)), "
+        + "p95 \(formatted(overview.captureStartP95)), "
+        + "\(overview.sessionCount) sample\(overview.sessionCount == 1 ? "" : "s")"
+    )
   }
 
   private var providerTable: some View {
@@ -170,16 +205,9 @@ struct LatencyInsightsView: View {
               .font(density.isCompact ? .caption2 : .caption)
               .foregroundStyle(.secondary)
           }
-          metricRow(
-            label: "First words",
-            p50: provider.firstPartialP50,
-            p95: provider.firstPartialP95
-          )
-          metricRow(
-            label: "Finish",
-            p50: provider.stopToFinalP50,
-            p95: provider.stopToFinalP95
-          )
+          metricRow(label: "First words", distribution: provider.firstPartial)
+          metricRow(label: "First insert", distribution: provider.firstInsert)
+          metricRow(label: "Finish", distribution: provider.stopToFinal)
         }
         .padding(density.isCompact ? 5 : 10)
         .background(
@@ -191,15 +219,23 @@ struct LatencyInsightsView: View {
   }
 
   @ViewBuilder
-  private func metricRow(label: String, p50: Int?, p95: Int?) -> some View {
-    if p50 != nil || p95 != nil {
-      HStack {
+  private func metricRow(label: String, distribution: LatencyDistribution) -> some View {
+    if distribution.sampleCount > 0 {
+      HStack(spacing: density.inlineSpacing) {
         Text(label)
           .font(density.isCompact ? .caption2 : .caption)
           .foregroundStyle(.secondary)
+        Text("×\(distribution.sampleCount)")
+          .font((density.isCompact ? Font.caption2 : Font.caption).monospacedDigit())
+          .foregroundStyle(.tertiary)
         Spacer()
-        percentilePair(p50: p50, p95: p95)
+        percentilePair(p50: distribution.p50, p95: distribution.p95)
       }
+      .accessibilityElement(children: .ignore)
+      .accessibilityLabel(
+        "\(label): p50 \(formatted(distribution.p50)), p95 \(formatted(distribution.p95)), "
+          + "\(distribution.sampleCount) sample\(distribution.sampleCount == 1 ? "" : "s")"
+      )
     }
   }
 

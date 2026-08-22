@@ -19,7 +19,7 @@ struct ShortcutsSettingsView: View {
                         .foregroundStyle(.secondary)
 
                     LazyVGrid(columns: shortcutColumns, alignment: .leading, spacing: density.inlineSpacing) {
-                        ForEach(ShortcutAction.allCases.filter { $0.isGlobalByDefault }) { action in
+                        ForEach(ShortcutAction.availableCases().filter { $0.isGlobalByDefault }) { action in
                             shortcutRow(for: action)
                         }
                     }
@@ -34,7 +34,7 @@ struct ShortcutsSettingsView: View {
                         .foregroundStyle(.secondary)
 
                     LazyVGrid(columns: shortcutColumns, alignment: .leading, spacing: density.inlineSpacing) {
-                        ForEach(ShortcutAction.allCases.filter { !$0.isGlobalByDefault }) { action in
+                        ForEach(ShortcutAction.availableCases().filter { !$0.isGlobalByDefault }) { action in
                             shortcutRow(for: action)
                         }
                     }

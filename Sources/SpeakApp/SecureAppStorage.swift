@@ -12,6 +12,7 @@ extension Notification.Name {
 enum SecureAppStorageError: LocalizedError {
     case permissionDenied
     case valueNotFound
+    case emptyIdentifier
     case unexpectedStatus(OSStatus)
 
     var errorDescription: String? {
@@ -20,6 +21,8 @@ enum SecureAppStorageError: LocalizedError {
             return "Keychain access was denied. Please review your Security & Privacy settings."
         case .valueNotFound:
             return "No value found for the requested identifier."
+        case .emptyIdentifier:
+            return "A secret identifier must not be empty."
         case .unexpectedStatus(let status):
             if let message = SecCopyErrorMessageString(status, nil) as String? {
                 return message
@@ -34,6 +37,8 @@ enum SecureAppStorageError: LocalizedError {
             self = .permissionDenied
         case .valueNotFound:
             self = .valueNotFound
+        case .emptyIdentifier:
+            self = .emptyIdentifier
         case .unexpectedStatus(let status):
             self = .unexpectedStatus(status)
         }

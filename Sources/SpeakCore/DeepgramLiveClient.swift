@@ -13,6 +13,10 @@ import os.log
 ///
 /// Works on both macOS and iOS.
 public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
+    /// Final shape: v1/listen is_final results and Flux EndOfTurn events each cover
+    /// their own audio span exactly once; nothing is resent.
+    public let finalShape: TranscriptFinalShape = .standaloneSegments
+
     private let apiKey: String
     private let model: String
     private let language: String?
@@ -30,7 +34,7 @@ public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @
     /// Guarded by `stateLock`: the session's full transcript, folded from the
     /// segment finals Deepgram streams. `finishAndWait()` returns this, per the
     /// `FinalizingStreamingTranscriptionClient` contract.
-    private var accumulated = TranscriptAccumulator()
+    private var accumulated = TranscriptAccumulator(shape: .standaloneSegments)
 
     /// Bounded post-stop drain state: after `CloseStream` is sent, the trailing
     /// final transcript is folded in and the full transcript is handed to the

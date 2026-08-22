@@ -55,16 +55,17 @@ public enum SpeechInsightsEngine {
         configuration: SpeechInsightsConfiguration
     ) {
         aggregate.processedSessionIDs.insert(record.id)
+        aggregate.sessionFingerprints[record.id] = record.contentFingerprint
 
         let tokenized = SpeechTokenizer.tokenize(record.text)
         let surfaces = tokenized.surfaceTokens
 
-        let fillers = SpeechTokenizer.countFillers(
+        let fillers = SpeechTokenizer.matchFillers(
             in: surfaces,
             phrases: configuration.fillerTokenSequences
         )
-        let sessionFillerCount = fillers.values.reduce(0, +)
-        for (phrase, count) in fillers {
+        let sessionFillerCount = fillers.counts.values.reduce(0, +)
+        for (phrase, count) in fillers.counts {
             aggregate.fillerCounts[phrase, default: 0] += count
         }
         aggregate.totalFillerCount += sessionFillerCount
@@ -72,6 +73,7 @@ public enum SpeechInsightsEngine {
 
         let contentWords = contentWords(
             in: tokenized,
+            excludingIndices: fillers.consumedTokenIndices,
             stopwords: configuration.stopwords,
             singleWordFillers: configuration.singleWordFillers
         )
@@ -112,8 +114,10 @@ public enum SpeechInsightsEngine {
     ///
     /// - New sessions are folded in incrementally.
     /// - If any processed session no longer exists in `records` (deletion or
-    ///   retention), or the schema version changed, the aggregate is rebuilt
-    ///   from `records` so removed transcripts stop contributing.
+    ///   retention), was edited in place (content fingerprint changed under an
+    ///   existing UUID — CloudKit merge, local reprocessing), or the schema
+    ///   version changed, the aggregate is rebuilt from `records` so obsolete
+    ///   contributions stop counting.
     public static func reconcile(
         _ aggregate: SpeechInsightsAggregate,
         with records: [SpeechSessionRecord],
@@ -122,9 +126,17 @@ public enum SpeechInsightsEngine {
         guard aggregate.schemaVersion == SpeechInsightsAggregate.currentSchemaVersion else {
             return computeAggregate(from: records, configuration: configuration)
         }
-        let currentIDs = Set(records.map(\.id))
-        guard aggregate.processedSessionIDs.isSubset(of: currentIDs) else {
-            return computeAggregate(from: records, configuration: configuration)
+        let recordsByID = Dictionary(
+            records.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        for id in aggregate.processedSessionIDs {
+            guard let record = recordsByID[id],
+                  aggregate.sessionFingerprints[id] == record.contentFingerprint
+            else {
+                // Deleted or edited in place: rebuild from what remains.
+                return computeAggregate(from: records, configuration: configuration)
+            }
         }
         let newRecords = records.filter { !aggregate.processedSessionIDs.contains($0.id) }
         guard !newRecords.isEmpty else { return aggregate }
@@ -133,17 +145,20 @@ public enum SpeechInsightsEngine {
         return updated
     }
 
-    /// Lemmatized content words for one session: filler and stopword tokens
-    /// removed (checking both surface and lemma), single characters and
-    /// digit-only tokens dropped.
+    /// Lemmatized content words for one session: tokens consumed by a matched
+    /// filler phrase (single- or multi-word) excluded, filler and stopword
+    /// tokens removed (checking both surface and lemma), single characters
+    /// and digit-only tokens dropped.
     private static func contentWords(
         in tokenized: SpeechTokenizer.TokenizedText,
+        excludingIndices excluded: Set<Int>,
         stopwords: Set<String>,
         singleWordFillers: Set<String>
     ) -> [String] {
         var words: [String] = []
         words.reserveCapacity(tokenized.lemmas.count)
-        for (surface, lemma) in zip(tokenized.surfaceTokens, tokenized.lemmas) {
+        for (index, (surface, lemma)) in zip(tokenized.surfaceTokens, tokenized.lemmas).enumerated() {
+            if excluded.contains(index) { continue }
             if stopwords.contains(surface) || stopwords.contains(lemma) { continue }
             if singleWordFillers.contains(surface) || singleWordFillers.contains(lemma) { continue }
             if lemma.count < 2 { continue }

@@ -93,6 +93,52 @@ final class SpeechInsightsEngineTests: XCTestCase {
         XCTAssertNotNil(aggregate.wordCounts["roadmap"])
     }
 
+    func testMultiWordFillers_allConsumedWordsExcludedFromContentAggregates() {
+        // "sort of" / "kind of" count as fillers, and neither "sort" nor
+        // "kind" may leak into top words, weekly/monthly trends or first-seen.
+        let aggregate = SpeechInsightsEngine.computeAggregate(
+            from: [record("sort of sort of budget kind of roadmap", on: now)]
+        )
+        XCTAssertEqual(aggregate.fillerCounts["sort of"], 2)
+        XCTAssertEqual(aggregate.fillerCounts["kind of"], 1)
+        XCTAssertNil(aggregate.wordCounts["sort"])
+        XCTAssertNil(aggregate.wordCounts["kind"])
+        XCTAssertEqual(aggregate.wordCounts["budget"], 1)
+        XCTAssertEqual(aggregate.wordCounts["roadmap"], 1)
+
+        let weekKey = SpeechInsightsAggregate.weekKey(for: now)
+        let monthKey = SpeechInsightsAggregate.monthKey(for: now)
+        XCTAssertNil(aggregate.weeklyWordCounts[weekKey]?["sort"])
+        XCTAssertNil(aggregate.weeklyWordCounts[weekKey]?["kind"])
+        XCTAssertNil(aggregate.monthlyWordCounts[monthKey]?["sort"])
+        XCTAssertNil(aggregate.monthlyWordCounts[monthKey]?["kind"])
+        XCTAssertNil(aggregate.firstSeenByWord["sort"])
+        XCTAssertNil(aggregate.firstSeenByWord["kind"])
+        XCTAssertNotNil(aggregate.firstSeenByWord["budget"])
+    }
+
+    func testMultiWordFillerWords_stillCountWhenUsedOutsideFillerPhrase() {
+        // "sort" and "kind" outside a matched filler span remain real content.
+        let aggregate = SpeechInsightsEngine.computeAggregate(
+            from: [record("please sort every box by kind", on: now)]
+        )
+        XCTAssertTrue(aggregate.fillerCounts.isEmpty)
+        XCTAssertEqual(aggregate.wordCounts["sort"], 1)
+        XCTAssertEqual(aggregate.wordCounts["kind"], 1)
+    }
+
+    func testMultiWordFillers_retainedInPhraseReporting() {
+        // Excluding filler words from content stats must not hide the full
+        // phrase from filler and n-gram reporting.
+        let aggregate = SpeechInsightsEngine.computeAggregate(
+            from: [record("you know the plan sort of works", on: now)]
+        )
+        XCTAssertEqual(aggregate.fillerCounts["you know"], 1)
+        XCTAssertEqual(aggregate.fillerCounts["sort of"], 1)
+        XCTAssertEqual(aggregate.bigramCounts["you know"], 1)
+        XCTAssertEqual(aggregate.bigramCounts["sort of"], 1)
+    }
+
     func testLemmatization_foldsInflectionsIntoOneCount() {
         let aggregate = SpeechInsightsEngine.computeAggregate(
             from: [record("The cats and the cat were sleeping.", on: now)]
@@ -464,12 +510,137 @@ final class SpeechInsightsEngineTests: XCTestCase {
         XCTAssertTrue(reconciled.isEmpty)
     }
 
+    func testReconcile_rebuildsWhenTranscriptChangesUnderExistingID() {
+        // A CloudKit merge or local reprocess replaces only the text: same
+        // UUID, date and duration, so counts-based statistics never move.
+        let stableID = UUID()
+        let original = record("alpha alpha alpha", on: now, id: stableID)
+        let aggregate = SpeechInsightsEngine.computeAggregate(from: [original])
+
+        let edited = record("beta beta", on: now, id: stableID)
+        let reconciled = SpeechInsightsEngine.reconcile(aggregate, with: [edited])
+
+        XCTAssertEqual(reconciled, SpeechInsightsEngine.computeAggregate(from: [edited]))
+        XCTAssertNil(reconciled.wordCounts["alpha"])
+        XCTAssertEqual(reconciled.wordCounts["beta"], 2)
+    }
+
+    func testReconcile_rebuildsWhenStartDateChangesUnderExistingID() {
+        let stableID = UUID()
+        let original = record("alpha", on: date(2026, 7, 20), id: stableID)
+        let aggregate = SpeechInsightsEngine.computeAggregate(from: [original])
+
+        let moved = record("alpha", on: date(2026, 8, 4), id: stableID)
+        let reconciled = SpeechInsightsEngine.reconcile(aggregate, with: [moved])
+
+        XCTAssertEqual(reconciled, SpeechInsightsEngine.computeAggregate(from: [moved]))
+        XCTAssertNil(reconciled.weeklyWordCounts["2026-07-20"])
+        XCTAssertEqual(reconciled.weeklyWordCounts["2026-08-03"]?["alpha"], 1)
+    }
+
+    func testReconcile_rebuildsWhenDurationChangesUnderExistingID() {
+        let stableID = UUID()
+        let original = record(words("alpha", count: 120), on: now, duration: 120, id: stableID)
+        let aggregate = SpeechInsightsEngine.computeAggregate(from: [original])
+
+        let corrected = record(words("alpha", count: 120), on: now, duration: 60, id: stableID)
+        let reconciled = SpeechInsightsEngine.reconcile(aggregate, with: [corrected])
+
+        XCTAssertEqual(reconciled, SpeechInsightsEngine.computeAggregate(from: [corrected]))
+        let summary = SpeechInsightsEngine.summary(for: reconciled, now: now)
+        XCTAssertEqual(summary.pace.averageWPM, 120, accuracy: 0.0001)
+    }
+
+    func testReconcile_unchangedRecordsWithMatchingFingerprintsStayIncremental() {
+        // Same content re-materialised as fresh value instances must not force
+        // a rebuild: fingerprints, not identity, decide.
+        let stableID = UUID()
+        let aggregate = SpeechInsightsEngine.computeAggregate(
+            from: [record("alpha beta", on: now, id: stableID)]
+        )
+        let sameContent = record("alpha beta", on: now, id: stableID)
+        let extra = record("gamma", on: now.addingTimeInterval(60))
+        let reconciled = SpeechInsightsEngine.reconcile(aggregate, with: [sameContent, extra])
+        XCTAssertEqual(
+            reconciled,
+            SpeechInsightsEngine.computeAggregate(from: [sameContent, extra])
+        )
+    }
+
     func testReconcile_recomputesOnSchemaMismatch() {
         let records = sampleRecords()
         var stale = SpeechInsightsEngine.computeAggregate(from: Array(records[0..<2]))
         stale.schemaVersion = 0
         let reconciled = SpeechInsightsEngine.reconcile(stale, with: records)
         XCTAssertEqual(reconciled, SpeechInsightsEngine.computeAggregate(from: records))
+    }
+
+    // MARK: - Content fingerprint
+
+    func testContentFingerprint_isDeterministicAcrossInstances() {
+        let id = UUID()
+        let first = record("alpha beta", on: now, duration: 42, id: id)
+        let second = record("alpha beta", on: now, duration: 42, id: UUID())
+        XCTAssertEqual(first.contentFingerprint, second.contentFingerprint,
+                       "fingerprint covers content only, not identity")
+    }
+
+    func testContentFingerprint_changesWithEachAggregationInput() {
+        let base = record("alpha beta", on: now, duration: 42)
+        XCTAssertNotEqual(
+            base.contentFingerprint,
+            record("alpha gamma", on: now, duration: 42).contentFingerprint
+        )
+        XCTAssertNotEqual(
+            base.contentFingerprint,
+            record("alpha beta", on: now.addingTimeInterval(1), duration: 42).contentFingerprint
+        )
+        XCTAssertNotEqual(
+            base.contentFingerprint,
+            record("alpha beta", on: now, duration: 43).contentFingerprint
+        )
+    }
+
+    func testAggregate_storesFingerprintPerProcessedSession() {
+        let records = sampleRecords()
+        let aggregate = SpeechInsightsEngine.computeAggregate(from: records)
+        XCTAssertEqual(
+            Set(aggregate.sessionFingerprints.keys),
+            aggregate.processedSessionIDs
+        )
+        for record in records {
+            XCTAssertEqual(aggregate.sessionFingerprints[record.id], record.contentFingerprint)
+        }
+    }
+
+    // MARK: - Schema migration
+
+    func testSchemaV1Payload_failsDecodeSoLoadersRecompute() throws {
+        // v1 aggregates have no `sessionFingerprints`; decoding must fail so
+        // persistence loaders fall back to a full recompute from history.
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(SpeechInsightsEngine.computeAggregate(from: sampleRecords()))
+        var json = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        json.removeValue(forKey: "sessionFingerprints")
+        json["schemaVersion"] = 1
+        let v1Data = try JSONSerialization.data(withJSONObject: json)
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        XCTAssertThrowsError(try decoder.decode(SpeechInsightsAggregate.self, from: v1Data))
+    }
+
+    func testReconcile_recomputesForV1SchemaAggregate() {
+        let records = sampleRecords()
+        var stale = SpeechInsightsEngine.computeAggregate(from: Array(records[0..<2]))
+        stale.schemaVersion = 1
+        stale.sessionFingerprints = [:]
+        let reconciled = SpeechInsightsEngine.reconcile(stale, with: records)
+        XCTAssertEqual(reconciled, SpeechInsightsEngine.computeAggregate(from: records))
+        XCTAssertEqual(reconciled.schemaVersion, SpeechInsightsAggregate.currentSchemaVersion)
     }
 
     // MARK: - Persistence

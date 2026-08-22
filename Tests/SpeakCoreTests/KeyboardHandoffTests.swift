@@ -197,46 +197,8 @@ final class KeyboardHandoffTests: XCTestCase {
         )
     }
 
-    func testResultCanOnlyBeConsumedByItsOriginalTextDocument() throws {
-        let target = UUID()
-        let request = try store.createRequest(targetDocumentIdentifier: target)
-        try store.markRecording(requestID: request.requestID)
-        try store.markTranscribing(requestID: request.requestID)
-        try store.complete(requestID: request.requestID, transcript: "Right field")
-
-        XCTAssertNil(
-            store.consumeResult(requestID: request.requestID, documentIdentifier: UUID())
-        )
-        XCTAssertEqual(
-            store.consumeResult(requestID: request.requestID, documentIdentifier: target),
-            "Right field"
-        )
-    }
-
-    func testCancelRemovesAnyTranscriptAndBlocksCompletion() throws {
-        let request = try store.createRequest()
-        try store.markRecording(requestID: request.requestID)
-        let cancelled = try store.cancel(requestID: request.requestID)
-
-        XCTAssertEqual(cancelled.phase, .cancelled)
-        XCTAssertNil(cancelled.transcript)
-        XCTAssertThrowsError(
-            try store.markTranscribing(requestID: request.requestID)
-        ) { error in
-            XCTAssertEqual(error as? KeyboardHandoffStoreError, .invalidTransition)
-        }
-    }
-
-    func testConsumerInsertsMatchingResultOnce() throws {
-        let request = try completedRequest(transcript: "One-time result")
-        let consumer = KeyboardHandoffConsumer(store: store)
-        var inserted: [String] = []
-
-        XCTAssertTrue(consumer.insertReadyResult(requestID: request.requestID) { inserted.append($0) })
-        XCTAssertEqual(inserted, ["One-time result"])
-        XCTAssertFalse(consumer.insertReadyResult(requestID: request.requestID) { inserted.append($0) })
-        XCTAssertEqual(inserted, ["One-time result"])
-    }
+    // Result consumption, document matching, cancellation and timed-out
+    // expiry are covered in KeyboardHandoffResultTests.
 
     func testFullAccessPolicyGatesSharedHandoff() {
         XCTAssertEqual(

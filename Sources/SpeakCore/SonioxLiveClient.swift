@@ -10,6 +10,9 @@ import os.log
 /// final is committed on the `finished`/finalize markers. Conforms to
 /// ``StreamingTranscriptionClient``.
 public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Sendable {
+    /// Final shape: the final emit is the accumulated final-token text for the session.
+    public let finalShape: TranscriptFinalShape = .cumulativeTranscript
+
     private static let websocketHost = "stt-rt.soniox.com"
     private static let websocketPath = "/transcribe-websocket"
 

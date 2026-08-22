@@ -8,6 +8,9 @@ import os
 /// captions, and no `response.create` event. That means no assistant audio is
 /// generated or played.
 public final class XAILiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
+    /// Final shape: every transcription event restates the whole turn so far.
+    public let finalShape: TranscriptFinalShape = .cumulativeTranscript
+
     private static let finishTimeoutSeconds: TimeInterval = 3
     private static let preconfigurationByteLimit = 24_000 * 2 * 5
 

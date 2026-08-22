@@ -18,6 +18,17 @@ final class MachOArchitecturesTests: XCTestCase {
     )
   }
 
+  func testByteSwappedFatHeader_reportsEverySlice() throws {
+    // FAT_CIGAM: the magic reads byte-swapped, so the count and every
+    // cputype are little-endian too. Reading them big-endian turns a
+    // one-slice header into a count of 16,777,216 and rejects the file.
+    XCTAssertEqual(try MachOArchitectures.architectures(in: MachOFixtures.fatSwapped(["arm64"])), ["arm64"])
+    XCTAssertEqual(
+      try MachOArchitectures.architectures(in: MachOFixtures.fatSwapped(["x86_64", "arm64"])),
+      ["arm64", "x86_64"]
+    )
+  }
+
   func testNonMachOData_isRejected() {
     XCTAssertThrowsError(try MachOArchitectures.architectures(in: Data("#!/bin/sh\necho hi\n".utf8)))
     XCTAssertThrowsError(try MachOArchitectures.architectures(in: Data([0xCA, 0xFE])))
@@ -48,6 +59,17 @@ enum MachOFixtures {
     data.append(bigEndian(UInt32(architectures.count)))
     for architecture in architectures {
       data.append(bigEndian(cpuTypes[architecture] ?? 0))
+      data.append(Data(repeating: 0, count: 16))
+    }
+    return data
+  }
+
+  /// A byte-swapped fat header (FAT_CIGAM): every field little-endian.
+  static func fatSwapped(_ architectures: [String]) -> Data {
+    var data = Data([0xBE, 0xBA, 0xFE, 0xCA])
+    data.append(littleEndian(UInt32(architectures.count)))
+    for architecture in architectures {
+      data.append(littleEndian(cpuTypes[architecture] ?? 0))
       data.append(Data(repeating: 0, count: 16))
     }
     return data

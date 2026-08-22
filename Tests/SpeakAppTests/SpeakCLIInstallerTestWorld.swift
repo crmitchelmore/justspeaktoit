@@ -21,7 +21,15 @@ final class FakeReleaseWorld {
   var tamperManifest = false
   var manifestPublished = true
   private let signatureGate = SignatureGate()
+  private let recordGate = SignatureGate()
   private(set) var downloadedURLs: [URL] = []
+
+  /// When set, committing the installation record fails after the executable
+  /// has already been replaced — the hardest point for consistency.
+  var failRecordCommit: Bool {
+    get { recordGate.reject }
+    set { recordGate.reject = newValue }
+  }
   /// The manifest bytes a real server keeps serving for one published state,
   /// so the detached signature covers exactly what the manifest fetch returned.
   private var servedManifest: Data?
@@ -131,6 +139,10 @@ final class FakeReleaseWorld {
         }
       },
       hardwareArchitecture: { [hardwareArchitecture] in hardwareArchitecture },
+      commitRecord: { [recordGate] staged, final in
+        if recordGate.reject { throw CocoaError(.fileWriteUnknown) }
+        try SpeakCLIInstallerDependencies.commitRecord(staged: staged, final: final)
+      },
       publicKeyBase64: signingKey.publicKey.rawRepresentation.base64EncodedString(),
       automationSchemaVersion: AutomationSchema.currentVersion,
       manifestURL: URL(string: "https://example.com/releases/speak-cli-manifest.json")!,

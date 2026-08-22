@@ -20,6 +20,9 @@ struct SpeakCLIInstallerDependencies {
   var verifyCodeSignature: @Sendable (URL) throws -> Void
   /// `arm64` on Apple Silicon hardware (even under Rosetta), `x86_64` on Intel.
   var hardwareArchitecture: @Sendable () -> String
+  /// Moves the staged installation record over the final one in a single
+  /// rename (a seam so tests can fail the commit after the executable moved).
+  var commitRecord: @Sendable (_ staged: URL, _ final: URL) throws -> Void = Self.commitRecord
   /// Sparkle's Ed25519 public key from Info.plist, which also signs the manifest.
   var publicKeyBase64: String?
   var automationSchemaVersion: Int
@@ -189,6 +192,15 @@ struct SpeakCLIInstallerDependencies {
       return "arm64"
     }
     return "x86_64"
+  }
+
+  /// Replaces `final` with `staged` atomically (a rename on the same volume).
+  static func commitRecord(staged: URL, final: URL) throws {
+    if FileManager.default.fileExists(atPath: final.path) {
+      _ = try FileManager.default.replaceItemAt(final, withItemAt: staged)
+    } else {
+      try FileManager.default.moveItem(at: staged, to: final)
+    }
   }
 
   static func sha256Hex(of fileURL: URL) throws -> String {

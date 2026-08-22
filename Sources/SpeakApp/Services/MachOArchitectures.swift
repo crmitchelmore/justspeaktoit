@@ -33,13 +33,16 @@ enum MachOArchitectures {
         let magic = header.readUInt32(at: 0, bigEndian: true)
         switch magic {
         case fatMagic, fatCigam:
-            let count = Int(header.readUInt32(at: 4, bigEndian: true))
+            // A fat header is big-endian on disk; a byte-swapped magic means
+            // every field of this header is byte-swapped too.
+            let fieldsAreBigEndian = magic == fatMagic
+            let count = Int(header.readUInt32(at: 4, bigEndian: fieldsAreBigEndian))
             guard count > 0, count < 64 else { throw ReadError.notMachO }
             var archs: Set<String> = []
             for index in 0..<count {
                 let offset = 8 + index * 20
                 guard header.count >= offset + 4 else { throw ReadError.notMachO }
-                archs.insert(name(forCPUType: header.readUInt32(at: offset, bigEndian: true)))
+                archs.insert(name(forCPUType: header.readUInt32(at: offset, bigEndian: fieldsAreBigEndian)))
             }
             return archs
         case machMagic64, machMagic32:

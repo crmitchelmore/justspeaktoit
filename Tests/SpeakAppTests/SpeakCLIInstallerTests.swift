@@ -179,6 +179,33 @@ final class SpeakCLIInstallerTests: XCTestCase {
     XCTAssertEqual(try Data(contentsOf: installer.executableURL), world.executableBytes(for: "2.63.0"))
   }
 
+  func testUpdate_whenTheRecordCannotBeCommitted_neverDescribesTheWrongBinary() async throws {
+    let world = try FakeReleaseWorld(version: "2.62.0")
+    let installer = world.makeInstaller()
+    await installer.install()
+    guard case .installed(let first) = installer.state else { return XCTFail("install failed") }
+
+    // The new executable lands but its record cannot be committed: the old
+    // record must not survive to describe a binary that is no longer there.
+    world.publish(version: "2.63.0")
+    world.failRecordCommit = true
+    await installer.install()
+    guard case .failed(_, let installed) = installer.state else { return XCTFail("Expected failed") }
+    XCTAssertEqual(installed, first, "the failure reports what was installed before the attempt")
+    XCTAssertEqual(try Data(contentsOf: installer.executableURL), world.executableBytes(for: "2.63.0"))
+    let recordPath = world.installDirectory.appendingPathComponent("installed.json").path
+    XCTAssertFalse(FileManager.default.fileExists(atPath: recordPath))
+    installer.refresh()
+    XCTAssertEqual(installer.state, .notInstalled, "without a trustworthy record nothing claims to be installed")
+
+    // A retry with a working disk recovers fully.
+    world.failRecordCommit = false
+    await installer.install()
+    guard case .installed(let second) = installer.state else { return XCTFail("Expected installed") }
+    XCTAssertEqual(second.version, "2.63.0")
+    XCTAssertEqual(world.makeInstaller().state, .installed(second))
+  }
+
   // MARK: - Uninstall
 
   func testUninstall_removesOnlyOwnedFiles() async throws {

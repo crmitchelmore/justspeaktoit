@@ -245,15 +245,30 @@ final class SpeakCLIInstaller: ObservableObject {
     // rather than have Gatekeeper block a terminal launch.
     removexattr(executable.path, "com.apple.quarantine", 0)
 
+    // The record is encoded and staged next to its final path before the
+    // executable moves, so an encoding or disk problem surfaces while the
+    // previous installation is still intact. After the executable is
+    // replaced the staged record is committed with a single rename; if even
+    // that fails, the stale record is removed rather than left describing a
+    // binary that is no longer on disk.
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    encoder.dateEncodingStrategy = .iso8601
+    let stagedRecordURL = recordURL.appendingPathExtension("staged")
+    try encoder.encode(record).write(to: stagedRecordURL, options: .atomic)
+
     if fileManager.fileExists(atPath: executableURL.path) {
       _ = try fileManager.replaceItemAt(executableURL, withItemAt: executable)
     } else {
       try fileManager.moveItem(at: executable, to: executableURL)
     }
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-    encoder.dateEncodingStrategy = .iso8601
-    try encoder.encode(record).write(to: recordURL, options: .atomic)
+    do {
+      try dependencies.commitRecord(stagedRecordURL, recordURL)
+    } catch {
+      try? fileManager.removeItem(at: recordURL)
+      try? fileManager.removeItem(at: stagedRecordURL)
+      throw error
+    }
   }
 
   private func readRecord() -> InstalledCLI? {

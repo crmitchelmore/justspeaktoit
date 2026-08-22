@@ -21,6 +21,7 @@ struct MacAPIKeyItem: Identifiable {
 struct SettingsView: View {
   @EnvironmentObject var environment: AppEnvironment
   @EnvironmentObject var settings: AppSettings
+  @EnvironmentObject var paidAccess: PaidAccessManager
   @EnvironmentObject var audioDevices: AudioInputDeviceManager
   @ObservedObject var updaterManager = UpdaterManager.shared
   @ObservedObject var localModels = LocalModelManager.shared

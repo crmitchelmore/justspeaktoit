@@ -9,7 +9,11 @@ private let logger = SpeakLogger.logger(category: "WireUp")
 
 // swiftlint:disable file_length
 
+// The dependency container: one stored property, one initialiser parameter and
+// one assignment per service, so it grows by three lines whenever the app gains
+// one. Splitting it would only move the list somewhere else.
 @MainActor
+// swiftlint:disable:next type_body_length
 final class AppEnvironment: ObservableObject {
   /// Process-wide access point for the App Intents (Shortcuts) surface, set at
   /// bootstrap. Intents can fire before the SwiftUI scene has bootstrapped the
@@ -30,6 +34,7 @@ final class AppEnvironment: ObservableObject {
   let tts: TextToSpeechManager
   let secureStorage: SecureAppStorage
   let openRouter: OpenRouterAPIClient
+  let paidAccess: PaidAccessManager
   let personalLexicon: PersonalLexiconService
   let pronunciationManager: PronunciationManager
   let livePolish: LivePolishManager
@@ -84,6 +89,7 @@ final class AppEnvironment: ObservableObject {
     tts: TextToSpeechManager,
     secureStorage: SecureAppStorage,
     openRouter: OpenRouterAPIClient,
+    paidAccess: PaidAccessManager,
     personalLexicon: PersonalLexiconService,
     pronunciationManager: PronunciationManager,
     livePolish: LivePolishManager,
@@ -107,6 +113,7 @@ final class AppEnvironment: ObservableObject {
     self.tts = tts
     self.secureStorage = secureStorage
     self.openRouter = openRouter
+    self.paidAccess = paidAccess
     self.personalLexicon = personalLexicon
     self.pronunciationManager = pronunciationManager
     self.livePolish = livePolish
@@ -441,11 +448,28 @@ enum WireUp {
         ?? "com.github.speakapp.credentials"
     )
     let openRouter = OpenRouterAPIClient(secureStorage: secureStorage)
+
+    // Paid access wraps, rather than replaces, the bring-your-own-key client.
+    // Without a verified entitlement every request goes straight through to
+    // `openRouter`, so subscribers and non-subscribers share one code path and
+    // an outage degrades to the user's own keys instead of breaking dictation.
+    let paidAccess = PaidAccessManager(
+      client: PaidAccessHTTPClient(),
+      sessionStore: AppSecureStorageSessionStore(storage: secureStorage),
+      settings: settings
+    )
+    let routedClient = PaidAccessProxyClient(
+      fallback: openRouter,
+      paidClient: PaidAccessHTTPClient(),
+      sessionProvider: paidAccess.sessionProvider(),
+      routerProvider: paidAccess.routerProvider()
+    )
+
     let transcription = TranscriptionManager(
       appSettings: settings,
       permissionsManager: permissions,
       audioDeviceManager: audioDevices,
-      batchClient: RemoteAudioTranscriber(client: openRouter),
+      batchClient: RemoteAudioTranscriber(client: routedClient),
       openRouter: openRouter,
       secureStorage: secureStorage
     )
@@ -453,7 +477,7 @@ enum WireUp {
     let personalLexicon = PersonalLexiconService(store: personalLexiconStore)
     let pronunciationManager = PronunciationManager()
     let postProcessing = PostProcessingManager(
-      client: openRouter,
+      client: routedClient,
       settings: settings,
       personalLexicon: personalLexicon
     )
@@ -509,6 +533,7 @@ enum WireUp {
       tts: tts,
       secureStorage: secureStorage,
       openRouter: openRouter,
+      paidAccess: paidAccess,
       personalLexicon: personalLexicon,
       pronunciationManager: pronunciationManager,
       livePolish: livePolish,
@@ -533,6 +558,14 @@ enum WireUp {
     secureStorage: SecureAppStorage
   ) {
     environment.installVoiceEdit()
+
+    // Restore an existing subscription at launch so paid routing works without
+    // opening Settings first. Routing waits, briefly, for this to finish, so a
+    // subscriber's first dictation does not race the restore and fall back to a
+    // key they may never have configured.
+    Task { @MainActor in
+      environment.paidAccess.restoreEntitlementAtLaunch()
+    }
 
     environment.transportServer.onTranscriptReceived = { _, text in
       Task { @MainActor in

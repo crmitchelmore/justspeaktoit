@@ -139,21 +139,28 @@ extension SettingsView {
               .foregroundStyle(.secondary)
           }
 
-          VStack(alignment: .leading, spacing: 8) {
-            Text("Post-processing location")
-              .font(.caption.weight(.semibold))
-              .foregroundStyle(.secondary)
-            postProcessingLocationSelector
-
-            Text("Choose whether cleanup runs locally on this Mac or remotely through OpenRouter.")
+          if hidesModelSelection {
+            Text(paidAccess.simpleModelChoicesPolicy.explanation)
               .font(.caption)
               .foregroundStyle(.secondary)
-          }
-
-          if isCloudPostProcessingModelSelected {
-            remotePostProcessingSection
+              .fixedSize(horizontal: false, vertical: true)
           } else {
-            localPostProcessingSection
+            VStack(alignment: .leading, spacing: 8) {
+              Text("Post-processing location")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+              postProcessingLocationSelector
+
+              Text("Choose whether cleanup runs locally on this Mac or remotely through OpenRouter.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            if isCloudPostProcessingModelSelected {
+              remotePostProcessingSection
+            } else {
+              localPostProcessingSection
+            }
           }
         }
       }

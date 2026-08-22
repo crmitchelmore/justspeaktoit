@@ -327,6 +327,12 @@ extension SettingsView {
       }
       .speakTooltip("Voice-activated dictation using Apple's on-device speech detector.")
 
+      if hidesModelSelection {
+        simpleModelChoicesNotice
+      }
+
+      // Never hidden: streaming dictation does not go through the paid service
+      // yet, so this picker still chooses the model that actually runs.
       if isRemoteStreamingTranscriptionSelected {
         SettingsCard(title: "Remote Streaming model", systemImage: "mic.fill", tint: Color.brandAccentDeep) {
           VStack(alignment: .leading, spacing: 12) {
@@ -364,7 +370,7 @@ extension SettingsView {
         .speakTooltip("Pick the remote model that transcribes as you speak during streaming recording.")
       }
 
-      if settings.transcriptionMode == .batchRemote {
+      if settings.transcriptionMode == .batchRemote, !hidesModelSelection {
         SettingsCard(
           title: "Remote Batch model", systemImage: "folder.badge.clock", tint: Color.brandLagoon
         ) {
@@ -428,6 +434,9 @@ extension SettingsView {
         .speakTooltip("Tell Speak which cloud transcription model should polish the full recording.")
       }
 
+      // Never hidden: on-device transcription bypasses paid routing entirely,
+      // so hiding its picker would leave the user with no way to choose the
+      // engine that is actually doing the work.
       if isAppleOnDeviceTranscriptionSelected {
         SettingsCard(
           title: "Apple on-device transcription",
@@ -455,6 +464,8 @@ extension SettingsView {
         .speakTooltip("Choose an on-device Apple transcription engine.")
       }
 
+      // Never hidden, for the same reason: a downloaded local model runs on
+      // this Mac whether or not there is a subscription.
       if settings.transcriptionMode == .localModel {
         SettingsCard(
           title: "Local transcription models",

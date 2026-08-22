@@ -1,0 +1,140 @@
+#:schema node_modules/wrangler/config-schema.json
+#
+# Paid Access backend for Just Speak to It.
+#
+# Every value in this file is non-secret configuration. Secrets (Stripe keys,
+# session signing key, vendor API keys) are set with `wrangler secret put` and
+# are never committed. See README.md for the full secret list.
+name = "justspeaktoit-paid-access"
+main = "src/index.ts"
+compatibility_date = "2025-07-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+[observability]
+enabled = true
+
+# ---------------------------------------------------------------------------
+# Non-secret configuration. Overridden per environment below.
+# ---------------------------------------------------------------------------
+[vars]
+ENVIRONMENT = "development"
+# Sign in with Apple audiences. Native apps use the bundle identifier; the
+# macOS direct-download web flow uses the Services ID.
+APPLE_IDENTITY_AUDIENCES = "com.justspeaktoit.ios,com.justspeaktoit,com.justspeaktoit.signin"
+APPLE_BUNDLE_IDS = "com.justspeaktoit.ios,com.justspeaktoit"
+SESSION_TTL_SECONDS = "3600"
+REFRESH_TTL_SECONDS = "2592000"
+# Monthly included usage for the paid plan, enforced by the quota Durable Object.
+PLAN_MONTHLY_SECONDS = "180000"
+PLAN_MONTHLY_POSTPROCESS_TOKENS = "20000000"
+MAX_CONCURRENT_SESSIONS = "2"
+MAX_LIVE_SESSION_SECONDS = "1800"
+MAX_REQUEST_BYTES = "26214400"
+UPSTREAM_TIMEOUT_MS = "60000"
+LIVE_UPSTREAM_TIMEOUT_MS = "15000"
+STRIPE_SUCCESS_URL = "https://justspeaktoit.com/billing/success"
+STRIPE_CANCEL_URL = "https://justspeaktoit.com/billing/cancel"
+STRIPE_PORTAL_RETURN_URL = "https://justspeaktoit.com/billing"
+# Placeholder identifiers — replace with the real product/price IDs at deploy time.
+STRIPE_PRICE_IDS = "price_REPLACE_ME_MONTHLY,price_REPLACE_ME_YEARLY"
+STOREKIT_SUBSCRIPTION_PRODUCT_IDS = "com.justspeaktoit.paid.monthly,com.justspeaktoit.paid.yearly"
+# Global kill switch for paid routing. Flip to "true" to fail paid requests
+# closed without revoking entitlements or taking the Worker offline.
+PAID_ROUTING_DISABLED = "true"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "paid-access"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+[[durable_objects.bindings]]
+name = "QUOTA"
+class_name = "QuotaDurableObject"
+
+[[durable_objects.bindings]]
+name = "LIVE_SESSION"
+class_name = "LiveSessionDurableObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["QuotaDurableObject", "LiveSessionDurableObject"]
+
+# ---------------------------------------------------------------------------
+# Environments
+# ---------------------------------------------------------------------------
+[env.staging]
+name = "justspeaktoit-paid-access-staging"
+
+[env.staging.vars]
+ENVIRONMENT = "staging"
+APPLE_IDENTITY_AUDIENCES = "com.justspeaktoit.ios,com.justspeaktoit,com.justspeaktoit.signin"
+APPLE_BUNDLE_IDS = "com.justspeaktoit.ios,com.justspeaktoit"
+SESSION_TTL_SECONDS = "3600"
+REFRESH_TTL_SECONDS = "2592000"
+PLAN_MONTHLY_SECONDS = "180000"
+PLAN_MONTHLY_POSTPROCESS_TOKENS = "20000000"
+MAX_CONCURRENT_SESSIONS = "2"
+MAX_LIVE_SESSION_SECONDS = "1800"
+MAX_REQUEST_BYTES = "26214400"
+UPSTREAM_TIMEOUT_MS = "60000"
+LIVE_UPSTREAM_TIMEOUT_MS = "15000"
+STRIPE_SUCCESS_URL = "https://staging.justspeaktoit.com/billing/success"
+STRIPE_CANCEL_URL = "https://staging.justspeaktoit.com/billing/cancel"
+STRIPE_PORTAL_RETURN_URL = "https://staging.justspeaktoit.com/billing"
+STRIPE_PRICE_IDS = "price_REPLACE_ME_MONTHLY,price_REPLACE_ME_YEARLY"
+STOREKIT_SUBSCRIPTION_PRODUCT_IDS = "com.justspeaktoit.paid.monthly,com.justspeaktoit.paid.yearly"
+PAID_ROUTING_DISABLED = "true"
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "paid-access-staging"
+database_id = "REPLACE_WITH_STAGING_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+[[env.staging.durable_objects.bindings]]
+name = "QUOTA"
+class_name = "QuotaDurableObject"
+
+[[env.staging.durable_objects.bindings]]
+name = "LIVE_SESSION"
+class_name = "LiveSessionDurableObject"
+
+[env.production]
+name = "justspeaktoit-paid-access"
+routes = [{ pattern = "api.justspeaktoit.com/*", zone_name = "justspeaktoit.com" }]
+
+[env.production.vars]
+ENVIRONMENT = "production"
+APPLE_IDENTITY_AUDIENCES = "com.justspeaktoit.ios,com.justspeaktoit,com.justspeaktoit.signin"
+APPLE_BUNDLE_IDS = "com.justspeaktoit.ios,com.justspeaktoit"
+SESSION_TTL_SECONDS = "3600"
+REFRESH_TTL_SECONDS = "2592000"
+PLAN_MONTHLY_SECONDS = "180000"
+PLAN_MONTHLY_POSTPROCESS_TOKENS = "20000000"
+MAX_CONCURRENT_SESSIONS = "2"
+MAX_LIVE_SESSION_SECONDS = "1800"
+MAX_REQUEST_BYTES = "26214400"
+UPSTREAM_TIMEOUT_MS = "60000"
+LIVE_UPSTREAM_TIMEOUT_MS = "15000"
+STRIPE_SUCCESS_URL = "https://justspeaktoit.com/billing/success"
+STRIPE_CANCEL_URL = "https://justspeaktoit.com/billing/cancel"
+STRIPE_PORTAL_RETURN_URL = "https://justspeaktoit.com/billing"
+STRIPE_PRICE_IDS = "price_REPLACE_ME_MONTHLY,price_REPLACE_ME_YEARLY"
+STOREKIT_SUBSCRIPTION_PRODUCT_IDS = "com.justspeaktoit.paid.monthly,com.justspeaktoit.paid.yearly"
+PAID_ROUTING_DISABLED = "true"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "paid-access"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+[[env.production.durable_objects.bindings]]
+name = "QUOTA"
+class_name = "QuotaDurableObject"
+
+[[env.production.durable_objects.bindings]]
+name = "LIVE_SESSION"
+class_name = "LiveSessionDurableObject"

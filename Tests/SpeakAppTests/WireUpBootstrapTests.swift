@@ -1,3 +1,4 @@
+import SpeakCore
 import XCTest
 
 @testable import SpeakApp
@@ -48,6 +49,67 @@ final class WireUpBootstrapTests: XCTestCase {
         XCTAssertNotNil(env.autoCorrectionTracker)
         XCTAssertNotNil(env.main)
         XCTAssertNotNil(env.transportServer)
+        XCTAssertNotNil(env.paidAccess)
+    }
+
+    // MARK: - Paid access defaults
+
+    @MainActor
+    func testBootstrap_paidAccessStartsUnentitledAndInactive() {
+        // Adding paid access must not change behaviour for anyone who has not
+        // subscribed: the app boots signed out, unentitled and routing through
+        // the user's own keys.
+        let env = WireUp.bootstrap(options: makeWireUpTestOptions())
+
+        XCTAssertFalse(env.paidAccess.isSignedIn)
+        XCTAssertEqual(env.paidAccess.entitlement.status, .none)
+        XCTAssertFalse(env.paidAccess.entitlement.allowsPaidRouting())
+        XCTAssertFalse(env.paidAccess.isPaidRoutingActive)
+        XCTAssertFalse(env.settings.paidAccessRoutingEnabled)
+        XCTAssertFalse(env.settings.simpleModelChoices)
+    }
+
+    @MainActor
+    func testBootstrap_modelPickersRemainVisibleWithoutASubscription() {
+        let env = WireUp.bootstrap(options: makeWireUpTestOptions())
+
+        // Even if the user switches the preference on, no entitlement means the
+        // pickers stay: otherwise they would be left with neither.
+        env.settings.simpleModelChoices = true
+        XCTAssertFalse(env.paidAccess.simpleModelChoicesPolicy.hidesModelSelection)
+        env.settings.simpleModelChoices = false
+    }
+
+    @MainActor
+    func testBootstrap_billingChannelMatchesTheDistributionChannel() {
+        let env = WireUp.bootstrap(options: makeWireUpTestOptions())
+        XCTAssertEqual(
+            env.paidAccess.billingChannel,
+            DistributionChannel.current.paidBillingChannel
+        )
+    }
+
+    @MainActor
+    func testPaidAccessNonce_isUniqueAndUrlSafe() {
+        let first = PaidAccessManager.makeRawNonce()
+        let second = PaidAccessManager.makeRawNonce()
+
+        XCTAssertNotEqual(first, second)
+        for nonce in [first, second] {
+            XCTAssertGreaterThanOrEqual(nonce.count, 16)
+            XCTAssertNil(nonce.range(of: "[^A-Za-z0-9_-]", options: .regularExpression))
+        }
+    }
+
+    @MainActor
+    func testPaidAccessNonceDigest_isASha256HexString() {
+        // Apple echoes the digest back in the identity token, so it must be the
+        // hex SHA-256 the server re-derives from the raw nonce.
+        let digest = PaidAccessManager.sha256Hex("abc")
+        XCTAssertEqual(
+            digest,
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        )
     }
 
     @MainActor

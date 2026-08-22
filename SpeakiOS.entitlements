@@ -32,5 +32,13 @@
          "development" only for local Xcode-signed development builds. -->
     <key>aps-environment</key>
     <string>production</string>
+
+    <!-- Sign in with Apple: identity for the Paid Access subscription. The same
+         Apple account resolves to one subscription across iPhone and Mac.
+         On-device models and your own API keys never require signing in. -->
+    <key>com.apple.developer.applesignin</key>
+    <array>
+        <string>Default</string>
+    </array>
 </dict>
 </plist>

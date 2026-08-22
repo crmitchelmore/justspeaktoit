@@ -230,10 +230,16 @@ private actor ScriptedKeychainPermissions: KeychainPermissionsChecking {
 }
 
 private func deleteKeychainItem(service: String) {
-    let query: [String: Any] = [
-        kSecClass as String: kSecClassGenericPassword,
-        kSecAttrService as String: service,
-        kSecAttrAccount as String: "speak-app-secrets"
-    ]
-    SecItemDelete(query as CFDictionary)
+    for account in [
+        "speak-app-secrets",
+        "speak-app-secrets.v2",
+        "speak-app-secrets.unsupported-backup"
+    ] {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
 }

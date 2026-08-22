@@ -13,6 +13,9 @@ import os.log
 /// so it can drive the generic iOS transcriber (which captures the latest text).
 /// Conforms to ``StreamingTranscriptionClient``.
 public final class AssemblyAILiveClient: StreamingTranscriptionClient, @unchecked Sendable {
+    /// Final shape: this client emits a cumulative display string assembled from turns.
+    public let finalShape: TranscriptFinalShape = .cumulativeTranscript
+
     private static let beginTimeoutSeconds: Double = 8
     private static let terminationTimeoutSeconds: Double = 3
     private static let preBeginByteLimit = 16_000 * 2 * 5 // 5s of 16kHz PCM16

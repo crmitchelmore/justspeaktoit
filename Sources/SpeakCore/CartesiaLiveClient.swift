@@ -8,6 +8,9 @@ import os.log
 /// Shared by macOS and iOS: both feed it linear16 mono PCM captured by their own
 /// platform audio layer. Conforms to `StreamingTranscriptionClient`.
 public final class CartesiaLiveClient: StreamingTranscriptionClient, @unchecked Sendable {
+    /// Final shape: each is_final transcript event carries one finalised turn.
+    public let finalShape: TranscriptFinalShape = .standaloneSegments
+
     private static let host = "api.cartesia.ai"
     private static let path = "/stt/turns/websocket"
     private static let apiVersion = "2026-03-01"

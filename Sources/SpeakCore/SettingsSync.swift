@@ -310,14 +310,34 @@ public final class ConfigTransferManager: Sendable {
     /// API-key identifiers included in a device-to-device transfer: the union
     /// of the keys either platform can hold, so exporting from one platform
     /// and importing on the other never silently drops a stored credential.
+    ///
+    /// This list is deliberately explicit rather than derived: it is the
+    /// bounded transfer policy (issue #699). A parity test asserts it equals
+    /// `ModelCredentialResolver.allKnownAPIKeyIdentifiers`, so adding a
+    /// provider to any catalogue fails the test until its transfer capability
+    /// is defined here. Dynamically registered identifiers are never exported.
     public static let transferableSecretIdentifiers: [String] = [
+        "assemblyai.apiKey",
+        "azure.speech.apiKey",
+        "cartesia.apiKey",
         "deepgram.apiKey",
-        "openrouter.apiKey",
+        "elevenlabs.apiKey",
+        "gladia.apiKey",
+        "groq.apiKey",
+        "mistral.apiKey",
+        "modulate.apiKey",
         "openai.apiKey",
         "openai.tts.apiKey",
-        "elevenlabs.apiKey",
-        "azure.speech.apiKey"
+        "openrouter.apiKey",
+        "revai.apiKey",
+        "soniox.apiKey",
+        "speechmatics.apiKey",
+        "xai.apiKey"
     ]
+
+    /// Non-secret settings keys a transfer payload may carry. Import refuses
+    /// anything else so a payload cannot write arbitrary defaults.
+    public static let transferableSettingKeys: Set<String> = ["selectedModel"]
 
     /// Collects the transferable secrets currently stored in `storage`,
     /// skipping identifiers that are missing or empty.
@@ -362,7 +382,10 @@ public final class ConfigTransferManager: Sendable {
     public func makeQRCodeImage(payload: String, scale: CGFloat = 10) -> CIImage? {
         let filter = CIFilter.qrCodeGenerator()
         filter.message = Data(payload.utf8)
-        filter.correctionLevel = "M"
+        // Level M for the compatible payload size; a full credential set only
+        // fits at level L (2,953 bytes), which remains reliable for the short
+        // screen-to-camera scan this feature performs (issue #699).
+        filter.correctionLevel = payload.utf8.count > 2_200 ? "L" : "M"
         guard let outputImage = filter.outputImage else { return nil }
         return outputImage.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
     }
@@ -427,7 +450,35 @@ public final class ConfigTransferManager: Sendable {
             nonce: Data(nonce),
             ciphertext: sealedBox.ciphertext + sealedBox.tag
         )
-        return try envelopeEncoder.encode(envelope).base64EncodedString()
+        let encoded = try envelopeEncoder.encode(envelope)
+        let base64 = encoded.base64EncodedString()
+        // The doubly-encoded form stays the default so older importers keep
+        // working, but it cannot fit a full credential set in one QR code
+        // (issue #699). An oversized payload is emitted as the envelope JSON
+        // itself — QR byte mode carries it directly, authentication is
+        // unchanged, and current importers accept both shapes.
+        if base64.utf8.count > Self.maximumCompatiblePayloadLength,
+           let envelopeJSON = String(bytes: encoded, encoding: .utf8) {
+            return envelopeJSON
+        }
+        return base64
+    }
+
+    /// QR byte capacity at correction level M. Above this the doubly-encoded
+    /// payload cannot be drawn, so export falls back to the raw envelope JSON.
+    static let maximumCompatiblePayloadLength = 2_331
+
+    /// Accepts both payload shapes: the base64-wrapped envelope every version
+    /// understands, and the raw envelope JSON used when a full credential set
+    /// would not fit a QR code otherwise (issue #699).
+    private static func envelopeCandidateData(from encoded: String) -> Data? {
+        if let data = Data(base64Encoded: encoded), !data.isEmpty {
+            return data
+        }
+        if encoded.hasPrefix("{") {
+            return Data(encoded.utf8)
+        }
+        return nil
     }
 
     // MARK: - Import
@@ -436,7 +487,7 @@ public final class ConfigTransferManager: Sendable {
     /// knows whether to ask for a one-time code. Unknown envelope versions are
     /// rejected here rather than being mistaken for a legacy payload.
     public func format(of encoded: String) throws -> ConfigTransferFormat {
-        guard let data = Data(base64Encoded: encoded), !data.isEmpty else {
+        guard let data = Self.envelopeCandidateData(from: encoded) else {
             throw ConfigTransferError.invalidFormat
         }
 
@@ -508,7 +559,7 @@ public final class ConfigTransferManager: Sendable {
 
     /// Parses (but does not decrypt) the envelope, rejecting unknown versions.
     public func decodeEnvelope(_ encoded: String) throws -> ConfigTransferEnvelope {
-        guard let data = Data(base64Encoded: encoded), !data.isEmpty else {
+        guard let data = Self.envelopeCandidateData(from: encoded) else {
             throw ConfigTransferError.invalidFormat
         }
         guard let envelope = try? envelopeDecoder.decode(ConfigTransferEnvelope.self, from: data) else {
@@ -611,6 +662,118 @@ public enum ConfigTransferFormat: Equatable, Sendable {
     case legacy
 }
 
+// MARK: - Transactional import (issue #699)
+
+extension ConfigTransferManager {
+    /// Applies an imported payload transactionally.
+    ///
+    /// Before any mutation the payload is validated against the bounded
+    /// transfer policy and every destination value is read and retained. On a
+    /// failed write, every already-applied secret is rolled back to its
+    /// retained value; if rollback itself fails, the identifiers left in the
+    /// imported state are reported. Settings are applied last (their writes
+    /// cannot fail), so a secret failure never leaves partial settings.
+    ///
+    /// The Keychain offers no multi-item transaction, so an import interrupted
+    /// by process death can leave earlier writes applied; retrying the same
+    /// import re-applies identical values and converges — it can never produce
+    /// a configuration mixing two sources beyond the interrupted one.
+    ///
+    /// `liveModelDefaultsKey` mirrors `gatherSettings(defaults:liveModelDefaultsKey:)`:
+    /// the payload always carries the shared `selectedModel` key, and the importing
+    /// platform names the local UserDefaults key it reads its live transcription
+    /// model from, so the selection lands where that platform will find it.
+    public func applyImport(
+        payload: ConfigTransferPayload,
+        storage: SecureStorage,
+        defaults: UserDefaults = .standard,
+        liveModelDefaultsKey: String = "selectedModel"
+    ) async throws {
+        try Self.validateImport(payload: payload)
+
+        // Retain the destination values for every key that will change. A read
+        // failure other than "not stored" aborts before mutation.
+        var previousValues: [String: String] = [:]
+        for identifier in payload.secrets.keys.sorted() {
+            do {
+                previousValues[identifier] = try await storage.secret(identifier: identifier)
+            } catch SecureStorageError.valueNotFound {
+                continue
+            }
+        }
+
+        var appliedIdentifiers: [String] = []
+        do {
+            for identifier in payload.secrets.keys.sorted() {
+                guard let value = payload.secrets[identifier] else { continue }
+                try await storage.storeSecret(value, identifier: identifier)
+                appliedIdentifiers.append(identifier)
+            }
+        } catch {
+            let stranded = await rollBack(
+                identifiers: appliedIdentifiers,
+                previousValues: previousValues,
+                storage: storage
+            )
+            guard stranded.isEmpty else {
+                throw ConfigTransferError.rollbackFailed(identifiers: stranded)
+            }
+            throw error
+        }
+
+        for (key, value) in payload.settings {
+            let localKey = key == "selectedModel" ? liveModelDefaultsKey : key
+            defaults.set(value, forKey: localKey)
+        }
+    }
+
+    /// Refuses anything outside the bounded transfer policy before any write.
+    ///
+    /// Empty values are refused as well: export never produces them, and
+    /// storing an empty secret would overwrite a working destination credential
+    /// while unregistering its identifier.
+    private static func validateImport(payload: ConfigTransferPayload) throws {
+        for identifier in payload.secrets.keys.sorted() {
+            guard transferableSecretIdentifiers.contains(identifier) else {
+                throw ConfigTransferError.unknownSecretIdentifier(identifier)
+            }
+            if payload.secrets[identifier]?.isEmpty ?? true {
+                throw ConfigTransferError.emptySecretValue(identifier)
+            }
+        }
+        for key in payload.settings.keys.sorted() {
+            guard transferableSettingKeys.contains(key) else {
+                throw ConfigTransferError.unknownSettingKey(key)
+            }
+            if payload.settings[key]?.isEmpty ?? true {
+                throw ConfigTransferError.emptySettingValue(key)
+            }
+        }
+    }
+
+    /// Restores each applied identifier to its retained value (or removes it
+    /// when it did not exist). Returns the identifiers rollback failed for.
+    private func rollBack(
+        identifiers: [String],
+        previousValues: [String: String],
+        storage: SecureStorage
+    ) async -> [String] {
+        var failures: [String] = []
+        for identifier in identifiers.reversed() {
+            do {
+                if let previous = previousValues[identifier] {
+                    try await storage.storeSecret(previous, identifier: identifier)
+                } else {
+                    try await storage.removeSecret(identifier: identifier)
+                }
+            } catch {
+                failures.append(identifier)
+            }
+        }
+        return failures.sorted()
+    }
+}
+
 public enum ConfigTransferError: LocalizedError, Equatable {
     case invalidFormat
     case payloadExpired
@@ -621,6 +784,11 @@ public enum ConfigTransferError: LocalizedError, Equatable {
     case encryptionFailed
     case randomGenerationFailed
     case qrGenerationFailed
+    case unknownSecretIdentifier(String)
+    case unknownSettingKey(String)
+    case emptySecretValue(String)
+    case emptySettingValue(String)
+    case rollbackFailed(identifiers: [String])
 
     public var errorDescription: String? {
         switch self {
@@ -643,6 +811,18 @@ public enum ConfigTransferError: LocalizedError, Equatable {
             return "Failed to generate a secure transfer code. Please try again."
         case .qrGenerationFailed:
             return "Failed to draw the QR code for this configuration."
+        case .unknownSecretIdentifier:
+            return "This configuration contains a credential this version does not recognise. "
+                + "Update both devices, then try again."
+        case .unknownSettingKey:
+            return "This configuration contains a setting this version does not recognise. "
+                + "Update both devices, then try again."
+        case .emptySecretValue, .emptySettingValue:
+            return "This configuration contains an empty value and was not applied. "
+                + "Generate a new code on the other device, then try again."
+        case .rollbackFailed:
+            return "The import failed and some credentials could not be restored. "
+                + "Review your API keys in Settings before dictating."
         }
     }
 }

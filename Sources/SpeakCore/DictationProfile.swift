@@ -104,6 +104,41 @@ public struct DictationProfile: Codable, Equatable, Identifiable, Sendable {
         self.languageIdentifier = languageIdentifier
     }
 
+    /// The pre-#690 initializer, kept for source and API compatibility (#791).
+    /// A profile created this way carries no explicit routing, so the applier
+    /// derives it from the model identifier exactly as it does for profiles
+    /// saved before routing metadata existed. Calls without `transcriptionRouting:`
+    /// resolve here (fewer parameters win); calls with it use the designated
+    /// initializer.
+    public init(
+        id: UUID = UUID(),
+        name: String,
+        matchers: [DictationProfileMatcher] = [],
+        transcriptionModelID: String? = nil,
+        polishEnabled: Bool? = nil,
+        polishModelID: String? = nil,
+        polishPrompt: String? = nil,
+        polishOutputLanguage: String? = nil,
+        polishIncludeLexiconDirectives: Bool? = nil,
+        polishIncludeContextTags: Bool? = nil,
+        languageIdentifier: String? = nil
+    ) {
+        self.init(
+            id: id,
+            name: name,
+            matchers: matchers,
+            transcriptionModelID: transcriptionModelID,
+            polishEnabled: polishEnabled,
+            polishModelID: polishModelID,
+            polishPrompt: polishPrompt,
+            polishOutputLanguage: polishOutputLanguage,
+            polishIncludeLexiconDirectives: polishIncludeLexiconDirectives,
+            polishIncludeContextTags: polishIncludeContextTags,
+            languageIdentifier: languageIdentifier,
+            transcriptionRouting: nil
+        )
+    }
+
     private enum CodingKeys: String, CodingKey {
         case id
         case name

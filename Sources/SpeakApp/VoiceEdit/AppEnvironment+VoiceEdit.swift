@@ -1,4 +1,5 @@
 import Foundation
+import SpeakCore
 
 extension AppEnvironment {
   /// Creates the voice-edit controller ("select text → hotkey → speak an instruction →
@@ -14,14 +15,17 @@ extension AppEnvironment {
       hotKeyManager: hotKeys,
       selectionService: VoiceEditSelectionService(
         permissionsManager: permissions,
-        appSettings: settings,
-        historyManager: history
-      )
+        insertionRecords: main.insertionRecords
+      ),
+      replacementService: VoiceEditReplacementService(permissionsManager: permissions)
     )
   }
 
-  /// Global-shortcut entry point for voice edit mode.
+  /// Global-shortcut entry point for voice edit mode. Inert on channels that
+  /// cannot read or replace another app's selection; the shortcut is not
+  /// registered there either, so this is the last line of defence.
   func toggleVoiceEdit() {
+    guard DistributionChannel.current.supportsVoiceEdit else { return }
     installVoiceEdit()
     voiceEdit?.toggle()
   }

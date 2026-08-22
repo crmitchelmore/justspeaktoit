@@ -106,6 +106,50 @@ final class KeyboardHandoffCrossProcessTests: XCTestCase {
         XCTAssertEqual(ext.activeRecord()?.phase, .cancelled)
     }
 
+    // MARK: - Idempotent retries
+
+    func testRepeatedFinish_isASafeNoOp() throws {
+        let requestID = try startRecordingRequest()
+        let first = try ext.requestFinish(requestID: requestID)
+        XCTAssertEqual(first.phase, .finishRequested)
+
+        // A retried finish (the extension re-sending after a suspension)
+        // must neither throw nor change anything.
+        let second = try ext.requestFinish(requestID: requestID, now: first.updatedAt.addingTimeInterval(5))
+        XCTAssertEqual(second.phase, .finishRequested)
+        XCTAssertEqual(second.updatedAt, first.updatedAt)
+        XCTAssertEqual(second.expiresAt, first.expiresAt)
+        XCTAssertEqual(app.activeRecord()?.phase, .finishRequested)
+    }
+
+    func testRepeatedExtensionCancel_isASafeNoOp() throws {
+        let requestID = try startRecordingRequest()
+        let first = try ext.cancel(requestID: requestID)
+        XCTAssertEqual(first.phase, .cancelled)
+
+        let second = try ext.cancel(requestID: requestID, now: first.updatedAt.addingTimeInterval(5))
+        XCTAssertEqual(second.phase, .cancelled)
+        XCTAssertEqual(second.updatedAt, first.updatedAt)
+        XCTAssertEqual(second.expiresAt, first.expiresAt)
+
+        // Cancelled stays excluded for finish: it is not a retry, it is a
+        // downgrade.
+        XCTAssertThrowsError(try ext.requestFinish(requestID: requestID)) { error in
+            XCTAssertEqual(error as? KeyboardHandoffStoreError, .invalidTransition)
+        }
+    }
+
+    func testRepeatedAppCancel_returnsTheCancelledRecordWithoutRewritingIt() throws {
+        let requestID = try startRecordingRequest()
+        let first = try app.cancel(requestID: requestID)
+        XCTAssertEqual(first.phase, .cancelled)
+
+        let second = try app.cancel(requestID: requestID, now: first.updatedAt.addingTimeInterval(5))
+        XCTAssertEqual(second.phase, .cancelled)
+        XCTAssertEqual(second.expiresAt, first.expiresAt, "a repeated cancel must not extend the record")
+        XCTAssertEqual(ext.activeRecord()?.phase, .cancelled)
+    }
+
     // MARK: - Old-process isolation
 
     func testSuspendedOldExtension_cannotMutateAReplacementRequest() throws {

@@ -101,12 +101,23 @@ public final class KeyboardHandoffStore: @unchecked Sendable {
     }
 
     /// Requests finalisation via the extension-owned monotonic command
-    /// channel, so no later app write can overwrite it.
+    /// channel, so no later app write can overwrite it. Repeating the request
+    /// while it is pending is a no-op (the monotonic channel ignores it), so a
+    /// retry across processes is always safe; a cancelled request refuses it.
     @discardableResult
     public func requestFinish(requestID: UUID, now: Date = Date()) throws -> KeyboardHandoffRecord {
-        try issueCommand(.finish, requestID: requestID, allowedFrom: [.recording], now: now)
+        try issueCommand(
+            .finish,
+            requestID: requestID,
+            allowedFrom: [.recording, .finishRequested],
+            now: now
+        )
     }
 
+    /// Cancels the request. Repeating a cancel that already took effect is a
+    /// no-op in both processes: the extension's monotonic channel ignores the
+    /// duplicate, and the app returns the cancelled record without rewriting
+    /// it (which would otherwise extend its expiry).
     @discardableResult
     public func cancel(requestID: UUID, now: Date = Date()) throws -> KeyboardHandoffRecord {
         let allowed: Set<KeyboardHandoffRecord.Phase> = [
@@ -114,8 +125,16 @@ public final class KeyboardHandoffStore: @unchecked Sendable {
         ]
         switch role {
         case .keyboardExtension:
-            return try issueCommand(.cancel, requestID: requestID, allowedFrom: allowed, now: now)
+            return try issueCommand(
+                .cancel,
+                requestID: requestID,
+                allowedFrom: allowed.union([.cancelled]),
+                now: now
+            )
         case .containingApp:
+            if let current = record(matching: requestID, now: now), current.phase == .cancelled {
+                return current
+            }
             return try writeStatus(
                 requestID: requestID,
                 allowedFrom: allowed,
@@ -126,63 +145,8 @@ public final class KeyboardHandoffStore: @unchecked Sendable {
         }
     }
 
-    // MARK: - App-side phase transitions
-
-    @discardableResult
-    public func markRecording(requestID: UUID, now: Date = Date()) throws -> KeyboardHandoffRecord {
-        try writeStatus(
-            requestID: requestID,
-            allowedFrom: [.requested],
-            phase: .recording,
-            now: now,
-            lifetime: Self.requestLifetime
-        )
-    }
-
-    @discardableResult
-    public func markTranscribing(requestID: UUID, now: Date = Date()) throws -> KeyboardHandoffRecord {
-        try writeStatus(
-            requestID: requestID,
-            allowedFrom: [.recording, .finishRequested],
-            phase: .transcribing,
-            now: now,
-            lifetime: Self.transcriptionLifetime
-        )
-    }
-
-    @discardableResult
-    public func complete(
-        requestID: UUID,
-        transcript: String,
-        now: Date = Date()
-    ) throws -> KeyboardHandoffRecord {
-        let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { throw KeyboardHandoffStoreError.invalidTranscript }
-        return try writeStatus(
-            requestID: requestID,
-            allowedFrom: [.transcribing],
-            phase: .completed,
-            transcript: trimmed,
-            now: now,
-            lifetime: Self.resultLifetime
-        )
-    }
-
-    @discardableResult
-    public func fail(
-        requestID: UUID,
-        code: KeyboardHandoffRecord.FailureCode,
-        now: Date = Date()
-    ) throws -> KeyboardHandoffRecord {
-        try writeStatus(
-            requestID: requestID,
-            allowedFrom: [.requested, .recording, .finishRequested, .transcribing],
-            phase: .failed,
-            failureCode: code,
-            now: now,
-            lifetime: Self.resultLifetime
-        )
-    }
+    // App-side phase transitions (markRecording, markTranscribing, complete,
+    // fail) live in KeyboardHandoffTransitions.swift.
 
     /// Publishes only the current request's live text, in a key of its own:
     /// an interim update can no longer touch — let alone regress — the
@@ -242,6 +206,19 @@ public final class KeyboardHandoffStore: @unchecked Sendable {
         }
     }
 
+    /// Returns only the matching, unexpired result, leaving it in place.
+    /// Consumers insert the text first and clear afterwards, so a process
+    /// death or a failed insertion between the two cannot lose the transcript.
+    public func readyResult(
+        requestID: UUID,
+        documentIdentifier: UUID? = nil,
+        now: Date = Date()
+    ) -> String? {
+        lock.withLock {
+            readyResultUnlocked(requestID: requestID, documentIdentifier: documentIdentifier, now: now)
+        }
+    }
+
     /// Returns and then promptly removes only the matching, unexpired result.
     public func consumeResult(
         requestID: UUID,
@@ -249,18 +226,27 @@ public final class KeyboardHandoffStore: @unchecked Sendable {
         now: Date = Date()
     ) -> String? {
         lock.withLock {
-            guard let record = mergedRecordUnlocked(now: now),
-                  record.requestID == requestID,
-                  record.phase == .completed,
-                  record.targetDocumentIdentifier == nil
-                    || record.targetDocumentIdentifier == documentIdentifier,
-                  let transcript = record.transcript,
-                  !transcript.isEmpty else {
+            guard let transcript = readyResultUnlocked(
+                requestID: requestID, documentIdentifier: documentIdentifier, now: now
+            ) else {
                 return nil
             }
             removeAllUnlocked()
             return transcript
         }
+    }
+
+    private func readyResultUnlocked(requestID: UUID, documentIdentifier: UUID?, now: Date) -> String? {
+        guard let record = mergedRecordUnlocked(now: now),
+              record.requestID == requestID,
+              record.phase == .completed,
+              record.targetDocumentIdentifier == nil
+                || record.targetDocumentIdentifier == documentIdentifier,
+              let transcript = record.transcript,
+              !transcript.isEmpty else {
+            return nil
+        }
+        return transcript
     }
 
     /// Removes only the caller's request, so an old process cannot clear a

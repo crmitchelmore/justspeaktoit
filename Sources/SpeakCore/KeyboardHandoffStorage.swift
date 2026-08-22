@@ -101,7 +101,7 @@ extension KeyboardHandoffStore {
             // reported as timed out — derived, not written, so this
             // normalisation cannot race a writer in either process.
             if terminal.contains(phase) { return nil }
-            return timedOutView(of: intent, now: now)
+            return timedOutRecord(of: intent, storedExpiry: expiresAt, now: now)
         }
 
         let interim: String? = {
@@ -126,12 +126,21 @@ extension KeyboardHandoffStore {
             failureCode: phase == .failed ? (status?.failureCode ?? .unknown) : nil
         )
     }
-    func timedOutView(of intent: IntentRecord, now: Date) -> KeyboardHandoffRecord {
+    /// The timed-out view of a non-terminal request keeps a fixed expiry
+    /// anchored to the stored one (`storedExpiry + resultLifetime`), so
+    /// repeated reads cannot extend it; past that point the record is gone.
+    func timedOutRecord(of intent: IntentRecord, storedExpiry: Date, now: Date) -> KeyboardHandoffRecord? {
+        let timedOutExpiresAt = storedExpiry.addingTimeInterval(Self.resultLifetime)
+        guard timedOutExpiresAt > now else { return nil }
+        return timedOutView(of: intent, timedOutAt: storedExpiry, expiresAt: timedOutExpiresAt)
+    }
+
+    func timedOutView(of intent: IntentRecord, timedOutAt: Date, expiresAt: Date) -> KeyboardHandoffRecord {
         KeyboardHandoffRecord(
             requestID: intent.requestID,
             createdAt: intent.createdAt,
-            updatedAt: now,
-            expiresAt: now.addingTimeInterval(Self.resultLifetime),
+            updatedAt: timedOutAt,
+            expiresAt: expiresAt,
             phase: .failed,
             targetDocumentIdentifier: intent.targetDocumentIdentifier,
             profile: intent.profile,

@@ -122,7 +122,10 @@ public struct KeyboardHandoffConsumer {
         self.store = store
     }
 
-    /// Inserts only a matching result and clears it immediately afterwards.
+    /// Inserts only a matching result, then clears it — in that order, so the
+    /// shared record still holds the transcript if the extension dies or the
+    /// text document proxy refuses the insertion; the next launch retries
+    /// rather than losing what the user said.
     @discardableResult
     public func insertReadyResult(
         requestID: UUID,
@@ -130,7 +133,7 @@ public struct KeyboardHandoffConsumer {
         now: Date = Date(),
         insert: (String) -> Void
     ) -> Bool {
-        guard let transcript = store.consumeResult(
+        guard let transcript = store.readyResult(
             requestID: requestID,
             documentIdentifier: documentIdentifier,
             now: now
@@ -138,6 +141,7 @@ public struct KeyboardHandoffConsumer {
             return false
         }
         insert(transcript)
+        store.clear(requestID: requestID)
         return true
     }
 }

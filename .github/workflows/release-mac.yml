@@ -20,10 +20,13 @@ jobs:
   build-and-release:
     runs-on: macos-15
     # Two archives (arm64 primary + universal legacy), each with app
-    # notarisation polling (up to 60 min) and DMG notarisation, then publication.
+    # notarisation polling (up to 60 min) and DMG notarisation, then the
+    # standalone CLI archives (two more notarisations) and publication.
     timeout-minutes: 240
     permissions:
       contents: write
+      # A failed optional CLI publication is surfaced as an issue, not a failed release.
+      issues: write
 
     steps:
       - name: Checkout
@@ -176,11 +179,14 @@ jobs:
       # Apple Silicon Macs download and update to, and the universal legacy
       # build that Intel Macs — and every install that predates per-architecture
       # artefacts — keep receiving through the original appcast.xml feed.
+      # The primary ships without the speak CLI, which is published as
+      # standalone assets below (issue #775); the legacy build keeps embedding it.
       - name: Package arm64 primary
         id: arm64
         uses: ./.github/actions/package-mac-release
         with:
           variant: arm64
+          embed-cli: "false"
           version: ${{ steps.version.outputs.version }}
           apple-id: ${{ secrets.APPLE_ID }}
           apple-id-password: ${{ secrets.APPLE_ID_PASSWORD }}
@@ -193,6 +199,7 @@ jobs:
         uses: ./.github/actions/package-mac-release
         with:
           variant: universal
+          embed-cli: "true"
           version: ${{ steps.version.outputs.version }}
           apple-id: ${{ secrets.APPLE_ID }}
           apple-id-password: ${{ secrets.APPLE_ID_PASSWORD }}
@@ -210,6 +217,60 @@ jobs:
             echo "LEGACY_APP_PATH=${{ steps.universal.outputs.app-path }}"
             echo "LEGACY_ARCHIVE_PATH=${{ steps.universal.outputs.archive-path }}"
           } >> "$GITHUB_ENV"
+
+      # Standalone speak CLI assets (issue #775): arm64 and x86_64 archives plus
+      # the signed manifest the in-app installer reads. Optional by design — a
+      # failure here must not block the app release, so it is surfaced below and
+      # retried with the publish-speak-cli workflow.
+      - name: Build, notarise and verify speak CLI assets
+        id: cli
+        continue-on-error: true
+        uses: ./.github/actions/publish-speak-cli
+        with:
+          version: ${{ steps.version.outputs.version }}
+          apple-id: ${{ secrets.APPLE_ID }}
+          apple-id-password: ${{ secrets.APPLE_ID_PASSWORD }}
+          apple-team-id: ${{ secrets.APPLE_TEAM_ID }}
+          sparkle-private-key: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+
+      - name: Publish speak CLI asset paths
+        if: steps.cli.outcome == 'success'
+        run: |
+          {
+            echo "CLI_ARM64_ZIP=${{ steps.cli.outputs.arm64-zip }}"
+            echo "CLI_X86_64_ZIP=${{ steps.cli.outputs.x86_64-zip }}"
+            echo "CLI_MANIFEST=${{ steps.cli.outputs.manifest }}"
+            echo "CLI_MANIFEST_SIG=${{ steps.cli.outputs.signature }}"
+          } >> "$GITHUB_ENV"
+
+      - name: Surface speak CLI publication failure
+        if: steps.cli.outcome != 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          echo "::error::speak CLI assets were not published for v${VERSION}; the app release continues without them"
+          {
+            echo ""
+            echo "> ⚠️ **speak CLI assets were not published for v${VERSION}.** The app release is unaffected."
+            echo "> Re-run the *Publish speak CLI* workflow with version \`${VERSION}\` once the cause is fixed."
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$GITHUB_REF" == refs/tags/mac-v* ]]; then
+            TITLE="speak CLI assets missing for mac-v${VERSION}"
+            EXISTING="$(gh issue list --state open --search "\"$TITLE\" in:title" --json number --jq '.[0].number')"
+            if [ -z "$EXISTING" ]; then
+              gh issue create --title "$TITLE" --body "$(cat <<EOF
+          The optional speak CLI publication step failed in the release run for mac-v${VERSION}: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+
+          The app DMGs, appcasts and cask were published normally. Until the CLI assets exist, the in-app installer shows *Not available* for this release and the Homebrew formula stays at the previous version.
+
+          **Retry:** fix the cause, then run the *Publish speak CLI* workflow (\`publish-speak-cli.yml\`) with version \`${VERSION}\`. It rebuilds, notarises and verifies the archives from the tag, uploads them with the signed manifest to the existing release, and updates the tap. Refs #775.
+          EOF
+          )" || echo "::warning::Could not open the follow-up issue"
+            else
+              echo "Follow-up issue #$EXISTING is already open"
+            fi
+          fi
 
       # One feed per download. The legacy feed keeps its historical name and
       # asset because every shipped build carries it in Info.plist, and the
@@ -261,11 +322,18 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/mac-v')
         uses: softprops/action-gh-release@v3
         with:
+          # The CLI entries are empty when publication failed; unmatched
+          # entries are skipped (fail_on_unmatched_files is off) so the app
+          # release still goes out.
           files: |
             ${{ env.DMG_PATH }}
             ${{ env.LEGACY_DMG_PATH }}
             ${{ env.APPCAST_PATH }}
             ${{ env.ARM64_APPCAST_PATH }}
+            ${{ env.CLI_ARM64_ZIP }}
+            ${{ env.CLI_X86_64_ZIP }}
+            ${{ env.CLI_MANIFEST }}
+            ${{ env.CLI_MANIFEST_SIG }}
           body_path: ${{ runner.temp }}/release-notes.md
           generate_release_notes: false
           draft: false
@@ -304,51 +372,24 @@ jobs:
           echo "    arm64 SHA256:     $ARM64_SHA256"
           echo "    universal SHA256: $UNIVERSAL_SHA256"
 
-          # Clone the tap repo
-          git clone https://x-access-token:${GH_TOKEN}@github.com/crmitchelmore/homebrew-justspeaktoit.git /tmp/homebrew-tap
-          cd /tmp/homebrew-tap
+          # The cask gets the per-architecture DMGs (issue #774) and depends on
+          # the speak formula, which is written from this release's standalone
+          # CLI archives when they were published (issue #775). Without them
+          # the formula is left untouched.
+          CLI_SHAS=()
+          if [ -n "${CLI_ARM64_ZIP:-}" ] && [ -n "${CLI_X86_64_ZIP:-}" ]; then
+            CLI_SHAS=(
+              "$(shasum -a 256 "$CLI_ARM64_ZIP" | awk '{print $1}')"
+              "$(shasum -a 256 "$CLI_X86_64_ZIP" | awk '{print $1}')"
+            )
+            echo "    speak arm64 SHA256:  ${CLI_SHAS[0]}"
+            echo "    speak x86_64 SHA256: ${CLI_SHAS[1]}"
+          else
+            echo "    speak CLI archives not published; formula unchanged"
+          fi
 
-          # Update the cask file: Apple Silicon Macs get the arm64 download,
-          # Intel Macs the universal legacy download (issue #774). The bundled
-          # speak CLI matches the app's own slices in both.
-          cat > Casks/justspeaktoit.rb << EOF
-          cask "justspeaktoit" do
-            arch arm: "arm64", intel: "universal"
-
-            version "$VERSION"
-            sha256 arm: "$ARM64_SHA256", intel: "$UNIVERSAL_SHA256"
-
-            url "https://github.com/crmitchelmore/justspeaktoit/releases/download/mac-v#{version}/JustSpeakToIt-#{arch}.dmg"
-            name "Just Speak to It"
-            desc "Native macOS voice transcription with on-device or cloud processing"
-            homepage "https://justspeaktoit.com"
-
-            livecheck do
-              url :url
-              strategy :github_latest
-            end
-
-            depends_on macos: ">= :sonoma"
-
-            app "JustSpeakToIt.app"
-            binary "#{appdir}/JustSpeakToIt.app/Contents/MacOS/speak"
-
-            zap trash: [
-              "~/Library/Application Support/JustSpeakToIt",
-              "~/Library/Caches/com.justspeaktoit.app",
-              "~/Library/Preferences/com.justspeaktoit.app.plist",
-            ]
-          end
-          EOF
-
-          # Commit and push
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Casks/justspeaktoit.rb
-          git commit -m "Update Just Speak to It to v$VERSION"
-          git push
-
-          echo "==> Homebrew tap updated successfully"
+          chmod +x scripts/update-homebrew-tap.sh
+          ./scripts/update-homebrew-tap.sh "$VERSION" "$ARM64_SHA256" "$UNIVERSAL_SHA256" "${CLI_SHAS[@]}"
 
       - name: Upload Artifacts (for manual builds)
         if: "!startsWith(github.ref, 'refs/tags/mac-v')"
@@ -358,6 +399,10 @@ jobs:
           path: |
             ${{ env.DMG_PATH }}
             ${{ env.LEGACY_DMG_PATH }}
+            ${{ env.CLI_ARM64_ZIP }}
+            ${{ env.CLI_X86_64_ZIP }}
+            ${{ env.CLI_MANIFEST }}
+            ${{ env.CLI_MANIFEST_SIG }}
 
       - name: Cleanup Keychain
         if: always()

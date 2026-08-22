@@ -12,6 +12,15 @@ import SpeakCore
 public final class TranscriptionRecordingService: ObservableObject {
     public static let shared = TranscriptionRecordingService()
 
+    /// The service's lifecycle state, mirrored from the run-identity
+    /// coordinator after every transition. `isRunning` remains as the
+    /// published `recording`-only view for existing observers.
+    @Published public private(set) var state: RecordingServiceState = .idle
+
+    /// Whether a stop/toggle has an operation to act on: a live recording or
+    /// a startup still in flight (which stop will cancel).
+    public var isActive: Bool { lifecycle.isActive }
+
     @Published public private(set) var isRunning = false
     @Published public private(set) var partialText = ""
     @Published public private(set) var wordCount = 0
@@ -30,9 +39,10 @@ public final class TranscriptionRecordingService: ObservableObject {
     private var startTime: Date?
     private var currentModel: String = ""
     private var sharesLiveTranscript = true
-    /// Guards against concurrent double-starts across the suspension points in
-    /// `startRecording` (key load, transcriber start).
-    private var isStarting = false
+    /// Run-identity state machine for cancellable startup (issue #701); the
+    /// pure mechanics live in SpeakCore so they are testable on every
+    /// platform. `state` mirrors it for observers.
+    private let lifecycle = RecordingLifecycleCoordinator()
     /// Last time the App Group shared state was written for a partial result.
     private var lastSharedStateWriteAt: Date = .distantPast
     private static let sharedStateWriteInterval: TimeInterval = 1.0
@@ -74,9 +84,9 @@ public final class TranscriptionRecordingService: ObservableObject {
         requiresLiveActivity: Bool = true,
         keyboardProfile: KeyboardDictationProfileOption? = nil
     ) async throws {
-        guard !isRunning, !isStarting else { return }
-        isStarting = true
-        defer { isStarting = false }
+        guard let runID = lifecycle.beginStart() else { return }
+        state = lifecycle.state
+        defer { state = lifecycle.state }
 
         let settings = AppSettings.shared
         // AppSettings.init publishes empty API keys and loads the real values
@@ -84,7 +94,12 @@ public final class TranscriptionRecordingService: ObservableObject {
         // Button could read those empty keys and silently fall back to Apple
         // Speech, so wait for the initial load before resolving the model.
         await settings.ensureKeysLoaded()
-        guard !isRunning else { return }
+        // A stop/cancel during the suspension above retires the run; nothing
+        // has been allocated yet, so unwinding only settles the state machine.
+        guard lifecycle.isCurrentStartRun(runID) else {
+            unwindCancelledStart()
+            throw CancellationError()
+        }
 
         lastSessionError = nil
         providerFallbackNotice = nil
@@ -134,19 +149,21 @@ public final class TranscriptionRecordingService: ObservableObject {
             ? activityManager.startActivity(provider: activityProvider)
             : false
         if requiresLiveActivity && !activityStarted && !appIsActive {
-            startTime = nil
-            sharedState.clearRecordingState()
+            unwindCancelledStart()
             throw iOSTranscriptionError.liveActivityUnavailable
         }
 
         #if DEBUG && targetEnvironment(simulator)
         if let transcript = sharedState.simulatorValidationTranscript {
             handlePartialResult(text: transcript)
+            _ = lifecycle.activate(runID)
+            state = lifecycle.state
             isRunning = true
             return
         }
         #endif
 
+        var startedSession: IOSTranscriptionSession?
         do {
             let mode: IOSTranscriptionSession.Mode = usesBatchTranscription
                 ? .batch(retainRecording: retainBatchRecording)
@@ -167,19 +184,42 @@ public final class TranscriptionRecordingService: ObservableObject {
             session.onError = { [weak self] error in
                 self?.handleError(error)
             }
-            transcriptionSession = session
+            startedSession = session
             try await session.start()
-
+            // The session this run allocated is published only while the run
+            // is still current; a stop during start() retires the run, and the
+            // cleanup below tears down exactly what this run owns without
+            // touching any replacement run's session (issue #701).
+            guard lifecycle.activate(runID) else {
+                session.cancel()
+                unwindCancelledStart()
+                throw CancellationError()
+            }
+            transcriptionSession = session
             isRunning = true
         } catch {
-            transcriptionSession?.cancel()
-            startTime = nil
-            transcriptionSession = nil
-            self.sharesLiveTranscript = true
-            sharedState.clearRecordingState()
-            activityManager.endActivity()
+            // Unwind runs for the retired case too: a stop that cancelled this
+            // startup is awaiting settlement, and this run still owns whatever
+            // it allocated. `transcriptionSession` is untouched — it is only
+            // ever assigned after successful activation.
+            startedSession?.cancel()
+            unwindCancelledStart()
             throw error
         }
+    }
+
+    /// Reverts everything a cancelled startup run had published: timing,
+    /// shared App Group recording state and the Live Activity. The run calls
+    /// this itself so ownership never crosses runs.
+    private func unwindCancelledStart() {
+        startTime = nil
+        sharesLiveTranscript = true
+        partialText = ""
+        wordCount = 0
+        sharedState.clearRecordingState()
+        activityManager.endActivity()
+        lifecycle.finishStartUnwind()
+        state = lifecycle.state
     }
 
     /// Stops recording, applies the requested result destination, and returns the result.
@@ -196,10 +236,14 @@ public final class TranscriptionRecordingService: ObservableObject {
         saveToHistory: Bool = true,
         primedActivityMessage: String = "Ready for the Action Button"
     ) async -> TranscriptionResult {
-        // Reentrancy guard: a rapid double-stop (e.g. double Action Button
-        // press) must not produce a second history entry or clobber the
-        // clipboard with stale text. Return an empty no-op result instead.
-        guard isRunning else {
+        // A stop during startup cancels the pending run and waits for it to
+        // unwind (issue #701): retiring `activeStartRunID` makes the suspended
+        // start release everything it allocated instead of activating the
+        // microphone after the user asked to stop.
+        if lifecycle.state == .starting {
+            lifecycle.retireStartRun()
+            await lifecycle.awaitStartSettled()
+            state = lifecycle.state
             return TranscriptionResult(
                 text: "",
                 segments: [],
@@ -211,6 +255,23 @@ public final class TranscriptionRecordingService: ObservableObject {
                 debugInfo: nil
             )
         }
+
+        // Reentrancy guard: a rapid double-stop (e.g. double Action Button
+        // press) must not produce a second history entry or clobber the
+        // clipboard with stale text. Return an empty no-op result instead.
+        guard lifecycle.beginStopping() else {
+            return TranscriptionResult(
+                text: "",
+                segments: [],
+                confidence: nil,
+                duration: 0,
+                modelIdentifier: currentModel,
+                cost: nil,
+                rawPayload: nil,
+                debugInfo: nil
+            )
+        }
+        state = lifecycle.state
         isRunning = false
         let duration = elapsedSeconds
 
@@ -290,6 +351,8 @@ public final class TranscriptionRecordingService: ObservableObject {
         partialText = ""
         wordCount = 0
 
+        lifecycle.finishStopping()
+        state = lifecycle.state
         return result
     }
 
@@ -302,8 +365,14 @@ public final class TranscriptionRecordingService: ObservableObject {
         )
     }
 
-    /// Cancels recording without saving.
+    /// Cancels recording without saving. During startup this retires the
+    /// pending run; the suspended start unwinds its own allocations when it
+    /// resumes (issue #701).
     public func cancelRecording() {
+        if lifecycle.state == .starting {
+            lifecycle.retireStartRun()
+            return
+        }
         transcriptionSession?.cancel()
         transcriptionSession = nil
         sharesLiveTranscript = true
@@ -313,6 +382,8 @@ public final class TranscriptionRecordingService: ObservableObject {
         wordCount = 0
         sharedState.clearRecordingState()
         activityManager.endActivity()
+        lifecycle.finishStopping()
+        state = lifecycle.state
     }
 
     // MARK: - Private
@@ -348,7 +419,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         // the mic stayed hot while the user dictated into a dead session.
         // Tear the session down, preserving the accumulated transcript, and
         // publish the error so the app can surface it on next foreground.
-        guard isRunning else { return }
+        guard lifecycle.state == .recording else { return }
         lastSessionError = error
         Task { [weak self] in
             guard let self, self.isRunning else { return }

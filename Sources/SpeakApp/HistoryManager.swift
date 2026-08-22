@@ -41,6 +41,45 @@ struct WALEntry: Codable {
   }
 }
 
+extension [WALEntry] {
+  /// Applies the queued operations, in order, to an item list. Shared by WAL
+  /// replay and by the startup merge of mutations queued while storage was
+  /// unavailable (issue #695). Appends are idempotent by item id.
+  func applied(to items: [HistoryItem]) -> [HistoryItem] {
+    var current = items
+    for entry in self {
+      switch entry.operation {
+      case .append:
+        if let item = entry.item, !current.contains(where: { $0.id == item.id }) {
+          current.insert(item, at: 0)
+        }
+      case .update:
+        if let item = entry.item, let index = current.firstIndex(where: { $0.id == item.id }) {
+          current[index] = item
+        }
+      case .remove:
+        if let item = entry.item {
+          current.removeAll { $0.id == item.id }
+        }
+      case .removeAll:
+        current.removeAll()
+      }
+    }
+    return current
+  }
+}
+
+/// Startup persistence state. `failed` means the on-disk history could not be
+/// loaded; the last snapshot is left untouched and every operation that could
+/// replace it is blocked until a retry succeeds (issue #695).
+enum HistoryLoadState: Equatable {
+  case loading
+  case ready
+  case failed(String)
+
+  var isReady: Bool { self == .ready }
+}
+
 @MainActor
 // swiftlint:disable:next type_body_length
 final class HistoryManager: ObservableObject {
@@ -54,6 +93,14 @@ final class HistoryManager: ObservableObject {
   )
   @Published private(set) var hasMoreItems: Bool = false
   @Published private(set) var isLoadingMore: Bool = false
+
+  /// Startup persistence state. While `.failed`, mutations stay queued in
+  /// memory and nothing on disk is replaced; `retryLoad()` re-attempts.
+  @Published private(set) var loadState: HistoryLoadState = .loading
+
+  /// Most recent WAL/flush failure, for the UI. Cleared by the next durable
+  /// write. Never contains transcript text or file paths.
+  @Published private(set) var persistenceError: String?
 
   /// Monotonic revision bumped on every mutation of history content (load,
   /// append, update, remove, clear-all — including CloudKit-driven merges,
@@ -195,7 +242,17 @@ final class HistoryManager: ObservableObject {
   /// flush bookkeeping; the on-disk append is actor-isolated.
   private func appendToWAL(_ entry: WALEntry) async {
     pendingWrites.append(entry)
-    await walStore.append(entry)
+    // While startup load has failed, nothing may touch the history files: the
+    // entry stays queued in memory and is written after a successful retry.
+    guard loadState.isReady else { return }
+    do {
+      try await walStore.append(entry)
+    } catch {
+      // The mutation is not durable yet; it remains in pendingWrites so the
+      // next flush retries it through the snapshot commit.
+      persistenceError = "History could not be written to disk. It will be retried automatically."
+      log.error("WAL append failed: \(error.localizedDescription, privacy: .public)")
+    }
     if pendingWrites.count >= batchSizeThreshold {
       await flushIfNeeded()
     }
@@ -233,6 +290,10 @@ final class HistoryManager: ObservableObject {
   /// pending writes unflushed. Doing the encode + write synchronously here costs a
   /// short stall during `willTerminate`, but actually persists the data.
   private func flushImmediatelySync() {
+    // A failed startup load means the in-memory view does not contain the
+    // persisted history; writing it here would replace a valid snapshot with
+    // only the newest items (issue #695).
+    guard loadState.isReady else { return }
     guard !pendingWrites.isEmpty, !isFlushing else { return }
     isFlushing = true
     defer { isFlushing = false }
@@ -254,6 +315,8 @@ final class HistoryManager: ObservableObject {
   /// Force immediate flush of all pending writes — now via isolated WAL store
   func flushImmediately() async {
     await waitUntilLoaded()
+    // Never replace the on-disk snapshot from a state that failed to load it.
+    guard loadState.isReady else { return }
     guard !isFlushing else { return }
     isFlushing = true
     defer { isFlushing = false }
@@ -265,8 +328,10 @@ final class HistoryManager: ObservableObject {
     do {
       try await walStore.commitSnapshot(snapshot, flushing: flushedEntries)
       completeFlush(flushedCount: flushedCount)
+      persistenceError = nil
       log.info("Flush complete")
     } catch {
+      persistenceError = "History could not be written to disk. It will be retried automatically."
       log.error("Failed to flush history: \(error.localizedDescription, privacy: .public)")
     }
   }
@@ -300,8 +365,12 @@ final class HistoryManager: ObservableObject {
       } else {
         persisted = try await walStore.loadSnapshot()
       }
+      // Mutations queued while the store was unavailable are replayed on top
+      // of the loaded history, so a retried load keeps both (issue #695). On
+      // first startup the queue is empty and this is the identity.
+      let merged = pendingWrites.applied(to: persisted)
       let (sorted, stats) = await Task.detached(priority: .userInitiated) {
-        let sorted = persisted.sorted { $0.createdAt > $1.createdAt }
+        let sorted = merged.sorted { $0.createdAt > $1.createdAt }
         let stats = Self.calculateStatistics(for: sorted)
         return (sorted, stats)
       }.value
@@ -312,9 +381,30 @@ final class HistoryManager: ObservableObject {
       cachedStatistics = stats
       statistics = stats
       contentRevision &+= 1
+      loadState = .ready
+      // Make the queued mutations durable now that the store is reachable.
+      // They remain in pendingWrites either way; flush commits them.
+      for entry in pendingWrites {
+        try? await walStore.append(entry)
+      }
+      if !pendingWrites.isEmpty {
+        await flushIfNeeded()
+      }
     } catch {
+      // Leave the last snapshot and the in-memory queue untouched: readiness
+      // is explicit, not inferred from task completion (issue #695).
+      loadState = .failed(error.localizedDescription)
+      persistenceError = "History could not be loaded from disk. New sessions are kept in memory until retry succeeds."
       log.error("Failed to load history: \(error.localizedDescription, privacy: .public)")
     }
+  }
+
+  /// Re-attempts a failed startup load. Queued mutations are preserved and
+  /// replayed over the loaded history on success.
+  func retryLoad() async {
+    guard case .failed = loadState else { return }
+    loadState = .loading
+    await loadFromDisk()
   }
 
   /// Loads more items for infinite scroll

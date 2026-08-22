@@ -58,9 +58,15 @@ public final class KeyboardHandoffStore: @unchecked Sendable {
     /// Injectable for deterministic tests. Passing `nil` models a missing or
     /// inaccessible App Group. Tests pass explicit roles to model the two
     /// processes as two independent store instances.
-    public init(defaults: UserDefaults?, role: Role = .detected) {
+    public init(defaults: UserDefaults?, role: Role) {
         self.defaults = defaults
         self.role = role
+    }
+
+    /// The pre-v4 initializer, kept for source and API compatibility (#790):
+    /// the role is detected from the running process, exactly as `shared` does.
+    public convenience init(defaults: UserDefaults?) {
+        self.init(defaults: defaults, role: .detected)
     }
 
     public var isAvailable: Bool {

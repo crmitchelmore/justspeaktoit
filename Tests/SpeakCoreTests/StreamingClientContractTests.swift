@@ -156,6 +156,77 @@ final class StreamingClientContractTests: XCTestCase {
         XCTAssertNil(transcript)
     }
 
+    // MARK: - xAI bounded finalisation (issue #716)
+
+    func testXAIBoundedSend_withheldCompletion_timesOutWithinTheBudget() async {
+        // A transport that never invokes the send completion must not hang the
+        // finalisation; the bridge resumes at the shared deadline.
+        let started = Date()
+        let result = await XAILiveClient.awaitBoundedSend(
+            deadline: Date().addingTimeInterval(0.3)
+        ) { _ in
+            // Completion deliberately withheld.
+        }
+
+        guard case .timedOut = result else {
+            return XCTFail("Expected timedOut, got \(result)")
+        }
+        XCTAssertLessThan(Date().timeIntervalSince(started), 2.0)
+    }
+
+    func testXAIBoundedSend_lateAndDuplicateCompletions_cannotDoubleResume() async {
+        let held = HeldCompletion()
+        let result = await XAILiveClient.awaitBoundedSend(
+            deadline: Date().addingTimeInterval(0.15)
+        ) { completion in
+            held.store(completion)
+        }
+        guard case .timedOut = result else {
+            return XCTFail("Expected timedOut, got \(result)")
+        }
+
+        // A late completion after the timeout — delivered twice, then with an
+        // error — must be ignored; a double resume would crash the test run.
+        held.invoke(with: nil)
+        held.invoke(with: nil)
+        held.invoke(with: URLError(.networkConnectionLost))
+    }
+
+    func testXAIBoundedSend_promptCompletionsReportTheirResult() async {
+        let sent = await XAILiveClient.awaitBoundedSend(
+            deadline: Date().addingTimeInterval(5)
+        ) { completion in
+            completion(nil)
+        }
+        guard case .sent = sent else {
+            return XCTFail("Expected sent, got \(sent)")
+        }
+
+        let failed = await XAILiveClient.awaitBoundedSend(
+            deadline: Date().addingTimeInterval(5)
+        ) { completion in
+            completion(URLError(.networkConnectionLost))
+        }
+        guard case .failed = failed else {
+            return XCTFail("Expected failed, got \(failed)")
+        }
+    }
+
+    func testXAIFinishOutcome_confirmedOnlyWhenAFinalEventArrived() async {
+        let confirmed = XAILiveClient(apiKey: "k")
+        confirmed.ingest(Self.xai("Hello there.", type: "completed"))
+        _ = await confirmed.finishAndWait()
+        XCTAssertEqual(confirmed.lastFinishOutcome, .confirmedFinal)
+
+        // An interim-only session hands back its best available text but must
+        // not claim a clean final.
+        let interimOnly = XAILiveClient(apiKey: "k")
+        interimOnly.ingest(Self.xai("Hello", type: "updated"))
+        let transcript = await interimOnly.finishAndWait()
+        XCTAssertEqual(transcript, "Hello")
+        XCTAssertEqual(interimOnly.lastFinishOutcome, .bestAvailable)
+    }
+
     // MARK: - Finalisation rule
 
     /// Issue #641: a short utterance stopped before the provider's first
@@ -279,6 +350,27 @@ final class StreamingClientContractTests: XCTestCase {
     }
 
     // MARK: - Fixtures
+
+    /// Thread-safe holder for a send completion captured by a fake transport.
+    private final class HeldCompletion: @unchecked Sendable {
+        private let lock = NSLock()
+        private var completion: (@Sendable (Error?) -> Void)?
+
+        func store(_ completion: @escaping @Sendable (Error?) -> Void) {
+            lock.lock()
+            defer { lock.unlock() }
+            self.completion = completion
+        }
+
+        func invoke(with error: Error?) {
+            let held: (@Sendable (Error?) -> Void)? = {
+                lock.lock()
+                defer { lock.unlock() }
+                return completion
+            }()
+            held?(error)
+        }
+    }
 
     private static func deepgramFinal(_ text: String) -> String {
         #"{"channel":{"alternatives":[{"transcript":"\#(text)"}]},"is_final":true}"#

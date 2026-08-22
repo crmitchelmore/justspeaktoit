@@ -1,3 +1,7 @@
+// The client, its event handling and the bounded finalisation exceed the
+// default cap; the send bridge and outcome types already live in
+// XAILiveFinalisation.swift.
+// swiftlint:disable file_length
 import Foundation
 import os
 
@@ -11,7 +15,11 @@ public final class XAILiveClient: FinalizingStreamingTranscriptionClient, @unche
     /// Final shape: every transcription event restates the whole turn so far.
     public let finalShape: TranscriptFinalShape = .cumulativeTranscript
 
-    private static let finishTimeoutSeconds: TimeInterval = 3
+    /// One absolute budget for the whole finalisation: pending audio sends,
+    /// the commit send, the final transcript wait and close all consume the
+    /// same remaining time instead of starting independent timers (#716).
+    static let finishBudgetSeconds: TimeInterval = 5
+    private static let pendingSendStageCapSeconds: TimeInterval = 1.5
     private static let preconfigurationByteLimit = 24_000 * 2 * 5
 
     private let apiKey: String
@@ -31,6 +39,11 @@ public final class XAILiveClient: FinalizingStreamingTranscriptionClient, @unche
     private var latestTranscript = ""
     private var didReceiveFinalTranscript = false
     private var finishContinuation: CheckedContinuation<String?, Never>?
+    private var storedFinishOutcome: FinishOutcome?
+
+    /// Typed outcome of the most recent `finishAndWait()`, alongside the
+    /// protocol's transcript return (#716).
+    var lastFinishOutcome: FinishOutcome? { withStateLock { storedFinishOutcome } }
 
     public init(
         apiKey: String,
@@ -104,19 +117,45 @@ public final class XAILiveClient: FinalizingStreamingTranscriptionClient, @unche
             isStopping = true
             return webSocketTask
         }
-        guard let task else { return currentTranscript() }
-
-        flushBufferedAudioForFinish(on: task)
-        await waitForPendingSends()
-        let commitError = await sendAndWait(.string(#"{"type":"input_audio_buffer.commit"}"#), on: task)
-        if let commitError {
-            currentOnError()?(commitError)
-            close(task)
+        guard let task else {
+            recordFinishOutcome(
+                withStateLock { didReceiveFinalTranscript } ? .confirmedFinal : .bestAvailable
+            )
             return currentTranscript()
         }
 
-        let transcript = await waitForFinalTranscript()
-        close(task)
+        // Every stage below consumes the same absolute deadline (#716): a
+        // stalled pending send, a commit whose completion Foundation never
+        // invokes, and a silent provider each end the finalisation within
+        // `finishBudgetSeconds` in total, not per stage.
+        let deadline = Date().addingTimeInterval(Self.finishBudgetSeconds)
+
+        flushBufferedAudioForFinish(on: task)
+        await waitForPendingSends(deadline: deadline)
+        let commitResult = await Self.awaitBoundedSend(deadline: deadline) { completion in
+            task.send(.string(#"{"type":"input_audio_buffer.commit"}"#)) { completion($0) }
+        }
+        switch commitResult {
+        case .sent:
+            break
+        case .failed(let error):
+            currentOnError()?(mapConnectionError(error))
+            retireAfterFinish(task)
+            recordFinishOutcome(.transportFailure)
+            return currentTranscript()
+        case .timedOut:
+            // The commit was never confirmed delivered; do not wait for an
+            // answer that cannot come and never claim a clean final.
+            retireAfterFinish(task)
+            recordFinishOutcome(.transportFailure)
+            return currentTranscript()
+        }
+
+        let transcript = await waitForFinalTranscript(deadline: deadline)
+        retireAfterFinish(task)
+        recordFinishOutcome(
+            withStateLock { didReceiveFinalTranscript } ? .confirmedFinal : .bestAvailable
+        )
         return transcript
     }
 
@@ -240,18 +279,13 @@ private extension XAILiveClient {
         }
     }
 
-    func sendAndWait(
-        _ message: URLSessionWebSocketTask.Message,
-        on task: URLSessionWebSocketTask
-    ) async -> Error? {
-        await withCheckedContinuation { continuation in
-            task.send(message) { error in
-                continuation.resume(returning: error)
-            }
-        }
-    }
-
-    func waitForPendingSends(timeout: TimeInterval = 1.5) async {
+    func waitForPendingSends(deadline: Date) async {
+        // The stage keeps its historical cap but can never exceed what is
+        // left of the shared finalisation budget (#716).
+        let timeout = min(
+            Self.pendingSendStageCapSeconds,
+            max(0, deadline.timeIntervalSinceNow)
+        )
         let group = pendingSendGroup
         await withCheckedContinuation { continuation in
             // Lock-guarded flag instead of a captured `var`, so the closure can
@@ -276,7 +310,7 @@ private extension XAILiveClient {
         }
     }
 
-    func waitForFinalTranscript() async -> String? {
+    func waitForFinalTranscript(deadline: Date) async -> String? {
         await withCheckedContinuation { continuation in
             let shouldWait = withStateLock { () -> Bool in
                 guard !didReceiveFinalTranscript else { return false }
@@ -288,7 +322,8 @@ private extension XAILiveClient {
                 continuation.resume(returning: currentTranscript())
                 return
             }
-            DispatchQueue.global().asyncAfter(deadline: .now() + Self.finishTimeoutSeconds) { [weak self] in
+            let remaining = max(0, deadline.timeIntervalSinceNow)
+            DispatchQueue.global().asyncAfter(deadline: .now() + remaining) { [weak self] in
                 guard let self else { return }
                 self.resumeFinishIfNeeded(with: self.currentTranscript())
             }
@@ -313,6 +348,22 @@ private extension XAILiveClient {
             return continuation
         }
         continuation?.resume(returning: transcript)
+    }
+
+    /// Retires the session state a finished (or timed-out) run owns: the
+    /// socket, buffered audio and the finish continuation. Guarded by task
+    /// identity, so a late callback from this run cannot mutate a newer one.
+    func retireAfterFinish(_ task: URLSessionWebSocketTask) {
+        withStateLock {
+            guard webSocketTask === task || webSocketTask == nil else { return }
+            pendingAudio = []
+        }
+        close(task)
+        resumeFinishIfNeeded(with: nil)
+    }
+
+    func recordFinishOutcome(_ outcome: FinishOutcome) {
+        withStateLock { storedFinishOutcome = outcome }
     }
 
     func close(_ task: URLSessionWebSocketTask) {

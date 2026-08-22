@@ -3,6 +3,27 @@ import XCTest
 import SpeakCore
 @testable import SpeakApp
 
+/// FileManager that redirects Application Support to a temporary directory so
+/// `SpeechInsightsModel` persists its aggregate to an isolated location.
+private final class TemporaryApplicationSupportFileManager: FileManager {
+  let supportURL: URL
+
+  init(supportURL: URL) {
+    self.supportURL = supportURL
+    super.init()
+  }
+
+  override func urls(
+    for directory: FileManager.SearchPathDirectory,
+    in domainMask: FileManager.SearchPathDomainMask
+  ) -> [URL] {
+    guard directory == .applicationSupportDirectory else {
+      return super.urls(for: directory, in: domainMask)
+    }
+    return [supportURL]
+  }
+}
+
 final class SpeechInsightsModelTests: XCTestCase {
   func testSessionRecord_usesRawTranscriptAndMetadata() {
     let created = Date(timeIntervalSince1970: 1_785_888_000)
@@ -45,7 +66,43 @@ final class SpeechInsightsModelTests: XCTestCase {
     XCTAssertEqual(SpeechInsightsModel.sessionRecord(from: item)?.duration, 90)
   }
 
+  // MARK: - Refresh invalidation
+
+  /// Acceptance for #682: replacing only the raw transcript of an existing
+  /// UUID must update the visible summary and the persisted aggregate, and a
+  /// relaunch from disk must agree with the in-memory result.
+  @MainActor
+  func testRefresh_transcriptEditUnderExistingIDUpdatesSummaryAndPersistedAggregate() async throws {
+    let tempDir = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tempDir) }
+    let fileManager = TemporaryApplicationSupportFileManager(supportURL: tempDir)
+
+    let model = SpeechInsightsModel(fileManager: fileManager)
+    let original = makeHistoryItem(raw: "alpha alpha alpha", processed: nil, duration: 30)
+    model.refresh(using: [original])
+    await model.waitForPendingRefresh()
+    XCTAssertEqual(model.summary?.topWords.map(\.term), ["alpha"])
+
+    // Same UUID and metadata, new transcript (CloudKit merge / reprocess).
+    let edited = makeHistoryItem(
+      id: original.id, raw: "bravo bravo", processed: nil, duration: 30
+    )
+    model.refresh(using: [edited])
+    await model.waitForPendingRefresh()
+    XCTAssertEqual(model.summary?.topWords.map(\.term), ["bravo"],
+                   "stale transcript contribution must be replaced")
+
+    // Relaunch: a fresh model loading the persisted aggregate must agree.
+    let relaunched = SpeechInsightsModel(fileManager: fileManager)
+    relaunched.refresh(using: [edited])
+    await relaunched.waitForPendingRefresh()
+    XCTAssertEqual(relaunched.summary, model.summary)
+  }
+
   private func makeHistoryItem(
+    id: UUID = UUID(),
     raw: String?,
     processed: String?,
     duration: TimeInterval,
@@ -54,6 +111,7 @@ final class SpeechInsightsModelTests: XCTestCase {
     recordingEnded: Date? = nil
   ) -> HistoryItem {
     HistoryItem(
+      id: id,
       createdAt: createdAt,
       modelsUsed: ["deepgram/nova-3"],
       modelUsages: [

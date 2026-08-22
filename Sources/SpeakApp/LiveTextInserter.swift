@@ -60,6 +60,12 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
   /// (latency checkpoint: first character visible in the target app).
   private(set) var firstInsertionAt: Date?
 
+  /// UTF-16 range the finalised text occupies in the target field after the
+  /// last successful write, or nil when the session cannot vouch for where its
+  /// text landed. Voice Edit's "last dictation" fallback edits exactly this
+  /// range (issue #673).
+  private(set) var lastInsertedRange: VoiceEditTextRange?
+
   /// Strategy chosen for the current session.
   private(set) var strategy: InsertionStrategy = .fullValue
 
@@ -112,6 +118,7 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
     firstInsertionVerified = false
     hasPerformedAccessibilityWrite = false
     self.firstInsertionAt = nil
+    self.lastInsertedRange = nil
     self.strategy = strategy
     self.streamingAnchorUTF16 = nil
     self.streamingPendingSelectionUTF16 = 0
@@ -143,6 +150,7 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
     firstInsertionVerified = false
     hasPerformedAccessibilityWrite = false
     self.firstInsertionAt = nil
+    self.lastInsertedRange = nil
     self.strategy = .fullValue
     self.streamingAnchorUTF16 = nil
     self.streamingPendingSelectionUTF16 = 0
@@ -322,17 +330,22 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
     )
 
     var finalValue: String
+    // UTF-16 offset where `newText` starts in `finalValue`, when known.
+    var insertedLocation: Int?
     if getStatus == .success, let current = currentValue as? String {
       // Remove what we previously inserted, add the new text
       if current.hasSuffix(insertedText) && !insertedText.isEmpty {
         let prefix = String(current.dropLast(insertedText.count))
         finalValue = prefix + newText
+        insertedLocation = prefix.utf16.count
       } else {
         // Can't find our inserted text - just append
         finalValue = current.isEmpty ? newText : current
+        insertedLocation = current.isEmpty ? 0 : nil
       }
     } else {
       finalValue = newText
+      insertedLocation = 0
     }
 
     let setResult = AXUIElementSetAttributeValue(
@@ -343,6 +356,9 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
       recordAccessibilityWrite()
       insertedText = newText
       confirmedCharCount = insertedText.count
+      lastInsertedRange = insertedLocation.map {
+        VoiceEditTextRange(location: $0, length: newText.utf16.count)
+      }
       return .applied
     } else {
       deferToStandardDelivery(
@@ -383,6 +399,10 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
       recordAccessibilityWrite()
       insertedText = text
       confirmedCharCount = text.count
+      lastInsertedRange = VoiceEditTextRange(
+        location: newValue.utf16.count - text.utf16.count,
+        length: text.utf16.count
+      )
       return .applied
     } else {
       deferToStandardDelivery(
@@ -503,6 +523,7 @@ extension LiveTextInserter {
       // the first partial.
       logger.warning("Streaming finalize: focused element lost, keeping streamed text")
       lastError = TextOutputError.unableToFindFocusedElement
+      recordStreamedRegion(length: insertedText.utf16.count)
       return .applied
     }
 
@@ -536,12 +557,14 @@ extension LiveTextInserter {
 
     let diff = StreamingTextReconciler.diff(from: insertedText, to: finalText)
     if diff.isNoOp {
+      recordStreamedRegion(length: finalText.utf16.count)
       return .applied
     }
 
     if applyStreamingDiff(diff, on: field) {
       insertedText = finalText
       confirmedCharCount = finalText.count
+      recordStreamedRegion(length: finalText.utf16.count)
       return .applied
     }
     if usingClipboardFallback {
@@ -558,7 +581,15 @@ extension LiveTextInserter {
     // delivery the user can see, which is a worse report than the mild
     // inaccuracy of treating a near-final transcript as delivered.
     logger.warning("Streaming finalize failed after writes; keeping streamed text")
+    recordStreamedRegion(length: insertedText.utf16.count)
     return .applied
+  }
+
+  /// Publishes the streamed region as this session's final insertion range.
+  private func recordStreamedRegion(length: Int) {
+    lastInsertedRange = self.streamingAnchorUTF16.map {
+      VoiceEditTextRange(location: $0, length: length)
+    }
   }
 
   /// Selects `diff`'s range (offset by the region anchor) and replaces it.

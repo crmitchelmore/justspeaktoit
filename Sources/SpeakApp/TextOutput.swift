@@ -37,6 +37,20 @@ private let logger = SpeakLogger.logger(category: "TextOutput")
 struct TextOutputResult {
   let method: HistoryTrigger.OutputMethod
   let error: Error?
+  /// Where the text landed in the focused field, when the delivery path can
+  /// tell. Voice Edit's "last dictation" fallback edits this exact range
+  /// (issue #673).
+  let insertedRange: VoiceEditTextRange?
+
+  init(
+    method: HistoryTrigger.OutputMethod,
+    error: Error?,
+    insertedRange: VoiceEditTextRange? = nil
+  ) {
+    self.method = method
+    self.error = error
+    self.insertedRange = insertedRange
+  }
 }
 
 func currentSystemFocusedElement() -> AXUIElement? {
@@ -225,22 +239,7 @@ struct AccessibilityTextOutput: TextOutputting {
 
     switch appSettings.accessibilityInsertionMode {
     case .insertAtCursor:
-      // Insert at cursor by replacing the current selection (or inserting if selection is empty)
-      let setResult = AXUIElementSetAttributeValue(
-        focusedElement, kAXSelectedTextAttribute as CFString, text as CFTypeRef)
-      guard setResult == .success else {
-        // Fall back to replacing the whole field if selected text insertion isn't supported
-        let fallbackResult = AXUIElementSetAttributeValue(
-          focusedElement, kAXValueAttribute as CFString, text as CFTypeRef)
-        guard fallbackResult == .success else {
-          return TextOutputResult(
-            method: .none,
-            error: TextOutputError.unableToSetValue(fallbackResult)
-          )
-        }
-        return TextOutputResult(method: .accessibility, error: nil)
-      }
-      return TextOutputResult(method: .accessibility, error: nil)
+      return insertAtCursor(text, into: focusedElement)
 
     case .replaceAll:
       let setResult = AXUIElementSetAttributeValue(
@@ -251,8 +250,44 @@ struct AccessibilityTextOutput: TextOutputting {
           error: TextOutputError.unableToSetValue(setResult)
         )
       }
-      return TextOutputResult(method: .accessibility, error: nil)
+      return TextOutputResult(
+        method: .accessibility,
+        error: nil,
+        insertedRange: VoiceEditTextRange(location: 0, length: text.utf16.count)
+      )
     }
+  }
+
+  /// Replaces the current selection (or inserts at the caret), falling back to
+  /// replacing the whole field when the app rejects selected-text insertion.
+  private func insertAtCursor(_ text: String, into focusedElement: AXUIElement) -> TextOutputResult {
+    // The selection about to be replaced tells us where the text will land.
+    let selectionBeforeInsert = AccessibilityStreamingTextField(element: focusedElement)
+      .readSelectedRange()
+    let setResult = AXUIElementSetAttributeValue(
+      focusedElement, kAXSelectedTextAttribute as CFString, text as CFTypeRef)
+    guard setResult == .success else {
+      let fallbackResult = AXUIElementSetAttributeValue(
+        focusedElement, kAXValueAttribute as CFString, text as CFTypeRef)
+      guard fallbackResult == .success else {
+        return TextOutputResult(
+          method: .none,
+          error: TextOutputError.unableToSetValue(fallbackResult)
+        )
+      }
+      return TextOutputResult(
+        method: .accessibility,
+        error: nil,
+        insertedRange: VoiceEditTextRange(location: 0, length: text.utf16.count)
+      )
+    }
+    return TextOutputResult(
+      method: .accessibility,
+      error: nil,
+      insertedRange: selectionBeforeInsert.map {
+        VoiceEditTextRange(location: $0.location, length: text.utf16.count)
+      }
+    )
   }
 
   /// A non-nil target is a captured-field contract: when its AX element is
@@ -309,13 +344,16 @@ struct PasteTextOutput: TextOutputting {
 
     let canPasteIntoOtherApps = DistributionChannel.current.supportsAccessibilityTextInsertion
     let restoreClipboard = canPasteIntoOtherApps && appSettings.restoreClipboardAfterPaste
-    let previousString = restoreClipboard ? pasteboard.string(forType: .string) : nil
+    // Every item and type, not just the string: an image, file or rich-only
+    // clipboard must survive the temporary paste intact (issue #673).
+    let previousContents = restoreClipboard ? PasteboardSnapshot(reading: pasteboard) : nil
 
     pasteboard.clearContents()
     guard pasteboard.setString(text, forType: .string) else {
       return TextOutputResult(method: .none, error: TextOutputError.clipboardWriteFailed)
     }
 
+    var insertedRange: VoiceEditTextRange?
     if canPasteIntoOtherApps {
       let destination = Self.eventDestination(for: target)
       guard destination != .none else {
@@ -345,16 +383,30 @@ struct PasteTextOutput: TextOutputting {
           )
         }
       }
+      // Read before the paste replaces the selection; the pasted text starts
+      // where the selection started.
+      insertedRange = pasteLandingRange(in: target, for: text)
       guard simulatePasteShortcut(destination: destination) else {
         return TextOutputResult(method: .clipboard, error: TextOutputError.pasteShortcutUnavailable)
       }
     }
 
-    if restoreClipboard {
-      scheduleClipboardRestore(previousString, on: pasteboard)
+    if let previousContents {
+      scheduleClipboardRestore(previousContents, on: pasteboard)
     }
 
-    return TextOutputResult(method: .clipboard, error: nil)
+    return TextOutputResult(method: .clipboard, error: nil, insertedRange: insertedRange)
+  }
+
+  /// Where `text` will land in the captured field, when Accessibility lets us
+  /// read the current selection. Nil when unknown; consumers verify the text
+  /// at the range before trusting it.
+  private func pasteLandingRange(in target: TextOutputTarget?, for text: String) -> VoiceEditTextRange? {
+    guard let element = target?.focusedElement,
+      permissionsManager.status(for: .accessibility).isGranted,
+      let selection = AccessibilityStreamingTextField(element: element).readSelectedRange()
+    else { return nil }
+    return VoiceEditTextRange(location: selection.location, length: text.utf16.count)
   }
 
   static func hasDeliverableText(_ text: String) -> Bool {
@@ -396,13 +448,10 @@ struct PasteTextOutput: TextOutputting {
     return .process(processIdentifier)
   }
 
-  private func scheduleClipboardRestore(_ previousString: String?, on pasteboard: NSPasteboard) {
+  private func scheduleClipboardRestore(_ previousContents: PasteboardSnapshot, on pasteboard: NSPasteboard) {
     let delay = DispatchTime.now() + .milliseconds(300)
     DispatchQueue.main.asyncAfter(deadline: delay) {
-      pasteboard.clearContents()
-      if let previousString {
-        pasteboard.setString(previousString, forType: .string)
-      }
+      previousContents.restore(to: pasteboard)
     }
   }
 }

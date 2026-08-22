@@ -16,6 +16,10 @@ struct RecordingSummary: Identifiable, Hashable {
 enum AudioRecordingOwner: Sendable {
   case dictation
   case auxiliary
+  /// A Voice Edit instruction recording. Reported to the warm coordinator like
+  /// any auxiliary capture, but identified so dictation's failure cleanup can
+  /// never cancel it (issue #673).
+  case voiceEdit
 }
 
 enum AudioRecordingLifecycleEvent: Sendable {
@@ -429,7 +433,7 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
         try? FileManager.default.setAttributes(
           [.creationDate: startDate], ofItemAtPath: started.url.path)
       }
-      if owner == .auxiliary {
+      if owner != .dictation {
         self.lifecycleHandler?(.auxiliaryStarted)
       }
       return RecordingStart(url: started.url, usedWarmRecorder: started.isWarm)
@@ -567,14 +571,23 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
       activeInputSession = nil
     }
 
-    if owner == .auxiliary {
+    if owner != .dictation {
       self.lifecycleHandler?(.auxiliaryEnded)
     }
 
     return summary
   }
 
-  func cancelRecording(deleteFile: Bool = true) async {
+  /// Cancels the active recording. When `expectedOwner` is given, a recording
+  /// owned by another flow is left untouched: each flow may only cancel what
+  /// it started (issue #673).
+  func cancelRecording(
+    deleteFile: Bool = true,
+    ifOwnedBy expectedOwner: AudioRecordingOwner? = nil
+  ) async {
+    if let expectedOwner, let currentOwner = currentRecordingOwner, currentOwner != expectedOwner {
+      return
+    }
     let session = activeInputSession
     let owner = currentRecordingOwner
 
@@ -596,7 +609,7 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
       activeInputSession = nil
     }
 
-    if owner == .auxiliary {
+    if let owner, owner != .dictation {
       self.lifecycleHandler?(.auxiliaryEnded)
     }
   }

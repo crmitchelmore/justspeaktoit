@@ -77,6 +77,15 @@ final class MainManager: ObservableObject {
   /// Applies/reverts per-app dictation profile overrides for a session.
   private let profileApplier = SessionProfileApplier()
 
+  /// Reservation shared with Voice Edit for the recorder and live transcriber
+  /// (issue #673). Dictation claims it in `startSession` and gives it back
+  /// whenever `activeSession` clears.
+  let captureOwnership = CaptureSessionOwnership()
+
+  /// Where the last dictation landed, for Voice Edit's "last dictation"
+  /// fallback (issue #673).
+  let insertionRecords = InsertionRecordStore()
+
   var activeSession: ActiveSession? {
     didSet {
       // Every session-teardown path clears `activeSession`, so this is the one
@@ -85,6 +94,7 @@ final class MainManager: ObservableObject {
       if activeSession == nil {
         profileApplier.end(settings: appSettings, postProcessing: postProcessingManager)
         captureWarmer?.sessionDidEnd()
+        captureOwnership.release(.dictation)
       }
     }
   }
@@ -591,6 +601,23 @@ final class MainManager: ObservableObject {
         message: "Plug in a USB or Bluetooth microphone and try again."
       )
       return .rejected(.audioUnavailable)
+    }
+
+    // Voice Edit may own the shared recorder and live stream right now. Starting
+    // on top of it would hit `alreadyRecording` and the failure path would then
+    // cancel Voice Edit's capture, so refuse before touching either (issue #673).
+    guard captureOwnership.reserve(.dictation) else {
+      profileApplier.end(settings: appSettings, postProcessing: postProcessingManager)
+      captureWarmer?.sessionDidEnd()
+      let message = "Voice edit is in progress. Finish or cancel it first."
+      state = .failed(message)
+      lastErrorMessage = message
+      hudManager.finishFailure(
+        headline: "Voice edit in progress",
+        message: "Finish or cancel the voice edit, then start dictation.",
+        displayDuration: 3
+      )
+      return .rejected(.captureFailed)
     }
 
     // Failsafe: if live transcription is still running but we have no activeSession,
@@ -1109,10 +1136,18 @@ final class MainManager: ObservableObject {
       switch liveFinalizationResult {
       case .applied:
         session.outputMethod = .accessibility
+        recordInsertion(
+          of: liveTextInserter.insertedText,
+          range: liveTextInserter.lastInsertedRange,
+          target: session.outputTarget
+        )
       case .deferred:
         let output = SmartTextOutput(permissionsManager: permissionsManager, appSettings: appSettings)
         let outputResult = output.output(text: finalText, target: session.outputTarget)
         session.outputMethod = outputResult.method
+        if outputResult.error == nil {
+          recordInsertion(of: finalText, range: outputResult.insertedRange, target: session.outputTarget)
+        }
 
         if let error = outputResult.error {
           session.errors.append(
@@ -1292,6 +1327,9 @@ final class MainManager: ObservableObject {
       let outputResult = output.output(text: finalText, target: session.outputTarget)
       session.outputMethod = outputResult.method
       session.outputDelivered = Date()
+      if outputResult.error == nil {
+        recordInsertion(of: finalText, range: outputResult.insertedRange, target: session.outputTarget)
+      }
 
       if let error = outputResult.error {
         session.errors.append(

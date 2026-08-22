@@ -545,6 +545,8 @@ extension SettingsView {
       }
       .speakTooltip("Control Speak from scripts, the terminal, or an AI agent over a local socket.")
 
+      automationCLICard
+
       SettingsCard(title: "Housekeeping", systemImage: "tray.full", tint: Color.brandAccentWarm) {
         VStack(alignment: .leading, spacing: 12) {
           HStack(alignment: .top, spacing: 12) {

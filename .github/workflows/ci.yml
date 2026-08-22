@@ -174,6 +174,8 @@ jobs:
         run: tuist generate --no-open
 
       - name: Test iOS App and Action Button Settings
+        # The full log is kept: `tail` only shows the closing summary, which
+        # names a failed test without the assertion that failed (issue #793).
         run: |
           set -o pipefail
           xcodebuild test \
@@ -182,9 +184,31 @@ jobs:
             -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
             -only-testing:SpeakiOSTests \
             -only-testing:SpeakiOSUITests \
+            -resultBundlePath "$RUNNER_TEMP/SpeakiOS.xcresult" \
             -skipPackagePluginValidation \
             -quiet \
-            2>&1 | tail -50
+            2>&1 | tee "$RUNNER_TEMP/ios-tests.log" | tail -50
+
+      # Both diagnostics also run when the job is cancelled (a superseded push
+      # cancels in-progress runs): a partial log still names the assertion
+      # that had already failed.
+      - name: Show failing assertions
+        if: ${{ failure() || cancelled() }}
+        run: |
+          echo "::group::Assertion failures and crashes from the iOS test log"
+          grep -nE 'error: |Fatal error|Assertion Failure|Failed to (get|find|launch)|Restarting after|crashed' \
+            "$RUNNER_TEMP/ios-tests.log" | head -200 || echo "(none matched)"
+          echo "::endgroup::"
+
+      - name: Upload iOS test results
+        if: ${{ failure() || cancelled() }}
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: ios-test-results
+          path: |
+            ${{ runner.temp }}/SpeakiOS.xcresult
+            ${{ runner.temp }}/ios-tests.log
+          if-no-files-found: ignore
 
       - name: Build watchOS App (feature-flagged)
         # The watch app target only exists when generated with

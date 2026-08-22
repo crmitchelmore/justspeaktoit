@@ -84,6 +84,41 @@ final class LiveTextInserterStreamingTests: XCTestCase {
         return inserter
     }
 
+    // MARK: - Insertion range for Voice Edit (issue #673)
+
+    @MainActor
+    func testFinalizeRecordsTheStreamedRegionAsTheInsertionRange() {
+        let field = FakeStreamingTextField(
+            value: "Note: ", selection: CFRange(location: 6, length: 0)
+        )
+        let inserter = self.makeInserter(field: field)
+        XCTAssertNil(inserter.lastInsertedRange, "Nothing has been written yet")
+
+        inserter.update(with: "hello")
+        inserter.update(with: "hello there")
+        let result = inserter.applyPolishedFinal("Hello there.")
+
+        guard case .applied = result else {
+            return XCTFail("Expected the final text to be applied, got \(result)")
+        }
+        XCTAssertEqual(field.value, "Note: Hello there.")
+        XCTAssertEqual(inserter.lastInsertedRange, VoiceEditTextRange(location: 6, length: 12))
+        XCTAssertEqual(inserter.lastInsertedRange?.substring(of: field.value), "Hello there.")
+    }
+
+    @MainActor
+    func testInsertionRangeIsClearedWhenANewSessionBegins() {
+        let field = FakeStreamingTextField(value: "", selection: CFRange(location: 0, length: 0))
+        let inserter = self.makeInserter(field: field)
+        inserter.update(with: "hello")
+        _ = inserter.applyPolishedFinal("hello")
+        XCTAssertNotNil(inserter.lastInsertedRange)
+
+        inserter.reset()
+
+        XCTAssertNil(inserter.lastInsertedRange)
+    }
+
     // MARK: - Happy path
 
     @MainActor

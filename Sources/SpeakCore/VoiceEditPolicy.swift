@@ -37,12 +37,24 @@ public enum VoiceEditPolicy {
         raw.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Cleans a model response into replacement text: trims outer whitespace, strips a wrapping
-    /// code fence, and strips symmetric wrapping quotes that the original selection did not have.
-    public static func normalizedRewrite(_ raw: String, original: String) -> String {
-        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        text = strippingCodeFence(from: text, original: original)
-        text = strippingWrappingQuotes(from: text, original: original)
+    /// Cleans a model response into replacement text by removing only provably accidental
+    /// wrappers: outer whitespace the original selection did not have, a wrapping code fence,
+    /// and symmetric wrapping quotes the original did not have. Formatting the spoken
+    /// instruction asked for — quotes, a code block, indentation, line breaks — is never
+    /// removed, because the response is then the requested output (issue #673).
+    public static func normalizedRewrite(
+        _ raw: String,
+        original: String,
+        instruction: String = ""
+    ) -> String {
+        let intent = VoiceEditFormattingIntent(instruction: instruction)
+        var text = trimmingAccidentalWhitespace(from: raw, original: original, intent: intent)
+        if !intent.requestsCodeFence {
+            text = strippingCodeFence(from: text, original: original)
+        }
+        if !intent.requestsQuotes {
+            text = strippingWrappingQuotes(from: text, original: original)
+        }
         return text
     }
 
@@ -53,6 +65,28 @@ public enum VoiceEditPolicy {
         let instruction: String
     }
 
+    /// Trims leading/trailing whitespace only where the original selection had none, so an
+    /// indented selection keeps its indentation and a selection ending in a newline keeps it.
+    private static func trimmingAccidentalWhitespace(
+        from text: String,
+        original: String,
+        intent: VoiceEditFormattingIntent
+    ) -> String {
+        guard !intent.requestsWhitespace else { return text }
+        var result = Substring(text)
+        let originalStartsWithWhitespace = original.first?.isWhitespace ?? false
+        let originalEndsWithWhitespace = original.last?.isWhitespace ?? false
+        if !originalStartsWithWhitespace {
+            result = result.drop(while: \.isWhitespace)
+        }
+        if !originalEndsWithWhitespace {
+            while let last = result.last, last.isWhitespace {
+                result.removeLast()
+            }
+        }
+        return String(result)
+    }
+
     private static func strippingCodeFence(from text: String, original: String) -> String {
         guard text.hasPrefix("```"), text.hasSuffix("```"), !original.hasPrefix("```") else {
             return text
@@ -61,7 +95,8 @@ public enum VoiceEditPolicy {
         guard lines.count >= 2 else { return text }
         lines.removeFirst()
         lines.removeLast()
-        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        // Only the fence's own line breaks are accidental; indentation inside it is content.
+        return lines.joined(separator: "\n").trimmingCharacters(in: .newlines)
     }
 
     private static func strippingWrappingQuotes(from text: String, original: String) -> String {
@@ -87,5 +122,36 @@ public enum VoiceEditPolicy {
             preconditionFailure("Voice edit payload must be JSON encodable")
         }
         return string
+    }
+}
+
+/// Output formatting the spoken instruction explicitly asked for. Response cleanup consults
+/// this so it only removes wrappers the model added on its own.
+public struct VoiceEditFormattingIntent: Equatable, Sendable {
+    public let requestsQuotes: Bool
+    public let requestsCodeFence: Bool
+    public let requestsWhitespace: Bool
+
+    public init(requestsQuotes: Bool, requestsCodeFence: Bool, requestsWhitespace: Bool) {
+        self.requestsQuotes = requestsQuotes
+        self.requestsCodeFence = requestsCodeFence
+        self.requestsWhitespace = requestsWhitespace
+    }
+
+    public init(instruction: String) {
+        let lowered = instruction.lowercased()
+        func mentions(_ terms: [String]) -> Bool {
+            terms.contains { lowered.contains($0) }
+        }
+        self.init(
+            requestsQuotes: mentions(["quote", "quotation", "inverted comma", "speech mark"]),
+            requestsCodeFence: mentions([
+                "code block", "code fence", "fenced", "backtick", "```", "code snippet", "as code"
+            ]),
+            requestsWhitespace: mentions([
+                "indent", "whitespace", "white space", "newline", "new line", "line break",
+                "blank line", "trailing", "leading", "tab", "padding"
+            ])
+        )
     }
 }

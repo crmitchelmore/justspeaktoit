@@ -19,11 +19,12 @@ env:
 jobs:
   build-and-release:
     runs-on: macos-15
-    # Archive + app notarisation polling (up to 60 min) + DMG notarisation and publication.
-    timeout-minutes: 180
+    # Two archives (arm64 primary + universal legacy), each with app
+    # notarisation polling (up to 60 min) and DMG notarisation, then publication.
+    timeout-minutes: 240
     permissions:
       contents: write
-    
+
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -66,19 +67,19 @@ jobs:
           # Create temporary keychain
           KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
           KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
-          
+
           security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
           security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-          
+
           # Import certificate
           CERTIFICATE_PATH=$RUNNER_TEMP/certificate.p12
           echo -n "$APPLE_DEVELOPER_ID_APPLICATION" | base64 --decode -o $CERTIFICATE_PATH
-          
+
           security import $CERTIFICATE_PATH -P "$APPLE_DEVELOPER_ID_APPLICATION_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
           security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
           security list-keychain -d user -s $KEYCHAIN_PATH
-          
+
           # Clean up
           rm -f $CERTIFICATE_PATH
 
@@ -162,214 +163,60 @@ jobs:
             --tag "${GITHUB_REF_NAME}" \
             --notes-file "$RUNNER_TEMP/release-notes.md"
 
-      - name: Build Release Archive
+      - name: Start artefact size summary
         run: |
-          # Archive unsigned to avoid automatic-development signing on CI runners.
-          # Distribution signing and profile resolution happens at export time.
-          xcodebuild archive \
-            -workspace "$WORKSPACE" \
-            -scheme "$SCHEME" \
-            -configuration Release \
-            -archivePath $RUNNER_TEMP/$PRODUCT_NAME.xcarchive \
-            -destination "generic/platform=macOS" \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="-" \
-            CODE_SIGNING_ALLOWED=NO \
-            PRODUCT_BUNDLE_IDENTIFIER=com.justspeaktoit.mac \
-            ENABLE_HARDENED_RUNTIME=YES
+          {
+            echo "## Release artefacts (v${{ steps.version.outputs.version }}, build ${BUILD_NUMBER})"
+            echo ""
+            echo "| Variant | DMG | Installed app | Main executable | speak CLI | Archs |"
+            echo "|---|---:|---:|---:|---:|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Verify archived release notes
+      # Two downloads per release (issue #774): the arm64-only primary that
+      # Apple Silicon Macs download and update to, and the universal legacy
+      # build that Intel Macs — and every install that predates per-architecture
+      # artefacts — keep receiving through the original appcast.xml feed.
+      - name: Package arm64 primary
+        id: arm64
+        uses: ./.github/actions/package-mac-release
+        with:
+          variant: arm64
+          version: ${{ steps.version.outputs.version }}
+          apple-id: ${{ secrets.APPLE_ID }}
+          apple-id-password: ${{ secrets.APPLE_ID_PASSWORD }}
+          apple-team-id: ${{ secrets.APPLE_TEAM_ID }}
+          app-store-connect-issuer-id: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          app-store-connect-key-id: ${{ env.APP_STORE_CONNECT_KEY_ID }}
+
+      - name: Package universal legacy
+        id: universal
+        uses: ./.github/actions/package-mac-release
+        with:
+          variant: universal
+          version: ${{ steps.version.outputs.version }}
+          apple-id: ${{ secrets.APPLE_ID }}
+          apple-id-password: ${{ secrets.APPLE_ID_PASSWORD }}
+          apple-team-id: ${{ secrets.APPLE_TEAM_ID }}
+          app-store-connect-issuer-id: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          app-store-connect-key-id: ${{ env.APP_STORE_CONNECT_KEY_ID }}
+
+      - name: Publish artefact paths
         run: |
-          APP_PATH="$RUNNER_TEMP/$PRODUCT_NAME.xcarchive/Products/Applications/$PRODUCT_NAME.app"
-          CATALOGUE_PATH=$(find "$APP_PATH" -name ReleaseNotes.json -print -quit)
-          if [ -z "$CATALOGUE_PATH" ]; then
-            echo "::error::Archived app does not contain ReleaseNotes.json"
-            exit 1
-          fi
-          node scripts/update-release-notes-catalogue.mjs \
-            --verify \
-            --platform mac \
-            --version "${{ steps.version.outputs.version }}" \
-            --catalogue "$CATALOGUE_PATH"
+          {
+            echo "DMG_PATH=${{ steps.arm64.outputs.dmg-path }}"
+            echo "APP_PATH=${{ steps.arm64.outputs.app-path }}"
+            echo "ARCHIVE_PATH=${{ steps.arm64.outputs.archive-path }}"
+            echo "LEGACY_DMG_PATH=${{ steps.universal.outputs.dmg-path }}"
+            echo "LEGACY_APP_PATH=${{ steps.universal.outputs.app-path }}"
+            echo "LEGACY_ARCHIVE_PATH=${{ steps.universal.outputs.archive-path }}"
+          } >> "$GITHUB_ENV"
 
-      - name: Export App (Developer ID / Ad-Hoc)
-        env:
-          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-        run: |
-          # Create export options plist for Developer ID distribution
-          cat > $RUNNER_TEMP/ExportOptions.plist << EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>method</key>
-              <string>developer-id</string>
-              <key>teamID</key>
-              <string>${{ secrets.APPLE_TEAM_ID }}</string>
-              <key>signingStyle</key>
-              <string>automatic</string>
-              <key>signingCertificate</key>
-              <string>Developer ID Application</string>
-          </dict>
-          </plist>
-          EOF
-          
-          xcodebuild -exportArchive \
-            -archivePath $RUNNER_TEMP/$PRODUCT_NAME.xcarchive \
-            -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist \
-            -exportPath $RUNNER_TEMP/export \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_${{ env.APP_STORE_CONNECT_KEY_ID }}.p8 \
-            -authenticationKeyID ${{ env.APP_STORE_CONNECT_KEY_ID }} \
-            -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID" \
-            ENABLE_HARDENED_RUNTIME=YES \
-            OTHER_CODE_SIGN_FLAGS="--options runtime"
-
-      - name: Embed speak CLI
-        run: |
-          APP_PATH="$RUNNER_TEMP/export/$PRODUCT_NAME.app"
-          chmod +x scripts/build-speak-cli.sh
-          ./scripts/build-speak-cli.sh "$APP_PATH" "Developer ID Application"
-
-      - name: Verify Hardened Runtime
-        run: |
-          APP_PATH="$RUNNER_TEMP/export/$PRODUCT_NAME.app"
-          MAIN_BINARY="$APP_PATH/Contents/MacOS/$PRODUCT_NAME"
-
-          # Exported app signs correctly for Developer ID but omits runtime option.
-          # Re-sign the main binary with runtime, then refresh app bundle signature.
-          codesign --force --timestamp --options runtime \
-            --sign "Developer ID Application" \
-            --entitlements Config/SpeakMacOS.entitlements \
-            "$MAIN_BINARY"
-
-          codesign --force --timestamp \
-            --sign "Developer ID Application" \
-            --options runtime \
-            --entitlements Config/SpeakMacOS.entitlements \
-            "$APP_PATH"
-
-          CODESIGN_INFO=$(codesign -dv --verbose=4 "$MAIN_BINARY" 2>&1)
-          echo "$CODESIGN_INFO"
-          echo "$CODESIGN_INFO" | grep -q "runtime"
-
-      - name: Verify App Launches (Pre-Notarisation)
-        run: |
-          APP_PATH="$RUNNER_TEMP/export/$PRODUCT_NAME.app"
-          echo "Verifying signed app launches without crashing..."
-          chmod +x scripts/verify-launch.sh
-          ./scripts/verify-launch.sh "$APP_PATH"
-
-      - name: Notarize App
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          APP_PATH="$RUNNER_TEMP/export/$PRODUCT_NAME.app"
-          
-          # Create ZIP for notarization
-          ditto -c -k --keepParent "$APP_PATH" "$RUNNER_TEMP/$PRODUCT_NAME.zip"
-          
-          # Submit for notarization (don't wait, use polling to avoid timeout)
-          set +e
-          SUBMIT_OUTPUT=$(xcrun notarytool submit "$RUNNER_TEMP/$PRODUCT_NAME.zip" \
-            --apple-id "$APPLE_ID" \
-            --password "$APPLE_ID_PASSWORD" \
-            --team-id "$APPLE_TEAM_ID" 2>&1)
-          SUBMIT_EXIT_CODE=$?
-          set -e
-
-          echo "$SUBMIT_OUTPUT"
-
-          if [ $SUBMIT_EXIT_CODE -ne 0 ]; then
-            echo "Initial notarization submission failed"
-            exit $SUBMIT_EXIT_CODE
-          fi
-
-          SUBMISSION_ID=$(echo "$SUBMIT_OUTPUT" | grep -E "^\s*id:" | head -1 | awk '{print $2}')
-          if [ -z "$SUBMISSION_ID" ]; then
-            echo "Failed to parse notarization submission ID"
-            exit 1
-          fi
-          echo "Submission ID: $SUBMISSION_ID"
-          
-          # Poll for completion with retries
-          MAX_ATTEMPTS=120  # 60 minutes max (30s intervals)
-          ATTEMPT=0
-          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
-            ATTEMPT=$((ATTEMPT + 1))
-            echo "Checking status (attempt $ATTEMPT/$MAX_ATTEMPTS)..."
-            
-            STATUS_OUTPUT=$(xcrun notarytool info "$SUBMISSION_ID" \
-              --apple-id "$APPLE_ID" \
-              --password "$APPLE_ID_PASSWORD" \
-              --team-id "$APPLE_TEAM_ID" 2>&1) || true
-            
-            echo "$STATUS_OUTPUT"
-            
-            if echo "$STATUS_OUTPUT" | grep -q "status: Accepted"; then
-              echo "Notarization accepted!"
-              break
-            elif echo "$STATUS_OUTPUT" | grep -q "status: Invalid"; then
-              echo "=== Notarization Failed ==="
-              xcrun notarytool log "$SUBMISSION_ID" \
-                --apple-id "$APPLE_ID" \
-                --password "$APPLE_ID_PASSWORD" \
-                --team-id "$APPLE_TEAM_ID" || true
-              exit 1
-            elif echo "$STATUS_OUTPUT" | grep -q "status: In Progress"; then
-              echo "Still in progress, waiting 30s..."
-              sleep 30
-            else
-              echo "Unknown status or network error, retrying in 30s..."
-              sleep 30
-            fi
-          done
-          
-          if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
-            echo "Notarization timed out after $MAX_ATTEMPTS attempts"
-            exit 1
-          fi
-          
-          # Staple the notarization ticket
-          bash scripts/retry-staple.sh "$APP_PATH"
-
-      - name: Verify Entitlements (Post-Sign)
-        run: |
-          APP_PATH="$RUNNER_TEMP/export/$PRODUCT_NAME.app"
-          chmod +x scripts/verify-entitlements.sh
-          ./scripts/verify-entitlements.sh "$APP_PATH"
-
-      - name: Verify App Launches (Post-Notarisation)
-        run: |
-          APP_PATH="$RUNNER_TEMP/export/$PRODUCT_NAME.app"
-          echo "Verifying notarised+stapled app launches without crashing..."
-          chmod +x scripts/verify-launch.sh
-          ./scripts/verify-launch.sh "$APP_PATH"
-
-      - name: Create DMG
-        run: |
-          APP_PATH="$RUNNER_TEMP/export/$PRODUCT_NAME.app"
-          DMG_PATH="$RUNNER_TEMP/$PRODUCT_NAME-${{ steps.version.outputs.version }}.dmg"
-          VERSION="${{ steps.version.outputs.version }}"
-          
-          # Use custom DMG creation script for beautiful installer
-          chmod +x scripts/create-dmg.sh
-          ./scripts/create-dmg.sh "$APP_PATH" "$DMG_PATH" "$VERSION"
-          
-          # Notarize the DMG
-          xcrun notarytool submit "$DMG_PATH" \
-            --apple-id "${{ secrets.APPLE_ID }}" \
-            --password "${{ secrets.APPLE_ID_PASSWORD }}" \
-            --team-id "${{ secrets.APPLE_TEAM_ID }}" \
-            --wait
-          
-          bash scripts/retry-staple.sh "$DMG_PATH"
-          
-          echo "DMG_PATH=$DMG_PATH" >> $GITHUB_ENV
-
-      - name: Generate Appcast for Sparkle Updates
+      # One feed per download. The legacy feed keeps its historical name and
+      # asset because every shipped build carries it in Info.plist, and the
+      # release-notes tooling reads it for every past release; the app picks
+      # the arm64 feed at runtime only when it runs natively on Apple Silicon
+      # (UpdateFeedSelection).
+      - name: Generate Appcasts for Sparkle Updates
         if: startsWith(github.ref, 'refs/tags/mac-v')
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
@@ -378,19 +225,37 @@ jobs:
           # Use timestamp-based build number (set in Stamp Version step)
           # This ensures sparkle:version matches CFBundleVersion for proper update detection
           BUILD_NUMBER="${{ env.BUILD_NUMBER }}"
-          DMG_PATH="${{ env.DMG_PATH }}"
-          
+
           chmod +x scripts/generate-appcast.sh
+          ./scripts/generate-appcast.sh \
+            "$VERSION" \
+            "$BUILD_NUMBER" \
+            "$LEGACY_DMG_PATH" \
+            "$SPARKLE_PRIVATE_KEY" \
+            "$RUNNER_TEMP/release-notes.html" \
+            "https://justspeaktoit.com/appcast.xml" > "$RUNNER_TEMP/appcast.xml"
           ./scripts/generate-appcast.sh \
             "$VERSION" \
             "$BUILD_NUMBER" \
             "$DMG_PATH" \
             "$SPARKLE_PRIVATE_KEY" \
-            "$RUNNER_TEMP/release-notes.html" > "$RUNNER_TEMP/appcast.xml"
-          
+            "$RUNNER_TEMP/release-notes.html" \
+            "https://justspeaktoit.com/appcast-arm64.xml" > "$RUNNER_TEMP/appcast-arm64.xml"
+
+          # Each feed must offer its own download: the legacy feed the universal
+          # DMG, the Apple Silicon feed the arm64 DMG. A mix-up here would offer
+          # an arm64-only build to an Intel Mac.
+          grep -q "releases/download/mac-v${VERSION}/$(basename "$LEGACY_DMG_PATH")" "$RUNNER_TEMP/appcast.xml"
+          grep -q "releases/download/mac-v${VERSION}/$(basename "$DMG_PATH")" "$RUNNER_TEMP/appcast-arm64.xml"
+          ! grep -q "$(basename "$DMG_PATH")" "$RUNNER_TEMP/appcast.xml"
+          ! grep -q "$(basename "$LEGACY_DMG_PATH")" "$RUNNER_TEMP/appcast-arm64.xml"
+
           echo "APPCAST_PATH=$RUNNER_TEMP/appcast.xml" >> "$GITHUB_ENV"
-          echo "Generated appcast.xml:"
+          echo "ARM64_APPCAST_PATH=$RUNNER_TEMP/appcast-arm64.xml" >> "$GITHUB_ENV"
+          echo "Generated appcast.xml (legacy, universal):"
           cat "$RUNNER_TEMP/appcast.xml"
+          echo "Generated appcast-arm64.xml (Apple Silicon):"
+          cat "$RUNNER_TEMP/appcast-arm64.xml"
 
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/mac-v')
@@ -398,7 +263,9 @@ jobs:
         with:
           files: |
             ${{ env.DMG_PATH }}
+            ${{ env.LEGACY_DMG_PATH }}
             ${{ env.APPCAST_PATH }}
+            ${{ env.ARM64_APPCAST_PATH }}
           body_path: ${{ runner.temp }}/release-notes.md
           generate_release_notes: false
           draft: false
@@ -417,9 +284,9 @@ jobs:
             sentry-cli releases new "justspeaktoit-mac@${VERSION}+${BUILD_NUMBER}"
             sentry-cli releases set-commits "justspeaktoit-mac@${VERSION}+${BUILD_NUMBER}" --auto
             sentry-cli releases finalize "justspeaktoit-mac@${VERSION}+${BUILD_NUMBER}"
-            # Upload dSYMs for symbolication
-            sentry-cli debug-files upload --include-sources \
-              "$RUNNER_TEMP/$PRODUCT_NAME.xcarchive/dSYMs"
+            # Upload dSYMs for symbolication (both variants share the build number)
+            sentry-cli debug-files upload --include-sources "$ARCHIVE_PATH/dSYMs"
+            sentry-cli debug-files upload --include-sources "$LEGACY_ARCHIVE_PATH/dSYMs"
           else
             echo "sentry-cli not found, skipping release creation"
           fi
@@ -430,23 +297,28 @@ jobs:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          DMG_PATH="${{ env.DMG_PATH }}"
-          SHA256=$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')
-          
+          ARM64_SHA256=$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')
+          UNIVERSAL_SHA256=$(shasum -a 256 "$LEGACY_DMG_PATH" | awk '{print $1}')
+
           echo "==> Updating Homebrew tap for version $VERSION"
-          echo "    SHA256: $SHA256"
-          
+          echo "    arm64 SHA256:     $ARM64_SHA256"
+          echo "    universal SHA256: $UNIVERSAL_SHA256"
+
           # Clone the tap repo
           git clone https://x-access-token:${GH_TOKEN}@github.com/crmitchelmore/homebrew-justspeaktoit.git /tmp/homebrew-tap
           cd /tmp/homebrew-tap
-          
-          # Update the cask file
+
+          # Update the cask file: Apple Silicon Macs get the arm64 download,
+          # Intel Macs the universal legacy download (issue #774). The bundled
+          # speak CLI matches the app's own slices in both.
           cat > Casks/justspeaktoit.rb << EOF
           cask "justspeaktoit" do
-            version "$VERSION"
-            sha256 "$SHA256"
+            arch arm: "arm64", intel: "universal"
 
-            url "https://github.com/crmitchelmore/justspeaktoit/releases/download/mac-v#{version}/JustSpeakToIt-#{version}.dmg"
+            version "$VERSION"
+            sha256 arm: "$ARM64_SHA256", intel: "$UNIVERSAL_SHA256"
+
+            url "https://github.com/crmitchelmore/justspeaktoit/releases/download/mac-v#{version}/JustSpeakToIt-#{arch}.dmg"
             name "Just Speak to It"
             desc "Native macOS voice transcription with on-device or cloud processing"
             homepage "https://justspeaktoit.com"
@@ -468,22 +340,24 @@ jobs:
             ]
           end
           EOF
-          
+
           # Commit and push
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Casks/justspeaktoit.rb
           git commit -m "Update Just Speak to It to v$VERSION"
           git push
-          
+
           echo "==> Homebrew tap updated successfully"
 
-      - name: Upload Artifact (for manual builds)
+      - name: Upload Artifacts (for manual builds)
         if: "!startsWith(github.ref, 'refs/tags/mac-v')"
         uses: actions/upload-artifact@v7.0.1
         with:
           name: ${{ env.PRODUCT_NAME }}-${{ steps.version.outputs.version }}
-          path: ${{ env.DMG_PATH }}
+          path: |
+            ${{ env.DMG_PATH }}
+            ${{ env.LEGACY_DMG_PATH }}
 
       - name: Cleanup Keychain
         if: always()

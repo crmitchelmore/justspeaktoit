@@ -1,2 +1,5 @@
 /appcast.xml   https://github.com/crmitchelmore/justspeaktoit/releases/latest/download/appcast.xml   302
+/appcast-arm64.xml   https://github.com/crmitchelmore/justspeaktoit/releases/latest/download/appcast-arm64.xml   302
+/download/mac   https://github.com/crmitchelmore/justspeaktoit/releases/latest/download/JustSpeakToIt-arm64.dmg   302
+/download/mac-intel   https://github.com/crmitchelmore/justspeaktoit/releases/latest/download/JustSpeakToIt-universal.dmg   302
 /index.html   /   200

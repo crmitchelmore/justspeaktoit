@@ -31,6 +31,18 @@ public struct DictationProfileMatcher: Codable, Equatable, Hashable, Sendable {
 
 // MARK: - Profile
 
+/// How a profile's transcription model override is routed. Stored explicitly
+/// so a custom identifier the catalogue does not list is applied the way the
+/// editor showed it, never re-classified by guesswork (issue #690).
+public enum DictationProfileTranscriptionRouting: String, Codable, Equatable, Sendable, CaseIterable {
+    /// A cloud streaming model used while recording.
+    case remoteStreaming
+    /// A cloud batch model the finished recording is sent to.
+    case remoteBatch
+    /// A downloaded local model run after recording.
+    case localBatch
+}
+
 /// A per-app dictation configuration ("Power Mode" profile).
 ///
 /// Every override is optional; `nil` means "keep the user's normal setting".
@@ -42,8 +54,11 @@ public struct DictationProfile: Codable, Equatable, Identifiable, Sendable {
     public var matchers: [DictationProfileMatcher]
 
     /// Transcription model override (catalog identifier, e.g. `deepgram/nova-3-streaming`
-    /// or `openai/whisper-1`). The transcription mode is derived from the identifier.
+    /// or `openai/whisper-1`). Routed by `transcriptionRouting` when set; profiles saved
+    /// before routing metadata existed derive it from the identifier.
     public var transcriptionModelID: String?
+    /// How `transcriptionModelID` is applied. `nil` for profiles saved by older builds.
+    public var transcriptionRouting: DictationProfileTranscriptionRouting?
 
     /// Whether LLM polish (post-processing) runs for this profile.
     public var polishEnabled: Bool?
@@ -72,12 +87,14 @@ public struct DictationProfile: Codable, Equatable, Identifiable, Sendable {
         polishOutputLanguage: String? = nil,
         polishIncludeLexiconDirectives: Bool? = nil,
         polishIncludeContextTags: Bool? = nil,
-        languageIdentifier: String? = nil
+        languageIdentifier: String? = nil,
+        transcriptionRouting: DictationProfileTranscriptionRouting? = nil
     ) {
         self.id = id
         self.name = name
         self.matchers = matchers
         self.transcriptionModelID = transcriptionModelID
+        self.transcriptionRouting = transcriptionRouting
         self.polishEnabled = polishEnabled
         self.polishModelID = polishModelID
         self.polishPrompt = polishPrompt
@@ -92,6 +109,7 @@ public struct DictationProfile: Codable, Equatable, Identifiable, Sendable {
         case name
         case matchers
         case transcriptionModelID
+        case transcriptionRouting
         case polishEnabled
         case polishModelID
         case polishPrompt
@@ -118,6 +136,11 @@ public struct DictationProfile: Codable, Equatable, Identifiable, Sendable {
         let lossyMatchers = try container.decodeIfPresent([LossyMatcher].self, forKey: .matchers) ?? []
         matchers = lossyMatchers.compactMap(\.matcher)
         transcriptionModelID = try container.decodeIfPresent(String.self, forKey: .transcriptionModelID)
+        // A routing written by a newer build is dropped rather than failing the profile;
+        // the legacy derivation then applies.
+        transcriptionRouting = try? container.decodeIfPresent(
+            DictationProfileTranscriptionRouting.self, forKey: .transcriptionRouting
+        )
         polishEnabled = try container.decodeIfPresent(Bool.self, forKey: .polishEnabled)
         polishModelID = try container.decodeIfPresent(String.self, forKey: .polishModelID)
         polishPrompt = try container.decodeIfPresent(String.self, forKey: .polishPrompt)
@@ -127,6 +150,33 @@ public struct DictationProfile: Codable, Equatable, Identifiable, Sendable {
         )
         polishIncludeContextTags = try container.decodeIfPresent(Bool.self, forKey: .polishIncludeContextTags)
         languageIdentifier = try container.decodeIfPresent(String.self, forKey: .languageIdentifier)
+    }
+}
+
+// MARK: - Routing
+
+public extension DictationProfile {
+    /// Routing for a profile saved before explicit metadata existed: catalogue live
+    /// models stream, `local/` identifiers run locally, everything else is remote batch.
+    static func derivedTranscriptionRouting(for modelID: String) -> DictationProfileTranscriptionRouting {
+        let trimmed = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        if ModelCatalog.liveTranscription.contains(where: { $0.id.caseInsensitiveCompare(trimmed) == .orderedSame }) {
+            return .remoteStreaming
+        }
+        if trimmed.lowercased().hasPrefix("local/") {
+            return .localBatch
+        }
+        return .remoteBatch
+    }
+
+    /// The transcription override as a (model, routing) pair, or `nil` when the profile
+    /// keeps the user's own transcription settings.
+    var resolvedTranscriptionOverride: (modelID: String, routing: DictationProfileTranscriptionRouting)? {
+        guard let modelID = transcriptionModelID?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !modelID.isEmpty else {
+            return nil
+        }
+        return (modelID, transcriptionRouting ?? Self.derivedTranscriptionRouting(for: modelID))
     }
 }
 

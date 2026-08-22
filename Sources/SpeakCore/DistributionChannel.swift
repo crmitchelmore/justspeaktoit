@@ -94,6 +94,11 @@ public enum ChannelFeature: String, Sendable, CaseIterable {
     /// Cross-app text insertion via AXUIElement. The App Store sandbox blocks
     /// reading and mutating another app's accessibility hierarchy.
     case accessibilityTextInsertion
+    /// Voice Edit: reading another app's selection and replacing it through its
+    /// accessibility hierarchy or a simulated ⌘C/⌘V. Needs the same cross-app
+    /// access as `accessibilityTextInsertion`, so the App Store build must not
+    /// offer the shortcut at all rather than fail at apply time (issue #673).
+    case voiceEdit
     /// Freedom to reference other distribution channels or external purchases in UI copy.
     /// App Store review guidelines discourage this, so App Store builds must not.
     case crossChannelMessaging
@@ -115,7 +120,7 @@ public extension DistributionChannel {
     func supports(_ feature: ChannelFeature) -> Bool {
         switch feature {
         case .selfUpdate, .externalLocalModelRuntime, .standaloneCLIInstaller, .automaticAccessibilityPrompt,
-             .accessibilityTextInsertion, .crossChannelMessaging:
+             .accessibilityTextInsertion, .voiceEdit, .crossChannelMessaging:
             return self == .direct
         case .iCloudSync, .encryptedCloudKitKeySync:
             // iOS and Mac App Store builds carry the managed iCloud entitlements.
@@ -147,6 +152,9 @@ public extension DistributionChannel {
 
     /// Whether this build may insert text directly into another app via AXUIElement.
     var supportsAccessibilityTextInsertion: Bool { supports(.accessibilityTextInsertion) }
+
+    /// Whether this build can offer Voice Edit (select text → speak → replaced in place).
+    var supportsVoiceEdit: Bool { supports(.voiceEdit) }
 
     /// Whether UI copy may reference other distribution channels (e.g. the direct
     /// download). `false` for App Store builds to stay within review guidelines.

@@ -1,0 +1,114 @@
+name: Publish speak CLI
+
+# Rebuilds and publishes the standalone speak CLI assets for an existing
+# macOS release (issue #775). The release workflow publishes them with every
+# mac-v tag; when that optional step fails, run this with the same version to
+# add the assets, the signed manifest and the Homebrew formula without
+# rebuilding the app.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Released version to publish the CLI for (e.g. 2.62.0; the mac-v tag must exist)'
+        required: true
+
+env:
+  APP_STORE_CONNECT_KEY_ID: S747NJ9DZY
+
+jobs:
+  publish-cli:
+    runs-on: macos-15
+    timeout-minutes: 120
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v7
+        with:
+          ref: refs/tags/mac-v${{ github.event.inputs.version }}
+          fetch-depth: 0
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Resolve Swift Package Dependencies
+        run: |
+          # Fetches Sparkle's artifact bundle, whose sign_update signs the manifest.
+          swift package resolve
+
+      - name: Import Code Signing Certificate
+        env:
+          APPLE_DEVELOPER_ID_APPLICATION: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION }}
+          APPLE_DEVELOPER_ID_APPLICATION_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+          CERTIFICATE_PATH=$RUNNER_TEMP/certificate.p12
+          echo -n "$APPLE_DEVELOPER_ID_APPLICATION" | base64 --decode -o $CERTIFICATE_PATH
+          security import $CERTIFICATE_PATH -P "$APPLE_DEVELOPER_ID_APPLICATION_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+          rm -f $CERTIFICATE_PATH
+
+      - name: Start artefact size summary
+        run: |
+          echo "## speak CLI publication (v${{ github.event.inputs.version }})" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build, notarise and verify speak CLI assets
+        id: cli
+        uses: ./.github/actions/publish-speak-cli
+        with:
+          version: ${{ github.event.inputs.version }}
+          apple-id: ${{ secrets.APPLE_ID }}
+          apple-id-password: ${{ secrets.APPLE_ID_PASSWORD }}
+          apple-team-id: ${{ secrets.APPLE_TEAM_ID }}
+          sparkle-private-key: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+
+      - name: Upload CLI assets to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          gh release view "mac-v$VERSION" --json tagName --jq .tagName
+          gh release upload "mac-v$VERSION" --clobber \
+            "${{ steps.cli.outputs.arm64-zip }}" \
+            "${{ steps.cli.outputs.x86_64-zip }}" \
+            "${{ steps.cli.outputs.manifest }}" \
+            "${{ steps.cli.outputs.signature }}"
+
+      - name: Update Homebrew Tap
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          # The app DMGs are unchanged: keep the cask's existing digests and
+          # add the formula for this release's CLI archives.
+          TAP_DIR="$RUNNER_TEMP/homebrew-tap"
+          git clone --quiet "https://x-access-token:${GH_TOKEN}@github.com/crmitchelmore/homebrew-justspeaktoit.git" "$TAP_DIR"
+          CASK="$TAP_DIR/Casks/justspeaktoit.rb"
+          CASK_VERSION="$(sed -n 's/^  version "\(.*\)"$/\1/p' "$CASK")"
+          if [ "$CASK_VERSION" != "$VERSION" ]; then
+            echo "::error::The tap's cask is at $CASK_VERSION, not $VERSION; run the release workflow first"
+            exit 1
+          fi
+          ARM64_SHA256="$(sed -n 's/^  sha256 arm: "\([0-9a-f]*\)".*$/\1/p' "$CASK")"
+          UNIVERSAL_SHA256="$(sed -n 's/^  sha256 arm: "[0-9a-f]*", intel: "\([0-9a-f]*\)"$/\1/p' "$CASK")"
+          CLI_ARM64_SHA256="$(shasum -a 256 "${{ steps.cli.outputs.arm64-zip }}" | awk '{print $1}')"
+          CLI_X86_64_SHA256="$(shasum -a 256 "${{ steps.cli.outputs.x86_64-zip }}" | awk '{print $1}')"
+          chmod +x scripts/update-homebrew-tap.sh
+          TAP_DIR="$TAP_DIR" ./scripts/update-homebrew-tap.sh "$VERSION" "$ARM64_SHA256" "$UNIVERSAL_SHA256" \
+            "$CLI_ARM64_SHA256" "$CLI_X86_64_SHA256"
+
+      - name: Cleanup Keychain
+        if: always()
+        run: |
+          security delete-keychain $RUNNER_TEMP/app-signing.keychain-db || true

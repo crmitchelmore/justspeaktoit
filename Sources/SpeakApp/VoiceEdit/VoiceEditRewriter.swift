@@ -46,6 +46,6 @@ final class VoiceEditRewriter {
     )
     let reply = response.messages.last(where: { $0.role == .assistant })?.content ?? ""
     log.info("Voice edit rewrite completed (\(reply.count, privacy: .public) characters)")
-    return VoiceEditPolicy.normalizedRewrite(reply, original: selection)
+    return VoiceEditPolicy.normalizedRewrite(reply, original: selection, instruction: instruction)
   }
 }

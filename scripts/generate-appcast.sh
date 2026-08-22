@@ -1,6 +1,12 @@
 #!/bin/bash
-# Generate Sparkle appcast.xml from GitHub release
-# Usage: ./scripts/generate-appcast.sh <version> <build-number> <dmg-path> <private-key-base64> [release-notes-html]
+# Generate a Sparkle appcast from a GitHub release asset.
+# Usage: ./scripts/generate-appcast.sh <version> <build-number> <dmg-path> <private-key-base64> [release-notes-html] [feed-url]
+#
+# Two feeds are generated per release (issue #774): the legacy feed
+# (https://justspeaktoit.com/appcast.xml, universal DMG, which every Mac and
+# every existing install can run) and the Apple Silicon feed
+# (https://justspeaktoit.com/appcast-arm64.xml, arm64-only DMG). The enclosure
+# URL is derived from the DMG's file name, so each feed points at its own asset.
 
 set -e
 
@@ -9,6 +15,7 @@ BUILD_NUMBER="$2"
 DMG_PATH="$3"
 PRIVATE_KEY_BASE64="$4"
 RELEASE_NOTES_HTML_PATH="${5:-}"
+FEED_URL="${6:-https://justspeaktoit.com/appcast.xml}"
 
 if [ -z "$VERSION" ] || [ -z "$BUILD_NUMBER" ] || [ -z "$DMG_PATH" ] || [ -z "$PRIVATE_KEY_BASE64" ]; then
     echo "Usage: $0 <version> <build-number> <dmg-path> <private-key-base64>"
@@ -101,7 +108,7 @@ cat << EOF
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
   <channel>
     <title>Just Speak to It Updates</title>
-    <link>https://justspeaktoit.com/appcast.xml</link>
+    <link>${FEED_URL}</link>
     <description>Most recent updates to Just Speak to It</description>
     <language>en</language>
     <item>

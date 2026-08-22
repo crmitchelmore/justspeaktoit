@@ -194,10 +194,15 @@ if isAppStoreBuild {
     }
 }
 
+// The `.remote` requirements below must mirror the same packages' requirements
+// in the root Package.swift. Xcode resolves the local package's graph and this
+// list together, and a mismatch fails resolution for every Tuist target
+// (issue #757; Dependabot only edits Package.swift). `ManifestParityTests`
+// enforces this.
 var projectPackages: [Package] = [
     .package(path: .relativeToRoot(".")),
     .remote(url: "https://github.com/getsentry/sentry-cocoa.git", requirement: .upToNextMajor(from: "9.3.0")),
-    .remote(url: "https://github.com/argmaxinc/argmax-oss-swift.git", requirement: .upToNextMajor(from: "0.9.0")),
+    .remote(url: "https://github.com/argmaxinc/argmax-oss-swift.git", requirement: .upToNextMajor(from: "1.1.0")),
     .remote(url: "https://github.com/FluidInference/FluidAudio.git", requirement: .exact("0.15.5"))
 ]
 if !isAppStoreBuild {

@@ -26,6 +26,17 @@ brew tap crmitchelmore/justspeaktoit
 brew install --cask justspeaktoit
 ```
 
+Homebrew installs the right build for your Mac automatically.
+
+### Direct download
+
+Every release on the [Releases page](https://github.com/crmitchelmore/justspeaktoit/releases/latest) ships two DMGs:
+
+- **Apple Silicon (recommended):** `JustSpeakToIt-arm64.dmg` — the primary download, arm64 only.
+- **Intel Macs (legacy):** `JustSpeakToIt-universal.dmg` — a universal build that also runs on Apple Silicon, kept for Intel Macs and for existing installs.
+
+Apple Silicon installs update to arm64-only builds; Intel installs keep receiving the universal build. Both update paths are notarised and signed.
+
 ### Build from Source
 
 ```bash

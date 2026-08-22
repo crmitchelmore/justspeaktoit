@@ -25,6 +25,16 @@ on:
         default: false
         type: boolean
 
+# Serialise runs so overlapping dispatches cannot race App Store Connect
+# portal mutation (bundle ID / capability / profile bootstrap in
+# scripts/create-ios-app-store-profile.rb). cancel-in-progress stays false:
+# a newer dispatch queues behind the in-flight release instead of aborting
+# its upload. GitHub keeps at most one queued run per group, so rapid
+# re-dispatches supersede the previously queued (not running) run.
+concurrency:
+  group: release-ios-portal
+  cancel-in-progress: false
+
 env:
   APP_STORE_CONNECT_KEY_ID: S747NJ9DZY
   # The extension now ships by default, while direct capture remains an

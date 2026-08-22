@@ -120,6 +120,143 @@ final class TextOutputTests: XCTestCase {
   }
   #endif
 
+  // MARK: - Captured field identity (issue #707)
+
+  @MainActor
+  private func makeRunningTarget(focusedElement: AXUIElement?) -> TextOutputTarget {
+    TextOutputTarget(
+      processIdentifier: ProcessInfo.processInfo.processIdentifier,
+      applicationName: "Tests",
+      bundleIdentifier: nil,
+      applicationLaunchDate: nil,
+      focusedElement: focusedElement
+    )
+  }
+
+  @MainActor
+  func testAccessibilityOutput_capturedTargetWithoutElement_NeverUsesCurrentFocus() {
+    let suiteName = "com.speakapp.text-output-tests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { UserDefaults.standard.removePersistentDomain(forName: suiteName) }
+    let output = AccessibilityTextOutput(
+      permissionsManager: PermissionsManager(statusProvider: { _ in .granted }),
+      appSettings: AppSettings(defaults: defaults)
+    )
+
+    let result = output.output(text: "hello", target: makeRunningTarget(focusedElement: nil))
+
+    XCTAssertEqual(result.method, .none)
+    guard case .some(TextOutputError.capturedFieldUnavailable) = result.error else {
+      return XCTFail("Expected capturedFieldUnavailable, got \(String(describing: result.error))")
+    }
+  }
+
+  @MainActor
+  func testAccessibilityOutput_elementFromAnotherProcess_IsRefused() {
+    let suiteName = "com.speakapp.text-output-tests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { UserDefaults.standard.removePersistentDomain(forName: suiteName) }
+    let output = AccessibilityTextOutput(
+      permissionsManager: PermissionsManager(statusProvider: { _ in .granted }),
+      appSettings: AppSettings(defaults: defaults)
+    )
+    // An element bound to a different process than the captured identity: the
+    // capture raced an app switch and must not be delivered into.
+    let foreignElement = AXUIElementCreateApplication(1)
+
+    let result = output.output(text: "hello", target: makeRunningTarget(focusedElement: foreignElement))
+
+    XCTAssertEqual(result.method, .none)
+    guard case .some(TextOutputError.capturedFieldChanged) = result.error else {
+      return XCTFail("Expected capturedFieldChanged, got \(String(describing: result.error))")
+    }
+  }
+
+  @MainActor
+  func testPasteOutput_capturedTargetWithoutElement_WithholdsPasteAndKeepsClipboard() {
+    let suiteName = "com.speakapp.text-output-tests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    let pasteboard = NSPasteboard(name: NSPasteboard.Name(suiteName))
+    defer {
+      pasteboard.clearContents()
+      UserDefaults.standard.removePersistentDomain(forName: suiteName)
+    }
+    let output = PasteTextOutput(
+      permissionsManager: PermissionsManager(statusProvider: { _ in .granted }),
+      appSettings: AppSettings(defaults: defaults),
+      pasteboard: pasteboard
+    )
+
+    let result = output.output(text: "Withheld transcript", target: makeRunningTarget(focusedElement: nil))
+
+    XCTAssertEqual(result.method, .clipboard)
+    guard case .some(TextOutputError.capturedFieldUnavailable) = result.error else {
+      return XCTFail("Expected capturedFieldUnavailable, got \(String(describing: result.error))")
+    }
+    XCTAssertEqual(pasteboard.string(forType: .string), "Withheld transcript")
+  }
+
+  @MainActor
+  func testCapturedElementBelongsToCapturedProcess_matchesOnlyItsOwnProcess() {
+    let ownPid = ProcessInfo.processInfo.processIdentifier
+    let ownElement = AXUIElementCreateApplication(ownPid)
+
+    XCTAssertTrue(makeRunningTarget(focusedElement: ownElement)
+      .capturedElementBelongsToCapturedProcess())
+    XCTAssertFalse(makeRunningTarget(focusedElement: AXUIElementCreateApplication(1))
+      .capturedElementBelongsToCapturedProcess())
+    XCTAssertFalse(makeRunningTarget(focusedElement: nil)
+      .capturedElementBelongsToCapturedProcess())
+  }
+
+  @MainActor
+  func testConfirmCapturedFieldOwnsFocus_requiresFrontmostProcessAndIdenticalField() {
+    let ownPid = ProcessInfo.processInfo.processIdentifier
+    let capturedElement = AXUIElementCreateApplication(ownPid)
+    let target = makeRunningTarget(focusedElement: capturedElement)
+
+    // No element captured: identity cannot be proven.
+    XCTAssertEqual(
+      makeRunningTarget(focusedElement: nil).confirmCapturedFieldOwnsFocus(
+        frontmostProcessIdentifier: ownPid,
+        currentFocus: { capturedElement }
+      ),
+      .fieldUnavailable
+    )
+    // Captured process not frontmost: a paste keystroke would land elsewhere.
+    XCTAssertEqual(
+      target.confirmCapturedFieldOwnsFocus(
+        frontmostProcessIdentifier: 1,
+        currentFocus: { capturedElement }
+      ),
+      .fieldChanged
+    )
+    // Same process, different field (another conversation in the same app).
+    XCTAssertEqual(
+      target.confirmCapturedFieldOwnsFocus(
+        frontmostProcessIdentifier: ownPid,
+        currentFocus: { AXUIElementCreateApplication(1) }
+      ),
+      .fieldChanged
+    )
+    // Focus cannot be read at all: fail closed.
+    XCTAssertEqual(
+      target.confirmCapturedFieldOwnsFocus(
+        frontmostProcessIdentifier: ownPid,
+        currentFocus: { nil }
+      ),
+      .fieldChanged
+    )
+    // The captured field still owns focus in the frontmost captured process.
+    XCTAssertEqual(
+      target.confirmCapturedFieldOwnsFocus(
+        frontmostProcessIdentifier: ownPid,
+        currentFocus: { AXUIElementCreateApplication(ownPid) }
+      ),
+      .confirmed
+    )
+  }
+
   func testHotKeyMonitoringState_displayNames_AreActionable() {
     XCTAssertEqual(HotKeyMonitoringState.active.displayName, "Active")
     XCTAssertEqual(

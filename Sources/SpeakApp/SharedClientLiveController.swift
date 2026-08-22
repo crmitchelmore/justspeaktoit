@@ -24,6 +24,9 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
   private var startedAt: Date?
   private var latestTranscript = ""
+  /// Folds updates by the hosted client's declared final shape (issue #700);
+  /// re-created in start() once the client is known.
+  private var accumulated = TranscriptAccumulator(shape: .cumulativeTranscript)
   private var isStopping = false
 
   init(
@@ -64,6 +67,7 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     activeInputSession = await audioDeviceManager.beginUsingPreferredInput()
     audioEngine = AVAudioEngine()
     latestTranscript = ""
+    accumulated = TranscriptAccumulator(shape: client.finalShape)
     isStopping = false
     self.client = client
 
@@ -109,7 +113,7 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
       // would double every word the client already streamed.
       if let finalTranscript = await finalizingClient.finishAndWait(),
          latestTranscript != finalTranscript {
-        handleTranscript(finalTranscript, isFinal: true)
+        applyFullTranscript(finalTranscript)
       }
     } else {
       client?.stop()
@@ -148,27 +152,47 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     return apiKey
   }
 
-  /// Applies a transcript update.
-  ///
-  /// This *replaces* `latestTranscript`, which is right for the cumulative
-  /// providers routed here (xAI resends the whole turn on every event) and for
-  /// the full transcript `finishAndWait()` returns. A provider whose
-  /// `onTranscript` emits standalone segments (Deepgram, ElevenLabs) needs
-  /// `TranscriptAccumulator` here before it can be routed through this
-  /// controller — its live updates would otherwise show only the last segment.
+  /// Applies a transcript update, folded by the hosted client's declared
+  /// final shape (issue #700): cumulative finals replace (xAI restates the
+  /// whole turn on every event), standalone segment finals append — including
+  /// repeated identical text, which is a genuine repeat, so a segment-shaped
+  /// provider routed here can no longer lose earlier segments.
   private func handleTranscript(_ text: String, isFinal: Bool) {
     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return }
-    latestTranscript = trimmed
+    let displayText: String
+    if isFinal {
+      displayText = accumulated.append(final: trimmed)
+    } else {
+      displayText = accumulated.display(withInterim: trimmed)
+    }
+    latestTranscript = displayText
     delegate?.liveTranscriber(self, didUpdateWith: LiveTranscriptionUpdate(
-      text: trimmed,
+      text: displayText,
       isFinal: isFinal,
       confidence: nil
     ))
-    delegate?.liveTranscriber(self, didUpdatePartial: trimmed)
+    delegate?.liveTranscriber(self, didUpdatePartial: displayText)
     if isFinal {
-      delegate?.liveTranscriber(self, didDetectUtteranceBoundary: trimmed)
+      delegate?.liveTranscriber(self, didDetectUtteranceBoundary: displayText)
     }
+  }
+
+  /// Adopts a transcript that is already complete (the `finishAndWait()`
+  /// return) as the whole session transcript — replace, never append, or every
+  /// word the client already streamed would double.
+  private func applyFullTranscript(_ transcript: String) {
+    let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return }
+    accumulated.replace(with: trimmed)
+    latestTranscript = accumulated.text
+    delegate?.liveTranscriber(self, didUpdateWith: LiveTranscriptionUpdate(
+      text: accumulated.text,
+      isFinal: true,
+      confidence: nil
+    ))
+    delegate?.liveTranscriber(self, didUpdatePartial: accumulated.text)
+    delegate?.liveTranscriber(self, didDetectUtteranceBoundary: accumulated.text)
   }
 
   private func installAudioTap(
@@ -231,6 +255,7 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     isRunning = false
     isStopping = false
     latestTranscript = ""
+    accumulated.reset()
     startedAt = nil
     await endActiveInputSession()
   }

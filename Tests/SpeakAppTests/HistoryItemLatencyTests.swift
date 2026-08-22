@@ -44,6 +44,7 @@ final class HistoryItemLatencyTests: XCTestCase {
 
     private func makeLatency(
         firstPartialMs: Int? = nil,
+        firstInsertMs: Int? = nil,
         stopToFinalMs: Int? = nil,
         captureStartMs: Int? = nil
     ) -> SessionLatencyMetrics {
@@ -55,9 +56,38 @@ final class HistoryItemLatencyTests: XCTestCase {
             hotKeyPressedAt: captureStartMs != nil ? hotKey : nil,
             captureStartedAt: capture,
             firstPartialAt: firstPartialMs.map { capture.addingTimeInterval(Double($0) / 1000) },
-            firstInsertAt: nil,
+            firstInsertAt: firstInsertMs.map { capture.addingTimeInterval(Double($0) / 1000) },
             stopPressedAt: stop,
             finalInsertAt: stopToFinalMs.map { stop.addingTimeInterval(Double($0) / 1000) }
+        )
+    }
+
+    private func streamingItem(
+        provider: String = "deepgram/nova-3",
+        firstPartialMs: Int,
+        firstInsertMs: Int,
+        stopToFinalMs: Int? = nil
+    ) -> HistoryItem {
+        self.makeItem(
+            modelUsages: [ModelUsage(modelIdentifier: provider, phase: .transcriptionLive)],
+            latency: self.makeLatency(
+                firstPartialMs: firstPartialMs,
+                firstInsertMs: firstInsertMs,
+                stopToFinalMs: stopToFinalMs
+            )
+        )
+    }
+
+    /// A one-shot (transcribe-then-paste) session: no partials, and the first
+    /// visible character is the final paste.
+    private func oneShotItem(
+        provider: String = "openai/whisper-1",
+        firstInsertMs: Int,
+        stopToFinalMs: Int? = nil
+    ) -> HistoryItem {
+        self.makeItem(
+            modelUsages: [ModelUsage(modelIdentifier: provider, phase: .transcriptionBatch)],
+            latency: self.makeLatency(firstInsertMs: firstInsertMs, stopToFinalMs: stopToFinalMs)
         )
     }
 
@@ -131,15 +161,88 @@ final class HistoryItemLatencyTests: XCTestCase {
 
         let deepgram = insights.first { $0.id == "deepgram" }
         XCTAssertEqual(deepgram?.sessionCount, 5)
-        XCTAssertEqual(deepgram?.firstPartialP50, 500)
-        XCTAssertEqual(deepgram?.firstPartialP95, 700)
-        XCTAssertEqual(deepgram?.stopToFinalP50, 600)
-        XCTAssertEqual(deepgram?.stopToFinalP95, 800)
+        XCTAssertEqual(deepgram?.firstPartial.p50, 500)
+        XCTAssertEqual(deepgram?.firstPartial.p95, 700)
+        XCTAssertEqual(deepgram?.stopToFinal.p50, 600)
+        XCTAssertEqual(deepgram?.stopToFinal.p95, 800)
 
         let apple = insights.first { $0.id == "apple" }
         XCTAssertEqual(apple?.sessionCount, 1)
-        XCTAssertEqual(apple?.firstPartialP50, 200)
-        XCTAssertNil(apple?.stopToFinalP50)
+        XCTAssertEqual(apple?.firstPartial.p50, 200)
+        XCTAssertNil(apple?.stopToFinal.p50)
+    }
+
+    // MARK: - Insertion latency (issue #611)
+
+    func testLatencyInsightsByProvider_AggregatesFirstInsertForStreamingSessions() {
+        let items = [350, 450, 550, 650, 750].map { insert in
+            self.streamingItem(firstPartialMs: insert - 50, firstInsertMs: insert, stopToFinalMs: 900)
+        }
+
+        let deepgram = items.latencyInsightsByProvider().first { $0.id == "deepgram" }
+        XCTAssertEqual(deepgram?.sessionCount, 5)
+        XCTAssertEqual(deepgram?.firstInsert, LatencyDistribution(samples: [350, 450, 550, 650, 750]))
+        XCTAssertEqual(deepgram?.firstInsert.sampleCount, 5)
+        XCTAssertEqual(deepgram?.firstInsert.p50, 550)
+        XCTAssertEqual(deepgram?.firstInsert.p95, 750)
+        XCTAssertEqual(deepgram?.firstPartial.sampleCount, 5)
+        XCTAssertEqual(deepgram?.stopToFinal.sampleCount, 5)
+    }
+
+    func testLatencyInsightsByProvider_AggregatesFirstInsertForOneShotFallbackSessions() {
+        let items = [
+            self.oneShotItem(firstInsertMs: 900, stopToFinalMs: 850),
+            self.oneShotItem(firstInsertMs: 1100, stopToFinalMs: 1050)
+        ]
+
+        let openai = items.latencyInsightsByProvider().first { $0.id == "openai" }
+        XCTAssertEqual(openai?.sessionCount, 2)
+        XCTAssertEqual(openai?.firstPartial.sampleCount, 0, "One-shot sessions have no partials")
+        XCTAssertNil(openai?.firstPartial.p50)
+        XCTAssertEqual(openai?.firstInsert.sampleCount, 2)
+        XCTAssertEqual(openai?.firstInsert.p50, 900)
+        XCTAssertEqual(openai?.firstInsert.p95, 1100)
+        XCTAssertEqual(openai?.stopToFinal.p50, 850)
+    }
+
+    func testLatencyInsightsByProvider_SampleCountsExcludeSessionsMissingThatInterval() {
+        let items = [
+            self.streamingItem(firstPartialMs: 300, firstInsertMs: 400),
+            // Streamed partials but never inserted (clipboard-only session).
+            self.makeItem(
+                modelUsages: [ModelUsage(modelIdentifier: "deepgram/nova-3", phase: .transcriptionLive)],
+                latency: self.makeLatency(firstPartialMs: 320)
+            ),
+            // Inserted at the end but stop-to-final unknown.
+            self.streamingItem(firstPartialMs: 280, firstInsertMs: 2000)
+        ]
+
+        let deepgram = items.latencyInsightsByProvider().first { $0.id == "deepgram" }
+        XCTAssertEqual(deepgram?.sessionCount, 3)
+        XCTAssertEqual(deepgram?.firstPartial.sampleCount, 3)
+        XCTAssertEqual(deepgram?.firstInsert.sampleCount, 2)
+        XCTAssertEqual(deepgram?.firstInsert.p50, 400)
+        XCTAssertEqual(deepgram?.firstInsert.p95, 2000)
+        XCTAssertEqual(deepgram?.stopToFinal.sampleCount, 0)
+    }
+
+    func testLatencyInsightsByProvider_KeepsStreamingAndOneShotProvidersSeparate() {
+        let items = [
+            self.streamingItem(firstPartialMs: 300, firstInsertMs: 400),
+            self.oneShotItem(firstInsertMs: 1200)
+        ]
+
+        let insights = items.latencyInsightsByProvider()
+        XCTAssertEqual(Set(insights.map(\.id)), ["deepgram", "openai"])
+        XCTAssertEqual(insights.first { $0.id == "deepgram" }?.firstInsert.p50, 400)
+        XCTAssertEqual(insights.first { $0.id == "openai" }?.firstInsert.p50, 1200)
+    }
+
+    func testLatencyDistribution_EmptySamplesHaveNoPercentiles() {
+        let distribution = LatencyDistribution(samples: [])
+        XCTAssertEqual(distribution.sampleCount, 0)
+        XCTAssertNil(distribution.p50)
+        XCTAssertNil(distribution.p95)
     }
 
     func testLatencyOverview_UsesCaptureStartSamplesOnly() {

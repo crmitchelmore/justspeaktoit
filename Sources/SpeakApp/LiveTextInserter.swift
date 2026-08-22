@@ -413,21 +413,18 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
     }
   }
 
+  /// The captured field for this session, or `nil` when live insertion must
+  /// defer to standard delivery. `begin(target:)` always captures a target, so
+  /// a missing or cross-process AX element means the capture failed — current
+  /// system focus is deliberately never resolved in its place, because that
+  /// is how live text streams into an unrelated app (issue #707).
   private func getFocusedTextElement() -> AXUIElement? {
-    if let focusedElement = target?.focusedElement {
-      return focusedElement
-    }
-    let systemWideElement = AXUIElementCreateSystemWide()
-    var rawFocused: CFTypeRef?
-    let copyStatus = AXUIElementCopyAttributeValue(
-      systemWideElement, kAXFocusedUIElementAttribute as CFString, &rawFocused
-    )
-
-    guard copyStatus == .success, let rawFocused else {
+    guard let target, let focusedElement = target.focusedElement,
+          target.capturedElementBelongsToCapturedProcess()
+    else {
       return nil
     }
-
-    return unsafeBitCast(rawFocused, to: AXUIElement.self)
+    return focusedElement
   }
 
   /// Verify that text was actually inserted by re-reading the value after a short delay.

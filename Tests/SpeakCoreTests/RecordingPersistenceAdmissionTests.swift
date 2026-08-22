@@ -106,6 +106,32 @@ final class RecordingPersistenceAdmissionTests: XCTestCase {
         XCTAssertFalse(diagnostics.isComplete)
     }
 
+    func testFailedFallbackAllocation_isAccountedAsDroppedAudio() {
+        let controller = RecordingPersistenceAdmissionController(overflowBudgetSeconds: 2)
+        XCTAssertEqual(controller.admit(frameSeconds: frame, poolHasCapacity: true), .accepted)
+        controller.completeWrite(frameSeconds: frame, failed: false)
+
+        // Admission granted via overflow, but the allocation itself fails: the
+        // frame is gone, so it is a gap — not a write that failed.
+        XCTAssertEqual(
+            controller.admit(frameSeconds: frame, poolHasCapacity: false),
+            .acceptedViaOverflow
+        )
+        controller.abandonAdmittedFrame(frameSeconds: frame)
+
+        let diagnostics = controller.diagnostics
+        XCTAssertEqual(diagnostics.admittedFrames, 1, "the abandoned admission is reversed")
+        XCTAssertEqual(diagnostics.admittedSeconds, frame, accuracy: 0.0001)
+        XCTAssertEqual(diagnostics.overflowAllocations, 0, "no fallback allocation was actually used")
+        XCTAssertEqual(diagnostics.droppedFrames, 1)
+        XCTAssertEqual(diagnostics.droppedSeconds, frame, accuracy: 0.0001)
+        XCTAssertEqual(diagnostics.writeFailures, 0)
+        XCTAssertFalse(diagnostics.isComplete)
+
+        // The budget was released: the next overflow frame is admitted again.
+        XCTAssertEqual(controller.inFlightSecondsForTesting, 0, accuracy: 0.0001)
+    }
+
     func testPoolCapacity_neverConsultsTheOverflowBudget() {
         // A zero-budget controller still admits every pool-backed frame: the
         // budget only governs fallback allocations.

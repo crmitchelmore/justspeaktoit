@@ -22,7 +22,10 @@ public final class AudioRecordingPersistence: ObservableObject {
     /// Invoked (off the audio thread) the first time a session drops audio or
     /// fails a write, so the owning session can surface the problem while the
     /// recording is still running rather than discovering it at stop.
-    nonisolated(unsafe) public var onPersistenceIssue: (@Sendable (RecordingPersistenceDiagnostics) -> Void)?
+    nonisolated public var onPersistenceIssue: (@Sendable (RecordingPersistenceDiagnostics) -> Void)? {
+        get { issueLock.withLock { storedIssueHandler } }
+        set { issueLock.withLock { storedIssueHandler = newValue } }
+    }
 
     // MARK: - Private
 
@@ -43,10 +46,19 @@ public final class AudioRecordingPersistence: ObservableObject {
     /// format; sustained overflow drops frames and records the gap instead of
     /// silently presenting a complete recording. Replaced per session.
     nonisolated(unsafe) private var admission = RecordingPersistenceAdmissionController()
+    /// Leaf lock for the once-per-session issue latch and its handler. The
+    /// latch is tested from `writeBuffer` (which holds `stateLock`) and from
+    /// `ioQueue` blocks (which never take `stateLock`), so it needs its own
+    /// lock: a check-then-set on a bare flag would let both paths fire the
+    /// callback, and `stateLock` cannot be taken on `ioQueue` without
+    /// inverting the order against `closeWriter`'s barrier.
+    private let issueLock = NSLock()
+    /// Guarded by `issueLock`.
+    nonisolated(unsafe) private var storedIssueHandler: (@Sendable (RecordingPersistenceDiagnostics) -> Void)?
     /// Set once per session after the first drop/write failure so the
     /// owning-session callback fires exactly once, off the audio thread.
+    /// Guarded by `issueLock`.
     nonisolated(unsafe) private var didReportIssue = false
-    private var recordingID: UUID?
     private var startTime: Date?
 
     private let logger = SpeakLogger.logger(category: "AudioPersistence")
@@ -136,10 +148,9 @@ public final class AudioRecordingPersistence: ObservableObject {
         ioQueue.async { [weak self] in self?.ioFile = file }
         isWriterOpen = true
         admission = RecordingPersistenceAdmissionController()
-        didReportIssue = false
+        issueLock.withLock { didReportIssue = false }
         stateLock.unlock()
 
-        recordingID = rid
         startTime = Date()
         currentFileURL = url
         isRecording = true
@@ -193,8 +204,11 @@ public final class AudioRecordingPersistence: ObservableObject {
         guard let copy else {
             // Admission granted but the fallback allocation itself failed, or
             // the frame was backpressured: either way it is a recorded gap.
+            // An abandoned admission is reversed and counted as dropped audio
+            // so `droppedSeconds` stays exact and the diagnostics agree with
+            // the `.backpressured` result returned here.
             if verdict != .backpressured {
-                admissionController.completeWrite(frameSeconds: frameSeconds, failed: true)
+                admissionController.abandonAdmittedFrame(frameSeconds: frameSeconds)
             }
             reportIssueIfNeeded(admissionController)
             return .backpressured
@@ -270,12 +284,17 @@ public final class AudioRecordingPersistence: ObservableObject {
     /// Surfaces the first drop/failure of the session to the owning session,
     /// exactly once, without blocking the audio thread.
     private nonisolated func reportIssueIfNeeded(_ controller: RecordingPersistenceAdmissionController) {
-        guard !didReportIssue else { return }
-        didReportIssue = true
-        guard let onPersistenceIssue else { return }
+        // Latch and handler are read under one lock hold so two threads can
+        // never both observe an unset latch (see `issueLock`).
+        let handler = issueLock.withLock { () -> (@Sendable (RecordingPersistenceDiagnostics) -> Void)? in
+            guard !didReportIssue else { return nil }
+            didReportIssue = true
+            return storedIssueHandler
+        }
+        guard let handler else { return }
         let diagnostics = controller.diagnostics
         DispatchQueue.global(qos: .utility).async {
-            onPersistenceIssue(diagnostics)
+            handler(diagnostics)
         }
     }
 
@@ -335,8 +354,10 @@ public final class AudioRecordingPersistence: ObservableObject {
             )
         }
 
+        // The same identity a later listing derives for this file, so the
+        // in-session entry and the library entry are one recording to the UI.
         let info = RecordingInfo(
-            id: recordingID ?? UUID(),
+            id: Self.stableRecordingID(for: url),
             url: url,
             startedAt: startTime ?? Date(),
             duration: duration,
@@ -344,7 +365,6 @@ public final class AudioRecordingPersistence: ObservableObject {
             diagnostics: diagnostics
         )
 
-        recordingID = nil
         startTime = nil
 
         let filename = url.lastPathComponent
@@ -358,7 +378,6 @@ public final class AudioRecordingPersistence: ObservableObject {
         closeWriter()
         isRecording = false
         currentFileURL = nil
-        recordingID = nil
         startTime = nil
 
         if let url {

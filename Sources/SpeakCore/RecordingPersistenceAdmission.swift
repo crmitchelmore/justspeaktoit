@@ -68,6 +68,14 @@ public final class RecordingPersistenceAdmissionController: @unchecked Sendable 
         return storedDiagnostics
     }
 
+    /// Audio currently admitted but not yet written; exposed for tests that
+    /// assert the budget is released correctly.
+    var inFlightSecondsForTesting: Double {
+        lock.lock()
+        defer { lock.unlock() }
+        return inFlightSeconds
+    }
+
     /// Decides admission for one frame.
     ///
     /// - Parameters:
@@ -106,5 +114,21 @@ public final class RecordingPersistenceAdmissionController: @unchecked Sendable 
         if failed {
             storedDiagnostics.writeFailures += 1
         }
+    }
+
+    /// Records that an admitted frame never reached the writer — the fallback
+    /// allocation failed after `admit` granted `.acceptedViaOverflow`. The
+    /// admission is reversed and the frame is accounted as dropped audio, not
+    /// as a write failure, so `droppedSeconds` stays the exact gap and the
+    /// diagnostics agree with the `.backpressured` result the caller returns.
+    public func abandonAdmittedFrame(frameSeconds: Double) {
+        lock.lock()
+        defer { lock.unlock() }
+        inFlightSeconds = max(0, inFlightSeconds - frameSeconds)
+        storedDiagnostics.admittedFrames = max(0, storedDiagnostics.admittedFrames - 1)
+        storedDiagnostics.admittedSeconds = max(0, storedDiagnostics.admittedSeconds - frameSeconds)
+        storedDiagnostics.overflowAllocations = max(0, storedDiagnostics.overflowAllocations - 1)
+        storedDiagnostics.droppedFrames += 1
+        storedDiagnostics.droppedSeconds += frameSeconds
     }
 }

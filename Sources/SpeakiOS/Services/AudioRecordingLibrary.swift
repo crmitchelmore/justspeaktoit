@@ -1,5 +1,6 @@
 #if os(iOS)
 import AVFoundation
+import CryptoKit
 import Foundation
 import SpeakCore
 
@@ -33,13 +34,8 @@ extension AudioRecordingPersistence {
                 let created = res?.creationDate ?? Date()
                 let size = Int64(res?.fileSize ?? 0)
 
-                let stem = url.deletingPathExtension().lastPathComponent
-                let cleanStem = stem
-                    .replacingOccurrences(of: "Recording-", with: "")
-                let rid = UUID(uuidString: String(cleanStem.suffix(8))) ?? UUID()
-
                 return RecordingInfo(
-                    id: rid,
+                    id: stableRecordingID(for: url),
                     url: url,
                     startedAt: created,
                     duration: 0,
@@ -47,6 +43,23 @@ extension AudioRecordingPersistence {
                 )
             }
             .sorted { $0.startedAt > $1.startedAt }
+    }
+
+    /// Stable identity for a recording on disk, derived from its file name, so
+    /// the same file yields the same `id` on every listing. `RecordingInfo` is
+    /// `Identifiable`/`Hashable`: SwiftUI diffing and any selection or
+    /// pending-delete state keyed on `id` break if it changes between
+    /// refreshes. (The file name's 8-character suffix is not a UUID, so it
+    /// cannot simply be parsed back.)
+    public static func stableRecordingID(for url: URL) -> UUID {
+        let digest = SHA256.hash(data: Data(url.lastPathComponent.utf8))
+        let bytes = Array(digest.prefix(16))
+        return UUID(uuid: (
+            bytes[0], bytes[1], bytes[2], bytes[3],
+            bytes[4], bytes[5], bytes[6], bytes[7],
+            bytes[8], bytes[9], bytes[10], bytes[11],
+            bytes[12], bytes[13], bytes[14], bytes[15]
+        ))
     }
 
     /// Load a recording's duration without blocking the calling thread.

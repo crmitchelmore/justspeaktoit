@@ -173,7 +173,7 @@ final class TextOutputTests: XCTestCase {
   }
 
   @MainActor
-  func testPasteOutput_capturedTargetWithoutElement_WithholdsPasteAndKeepsClipboard() {
+  func testPasteOutput_capturedTargetWithoutElement_UsesApplicationFallbackAndKeepsClipboard() {
     let suiteName = "com.speakapp.text-output-tests.\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suiteName)!
     let pasteboard = NSPasteboard(name: NSPasteboard.Name(suiteName))
@@ -192,8 +192,8 @@ final class TextOutputTests: XCTestCase {
     let result = output.output(text: "Withheld transcript", target: makeRunningTarget(focusedElement: nil))
 
     XCTAssertEqual(result.method, .clipboard)
-    guard case .some(TextOutputError.capturedFieldUnavailable) = result.error else {
-      return XCTFail("Expected capturedFieldUnavailable, got \(String(describing: result.error))")
+    if case .some(TextOutputError.capturedFieldUnavailable) = result.error {
+      XCTFail("A missing AX field should use the captured-application fallback")
     }
     XCTAssertEqual(pasteboard.string(forType: .string), "Withheld transcript")
   }
@@ -300,5 +300,27 @@ final class ClipboardFieldIdentityPolicyTests: XCTestCase {
         accessibilityGranted: true
       )
     )
+  }
+
+  @MainActor
+  func testUnavailableFieldFallsBackToFrontmostCapturedApplication() {
+    XCTAssertNil(
+      PasteTextOutput.fieldIdentityError(
+        confirmation: .fieldUnavailable,
+        capturedApplicationIsFrontmost: true
+      )
+    )
+    guard case .capturedFieldChanged? = PasteTextOutput.fieldIdentityError(
+      confirmation: .fieldUnavailable,
+      capturedApplicationIsFrontmost: false
+    ) else {
+      return XCTFail("A missing field must not paste after the captured app loses focus")
+    }
+    guard case .capturedFieldChanged? = PasteTextOutput.fieldIdentityError(
+      confirmation: .fieldChanged,
+      capturedApplicationIsFrontmost: true
+    ) else {
+      return XCTFail("A positive field change must remain fail-closed")
+    }
   }
 }

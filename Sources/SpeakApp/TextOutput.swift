@@ -156,6 +156,20 @@ struct TextOutputTarget {
     }
     return .confirmed
   }
+
+  /// Clipboard delivery must still work for users who deliberately have not
+  /// granted Accessibility access. In that mode macOS will not expose a field
+  /// identity, so the strongest safe check available is that the captured app
+  /// is still the frontmost app. This preserves the pre-2.61 clipboard path
+  /// without allowing a paste into a different application.
+  func capturedApplicationIsFrontmost(
+    frontmostProcessIdentifier: pid_t? = NSWorkspace.shared.frontmostApplication?.processIdentifier
+  ) -> Bool {
+    guard isApplicationRunning, let processIdentifier, let frontmostProcessIdentifier else {
+      return false
+    }
+    return processIdentifier == frontmostProcessIdentifier
+  }
 }
 
 @MainActor
@@ -367,21 +381,8 @@ struct PasteTextOutput: TextOutputting {
       // Slack conversation, say) would receive the paste. Withhold the
       // keystroke unless the captured field provably still owns focus; the
       // transcript stays on the clipboard with the reason (issue #707).
-      if let target {
-        switch target.confirmCapturedFieldOwnsFocus() {
-        case .confirmed:
-          break
-        case .fieldUnavailable:
-          return TextOutputResult(
-            method: .clipboard,
-            error: TextOutputError.capturedFieldUnavailable
-          )
-        case .fieldChanged:
-          return TextOutputResult(
-            method: .clipboard,
-            error: TextOutputError.capturedFieldChanged
-          )
-        }
+      if let target, let identityError = fieldIdentityError(for: target) {
+        return TextOutputResult(method: .clipboard, error: identityError)
       }
       // Read before the paste replaces the selection; the pasted text starts
       // where the selection started.
@@ -411,6 +412,37 @@ struct PasteTextOutput: TextOutputting {
 
   static func hasDeliverableText(_ text: String) -> Bool {
     !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+  }
+
+  static func requiresExactFieldIdentity(
+    textOutputMethod: AppSettings.TextOutputMethod,
+    accessibilityGranted: Bool
+  ) -> Bool {
+    textOutputMethod != .clipboardOnly && accessibilityGranted
+  }
+
+  /// Enforces exact field identity for Smart-mode fallback when Accessibility
+  /// is available. Explicit Clipboard mode intentionally uses process-level
+  /// identity, as does any installation without Accessibility permission.
+  /// Both cases retain the legacy Command-V workflow while refusing to paste
+  /// after the user switches to another application.
+  private func fieldIdentityError(for target: TextOutputTarget) -> TextOutputError? {
+    permissionsManager.refresh(.accessibility)
+    let accessibilityGranted = permissionsManager.status(for: .accessibility).isGranted
+    guard Self.requiresExactFieldIdentity(
+      textOutputMethod: appSettings.textOutputMethod,
+      accessibilityGranted: accessibilityGranted
+    ) else {
+      return target.capturedApplicationIsFrontmost() ? nil : .capturedFieldChanged
+    }
+    switch target.confirmCapturedFieldOwnsFocus() {
+    case .confirmed:
+      return nil
+    case .fieldUnavailable:
+      return .capturedFieldUnavailable
+    case .fieldChanged:
+      return .capturedFieldChanged
+    }
   }
 
   private func simulatePasteShortcut(destination: EventDestination) -> Bool {

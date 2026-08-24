@@ -181,9 +181,11 @@ final class TextOutputTests: XCTestCase {
       pasteboard.clearContents()
       UserDefaults.standard.removePersistentDomain(forName: suiteName)
     }
+    let settings = AppSettings(defaults: defaults)
+    settings.textOutputMethod = .smart
     let output = PasteTextOutput(
       permissionsManager: PermissionsManager(statusProvider: { _ in .granted }),
-      appSettings: AppSettings(defaults: defaults),
+      appSettings: settings,
       pasteboard: pasteboard
     )
 
@@ -254,6 +256,38 @@ final class TextOutputTests: XCTestCase {
         currentFocus: { AXUIElementCreateApplication(ownPid) }
       ),
       .confirmed
+    )
+  }
+
+  @MainActor
+  func testCapturedApplicationIsFrontmost_requiresSameRunningProcess() {
+    let ownPid = ProcessInfo.processInfo.processIdentifier
+    let target = makeRunningTarget(focusedElement: nil)
+
+    XCTAssertTrue(target.capturedApplicationIsFrontmost(frontmostProcessIdentifier: ownPid))
+    XCTAssertFalse(target.capturedApplicationIsFrontmost(frontmostProcessIdentifier: 1))
+    XCTAssertFalse(target.capturedApplicationIsFrontmost(frontmostProcessIdentifier: nil))
+  }
+
+  @MainActor
+  func testExactFieldIdentity_isOnlyRequiredForSmartModeWithAccessibility() {
+    XCTAssertFalse(
+      PasteTextOutput.requiresExactFieldIdentity(
+        textOutputMethod: .clipboardOnly,
+        accessibilityGranted: true
+      )
+    )
+    XCTAssertFalse(
+      PasteTextOutput.requiresExactFieldIdentity(
+        textOutputMethod: .smart,
+        accessibilityGranted: false
+      )
+    )
+    XCTAssertTrue(
+      PasteTextOutput.requiresExactFieldIdentity(
+        textOutputMethod: .smart,
+        accessibilityGranted: true
+      )
     )
   }
 

@@ -435,11 +435,25 @@ struct PasteTextOutput: TextOutputting {
     ) else {
       return target.capturedApplicationIsFrontmost() ? nil : .capturedFieldChanged
     }
-    switch target.confirmCapturedFieldOwnsFocus() {
+    return Self.fieldIdentityError(
+      confirmation: target.confirmCapturedFieldOwnsFocus(),
+      capturedApplicationIsFrontmost: target.capturedApplicationIsFrontmost()
+    )
+  }
+
+  static func fieldIdentityError(
+    confirmation: TextOutputTarget.CapturedFieldConfirmation,
+    capturedApplicationIsFrontmost: Bool
+  ) -> TextOutputError? {
+    switch confirmation {
     case .confirmed:
       return nil
     case .fieldUnavailable:
-      return .capturedFieldUnavailable
+      // Some apps do not expose a focused AX element even though the user has
+      // granted Accessibility permission. Treat that the same as Clipboard
+      // mode: continue only while the captured app is still frontmost. A
+      // positive field mismatch remains fail-closed below.
+      return capturedApplicationIsFrontmost ? nil : .capturedFieldChanged
     case .fieldChanged:
       return .capturedFieldChanged
     }

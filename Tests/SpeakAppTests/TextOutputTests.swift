@@ -301,4 +301,26 @@ final class ClipboardFieldIdentityPolicyTests: XCTestCase {
       )
     )
   }
+
+  @MainActor
+  func testUnavailableFieldFallsBackToFrontmostCapturedApplication() {
+    XCTAssertNil(
+      PasteTextOutput.fieldIdentityError(
+        confirmation: .fieldUnavailable,
+        capturedApplicationIsFrontmost: true
+      )
+    )
+    guard case .capturedFieldChanged? = PasteTextOutput.fieldIdentityError(
+      confirmation: .fieldUnavailable,
+      capturedApplicationIsFrontmost: false
+    ) else {
+      return XCTFail("A missing field must not paste after the captured app loses focus")
+    }
+    guard case .capturedFieldChanged? = PasteTextOutput.fieldIdentityError(
+      confirmation: .fieldChanged,
+      capturedApplicationIsFrontmost: true
+    ) else {
+      return XCTFail("A positive field change must remain fail-closed")
+    }
+  }
 }

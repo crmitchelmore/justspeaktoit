@@ -269,6 +269,17 @@ final class TextOutputTests: XCTestCase {
     XCTAssertFalse(target.capturedApplicationIsFrontmost(frontmostProcessIdentifier: nil))
   }
 
+  func testHotKeyMonitoringState_displayNames_AreActionable() {
+    XCTAssertEqual(HotKeyMonitoringState.active.displayName, "Active")
+    XCTAssertEqual(
+      HotKeyMonitoringState.inputMonitoringRequired.displayName,
+      "Needs Input Monitoring"
+    )
+    XCTAssertEqual(HotKeyMonitoringState.registrationFailed.displayName, "Reconnect Required")
+  }
+}
+
+final class ClipboardFieldIdentityPolicyTests: XCTestCase {
   @MainActor
   func testExactFieldIdentity_isOnlyRequiredForSmartModeWithAccessibility() {
     XCTAssertFalse(
@@ -289,14 +300,5 @@ final class TextOutputTests: XCTestCase {
         accessibilityGranted: true
       )
     )
-  }
-
-  func testHotKeyMonitoringState_displayNames_AreActionable() {
-    XCTAssertEqual(HotKeyMonitoringState.active.displayName, "Active")
-    XCTAssertEqual(
-      HotKeyMonitoringState.inputMonitoringRequired.displayName,
-      "Needs Input Monitoring"
-    )
-    XCTAssertEqual(HotKeyMonitoringState.registrationFailed.displayName, "Reconnect Required")
   }
 }

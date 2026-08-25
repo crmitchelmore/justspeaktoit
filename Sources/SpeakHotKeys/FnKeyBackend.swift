@@ -24,6 +24,7 @@ final class FnKeyBackend {
   private var localMonitor: Any?
   private var eventTap: CFMachPort?
   private var eventTapRunLoopSource: CFRunLoopSource?
+  private var hardwareStateTimer: Timer?
   private var fnIsPressed = false
 
   @discardableResult
@@ -41,6 +42,7 @@ final class FnKeyBackend {
     }
 
     let eventTapStarted = startEventTap()
+    startHardwareStatePolling()
     return eventTapStarted || globalMonitor != nil
   }
 
@@ -54,6 +56,8 @@ final class FnKeyBackend {
       self.localMonitor = nil
     }
     stopEventTap()
+    hardwareStateTimer?.invalidate()
+    hardwareStateTimer = nil
     fnIsPressed = false
   }
 
@@ -70,6 +74,7 @@ final class FnKeyBackend {
     if let tap = eventTap {
       CGEvent.tapEnable(tap: tap, enable: false)
     }
+    hardwareStateTimer?.invalidate()
   }
 
   // MARK: - NSEvent Handling (Fallback)
@@ -140,6 +145,26 @@ final class FnKeyBackend {
       CGEvent.tapEnable(tap: tap, enable: false)
     }
     eventTap = nil
+  }
+
+  /// Terminal and other secure-input clients can temporarily starve event-tap
+  /// and global-monitor callbacks. Poll the Fn hardware state independently so
+  /// the configured shortcut still receives balanced down/up edges there.
+  private func startHardwareStatePolling() {
+    hardwareStateTimer?.invalidate()
+    let timer = Timer(timeInterval: 0.02, repeats: true) { [weak self] _ in
+      MainActor.assumeIsolated {
+        self?.reconcileHardwareState()
+      }
+    }
+    hardwareStateTimer = timer
+    RunLoop.main.add(timer, forMode: .common)
+  }
+
+  private func reconcileHardwareState() {
+    let flagsDown = CGEventSource.flagsState(.hidSystemState).contains(.maskSecondaryFn)
+    let keyDown = CGEventSource.keyState(.hidSystemState, key: functionKeyCode)
+    updateFnState(isDown: flagsDown || keyDown, source: "hardwarePoll")
   }
 
   private func handleCGEvent(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {

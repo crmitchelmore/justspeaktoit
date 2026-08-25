@@ -281,6 +281,43 @@ final class TextOutputTests: XCTestCase {
 
 final class ClipboardFieldIdentityPolicyTests: XCTestCase {
   @MainActor
+  func testPasteOutput_changedCapturedField_PastesWithWarningInsteadOfError() {
+    let suiteName = "com.speakapp.text-output-tests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    let pasteboard = NSPasteboard(name: NSPasteboard.Name(suiteName))
+    defer {
+      pasteboard.clearContents()
+      UserDefaults.standard.removePersistentDomain(forName: suiteName)
+    }
+    let settings = AppSettings(defaults: defaults)
+    settings.textOutputMethod = .smart
+    let output = PasteTextOutput(
+      permissionsManager: PermissionsManager(statusProvider: { _ in .granted }),
+      appSettings: settings,
+      pasteboard: pasteboard
+    )
+    let changedTarget = TextOutputTarget(
+      processIdentifier: ProcessInfo.processInfo.processIdentifier,
+      applicationName: "Tests",
+      bundleIdentifier: nil,
+      applicationLaunchDate: nil,
+      focusedElement: AXUIElementCreateApplication(1)
+    )
+
+    let result = output.output(text: "Paste despite target warning", target: changedTarget)
+
+    XCTAssertEqual(result.method, .clipboard)
+    XCTAssertNil(result.error)
+    XCTAssertNil(result.insertedRange)
+    guard let warning = result.warning as? TextOutputError,
+          case .capturedFieldChanged = warning
+    else {
+      return XCTFail("Expected the changed target to be reported as a warning")
+    }
+    XCTAssertEqual(pasteboard.string(forType: .string), "Paste despite target warning")
+  }
+
+  @MainActor
   func testExactFieldIdentity_isOnlyRequiredForSmartModeWithAccessibility() {
     XCTAssertFalse(
       PasteTextOutput.requiresExactFieldIdentity(
@@ -321,6 +358,16 @@ final class ClipboardFieldIdentityPolicyTests: XCTestCase {
       capturedApplicationIsFrontmost: true
     ) else {
       return XCTFail("A positive field change must remain fail-closed")
+    }
+  }
+
+  @MainActor
+  func testChangedFieldIsAWarningPolicyRatherThanBlockingPaste() {
+    guard case .capturedFieldChanged? = PasteTextOutput.fieldIdentityError(
+      confirmation: .fieldChanged,
+      capturedApplicationIsFrontmost: true
+    ) else {
+      return XCTFail("A changed target should still be surfaced as a delivery warning")
     }
   }
 }

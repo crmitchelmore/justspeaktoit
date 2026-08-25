@@ -7,6 +7,37 @@ import SwiftUI
 
 // MARK: - Provider Info for Onboarding
 
+// MARK: - Analytics helpers
+
+extension OnboardingProvider {
+    /// Maps the onboarding provider to the analytics provider type for event capture.
+    var analyticsProviderType: AnalyticsProviderType {
+        switch self {
+        case .deepgram: return .deepgram
+        case .soniox: return .soniox
+        case .openai: return .openAI
+        case .openrouter: return .openRouter
+        case .revai: return .revAI
+        }
+    }
+}
+
+extension OnboardingStep {
+    /// Returns the analytics step used for `onboarding_step_completed` events,
+    /// or `nil` for steps without a direct analytics equivalent.
+    var analyticsStep: AnalyticsOnboardingStep? {
+        switch self {
+        case .welcome: return .welcome
+        case .permissions: return .microphonePermission
+        case .hotkey: return .hotkeySetup
+        case .apiKey: return .providerChoice
+        case .testRecording, .complete: return nil
+        }
+    }
+}
+
+// MARK: - Provider Info for Onboarding
+
 enum OnboardingProvider: String, CaseIterable, Identifiable {
     case deepgram
     case soniox
@@ -381,6 +412,12 @@ struct OnboardingView: View {
                 
                 if state.currentStep == .complete {
                     Button("Get Started") {
+                        if AppEnvironment.shared?.analyticsAvailable == true {
+                            UserDefaults.standard.set(true, forKey: "hasAnsweredAnalyticsConsent")
+                            AppEnvironment.shared?.captureOnboardingCompletedAfterConsent()
+                        } else {
+                            AppEnvironment.shared?.capture(.onboardingCompleted(stepsSkipped: .zero))
+                        }
                         isComplete = true
                     }
                     .buttonStyle(.borderedProminent)
@@ -402,6 +439,9 @@ struct OnboardingView: View {
             .padding(.bottom, 30)
         }
         .frame(width: 600, height: 550)
+        .onAppear {
+            AppEnvironment.shared?.capture(.onboardingStarted(entryPoint: .freshInstall))
+        }
     }
     
     private var canAdvance: Bool {
@@ -422,6 +462,7 @@ struct OnboardingView: View {
     }
     
     private func advanceStep() async {
+        let completedStep = state.currentStep
         switch state.currentStep {
         case .hotkey:
             // Save the selected hotkey to settings
@@ -438,6 +479,11 @@ struct OnboardingView: View {
             if valid {
                 do {
                     try await state.saveAPIKey()
+                    // Track provider configuration
+                    AppEnvironment.shared?.capture(.providerConfigured(
+                        provider: state.selectedProvider.analyticsProviderType,
+                        method: .manual
+                    ))
                     withAnimation {
                         // If using non-Fn hotkey, show test recording; otherwise go to complete
                         if state.selectedHotKey != .fnKey {
@@ -460,6 +506,10 @@ struct OnboardingView: View {
                     state.currentStep = next
                 }
             }
+        }
+        // Track step completion for steps with an analytics mapping
+        if let analyticsStep = completedStep.analyticsStep {
+            AppEnvironment.shared?.capture(.onboardingStepCompleted(step: analyticsStep))
         }
     }
 }
@@ -1182,6 +1232,26 @@ struct CompleteStepView: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .padding(.top, 10)
+
+            if AppEnvironment.shared?.analyticsAvailable == true {
+                Toggle(
+                    "Share anonymous analytics",
+                    isOn: Binding(
+                        get: { state.settings.analyticsEnabled },
+                        set: { state.settings.analyticsEnabled = $0 }
+                    )
+                )
+                    .toggleStyle(.checkbox)
+                    .font(.callout)
+                Text(
+                    "Optional. Never includes transcripts, audio, prompts, clipboard text, "
+                        + "keystrokes, API keys, screen content or personal identity."
+                )
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 440)
+            }
         }
     }
 }

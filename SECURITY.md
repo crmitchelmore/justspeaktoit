@@ -36,6 +36,10 @@ This app follows these security practices:
   transcript content and API keys are not included.
   The iOS app does not currently initialise Sentry or another developer-operated
   analytics SDK.
+- **Consent-gated product analytics**: The direct-download macOS build can send a
+  small typed event catalogue to PostHog EU only after explicit opt-in. Opt-out
+  purges the random analytics identity and bounded local queue. The transport is
+  compiled out of Mac App Store, iOS and keyboard builds.
 - **Local processing**: Transcription can be performed entirely on-device
 - **Minimal permissions**: Only requests necessary permissions (microphone, accessibility)
 - **Debug UI redaction**: API keys and sensitive headers are automatically redacted in debug displays to prevent accidental exposure in screenshots or screen sharing

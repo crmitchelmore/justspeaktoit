@@ -92,6 +92,25 @@ items and breadcrumb data before transmission.
 The macOS dashboard's transcription history and usage charts are stored locally;
 they are not product-analytics events sent to the developer.
 
+### Optional product analytics (direct-download macOS only)
+
+The direct-download/Sparkle build offers an explicit opt-in to anonymous product
+analytics hosted in PostHog EU Cloud (Frankfurt). Declining does not affect any
+feature. Until you opt in, the app creates no analytics installation identifier,
+queues no events and makes no PostHog request. You can withdraw consent at any
+time in Settings; doing so immediately stops collection and deletes the local
+analytics identifier and queued events.
+
+The initial rollout sends only daily app activity, onboarding progress and the
+first successful transcription. Properties are selected from a fixed catalogue
+and use coarse buckets. Just Speak to It never sends transcripts, audio, prompts,
+clipboard text, keystrokes, API keys, screen content, names or email addresses.
+Each Mac uses a separate random identifier that is not synced through iCloud and
+is not linked to Sentry. Raw product events are retained for no more than 12
+months and are not used for advertising or cross-company tracking.
+
+The Mac App Store build and all iOS/keyboard targets compile this transport out.
+
 ### iOS diagnostics
 
 The iOS app does not currently initialise Sentry or another
@@ -107,7 +126,7 @@ tracking.
 
 ## Questions?
 
-For privacy questions, contact: [your contact email]
+For privacy questions, contact: [hello@justspeaktoit.com](mailto:hello@justspeaktoit.com)
 
 ---
 

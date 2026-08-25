@@ -35,7 +35,7 @@ let package = Package(
         .package(url: "https://github.com/argmaxinc/argmax-oss-swift.git", from: "1.1.0"),
         .package(
             url: "https://github.com/FluidInference/FluidAudio.git",
-            exact: "0.15.5"
+            exact: "0.15.6"
         ),
         .package(
             url: "https://github.com/pointfreeco/swift-snapshot-testing.git",

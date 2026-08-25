@@ -308,6 +308,7 @@ final class ClipboardFieldIdentityPolicyTests: XCTestCase {
 
     XCTAssertEqual(result.method, .clipboard)
     XCTAssertNil(result.error)
+    XCTAssertNil(result.insertedRange)
     guard let warning = result.warning as? TextOutputError,
           case .capturedFieldChanged = warning
     else {

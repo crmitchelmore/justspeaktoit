@@ -1190,11 +1190,18 @@ final class MainManager: ObservableObject {
         return
       }
 
-      // Start monitoring for user corrections (auto-corrections feature)
       let focusedElement = session.outputTarget?.focusedElement ?? getFocusedElement()
       let appName = session.outputTarget?.applicationName
         ?? NSWorkspace.shared.frontmostApplication?.localizedName
-      autoCorrectionTracker.startMonitoring(insertedText: finalText, element: focusedElement, app: appName)
+      // A warning means delivery proceeded without proving the current field.
+      // Do not associate Voice Edit/correction tracking with the stale capture.
+      if outputWarning == nil {
+        autoCorrectionTracker.startMonitoring(
+          insertedText: finalText,
+          element: focusedElement,
+          app: appName
+        )
+      }
 
       session.outputDelivered = Date()
 

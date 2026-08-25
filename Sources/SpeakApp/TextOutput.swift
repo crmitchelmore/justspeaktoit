@@ -393,7 +393,9 @@ struct PasteTextOutput: TextOutputting {
       }
       // Read before the paste replaces the selection; the pasted text starts
       // where the selection started.
-      insertedRange = pasteLandingRange(in: target, for: text)
+      if deliveryWarning == nil {
+        insertedRange = pasteLandingRange(in: target, for: text)
+      }
       guard simulatePasteShortcut(destination: destination) else {
         return TextOutputResult(method: .clipboard, error: TextOutputError.pasteShortcutUnavailable)
       }

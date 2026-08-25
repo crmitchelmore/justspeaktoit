@@ -23,6 +23,11 @@ final class AppStoreInfoPlistTests: XCTestCase {
         }
     }
 
+    func testAppStorePlist_omitsProductAnalyticsConfiguration() {
+        XCTAssertNil(appStorePlist["PostHogProjectKey"])
+        XCTAssertNil(appStorePlist["PostHogHost"])
+    }
+
     func testAppStorePlist_declaresLocalNetworkUsage() {
         let value = appStorePlist["NSLocalNetworkUsageDescription"] as? String
         let expected = "Just Speak to It uses your local network to connect iPhone and Mac "
@@ -44,6 +49,8 @@ final class AppStoreInfoPlistTests: XCTestCase {
         ]
         var directWithoutSparkle = directPlist!
         sparkleKeys.forEach { directWithoutSparkle.removeValue(forKey: $0) }
+        directWithoutSparkle.removeValue(forKey: "PostHogProjectKey")
+        directWithoutSparkle.removeValue(forKey: "PostHogHost")
         directWithoutSparkle["CFBundleDisplayName"] = "Just Speak to It (App Store)"
         directWithoutSparkle["CFBundleName"] = "Just Speak to It App Store"
         directWithoutSparkle["SpeakDistributionChannel"] = "appStore"

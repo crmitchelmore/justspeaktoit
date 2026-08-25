@@ -1125,6 +1125,7 @@ final class MainManager: ObservableObject {
 
       // Handle live text insertion finalization
       var liveFinalizationResult: LiveTextInserter.FinalizationResult = .deferred
+      var outputWarning: Error?
       if liveTextInserter.isActive {
         liveFinalizationResult = liveTextInserter.applyPolishedFinal(finalText)
         liveTextInserter.end()
@@ -1144,6 +1145,7 @@ final class MainManager: ObservableObject {
       case .deferred:
         let output = SmartTextOutput(permissionsManager: permissionsManager, appSettings: appSettings)
         let outputResult = output.output(text: finalText, target: session.outputTarget)
+        outputWarning = outputResult.warning
         session.outputMethod = outputResult.method
         if outputResult.error == nil {
           recordInsertion(of: finalText, range: outputResult.insertedRange, target: session.outputTarget)
@@ -1199,6 +1201,14 @@ final class MainManager: ObservableObject {
       session.events.append(
         HistoryEvent(kind: .outputDelivered, description: "Output delivered successfully")
       )
+      if let outputWarning {
+        session.events.append(
+          HistoryEvent(
+            kind: .outputDelivered,
+            description: "Delivery warning: \(outputWarning.localizedDescription)"
+          )
+        )
+      }
       session.destination = appName
       session.lexiconContext = makeLexiconContext(for: finalText, destination: appName)
       if let summary = session.personalCorrections {
@@ -1213,15 +1223,13 @@ final class MainManager: ObservableObject {
         lastErrorMessage = notice.message
         state = .failed(notice.message)
       } else {
-        if let stopToFinalMs = SessionLatencyMetrics.milliseconds(
-          from: session.stopRequested, to: session.outputDelivered
-        ) {
-          hudManager.finishSuccess(
-            message: "Delivered in \(SessionLatencyMetrics.formattedMilliseconds(stopToFinalMs))"
+        hudManager.finishSuccess(
+          message: Self.deliverySuccessMessage(
+            warning: outputWarning,
+            stopRequested: session.stopRequested,
+            delivered: session.outputDelivered
           )
-        } else {
-          hudManager.finishSuccess(message: "Delivered")
-        }
+        )
         state = .completed(historyItem)
       }
 
@@ -1238,6 +1246,23 @@ final class MainManager: ObservableObject {
       )
       cleanupAfterFailure(message: error.localizedDescription, preserveFile: true)
     }
+  }
+
+  private static func deliverySuccessMessage(
+    warning: Error?,
+    stopRequested: Date?,
+    delivered: Date?
+  ) -> String {
+    if let warning {
+      return "Delivered — \(warning.localizedDescription)"
+    }
+    guard let stopToFinalMs = SessionLatencyMetrics.milliseconds(
+      from: stopRequested,
+      to: delivered
+    ) else {
+      return "Delivered"
+    }
+    return "Delivered in \(SessionLatencyMetrics.formattedMilliseconds(stopToFinalMs))"
   }
   // swiftlint:enable cyclomatic_complexity function_body_length
 
@@ -1346,6 +1371,7 @@ final class MainManager: ObservableObject {
         let historyItem = session.buildHistoryItem(finalText: finalText)
         await historyManager.append(historyItem)
       } else {
+        recordDeliveryWarning(outputResult.warning, on: session)
         session.events.append(
           HistoryEvent(kind: .outputDelivered, description: "Retry output delivered successfully")
         )
@@ -1355,7 +1381,7 @@ final class MainManager: ObservableObject {
         let historyItem = session.buildHistoryItem(finalText: finalText)
         await historyManager.append(historyItem)
         clearRetryData()
-        hudManager.finishSuccess(message: "Retry Delivered")
+        hudManager.finishSuccess(message: Self.retryDeliverySuccessMessage(warning: outputResult.warning))
         state = .completed(historyItem)
       }
 
@@ -1382,6 +1408,20 @@ final class MainManager: ObservableObject {
     }
 
     activeSession = nil
+  }
+
+  private func recordDeliveryWarning(_ warning: Error?, on session: ActiveSession) {
+    guard let warning else { return }
+    session.events.append(
+      HistoryEvent(
+        kind: .outputDelivered,
+        description: "Delivery warning: \(warning.localizedDescription)"
+      )
+    )
+  }
+
+  private static func retryDeliverySuccessMessage(warning: Error?) -> String {
+    warning.map { "Retry delivered — \($0.localizedDescription)" } ?? "Retry Delivered"
   }
 
   // swiftlint:disable:next cyclomatic_complexity function_body_length

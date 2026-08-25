@@ -37,6 +37,7 @@ private let logger = SpeakLogger.logger(category: "TextOutput")
 struct TextOutputResult {
   let method: HistoryTrigger.OutputMethod
   let error: Error?
+  let warning: Error?
   /// Where the text landed in the focused field, when the delivery path can
   /// tell. Voice Edit's "last dictation" fallback edits this exact range
   /// (issue #673).
@@ -45,10 +46,12 @@ struct TextOutputResult {
   init(
     method: HistoryTrigger.OutputMethod,
     error: Error?,
+    warning: Error? = nil,
     insertedRange: VoiceEditTextRange? = nil
   ) {
     self.method = method
     self.error = error
+    self.warning = warning
     self.insertedRange = insertedRange
   }
 }
@@ -368,6 +371,7 @@ struct PasteTextOutput: TextOutputting {
     }
 
     var insertedRange: VoiceEditTextRange?
+    var deliveryWarning: Error?
     if canPasteIntoOtherApps {
       let destination = Self.eventDestination(for: target)
       guard destination != .none else {
@@ -378,11 +382,14 @@ struct PasteTextOutput: TextOutputting {
       }
       // PID-directed events reach the captured *process*, not the captured
       // *field*: focus moved to another field in the same app (a different
-      // Slack conversation, say) would receive the paste. Withhold the
-      // keystroke unless the captured field provably still owns focus; the
-      // transcript stays on the clipboard with the reason (issue #707).
+      // Slack conversation, say) may receive the paste. Surface that as a
+      // warning, but honour the user's preference to deliver anyway.
       if let target, let identityError = fieldIdentityError(for: target) {
-        return TextOutputResult(method: .clipboard, error: identityError)
+        deliveryWarning = identityError
+        let warningDescription = identityError.localizedDescription
+        logger.warning(
+          "Output target changed; continuing paste into captured process: \(warningDescription, privacy: .public)"
+        )
       }
       // Read before the paste replaces the selection; the pasted text starts
       // where the selection started.
@@ -396,7 +403,12 @@ struct PasteTextOutput: TextOutputting {
       scheduleClipboardRestore(previousContents, on: pasteboard)
     }
 
-    return TextOutputResult(method: .clipboard, error: nil, insertedRange: insertedRange)
+    return TextOutputResult(
+      method: .clipboard,
+      error: nil,
+      warning: deliveryWarning,
+      insertedRange: insertedRange
+    )
   }
 
   /// Where `text` will land in the captured field, when Accessibility lets us

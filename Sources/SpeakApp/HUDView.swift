@@ -13,11 +13,17 @@ struct HUDOverlay: View {
 
   var body: some View {
     if manager.snapshot.phase.isVisible {
-      presentedContent
-        .padding(.bottom, 24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-        .ignoresSafeArea()
-        .accessibilityIdentifier("hudOverlay")
+      Group {
+        if settings.showCompactHUD {
+          CompactHUDContent(manager: manager)
+        } else {
+          presentedContent
+        }
+      }
+      .padding(.bottom, 24)
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+      .ignoresSafeArea()
+      .accessibilityIdentifier("hudOverlay")
     }
   }
 

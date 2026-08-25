@@ -28,18 +28,39 @@ enum AutomationDeadline {
         id: String,
         command: AutomationCommand
     ) async -> AutomationResponse {
+        await value(of: work, within: seconds, id: id, command: command, beforeSettling: nil)
+    }
+
+    /// Test seam: `beforeSettling` runs once the command has completed and before
+    /// its result reaches the gate, with the timer task in hand, so a test can
+    /// force the interleaving a starved CI runner produced — a cancelled timer
+    /// that runs to completion ahead of the result.
+    static func value(
+        of work: Task<AutomationResponse, Never>,
+        within seconds: TimeInterval,
+        id: String,
+        command: AutomationCommand,
+        beforeSettling: (@Sendable (Task<Void, Never>) async -> Void)?
+    ) async -> AutomationResponse {
         let outcome: AutomationResponse? = await withCheckedContinuation { continuation in
             let gate = Gate(continuation: continuation)
             let deadline = Task.detached {
                 try? await Task.sleep(for: .seconds(seconds))
+                // A cancelled timer lost the race. Without this guard the sleep
+                // returns the instant the command cancels it, and on a starved
+                // machine the timer could reach the gate before the command's own
+                // result did — reporting a finished command as timed out.
+                guard !Task.isCancelled else { return }
                 await gate.settle(nil)
             }
             Task.detached {
                 let response = await work.value
-                // Releases the timer as soon as it can no longer win, rather than
-                // leaving it asleep for the remainder of a long deadline.
-                deadline.cancel()
+                await beforeSettling?(deadline)
+                // Settle first, so the result is what answers the waiter; then
+                // release the timer rather than leaving it asleep for the rest of
+                // a long deadline.
                 await gate.settle(response)
+                deadline.cancel()
             }
         }
         return outcome ?? .failure(

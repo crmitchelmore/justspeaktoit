@@ -1,13 +1,25 @@
 import Foundation
 
-/// A deliberately small, extension-safe store backed by the shared App Group.
+/// Cross-process handoff store for keyboard dictation (issue #712).
 ///
-/// The entire handoff is a single encoded value so readers never combine fields
-/// from different requests. Each mutation validates the nonce and transition.
-/// `@unchecked` only because `UserDefaults` lacks a Sendable annotation in the
-/// SDK: all stored properties are immutable references, `UserDefaults` is
-/// documented thread-safe, and the `NSLock` serializes every
-/// read-modify-write.
+/// App and keyboard extension are separate processes, so an in-process lock
+/// cannot make whole-record read-modify-write safe: the app's interim update
+/// could re-write a record the extension had just cancelled, resurrecting a
+/// closed recording. The v4 layout removes every cross-process
+/// read-modify-write by giving each key exactly one writing process:
+///
+/// | Key            | Writer            | Contents                            |
+/// |----------------|-------------------|-------------------------------------|
+/// | `intent.v4`    | keyboard extension| request identity + monotonic command|
+/// | `status.v4`    | containing app    | app-side phase, transcript, failure |
+/// | `interim.v4`   | containing app    | live transcript text only           |
+///
+/// Readers merge the keys into the familiar `KeyboardHandoffRecord`. Commands
+/// travel in the extension's own key with a monotonic sequence, so no app
+/// write can overwrite them; interim text lives apart from control state, so
+/// a text update cannot regress a phase; expiry is derived at read time and
+/// never written back. Every mutation validates the request identity, so a
+/// suspended old process cannot affect a replacement request.
 public final class KeyboardHandoffStore: @unchecked Sendable {
     public static let appGroupIdentifier = "group.com.justspeaktoit.ios"
     public static let shared = KeyboardHandoffStore()
@@ -16,10 +28,27 @@ public final class KeyboardHandoffStore: @unchecked Sendable {
     public static let transcriptionLifetime: TimeInterval = 90
     public static let resultLifetime: TimeInterval = 60
 
-    private static let recordKey = "keyboardHandoff.record.v3"
-    private static let observationKey = "keyboardHandoff.extensionObservation.v3"
+    /// Which process this store instance is running in. Writes are routed to
+    /// the process's own key so cross-process ownership is structural.
+    public enum Role: Sendable {
+        case containingApp
+        case keyboardExtension
 
-    private let defaults: UserDefaults?
+        public static var detected: Role {
+            Bundle.main.bundleURL.pathExtension == "appex" ? .keyboardExtension : .containingApp
+        }
+    }
+
+    static let intentKey = "keyboardHandoff.intent.v4"
+    static let statusKey = "keyboardHandoff.status.v4"
+    static let interimKey = "keyboardHandoff.interim.v4"
+    static let legacyRecordKey = "keyboardHandoff.record.v3"
+    static let observationKey = "keyboardHandoff.extensionObservation.v3"
+
+    let defaults: UserDefaults?
+    private let role: Role
+    /// Serialises this process's own writes; cross-process safety comes from
+    /// per-key ownership, not from this lock.
     private let lock = NSLock()
 
     public convenience init() {
@@ -27,14 +56,26 @@ public final class KeyboardHandoffStore: @unchecked Sendable {
     }
 
     /// Injectable for deterministic tests. Passing `nil` models a missing or
-    /// inaccessible App Group.
-    public init(defaults: UserDefaults?) {
+    /// inaccessible App Group. Tests pass explicit roles to model the two
+    /// processes as two independent store instances.
+    public init(defaults: UserDefaults?, role: Role = .detected) {
         self.defaults = defaults
+        self.role = role
+    }
+
+    /// The pre-v4 initializer, kept for source and API compatibility (#790):
+    /// the role is detected from the running process, exactly as `shared` does.
+    /// Swift resolves `init(defaults:)` calls to this overload (no defaulted
+    /// parameter is needed), so both symbols stay usable.
+    public convenience init(defaults: UserDefaults?) {
+        self.init(defaults: defaults, role: .detected)
     }
 
     public var isAvailable: Bool {
         defaults != nil
     }
+
+    // MARK: - Extension-side intent
 
     @discardableResult
     public func createRequest(
@@ -44,69 +85,81 @@ public final class KeyboardHandoffStore: @unchecked Sendable {
         now: Date = Date(),
         lifetime: TimeInterval = requestLifetime
     ) throws -> KeyboardHandoffRecord {
-        guard defaults != nil else { throw KeyboardHandoffStoreError.unavailable }
-        let record = KeyboardHandoffRecord(
-            requestID: id,
-            createdAt: now,
-            updatedAt: now,
-            expiresAt: now.addingTimeInterval(lifetime),
-            phase: .requested,
-            targetDocumentIdentifier: targetDocumentIdentifier,
-            profile: profile
-        )
-        try write(record)
-        return record
-    }
-
-    public func record(matching requestID: UUID, now: Date = Date()) -> KeyboardHandoffRecord? {
-        lock.withLock {
-            guard let record = readUnlocked(), record.requestID == requestID else { return nil }
-            return normalizeExpiryUnlocked(record, now: now)
+        try lock.withLock {
+            guard let defaults else { throw KeyboardHandoffStoreError.unavailable }
+            let intent = IntentRecord(
+                requestID: id,
+                createdAt: now,
+                expiresAt: now.addingTimeInterval(lifetime),
+                targetDocumentIdentifier: targetDocumentIdentifier,
+                profile: profile
+            )
+            // A new request owns the whole store: stale status/interim from a
+            // previous request (and any pre-v4 record) are removed.
+            defaults.set(try JSONEncoder().encode(intent), forKey: Self.intentKey)
+            defaults.removeObject(forKey: Self.statusKey)
+            defaults.removeObject(forKey: Self.interimKey)
+            defaults.removeObject(forKey: Self.legacyRecordKey)
+            defaults.synchronize()
+            guard let record = mergedRecordUnlocked(now: now) else {
+                throw KeyboardHandoffStoreError.unavailable
+            }
+            return record
         }
     }
 
-    public func activeRecord(now: Date = Date()) -> KeyboardHandoffRecord? {
-        lock.withLock {
-            guard let record = readUnlocked() else { return nil }
-            return normalizeExpiryUnlocked(record, now: now)
-        }
-    }
-
-    @discardableResult
-    public func markRecording(requestID: UUID, now: Date = Date()) throws -> KeyboardHandoffRecord {
-        try transition(
-            requestID: requestID,
-            allowedFrom: [.requested],
-            to: .recording,
-            now: now,
-            lifetime: Self.requestLifetime
-        )
-    }
-
-    @discardableResult
-    public func markTranscribing(requestID: UUID, now: Date = Date()) throws -> KeyboardHandoffRecord {
-        try transition(
-            requestID: requestID,
-            allowedFrom: [.recording, .finishRequested],
-            to: .transcribing,
-            now: now,
-            lifetime: Self.transcriptionLifetime
-        )
-    }
-
+    /// Requests finalisation via the extension-owned monotonic command
+    /// channel, so no later app write can overwrite it. Repeating the request
+    /// while it is pending is a no-op (the monotonic channel ignores it), so a
+    /// retry across processes is always safe; a cancelled request refuses it.
     @discardableResult
     public func requestFinish(requestID: UUID, now: Date = Date()) throws -> KeyboardHandoffRecord {
-        try transition(
+        try issueCommand(
+            .finish,
             requestID: requestID,
-            allowedFrom: [.recording],
-            to: .finishRequested,
-            now: now,
-            lifetime: Self.transcriptionLifetime
+            allowedFrom: [.recording, .finishRequested],
+            now: now
         )
     }
 
-    /// Publishes only the current request's live text. It is replaced on each
-    /// update, never appended, and is removed when the request ends.
+    /// Cancels the request. Repeating a cancel that already took effect is a
+    /// no-op in both processes: the extension's monotonic channel ignores the
+    /// duplicate, and the app returns the cancelled record without rewriting
+    /// it (which would otherwise extend its expiry).
+    @discardableResult
+    public func cancel(requestID: UUID, now: Date = Date()) throws -> KeyboardHandoffRecord {
+        let allowed: Set<KeyboardHandoffRecord.Phase> = [
+            .requested, .recording, .finishRequested, .transcribing
+        ]
+        switch role {
+        case .keyboardExtension:
+            return try issueCommand(
+                .cancel,
+                requestID: requestID,
+                allowedFrom: allowed.union([.cancelled]),
+                now: now
+            )
+        case .containingApp:
+            if let current = record(matching: requestID, now: now), current.phase == .cancelled {
+                return current
+            }
+            return try writeStatus(
+                requestID: requestID,
+                allowedFrom: allowed,
+                phase: .cancelled,
+                now: now,
+                lifetime: Self.resultLifetime
+            )
+        }
+    }
+
+    // App-side phase transitions (markRecording, markTranscribing, complete,
+    // fail) live in KeyboardHandoffTransitions.swift.
+
+    /// Publishes only the current request's live text, in a key of its own:
+    /// an interim update can no longer touch — let alone regress — the
+    /// control phase (issue #712). The app-owned status expiry is refreshed so
+    /// a long dictation cannot time out mid-sentence.
     @discardableResult
     public func updateInterim(
         requestID: UUID,
@@ -114,72 +167,64 @@ public final class KeyboardHandoffStore: @unchecked Sendable {
         now: Date = Date()
     ) throws -> KeyboardHandoffRecord {
         try lock.withLock {
-            guard defaults != nil else { throw KeyboardHandoffStoreError.unavailable }
-            guard let stored = readUnlocked() else { throw KeyboardHandoffStoreError.noActiveRequest }
-            guard stored.requestID == requestID else { throw KeyboardHandoffStoreError.mismatchedRequest }
-            guard let current = normalizeExpiryUnlocked(stored, now: now),
-                  current.phase == .recording else {
+            guard let defaults else { throw KeyboardHandoffStoreError.unavailable }
+            guard let current = mergedRecordUnlocked(now: now) else {
+                throw KeyboardHandoffStoreError.noActiveRequest
+            }
+            guard current.requestID == requestID else {
+                throw KeyboardHandoffStoreError.mismatchedRequest
+            }
+            guard current.phase == .recording else {
                 throw KeyboardHandoffStoreError.invalidTransition
             }
             let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-            let updated = KeyboardHandoffRecord(
-                requestID: current.requestID,
-                createdAt: current.createdAt,
-                updatedAt: now,
-                expiresAt: now.addingTimeInterval(Self.requestLifetime),
-                phase: current.phase,
-                targetDocumentIdentifier: current.targetDocumentIdentifier,
-                profile: current.profile,
-                interimTranscript: trimmed.isEmpty ? nil : trimmed
+            let interim = InterimRecord(
+                requestID: requestID,
+                text: trimmed.isEmpty ? nil : trimmed,
+                updatedAt: now
             )
-            try writeUnlocked(updated)
+            defaults.set(try JSONEncoder().encode(interim), forKey: Self.interimKey)
+            if var status = readStatusUnlocked(), status.requestID == requestID {
+                status.expiresAt = now.addingTimeInterval(Self.requestLifetime)
+                status.updatedAt = now
+                writeStatusRecordUnlocked(status)
+            }
+            defaults.synchronize()
+            guard let updated = mergedRecordUnlocked(now: now) else {
+                throw KeyboardHandoffStoreError.noActiveRequest
+            }
             return updated
         }
     }
 
-    @discardableResult
-    public func complete(
-        requestID: UUID,
-        transcript: String,
-        now: Date = Date()
-    ) throws -> KeyboardHandoffRecord {
-        let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { throw KeyboardHandoffStoreError.invalidTranscript }
-        return try transition(
-            requestID: requestID,
-            allowedFrom: [.transcribing],
-            to: .completed,
-            transcript: trimmed,
-            now: now,
-            lifetime: Self.resultLifetime
-        )
+    // MARK: - Reading
+
+    public func record(matching requestID: UUID, now: Date = Date()) -> KeyboardHandoffRecord? {
+        lock.withLock {
+            guard let record = mergedRecordUnlocked(now: now), record.requestID == requestID else {
+                return nil
+            }
+            return record
+        }
     }
 
-    @discardableResult
-    public func cancel(requestID: UUID, now: Date = Date()) throws -> KeyboardHandoffRecord {
-        try transition(
-            requestID: requestID,
-            allowedFrom: [.requested, .recording, .finishRequested, .transcribing],
-            to: .cancelled,
-            now: now,
-            lifetime: Self.resultLifetime
-        )
+    public func activeRecord(now: Date = Date()) -> KeyboardHandoffRecord? {
+        lock.withLock {
+            mergedRecordUnlocked(now: now)
+        }
     }
 
-    @discardableResult
-    public func fail(
+    /// Returns only the matching, unexpired result, leaving it in place.
+    /// Consumers insert the text first and clear afterwards, so a process
+    /// death or a failed insertion between the two cannot lose the transcript.
+    public func readyResult(
         requestID: UUID,
-        code: KeyboardHandoffRecord.FailureCode,
+        documentIdentifier: UUID? = nil,
         now: Date = Date()
-    ) throws -> KeyboardHandoffRecord {
-        try transition(
-            requestID: requestID,
-            allowedFrom: [.requested, .recording, .finishRequested, .transcribing],
-            to: .failed,
-            failureCode: code,
-            now: now,
-            lifetime: Self.resultLifetime
-        )
+    ) -> String? {
+        lock.withLock {
+            readyResultUnlocked(requestID: requestID, documentIdentifier: documentIdentifier, now: now)
+        }
     }
 
     /// Returns and then promptly removes only the matching, unexpired result.
@@ -189,29 +234,35 @@ public final class KeyboardHandoffStore: @unchecked Sendable {
         now: Date = Date()
     ) -> String? {
         lock.withLock {
-            guard let stored = readUnlocked(),
-                  stored.requestID == requestID,
-                  let record = normalizeExpiryUnlocked(stored, now: now),
-                  record.phase == .completed,
-                  record.targetDocumentIdentifier == nil
-                    || record.targetDocumentIdentifier == documentIdentifier,
-                  let transcript = record.transcript,
-                  !transcript.isEmpty else {
+            guard let transcript = readyResultUnlocked(
+                requestID: requestID, documentIdentifier: documentIdentifier, now: now
+            ) else {
                 return nil
             }
-            defaults?.removeObject(forKey: Self.recordKey)
-            defaults?.synchronize()
+            removeAllUnlocked()
             return transcript
         }
     }
 
-    /// Removes only the caller's request, so an old keyboard cannot clear a
-    /// newer request after process suspension.
+    private func readyResultUnlocked(requestID: UUID, documentIdentifier: UUID?, now: Date) -> String? {
+        guard let record = mergedRecordUnlocked(now: now),
+              record.requestID == requestID,
+              record.phase == .completed,
+              record.targetDocumentIdentifier == nil
+                || record.targetDocumentIdentifier == documentIdentifier,
+              let transcript = record.transcript,
+              !transcript.isEmpty else {
+            return nil
+        }
+        return transcript
+    }
+
+    /// Removes only the caller's request, so an old process cannot clear a
+    /// newer request after suspension.
     public func clear(requestID: UUID) {
         lock.withLock {
-            guard readUnlocked()?.requestID == requestID else { return }
-            defaults?.removeObject(forKey: Self.recordKey)
-            defaults?.synchronize()
+            guard readIntentUnlocked()?.requestID == requestID else { return }
+            removeAllUnlocked()
         }
     }
 
@@ -229,135 +280,115 @@ public final class KeyboardHandoffStore: @unchecked Sendable {
     }
 }
 
-private extension KeyboardHandoffStore {
-    func transition(
+// MARK: - Writes
+
+extension KeyboardHandoffStore {
+    /// Records an extension intent in the extension-owned command channel.
+    /// Commands only escalate (`finish` → `cancel`); a stale lower command can
+    /// never replace a newer one, and terminal app phases refuse commands.
+    func issueCommand(
+        _ command: Command,
         requestID: UUID,
         allowedFrom: Set<KeyboardHandoffRecord.Phase>,
-        to phase: KeyboardHandoffRecord.Phase,
+        now: Date
+    ) throws -> KeyboardHandoffRecord {
+        try lock.withLock {
+            guard let defaults else { throw KeyboardHandoffStoreError.unavailable }
+            guard var intent = readIntentUnlocked() else {
+                throw KeyboardHandoffStoreError.noActiveRequest
+            }
+            guard intent.requestID == requestID else {
+                throw KeyboardHandoffStoreError.mismatchedRequest
+            }
+            guard let current = mergedRecordUnlocked(now: now),
+                  allowedFrom.contains(current.phase) else {
+                throw KeyboardHandoffStoreError.invalidTransition
+            }
+            // Monotonic command channel: cancel outranks finish outranks none.
+            guard commandRank(command) > commandRank(intent.command) else {
+                guard let record = mergedRecordUnlocked(now: now) else {
+                    throw KeyboardHandoffStoreError.noActiveRequest
+                }
+                return record
+            }
+            intent.command = command
+            intent.commandSequence += 1
+            intent.commandIssuedAt = now
+            intent.expiresAt = now.addingTimeInterval(Self.transcriptionLifetime)
+            defaults.set(try JSONEncoder().encode(intent), forKey: Self.intentKey)
+            defaults.synchronize()
+            guard let record = mergedRecordUnlocked(now: now) else {
+                throw KeyboardHandoffStoreError.noActiveRequest
+            }
+            return record
+        }
+    }
+
+    func commandRank(_ command: Command) -> Int {
+        switch command {
+        case .none: return 0
+        case .finish: return 1
+        case .cancel: return 2
+        }
+    }
+
+    /// App-owned status write. Transitions validate against the merged view
+    /// (so a pending extension cancel blocks app transitions) and are
+    /// monotonic: a terminal phase is absorbing.
+    func writeStatus(
+        requestID: UUID,
+        allowedFrom: Set<KeyboardHandoffRecord.Phase>,
+        phase: KeyboardHandoffRecord.Phase,
         transcript: String? = nil,
         failureCode: KeyboardHandoffRecord.FailureCode? = nil,
         now: Date,
         lifetime: TimeInterval
     ) throws -> KeyboardHandoffRecord {
         try lock.withLock {
-            guard defaults != nil else { throw KeyboardHandoffStoreError.unavailable }
-            guard let stored = readUnlocked() else { throw KeyboardHandoffStoreError.noActiveRequest }
-            guard stored.requestID == requestID else { throw KeyboardHandoffStoreError.mismatchedRequest }
-            guard let current = normalizeExpiryUnlocked(stored, now: now),
-                  allowedFrom.contains(current.phase) else {
+            guard let defaults else { throw KeyboardHandoffStoreError.unavailable }
+            guard let current = mergedRecordUnlocked(now: now) else {
+                throw KeyboardHandoffStoreError.noActiveRequest
+            }
+            guard current.requestID == requestID else {
+                throw KeyboardHandoffStoreError.mismatchedRequest
+            }
+            guard allowedFrom.contains(current.phase) else {
                 throw KeyboardHandoffStoreError.invalidTransition
             }
-
-            let updated = KeyboardHandoffRecord(
-                requestID: current.requestID,
-                createdAt: current.createdAt,
+            let status = StatusRecord(
+                requestID: requestID,
+                phase: phase,
                 updatedAt: now,
                 expiresAt: now.addingTimeInterval(lifetime),
-                phase: phase,
-                targetDocumentIdentifier: current.targetDocumentIdentifier,
-                profile: current.profile,
-                interimTranscript: phase == .recording || phase == .finishRequested || phase == .transcribing
-                    ? current.interimTranscript
-                    : nil,
                 transcript: transcript,
                 failureCode: failureCode
             )
-            try writeUnlocked(updated)
-            return updated
+            writeStatusRecordUnlocked(status)
+            if !phaseKeepsInterim(phase) {
+                defaults.removeObject(forKey: Self.interimKey)
+            }
+            defaults.synchronize()
+            guard let record = mergedRecordUnlocked(now: now) else {
+                throw KeyboardHandoffStoreError.noActiveRequest
+            }
+            return record
         }
     }
 
-    func write(_ record: KeyboardHandoffRecord) throws {
-        try lock.withLock {
-            try writeUnlocked(record)
-        }
+    func phaseKeepsInterim(_ phase: KeyboardHandoffRecord.Phase) -> Bool {
+        phase == .recording || phase == .finishRequested || phase == .transcribing
     }
 
-    func writeUnlocked(_ record: KeyboardHandoffRecord) throws {
-        guard let defaults else { throw KeyboardHandoffStoreError.unavailable }
-        defaults.set(try JSONEncoder().encode(record), forKey: Self.recordKey)
-        defaults.synchronize()
+    func writeStatusRecordUnlocked(_ status: StatusRecord) {
+        guard let data = try? JSONEncoder().encode(status) else { return }
+        defaults?.set(data, forKey: Self.statusKey)
     }
 
-    func readUnlocked() -> KeyboardHandoffRecord? {
-        guard let data = defaults?.data(forKey: Self.recordKey),
-              let record = try? JSONDecoder().decode(KeyboardHandoffRecord.self, from: data),
-              record.schemaVersion == KeyboardHandoffRecord.schemaVersion else {
-            return nil
-        }
-        return record
-    }
-
-    func normalizeExpiryUnlocked(
-        _ record: KeyboardHandoffRecord,
-        now: Date
-    ) -> KeyboardHandoffRecord? {
-        guard record.expiresAt <= now else { return record }
-
-        if record.phase == .cancelled || record.phase == .failed {
-            defaults?.removeObject(forKey: Self.recordKey)
-            defaults?.synchronize()
-            return nil
-        }
-
-        let timedOut = KeyboardHandoffRecord(
-            requestID: record.requestID,
-            createdAt: record.createdAt,
-            updatedAt: now,
-            expiresAt: now.addingTimeInterval(Self.resultLifetime),
-            phase: .failed,
-            targetDocumentIdentifier: record.targetDocumentIdentifier,
-            profile: record.profile,
-            failureCode: .timedOut
-        )
-        try? writeUnlocked(timedOut)
-        return timedOut
-    }
-}
-
-public enum KeyboardLaunchPolicy {
-    public enum BlockReason: Equatable {
-        case fullAccessRequired
-        case sharedContainerUnavailable
-    }
-
-    public static func blockReason(
-        hasFullAccess: Bool,
-        sharedContainerAvailable: Bool
-    ) -> BlockReason? {
-        if !hasFullAccess {
-            return .fullAccessRequired
-        }
-        if !sharedContainerAvailable {
-            return .sharedContainerUnavailable
-        }
-        return nil
-    }
-}
-
-public struct KeyboardHandoffConsumer {
-    private let store: KeyboardHandoffStore
-
-    public init(store: KeyboardHandoffStore = .shared) {
-        self.store = store
-    }
-
-    /// Inserts only a matching result and clears it immediately afterwards.
-    @discardableResult
-    public func insertReadyResult(
-        requestID: UUID,
-        documentIdentifier: UUID? = nil,
-        now: Date = Date(),
-        insert: (String) -> Void
-    ) -> Bool {
-        guard let transcript = store.consumeResult(
-            requestID: requestID,
-            documentIdentifier: documentIdentifier,
-            now: now
-        ) else {
-            return false
-        }
-        insert(transcript)
-        return true
+    func removeAllUnlocked() {
+        defaults?.removeObject(forKey: Self.intentKey)
+        defaults?.removeObject(forKey: Self.statusKey)
+        defaults?.removeObject(forKey: Self.interimKey)
+        defaults?.removeObject(forKey: Self.legacyRecordKey)
+        defaults?.synchronize()
     }
 }

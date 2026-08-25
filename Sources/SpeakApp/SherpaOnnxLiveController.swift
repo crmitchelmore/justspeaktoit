@@ -32,6 +32,9 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
   private var streamingStartTime: Date?
   private var latestText: String = ""
   private var hasFinished: Bool = false
+  /// Whether this run's sidecar delivered its `session_final` event — the
+  /// proof that finalisation covered every accepted PCM frame (issue #679).
+  private var receivedSessionFinal = false
   private var isStopping: Bool = false
   private var sidecarOutputBuffer = ""
   /// Sink for the current process's stderr. Replaced on every start so stderr
@@ -82,6 +85,7 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
 
     latestText = ""
     hasFinished = false
+    receivedSessionFinal = false
     sidecarOutputBuffer = ""
     processDidLaunch = false
     let errorSink = SidecarErrorSink(maxByteCount: Self.maxSidecarErrorByteCount)
@@ -183,20 +187,34 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
     isRunning = false
 
     let duration = streamingStartTime.map { Date().timeIntervalSince($0) } ?? 0
-    let result = TranscriptionResult(
-      text: latestText,
-      segments: latestText.isEmpty ? [] : [
-        TranscriptionSegment(startTime: 0, endTime: duration, text: latestText)
-      ],
-      confidence: nil,
-      duration: duration,
-      modelIdentifier: currentModel ?? appSettings.localStreamingModelSource,
-      cost: nil,
-      rawPayload: nil,
-      debugInfo: nil
-    )
     hasFinished = true
-    delegate?.liveTranscriber(self, didFinishWith: result)
+    if receivedSessionFinal {
+      let result = TranscriptionResult(
+        text: latestText,
+        segments: latestText.isEmpty ? [] : [
+          TranscriptionSegment(startTime: 0, endTime: duration, text: latestText)
+        ],
+        confidence: nil,
+        duration: duration,
+        modelIdentifier: currentModel ?? appSettings.localStreamingModelSource,
+        cost: nil,
+        rawPayload: nil,
+        debugInfo: nil
+      )
+      delegate?.liveTranscriber(self, didFinishWith: result)
+    } else {
+      // The sidecar never delivered its whole-session final: forced
+      // termination or a crash must surface as an explicit failure, never as
+      // a success carrying a stale partial that silently drops trailing
+      // speech (issue #679).
+      delegate?.liveTranscriber(
+        self,
+        didFail: SherpaOnnxRuntimeError.processFailed(
+          "Local finalisation did not complete; the transcript may be missing "
+            + "trailing speech. The live text shown so far was kept."
+        )
+      )
+    }
     await endActiveInputSession()
     resetProcessState()
     isStopping = false
@@ -283,6 +301,7 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
     else { return }
     switch event.type {
     case "partial", "session_final":
+      if event.type == "session_final" { receivedSessionFinal = true }
       guard let rawText = event.text?.trimmingCharacters(in: .whitespacesAndNewlines), !rawText.isEmpty else {
         return
       }
@@ -304,14 +323,32 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
   private func waitForProcessExit() async {
     guard let process else { return }
     // Offline transducer models (Parakeet TDT) decode the whole session once
-    // stdin closes, so long recordings need more headroom than the online
-    // models, which exit almost immediately.
-    for _ in 0..<100 where process.isRunning {
+    // stdin closes, so the exit allowance must scale with what was recorded —
+    // a fixed window silently truncated long sessions to a stale partial
+    // (issue #679).
+    let sessionSeconds = streamingStartTime.map { Date().timeIntervalSince($0) } ?? 0
+    let deadline = Date().addingTimeInterval(
+      Self.finalisationAllowance(forSessionSeconds: sessionSeconds)
+    )
+    while process.isRunning && Date() < deadline && !receivedSessionFinal {
+      try? await Task.sleep(for: .milliseconds(100))
+    }
+    // Give a process that already produced its final a moment to exit.
+    for _ in 0..<20 where process.isRunning {
       try? await Task.sleep(for: .milliseconds(100))
     }
     if process.isRunning {
       process.terminate()
     }
+  }
+
+  /// How long finalisation may run after stdin closes: at the measured
+  /// real-time factor (~0.04) a quarter of the session duration is six-fold
+  /// headroom, floored at the historical ten seconds for short sessions.
+  nonisolated static func finalisationAllowance(
+    forSessionSeconds seconds: TimeInterval
+  ) -> TimeInterval {
+    max(10, seconds * 0.25)
   }
 
   private func cleanupAfterFailedStart() async {

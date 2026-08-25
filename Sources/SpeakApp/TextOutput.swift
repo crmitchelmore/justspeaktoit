@@ -37,9 +37,26 @@ private let logger = SpeakLogger.logger(category: "TextOutput")
 struct TextOutputResult {
   let method: HistoryTrigger.OutputMethod
   let error: Error?
+  let warning: Error?
+  /// Where the text landed in the focused field, when the delivery path can
+  /// tell. Voice Edit's "last dictation" fallback edits this exact range
+  /// (issue #673).
+  let insertedRange: VoiceEditTextRange?
+
+  init(
+    method: HistoryTrigger.OutputMethod,
+    error: Error?,
+    warning: Error? = nil,
+    insertedRange: VoiceEditTextRange? = nil
+  ) {
+    self.method = method
+    self.error = error
+    self.warning = warning
+    self.insertedRange = insertedRange
+  }
 }
 
-private func currentSystemFocusedElement() -> AXUIElement? {
+func currentSystemFocusedElement() -> AXUIElement? {
   let systemWideElement = AXUIElementCreateSystemWide()
   var rawFocused: CFTypeRef?
   let copyStatus = AXUIElementCopyAttributeValue(
@@ -97,6 +114,65 @@ struct TextOutputTarget {
     }
     return true
   }
+
+  /// Whether the captured AX element belongs to the captured process. An
+  /// AXUIElement is bound to one process for its lifetime, so a mismatch means
+  /// the capture raced an app switch and the element must not be used
+  /// (issue #707).
+  func capturedElementBelongsToCapturedProcess() -> Bool {
+    guard let focusedElement, let processIdentifier else { return false }
+    var elementProcessIdentifier: pid_t = 0
+    guard AXUIElementGetPid(focusedElement, &elementProcessIdentifier) == .success else {
+      return false
+    }
+    return elementProcessIdentifier == processIdentifier
+  }
+
+  /// Field-identity confirmation for keystroke-based delivery (issue #707).
+  enum CapturedFieldConfirmation: Equatable {
+    /// The captured field is the captured process's current focus.
+    case confirmed
+    /// No AX element was captured, so field identity cannot be proven.
+    case fieldUnavailable
+    /// The captured process is not frontmost, or focus moved to a different
+    /// field (for example another conversation in the same app).
+    case fieldChanged
+  }
+
+  /// Confirms that a simulated paste would land in the captured field: the
+  /// captured process must be frontmost and its current focused element must
+  /// be the captured element. PID-directed events reach a process, not a
+  /// field, so without this proof a paste can land in whichever field owns
+  /// focus now (issue #707).
+  func confirmCapturedFieldOwnsFocus(
+    frontmostProcessIdentifier: pid_t? = NSWorkspace.shared.frontmostApplication?.processIdentifier,
+    currentFocus: () -> AXUIElement? = currentSystemFocusedElement
+  ) -> CapturedFieldConfirmation {
+    guard let focusedElement else { return .fieldUnavailable }
+    guard capturedElementBelongsToCapturedProcess(),
+          let frontmostProcessIdentifier,
+          frontmostProcessIdentifier == processIdentifier,
+          let current = currentFocus(),
+          CFEqual(current, focusedElement)
+    else {
+      return .fieldChanged
+    }
+    return .confirmed
+  }
+
+  /// Clipboard delivery must still work for users who deliberately have not
+  /// granted Accessibility access. In that mode macOS will not expose a field
+  /// identity, so the strongest safe check available is that the captured app
+  /// is still the frontmost app. This preserves the pre-2.61 clipboard path
+  /// without allowing a paste into a different application.
+  func capturedApplicationIsFrontmost(
+    frontmostProcessIdentifier: pid_t? = NSWorkspace.shared.frontmostApplication?.processIdentifier
+  ) -> Bool {
+    guard isApplicationRunning, let processIdentifier, let frontmostProcessIdentifier else {
+      return false
+    }
+    return processIdentifier == frontmostProcessIdentifier
+  }
 }
 
 @MainActor
@@ -118,6 +194,8 @@ enum TextOutputError: LocalizedError {
   case clipboardWriteFailed
   case targetApplicationUnavailable
   case pasteShortcutUnavailable
+  case capturedFieldUnavailable
+  case capturedFieldChanged
 
   var errorDescription: String? {
     switch self {
@@ -135,6 +213,12 @@ enum TextOutputError: LocalizedError {
       return "The original app is no longer available. The transcript was kept on the clipboard."
     case .pasteShortcutUnavailable:
       return "Unable to paste into the original app. The transcript was kept on the clipboard."
+    case .capturedFieldUnavailable:
+      return "The field where recording started could not be identified. "
+        + "The transcript was kept on the clipboard."
+    case .capturedFieldChanged:
+      return "The focused field changed since recording started. "
+        + "The transcript was kept on the clipboard."
     }
   }
 }
@@ -162,31 +246,17 @@ struct AccessibilityTextOutput: TextOutputting {
       )
     }
 
-    guard let focusedElement = target?.focusedElement ?? currentSystemFocusedElement() else {
-      return TextOutputResult(
-        method: .none,
-        error: TextOutputError.unableToFindFocusedElement
-      )
+    let focusedElement: AXUIElement
+    switch Self.resolveDeliveryElement(for: target) {
+    case .success(let element):
+      focusedElement = element
+    case .failure(let error):
+      return TextOutputResult(method: .none, error: error)
     }
 
     switch appSettings.accessibilityInsertionMode {
     case .insertAtCursor:
-      // Insert at cursor by replacing the current selection (or inserting if selection is empty)
-      let setResult = AXUIElementSetAttributeValue(
-        focusedElement, kAXSelectedTextAttribute as CFString, text as CFTypeRef)
-      guard setResult == .success else {
-        // Fall back to replacing the whole field if selected text insertion isn't supported
-        let fallbackResult = AXUIElementSetAttributeValue(
-          focusedElement, kAXValueAttribute as CFString, text as CFTypeRef)
-        guard fallbackResult == .success else {
-          return TextOutputResult(
-            method: .none,
-            error: TextOutputError.unableToSetValue(fallbackResult)
-          )
-        }
-        return TextOutputResult(method: .accessibility, error: nil)
-      }
-      return TextOutputResult(method: .accessibility, error: nil)
+      return insertAtCursor(text, into: focusedElement)
 
     case .replaceAll:
       let setResult = AXUIElementSetAttributeValue(
@@ -197,10 +267,68 @@ struct AccessibilityTextOutput: TextOutputting {
           error: TextOutputError.unableToSetValue(setResult)
         )
       }
-      return TextOutputResult(method: .accessibility, error: nil)
+      return TextOutputResult(
+        method: .accessibility,
+        error: nil,
+        insertedRange: VoiceEditTextRange(location: 0, length: text.utf16.count)
+      )
     }
   }
 
+  /// Replaces the current selection (or inserts at the caret), falling back to
+  /// replacing the whole field when the app rejects selected-text insertion.
+  private func insertAtCursor(_ text: String, into focusedElement: AXUIElement) -> TextOutputResult {
+    // The selection about to be replaced tells us where the text will land.
+    let selectionBeforeInsert = AccessibilityStreamingTextField(element: focusedElement)
+      .readSelectedRange()
+    let setResult = AXUIElementSetAttributeValue(
+      focusedElement, kAXSelectedTextAttribute as CFString, text as CFTypeRef)
+    guard setResult == .success else {
+      let fallbackResult = AXUIElementSetAttributeValue(
+        focusedElement, kAXValueAttribute as CFString, text as CFTypeRef)
+      guard fallbackResult == .success else {
+        return TextOutputResult(
+          method: .none,
+          error: TextOutputError.unableToSetValue(fallbackResult)
+        )
+      }
+      return TextOutputResult(
+        method: .accessibility,
+        error: nil,
+        insertedRange: VoiceEditTextRange(location: 0, length: text.utf16.count)
+      )
+    }
+    return TextOutputResult(
+      method: .accessibility,
+      error: nil,
+      insertedRange: selectionBeforeInsert.map {
+        VoiceEditTextRange(location: $0.location, length: text.utf16.count)
+      }
+    )
+  }
+
+  /// A non-nil target is a captured-field contract: when its AX element is
+  /// missing (capture failed) or belongs to another process (the capture
+  /// raced an app switch), never resolve the *current* focus in its place —
+  /// that is how a transcript lands in an unrelated app (issue #707).
+  /// `target == nil` remains the explicit current-focus operation.
+  static func resolveDeliveryElement(
+    for target: TextOutputTarget?
+  ) -> Result<AXUIElement, TextOutputError> {
+    if let target {
+      guard let captured = target.focusedElement else {
+        return .failure(.capturedFieldUnavailable)
+      }
+      guard target.capturedElementBelongsToCapturedProcess() else {
+        return .failure(.capturedFieldChanged)
+      }
+      return .success(captured)
+    }
+    guard let current = currentSystemFocusedElement() else {
+      return .failure(.unableToFindFocusedElement)
+    }
+    return .success(current)
+  }
 }
 
 // @Implement: This implementation should use the clipboard to paste text into the focused app. It should restore the previous pasteboard value (if the app setting output to clipboard is false) It should respect any relevant settings from app settings
@@ -233,13 +361,17 @@ struct PasteTextOutput: TextOutputting {
 
     let canPasteIntoOtherApps = DistributionChannel.current.supportsAccessibilityTextInsertion
     let restoreClipboard = canPasteIntoOtherApps && appSettings.restoreClipboardAfterPaste
-    let previousString = restoreClipboard ? pasteboard.string(forType: .string) : nil
+    // Every item and type, not just the string: an image, file or rich-only
+    // clipboard must survive the temporary paste intact (issue #673).
+    let previousContents = restoreClipboard ? PasteboardSnapshot(reading: pasteboard) : nil
 
     pasteboard.clearContents()
     guard pasteboard.setString(text, forType: .string) else {
       return TextOutputResult(method: .none, error: TextOutputError.clipboardWriteFailed)
     }
 
+    var insertedRange: VoiceEditTextRange?
+    var deliveryWarning: Error?
     if canPasteIntoOtherApps {
       let destination = Self.eventDestination(for: target)
       guard destination != .none else {
@@ -248,20 +380,97 @@ struct PasteTextOutput: TextOutputting {
           error: TextOutputError.targetApplicationUnavailable
         )
       }
+      // PID-directed events reach the captured *process*, not the captured
+      // *field*: focus moved to another field in the same app (a different
+      // Slack conversation, say) may receive the paste. Surface that as a
+      // warning, but honour the user's preference to deliver anyway.
+      if let target, let identityError = fieldIdentityError(for: target) {
+        deliveryWarning = identityError
+        let warningDescription = identityError.localizedDescription
+        logger.warning(
+          "Output target changed; continuing paste into captured process: \(warningDescription, privacy: .public)"
+        )
+      }
+      // Read before the paste replaces the selection; the pasted text starts
+      // where the selection started.
+      if deliveryWarning == nil {
+        insertedRange = pasteLandingRange(in: target, for: text)
+      }
       guard simulatePasteShortcut(destination: destination) else {
         return TextOutputResult(method: .clipboard, error: TextOutputError.pasteShortcutUnavailable)
       }
     }
 
-    if restoreClipboard {
-      scheduleClipboardRestore(previousString, on: pasteboard)
+    if let previousContents {
+      scheduleClipboardRestore(previousContents, on: pasteboard)
     }
 
-    return TextOutputResult(method: .clipboard, error: nil)
+    return TextOutputResult(
+      method: .clipboard,
+      error: nil,
+      warning: deliveryWarning,
+      insertedRange: insertedRange
+    )
+  }
+
+  /// Where `text` will land in the captured field, when Accessibility lets us
+  /// read the current selection. Nil when unknown; consumers verify the text
+  /// at the range before trusting it.
+  private func pasteLandingRange(in target: TextOutputTarget?, for text: String) -> VoiceEditTextRange? {
+    guard let element = target?.focusedElement,
+      permissionsManager.status(for: .accessibility).isGranted,
+      let selection = AccessibilityStreamingTextField(element: element).readSelectedRange()
+    else { return nil }
+    return VoiceEditTextRange(location: selection.location, length: text.utf16.count)
   }
 
   static func hasDeliverableText(_ text: String) -> Bool {
     !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+  }
+
+  static func requiresExactFieldIdentity(
+    textOutputMethod: AppSettings.TextOutputMethod,
+    accessibilityGranted: Bool
+  ) -> Bool {
+    textOutputMethod != .clipboardOnly && accessibilityGranted
+  }
+
+  /// Enforces exact field identity for Smart-mode fallback when Accessibility
+  /// is available. Explicit Clipboard mode intentionally uses process-level
+  /// identity, as does any installation without Accessibility permission.
+  /// Both cases retain the legacy Command-V workflow while refusing to paste
+  /// after the user switches to another application.
+  private func fieldIdentityError(for target: TextOutputTarget) -> TextOutputError? {
+    permissionsManager.refresh(.accessibility)
+    let accessibilityGranted = permissionsManager.status(for: .accessibility).isGranted
+    guard Self.requiresExactFieldIdentity(
+      textOutputMethod: appSettings.textOutputMethod,
+      accessibilityGranted: accessibilityGranted
+    ) else {
+      return target.capturedApplicationIsFrontmost() ? nil : .capturedFieldChanged
+    }
+    return Self.fieldIdentityError(
+      confirmation: target.confirmCapturedFieldOwnsFocus(),
+      capturedApplicationIsFrontmost: target.capturedApplicationIsFrontmost()
+    )
+  }
+
+  static func fieldIdentityError(
+    confirmation: TextOutputTarget.CapturedFieldConfirmation,
+    capturedApplicationIsFrontmost: Bool
+  ) -> TextOutputError? {
+    switch confirmation {
+    case .confirmed:
+      return nil
+    case .fieldUnavailable:
+      // Some apps do not expose a focused AX element even though the user has
+      // granted Accessibility permission. Treat that the same as Clipboard
+      // mode: continue only while the captured app is still frontmost. A
+      // positive field mismatch remains fail-closed below.
+      return capturedApplicationIsFrontmost ? nil : .capturedFieldChanged
+    case .fieldChanged:
+      return .capturedFieldChanged
+    }
   }
 
   private func simulatePasteShortcut(destination: EventDestination) -> Bool {
@@ -299,13 +508,10 @@ struct PasteTextOutput: TextOutputting {
     return .process(processIdentifier)
   }
 
-  private func scheduleClipboardRestore(_ previousString: String?, on pasteboard: NSPasteboard) {
+  private func scheduleClipboardRestore(_ previousContents: PasteboardSnapshot, on pasteboard: NSPasteboard) {
     let delay = DispatchTime.now() + .milliseconds(300)
     DispatchQueue.main.asyncAfter(deadline: delay) {
-      pasteboard.clearContents()
-      if let previousString {
-        pasteboard.setString(previousString, forType: .string)
-      }
+      previousContents.restore(to: pasteboard)
     }
   }
 }
@@ -396,9 +602,13 @@ struct SmartTextOutput: TextOutputting {
       // TCC before deciding whether direct insertion is available.
       permissionsManager.refresh(.accessibility)
 
-      // Only try accessibility if permission is granted AND there's a focused element
+      // Only try accessibility if permission is granted AND the captured
+      // field (or, with no target, current focus) resolved. A missing or
+      // cross-process captured element falls through to the clipboard path,
+      // whose own field-identity gate decides about the paste keystroke —
+      // never to current focus (issue #707).
       if permissionsManager.status(for: .accessibility).isGranted,
-         let focusedElement = target?.focusedElement ?? currentSystemFocusedElement() {
+         case .success(let focusedElement) = AccessibilityTextOutput.resolveDeliveryElement(for: target) {
 
         // Log element info for debugging
         logFocusedElementInfo(focusedElement)

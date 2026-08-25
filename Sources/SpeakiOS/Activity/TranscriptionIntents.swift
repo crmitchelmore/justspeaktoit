@@ -80,8 +80,10 @@ public struct StartTranscriptionIntent: AudioRecordingIntent, ForegroundContinua
 
     public func perform() async throws -> some IntentResult & ProvidesDialog {
         let service = await TranscriptionRecordingService.shared
-        let isRunning = await service.isRunning
-        if isRunning {
+        // `starting` counts: a startup in flight is already an active
+        // operation, not a free slot (issue #701).
+        let isActive = await service.isActive
+        if isActive {
             return .result(dialog: "Recording already in progress.")
         }
         if SharedTranscriptionState.shared.isRecording {
@@ -136,9 +138,11 @@ public struct StartTranscriptionRecordingIntent: AudioRecordingIntent, Foregroun
     /// owned exclusively by `stopRecording(destination:)`.
     public func perform() async throws -> IntentResultContainer<Never, Never, Never, Never> {
         let service = await TranscriptionRecordingService.shared
-        let isRunning = await service.isRunning
+        // A toggle during startup must stop (cancel) the pending run rather
+        // than treating the service as free and double-starting (issue #701).
+        let isActive = await service.isActive
 
-        if isRunning {
+        if isActive {
             let destination = await AppSettings.shared.hardwareTriggerDestination
             await service.stopRecording(destination: destination)
             return .result()
@@ -177,9 +181,10 @@ public struct StopTranscriptionRecordingIntent: AudioRecordingIntent, LiveActivi
 
     public func perform() async throws -> some IntentResult & ProvidesDialog {
         let service = await TranscriptionRecordingService.shared
-        let isRunning = await service.isRunning
+        // `starting` is cancellable, not "no active recording" (issue #701).
+        let isActive = await service.isActive
 
-        guard isRunning else {
+        guard isActive else {
             if SharedTranscriptionState.shared.isRecording {
                 return .result(dialog: "A recording is active in the app. Use the in-app stop button.")
             }

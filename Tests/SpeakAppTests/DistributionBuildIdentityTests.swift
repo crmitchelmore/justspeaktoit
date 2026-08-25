@@ -53,8 +53,10 @@ final class DistributionBuildIdentityTests: XCTestCase {
     }
 
     func testDirectMacRelease_retriesStaplingAcceptedNotarizationTickets() throws {
-        let workflow = try String(
-            contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/release-mac.yml"),
+        // Per-variant packaging lives in the composite action the workflow calls
+        // once per download (issue #774).
+        let packaging = try String(
+            contentsOf: repositoryRoot.appendingPathComponent(".github/actions/package-mac-release/action.yml"),
             encoding: .utf8
         )
         let retryScript = try String(
@@ -62,8 +64,8 @@ final class DistributionBuildIdentityTests: XCTestCase {
             encoding: .utf8
         )
 
-        XCTAssertTrue(workflow.contains("bash scripts/retry-staple.sh \"$APP_PATH\""))
-        XCTAssertTrue(workflow.contains("bash scripts/retry-staple.sh \"$DMG_PATH\""))
+        XCTAssertTrue(packaging.contains("bash scripts/retry-staple.sh \"$APP_PATH\""))
+        XCTAssertTrue(packaging.contains("bash scripts/retry-staple.sh \"$DMG_PATH\""))
         XCTAssertTrue(retryScript.contains("stapler staple"))
         XCTAssertTrue(retryScript.contains("stapler validate"))
         XCTAssertTrue(retryScript.contains("STAPLE_MAX_ATTEMPTS:-6"))
@@ -411,10 +413,10 @@ final class DistributionBuildIdentityTests: XCTestCase {
             contentsOf: repositoryRoot.appendingPathComponent("scripts/create-ios-app-store-profile.rb"),
             encoding: .utf8
         )
-        XCTAssertTrue(profileBootstrap.contains("path: \"/v1/bundleIds\""))
+        XCTAssertTrue(profileBootstrap.contains("@client.post(\"/v1/bundleIds\""))
         XCTAssertTrue(profileBootstrap.contains("/bundleIdCapabilities\""))
         XCTAssertFalse(profileBootstrap.contains("/bundleIdCapabilities?limit="))
-        XCTAssertTrue(profileBootstrap.contains("path: \"/v1/bundleIdCapabilities\""))
+        XCTAssertTrue(profileBootstrap.contains("@client.post(\"/v1/bundleIdCapabilities\""))
         XCTAssertTrue(profileBootstrap.contains("capabilityType: capability_type"))
         XCTAssertFalse(profileBootstrap.contains("method: Net::HTTP::Delete"))
         XCTAssertFalse(profileBootstrap.contains("profiles.each do |stale_profile|"))
@@ -434,7 +436,197 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(script.contains("swift build --product speak --configuration release --arch x86_64"))
         XCTAssertTrue(script.contains("lipo -create"))
         XCTAssertTrue(script.contains("lipo -archs"))
-        XCTAssertTrue(script.contains("universal speak binary is missing"))
+        XCTAssertTrue(script.contains("speak binary is missing"))
+        // The arm64 primary download embeds an arm64-only CLI, and a slice the
+        // variant does not promise fails the build (issue #774).
+        XCTAssertTrue(script.contains("VARIANT=\"${3:-universal}\""))
+        XCTAssertTrue(script.contains("arm64) REQUIRED_ARCHS=\"arm64\""))
+        XCTAssertTrue(script.contains("universal) REQUIRED_ARCHS=\"arm64 x86_64\""))
+        XCTAssertTrue(script.contains("speak binary must not contain"))
+    }
+
+    // MARK: - arm64 primary + universal legacy downloads (issue #774)
+
+    func testDirectMacRelease_packagesTheArm64PrimaryAndUniversalLegacyVariants() throws {
+        let workflow = try String(
+            contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/release-mac.yml"),
+            encoding: .utf8
+        )
+        let packaging = try String(
+            contentsOf: repositoryRoot.appendingPathComponent(".github/actions/package-mac-release/action.yml"),
+            encoding: .utf8
+        )
+
+        XCTAssertEqual(workflow.components(separatedBy: "uses: ./.github/actions/package-mac-release").count - 1, 2)
+        XCTAssertTrue(workflow.contains("variant: arm64"))
+        XCTAssertTrue(workflow.contains("variant: universal"))
+        XCTAssertTrue(packaging.contains("arm64) ARCHS=\"arm64\""))
+        XCTAssertTrue(packaging.contains("universal) ARCHS=\"arm64 x86_64\""))
+        XCTAssertTrue(packaging.contains("ARCHS=\"${{ steps.paths.outputs.archs }}\""))
+        XCTAssertTrue(packaging.contains("ONLY_ACTIVE_ARCH=NO"))
+        XCTAssertTrue(packaging.contains("dmg-path=$WORK/$PRODUCT_NAME-${{ inputs.variant }}.dmg"))
+        let embedCLI = "./scripts/build-speak-cli.sh \"$APP_PATH\" \"Developer ID Application\" "
+            + "\"${{ inputs.variant }}\""
+        XCTAssertTrue(packaging.contains(embedCLI))
+        // The two builds must not share scratch space.
+        XCTAssertTrue(packaging.contains("RUNNER_TEMP=\"${{ steps.paths.outputs.work }}\" ./scripts/create-dmg.sh"))
+    }
+
+    func testDirectMacRelease_verifiesArchitectureGatekeeperAndRecordsSizes() throws {
+        let packaging = try String(
+            contentsOf: repositoryRoot.appendingPathComponent(".github/actions/package-mac-release/action.yml"),
+            encoding: .utf8
+        )
+        let workflow = try String(
+            contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/release-mac.yml"),
+            encoding: .utf8
+        )
+        let architectureScript = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("scripts/verify-architecture.sh"),
+            encoding: .utf8
+        )
+        let sizeScript = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("scripts/record-release-size.sh"),
+            encoding: .utf8
+        )
+
+        let verifyArchitecture = "./scripts/verify-architecture.sh \"${{ steps.paths.outputs.app-path }}\" "
+            + "\"${{ inputs.variant }}\""
+        XCTAssertTrue(packaging.contains(verifyArchitecture))
+        XCTAssertTrue(packaging.contains("spctl --assess --type execute"))
+        XCTAssertTrue(packaging.contains("./scripts/record-release-size.sh"))
+        XCTAssertTrue(workflow.contains("GITHUB_STEP_SUMMARY"))
+
+        XCTAssertTrue(architectureScript.contains("lipo -archs"))
+        XCTAssertTrue(architectureScript.contains("Contents/MacOS/JustSpeakToIt"))
+        XCTAssertTrue(architectureScript.contains("Contents/MacOS/speak"))
+        XCTAssertTrue(architectureScript.contains("must contain exactly"))
+        XCTAssertTrue(sizeScript.contains("GITHUB_STEP_SUMMARY"))
+        XCTAssertTrue(sizeScript.contains("du -sk"))
+    }
+
+    func testDirectMacRelease_publishesOneFeedAndOneCaskArchitecturePerDownload() throws {
+        let workflow = try String(
+            contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/release-mac.yml"),
+            encoding: .utf8
+        )
+        let appcastScript = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("scripts/generate-appcast.sh"),
+            encoding: .utf8
+        )
+
+        // Legacy feed keeps its name and serves the universal DMG; the arm64 feed serves the arm64 DMG.
+        let continuation = " \\\n            "
+        let legacyFeed = [
+            "\"$LEGACY_DMG_PATH\"", "\"$SPARKLE_PRIVATE_KEY\"", "\"$RUNNER_TEMP/release-notes.html\"",
+            "\"https://justspeaktoit.com/appcast.xml\" > \"$RUNNER_TEMP/appcast.xml\""
+        ].joined(separator: continuation)
+        let arm64Feed = [
+            "\"$DMG_PATH\"", "\"$SPARKLE_PRIVATE_KEY\"", "\"$RUNNER_TEMP/release-notes.html\"",
+            "\"https://justspeaktoit.com/appcast-arm64.xml\" > \"$RUNNER_TEMP/appcast-arm64.xml\""
+        ].joined(separator: continuation)
+        XCTAssertTrue(workflow.contains(legacyFeed))
+        XCTAssertTrue(workflow.contains(arm64Feed))
+        XCTAssertTrue(workflow.contains("! grep -q \"$(basename \"$DMG_PATH\")\" \"$RUNNER_TEMP/appcast.xml\""))
+        XCTAssertTrue(appcastScript.contains("FEED_URL=\"${6:-https://justspeaktoit.com/appcast.xml}\""))
+        XCTAssertTrue(appcastScript.contains("<link>${FEED_URL}</link>"))
+
+        // Both downloads and both feeds are release assets.
+        let releaseAssets = [
+            "${{ env.DMG_PATH }}", "${{ env.LEGACY_DMG_PATH }}",
+            "${{ env.APPCAST_PATH }}", "${{ env.ARM64_APPCAST_PATH }}"
+        ].joined(separator: "\n            ")
+        XCTAssertTrue(workflow.contains(releaseAssets))
+
+    }
+
+    func testDirectMacRelease_publishesCLIAssetsAndDelegatesTheTap() throws {
+        let workflow = try String(
+            contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/release-mac.yml"),
+            encoding: .utf8
+        )
+        let appcastScript = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("scripts/generate-appcast.sh"),
+            encoding: .utf8
+        )
+
+        // The standalone CLI assets ride along when their optional step succeeded (issue #775).
+        let cliAssets = [
+            "${{ env.CLI_ARM64_ZIP }}", "${{ env.CLI_X86_64_ZIP }}",
+            "${{ env.CLI_MANIFEST }}", "${{ env.CLI_MANIFEST_SIG }}"
+        ].joined(separator: "\n            ")
+        XCTAssertTrue(workflow.contains(cliAssets))
+
+        // The tap is written by one script the workflow delegates to: the cask
+        // hands each architecture its own download and checksum, and depends
+        // on the speak formula instead of linking the binary inside the bundle.
+        let tapScript = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("scripts/update-homebrew-tap.sh"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(workflow.contains(
+            "./scripts/update-homebrew-tap.sh \"$VERSION\" \"$ARM64_SHA256\" \"$UNIVERSAL_SHA256\""
+        ))
+        XCTAssertTrue(tapScript.contains("arch arm: \"arm64\", intel: \"universal\""))
+        XCTAssertTrue(tapScript.contains("sha256 arm:   \"$ARM64_SHA256\",\n         intel: \"$UNIVERSAL_SHA256\""))
+        XCTAssertTrue(tapScript.contains(
+            "RELEASE_URL=\"https://github.com/crmitchelmore/justspeaktoit/releases/download/mac-v#{version}\""
+        ))
+        XCTAssertTrue(tapScript.contains("url \"${RELEASE_URL}/JustSpeakToIt-#{arch}.dmg\""))
+        XCTAssertTrue(tapScript.contains("depends_on formula: \"crmitchelmore/justspeaktoit/speak\""))
+        XCTAssertFalse(tapScript.contains("binary \"#{appdir}"))
+        XCTAssertTrue(tapScript.contains("speak-#{version}-arm64.zip"))
+        XCTAssertTrue(tapScript.contains("speak-#{version}-x86_64.zip"))
+
+        // The retry workflow reads the DMG digests back out of that two-line
+        // cask by label, not by layout, and refuses to proceed without them.
+        let retryWorkflow = try String(
+            contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/publish-speak-cli.yml"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(retryWorkflow.contains("grep -oE 'arm: *\"[0-9a-f]{64}\"'"))
+        XCTAssertTrue(retryWorkflow.contains("grep -oE 'intel: *\"[0-9a-f]{64}\"'"))
+        XCTAssertTrue(retryWorkflow.contains("Could not read the DMG digests"))
+        // It builds the CLI from the tag but runs the pipeline files from
+        // main, fetched into the remote-tracking ref it then checks out from.
+        XCTAssertTrue(retryWorkflow.contains("ref: refs/tags/mac-v${{ github.event.inputs.version }}"))
+        XCTAssertTrue(retryWorkflow.contains(
+            "git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main"
+        ))
+        XCTAssertTrue(retryWorkflow.contains("git checkout origin/main -- \\\n            scripts/"))
+        XCTAssertTrue(retryWorkflow.contains("            .github/actions/publish-speak-cli\n"))
+
+        // Signing tools never arrive through an unverified download while the
+        // private key is on disk.
+        let signScript = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("scripts/sparkle-sign-file.sh"),
+            encoding: .utf8
+        )
+        XCTAssertFalse(signScript.contains("curl"))
+        XCTAssertTrue(appcastScript.contains("SPARKLE_TOOLS_SHA256="))
+        XCTAssertTrue(appcastScript.contains("curl --fail"))
+    }
+
+    func testLandingPageRedirects_routeBothFeedsAndDownloadsAheadOfTheIndexRewrite() throws {
+        let redirects = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("landing-page/_redirects"),
+            encoding: .utf8
+        )
+        let lines = redirects.components(separatedBy: "\n")
+        func index(of prefix: String) -> Int? { lines.firstIndex { $0.hasPrefix(prefix) } }
+
+        let legacyFeed = try XCTUnwrap(index(of: "/appcast.xml "))
+        let arm64Feed = try XCTUnwrap(index(of: "/appcast-arm64.xml "))
+        let appleSiliconDownload = try XCTUnwrap(index(of: "/download/mac "))
+        let intelDownload = try XCTUnwrap(index(of: "/download/mac-intel "))
+        let indexRewrite = try XCTUnwrap(index(of: "/index.html "))
+
+        XCTAssertTrue(lines[arm64Feed].contains("releases/latest/download/appcast-arm64.xml"))
+        XCTAssertTrue(lines[appleSiliconDownload].contains("releases/latest/download/JustSpeakToIt-arm64.dmg"))
+        XCTAssertTrue(lines[intelDownload].contains("releases/latest/download/JustSpeakToIt-universal.dmg"))
+        for rule in [legacyFeed, arm64Feed, appleSiliconDownload, intelDownload] {
+            XCTAssertLessThan(rule, indexRewrite, "exact redirects must precede the index rewrite")
+        }
     }
 
     func testIOSReleaseWorkflowRequiresAnExplicitSemanticVersion() throws {

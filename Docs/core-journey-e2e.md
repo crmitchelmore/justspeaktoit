@@ -1,0 +1,42 @@
+# Core dictation journey regression gate
+
+Run the required hermetic gate with:
+
+```sh
+scripts/run-core-journey-e2e.sh
+```
+
+It has an eight-minute test-command budget and CI has a ten-minute wall-clock
+timeout. The gate uses fixed in-memory HTTP/stream events and isolated defaults
+and pasteboards; it requires no microphone, provider network, API key, or paid
+service. Logs and timing are written to `.artifacts/core-journey-e2e/` and are
+uploaded by CI even when the command fails.
+
+## Covered contracts
+
+- Hardware hotkey down/up balance, reset, bounce, and cancellation.
+- Batch provider success/error payload handling, including missing and rejected
+  credentials.
+- Streaming partial/final reconciliation, timeouts, and late events.
+- Post-processing off/on, empty input, local processing, and cloud stub use.
+- Streaming delivery exactly once without stale or duplicate partial text.
+- Empty output preserving the clipboard and unavailable direct insertion
+  falling back to it.
+- Captured-target delivery, including a changed focused field being delivered
+  with a warning rather than becoming a session error.
+- Successful recovery after deadline and failure paths through the automation
+  boundary.
+
+These are process-boundary contract tests, not a claim that GitHub's unsigned
+runner can grant Accessibility or synthesize the physical Fn key. A signed app
+smoke on real macOS remains the release check for Terminal Secure Keyboard Entry.
+The fixture-app/UI layer described in #802 can be promoted once its permission
+bootstrap is reliable on cold hosted runners; it must reuse this same command
+and budget rather than creating a second required gate.
+
+## Updating the gate
+
+Keep only one representative journey per external branch here. Put
+combinatorial cases in the owning suite. Never add live credentials, network,
+blind retries, or sleeps. A failure must name the owning XCTest and the CI log
+must always be uploaded.

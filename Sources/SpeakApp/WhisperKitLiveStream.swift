@@ -180,7 +180,8 @@ final class WhisperKitLiveStream: WhisperKitLiveStreaming {
         ) else { return "" }
         var tailOptions = options
         tailOptions.clipTimestamps = []
-        let results = try await pipeline.transcribe(
+        let results = try await WhisperKitOffMain.transcribe(
+            pipeline,
             audioArray: Array(samples[range]),
             decodeOptions: tailOptions
         )

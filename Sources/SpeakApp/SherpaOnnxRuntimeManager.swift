@@ -534,9 +534,17 @@ def run_online(args):
 
 def run_offline(args):
     # Offline transducers (e.g. NVIDIA Parakeet TDT) decode a whole utterance
-    # at a time. Re-decode the accumulated audio after every ~2 s of new input
-    # to stream partial results, then decode once more at end of input for the
-    # session final.
+    # at a time. Ingestion and inference are decoupled (issue #679): a reader
+    # thread always drains stdin, so the pipe can never fill and block the
+    # app's real-time audio queue behind model inference. Partials decode a
+    # bounded tail window at an adaptive cadence (never more than ~half the
+    # wall clock), so partial latency and per-decode cost stay constant for
+    # long sessions instead of growing quadratically. The session final still
+    # decodes every retained sample.
+    import collections
+    import threading
+    import time
+
     recognizer = sherpa_onnx.OfflineRecognizer.from_transducer(
         encoder=args.encoder,
         decoder=args.decoder,
@@ -549,34 +557,123 @@ def run_offline(args):
         model_type=args.model_type,
         provider="cpu",
     )
-    buffered = array.array("f")
-    last_text = ""
-    samples_since_decode = 0
-    decode_interval = 16000 * 2
 
-    def decode_buffered():
+    # Bounded retention: one hour of 16 kHz mono float32 (~230 MB). Beyond it
+    # the oldest audio is dropped and the cap is reported once, so memory is
+    # bounded and truncation is explicit rather than silent.
+    max_buffer_samples = 16000 * 60 * 60
+    # Partials decode at most the trailing minute, keeping each partial decode
+    # constant-cost regardless of session length.
+    partial_window_samples = 16000 * 60
+
+    lock = threading.Lock()
+    # Retained audio is a deque of PCM chunks rather than one flat array:
+    # evicting old audio drops whole leading chunks (plus a prefix of one
+    # small chunk), so a post-cap read costs the same as any other read
+    # instead of shifting the whole hour of samples while the reader holds
+    # the lock and stdin stops draining.
+    buffered = collections.deque()
+    retained = 0  # samples currently held in `buffered`
+    received = 0  # samples accepted from stdin since start; never decreases
+    eof = threading.Event()
+    capped = threading.Event()
+
+    def reader():
+        nonlocal retained, received
+        while True:
+            samples = read_samples()
+            if samples is None:
+                break
+            if not samples:
+                continue
+            with lock:
+                buffered.append(samples)
+                retained += len(samples)
+                received += len(samples)
+                while retained > max_buffer_samples:
+                    excess = retained - max_buffer_samples
+                    oldest = buffered[0]
+                    if len(oldest) <= excess:
+                        buffered.popleft()
+                        retained -= len(oldest)
+                    else:
+                        del oldest[:excess]
+                        retained -= excess
+                    capped.set()
+        eof.set()
+
+    def snapshot(limit):
+        # Concatenates the trailing `limit` retained samples (every retained
+        # sample when `limit` is None). Called with the lock held.
+        window = array.array("f")
+        if limit is None or retained <= limit:
+            for chunk in buffered:
+                window.extend(chunk)
+            return window
+        remaining = limit
+        tail = []
+        for chunk in reversed(buffered):
+            if len(chunk) >= remaining:
+                tail.append(chunk[len(chunk) - remaining:])
+                break
+            tail.append(chunk)
+            remaining -= len(chunk)
+        for chunk in reversed(tail):
+            window.extend(chunk)
+        return window
+
+    thread = threading.Thread(target=reader, daemon=True)
+    thread.start()
+
+    def decode(window):
         stream = recognizer.create_stream()
-        stream.accept_waveform(16000, buffered)
+        stream.accept_waveform(16000, window)
         recognizer.decode_stream(stream)
         return stream.result.text
 
-    while True:
-        samples = read_samples()
-        if samples is None:
-            break
-        if not samples:
+    last_text = ""
+    # `received` at the last partial decode. Progress is measured against
+    # samples accepted, not samples retained, so partials continue after the
+    # retention cap holds the buffer at a constant length.
+    decoded_upto = 0
+    last_decode_seconds = 0.0
+    did_report_cap = False
+
+    def report_cap_once():
+        nonlocal did_report_cap
+        if capped.is_set() and not did_report_cap:
+            did_report_cap = True
+            emit("buffer_capped", "retention window exceeded; oldest audio dropped")
+
+    while not eof.is_set():
+        time.sleep(0.1)
+        report_cap_once()
+        with lock:
+            available = received
+        # Adaptive cadence: at least two seconds of new audio, and at least
+        # twice the previous decode's duration, so decoding can never occupy
+        # more than about half of real time and ingestion always stays ahead.
+        required = int(16000 * max(2.0, last_decode_seconds * 2.0))
+        if available - decoded_upto < required:
             continue
-        buffered.extend(samples)
-        samples_since_decode += len(samples)
-        if samples_since_decode < decode_interval:
-            continue
-        samples_since_decode = 0
-        text = decode_buffered()
+        with lock:
+            window = snapshot(partial_window_samples)
+        started = time.monotonic()
+        text = decode(window)
+        last_decode_seconds = time.monotonic() - started
+        decoded_upto = available
         if text and text != last_text:
             last_text = text
             emit("partial", text)
 
-    final_text = (decode_buffered() if buffered else "") or last_text
+    thread.join()
+    # The reader can reach the cap between the last poll and EOF; the
+    # truncation is still reported before the final transcript.
+    report_cap_once()
+    with lock:
+        final_window = snapshot(None)
+    emit("finalizing", "%.1f" % (len(final_window) / 16000.0))
+    final_text = (decode(final_window) if final_window else "") or last_text
     emit("session_final", final_text)
 
 

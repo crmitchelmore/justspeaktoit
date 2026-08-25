@@ -77,6 +77,15 @@ final class MainManager: ObservableObject {
   /// Applies/reverts per-app dictation profile overrides for a session.
   private let profileApplier = SessionProfileApplier()
 
+  /// Reservation shared with Voice Edit for the recorder and live transcriber
+  /// (issue #673). Dictation claims it in `startSession` and gives it back
+  /// whenever `activeSession` clears.
+  let captureOwnership = CaptureSessionOwnership()
+
+  /// Where the last dictation landed, for Voice Edit's "last dictation"
+  /// fallback (issue #673).
+  let insertionRecords = InsertionRecordStore()
+
   var activeSession: ActiveSession? {
     didSet {
       // Every session-teardown path clears `activeSession`, so this is the one
@@ -85,6 +94,7 @@ final class MainManager: ObservableObject {
       if activeSession == nil {
         profileApplier.end(settings: appSettings, postProcessing: postProcessingManager)
         captureWarmer?.sessionDidEnd()
+        captureOwnership.release(.dictation)
       }
     }
   }
@@ -593,6 +603,23 @@ final class MainManager: ObservableObject {
       return .rejected(.audioUnavailable)
     }
 
+    // Voice Edit may own the shared recorder and live stream right now. Starting
+    // on top of it would hit `alreadyRecording` and the failure path would then
+    // cancel Voice Edit's capture, so refuse before touching either (issue #673).
+    guard captureOwnership.reserve(.dictation) else {
+      profileApplier.end(settings: appSettings, postProcessing: postProcessingManager)
+      captureWarmer?.sessionDidEnd()
+      let message = "Voice edit is in progress. Finish or cancel it first."
+      state = .failed(message)
+      lastErrorMessage = message
+      hudManager.finishFailure(
+        headline: "Voice edit in progress",
+        message: "Finish or cancel the voice edit, then start dictation.",
+        displayDuration: 3
+      )
+      return .rejected(.captureFailed)
+    }
+
     // Failsafe: if live transcription is still running but we have no activeSession,
     // cancel it so the app can always recover without requiring a restart.
     //
@@ -1098,6 +1125,7 @@ final class MainManager: ObservableObject {
 
       // Handle live text insertion finalization
       var liveFinalizationResult: LiveTextInserter.FinalizationResult = .deferred
+      var outputWarning: Error?
       if liveTextInserter.isActive {
         liveFinalizationResult = liveTextInserter.applyPolishedFinal(finalText)
         liveTextInserter.end()
@@ -1109,10 +1137,19 @@ final class MainManager: ObservableObject {
       switch liveFinalizationResult {
       case .applied:
         session.outputMethod = .accessibility
+        recordInsertion(
+          of: liveTextInserter.insertedText,
+          range: liveTextInserter.lastInsertedRange,
+          target: session.outputTarget
+        )
       case .deferred:
         let output = SmartTextOutput(permissionsManager: permissionsManager, appSettings: appSettings)
         let outputResult = output.output(text: finalText, target: session.outputTarget)
+        outputWarning = outputResult.warning
         session.outputMethod = outputResult.method
+        if outputResult.error == nil {
+          recordInsertion(of: finalText, range: outputResult.insertedRange, target: session.outputTarget)
+        }
 
         if let error = outputResult.error {
           session.errors.append(
@@ -1153,17 +1190,32 @@ final class MainManager: ObservableObject {
         return
       }
 
-      // Start monitoring for user corrections (auto-corrections feature)
       let focusedElement = session.outputTarget?.focusedElement ?? getFocusedElement()
       let appName = session.outputTarget?.applicationName
         ?? NSWorkspace.shared.frontmostApplication?.localizedName
-      autoCorrectionTracker.startMonitoring(insertedText: finalText, element: focusedElement, app: appName)
+      // A warning means delivery proceeded without proving the current field.
+      // Do not associate Voice Edit/correction tracking with the stale capture.
+      if outputWarning == nil {
+        autoCorrectionTracker.startMonitoring(
+          insertedText: finalText,
+          element: focusedElement,
+          app: appName
+        )
+      }
 
       session.outputDelivered = Date()
 
       session.events.append(
         HistoryEvent(kind: .outputDelivered, description: "Output delivered successfully")
       )
+      if let outputWarning {
+        session.events.append(
+          HistoryEvent(
+            kind: .outputDelivered,
+            description: "Delivery warning: \(outputWarning.localizedDescription)"
+          )
+        )
+      }
       session.destination = appName
       session.lexiconContext = makeLexiconContext(for: finalText, destination: appName)
       if let summary = session.personalCorrections {
@@ -1178,15 +1230,13 @@ final class MainManager: ObservableObject {
         lastErrorMessage = notice.message
         state = .failed(notice.message)
       } else {
-        if let stopToFinalMs = SessionLatencyMetrics.milliseconds(
-          from: session.stopRequested, to: session.outputDelivered
-        ) {
-          hudManager.finishSuccess(
-            message: "Delivered in \(SessionLatencyMetrics.formattedMilliseconds(stopToFinalMs))"
+        hudManager.finishSuccess(
+          message: Self.deliverySuccessMessage(
+            warning: outputWarning,
+            stopRequested: session.stopRequested,
+            delivered: session.outputDelivered
           )
-        } else {
-          hudManager.finishSuccess(message: "Delivered")
-        }
+        )
         state = .completed(historyItem)
       }
 
@@ -1203,6 +1253,23 @@ final class MainManager: ObservableObject {
       )
       cleanupAfterFailure(message: error.localizedDescription, preserveFile: true)
     }
+  }
+
+  private static func deliverySuccessMessage(
+    warning: Error?,
+    stopRequested: Date?,
+    delivered: Date?
+  ) -> String {
+    if let warning {
+      return "Delivered — \(warning.localizedDescription)"
+    }
+    guard let stopToFinalMs = SessionLatencyMetrics.milliseconds(
+      from: stopRequested,
+      to: delivered
+    ) else {
+      return "Delivered"
+    }
+    return "Delivered in \(SessionLatencyMetrics.formattedMilliseconds(stopToFinalMs))"
   }
   // swiftlint:enable cyclomatic_complexity function_body_length
 
@@ -1292,6 +1359,9 @@ final class MainManager: ObservableObject {
       let outputResult = output.output(text: finalText, target: session.outputTarget)
       session.outputMethod = outputResult.method
       session.outputDelivered = Date()
+      if outputResult.error == nil {
+        recordInsertion(of: finalText, range: outputResult.insertedRange, target: session.outputTarget)
+      }
 
       if let error = outputResult.error {
         session.errors.append(
@@ -1308,6 +1378,7 @@ final class MainManager: ObservableObject {
         let historyItem = session.buildHistoryItem(finalText: finalText)
         await historyManager.append(historyItem)
       } else {
+        recordDeliveryWarning(outputResult.warning, on: session)
         session.events.append(
           HistoryEvent(kind: .outputDelivered, description: "Retry output delivered successfully")
         )
@@ -1317,7 +1388,7 @@ final class MainManager: ObservableObject {
         let historyItem = session.buildHistoryItem(finalText: finalText)
         await historyManager.append(historyItem)
         clearRetryData()
-        hudManager.finishSuccess(message: "Retry Delivered")
+        hudManager.finishSuccess(message: Self.retryDeliverySuccessMessage(warning: outputResult.warning))
         state = .completed(historyItem)
       }
 
@@ -1344,6 +1415,20 @@ final class MainManager: ObservableObject {
     }
 
     activeSession = nil
+  }
+
+  private func recordDeliveryWarning(_ warning: Error?, on session: ActiveSession) {
+    guard let warning else { return }
+    session.events.append(
+      HistoryEvent(
+        kind: .outputDelivered,
+        description: "Delivery warning: \(warning.localizedDescription)"
+      )
+    )
+  }
+
+  private static func retryDeliverySuccessMessage(warning: Error?) -> String {
+    warning.map { "Retry delivered — \($0.localizedDescription)" } ?? "Retry Delivered"
   }
 
   // swiftlint:disable:next cyclomatic_complexity function_body_length

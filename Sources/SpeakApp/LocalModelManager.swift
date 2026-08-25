@@ -289,7 +289,7 @@ final class LocalModelManager: ObservableObject {
 
     let start = Date()
     let pipe = try await pipeline(for: model)
-    let whisperResults = try await pipe.transcribe(audioPath: url.path)
+    let whisperResults = try await WhisperKitOffMain.transcribe(pipe, audioPath: url.path)
     let text = cleanTranscriptText(
       whisperResults
       .map(\.text)
@@ -336,7 +336,7 @@ final class LocalModelManager: ObservableObject {
       load: true
     )
     let task = Task<WhisperKit, Error> {
-      try await WhisperKit(config)
+      try await WhisperKitOffMain.load(config)
     }
     loadingPipelines[model.id] = task
     defer { loadingPipelines[model.id] = nil }

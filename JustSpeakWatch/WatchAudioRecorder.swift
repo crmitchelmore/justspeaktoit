@@ -45,6 +45,8 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
     private let activeCaptureRegistry: WatchActiveCaptureRegistry
     private var recorder: AVAudioRecorder?
     private var currentID = UUID()
+    /// Serialises `start()` across its suspension points (issue #674).
+    private var isStarting = false
     private var isFinalising = false
     private var finalisationTask: Task<Void, Never>?
     private var didRecoverInterruptedCapture = false
@@ -92,7 +94,13 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
     }
 
     func start() async {
-        guard !isRecording else { return }
+        // Owned-operation guard (issue #674): `isRecording` stays false across
+        // the awaits below (finalisation wait, recovery, permission prompt),
+        // so two rapid taps could interleave and replace `recorder` /
+        // `currentID`, orphaning one capture. Serialise the whole start.
+        guard !isRecording, !isStarting else { return }
+        isStarting = true
+        defer { isStarting = false }
         lastError = nil
 
         // A stop keeps the marker on disk while it inspects the finished asset.

@@ -1,0 +1,331 @@
+name: Package macOS release variant
+description: >-
+  Archive, export, sign, verify, notarise, staple and package one architecture
+  variant of the direct-distribution app: `arm64` (the primary download) or
+  `universal` (the legacy download every Mac can run). Issue #774. The legacy
+  variant still embeds the speak CLI; the primary ships without it and the CLI
+  is published separately (issue #775).
+
+inputs:
+  variant:
+    description: "arm64 (primary) or universal (legacy)"
+    required: true
+  embed-cli:
+    description: "true to embed the speak CLI at Contents/MacOS/speak, false to ship without it"
+    required: false
+    default: "true"
+  version:
+    description: Marketing version being built
+    required: true
+  apple-id:
+    description: Apple ID used for notarisation
+    required: true
+  apple-id-password:
+    description: App-specific password for the Apple ID
+    required: true
+  apple-team-id:
+    description: Developer team identifier
+    required: true
+  app-store-connect-issuer-id:
+    description: App Store Connect API issuer identifier
+    required: true
+  app-store-connect-key-id:
+    description: App Store Connect API key identifier
+    required: true
+
+outputs:
+  app-path:
+    description: Path to the notarised, stapled app bundle
+    value: ${{ steps.paths.outputs.app-path }}
+  dmg-path:
+    description: Path to the notarised, stapled DMG
+    value: ${{ steps.paths.outputs.dmg-path }}
+  archive-path:
+    description: Path to the xcarchive (for dSYM upload)
+    value: ${{ steps.paths.outputs.archive-path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve variant (${{ inputs.variant }})
+      id: paths
+      shell: bash
+      run: |
+        PRODUCT_NAME="${PRODUCT_NAME:-JustSpeakToIt}"
+        case "${{ inputs.variant }}" in
+          arm64) ARCHS="arm64" ;;
+          universal) ARCHS="arm64 x86_64" ;;
+          *)
+            echo "::error::Unknown release variant '${{ inputs.variant }}' (expected arm64 or universal)"
+            exit 1
+            ;;
+        esac
+        WORK="$RUNNER_TEMP/${{ inputs.variant }}"
+        mkdir -p "$WORK"
+        {
+          echo "archs=$ARCHS"
+          echo "work=$WORK"
+          echo "archive-path=$WORK/$PRODUCT_NAME.xcarchive"
+          echo "export-path=$WORK/export"
+          echo "app-path=$WORK/export/$PRODUCT_NAME.app"
+          echo "dmg-path=$WORK/$PRODUCT_NAME-${{ inputs.variant }}.dmg"
+        } >> "$GITHUB_OUTPUT"
+        echo "Packaging variant '${{ inputs.variant }}' (ARCHS=$ARCHS) under $WORK"
+
+    - name: Build Release Archive (${{ inputs.variant }})
+      shell: bash
+      run: |
+        # Archive unsigned to avoid automatic-development signing on CI runners.
+        # Distribution signing and profile resolution happens at export time.
+        # ARCHS selects the slices this variant ships; ONLY_ACTIVE_ARCH=NO keeps
+        # the universal variant universal on an arm64 runner.
+        xcodebuild archive \
+          -workspace "$WORKSPACE" \
+          -scheme "$SCHEME" \
+          -configuration Release \
+          -archivePath "${{ steps.paths.outputs.archive-path }}" \
+          -destination "generic/platform=macOS" \
+          CODE_SIGN_STYLE=Manual \
+          CODE_SIGN_IDENTITY="-" \
+          CODE_SIGNING_ALLOWED=NO \
+          PRODUCT_BUNDLE_IDENTIFIER=com.justspeaktoit.mac \
+          ENABLE_HARDENED_RUNTIME=YES \
+          ARCHS="${{ steps.paths.outputs.archs }}" \
+          ONLY_ACTIVE_ARCH=NO
+
+    - name: Verify archived release notes (${{ inputs.variant }})
+      shell: bash
+      run: |
+        APP_PATH="${{ steps.paths.outputs.archive-path }}/Products/Applications/$PRODUCT_NAME.app"
+        CATALOGUE_PATH=$(find "$APP_PATH" -name ReleaseNotes.json -print -quit)
+        if [ -z "$CATALOGUE_PATH" ]; then
+          echo "::error::Archived app does not contain ReleaseNotes.json"
+          exit 1
+        fi
+        node scripts/update-release-notes-catalogue.mjs \
+          --verify \
+          --platform mac \
+          --version "${{ inputs.version }}" \
+          --catalogue "$CATALOGUE_PATH"
+
+    - name: Export App (${{ inputs.variant }}, Developer ID)
+      shell: bash
+      run: |
+        WORK="${{ steps.paths.outputs.work }}"
+        cat > "$WORK/ExportOptions.plist" << EOF
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>method</key>
+            <string>developer-id</string>
+            <key>teamID</key>
+            <string>${{ inputs.apple-team-id }}</string>
+            <key>signingStyle</key>
+            <string>automatic</string>
+            <key>signingCertificate</key>
+            <string>Developer ID Application</string>
+        </dict>
+        </plist>
+        EOF
+
+        xcodebuild -exportArchive \
+          -archivePath "${{ steps.paths.outputs.archive-path }}" \
+          -exportOptionsPlist "$WORK/ExportOptions.plist" \
+          -exportPath "${{ steps.paths.outputs.export-path }}" \
+          -allowProvisioningUpdates \
+          -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_${{ inputs.app-store-connect-key-id }}.p8 \
+          -authenticationKeyID ${{ inputs.app-store-connect-key-id }} \
+          -authenticationKeyIssuerID "${{ inputs.app-store-connect-issuer-id }}" \
+          ENABLE_HARDENED_RUNTIME=YES \
+          OTHER_CODE_SIGN_FLAGS="--options runtime"
+
+    - name: Embed speak CLI (${{ inputs.variant }})
+      if: inputs.embed-cli == 'true'
+      shell: bash
+      run: |
+        APP_PATH="${{ steps.paths.outputs.app-path }}"
+        chmod +x scripts/build-speak-cli.sh
+        ./scripts/build-speak-cli.sh "$APP_PATH" "Developer ID Application" "${{ inputs.variant }}"
+
+    - name: Confirm no embedded speak CLI (${{ inputs.variant }})
+      if: inputs.embed-cli != 'true'
+      shell: bash
+      run: |
+        # Acceptance for issue #775: the primary download carries no speak binary.
+        APP_PATH="${{ steps.paths.outputs.app-path }}"
+        if [ -e "$APP_PATH/Contents/MacOS/speak" ]; then
+          echo "::error::Contents/MacOS/speak is present in the ${{ inputs.variant }} build"
+          exit 1
+        fi
+        echo "No speak CLI embedded in the ${{ inputs.variant }} build"
+
+    - name: Verify Hardened Runtime (${{ inputs.variant }})
+      shell: bash
+      run: |
+        APP_PATH="${{ steps.paths.outputs.app-path }}"
+        MAIN_BINARY="$APP_PATH/Contents/MacOS/$PRODUCT_NAME"
+
+        # Exported app signs correctly for Developer ID but omits runtime option.
+        # Re-sign the main binary with runtime, then refresh app bundle signature.
+        codesign --force --timestamp --options runtime \
+          --sign "Developer ID Application" \
+          --entitlements Config/SpeakMacOS.entitlements \
+          "$MAIN_BINARY"
+
+        codesign --force --timestamp \
+          --sign "Developer ID Application" \
+          --options runtime \
+          --entitlements Config/SpeakMacOS.entitlements \
+          "$APP_PATH"
+
+        CODESIGN_INFO=$(codesign -dv --verbose=4 "$MAIN_BINARY" 2>&1)
+        echo "$CODESIGN_INFO"
+        echo "$CODESIGN_INFO" | grep -q "runtime"
+
+    - name: Verify Architecture (${{ inputs.variant }})
+      shell: bash
+      run: |
+        chmod +x scripts/verify-architecture.sh
+        if [ "${{ inputs.embed-cli }}" = "true" ]; then
+          CLI_MODE="embedded-cli"
+        else
+          CLI_MODE="no-embedded-cli"
+        fi
+        ./scripts/verify-architecture.sh "${{ steps.paths.outputs.app-path }}" "${{ inputs.variant }}" "$CLI_MODE"
+
+    - name: Verify App Launches (${{ inputs.variant }}, Pre-Notarisation)
+      shell: bash
+      run: |
+        echo "Verifying signed app launches without crashing..."
+        chmod +x scripts/verify-launch.sh
+        ./scripts/verify-launch.sh "${{ steps.paths.outputs.app-path }}"
+
+    - name: Notarize App (${{ inputs.variant }})
+      shell: bash
+      env:
+        APPLE_ID: ${{ inputs.apple-id }}
+        APPLE_ID_PASSWORD: ${{ inputs.apple-id-password }}
+        APPLE_TEAM_ID: ${{ inputs.apple-team-id }}
+      run: |
+        APP_PATH="${{ steps.paths.outputs.app-path }}"
+        WORK="${{ steps.paths.outputs.work }}"
+
+        # Create ZIP for notarization
+        ditto -c -k --keepParent "$APP_PATH" "$WORK/$PRODUCT_NAME.zip"
+
+        # Submit for notarization (don't wait, use polling to avoid timeout)
+        set +e
+        SUBMIT_OUTPUT=$(xcrun notarytool submit "$WORK/$PRODUCT_NAME.zip" \
+          --apple-id "$APPLE_ID" \
+          --password "$APPLE_ID_PASSWORD" \
+          --team-id "$APPLE_TEAM_ID" 2>&1)
+        SUBMIT_EXIT_CODE=$?
+        set -e
+
+        echo "$SUBMIT_OUTPUT"
+
+        if [ $SUBMIT_EXIT_CODE -ne 0 ]; then
+          echo "Initial notarization submission failed"
+          exit $SUBMIT_EXIT_CODE
+        fi
+
+        SUBMISSION_ID=$(echo "$SUBMIT_OUTPUT" | grep -E "^\s*id:" | head -1 | awk '{print $2}')
+        if [ -z "$SUBMISSION_ID" ]; then
+          echo "Failed to parse notarization submission ID"
+          exit 1
+        fi
+        echo "Submission ID: $SUBMISSION_ID"
+
+        # Poll for completion with retries
+        MAX_ATTEMPTS=120  # 60 minutes max (30s intervals)
+        ATTEMPT=0
+        while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+          ATTEMPT=$((ATTEMPT + 1))
+          echo "Checking status (attempt $ATTEMPT/$MAX_ATTEMPTS)..."
+
+          STATUS_OUTPUT=$(xcrun notarytool info "$SUBMISSION_ID" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_ID_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" 2>&1) || true
+
+          echo "$STATUS_OUTPUT"
+
+          if echo "$STATUS_OUTPUT" | grep -q "status: Accepted"; then
+            echo "Notarization accepted!"
+            break
+          elif echo "$STATUS_OUTPUT" | grep -q "status: Invalid"; then
+            echo "=== Notarization Failed ==="
+            xcrun notarytool log "$SUBMISSION_ID" \
+              --apple-id "$APPLE_ID" \
+              --password "$APPLE_ID_PASSWORD" \
+              --team-id "$APPLE_TEAM_ID" || true
+            exit 1
+          elif echo "$STATUS_OUTPUT" | grep -q "status: In Progress"; then
+            echo "Still in progress, waiting 30s..."
+            sleep 30
+          else
+            echo "Unknown status or network error, retrying in 30s..."
+            sleep 30
+          fi
+        done
+
+        if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
+          echo "Notarization timed out after $MAX_ATTEMPTS attempts"
+          exit 1
+        fi
+
+        # Staple the notarization ticket
+        bash scripts/retry-staple.sh "$APP_PATH"
+
+    - name: Verify Entitlements (${{ inputs.variant }}, Post-Sign)
+      shell: bash
+      run: |
+        chmod +x scripts/verify-entitlements.sh
+        ./scripts/verify-entitlements.sh "${{ steps.paths.outputs.app-path }}"
+
+    - name: Verify Gatekeeper Acceptance (${{ inputs.variant }})
+      shell: bash
+      run: |
+        # A stapled Developer ID app must assess as accepted, the way Gatekeeper
+        # judges it on a user's Mac after download.
+        spctl --assess --type execute --verbose=2 "${{ steps.paths.outputs.app-path }}"
+
+    - name: Verify App Launches (${{ inputs.variant }}, Post-Notarisation)
+      shell: bash
+      run: |
+        echo "Verifying notarised+stapled app launches without crashing..."
+        chmod +x scripts/verify-launch.sh
+        ./scripts/verify-launch.sh "${{ steps.paths.outputs.app-path }}"
+
+    - name: Create DMG (${{ inputs.variant }})
+      shell: bash
+      env:
+        APPLE_ID: ${{ inputs.apple-id }}
+        APPLE_ID_PASSWORD: ${{ inputs.apple-id-password }}
+        APPLE_TEAM_ID: ${{ inputs.apple-team-id }}
+      run: |
+        APP_PATH="${{ steps.paths.outputs.app-path }}"
+        DMG_PATH="${{ steps.paths.outputs.dmg-path }}"
+        VERSION="${{ inputs.version }}"
+
+        # Use custom DMG creation script for beautiful installer. Its scratch
+        # files live under RUNNER_TEMP, so point it at this variant's directory
+        # to keep the two variants apart.
+        chmod +x scripts/create-dmg.sh
+        RUNNER_TEMP="${{ steps.paths.outputs.work }}" ./scripts/create-dmg.sh "$APP_PATH" "$DMG_PATH" "$VERSION"
+
+        # Notarize the DMG
+        xcrun notarytool submit "$DMG_PATH" \
+          --apple-id "$APPLE_ID" \
+          --password "$APPLE_ID_PASSWORD" \
+          --team-id "$APPLE_TEAM_ID" \
+          --wait
+
+        bash scripts/retry-staple.sh "$DMG_PATH"
+
+    - name: Record Sizes (${{ inputs.variant }})
+      shell: bash
+      run: |
+        chmod +x scripts/record-release-size.sh
+        ./scripts/record-release-size.sh "${{ inputs.variant }}" "${{ steps.paths.outputs.app-path }}" "${{ steps.paths.outputs.dmg-path }}"

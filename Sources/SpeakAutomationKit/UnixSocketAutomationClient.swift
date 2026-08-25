@@ -97,12 +97,35 @@ public struct UnixSocketAutomationClient: AutomationRequesting {
             }
         }
         guard result == 0 else {
+            let failure = errno
             close(descriptor)
-            // ENOENT/ECONNREFUSED both mean "nothing is listening": a stale socket
-            // file left by a crash looks identical to no file at all to the caller.
-            throw AutomationError.appUnavailable(socketPath: self.socketPath)
+            throw self.connectError(failure)
         }
         return descriptor
+    }
+
+    /// Only "nothing is listening" is reported as the app being unavailable;
+    /// other connection failures name their real cause so a permission or
+    /// path problem is not misdiagnosed as the app being closed.
+    private func connectError(_ code: Int32) -> AutomationError {
+        switch code {
+        case ENOENT, ECONNREFUSED:
+            // No socket file, or a stale one left by a crash: to the caller
+            // both mean the app (or its automation service) is not there.
+            return AutomationError.appUnavailable(socketPath: self.socketPath)
+        case EACCES, EPERM:
+            return AutomationError(
+                code: .internalError,
+                message: "The automation socket at \(self.socketPath) is not accessible to this user "
+                    + "(\(String(cString: strerror(code))))."
+            )
+        default:
+            return AutomationError(
+                code: .internalError,
+                message: "Could not connect to the automation socket at \(self.socketPath) "
+                    + "(\(String(cString: strerror(code))))."
+            )
+        }
     }
 
     private func applyTimeout(_ timeout: TimeInterval, to descriptor: Int32) {

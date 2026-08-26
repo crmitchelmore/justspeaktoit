@@ -12,9 +12,12 @@ import SwiftUI
 /// is live (it does not react to volume). The meter is the only element that
 /// tracks how loudly you are speaking. Beneath the top row, a single transcript
 /// line is anchored to the right so the newest words stay visible while older
-/// ones scroll off the left.
+/// ones scroll off the left. The transcript line honours the same
+/// "Show live transcript in HUD" preference as the full HUD, so it can be turned
+/// off independently while the compact HUD stays on.
 struct CompactHUDContent: View {
   @ObservedObject var manager: HUDManager
+  @EnvironmentObject private var settings: AppSettings
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   private var snapshot: HUDManager.Snapshot { manager.snapshot }
@@ -98,7 +101,7 @@ struct CompactHUDContent: View {
 
   @ViewBuilder
   private var transcriptLine: some View {
-    if phase == .recording {
+    if showsLiveTranscript {
       if let text = snapshot.liveText, !text.isEmpty {
         Text(text)
           .font(.system(size: 14))
@@ -108,7 +111,7 @@ struct CompactHUDContent: View {
           .frame(maxWidth: .infinity, alignment: .trailing)
           .accessibilityLabel("Transcript: \(text)")
       }
-    } else if !statusText.isEmpty {
+    } else if phase != .recording, !statusText.isEmpty {
       Text(statusText)
         .font(.system(size: 13))
         .foregroundStyle(.secondary)
@@ -166,6 +169,21 @@ struct CompactHUDContent: View {
   }
 
   // MARK: - Derived state
+
+  /// The scrolling transcript line is shown only while recording and only when
+  /// the "Show live transcript in HUD" preference is on, so it can be switched
+  /// off independently of the compact HUD.
+  private var showsLiveTranscript: Bool {
+    Self.showsLiveTranscript(phase: phase, showLiveTranscriptInHUD: settings.showLiveTranscriptInHUD)
+  }
+
+  /// Pure decision for the transcript line, exposed at package scope for testing.
+  static func showsLiveTranscript(
+    phase: HUDManager.Snapshot.Phase,
+    showLiveTranscriptInHUD: Bool
+  ) -> Bool {
+    phase == .recording && showLiveTranscriptInHUD
+  }
 
   /// The dot pulses only while the app is live (armed or recording); processing
   /// and terminal phases show a steady dot.

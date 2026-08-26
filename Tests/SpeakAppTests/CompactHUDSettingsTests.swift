@@ -35,15 +35,32 @@ final class CompactHUDSettingsTests: XCTestCase {
         XCTAssertTrue(reloaded.showCompactHUD)
     }
 
-    /// The live-transcript preference is independent state: enabling the compact
-    /// HUD ignores it at render time but must not silently clear it, so it is
-    /// restored if the compact HUD is switched back off.
+    /// The live-transcript preference is independent state: toggling the compact
+    /// HUD leaves it untouched, so each can be set without disturbing the other.
     @MainActor
     func testCompactHUD_DoesNotClearLiveTranscriptPreference() {
         let settings = AppSettings(defaults: defaults)
         settings.showLiveTranscriptInHUD = true
         settings.showCompactHUD = true
         XCTAssertTrue(settings.showLiveTranscriptInHUD)
+    }
+
+    /// The compact HUD draws the scrolling transcript line only while recording
+    /// and only when the live-transcript preference is on, so the line can be
+    /// turned off independently while the compact HUD stays on.
+    func testCompactHUD_ShowsLiveTranscriptOnlyWhenRecordingAndEnabled() {
+        XCTAssertTrue(
+            CompactHUDContent.showsLiveTranscript(phase: .recording, showLiveTranscriptInHUD: true)
+        )
+        XCTAssertFalse(
+            CompactHUDContent.showsLiveTranscript(phase: .recording, showLiveTranscriptInHUD: false)
+        )
+        XCTAssertFalse(
+            CompactHUDContent.showsLiveTranscript(phase: .armed, showLiveTranscriptInHUD: true)
+        )
+        XCTAssertFalse(
+            CompactHUDContent.showsLiveTranscript(phase: .success(message: "Done"), showLiveTranscriptInHUD: true)
+        )
     }
 
     func testElapsedLabel_UnderOneMinute_IsSecondsWithSuffix() {

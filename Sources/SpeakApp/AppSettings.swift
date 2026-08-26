@@ -557,9 +557,9 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   }
 
   /// When on, the HUD is drawn in its compact form (a pulsing dot, a live level
-  /// meter, the timer and a single scrolling transcript line). It replaces the
-  /// full-size live transcript, so `showLiveTranscriptInHUD` is ignored while
-  /// this is enabled.
+  /// meter and the timer). It stands alongside `showLiveTranscriptInHUD`, which
+  /// still governs whether the scrolling transcript line is drawn: the compact
+  /// HUD can run with the live transcript on or off, independently.
   @Published var showCompactHUD: Bool {
     didSet { store(showCompactHUD, key: .showCompactHUD) }
   }

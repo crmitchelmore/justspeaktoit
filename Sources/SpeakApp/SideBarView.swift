@@ -220,15 +220,26 @@ struct SideBarView: View {
   }
 
   private func sidebarTitle(_ title: String, isSelected: Bool) -> some View {
-    Text(title)
-      .font(settings.visualDensity.isCompact ? .caption : .body)
-      .fontWeight(isSelected ? .semibold : .regular)
-      .foregroundStyle(.primary)
-      .lineLimit(settings.visualDensity.isCompact ? 1 : nil)
-      .multilineTextAlignment(.leading)
-      .fixedSize(horizontal: false, vertical: true)
-      .layoutPriority(3)
-      .frame(maxWidth: .infinity, alignment: .leading)
+    let font: Font = settings.visualDensity.isCompact ? .caption : .body
+
+    return ZStack(alignment: .leading) {
+      // Always reserve the selected label's width so changing font weight cannot
+      // cause a long title to wrap and change the sidebar row's height.
+      Text(title)
+        .font(font)
+        .fontWeight(.semibold)
+        .hidden()
+
+      Text(title)
+        .font(font)
+        .fontWeight(isSelected ? .semibold : .regular)
+        .foregroundStyle(.primary)
+    }
+    .lineLimit(1)
+    .truncationMode(.tail)
+    .multilineTextAlignment(.leading)
+    .layoutPriority(3)
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   @ViewBuilder

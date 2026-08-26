@@ -39,7 +39,9 @@ and budget rather than creating a second required gate.
 `CoreJourneyFixtureApp` is the stable Accessibility destination for the next
 layer. It exposes one named editable field and readiness marker, avoiding AX
 tree drift from depending on TextEdit or third-party editors in CI. Its first UI
-test proves the fixture can be launched, focused, typed into and read back.
+test proves the fixture launches with keyboard focus, accepts typed text and can
+be read back. The bounded `Core Journey Fixture UI` CI job runs this launched-app
+test whenever core-journey paths change so the fixture cannot silently decay.
 
 The next increment launches Speak with an isolated E2E profile and deterministic
 provider fixtures, injects the supported hotkey gesture, and asserts delivery

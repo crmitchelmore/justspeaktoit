@@ -154,7 +154,16 @@ extension SettingsView {
               isOn: settingsBinding(\AppSettings.showLiveTranscriptInHUD),
               tint: .brandLagoon
             )
-            .speakTooltip("Show real-time transcription text in the HUD while recording.")
+            .speakTooltip("Show real-time transcription text in the HUD while recording, full or compact.")
+            settingsToggle(
+              "Show compact HUD",
+              isOn: settingsBinding(\AppSettings.showCompactHUD),
+              tint: .brandLagoon
+            )
+            .speakTooltip(
+              "Shrink the HUD to a pulsing dot, a live level meter and the timer. The scrolling "
+                + "transcript line still follows the \"Show live transcript in HUD\" setting above."
+            )
           }
         }
       }

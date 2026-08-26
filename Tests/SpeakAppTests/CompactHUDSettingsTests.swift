@@ -45,16 +45,26 @@ final class CompactHUDSettingsTests: XCTestCase {
         XCTAssertTrue(settings.showLiveTranscriptInHUD)
     }
 
-    /// The compact HUD draws the scrolling transcript line only while recording
-    /// and only when the live-transcript preference is on, so the line can be
-    /// turned off independently while the compact HUD stays on.
-    func testCompactHUD_ShowsLiveTranscriptOnlyWhenRecordingAndEnabled() {
+    /// The compact HUD draws the scrolling transcript line only in the
+    /// live-transcript phases (recording and voice-edit) and only when the
+    /// live-transcript preference is on, so the line can be turned off
+    /// independently while the compact HUD stays on. Mirrors the full HUD.
+    func testCompactHUD_ShowsLiveTranscriptOnlyInLiveTranscriptPhasesWhenEnabled() {
+        // On in the live-transcript phases.
         XCTAssertTrue(
             CompactHUDContent.showsLiveTranscript(phase: .recording, showLiveTranscriptInHUD: true)
         )
+        XCTAssertTrue(
+            CompactHUDContent.showsLiveTranscript(phase: .editing, showLiveTranscriptInHUD: true)
+        )
+        // Off when the preference is off, even in a live-transcript phase.
         XCTAssertFalse(
             CompactHUDContent.showsLiveTranscript(phase: .recording, showLiveTranscriptInHUD: false)
         )
+        XCTAssertFalse(
+            CompactHUDContent.showsLiveTranscript(phase: .editing, showLiveTranscriptInHUD: false)
+        )
+        // Off in non-live-transcript phases regardless of the preference.
         XCTAssertFalse(
             CompactHUDContent.showsLiveTranscript(phase: .armed, showLiveTranscriptInHUD: true)
         )

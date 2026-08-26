@@ -111,7 +111,7 @@ struct CompactHUDContent: View {
           .frame(maxWidth: .infinity, alignment: .trailing)
           .accessibilityLabel("Transcript: \(text)")
       }
-    } else if phase != .recording, !statusText.isEmpty {
+    } else if !Self.isLiveTranscriptPhase(phase), !statusText.isEmpty {
       Text(statusText)
         .font(.system(size: 13))
         .foregroundStyle(.secondary)
@@ -170,11 +170,19 @@ struct CompactHUDContent: View {
 
   // MARK: - Derived state
 
-  /// The scrolling transcript line is shown only while recording and only when
-  /// the "Show live transcript in HUD" preference is on, so it can be switched
-  /// off independently of the compact HUD.
+  /// The scrolling transcript line is shown only in the live-transcript phases
+  /// (recording and voice-edit) and only when the "Show live transcript in HUD"
+  /// preference is on, so it can be switched off independently of the compact
+  /// HUD. This mirrors the full HUD, which shows its transcript for the same
+  /// phases and preference.
   private var showsLiveTranscript: Bool {
     Self.showsLiveTranscript(phase: phase, showLiveTranscriptInHUD: settings.showLiveTranscriptInHUD)
+  }
+
+  /// The phases that carry live transcription text: active recording and the
+  /// voice-edit listening phase. Matches the full HUD's transcript gating.
+  static func isLiveTranscriptPhase(_ phase: HUDManager.Snapshot.Phase) -> Bool {
+    phase == .recording || phase == .editing
   }
 
   /// Pure decision for the transcript line, exposed at package scope for testing.
@@ -182,7 +190,7 @@ struct CompactHUDContent: View {
     phase: HUDManager.Snapshot.Phase,
     showLiveTranscriptInHUD: Bool
   ) -> Bool {
-    phase == .recording && showLiveTranscriptInHUD
+    isLiveTranscriptPhase(phase) && showLiveTranscriptInHUD
   }
 
   /// The dot pulses only while the app is live (armed or recording); processing

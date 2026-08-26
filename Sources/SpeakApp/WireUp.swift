@@ -611,13 +611,7 @@ enum WireUp {
   ) {
     environment.installVoiceEdit()
 
-    // Restore an existing subscription at launch so paid routing works without
-    // opening Settings first. Routing waits, briefly, for this to finish, so a
-    // subscriber's first dictation does not race the restore and fall back to a
-    // key they may never have configured.
-    Task { @MainActor in
-      environment.paidAccess.restoreEntitlementAtLaunch()
-    }
+    restorePaidAccessEntitlement(in: environment)
 
     environment.transportServer.onTranscriptReceived = { _, text in
       Task { @MainActor in
@@ -681,6 +675,14 @@ enum WireUp {
     }
 
     logger.info("AppEnvironment.bootstrap complete")
+  }
+
+  private static func restorePaidAccessEntitlement(in environment: AppEnvironment) {
+    // Routing waits briefly for this launch restore, preventing a subscriber's
+    // first dictation from racing it and falling back to an unconfigured key.
+    Task { @MainActor in
+      environment.paidAccess.restoreEntitlementAtLaunch()
+    }
   }
 
   // MARK: - Analytics Factory

@@ -67,6 +67,10 @@ final class AppEnvironment: ObservableObject {
   /// window (e.g. menu-bar-only mode). Supplied by the SwiftUI scene.
   var reopenMainWindow: (() -> Void)?
   private var statusBarVisibilityObserver: AnyCancellable?
+  /// Product analytics controller — nil when PostHog configuration is absent.
+  private(set) var analytics: ProductAnalyticsController?
+  var analyticsAvailable: Bool { analytics != nil }
+  private var analyticsConsentObserver: AnyCancellable?
   private(set) var menuBarManager: MenuBarManager?
   private(set) var dockMenuManager: DockMenuManager?
   private(set) var servicesProvider: ServicesProvider?
@@ -123,6 +127,53 @@ final class AppEnvironment: ObservableObject {
     self.main = main
     self.transportServer = transportServer
     self.hudPresenter = hudPresenter
+  }
+
+  /// Sets up the product analytics controller and subscribes to settings changes
+  /// so consent state stays in sync with the user's analytics toggle.
+  fileprivate func installAnalytics(_ controller: ProductAnalyticsController) {
+    analytics = controller
+    main.analyticsCapture = { [weak self] event in self?.capture(event) }
+    let initiallyEnabled = settings.analyticsEnabled
+    // Sync the initial consent state and fire the daily-active-user event.
+    Task {
+      try? await controller.setConsent(initiallyEnabled ? .optedIn : .optedOut)
+      // Fire app_active_daily at most once per calendar day.
+      let todayKey = "posthog.lastActiveDailyCaptureDate"
+      let today = Calendar.current.startOfDay(for: Date())
+      let lastCapture = UserDefaults.standard.object(forKey: todayKey) as? Date
+      if initiallyEnabled,
+         lastCapture == nil || !Calendar.current.isDate(lastCapture!, inSameDayAs: today) {
+        try? await controller.capture(.appActiveDaily)
+        UserDefaults.standard.set(today, forKey: todayKey)
+      }
+    }
+    // Keep consent in sync with future settings changes.
+    analyticsConsentObserver = settings.$analyticsEnabled
+      .dropFirst()
+      .receive(on: RunLoop.main)
+      .sink { [weak controller] enabled in
+        guard let controller else { return }
+        Task {
+          try? await controller.setConsent(enabled ? .optedIn : .optedOut)
+          if enabled { try? await controller.capture(.analyticsOptIn(surface: .settings)) }
+        }
+      }
+  }
+
+  /// Capture a product analytics event. No-op when analytics are absent or the
+  /// user has not opted in.
+  func capture(_ event: ProductAnalyticsEvent) {
+    guard let analytics else { return }
+    Task { try? await analytics.capture(event) }
+  }
+
+  func captureOnboardingCompletedAfterConsent() {
+    guard settings.analyticsEnabled, let analytics else { return }
+    Task {
+      try? await analytics.setConsent(.optedIn)
+      try? await analytics.capture(.onboardingCompleted(stepsSkipped: .zero))
+    }
   }
 
   /// Installs the status bar controller and the observer that keeps it in sync
@@ -406,6 +457,7 @@ extension AppEnvironment {
 }
 
 @MainActor
+// swiftlint:disable:next type_body_length
 enum WireUp {
 
   // MARK: - Dependency Injection Options
@@ -623,7 +675,61 @@ enum WireUp {
       await configureDefaultTranscriptionProvider(settings: settings, secureStorage: secureStorage)
     }
 
+    // Analytics
+    if let analyticsController = makeAnalyticsController(settings: settings) {
+      environment.installAnalytics(analyticsController)
+    }
+
     logger.info("AppEnvironment.bootstrap complete")
+  }
+
+  // MARK: - Analytics Factory
+
+  private static func makeAnalyticsController(settings: AppSettings) -> ProductAnalyticsController? {
+    #if APP_STORE
+    return nil
+    #else
+    guard DistributionChannel.current == .direct else { return nil }
+    guard PostHogProductAnalyticsSink.isConfigured else { return nil }
+    let stateURL = (FileManager.default
+      .urls(for: .applicationSupportDirectory, in: .userDomainMask)
+      .first ?? FileManager.default.homeDirectoryForCurrentUser)
+      .appendingPathComponent("SpeakApp/analytics_state.json")
+    let queueURL = stateURL.deletingLastPathComponent().appendingPathComponent("analytics_queue.json")
+    let stateStore = FileProductAnalyticsStateStore(fileURL: stateURL)
+    let context = buildAnalyticsContext()
+    return try? ProductAnalyticsController(
+      context: context,
+      sink: PostHogProductAnalyticsSink(queueURL: queueURL),
+      stateStore: stateStore
+    )
+    #endif
+  }
+
+  private static func buildAnalyticsContext() -> ProductAnalyticsContext {
+    let bundle = Bundle.main
+    let version = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+    let build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
+    let osVersion = ProcessInfo.processInfo.operatingSystemVersion
+    let osMajorMinor = "\(osVersion.majorVersion).\(osVersion.minorVersion)"
+    let localeCode = Locale.current.language.languageCode?.identifier ?? "en"
+    let distributionChannel: AnalyticsDistributionChannel = DistributionChannel.current == .appStore
+      ? .macAppStore
+      : .direct
+    #if arch(arm64)
+    let arch = "arm64"
+    #else
+    let arch = "x86_64"
+    #endif
+    return ProductAnalyticsContext(
+      platform: .macOS,
+      appVersion: version,
+      build: build,
+      osMajorMinor: osMajorMinor,
+      distributionChannel: distributionChannel,
+      localeLanguageCode: localeCode,
+      architecture: arch
+    )
   }
 
   // MARK: - TTS Factory

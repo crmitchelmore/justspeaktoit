@@ -15,6 +15,8 @@ struct SpeakApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var environmentHolder = EnvironmentHolder()
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
+    @AppStorage("hasAnsweredAnalyticsConsent") private var hasAnsweredAnalyticsConsent = false
+    @State private var showingAnalyticsConsent = false
     @Environment(\.openWindow) private var openWindow
 
     init() {
@@ -45,6 +47,27 @@ struct SpeakApp: App {
                                 if #available(macOS 10.12.2, *) {
                                     environment.installTouchBar()
                                 }
+                                if environment.analyticsAvailable,
+                                   !hasAnsweredAnalyticsConsent {
+                                    showingAnalyticsConsent = true
+                                }
+                            }
+                            .alert("Help improve Just Speak to It?", isPresented: $showingAnalyticsConsent) {
+                                Button("Share Anonymous Analytics") {
+                                    hasAnsweredAnalyticsConsent = true
+                                    environment.settings.analyticsEnabled = true
+                                }
+                                Button("Not Now", role: .cancel) {
+                                    hasAnsweredAnalyticsConsent = true
+                                    environment.settings.analyticsEnabled = false
+                                }
+                            } message: {
+                                Text(
+                                    "Share anonymous usage and reliability data. "
+                                        + "We never collect transcripts, audio, prompts, clipboard text, "
+                                        + "keystrokes, API keys, screen content, or personal identity. "
+                                        + "You can turn this off at any time in Settings."
+                                )
                             }
                     } else {
                         OnboardingView(

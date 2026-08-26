@@ -110,6 +110,23 @@ extension SettingsView {
         }
       }
 
+      if environment.analyticsAvailable {
+        SettingsCard(title: "Privacy", systemImage: "hand.raised", tint: Color.indigo) {
+          VStack(alignment: .leading, spacing: 12) {
+            Toggle("Share anonymous analytics", isOn: $settings.analyticsEnabled)
+            Text(
+              "Helps improve the app using typed usage and reliability events. "
+                + "Transcripts, audio, prompts, clipboard text, keystrokes, API keys, "
+                + "screen content and personal identity are never collected."
+            )
+              .font(.callout)
+              .foregroundStyle(.secondary)
+            Link("Privacy policy", destination: URL(string: "https://justspeaktoit.com/privacy")!)
+              .font(.callout)
+          }
+        }
+      }
+
       SettingsCard(title: "Transfer to iOS", systemImage: "iphone.and.arrow.forward", tint: Color.cyan) {
         VStack(alignment: .leading, spacing: 12) {
           Text("Transfer your API keys and settings to the iOS app by scanning a QR code.")

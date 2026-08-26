@@ -316,6 +316,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     case postProcessingStreamingEnabled
     case hudSizePreference
     case showLiveTranscriptInHUD
+    case showCompactHUD
     case showSidebarShortcutHints
     case speedMode
     case livePolishModel
@@ -345,6 +346,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     case simpleModelChoices
     case rememberedLocalTranscriptionSource
     case rememberedRemoteTranscriptionMode
+    case analyticsEnabled
   }
 
   private static let defaultLocalTranscriptionModel = "local/whisperkit/tiny"
@@ -554,6 +556,14 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
 
   @Published var showLiveTranscriptInHUD: Bool {
     didSet { store(showLiveTranscriptInHUD, key: .showLiveTranscriptInHUD) }
+  }
+
+  /// When on, the HUD is drawn in its compact form (a pulsing dot, a live level
+  /// meter and the timer). It stands alongside `showLiveTranscriptInHUD`, which
+  /// still governs whether the scrolling transcript line is drawn: the compact
+  /// HUD can run with the live transcript on or off, independently.
+  @Published var showCompactHUD: Bool {
+    didSet { store(showCompactHUD, key: .showCompactHUD) }
   }
 
   @Published var showSidebarShortcutHints: Bool {
@@ -874,6 +884,14 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     didSet { store(enableAutomationServer, key: .enableAutomationServer) }
   }
 
+  // MARK: - Analytics
+
+  /// Whether the user has opted into anonymous product analytics (PostHog).
+  /// Defaults to `false` — events are never sent until the user explicitly enables this.
+  @Published var analyticsEnabled: Bool {
+    didSet { store(analyticsEnabled, key: .analyticsEnabled) }
+  }
+
   // MARK: - Auto-Corrections
 
   /// Enable automatic detection of user corrections after transcription
@@ -1064,6 +1082,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     showHUDDuringSessions = defaults.object(forKey: DefaultsKey.showHUD.rawValue) as? Bool ?? true
     showLiveTranscriptInHUD =
       defaults.object(forKey: DefaultsKey.showLiveTranscriptInHUD.rawValue) as? Bool ?? true
+    showCompactHUD =
+      defaults.object(forKey: DefaultsKey.showCompactHUD.rawValue) as? Bool ?? false
     showSidebarShortcutHints =
       defaults.object(forKey: DefaultsKey.showSidebarShortcutHints.rawValue) as? Bool ?? true
     appVisibility =
@@ -1195,6 +1215,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       defaults.object(forKey: DefaultsKey.enableSendToMac.rawValue) as? Bool ?? false
     enableAutomationServer =
       defaults.object(forKey: DefaultsKey.enableAutomationServer.rawValue) as? Bool ?? false
+    analyticsEnabled =
+      defaults.object(forKey: DefaultsKey.analyticsEnabled.rawValue) as? Bool ?? false
 
     // History Settings
     historyFlushInterval =

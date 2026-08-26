@@ -15,6 +15,9 @@ env:
   PRODUCT_NAME: JustSpeakToIt
   WORKSPACE: "Just Speak to It.xcworkspace"
   APP_STORE_CONNECT_KEY_ID: S747NJ9DZY
+  # Public PostHog ingestion key. The app remains a silent no-op when the
+  # repository secret has not been configured.
+  POSTHOG_PROJECT_KEY: ${{ secrets.POSTHOG_PROJECT_KEY }}
 
 jobs:
   build-and-release:

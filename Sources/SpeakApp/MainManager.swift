@@ -72,6 +72,8 @@ final class MainManager: ObservableObject {
   let textProcessor: TranscriptionTextProcessor
   let autoCorrectionTracker: AutoCorrectionTracker
   let profileStore: DictationProfileStore
+  /// Installed by AppEnvironment only for the consent-gated direct analytics transport.
+  var analyticsCapture: ((ProductAnalyticsEvent) -> Void)?
   let logger = SpeakLogger.logger(category: "MainManager")
   private let recordingSoundPlayer = RecordingSoundPlayer()
   /// Applies/reverts per-app dictation profile overrides for a session.
@@ -1238,6 +1240,7 @@ final class MainManager: ObservableObject {
           )
         )
         state = .completed(historyItem)
+        captureFirstTranscriptionSucceededIfNeeded(session: session)
       }
 
       livePolishManager.reset()
@@ -1270,6 +1273,45 @@ final class MainManager: ObservableObject {
       return "Delivered"
     }
     return "Delivered in \(SessionLatencyMetrics.formattedMilliseconds(stopToFinalMs))"
+  }
+
+  private func captureFirstTranscriptionSucceededIfNeeded(session: ActiveSession) {
+    guard appSettings.analyticsEnabled, analyticsCapture != nil else { return }
+    let defaults = UserDefaults.standard
+    let emittedKey = "analytics.firstTranscriptionSucceeded.emitted"
+    guard !defaults.bool(forKey: emittedKey) else { return }
+    guard let modelIdentifier = session.transcriptionResult?.modelIdentifier.lowercased() else { return }
+
+    let provider: AnalyticsProviderType
+    if modelIdentifier.contains("deepgram") {
+      provider = .deepgram
+    } else if modelIdentifier.contains("soniox") {
+      provider = .soniox
+    } else if modelIdentifier.contains("openai") {
+      provider = .openAI
+    } else if modelIdentifier.contains("apple") {
+      provider = .apple
+    } else if modelIdentifier.contains("whisper") || modelIdentifier.contains("fluid") {
+      provider = .local
+    } else {
+      provider = .other
+    }
+
+    let engine: AnalyticsEngineType = appSettings.transcriptionMode == .localModel ? .onDevice : .cloud
+    let installDateKey = "analytics.installDate"
+    let installDate = defaults.object(forKey: installDateKey) as? Date ?? Date()
+    if defaults.object(forKey: installDateKey) == nil { defaults.set(installDate, forKey: installDateKey) }
+    let days = max(0, Calendar.current.dateComponents([.day], from: installDate, to: Date()).day ?? 0)
+    let bucket: AnalyticsDaysSinceInstallBucket
+    switch days {
+    case 0: bucket = .zero
+    case 1: bucket = .one
+    case 2 ... 7: bucket = .twoToSeven
+    case 8 ... 30: bucket = .eightToThirty
+    default: bucket = .overThirty
+    }
+    defaults.set(true, forKey: emittedKey)
+    analyticsCapture?(.firstTranscriptionSucceeded(provider: provider, engine: engine, daysSinceInstall: bucket))
   }
   // swiftlint:enable cyclomatic_complexity function_body_length
 

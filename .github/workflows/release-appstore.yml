@@ -298,6 +298,13 @@ jobs:
           expect_info_key_absent SUFeedURL
           expect_info_key_absent SUPublicEDKey
           expect_info_key_absent SUScheduledCheckInterval
+          expect_info_key_absent PostHogProjectKey
+          expect_info_key_absent PostHogHost
+
+          if strings "$APP_PATH/Contents/MacOS/$PRODUCT_NAME" | grep -q 'eu.i.posthog.com'; then
+            echo "::error::PostHog transport symbols must not ship in the App Store build"
+            exit 1
+          fi
 
       - name: Export and Upload to App Store Connect
         env:

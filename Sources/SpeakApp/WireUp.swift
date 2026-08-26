@@ -678,6 +678,7 @@ enum WireUp {
   }
 
   private static func restorePaidAccessEntitlement(in environment: AppEnvironment) {
+    guard PaidAccessFeature.isEnabled else { return }
     // Routing waits briefly for this launch restore, preventing a subscriber's
     // first dictation from racing it and falling back to an unconfigured key.
     Task { @MainActor in

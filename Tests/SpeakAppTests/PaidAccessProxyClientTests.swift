@@ -4,6 +4,16 @@ import XCTest
 
 @testable import SpeakApp
 
+final class PaidAccessBuildFlagTests: XCTestCase {
+  func testBuildFlagMatchesCompilationCondition() {
+    #if PAID_ACCESS
+    XCTAssertTrue(PaidAccessFeature.isEnabled)
+    #else
+    XCTAssertFalse(PaidAccessFeature.isEnabled)
+    #endif
+  }
+}
+
 /// The fallback paths through ``PaidAccessProxyClient``.
 ///
 /// These are the paths worth the most cover. Paid access is a convenience layer,

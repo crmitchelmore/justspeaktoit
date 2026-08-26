@@ -14,7 +14,9 @@ extension SettingsView {
           compactMinimumWidth: 320,
           maximumColumns: 2
         ) {
-          paidAccessCard
+          if PaidAccessFeature.isEnabled {
+            paidAccessCard
+          }
 
           apiKeyListControls
 

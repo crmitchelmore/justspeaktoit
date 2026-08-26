@@ -6,6 +6,22 @@ Use this runbook to set up, deploy, verify, and operate the paid access tier. Th
 
 Paid access lets a user subscribe instead of managing vendor API keys. Their transcription and post-processing requests are proxied through a Cloudflare Worker that holds the vendor credentials as Worker secrets.
 
+### Internal feature build
+
+Normal builds compile paid access dark. Build Chris's opt-in test flavour with:
+
+```bash
+make paid-access-test-build
+PAID_ACCESS_BASE_URL=https://your-staging-worker.example \
+  .build/paid-access-test/Build/Products/Debug/JustSpeakToIt.app/Contents/MacOS/JustSpeakToIt
+```
+
+`TUIST_PAID_ACCESS=1` defines the `PAID_ACCESS` Swift condition. Without it the
+subscription card is hidden, entitlement restore is skipped, and paid routing
+refuses to activate even if old preferences say otherwise. `PAID_ACCESS_BASE_URL`
+is honoured only by such internal builds; public builds always use the production
+endpoint.
+
 **Local models and bring-your-own (BYO) API keys remain the default and stay fully supported.** Paid access buys convenience, not capability: it unlocks no feature, model quality tier, or output that a BYO or local user cannot already reach. Every operational decision below follows from that. If paid routing is degraded or switched off, the correct client behaviour is to fall back to BYO keys or local models, not to lose the feature.
 
 | Property | Value |

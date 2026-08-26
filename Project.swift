@@ -110,6 +110,16 @@ var macAppSettings: [String: SettingValue] = [
     "PRODUCT_BUNDLE_IDENTIFIER": .string(macBundleIdentifier)
 ]
 
+// Paid access is compiled dark in every normal build. Internal builds opt in
+// explicitly with `TUIST_PAID_ACCESS=1 tuist generate`; the Swift condition is
+// also enforced at routing time, so stale UserDefaults cannot turn it on in a
+// public build merely because the subscription code is present.
+let paidAccessFlag = (ProcessInfo.processInfo.environment["TUIST_PAID_ACCESS"] ?? "").lowercased()
+let isPaidAccessBuild = ["1", "true", "yes"].contains(paidAccessFlag)
+if isPaidAccessBuild {
+    macAppSettings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] = "$(inherited) PAID_ACCESS"
+}
+
 var iosWidgetSettings: [String: SettingValue] = [
     "CURRENT_PROJECT_VERSION": "1",
     "MARKETING_VERSION": "\(version)"

@@ -10,8 +10,19 @@ import Foundation
 /// timeout, and a correlation identifier on every request so a user-visible
 /// failure can be traced in the Worker's logs without asking for any content.
 public struct PaidAccessHTTPClient: PaidAccessClienting { // swiftlint:disable:this type_body_length
-    /// Default production endpoint.
-    public static let defaultBaseURL = URL(string: "https://api.justspeaktoit.com")!
+    /// Production by default; internal feature builds may point at staging or
+    /// local Wrangler without changing or recompiling request code.
+    public static var defaultBaseURL: URL {
+        #if PAID_ACCESS
+        if let override = ProcessInfo.processInfo.environment["PAID_ACCESS_BASE_URL"],
+           let url = URL(string: override),
+           let scheme = url.scheme,
+           ["http", "https"].contains(scheme) {
+            return url
+        }
+        #endif
+        return URL(string: "https://api.justspeaktoit.com")!
+    }
 
     private let baseURL: URL
     private let session: URLSession

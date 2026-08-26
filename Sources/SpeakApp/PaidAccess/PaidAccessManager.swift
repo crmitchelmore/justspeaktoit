@@ -7,6 +7,19 @@ import StoreKit
 
 // swiftlint:disable file_length
 
+/// Build-time gate for the subscription surface and paid routing.
+///
+/// Normal release generation does not define `PAID_ACCESS`, making both the UI
+/// and routing inert. Chris/internal builds opt in with
+/// `TUIST_PAID_ACCESS=1 tuist generate`.
+enum PaidAccessFeature {
+  #if PAID_ACCESS
+  static let isEnabled = true
+  #else
+  static let isEnabled = false
+  #endif
+}
+
 /// Owns the paid-access session, entitlement and purchase flows on macOS.
 ///
 /// Two rules shape this type:
@@ -95,13 +108,15 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
     PaidAccessRouter(
       entitlement: self.entitlement,
       policy: self.policy,
-      isPaidRoutingPreferred: self.settings.paidAccessRoutingEnabled
+      isPaidRoutingPreferred: PaidAccessFeature.isEnabled && self.settings.paidAccessRoutingEnabled
     )
   }
 
   /// Whether paid routing is genuinely in effect right now.
   var isPaidRoutingActive: Bool {
-    self.settings.paidAccessRoutingEnabled && self.entitlement.allowsPaidRouting()
+    PaidAccessFeature.isEnabled
+      && self.settings.paidAccessRoutingEnabled
+      && self.entitlement.allowsPaidRouting()
   }
 
   // MARK: - Session handling

@@ -32,7 +32,7 @@ struct CompactHUDContent: View {
     .background(cardBackground)
     .overlay(
       RoundedRectangle(cornerRadius: 20, style: .continuous)
-        .stroke(dotColor.opacity(0.4), lineWidth: 1.5)
+        .stroke((washColor ?? Color.gray).opacity(0.35), lineWidth: 1.5)
     )
     .shadow(color: .black.opacity(0.16), radius: 16, x: 0, y: 10)
     .accessibilityElement(children: .contain)
@@ -196,10 +196,30 @@ struct CompactHUDContent: View {
   }
 
   private var cardBackground: some View {
-    let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
-    return shape
+    RoundedRectangle(cornerRadius: 20, style: .continuous)
       .fill(.thickMaterial)
-      .overlay(shape.fill(dotColor.opacity(0.18)))
+      .overlay(washOverlay)
+  }
+
+  /// The card stays calm grey while arming, recording and processing; it only
+  /// takes on colour for the final outcome - green on delivery, red on failure.
+  @ViewBuilder
+  private var washOverlay: some View {
+    if let washColor {
+      RoundedRectangle(cornerRadius: 20, style: .continuous)
+        .fill(washColor.opacity(0.18))
+    }
+  }
+
+  private var washColor: Color? {
+    switch phase {
+    case .delivering, .success:
+      return .green
+    case .failure:
+      return .red
+    default:
+      return nil
+    }
   }
 
   private var dotColor: Color {

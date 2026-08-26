@@ -15,7 +15,6 @@ import SwiftUI
 /// ones scroll off the left.
 struct CompactHUDContent: View {
   @ObservedObject var manager: HUDManager
-  @Environment(\.colorScheme) private var colorScheme
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   private var snapshot: HUDManager.Snapshot { manager.snapshot }
@@ -197,8 +196,10 @@ struct CompactHUDContent: View {
   }
 
   private var cardBackground: some View {
-    RoundedRectangle(cornerRadius: 20, style: .continuous)
-      .fill(colorScheme == .dark ? Color(white: 0.15) : Color.white)
+    let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
+    return shape
+      .fill(.thickMaterial)
+      .overlay(shape.fill(dotColor.opacity(0.18)))
   }
 
   private var dotColor: Color {

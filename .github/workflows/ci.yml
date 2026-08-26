@@ -186,7 +186,10 @@ jobs:
             -scheme SpeakApp \
             -destination "platform=macOS" \
             -only-testing:SpeakAppUITests/CoreJourneyFixtureUITests \
-            -skipPackagePluginValidation
+            -skipPackagePluginValidation \
+            CODE_SIGN_IDENTITY="-" \
+            DEVELOPMENT_TEAM="" \
+            CODE_SIGN_STYLE=Manual
 
   release-validation:
     name: Build & Test (Release)

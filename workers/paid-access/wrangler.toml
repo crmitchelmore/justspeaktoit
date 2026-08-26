@@ -90,7 +90,7 @@ PAID_ROUTING_DISABLED = "true"
 [[env.staging.d1_databases]]
 binding = "DB"
 database_name = "paid-access-staging"
-database_id = "REPLACE_WITH_STAGING_D1_DATABASE_ID"
+database_id = "1ca6eda7-7da6-4a65-a861-b3e425563a59"
 migrations_dir = "migrations"
 
 [[env.staging.durable_objects.bindings]]

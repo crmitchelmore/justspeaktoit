@@ -18,7 +18,9 @@ import SwiftUI
 struct CompactHUDContent: View {
   @ObservedObject var manager: HUDManager
   @EnvironmentObject private var settings: AppSettings
+  @Environment(\.colorScheme) private var colorScheme
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
   private var snapshot: HUDManager.Snapshot { manager.snapshot }
   private var phase: HUDManager.Snapshot.Phase { snapshot.phase }
@@ -40,6 +42,7 @@ struct CompactHUDContent: View {
     .shadow(color: .black.opacity(0.16), radius: 16, x: 0, y: 10)
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("compactHUD")
+    .accessibilityAddTraits(.isModal)
   }
 
   // MARK: - Top row (dot · meter · timer)
@@ -221,10 +224,18 @@ struct CompactHUDContent: View {
       : "\(seconds)s"
   }
 
+  @ViewBuilder
   private var cardBackground: some View {
-    RoundedRectangle(cornerRadius: 20, style: .continuous)
-      .fill(.thickMaterial)
-      .overlay(washOverlay)
+    let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
+    if reduceTransparency {
+      shape
+        .fill(colorScheme == .dark ? Color.black : Color.white)
+        .overlay(washOverlay)
+    } else {
+      shape
+        .fill(.thickMaterial)
+        .overlay(washOverlay)
+    }
   }
 
   /// The card stays calm grey while arming, recording and processing; it only

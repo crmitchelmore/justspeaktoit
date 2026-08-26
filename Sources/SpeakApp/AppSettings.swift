@@ -343,6 +343,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     case selectedHotKey
     case rememberedLocalTranscriptionSource
     case rememberedRemoteTranscriptionMode
+    case analyticsEnabled
   }
 
   private static let defaultLocalTranscriptionModel = "local/whisperkit/tiny"
@@ -854,6 +855,14 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     didSet { store(enableAutomationServer, key: .enableAutomationServer) }
   }
 
+  // MARK: - Analytics
+
+  /// Whether the user has opted into anonymous product analytics (PostHog).
+  /// Defaults to `false` — events are never sent until the user explicitly enables this.
+  @Published var analyticsEnabled: Bool {
+    didSet { store(analyticsEnabled, key: .analyticsEnabled) }
+  }
+
   // MARK: - Auto-Corrections
 
   /// Enable automatic detection of user corrections after transcription
@@ -1169,6 +1178,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       defaults.object(forKey: DefaultsKey.enableSendToMac.rawValue) as? Bool ?? false
     enableAutomationServer =
       defaults.object(forKey: DefaultsKey.enableAutomationServer.rawValue) as? Bool ?? false
+    analyticsEnabled =
+      defaults.object(forKey: DefaultsKey.analyticsEnabled.rawValue) as? Bool ?? false
 
     // History Settings
     historyFlushInterval =

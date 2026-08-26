@@ -206,6 +206,8 @@ var projectPackages: [Package] = [
     .remote(url: "https://github.com/FluidInference/FluidAudio.git", requirement: .exact("0.15.5"))
 ]
 if !isAppStoreBuild {
+    macAppSettings["INFOPLIST_KEY_PostHogProjectKey"] = "$(POSTHOG_PROJECT_KEY)"
+    macAppSettings["INFOPLIST_KEY_PostHogHost"] = "https://eu.i.posthog.com"
     projectPackages += [
         .remote(url: "https://github.com/sparkle-project/Sparkle.git", requirement: .upToNextMajor(from: "2.6.0"))
     ]

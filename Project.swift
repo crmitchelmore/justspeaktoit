@@ -412,6 +412,15 @@ let widgetTarget: Target = .target(
     settings: .settings(base: iosWidgetSettings)
 )
 
+let coreJourneyFixtureTarget: Target = .target(
+    name: "CoreJourneyFixtureApp",
+    destinations: .macOS,
+    product: .app,
+    bundleId: "com.justspeaktoit.core-journey-fixture",
+    infoPlist: .default,
+    sources: ["Tests/Fixtures/CoreJourneyTargetApp/**"]
+)
+
 let macUITestsTarget: Target = .target(
     name: "SpeakAppUITests",
     destinations: .macOS,
@@ -419,7 +428,8 @@ let macUITestsTarget: Target = .target(
     bundleId: "com.justspeaktoit.uitests",
     sources: ["Tests/SpeakAppUITests/**"],
     dependencies: [
-        .target(name: "SpeakApp")
+        .target(name: "SpeakApp"),
+        .target(name: "CoreJourneyFixtureApp")
     ]
 )
 
@@ -470,7 +480,7 @@ if isWatchAppEnabled {
 if isIOSKeyboardEnabled {
     projectTargets.append(keyboardTarget)
 }
-projectTargets += [widgetTarget, macUITestsTarget, iosUITestsTarget, iosTestsTarget]
+projectTargets += [widgetTarget, coreJourneyFixtureTarget, macUITestsTarget, iosUITestsTarget, iosTestsTarget]
 
 let project = Project(
     name: "Just Speak to It",

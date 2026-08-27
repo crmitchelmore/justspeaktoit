@@ -164,6 +164,33 @@ jobs:
           path: .artifacts/core-journey-e2e
           if-no-files-found: error
 
+  core-journey-fixture-ui:
+    name: Core Journey Fixture UI
+    runs-on: macos-latest
+    timeout-minutes: 10
+    needs: release-paths
+    if: needs.release-paths.outputs.core-journey == 'true'
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Tuist
+        run: brew install tuist
+
+      - name: Generate macOS project
+        run: tuist generate --no-open
+
+      - name: Test launched fixture app
+        run: |
+          xcodebuild test \
+            -workspace "Just Speak to It.xcworkspace" \
+            -scheme SpeakApp \
+            -destination "platform=macOS" \
+            -only-testing:SpeakAppUITests/CoreJourneyFixtureUITests \
+            -skipPackagePluginValidation \
+            CODE_SIGN_IDENTITY="-" \
+            DEVELOPMENT_TEAM="" \
+            CODE_SIGN_STYLE=Manual
+
   release-validation:
     name: Build & Test (Release)
     runs-on: macos-latest

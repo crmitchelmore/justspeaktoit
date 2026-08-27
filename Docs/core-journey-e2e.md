@@ -34,6 +34,20 @@ The fixture-app/UI layer described in #802 can be promoted once its permission
 bootstrap is reliable on cold hosted runners; it must reuse this same command
 and budget rather than creating a second required gate.
 
+## Launched-app layer (in progress)
+
+`CoreJourneyFixtureApp` is the stable Accessibility destination for the next
+layer. It exposes one named editable field and readiness marker, avoiding AX
+tree drift from depending on TextEdit or third-party editors in CI. Its first UI
+test proves the fixture launches with keyboard focus, accepts typed text and can
+be read back. The bounded `Core Journey Fixture UI` CI job runs this launched-app
+test whenever core-journey paths change so the fixture cannot silently decay.
+
+The next increment launches Speak with an isolated E2E profile and deterministic
+provider fixtures, injects the supported hotkey gesture, and asserts delivery
+into this field. It remains advisory until Accessibility permission bootstrap
+passes the cold-runner flake gate; the existing contract gate stays required.
+
 ## Updating the gate
 
 Keep only one representative journey per external branch here. Put

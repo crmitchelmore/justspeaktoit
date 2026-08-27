@@ -143,6 +143,18 @@ extension SettingsView {
                 "After Speak pastes your transcript, we put your original clipboard content back automatically."
               )
             }
+          }
+        }
+      }
+      .speakTooltip("Control how Speak delivers transcripts and how gently we touch your clipboard and interface.")
+
+      SettingsCard(title: "Heads-Up Display", systemImage: "rectangle.on.rectangle", tint: Color.brandLagoon) {
+        VStack(alignment: .leading, spacing: 12) {
+          Text("Choose what Speak shows while a recording or transcription session is active.")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+
+          VStack(alignment: .leading, spacing: 8) {
             settingsToggle(
               "Show HUD during sessions",
               isOn: settingsBinding(\AppSettings.showHUDDuringSessions),
@@ -167,7 +179,7 @@ extension SettingsView {
           }
         }
       }
-      .speakTooltip("Control how Speak delivers transcripts and how gently we touch your clipboard and interface.")
+      .speakTooltip("Configure the HUD shown while Speak is listening and transcribing.")
 
       SettingsCard(title: "App Behaviour", systemImage: "gearshape.2", tint: Color.brandAccentWarm) {
         VStack(alignment: .leading, spacing: 12) {

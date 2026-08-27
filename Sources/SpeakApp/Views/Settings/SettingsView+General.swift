@@ -176,6 +176,15 @@ extension SettingsView {
               "Shrink the HUD to a pulsing dot, a live level meter and the timer. The scrolling "
                 + "transcript line still follows the \"Show live transcript in HUD\" setting above."
             )
+            settingsToggle(
+              "Shorten error display",
+              isOn: settingsBinding(\AppSettings.shortenErrorDisplay),
+              tint: .brandLagoon
+            )
+            .speakTooltip(
+              "Auto-dismiss failure and cancellation messages after 3.6 seconds instead of 6, "
+                + "so they don't linger far longer than a success confirmation."
+            )
           }
         }
       }

@@ -124,11 +124,14 @@ jobs:
               - 'Config/**'
               - '.github/workflows/ci.yml'
             core-journey:
+              - 'Project.swift'
               - 'Package.swift'
               - 'Package.resolved'
               - 'Sources/SpeakApp/**'
               - 'Sources/SpeakCore/**'
               - 'Sources/SpeakHotKeys/**'
+              - 'Tests/Fixtures/CoreJourneyTargetApp/**'
+              - 'Tests/SpeakAppUITests/**'
               - 'Tests/SpeakAppTests/**'
               - 'Tests/SpeakCoreTests/**'
               - 'Tests/SpeakHotKeysTests/**'
@@ -181,15 +184,27 @@ jobs:
 
       - name: Test launched fixture app
         run: |
+          set -o pipefail
+          mkdir -p .artifacts/core-journey-fixture-ui
           xcodebuild test \
             -workspace "Just Speak to It.xcworkspace" \
             -scheme SpeakApp \
             -destination "platform=macOS" \
             -only-testing:SpeakAppUITests/CoreJourneyFixtureUITests \
+            -resultBundlePath .artifacts/core-journey-fixture-ui/CoreJourneyFixture.xcresult \
             -skipPackagePluginValidation \
             CODE_SIGN_IDENTITY="-" \
             DEVELOPMENT_TEAM="" \
-            CODE_SIGN_STYLE=Manual
+            CODE_SIGN_STYLE=Manual \
+            | tee .artifacts/core-journey-fixture-ui/xcodebuild.log
+
+      - name: Upload launched-app diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: core-journey-fixture-ui-${{ github.run_attempt }}
+          path: .artifacts/core-journey-fixture-ui
+          if-no-files-found: error
 
   release-validation:
     name: Build & Test (Release)

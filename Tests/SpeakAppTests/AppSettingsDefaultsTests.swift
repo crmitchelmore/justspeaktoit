@@ -99,6 +99,12 @@ final class AppSettingsDefaultsTests: XCTestCase {
     }
 
     @MainActor
+    func testCoreDefaults_shortenErrorDisplayIsFalse() {
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertFalse(settings.shortenErrorDisplay)
+    }
+
+    @MainActor
     func testReconcileAPIKeyIdentifiers_replacesStaleMetadataAndPersistsCanonicalSet() {
         defaults.set(
             ["openrouter.apiKey", "deepgram.apiKey", "assemblyai.apiKey"],

@@ -70,6 +70,11 @@ final class HUDManager: ObservableObject {
   private var timer: Timer?
   private var phaseStartDate: Date?
   private var autoHideTimer: Timer?
+  /// The interval most recently passed to `scheduleAutoHide`. `Timer.timeInterval`
+  /// reads back as 0 for a non-repeating timer, so this is the only way to
+  /// observe which duration a `finishSuccess`/`finishFailure` call actually
+  /// scheduled - test-only visibility, never read by production code.
+  private(set) var lastScheduledAutoHideDuration: TimeInterval?
 
   init(
     appSettings: AppSettings,
@@ -186,24 +191,46 @@ final class HUDManager: ObservableObject {
     transition(.editing, headline: "Editing", subheadline: subheadline)
   }
 
+  /// How long a success confirmation stays on screen before it auto-hides.
+  static let successDisplayDuration: TimeInterval = 2.4
+
+  /// The default interval a failure or cancellation message stays on screen.
+  static let standardFailureDisplayDuration: TimeInterval = 6.0
+
+  /// The interval used when the "Shorten error display" preference is on -
+  /// 50% longer than `successDisplayDuration`, so a failure still reads as
+  /// slower than a success without lingering nearly 3x as long.
+  static let shortFailureDisplayDuration: TimeInterval = 3.6
+
+  /// Resolves the auto-hide interval for a failure/cancellation message from
+  /// the "Shorten error display" preference. A caller-supplied
+  /// `displayDuration` (eg the 3s "voice edit in progress" refusal) always
+  /// wins - the preference only changes the shared default the other
+  /// `finishFailure` call sites fall back to.
+  static func failureDisplayDuration(shortenErrorDisplay: Bool) -> TimeInterval {
+    shortenErrorDisplay ? shortFailureDisplayDuration : standardFailureDisplayDuration
+  }
+
   func finishSuccess(message: String) {
     transition(
       .success(message: message), headline: "Completed", subheadline: message, showsTimer: false)
-    scheduleAutoHide(after: 2.4)
+    scheduleAutoHide(after: Self.successDisplayDuration)
   }
 
   func finishFailure(message: String) {
     finishFailure(headline: "Something went wrong", message: message, showRetryHint: false)
   }
 
-  func finishFailure(headline: String, message: String, displayDuration: TimeInterval = 6.0) {
+  func finishFailure(headline: String, message: String, displayDuration: TimeInterval? = nil) {
     finishFailure(headline: headline, message: message, showRetryHint: false, displayDuration: displayDuration)
   }
 
-  func finishFailure(headline: String, message: String, showRetryHint: Bool, displayDuration: TimeInterval = 6.0) {
+  func finishFailure(headline: String, message: String, showRetryHint: Bool, displayDuration: TimeInterval? = nil) {
     transition(
       .failure(message: message), headline: headline, subheadline: message, showsTimer: false, showRetryHint: showRetryHint)
-    scheduleAutoHide(after: displayDuration)
+    let resolvedDuration = displayDuration
+      ?? Self.failureDisplayDuration(shortenErrorDisplay: appSettings.shortenErrorDisplay)
+    scheduleAutoHide(after: resolvedDuration)
   }
 
   func hide() {
@@ -260,6 +287,7 @@ final class HUDManager: ObservableObject {
   }
 
   private func scheduleAutoHide(after delay: TimeInterval) {
+    lastScheduledAutoHideDuration = delay
     autoHideTimer?.invalidate()
     guard delay > 0 else { return }
     // Use target-selector Timer pattern to completely bypass Swift concurrency runtime.

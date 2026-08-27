@@ -88,4 +88,22 @@ final class CompactHUDSettingsTests: XCTestCase {
     func testElapsedLabel_NegativeElapsed_ClampsToZero() {
         XCTAssertEqual(CompactHUDContent.elapsedLabel(for: -5), "0s")
     }
+
+    @MainActor
+    func testShortenErrorDisplay_PersistsWhenToggled() {
+        let settings = AppSettings(defaults: defaults)
+        settings.shortenErrorDisplay = true
+        let reloaded = AppSettings(defaults: defaults)
+        XCTAssertTrue(reloaded.shortenErrorDisplay)
+    }
+
+    /// The error-display duration preference is independent state: toggling
+    /// it leaves the compact HUD preference untouched.
+    @MainActor
+    func testShortenErrorDisplay_DoesNotClearCompactHUDPreference() {
+        let settings = AppSettings(defaults: defaults)
+        settings.showCompactHUD = true
+        settings.shortenErrorDisplay = true
+        XCTAssertTrue(settings.showCompactHUD)
+    }
 }

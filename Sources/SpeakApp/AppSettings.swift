@@ -317,6 +317,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     case hudSizePreference
     case showLiveTranscriptInHUD
     case showCompactHUD
+    case shortenErrorDisplay
     case showSidebarShortcutHints
     case speedMode
     case livePolishModel
@@ -562,6 +563,14 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   /// HUD can run with the live transcript on or off, independently.
   @Published var showCompactHUD: Bool {
     didSet { store(showCompactHUD, key: .showCompactHUD) }
+  }
+
+  /// When on, a failure or cancellation message auto-hides after
+  /// `HUDManager.shortFailureDisplayDuration` instead of the standard
+  /// `HUDManager.standardFailureDisplayDuration`. Success messages are
+  /// unaffected - only the failure/cancellation duration shortens.
+  @Published var shortenErrorDisplay: Bool {
+    didSet { store(shortenErrorDisplay, key: .shortenErrorDisplay) }
   }
 
   @Published var showSidebarShortcutHints: Bool {
@@ -1064,6 +1073,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       defaults.object(forKey: DefaultsKey.showLiveTranscriptInHUD.rawValue) as? Bool ?? true
     showCompactHUD =
       defaults.object(forKey: DefaultsKey.showCompactHUD.rawValue) as? Bool ?? false
+    shortenErrorDisplay =
+      defaults.object(forKey: DefaultsKey.shortenErrorDisplay.rawValue) as? Bool ?? false
     showSidebarShortcutHints =
       defaults.object(forKey: DefaultsKey.showSidebarShortcutHints.rawValue) as? Bool ?? true
     appVisibility =

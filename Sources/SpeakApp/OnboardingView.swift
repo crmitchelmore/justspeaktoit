@@ -296,6 +296,23 @@ final class OnboardingState: ObservableObject {
             settings.postProcessingEnabled = false
         }
     }
+
+    func skipAPIKeySetup() {
+        apiKey = ""
+        validationError = nil
+        Self.disableUnavailablePostProcessing(in: settings)
+    }
+
+    static func disableUnavailablePostProcessing(in settings: AppSettings) {
+        let availability = ModelCredentialResolver.availability(
+            for: settings.postProcessingModel,
+            purpose: .postProcessing,
+            storedAPIKeyIdentifiers: settings.trackedAPIKeyIdentifiers
+        )
+        if case .missing = availability {
+            settings.postProcessingEnabled = false
+        }
+    }
 }
 
 enum OnboardingStep: Int, CaseIterable {
@@ -400,6 +417,7 @@ struct OnboardingView: View {
                 
                 if state.currentStep == .apiKey {
                     Button("Skip for Now") {
+                        state.skipAPIKeySetup()
                         withAnimation {
                             // Skip API key and test recording, go straight to complete
                             state.currentStep = .complete

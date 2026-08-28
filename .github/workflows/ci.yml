@@ -204,6 +204,7 @@ jobs:
         with:
           name: core-journey-fixture-ui-${{ github.run_attempt }}
           path: .artifacts/core-journey-fixture-ui
+          include-hidden-files: true
           if-no-files-found: error
 
   release-validation:

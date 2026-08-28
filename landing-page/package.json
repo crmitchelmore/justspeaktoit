@@ -6,8 +6,9 @@
   "type": "module",
   "scripts": {
     "dev": "bun run serve.ts",
-    "build": "mkdir -p dist && cp index.html dist/",
-    "preview": "bun run serve.ts"
+    "build": "mkdir -p dist && cp index.html download-architecture.js dist/",
+    "preview": "bun run serve.ts",
+    "test": "node --test download-architecture.test.js"
   },
   "devDependencies": {
     "@types/bun": "latest"

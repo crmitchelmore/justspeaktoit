@@ -4,7 +4,13 @@ final class CoreJourneyFixtureUITests: XCTestCase {
     func testFixtureProvidesNamedEditableTarget_acceptsAndReadsBackText() {
         let fixture = XCUIApplication(bundleIdentifier: "com.justspeaktoit.core-journey-fixture")
         fixture.launch()
-        defer { fixture.terminate() }
+        addTeardownBlock {
+            let screenshot = XCTAttachment(screenshot: fixture.screenshot())
+            screenshot.name = "Core journey fixture final state"
+            screenshot.lifetime = .keepAlways
+            self.add(screenshot)
+            fixture.terminate()
+        }
 
         let field = fixture.textViews["coreJourneyTargetField"]
         XCTAssertTrue(field.waitForExistence(timeout: 10))

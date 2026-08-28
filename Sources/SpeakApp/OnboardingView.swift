@@ -296,6 +296,23 @@ final class OnboardingState: ObservableObject {
             settings.postProcessingEnabled = false
         }
     }
+
+    func skipAPIKeySetup() {
+        apiKey = ""
+        validationError = nil
+        Self.disableUnavailablePostProcessing(in: settings)
+    }
+
+    static func disableUnavailablePostProcessing(in settings: AppSettings) {
+        let availability = ModelCredentialResolver.availability(
+            for: settings.postProcessingModel,
+            purpose: .postProcessing,
+            storedAPIKeyIdentifiers: settings.trackedAPIKeyIdentifiers
+        )
+        if case .missing = availability {
+            settings.postProcessingEnabled = false
+        }
+    }
 }
 
 enum OnboardingStep: Int, CaseIterable {
@@ -356,7 +373,7 @@ struct OnboardingView: View {
             }
             .padding(.top, 20)
             .padding(.bottom, 30)
-            
+
             // Content
             Group {
                 switch state.currentStep {
@@ -375,7 +392,7 @@ struct OnboardingView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            
+
             Spacer()
             
             // Navigation buttons
@@ -400,6 +417,7 @@ struct OnboardingView: View {
                 
                 if state.currentStep == .apiKey {
                     Button("Skip for Now") {
+                        state.skipAPIKeySetup()
                         withAnimation {
                             // Skip API key and test recording, go straight to complete
                             state.currentStep = .complete
@@ -1208,50 +1226,56 @@ struct CompleteStepView: View {
     @Binding var isComplete: Bool
     
     var body: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 80))
-                .foregroundColor(.green)
+        ScrollView(.vertical) {
+            VStack(spacing: 20) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 80))
+                    .foregroundColor(.green)
             
-            Text("You're All Set!")
-                .font(.title)
-                .fontWeight(.bold)
+                Text("You're All Set!")
+                    .font(.title)
+                    .fontWeight(.bold)
             
-            Text("Just Speak to It is ready to use")
-                .foregroundColor(.secondary)
-            
-            VStack(alignment: .leading, spacing: 16) {
-                TipRow(icon: "keyboard", text: "Press \(state.selectedHotKey.displayString) to start recording")
-                TipRow(icon: "text.cursor", text: "Click in any text field, then record")
-                TipRow(icon: "gearshape.fill", text: "Right-click the menu bar icon for settings")
-            }
-            .padding(.horizontal, 40)
-            .padding(.top, 20)
-            
-            Text("Tip: The app runs in your menu bar")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .padding(.top, 10)
+                Text("Just Speak to It is ready to use")
+                    .foregroundColor(.secondary)
 
-            if AppEnvironment.shared?.analyticsAvailable == true {
-                Toggle(
-                    "Share anonymous analytics",
-                    isOn: Binding(
-                        get: { state.settings.analyticsEnabled },
-                        set: { state.settings.analyticsEnabled = $0 }
+                if AppEnvironment.shared?.analyticsAvailable == true {
+                    Toggle(
+                        "Share anonymous analytics",
+                        isOn: Binding(
+                            get: { state.settings.analyticsEnabled },
+                            set: { state.settings.analyticsEnabled = $0 }
+                        )
                     )
-                )
                     .toggleStyle(.checkbox)
                     .font(.callout)
-                Text(
-                    "Optional. Never includes transcripts, audio, prompts, clipboard text, "
-                        + "keystrokes, API keys, screen content or personal identity."
-                )
+                    .accessibilityIdentifier("onboardingAnalyticsConsentToggle")
+                    Text(
+                        "Optional. Never includes transcripts, audio, prompts, clipboard text, "
+                            + "keystrokes, API keys, screen content or personal identity."
+                    )
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 440)
+                }
+
+                VStack(alignment: .leading, spacing: 16) {
+                    TipRow(icon: "keyboard", text: "Press \(state.selectedHotKey.displayString) to start recording")
+                    TipRow(icon: "text.cursor", text: "Click in any text field, then record")
+                    TipRow(icon: "gearshape.fill", text: "Right-click the menu bar icon for settings")
+                }
+                .padding(.horizontal, 40)
+                .padding(.top, 20)
+
+                Text("Tip: The app runs in your menu bar")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .padding(.top, 10)
             }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 24)
+            .padding(.bottom, 12)
         }
     }
 }

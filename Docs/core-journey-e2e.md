@@ -42,6 +42,8 @@ tree drift from depending on TextEdit or third-party editors in CI. Its first UI
 test proves the fixture launches with keyboard focus, accepts typed text and can
 be read back. The bounded `Core Journey Fixture UI` CI job runs this launched-app
 test whenever core-journey paths change so the fixture cannot silently decay.
+It uploads the full `xcresult`, xcodebuild log, and a final fixture screenshot on
+every run, so failures can be inspected without reproducing the runner state.
 
 The next increment launches Speak with an isolated E2E profile and deterministic
 provider fixtures, injects the supported hotkey gesture, and asserts delivery

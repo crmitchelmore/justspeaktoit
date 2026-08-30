@@ -2040,6 +2040,14 @@ struct PrivacyView: View {
         LiveTranscriptionRouting.iOSSupportedProviders
     }
 
+    private func processingDescription(for provider: LiveTranscriptionProviderID) -> String {
+        if provider == .apple {
+            return "Microphone audio is transcribed on-device when supported; Apple's speech service may otherwise "
+                + "process it on its servers."
+        }
+        return "Microphone audio is streamed to \(provider.displayName) for transcription."
+    }
+
     var body: some View {
         Form {
             Section {
@@ -2060,7 +2068,8 @@ struct PrivacyView: View {
                     )
                 }
 
-                Text("Post-processing and voice output may contact a separate cloud provider when enabled.")
+                Text("When enabled, post-processing sends transcript text to OpenRouter, and voice output sends "
+                    + "text to Soniox.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -2081,7 +2090,7 @@ struct PrivacyView: View {
                     ForEach(transcriptionProviders, id: \.self) { provider in
                         InfoRow(
                             label: provider == .apple ? "Apple Speech" : provider.displayName,
-                            value: provider == .apple ? "On-device transcription" : "During transcription"
+                            value: provider == .apple ? "On-device when supported" : "During transcription"
                         )
                     }
                     InfoRow(label: "Send to Mac", value: "Local network only")
@@ -2137,14 +2146,6 @@ struct FeatureRow: View {
                     .foregroundStyle(.secondary)
             }
         }
-    }
-
-    private func processingDescription(for provider: LiveTranscriptionProviderID) -> String {
-        if provider == .apple {
-            return "Microphone audio is transcribed on this device. Enabled cloud post-processing or voice output "
-                + "may still send transcript text to its selected provider."
-        }
-        return "Microphone audio is streamed to \(provider.displayName) for transcription."
     }
 }
 

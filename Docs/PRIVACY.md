@@ -9,14 +9,15 @@ Speak is designed with privacy in mind. This document explains what data is coll
 ### What is captured?
 - **Microphone audio** is captured only while actively transcribing (when you tap the record button)
 - Audio is processed in real-time and is **not stored** on your device after transcription
-- When using on-device Apple Speech, microphone audio stays on your device for transcription. If you separately
-  enable cloud post-processing or voice output, transcript text may still be sent to that feature's selected provider.
+- Apple Speech processes microphone audio on-device when the device and selected language support it. Its fallback can
+  use Apple's speech-recognition servers. If you separately enable cloud post-processing or voice output, transcript or
+  assistant-response text may also be sent to that feature's provider.
 
 ### Where does audio go?
 
 | Provider | Data Location | Processing |
 |----------|---------------|------------|
-| Apple Speech | On-device | Microphone audio is transcribed on your iPhone/Mac |
+| Apple Speech | Device or Apple cloud | Audio is transcribed on-device when supported; otherwise Apple's speech service may process it |
 | Deepgram | Cloud | Audio streamed to Deepgram for transcription |
 | Cartesia | Cloud | Audio streamed to Cartesia for transcription |
 | Gladia | Cloud | Audio streamed to Gladia for transcription |
@@ -27,9 +28,11 @@ Speak is designed with privacy in mind. This document explains what data is coll
 | OpenAI | Cloud | Audio streamed to OpenAI for transcription |
 | xAI | Cloud | Audio streamed to xAI for transcription |
 
-The in-app iOS disclosure derives this list from the same model catalogue and platform-support metadata used by the
-transcription picker, so newly supported providers appear automatically. Post-processing and voice-output selections
-can use a different cloud provider and are disclosed separately in their settings.
+This table covers live providers available in the iOS app. macOS also supports Speechmatics streaming. Selectable iOS
+batch models upload recorded audio to OpenAI for supported OpenAI models or through OpenRouter for other remote models.
+The in-app iOS live-provider disclosure derives its list from the same model catalogue and platform-support metadata
+used by the transcription picker, so newly supported live providers appear automatically. When enabled,
+post-processing sends transcript text to OpenRouter and voice output sends text to Soniox.
 
 ## API Keys
 
@@ -46,7 +49,7 @@ can use a different cloud provider and are disclosed separately in their setting
 ## Network Activity
 
 ### When does Speak connect to the internet?
-- **Apple Speech**: Only for initial language model download (if needed)
+- **Apple Speech**: For language-model download when needed, and for recognition when on-device processing is unavailable
 - **Cloud transcription providers**: When actively transcribing with a cloud model
 - **Send to Mac**: Only on your local network (no internet required)
 - **iCloud Sync**: When syncing settings (optional)
@@ -56,7 +59,8 @@ can use a different cloud provider and are disclosed separately in their setting
 When using a cloud transcription provider:
 - Audio stream (in real-time)
 - Language/model selection
-- No personal identifiers
+- App-supplied language/model metadata, but no separate account identifier supplied by Speak. Spoken audio itself may
+  contain names or other personal information.
 
 ## Local Network (Send to Mac)
 

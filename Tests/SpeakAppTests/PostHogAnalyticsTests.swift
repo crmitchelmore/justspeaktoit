@@ -29,8 +29,37 @@ final class PostHogAnalyticsTests: XCTestCase {
     XCTAssertEqual(body["event"] as? String, "app_active_daily")
     let properties = try XCTUnwrap(body["properties"] as? [String: Any])
     XCTAssertEqual(properties["platform"] as? String, "macOS")
+    XCTAssertEqual(properties["analytics_schema_version"] as? Int, 2)
     XCTAssertNil(properties["transcript"])
     XCTAssertNil(properties["audio"])
+  }
+
+  func testCapturePreservesNativeScalarPropertyTypes() async throws {
+    let recorder = RequestRecorder()
+    let sink = makeSink(recorder: recorder)
+    try await sink.reopen()
+    let payload = ProductAnalyticsPayload(
+      event: .keyboardEnabledState(enabled: true),
+      context: ProductAnalyticsContext(
+        platform: .macOS,
+        appVersion: "2.63.6",
+        build: "202608250001",
+        osMajorMinor: "26.0",
+        distributionChannel: .direct,
+        localeLanguageCode: "en",
+        architecture: "arm64"
+      ),
+      distinctID: UUID()
+    )
+
+    try await sink.capture(payload)
+
+    let request = try XCTUnwrap(recorder.requests.first)
+    let bodyData = try XCTUnwrap(request.httpBody)
+    let body = try XCTUnwrap(JSONSerialization.jsonObject(with: bodyData) as? [String: Any])
+    let properties = try XCTUnwrap(body["properties"] as? [String: Any])
+    XCTAssertEqual(properties["enabled"] as? Bool, true)
+    XCTAssertEqual(properties["analytics_schema_version"] as? Int, 2)
   }
 
   func testPurgeDeletesQueuedEventsAfterWithdrawal() async throws {

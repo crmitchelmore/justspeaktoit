@@ -2036,6 +2036,10 @@ struct APIKeysView: View {
 // MARK: - Privacy View
 
 struct PrivacyView: View {
+    private var transcriptionProviders: [LiveTranscriptionProviderID] {
+        LiveTranscriptionRouting.iOSSupportedProviders
+    }
+
     var body: some View {
         Form {
             Section {
@@ -2048,29 +2052,17 @@ struct PrivacyView: View {
             }
 
             Section("Audio Processing") {
-                FeatureRow(
-                    icon: "mic.fill",
-                    title: "Apple Speech",
-                    description: "Audio stays on your device. No data sent to cloud."
-                )
+                ForEach(transcriptionProviders, id: \.self) { provider in
+                    FeatureRow(
+                        icon: provider == .apple ? "mic.fill" : "network",
+                        title: provider == .apple ? "Apple Speech" : provider.displayName,
+                        description: processingDescription(for: provider)
+                    )
+                }
 
-                FeatureRow(
-                    icon: "network",
-                    title: "Deepgram",
-                    description: "Audio streamed to Deepgram servers for transcription."
-                )
-
-                FeatureRow(
-                    icon: "mic.and.signal.meter",
-                    title: "ElevenLabs",
-                    description: "Audio streamed to ElevenLabs servers for transcription."
-                )
-
-                FeatureRow(
-                    icon: "waveform.badge.mic",
-                    title: "OpenAI",
-                    description: "Audio streamed to OpenAI servers using your selected transcription model."
-                )
+                Text("Post-processing and voice output may contact a separate cloud provider when enabled.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("API Keys") {
@@ -2086,10 +2078,12 @@ struct PrivacyView: View {
 
             Section("Network Activity") {
                 VStack(alignment: .leading, spacing: 12) {
-                    InfoRow(label: "Apple Speech", value: "On-device only")
-                    InfoRow(label: "Deepgram", value: "During transcription")
-                    InfoRow(label: "ElevenLabs", value: "During transcription")
-                    InfoRow(label: "OpenAI", value: "During transcription")
+                    ForEach(transcriptionProviders, id: \.self) { provider in
+                        InfoRow(
+                            label: provider == .apple ? "Apple Speech" : provider.displayName,
+                            value: provider == .apple ? "On-device transcription" : "During transcription"
+                        )
+                    }
                     InfoRow(label: "Send to Mac", value: "Local network only")
                     InfoRow(label: "iCloud Sync", value: "Settings & keys (optional)")
                 }
@@ -2143,6 +2137,14 @@ struct FeatureRow: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    private func processingDescription(for provider: LiveTranscriptionProviderID) -> String {
+        if provider == .apple {
+            return "Microphone audio is transcribed on this device. Enabled cloud post-processing or voice output "
+                + "may still send transcript text to its selected provider."
+        }
+        return "Microphone audio is streamed to \(provider.displayName) for transcription."
     }
 }
 

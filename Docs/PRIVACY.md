@@ -9,14 +9,27 @@ Speak is designed with privacy in mind. This document explains what data is coll
 ### What is captured?
 - **Microphone audio** is captured only while actively transcribing (when you tap the record button)
 - Audio is processed in real-time and is **not stored** on your device after transcription
-- When using on-device Apple Speech, audio **never leaves your device**
+- When using on-device Apple Speech, microphone audio stays on your device for transcription. If you separately
+  enable cloud post-processing or voice output, transcript text may still be sent to that feature's selected provider.
 
 ### Where does audio go?
 
 | Provider | Data Location | Processing |
 |----------|---------------|------------|
-| Apple Speech | On-device | Audio stays on your iPhone/Mac |
-| Deepgram | Cloud (US) | Audio streamed to Deepgram servers |
+| Apple Speech | On-device | Microphone audio is transcribed on your iPhone/Mac |
+| Deepgram | Cloud | Audio streamed to Deepgram for transcription |
+| Cartesia | Cloud | Audio streamed to Cartesia for transcription |
+| Gladia | Cloud | Audio streamed to Gladia for transcription |
+| Modulate | Cloud | Audio streamed to Modulate for transcription |
+| AssemblyAI | Cloud | Audio streamed to AssemblyAI for transcription |
+| Soniox | Cloud | Audio streamed to Soniox for transcription |
+| ElevenLabs | Cloud | Audio streamed to ElevenLabs for transcription |
+| OpenAI | Cloud | Audio streamed to OpenAI for transcription |
+| xAI | Cloud | Audio streamed to xAI for transcription |
+
+The in-app iOS disclosure derives this list from the same model catalogue and platform-support metadata used by the
+transcription picker, so newly supported providers appear automatically. Post-processing and voice-output selections
+can use a different cloud provider and are disclosed separately in their settings.
 
 ## API Keys
 
@@ -34,13 +47,13 @@ Speak is designed with privacy in mind. This document explains what data is coll
 
 ### When does Speak connect to the internet?
 - **Apple Speech**: Only for initial language model download (if needed)
-- **Deepgram**: When actively transcribing via Deepgram
+- **Cloud transcription providers**: When actively transcribing with a cloud model
 - **Send to Mac**: Only on your local network (no internet required)
 - **iCloud Sync**: When syncing settings (optional)
 
 ### What is sent to cloud providers?
 
-When using Deepgram:
+When using a cloud transcription provider:
 - Audio stream (in real-time)
 - Language/model selection
 - No personal identifiers

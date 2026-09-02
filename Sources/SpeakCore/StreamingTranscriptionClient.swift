@@ -94,6 +94,7 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
     case deepgram
     case cartesia
     case gladia
+    case google
     case modulate
     case assemblyai
     case soniox
@@ -136,7 +137,7 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
     public var isSupportedOnIOS: Bool {
         switch self {
         case .apple, .deepgram, .elevenlabs, .openai, .cartesia, .soniox, .modulate, .assemblyai,
-             .gladia, .xai, .meta:
+             .gladia, .google, .xai, .meta:
             return true
         case .speechmatics:
             return false
@@ -151,6 +152,7 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
         case .deepgram: return "Deepgram"
         case .cartesia: return "Cartesia"
         case .gladia: return "Gladia"
+        case .google: return GeminiTranscribeModels.providerDisplayName
         case .modulate: return "Modulate"
         case .assemblyai: return "AssemblyAI"
         case .soniox: return "Soniox"
@@ -173,6 +175,7 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
         case .deepgram: website = "https://deepgram.com"
         case .cartesia: website = "https://cartesia.ai"
         case .gladia: website = "https://www.gladia.io"
+        case .google: website = "https://aistudio.google.com/apikey"
         case .modulate: website = "https://www.modulate-developer-apis.com/web/docs.html"
         case .assemblyai: website = "https://assemblyai.com"
         case .soniox: website = "https://soniox.com"
@@ -286,7 +289,7 @@ public enum LiveTranscriptionRouting {
     }
 }
 
-// MARK: - Factory
+// MARK: - Errors
 
 public enum LiveTranscriptionClientError: LocalizedError {
     case unknownModel(String)

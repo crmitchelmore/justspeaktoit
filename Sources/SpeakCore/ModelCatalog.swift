@@ -38,6 +38,12 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             description: "Real-time multilingual STT with automatic language detection and partial transcripts.",
             estimatedLatencyMs: 220, latencyTier: .fast),
         Option(
+            id: GeminiTranscribeModels.liveCatalogID,
+            displayName: "Gemini 3.5 Transcribe Live (Preview)",
+            description: "Google's real-time Gemini Live API transcription across 85+ languages with "
+                + "automatic language detection. Public preview — opt-in, never a default or fallback.",
+            estimatedLatencyMs: 200, latencyTier: .fast),
+        Option(
             id: "modulate/velma-2-stt-streaming", displayName: "Modulate Velma-2 (Streaming)",
             description: "Real-time multilingual WebSocket transcription with diarization and signal detection.",
             estimatedLatencyMs: 220, latencyTier: .fast),
@@ -156,6 +162,12 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             displayName: "Soniox Async v5",
             description: "Soniox v5 asynchronous batch STT with speaker diarization and language identification.",
             estimatedLatencyMs: 1200, latencyTier: .medium),
+        Option(
+            id: GeminiTranscribeModels.batchCatalogID,
+            displayName: "Gemini 3.5 Transcribe (Google, Preview)",
+            description: "Google's Gemini Interactions API for recorded audio, with word-level "
+                + "timestamps and speaker attribution. Public preview — opt-in, never a default.",
+            estimatedLatencyMs: 900, latencyTier: .fast),
         Option(
             id: "revai/default", displayName: "Rev.ai",
             description: "Rev.ai's speech recognition. High accuracy with speaker identification.",

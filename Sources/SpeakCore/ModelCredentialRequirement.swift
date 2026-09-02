@@ -85,6 +85,16 @@ public enum ModelCredentialResolver {
             return .apiKey(identifier: "openai.apiKey", providerName: "OpenAI")
         }
 
+        // Gemini 3.5 Transcribe uses Google's own Interactions API. The other
+        // google/-prefixed batch entries are OpenRouter-routed Gemini models,
+        // so the prefix alone is not sufficient here either.
+        if GeminiTranscribeModels.directBatchModelIDs.contains(modelIdentifier) {
+            return .apiKey(
+                identifier: "google.apiKey",
+                providerName: GeminiTranscribeModels.providerDisplayName
+            )
+        }
+
         let provider = providerPrefix(in: modelIdentifier)
         if directBatchProviderIdentifiers.contains(provider) {
             return .apiKey(
@@ -167,6 +177,7 @@ public enum ModelCredentialResolver {
         "deepgram": "Deepgram",
         "elevenlabs": "ElevenLabs",
         "gladia": "Gladia",
+        "google": GeminiTranscribeModels.providerDisplayName,
         "groq": "Groq",
         "mistral": "Mistral",
         "meta": "Meta",

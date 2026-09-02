@@ -1,13 +1,18 @@
 import Foundation
 
+// MARK: - Shared streaming client factory
+//
+// Split from `StreamingTranscriptionClient.swift` so the protocol, the provider
+// enum and the routing stay readable as the provider list grows.
+
 /// Constructs the shared streaming client for a resolved route.
 ///
 /// Providers whose client already lives in `SpeakCore` are built here so both
 /// platforms share one implementation. Providers without a shared client yet
-/// return `nil` so callers can use a platform-native path.
+/// (or on-device Apple, and OpenAI whose client is still platform-native)
+/// return `nil` — callers fall back to a platform-native path or surface a
+/// "not available yet" message.
 public enum LiveTranscriptionClientFactory {
-    // One explicit case keeps the provider catalogue and concrete transport
-    // mapping auditable in one place.
     // swiftlint:disable:next function_body_length
     public static func makeClient(
         for route: LiveTranscriptionRoute,
@@ -58,13 +63,15 @@ public enum LiveTranscriptionClientFactory {
                 language: language,
                 sampleRate: route.sampleRate
             )
-        case .xai:
-            return XAILiveClient(
+        case .google:
+            return GeminiLiveClient(
                 apiKey: apiKey,
                 model: route.apiModelName,
                 language: language,
                 sampleRate: route.sampleRate
             )
+        case .xai:
+            return makeXAIClient(for: route, apiKey: apiKey, language: language)
         case .meta:
             return MetaMuseLiveClient(
                 apiKey: apiKey,
@@ -76,5 +83,18 @@ public enum LiveTranscriptionClientFactory {
         case .apple, .openai, .speechmatics:
             return nil
         }
+    }
+
+    private static func makeXAIClient(
+        for route: LiveTranscriptionRoute,
+        apiKey: String,
+        language: String?
+    ) -> XAILiveClient {
+        XAILiveClient(
+            apiKey: apiKey,
+            model: route.apiModelName,
+            language: language,
+            sampleRate: route.sampleRate
+        )
     }
 }

@@ -16,9 +16,10 @@ final class LivePolishManager: ObservableObject {
   private let settings: AppSettings
   private let log = SpeakLogger.logger(category: "LivePolish")
 
-  /// Debounce interval in seconds (reads from settings)
-  private var debounceInterval: TimeInterval {
-    Double(settings.livePolishDebounceMs) / 1000.0
+  /// Debounce interval in milliseconds (reads from settings).
+  /// Kept in milliseconds so the sleep below never truncates a sub-second delay to zero.
+  private var debounceMilliseconds: Int {
+    max(0, settings.livePolishDebounceMs)
   }
 
   /// Minimum characters of new content before triggering polish (reads from settings)
@@ -69,9 +70,10 @@ final class LivePolishManager: ObservableObject {
     }
 
     // Start debounce timer
+    let delay = debounceMilliseconds
     debounceTask = Task { [weak self] in
       do {
-        try await Task.sleep(nanoseconds: UInt64(self?.debounceInterval ?? 0.5) * 1_000_000_000)
+        try await Task.sleep(for: .milliseconds(delay))
         await self?.triggerPolish(stableContext: stableContext, tailText: tailText)
       } catch {
         // Cancelled - ignore

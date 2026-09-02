@@ -17,13 +17,7 @@ extension SettingsView {
               Text(device.displayName).tag(device.id)
             }
           }
-          .pickerStyle(.menu)
-          .padding(.horizontal, 12)
-          .padding(.vertical, 8)
-          .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-              .fill(Color(nsColor: .controlBackgroundColor))
-          )
+          .settingsMenuPicker()
           .speakTooltip("Choose which microphone Speak listens to when recording or transcribing.")
           .accessibilityLabel("Audio input device picker")
 
@@ -64,13 +58,7 @@ extension SettingsView {
               Text(option.displayName).tag(option.id)
             }
           }
-          .pickerStyle(.menu)
-          .padding(.horizontal, 12)
-          .padding(.vertical, 8)
-          .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-              .fill(Color(nsColor: .controlBackgroundColor))
-          )
+          .settingsMenuPicker()
           .speakTooltip(
             "Automatic lets remote providers detect the language. Apple speech uses your current system locale."
           )
@@ -87,13 +75,7 @@ extension SettingsView {
                 Text(method.displayName).tag(method)
               }
             }
-            .pickerStyle(.menu)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(
-              RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
-            )
+            .settingsMenuPicker()
             .speakTooltip("Decide how Speak returns transcripts—typed for you or placed on the clipboard.")
             .accessibilityLabel("Text output method picker")
           } else {
@@ -114,13 +96,7 @@ extension SettingsView {
                 Text(mode.displayName).tag(mode)
               }
             }
-            .pickerStyle(.menu)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(
-              RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
-            )
+            .settingsMenuPicker()
             .speakTooltip(
               "Insert at Cursor adds text where your cursor is. Replace Field overwrites the entire text field."
             )
@@ -171,12 +147,7 @@ extension SettingsView {
             .labelsHidden()
             .pickerStyle(.segmented)
           }
-          .padding(.horizontal, 12)
-          .padding(.vertical, 8)
-          .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-              .fill(Color(nsColor: .controlBackgroundColor))
-          )
+          .settingsControlChrome()
           .speakTooltip(
             "Choose where Speak appears - in the Dock, menu bar, or both. Menu bar only keeps it out of the way."
           )
@@ -241,13 +212,7 @@ extension SettingsView {
               Text(appearance.rawValue.capitalized).tag(appearance)
             }
           }
-          .pickerStyle(.segmented)
-          .padding(.horizontal, 12)
-          .padding(.vertical, 8)
-          .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-              .fill(Color(nsColor: .controlBackgroundColor))
-          )
+          .settingsSegmentedPicker()
           .speakTooltip("Choose whether Speak follows macOS appearance or stays in light or dark mode all the time.")
           .accessibilityLabel("Appearance theme picker")
 
@@ -256,13 +221,7 @@ extension SettingsView {
               Text(density.displayName).tag(density)
             }
           }
-          .pickerStyle(.segmented)
-          .padding(.horizontal, 12)
-          .padding(.vertical, 8)
-          .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-              .fill(Color(nsColor: .controlBackgroundColor))
-          )
+          .settingsSegmentedPicker()
           .speakTooltip("Choose normal spacing or a higher-density layout across Speak.")
           .accessibilityLabel("Application layout density picker")
         }
@@ -329,13 +288,7 @@ extension SettingsView {
                 Text(profile.displayName).tag(profile)
               }
             }
-            .pickerStyle(.menu)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(
-              RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
-            )
+            .settingsMenuPicker()
           }
 
           VStack(alignment: .leading, spacing: 6) {

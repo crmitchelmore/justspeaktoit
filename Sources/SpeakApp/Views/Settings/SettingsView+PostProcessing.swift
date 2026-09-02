@@ -323,13 +323,7 @@ extension SettingsView {
           Text("Arabic").tag("Arabic")
           Text("Hindi").tag("Hindi")
         }
-        .pickerStyle(.menu)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(
-          RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .fill(Color(nsColor: .controlBackgroundColor))
-        )
+        .settingsMenuPicker()
         .speakTooltip("Let Speak know which language you want your polished transcript delivered in.")
         .onChange(of: settings.postProcessingOutputLanguage) { _, _ in
           if showSystemPromptPreview {
@@ -362,19 +356,10 @@ extension SettingsView {
 
   private var localPostProcessingSection: some View {
     VStack(alignment: .leading, spacing: 16) {
-      HStack(spacing: 8) {
-        Image(systemName: "lock.shield.fill")
-          .foregroundStyle(Color.green)
-          .imageScale(.small)
-        Text("Local Post-processing - private on this Mac")
-          .font(.subheadline.weight(.semibold))
-          .foregroundStyle(Color.green)
-      }
-      .padding(.horizontal, 12)
-      .padding(.vertical, 6)
-      .background(
-        Capsule()
-          .fill(Color.green.opacity(0.12))
+      SettingsModeBadge(
+        title: "Local Post-processing - private on this Mac",
+        systemImage: "lock.shield.fill",
+        tint: Color.green
       )
 
       #if APP_STORE

@@ -50,13 +50,7 @@ extension SettingsView {
               Text(style.displayName).tag(style)
             }
           }
-          .pickerStyle(.segmented)
-          .padding(.horizontal, 12)
-          .padding(.vertical, 8)
-          .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-              .fill(Color(nsColor: .controlBackgroundColor))
-          )
+          .settingsSegmentedPicker()
           .speakTooltip("Decide whether you press, hold, or double-tap the hotkey to start a session.")
         }
       }

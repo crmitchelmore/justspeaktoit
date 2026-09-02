@@ -57,13 +57,7 @@ extension SettingsView {
             Text(location.displayName).tag(location)
           }
         }
-        .pickerStyle(.segmented)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(
-          RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .fill(Color(nsColor: .controlBackgroundColor))
-        )
+        .settingsSegmentedPicker()
         .speakTooltip("Choose whether Speak transcribes locally on this Mac or remotely with a provider.")
         .accessibilityLabel("Transcription location picker")
 
@@ -120,19 +114,10 @@ extension SettingsView {
   private var remoteStreamingModelCard: some View {
     SettingsCard(title: "Remote Streaming model", systemImage: "mic.fill", tint: Color.brandAccentDeep) {
       VStack(alignment: .leading, spacing: 12) {
-        HStack(spacing: 8) {
-          Image(systemName: "bolt.fill")
-            .foregroundStyle(Color.brandAccentDeep)
-            .imageScale(.small)
-          Text("Fastest - Real-time Response")
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(Color.brandAccentDeep)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(
-          Capsule()
-            .fill(Color.brandAccentDeep.opacity(0.12))
+        SettingsModeBadge(
+          title: "Fastest - Real-time Response",
+          systemImage: "bolt.fill",
+          tint: Color.brandAccentDeep
         )
 
         Text("Model used while recording. Provides instant feedback as you speak.")
@@ -160,19 +145,10 @@ extension SettingsView {
       title: "Remote Batch model", systemImage: "folder.badge.clock", tint: Color.brandLagoon
     ) {
       VStack(alignment: .leading, spacing: 12) {
-        HStack(spacing: 8) {
-          Image(systemName: "star.fill")
-            .foregroundStyle(Color.brandLagoon)
-            .imageScale(.small)
-          Text("Best Quality - Most Accurate")
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(Color.brandLagoon)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(
-          Capsule()
-            .fill(Color.brandLagoon.opacity(0.12))
+        SettingsModeBadge(
+          title: "Best Quality - Most Accurate",
+          systemImage: "star.fill",
+          tint: Color.brandLagoon
         )
 
         Text("Model used when the recording is uploaded after it finishes. Delivers the highest accuracy.")
@@ -255,23 +231,12 @@ extension SettingsView {
       tint: Color.green
     ) {
       VStack(alignment: .leading, spacing: 16) {
-        HStack(spacing: 8) {
-          Image(systemName: "lock.shield.fill")
-            .foregroundStyle(Color.green)
-            .imageScale(.small)
-          Text(
-            settings.localTranscriptionMode == .batch
-              ? "Local Batch - private on this Mac"
-              : "Local Streaming - private on this Mac"
-          )
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(Color.green)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(
-          Capsule()
-            .fill(Color.green.opacity(0.12))
+        SettingsModeBadge(
+          title: settings.localTranscriptionMode == .batch
+            ? "Local Batch - private on this Mac"
+            : "Local Streaming - private on this Mac",
+          systemImage: "lock.shield.fill",
+          tint: Color.green
         )
 
         Text(
@@ -1084,13 +1049,7 @@ extension SettingsView {
           }
         }
         .labelsHidden()
-        .pickerStyle(.menu)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(
-          RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .fill(Color(nsColor: .controlBackgroundColor))
-        )
+        .settingsMenuPicker()
         if let source = selectedRecommendedStreamingSource {
           Text("\(source.runtime) · \(localStreamingSizeLabel(for: source)) · local-only streaming.")
             .font(.caption)

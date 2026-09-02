@@ -22,18 +22,15 @@ final class ElevenLabsTranscriptionProviderTests: XCTestCase {
 
     func testProvider_requiresAPIKey_isTrue() {
         let provider = ElevenLabsTranscriptionProvider()
-        XCTAssertTrue(provider.requiresAPIKey(for: "elevenlabs/scribe_v1"))
-        XCTAssertTrue(provider.requiresAPIKey(for: "elevenlabs/scribe_v1_experimental"))
+        XCTAssertTrue(provider.requiresAPIKey(for: "elevenlabs/scribe_v2"))
     }
 
     // MARK: - Supported Models
 
-    func testSupportedModels_returnsBothScribeVariants() {
+    func testSupportedModels_returnsScribeV2() {
         let provider = ElevenLabsTranscriptionProvider()
-        let models = provider.supportedModels()
-        let ids = models.map(\.id)
-        XCTAssertTrue(ids.contains("elevenlabs/scribe_v1"))
-        XCTAssertTrue(ids.contains("elevenlabs/scribe_v1_experimental"))
+        let ids = provider.supportedModels().map(\.id)
+        XCTAssertEqual(ids, ["elevenlabs/scribe_v2"])
     }
 
     func testSupportedModels_haveNonEmptyDisplayNames() {
@@ -52,14 +49,15 @@ final class ElevenLabsTranscriptionProviderTests: XCTestCase {
 
     // MARK: - ModelCatalog
 
-    func testModelCatalog_batchTranscription_includesElevenLabsScribeV1() {
+    func testModelCatalog_batchTranscription_includesElevenLabsScribeV2() {
         let ids = ModelCatalog.batchTranscription.map(\.id)
-        XCTAssertTrue(ids.contains("elevenlabs/scribe_v1"))
+        XCTAssertTrue(ids.contains("elevenlabs/scribe_v2"))
     }
 
-    func testModelCatalog_batchTranscription_includesElevenLabsScribeV1Experimental() {
+    func testModelCatalog_batchTranscription_dropsRetiredScribeV1Entries() {
         let ids = ModelCatalog.batchTranscription.map(\.id)
-        XCTAssertTrue(ids.contains("elevenlabs/scribe_v1_experimental"))
+        XCTAssertFalse(ids.contains("elevenlabs/scribe_v1"))
+        XCTAssertFalse(ids.contains("elevenlabs/scribe_v1_experimental"))
     }
 
     func testModelCatalog_batchTranscription_hasUniqueIDsAfterAddingElevenLabs() {
@@ -97,7 +95,7 @@ final class ElevenLabsTranscriptionProviderTests: XCTestCase {
         _ = try? await provider.transcribeFile(
             at: audioURL,
             apiKey: "test-key",
-            model: "elevenlabs/scribe_v1",
+            model: "elevenlabs/scribe_v2",
             language: nil
         )
 
@@ -134,7 +132,7 @@ final class ElevenLabsTranscriptionProviderTests: XCTestCase {
         _ = try? await provider.transcribeFile(
             at: audioURL,
             apiKey: "test-key",
-            model: "elevenlabs/scribe_v1",
+            model: "elevenlabs/scribe_v2",
             language: "fr_FR"
         )
 
@@ -174,7 +172,7 @@ final class ElevenLabsTranscriptionProviderTests: XCTestCase {
             _ = try await provider.transcribeFile(
                 at: audioURL,
                 apiKey: "bad-key",
-                model: "elevenlabs/scribe_v1",
+                model: "elevenlabs/scribe_v2",
                 language: nil
             )
             XCTFail("Expected a TranscriptionProviderError.httpError to be thrown")
@@ -205,7 +203,7 @@ final class ElevenLabsTranscriptionProviderTests: XCTestCase {
             _ = try await provider.transcribeFile(
                 at: audioURL,
                 apiKey: "test-key",
-                model: "elevenlabs/scribe_v1",
+                model: "elevenlabs/scribe_v2",
                 language: nil
             )
             XCTFail("Expected httpError to be thrown for 500 response")

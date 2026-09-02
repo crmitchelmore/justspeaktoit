@@ -304,7 +304,12 @@ final class SpeechmaticsLiveController: NSObject, LiveTranscriptionController {
         outputBuffer = newBuffer
       }
 
-      converter.reset()
+      // NOTE: We deliberately do NOT call converter.reset() between chunks —
+      // doing so wipes the resampler's filter history and priming/trailing
+      // frames, which audibly clicks at chunk boundaries and pays the
+      // re-priming cost on every chunk. The converter is only created once
+      // per inputFormat (cachedConverter), so its state is the *correct*
+      // thing to preserve across taps.
       var error: NSError?
       var suppliedInput = false
       let status = converter.convert(to: outputBuffer, error: &error) { _, outStatus in

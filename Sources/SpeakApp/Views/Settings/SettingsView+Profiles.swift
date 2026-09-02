@@ -93,12 +93,7 @@ struct ProfilesSettingsContent: View {
       .buttonStyle(.bordered)
       .accessibilityLabel("Delete profile \(profile.name)")
     }
-    .padding(.horizontal, 12)
-    .padding(.vertical, 8)
-    .background(
-      RoundedRectangle(cornerRadius: 8, style: .continuous)
-        .fill(Color(nsColor: .controlBackgroundColor))
-    )
+    .settingsControlChrome()
   }
 
   private func matcherSummary(for profile: DictationProfile) -> String {

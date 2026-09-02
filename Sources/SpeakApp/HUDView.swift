@@ -13,27 +13,33 @@ struct HUDOverlay: View {
 
   var body: some View {
     if manager.snapshot.phase.isVisible {
-      Group {
-        if settings.showCompactHUD {
-          CompactHUDContent(manager: manager)
-        } else {
-          presentedContent
-        }
-      }
-      .padding(.bottom, 24)
-      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-      .ignoresSafeArea()
-      .accessibilityIdentifier("hudOverlay")
+      presentedContent
+        .padding(.bottom, 24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        .ignoresSafeArea()
+        .accessibilityIdentifier("hudOverlay")
     }
   }
 
+  /// The entrance transition and the phase spring live here, on the container,
+  /// so the compact and full HUD styles animate identically. Attaching them
+  /// inside the full-HUD branch alone left the compact HUD snapping in and out.
   @ViewBuilder
   private var presentedContent: some View {
+    let styled = Group {
+      if settings.showCompactHUD {
+        CompactHUDContent(manager: manager)
+      } else {
+        content
+      }
+    }
     if shouldUseLegacyRendering || reduceMotion {
-      content
+      styled
     } else {
-      content
+      styled
         .transition(.move(edge: .bottom).combined(with: .opacity))
+        .animation(.spring(response: 0.25, dampingFraction: 0.85), value: manager.snapshot.phase)
+        .animation(.spring(response: 0.25, dampingFraction: 0.85), value: manager.isExpanded)
     }
   }
 
@@ -110,12 +116,9 @@ struct HUDOverlay: View {
     if shouldUseLegacyRendering || reduceMotion {
       return AnyView(shell)
     } else {
-      return AnyView(
-        shell
-          .shadow(color: .black.opacity(0.25), radius: 18, x: 0, y: 12)
-          .animation(.spring(response: 0.25, dampingFraction: 0.85), value: manager.snapshot.phase)
-          .animation(.spring(response: 0.25, dampingFraction: 0.85), value: manager.isExpanded)
-      )
+      // The phase/expansion springs live on `presentedContent` so the compact
+      // HUD gets the same animation; only the shadow is specific to this shell.
+      return AnyView(shell.shadow(color: .black.opacity(0.25), radius: 18, x: 0, y: 12))
     }
   }
 

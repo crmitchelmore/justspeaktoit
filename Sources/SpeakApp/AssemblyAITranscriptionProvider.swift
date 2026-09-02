@@ -172,19 +172,16 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
   }
 
   private func sendAudioFrame(_ audioData: Data, on webSocketTask: URLSessionWebSocketTask) {
-    var buffer = bufferPool.checkout()
-    buffer.append(audioData)
-
-    let dataToSend = buffer
-    let message = URLSessionWebSocketTask.Message.data(dataToSend)
     let sendGroup = pendingSendGroup
     sendGroup.enter()
 
-    webSocketTask.send(message) { [weak self] error in
+    // Send the caller's `Data` straight through. Copying it into a pooled
+    // buffer only to hand that buffer back while the send is still in flight
+    // forced a copy-on-write (plus a memset) per chunk, because `returnBuffer`
+    // zeroes storage the queued message still references.
+    webSocketTask.send(.data(audioData)) { [weak self] error in
       defer { sendGroup.leave() }
       guard let self else { return }
-      var returnBuffer = buffer
-      self.bufferPool.returnBuffer(&returnBuffer)
 
       if let error {
         if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
@@ -212,33 +209,20 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
     guard let channelData = pcmBuffer.floatChannelData else { return }
 
     let frameLength = Int(pcmBuffer.frameLength)
-    var buffer = bufferPool.checkout()
-    buffer.reserveCapacity(frameLength * 2)
-
-    for i in 0..<frameLength {
-      let sample = channelData[0][i]
-      let clampedSample = max(-1.0, min(1.0, sample))
-      let int16Sample = Int16(clampedSample * Float(Int16.max))
-      withUnsafeBytes(of: int16Sample.littleEndian) { bytes in
-        buffer.append(contentsOf: bytes)
-      }
-    }
+    // One `Data` built from a contiguous `[Int16]` rather than a per-sample
+    // `Data.append`, with the same clamp-and-scale arithmetic as before.
+    let audioData = PCM16Converter.data(from: channelData[0], frameCount: frameLength)
 
     guard let webSocketTask = currentWebSocketTask(), webSocketTask.state == .running else {
-      bufferPool.returnBuffer(&buffer)
       return
     }
 
-    let dataToSend = buffer
-    let message = URLSessionWebSocketTask.Message.data(dataToSend)
     let sendGroup = pendingSendGroup
     sendGroup.enter()
 
-    webSocketTask.send(message) { [weak self] error in
+    webSocketTask.send(.data(audioData)) { [weak self] error in
       defer { sendGroup.leave() }
       guard let self else { return }
-      var returnBuffer = buffer
-      self.bufferPool.returnBuffer(&returnBuffer)
 
       if let error {
         if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }

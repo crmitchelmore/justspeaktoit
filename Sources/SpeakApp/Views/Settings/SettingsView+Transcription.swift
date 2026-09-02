@@ -32,6 +32,9 @@ extension SettingsView {
       if settings.hasSelectedModulateModel {
         modulateFeatureSettings
       }
+      if settings.hasSelectedMetaMuseModel {
+        metaMuseRecognitionBiasCard
+      }
 
       // 4. How a recording starts and stops.
       handsFreeDictationCard
@@ -108,6 +111,31 @@ extension SettingsView {
       }
     }
     .speakTooltip("Choose whether Speak transcribes on this Mac or with a remote provider, and how.")
+  }
+
+  /// Language and vocabulary bias sent with Meta Muse Voice Transcribe requests.
+  /// Reuses the shared keyterms setting, as the OpenAI Realtime path does.
+  private var metaMuseRecognitionBiasCard: some View {
+    SettingsCard(
+      title: "Meta Muse recognition bias",
+      systemImage: "textformat.abc",
+      tint: Color.blue
+    ) {
+      VStack(alignment: .leading, spacing: 8) {
+        Text(
+          "The preferred language setting supplies Meta's language bias. "
+            + "Add comma-separated names, acronyms, places, or domain terms for vocabulary biasing."
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        TextField(
+          "JustSpeakToIt, Meta Model API, Muse Voice",
+          text: settingsBinding(\AppSettings.assemblyAIKeyterms)
+        )
+        .textFieldStyle(.roundedBorder)
+      }
+    }
+    .speakTooltip("Add vocabulary hints for Meta Muse Voice Transcribe.")
   }
 
   /// Provider model used while recording.

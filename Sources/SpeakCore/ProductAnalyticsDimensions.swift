@@ -133,6 +133,8 @@ public enum AnalyticsModelFamily: String, Codable, Sendable {
     case gemini
     /// xAI Grok Voice models used in transcription-only mode.
     case grok
+    /// Meta Muse Voice Transcribe.
+    case muse
     /// Rev.ai.
     case revAI = "rev_ai"
     /// Anything not in the list above — never the caller's own identifier.

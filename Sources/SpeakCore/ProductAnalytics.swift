@@ -38,7 +38,7 @@ public enum AnalyticsOnboardingStep: String, Codable, Sendable {
 }
 
 public enum AnalyticsProviderType: String, Codable, Sendable {
-    case apple, azure, cartesia, deepgram, gladia, groq, local, mistral, modulate, soniox, speechmatics, other
+    case apple, azure, cartesia, deepgram, gladia, groq, local, meta, mistral, modulate, soniox, speechmatics, other
     case assemblyAI = "assembly_ai"
     case elevenLabs = "eleven_labs"
     case openAI = "openai"
@@ -57,7 +57,8 @@ public enum AnalyticsProviderType: String, Codable, Sendable {
         .elevenlabs: .elevenLabs,
         .openai: .openAI,
         .speechmatics: .speechmatics,
-        .xai: .xAI
+        .xai: .xAI,
+        .meta: .meta
     ]
 
     public init(liveProvider: LiveTranscriptionProviderID) {

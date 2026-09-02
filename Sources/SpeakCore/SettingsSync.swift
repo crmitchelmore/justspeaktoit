@@ -324,6 +324,7 @@ public final class ConfigTransferManager: Sendable {
         "elevenlabs.apiKey",
         "gladia.apiKey",
         "groq.apiKey",
+        "meta.apiKey",
         "mistral.apiKey",
         "modulate.apiKey",
         "openai.apiKey",

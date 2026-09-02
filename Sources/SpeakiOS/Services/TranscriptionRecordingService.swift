@@ -176,7 +176,8 @@ public final class TranscriptionRecordingService: ObservableObject {
                 language: TranscriptionLanguageCatalog.providerLanguage(for: languageIdentifier),
                 audioSessionManager: audioSessionManager,
                 batchAPIKey: settings.batchAPIKey(for: currentModel),
-                liveAPIKey: settings.liveAPIKey(for:)
+                liveAPIKey: settings.liveAPIKey(for:),
+                transcriptionKeywords: MetaMuseVoiceTranscribe.keywords(from: settings.transcriptionKeywords)
             )
             session.onPartialResult = { [weak self] text, _ in
                 self?.handlePartialResult(text: text)

@@ -158,7 +158,8 @@ public final class WatchCaptureImportPipeline: ObservableObject {
             at: audioURL,
             model: model,
             apiKey: settings.batchAPIKey,
-            language: settings.preferredModelLanguage
+            language: settings.preferredModelLanguage,
+            keywords: MetaMuseVoiceTranscribe.keywords(from: settings.transcriptionKeywords)
         )
         try Task.checkCancellation()
         let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)

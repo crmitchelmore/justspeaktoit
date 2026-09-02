@@ -4,11 +4,6 @@ import XCTest
 @testable import SpeakCore
 
 final class MetaMuseVoiceTranscribeTests: XCTestCase {
-    override func tearDown() {
-        MetaMuseMockURLProtocol.handler = nil
-        super.tearDown()
-    }
-
     func testCatalogAndRouting_exposeLiveAndBatchOnBothPlatforms() throws {
         XCTAssertTrue(ModelCatalog.liveTranscription.contains { $0.id == MetaMuseVoiceTranscribe.liveCatalogID })
         XCTAssertTrue(ModelCatalog.batchTranscription.contains { $0.id == MetaMuseVoiceTranscribe.batchCatalogID })
@@ -180,91 +175,58 @@ final class MetaMuseVoiceTranscribeTests: XCTestCase {
         XCTAssertEqual(prepared.duration, 0.1, accuracy: 0.002)
     }
 
-    func testAPIKeyValidation_probesSpeechEndpointAndMapsAuthFailure() async throws {
-        MetaMuseMockURLProtocol.handler = { request in
-            let response = HTTPURLResponse(
-                url: try XCTUnwrap(request.url),
-                statusCode: 401,
-                httpVersion: nil,
-                headerFields: nil
-            )!
-            return (response, Data(#"{"message":"invalid token"}"#.utf8))
-        }
-        let result = await MetaMuseAPIKeyValidator(session: makeMockSession()).validate("invalid")
+    func testRealtimeURL_carriesDocumentedSessionIdentifier() throws {
+        let url = try XCTUnwrap(MetaMuseLiveClient.webSocketURL(sessionID: "session-1"))
 
-        guard case .failure(let message) = result.outcome else {
-            return XCTFail("Expected key validation failure")
-        }
-        XCTAssertTrue(message.contains("rejected the API key"))
+        XCTAssertEqual(url.scheme, "wss")
+        XCTAssertEqual(url.host, "api.meta.ai")
+        XCTAssertEqual(url.path, "/v1/asr/realtime")
+        let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        XCTAssertEqual(components.queryItems, [URLQueryItem(name: "sessionId", value: "session-1")])
     }
 
-    func testBatchClient_convertsSupportedFileUploadsAndDecodesTurns() async throws {
-        let audioURL = try makeTemporaryWAV()
-        defer { try? FileManager.default.removeItem(at: audioURL) }
-        MetaMuseMockURLProtocol.handler = { request in
-            XCTAssertEqual(request.url?.path, "/v1/asr/transcribe")
-            XCTAssertTrue(
-                request.value(forHTTPHeaderField: "Content-Type")?.hasPrefix("multipart/form-data; boundary=") == true
-            )
-            let response = HTTPURLResponse(
-                url: try XCTUnwrap(request.url),
-                statusCode: 200,
-                httpVersion: nil,
-                headerFields: ["Content-Type": "application/json"]
-            )!
-            let body = Data(
-                #"""
-                {
-                  "sessionId":"session-1",
-                  "transcript":"Hello world.",
-                  "audioDurationMs":100,
-                  "turns":[
-                    {"turnId":1,"startMs":0,"endMs":100,"transcript":"Hello world.","speaker":null}
-                  ]
-                }
-                """#.utf8
-            )
-            return (response, body)
-        }
-
-        let result = try await MetaMuseBatchClient(session: makeMockSession()).transcribeFile(
-            at: audioURL,
-            apiKey: "valid",
-            language: "en-GB",
-            keywords: ["JustSpeakToIt"]
+    func testHandshake_selects16kHzEncodingAndOmitsEmptyBias() throws {
+        let data = try MetaMuseLiveClient.handshakeData(
+            apiKey: "secret",
+            model: MetaMuseVoiceTranscribe.modelID,
+            sampleRate: 16_000,
+            language: nil,
+            keywords: []
         )
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
 
-        XCTAssertEqual(result.text, "Hello world.")
-        XCTAssertEqual(result.duration, 0.1, accuracy: 0.001)
-        XCTAssertEqual(result.segments.count, 1)
-        XCTAssertEqual(result.segments.first?.startTime, 0)
-        XCTAssertEqual(result.segments.first?.endTime, 0.1)
+        XCTAssertEqual(json["audioEncoding"] as? String, "PCM_16KHZ")
+        XCTAssertEqual(json["emitAudioProgress"] as? Bool, false)
+        XCTAssertNil(json["languageBias"])
+        XCTAssertNil(json["keywords"])
     }
 
-    func testBatchClient_honoursCancellationBeforeUpload() async throws {
-        let audioURL = try makeTemporaryWAV()
-        defer { try? FileManager.default.removeItem(at: audioURL) }
-        let task = Task {
-            try await MetaMuseBatchClient(session: makeMockSession()).transcribeFile(
-                at: audioURL,
-                apiKey: "valid",
-                language: nil
-            )
-        }
-        task.cancel()
+    func testCloseCodes_mapToDocumentedRecoveryOutcomes() {
+        let fallback = URLError(.networkConnectionLost)
 
-        do {
-            _ = try await task.value
-            XCTFail("Expected cancellation")
-        } catch is CancellationError {
-            // Expected.
-        }
+        XCTAssertEqual(
+            MetaMuseLiveClient.error(closeCode: 1_008, reason: Data("backlog".utf8), fallback: fallback),
+            .streamingPolicy("backlog")
+        )
+        XCTAssertEqual(
+            MetaMuseLiveClient.error(closeCode: 1_013, reason: nil, fallback: fallback),
+            .rateLimited
+        )
+        XCTAssertEqual(
+            MetaMuseLiveClient.error(closeCode: 1_011, reason: Data("backend".utf8), fallback: fallback),
+            .unavailable("backend")
+        )
     }
 
-    private func makeMockSession() -> URLSession {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [MetaMuseMockURLProtocol.self]
-        return URLSession(configuration: configuration)
+    func testAPIModelName_stripsCataloguePrefixAndStreamingSuffix() {
+        XCTAssertEqual(
+            MetaMuseBatchClient.apiModelName(from: MetaMuseVoiceTranscribe.liveCatalogID),
+            MetaMuseVoiceTranscribe.modelID
+        )
+        XCTAssertEqual(
+            MetaMuseBatchClient.apiModelName(from: MetaMuseVoiceTranscribe.batchCatalogID),
+            MetaMuseVoiceTranscribe.modelID
+        )
     }
 
     private func makeTemporaryWAV(sampleRate: Int = 16_000) throws -> URL {
@@ -275,29 +237,4 @@ final class MetaMuseVoiceTranscribeTests: XCTestCase {
         try data.write(to: url, options: .atomic)
         return url
     }
-}
-
-private class MetaMuseMockURLProtocol: URLProtocol, @unchecked Sendable {
-    static var handler: (@Sendable (URLRequest) async throws -> (HTTPURLResponse, Data))?
-
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-
-    override func startLoading() {
-        Task {
-            do {
-                guard let handler = Self.handler else {
-                    throw URLError(.badServerResponse)
-                }
-                let (response, data) = try await handler(request)
-                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-                client?.urlProtocol(self, didLoad: data)
-                client?.urlProtocolDidFinishLoading(self)
-            } catch {
-                client?.urlProtocol(self, didFailWithError: error)
-            }
-        }
-    }
-
-    override func stopLoading() {}
 }

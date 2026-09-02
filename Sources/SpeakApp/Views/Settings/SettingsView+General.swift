@@ -8,43 +8,44 @@ import SwiftUI
 extension SettingsView {
   var generalSettings: some View {
     SpeakDensitySettingsSection(density: settings.visualDensity) {
-      SettingsCard(title: "Appearance", systemImage: "paintpalette", tint: Color.brandAccent) {
+      SettingsCard(title: "Microphone", systemImage: "mic.circle", tint: Color.brandAccentWarm) {
         VStack(alignment: .leading, spacing: 12) {
-          Text("Choose how Speak looks across light, dark, or system themes.")
-            .font(.callout)
-            .foregroundStyle(.secondary)
-          Picker("Theme", selection: settingsBinding(\AppSettings.appearance)) {
-            ForEach(AppSettings.Appearance.allCases) { appearance in
-              Text(appearance.rawValue.capitalized).tag(appearance)
+          Picker("Input Device", selection: audioInputSelectionBinding) {
+            Text("System Default (\(audioDevices.systemDefaultDisplayName))")
+              .tag(AudioInputDeviceManager.systemDefaultToken)
+            ForEach(audioDevices.devices) { device in
+              Text(device.displayName).tag(device.id)
             }
           }
-          .pickerStyle(.segmented)
-          .padding(.horizontal, 12)
-          .padding(.vertical, 8)
-          .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-              .fill(Color(nsColor: .controlBackgroundColor))
-          )
-          .speakTooltip("Choose whether Speak follows macOS appearance or stays in light or dark mode all the time.")
-          .accessibilityLabel("Appearance theme picker")
+          .settingsMenuPicker()
+          .speakTooltip("Choose which microphone Speak listens to when recording or transcribing.")
+          .accessibilityLabel("Audio input device picker")
 
-          Picker("Layout Density", selection: settingsBinding(\AppSettings.visualDensity)) {
-            ForEach(AppVisualDensity.allCases) { density in
-              Text(density.displayName).tag(density)
-            }
+          if let details = audioDevices.currentSelectionDetails {
+            Text(details)
+              .font(.caption)
+              .foregroundStyle(.secondary)
           }
-          .pickerStyle(.segmented)
-          .padding(.horizontal, 12)
-          .padding(.vertical, 8)
-          .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-              .fill(Color(nsColor: .controlBackgroundColor))
-          )
-          .speakTooltip("Choose normal spacing or a higher-density layout across Speak.")
-          .accessibilityLabel("Application layout density picker")
+
+            HStack(spacing: 8) {
+              Image(systemName: "waveform")
+                .foregroundStyle(Color.brandAccentWarm)
+              Text("Currently active: \(audioDevices.systemDefaultDisplayName)")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+            Spacer()
+            Button {
+              audioDevices.refresh()
+            } label: {
+              Label("Refresh", systemImage: "arrow.clockwise")
+                .labelStyle(.titleAndIcon)
+            }
+            .buttonStyle(.bordered)
+            .speakTooltip("Reload the list of connected microphones.")
+          }
         }
       }
-      .speakTooltip("Set Speak's look to match your workspace with light, dark, or system themes.")
+      .speakTooltip("Pick the microphone Speak should use. We fall back to the system default if a device disconnects.")
 
       SettingsCard(title: "Language", systemImage: "character.bubble", tint: Color.brandAccentWarm) {
         VStack(alignment: .leading, spacing: 12) {
@@ -57,13 +58,7 @@ extension SettingsView {
               Text(option.displayName).tag(option.id)
             }
           }
-          .pickerStyle(.menu)
-          .padding(.horizontal, 12)
-          .padding(.vertical, 8)
-          .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-              .fill(Color(nsColor: .controlBackgroundColor))
-          )
+          .settingsMenuPicker()
           .speakTooltip(
             "Automatic lets remote providers detect the language. Apple speech uses your current system locale."
           )
@@ -80,13 +75,7 @@ extension SettingsView {
                 Text(method.displayName).tag(method)
               }
             }
-            .pickerStyle(.menu)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(
-              RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
-            )
+            .settingsMenuPicker()
             .speakTooltip("Decide how Speak returns transcripts—typed for you or placed on the clipboard.")
             .accessibilityLabel("Text output method picker")
           } else {
@@ -107,14 +96,10 @@ extension SettingsView {
                 Text(mode.displayName).tag(mode)
               }
             }
-            .pickerStyle(.menu)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(
-              RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
+            .settingsMenuPicker()
+            .speakTooltip(
+              "Insert at Cursor adds text where your cursor is. Replace Field overwrites the entire text field."
             )
-            .speakTooltip("Insert at Cursor adds text where your cursor is. Replace Field overwrites the entire text field.")
 
             Text(settings.accessibilityInsertionMode == .insertAtCursor
               ? "Text will be inserted at your cursor position, preserving existing content."
@@ -148,48 +133,6 @@ extension SettingsView {
       }
       .speakTooltip("Control how Speak delivers transcripts and how gently we touch your clipboard and interface.")
 
-      SettingsCard(title: "Heads-Up Display", systemImage: "rectangle.on.rectangle", tint: Color.brandLagoon) {
-        VStack(alignment: .leading, spacing: 12) {
-          Text("Choose what Speak shows while a recording or transcription session is active.")
-            .font(.callout)
-            .foregroundStyle(.secondary)
-
-          VStack(alignment: .leading, spacing: 8) {
-            settingsToggle(
-              "Show HUD during sessions",
-              isOn: settingsBinding(\AppSettings.showHUDDuringSessions),
-              tint: .brandLagoon
-            )
-            .speakTooltip("Display a small heads-up display so you always know when Speak is listening.")
-            settingsToggle(
-              "Show live transcript in HUD",
-              isOn: settingsBinding(\AppSettings.showLiveTranscriptInHUD),
-              tint: .brandLagoon
-            )
-            .speakTooltip("Show real-time transcription text in the HUD while recording, full or compact.")
-            settingsToggle(
-              "Show compact HUD",
-              isOn: settingsBinding(\AppSettings.showCompactHUD),
-              tint: .brandLagoon
-            )
-            .speakTooltip(
-              "Shrink the HUD to a pulsing dot, a live level meter and the timer. The scrolling "
-                + "transcript line still follows the \"Show live transcript in HUD\" setting above."
-            )
-            settingsToggle(
-              "Shorten error display",
-              isOn: settingsBinding(\AppSettings.shortenErrorDisplay),
-              tint: .brandLagoon
-            )
-            .speakTooltip(
-              "Auto-dismiss failure and cancellation messages after 3.6 seconds instead of 6, "
-                + "so they don't linger far longer than a success confirmation."
-            )
-          }
-        }
-      }
-      .speakTooltip("Configure the HUD shown while Speak is listening and transcribing.")
-
       SettingsCard(title: "App Behaviour", systemImage: "gearshape.2", tint: Color.brandAccentWarm) {
         VStack(alignment: .leading, spacing: 12) {
           VStack(alignment: .leading, spacing: 4) {
@@ -204,12 +147,7 @@ extension SettingsView {
             .labelsHidden()
             .pickerStyle(.segmented)
           }
-          .padding(.horizontal, 12)
-          .padding(.vertical, 8)
-          .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-              .fill(Color(nsColor: .controlBackgroundColor))
-          )
+          .settingsControlChrome()
           .speakTooltip(
             "Choose where Speak appears - in the Dock, menu bar, or both. Menu bar only keeps it out of the way."
           )
@@ -264,79 +202,73 @@ extension SettingsView {
       }
       .speakTooltip("Configure how Speak integrates with your Mac—where it appears and when it starts.")
 
-      SettingsCard(title: "Microphone", systemImage: "mic.circle", tint: Color.brandAccentWarm) {
+      SettingsCard(title: "Appearance", systemImage: "paintpalette", tint: Color.brandAccent) {
         VStack(alignment: .leading, spacing: 12) {
-          Picker("Input Device", selection: audioInputSelectionBinding) {
-            Text("System Default (\(audioDevices.systemDefaultDisplayName))")
-              .tag(AudioInputDeviceManager.systemDefaultToken)
-            ForEach(audioDevices.devices) { device in
-              Text(device.displayName).tag(device.id)
+          Text("Choose how Speak looks across light, dark, or system themes.")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+          Picker("Theme", selection: settingsBinding(\AppSettings.appearance)) {
+            ForEach(AppSettings.Appearance.allCases) { appearance in
+              Text(appearance.rawValue.capitalized).tag(appearance)
             }
           }
-          .pickerStyle(.menu)
-          .padding(.horizontal, 12)
-          .padding(.vertical, 8)
-          .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-              .fill(Color(nsColor: .controlBackgroundColor))
-          )
-          .speakTooltip("Choose which microphone Speak listens to when recording or transcribing.")
-          .accessibilityLabel("Audio input device picker")
+          .settingsSegmentedPicker()
+          .speakTooltip("Choose whether Speak follows macOS appearance or stays in light or dark mode all the time.")
+          .accessibilityLabel("Appearance theme picker")
 
-          if let details = audioDevices.currentSelectionDetails {
-            Text(details)
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          }
-
-            HStack(spacing: 8) {
-              Image(systemName: "waveform")
-                .foregroundStyle(Color.brandAccentWarm)
-              Text("Currently active: \(audioDevices.systemDefaultDisplayName)")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-            Spacer()
-            Button {
-              audioDevices.refresh()
-            } label: {
-              Label("Refresh", systemImage: "arrow.clockwise")
-                .labelStyle(.titleAndIcon)
+          Picker("Layout Density", selection: settingsBinding(\AppSettings.visualDensity)) {
+            ForEach(AppVisualDensity.allCases) { density in
+              Text(density.displayName).tag(density)
             }
-            .buttonStyle(.bordered)
-            .speakTooltip("Reload the list of connected microphones.")
           }
+          .settingsSegmentedPicker()
+          .speakTooltip("Choose normal spacing or a higher-density layout across Speak.")
+          .accessibilityLabel("Application layout density picker")
         }
       }
-      .speakTooltip("Pick the microphone Speak should use. We fall back to the system default if a device disconnects.")
+      .speakTooltip("Set Speak's look to match your workspace with light, dark, or system themes.")
 
-      SettingsCard(title: "Fast Start", systemImage: "bolt.circle", tint: Color.brandAccentWarm) {
+      SettingsCard(title: "Heads-Up Display", systemImage: "rectangle.on.rectangle", tint: Color.brandLagoon) {
         VStack(alignment: .leading, spacing: 12) {
-          Text("Prepare recording ahead of time so dictation begins the moment you press your shortcut.")
+          Text("Choose what Speak shows while a recording or transcription session is active.")
             .font(.callout)
             .foregroundStyle(.secondary)
 
-          settingsToggle(
-            "Prepare recording while idle",
-            isOn: settingsBinding(\AppSettings.audioPreWarmingEnabled),
-            tint: .brandAccentWarm
-          )
-          .speakTooltip(
-            "Sets up the recorder in advance so your shortcut starts capture immediately. "
-              + "The microphone is never opened until you actually start dictating."
-          )
-
-          settingsToggle(
-            "Warm supported connections",
-            isOn: settingsBinding(\AppSettings.connectionPreWarmingEnabled),
-            tint: .brandAccentWarm
-          )
-          .speakTooltip(
-            "Probes supported provider endpoints ahead of time without opening a live session. "
-              + "No audio, API key, or transcription request is sent while idle."
-          )
+          VStack(alignment: .leading, spacing: 8) {
+            settingsToggle(
+              "Show HUD during sessions",
+              isOn: settingsBinding(\AppSettings.showHUDDuringSessions),
+              tint: .brandLagoon
+            )
+            .speakTooltip("Display a small heads-up display so you always know when Speak is listening.")
+            settingsToggle(
+              "Show live transcript in HUD",
+              isOn: settingsBinding(\AppSettings.showLiveTranscriptInHUD),
+              tint: .brandLagoon
+            )
+            .speakTooltip("Show real-time transcription text in the HUD while recording, full or compact.")
+            settingsToggle(
+              "Show compact HUD",
+              isOn: settingsBinding(\AppSettings.showCompactHUD),
+              tint: .brandLagoon
+            )
+            .speakTooltip(
+              "Shrink the HUD to a pulsing dot, a live level meter and the timer. The scrolling "
+                + "transcript line still follows the \"Show live transcript in HUD\" setting above."
+            )
+            settingsToggle(
+              "Shorten error display",
+              isOn: settingsBinding(\AppSettings.shortenErrorDisplay),
+              tint: .brandLagoon
+            )
+            .speakTooltip(
+              "Auto-dismiss failure and cancellation messages after 3.6 seconds instead of 6, "
+                + "so they don't linger far longer than a success confirmation."
+            )
+          }
         }
       }
-      .speakTooltip("Trade a little idle work for a faster start when you press your dictation shortcut.")
+      .speakTooltip("Configure the HUD shown while Speak is listening and transcribing.")
 
       SettingsCard(title: "Recording Sounds", systemImage: "speaker.wave.2", tint: Color.brandLagoon) {
         VStack(alignment: .leading, spacing: 12) {
@@ -356,13 +288,7 @@ extension SettingsView {
                 Text(profile.displayName).tag(profile)
               }
             }
-            .pickerStyle(.menu)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(
-              RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
-            )
+            .settingsMenuPicker()
           }
 
           VStack(alignment: .leading, spacing: 6) {
@@ -405,6 +331,35 @@ extension SettingsView {
         }
       }
       .speakTooltip("Choose the sound that plays when Speak starts or stops recording.")
+
+      SettingsCard(title: "Fast Start", systemImage: "bolt.circle", tint: Color.brandAccentWarm) {
+        VStack(alignment: .leading, spacing: 12) {
+          Text("Prepare recording ahead of time so dictation begins the moment you press your shortcut.")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+
+          settingsToggle(
+            "Prepare recording while idle",
+            isOn: settingsBinding(\AppSettings.audioPreWarmingEnabled),
+            tint: .brandAccentWarm
+          )
+          .speakTooltip(
+            "Sets up the recorder in advance so your shortcut starts capture immediately. "
+              + "The microphone is never opened until you actually start dictating."
+          )
+
+          settingsToggle(
+            "Warm supported connections",
+            isOn: settingsBinding(\AppSettings.connectionPreWarmingEnabled),
+            tint: .brandAccentWarm
+          )
+          .speakTooltip(
+            "Probes supported provider endpoints ahead of time without opening a live session. "
+              + "No audio, API key, or transcription request is sent while idle."
+          )
+        }
+      }
+      .speakTooltip("Trade a little idle work for a faster start when you press your dictation shortcut.")
 
       SettingsCard(title: "Send to Mac", systemImage: "iphone.and.arrow.forward", tint: Color.green) {
         VStack(alignment: .leading, spacing: 12) {
@@ -639,8 +594,14 @@ extension SettingsView {
               in: 1...30,
               step: 1
             )
-            .speakTooltip("Control how often Speak writes history to disk. Lower values save more frequently but may impact performance.")
-            Text("How often pending history writes are flushed to disk. Lower values reduce potential data loss but increase I/O.")
+            .speakTooltip(
+              "Control how often Speak writes history to disk. "
+                + "Lower values save more frequently but may impact performance."
+            )
+            Text(
+              "How often pending history writes are flushed to disk. "
+                + "Lower values reduce potential data loss but increase I/O."
+            )
               .font(.caption)
               .foregroundStyle(.secondary)
           }

@@ -65,9 +65,9 @@ final class ProductAnalyticsTests: XCTestCase {
         let fixture = try Fixture()
         let data = try await fixture.controller.preview(.onboardingStarted(entryPoint: .freshInstall))
         let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        let properties = try XCTUnwrap(payload["properties"] as? [String: String])
+        let properties = try XCTUnwrap(payload["properties"] as? [String: Any])
         XCTAssertEqual(payload["event"] as? String, "onboarding_started")
-        XCTAssertEqual(properties["entry_point"], "fresh_install")
+        XCTAssertEqual(properties["entry_point"] as? String, "fresh_install")
     }
 
     func testDetailedTranscriptionEvent_BucketsRawMeasurementsLocally() async throws {
@@ -152,7 +152,7 @@ final class ProductAnalyticsTests: XCTestCase {
         XCTAssertEqual(context.osMajorMinor, "other")
         XCTAssertEqual(context.localeLanguageCode, "other")
         XCTAssertEqual(context.architecture, "other")
-        XCTAssertFalse(payload.properties.values.contains(input))
+        XCTAssertFalse(payload.properties.values.contains { $0.contains(input) })
     }
 
     func testAnonymousPreview_DropsCallerSuppliedIdentity() async throws {
@@ -247,7 +247,7 @@ final class ProductAnalyticsTests: XCTestCase {
         let payloads = await fixture.sink.payloads
         XCTAssertEqual(payloads.count, 2)
         for payload in payloads {
-            XCTAssertEqual(payload.properties["model_family"], AnalyticsModelFamily.other.rawValue)
+            XCTAssertEqual(payload.properties["model_family"], .string(AnalyticsModelFamily.other.rawValue))
             XCTAssertFalse(payload.properties.values.contains { $0.contains(transcript) })
         }
         XCTAssertEqual(payloads.first?.properties["language_code"], "other")

@@ -4,7 +4,7 @@ import Foundation
 
 // MARK: - ElevenLabs Transcription Provider
 
-/// Batch file transcription using the ElevenLabs Scribe v1 API.
+/// Batch file transcription using the ElevenLabs Scribe v2 API.
 ///
 /// Reuses the `elevenlabs.apiKey` keychain entry that TTS already stores, so users
 /// who have ElevenLabs configured need no additional credential.
@@ -94,7 +94,7 @@ struct ElevenLabsTranscriptionProvider: TranscriptionProvider {
     // MARK: - Private Helpers
 
     private func extractModelID(from model: String) -> String {
-        // Strip the provider prefix: "elevenlabs/scribe_v1" -> "scribe_v1"
+        // Strip the provider prefix: "elevenlabs/scribe_v2" -> "scribe_v2"
         model.split(separator: "/").last.map(String.init) ?? model
     }
 

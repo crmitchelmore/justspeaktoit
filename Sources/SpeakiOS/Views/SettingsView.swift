@@ -2137,6 +2137,11 @@ struct PrivacyView: View {
                         description: processingDescription(for: provider)
                     )
                 }
+
+                Text("When enabled, post-processing sends transcript text to OpenRouter, and voice output sends "
+                    + "text to Soniox.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("API Keys") {

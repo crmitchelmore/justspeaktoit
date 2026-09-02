@@ -17,9 +17,23 @@ final class MacHistorySyncAdapter: HistorySyncDelegate {
     /// resulting HistoryManager mutation is not echoed back to CloudKit.
     private var isApplyingRemoteChange = false
 
-    init(historyManager: HistoryManager, defaults: UserDefaults = .standard) {
+    /// How long a synced-ID change waits for more changes before the set is
+    /// written to `UserDefaults`. The sync engine hands remote entries to the
+    /// delegate one at a time with no end-of-pass callback, so a whole
+    /// download pass is folded into a single write by restarting this window
+    /// on each change instead.
+    private let saveInterval: Duration
+    private var pendingSave: Task<Void, Never>?
+    private var hasUnsavedSyncedIDs = false
+
+    init(
+        historyManager: HistoryManager,
+        defaults: UserDefaults = .standard,
+        saveInterval: Duration = .milliseconds(250)
+    ) {
         self.historyManager = historyManager
         self.defaults = defaults
+        self.saveInterval = saveInterval
         loadSyncedIDs()
         historyManager.onItemAppended = { [weak self] item in
             self?.uploadNewItem(item)
@@ -52,7 +66,7 @@ final class MacHistorySyncAdapter: HistorySyncDelegate {
     func deleteItem(id: UUID) {
         guard !isApplyingRemoteChange else { return }
         syncedIDs.remove(id)
-        saveSyncedIDs()
+        scheduleSaveSyncedIDs()
         Task {
             try? await HistorySyncEngine.shared.delete(entryID: id)
         }
@@ -70,7 +84,7 @@ final class MacHistorySyncAdapter: HistorySyncDelegate {
     func didReceiveRemoteEntry(_ entry: SyncableHistoryEntry) async {
         isApplyingRemoteChange = true
         defer { isApplyingRemoteChange = false }
-        if let local = historyManager.allItems.first(where: { $0.id == entry.id }) {
+        if let local = historyManager.item(id: entry.id) {
             if entry.updatedAt > local.updatedAt {
                 await historyManager.update(HistoryItem.fromSyncable(entry))
                 syncedIDs.insert(entry.id)
@@ -79,14 +93,14 @@ final class MacHistorySyncAdapter: HistorySyncDelegate {
             } else {
                 syncedIDs.remove(entry.id)
             }
-            saveSyncedIDs()
+            scheduleSaveSyncedIDs()
             return
         }
 
         let item = HistoryItem.fromSyncable(entry)
         await historyManager.append(item)
         syncedIDs.insert(entry.id)
-        saveSyncedIDs()
+        scheduleSaveSyncedIDs()
     }
 
     func didDeleteRemoteEntry(id: UUID) async {
@@ -94,12 +108,12 @@ final class MacHistorySyncAdapter: HistorySyncDelegate {
         defer { isApplyingRemoteChange = false }
         await historyManager.remove(id: id)
         syncedIDs.remove(id)
-        saveSyncedIDs()
+        scheduleSaveSyncedIDs()
     }
 
     func didAcknowledgeSyncedEntries(ids: Set<UUID>) async {
         syncedIDs.formUnion(ids)
-        saveSyncedIDs()
+        scheduleSaveSyncedIDs()
     }
 
     // MARK: - Synced IDs Tracking
@@ -110,7 +124,43 @@ final class MacHistorySyncAdapter: HistorySyncDelegate {
         }
     }
 
-    private func saveSyncedIDs() {
+    /// Marks the synced-ID set dirty and (re)arms the coalescing window.
+    ///
+    /// A download pass reconciles up to a full CloudKit change set one entry
+    /// at a time; writing the whole UUID array to `UserDefaults` per entry was
+    /// O(entries × known IDs) of main-actor work for bookkeeping that is only
+    /// read at launch. `pendingEntries()` and the rest of the adapter read
+    /// `syncedIDs` from memory, so deferring the write changes nothing within
+    /// a session; the only exposure is a quit inside the window, which at
+    /// worst re-uploads already-synced entries (CloudKit saves are keyed by
+    /// record ID, so that is idempotent).
+    private func scheduleSaveSyncedIDs() {
+        hasUnsavedSyncedIDs = true
+        pendingSave?.cancel()
+        let interval = saveInterval
+        pendingSave = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(for: interval)
+            } catch {
+                return  // Superseded by a later change, which owns the write.
+            }
+            self?.flushSyncedIDs()
+        }
+    }
+
+    /// Writes any coalesced synced-ID change immediately instead of waiting
+    /// for the window to elapse. Safe to call at any time; a no-op when there
+    /// is nothing pending.
+    func flushPendingSyncedIDs() {
+        pendingSave?.cancel()
+        flushSyncedIDs()
+    }
+
+    /// Writes the coalesced synced-ID set, if anything is still unsaved.
+    private func flushSyncedIDs() {
+        pendingSave = nil
+        guard hasUnsavedSyncedIDs else { return }
+        hasUnsavedSyncedIDs = false
         let strings = syncedIDs.map(\.uuidString)
         defaults.set(strings, forKey: syncedIDsKey)
     }

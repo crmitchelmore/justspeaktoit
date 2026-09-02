@@ -47,7 +47,7 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
 
     public init(
         apiKey: String,
-        modelID: String = "scribe_v1",
+        modelID: String = "scribe_v2_realtime",
         language: String? = nil,
         sampleRate: Int = LiveTranscriptionProviderID.elevenlabs.expectedSampleRate,
         session: URLSession = .shared,
@@ -150,19 +150,12 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
     }
 
     private func transmit(_ audioData: Data, on task: URLSessionWebSocketTask) {
-        var buffer = bufferPool.checkout()
-        buffer.append(audioData)
-
-        let dataToSend = buffer
-        let message = URLSessionWebSocketTask.Message.data(dataToSend)
-
-        task.send(message) { [weak self] error in
+        // Send the caller's `Data` straight through. Copying it into a pooled
+        // buffer only to hand that buffer back while the send is still in
+        // flight forced a copy-on-write (plus a memset) per chunk, because
+        // `returnBuffer` zeroes storage the queued message still references.
+        task.send(.data(audioData)) { [weak self] error in
             guard let self else { return }
-
-            // Capture the immutable copy: a captured `var` in this @Sendable
-            // completion would be a strict-concurrency violation.
-            var returnBuffer = dataToSend
-            self.bufferPool.returnBuffer(&returnBuffer)
 
             if let error {
                 if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) {
@@ -381,11 +374,20 @@ public enum ElevenLabsLiveError: LocalizedError {
 // MARK: - API Key Validation
 
 public struct ElevenLabsSTTAPIKeyValidator {
+    /// Batch Scribe model used for the access probe. ElevenLabs removed
+    /// `scribe_v1` on 2026-07-09, so probing with it now fails for every key.
+    public static let defaultProbeModelID = "scribe_v2"
+
     private let session: URLSession
+    private let modelID: String
     private let baseURL = URL(string: "https://api.elevenlabs.io/v1")!
 
-    public init(session: URLSession = .shared) {
+    public init(
+        session: URLSession = .shared,
+        modelID: String = ElevenLabsSTTAPIKeyValidator.defaultProbeModelID
+    ) {
         self.session = session
+        self.modelID = modelID
     }
 
     /// Validates that an ElevenLabs API key is valid and has Scribe speech-to-text access.
@@ -443,7 +445,7 @@ public struct ElevenLabsSTTAPIKeyValidator {
             --\(boundary)\r
             Content-Disposition: form-data; name="model_id"\r
             \r
-            scribe_v1\r
+            \(modelID)\r
             --\(boundary)--\r
             """.utf8
         )

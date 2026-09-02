@@ -340,6 +340,22 @@ final class HistoryManagerTests: XCTestCase {
         XCTAssertEqual(manager.contentRevision, before)
     }
 
+    /// `item(id:)` indexes the same records `allItems` exposes, so it must agree with a linear search.
+    func testItemByID_matchesLinearSearchAcrossMutations() async throws {
+        let manager = await makeManager()
+        let kept = makeItem(duration: 5)
+        let dropped = makeItem(duration: 9)
+        for item in [kept, dropped] { await manager.append(item) }
+        await manager.update(makeItem(id: kept.id, createdAt: kept.createdAt, duration: 42))
+        await manager.remove(id: dropped.id)
+        // Loading rebuilds the index from disk rather than mutating it.
+        await manager.loadFromDisk()
+        for id in [kept.id, dropped.id, UUID()] {
+            XCTAssertEqual(manager.item(id: id)?.id, manager.allItems.first { $0.id == id }?.id)
+        }
+        XCTAssertEqual(manager.item(id: kept.id)?.recordingDuration, 42, "Index must serve the updated record")
+    }
+
     // MARK: - Mutation observers (history sync wiring)
 
     func testAppend_firesOnItemAppended() async {

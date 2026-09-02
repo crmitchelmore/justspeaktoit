@@ -211,14 +211,21 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             description: "Fast and reliable batch transcription from AssemblyAI.",
             estimatedLatencyMs: 1200, latencyTier: .medium),
         Option(
-            id: "elevenlabs/scribe_v1", displayName: "ElevenLabs Scribe v1",
-            description: "ElevenLabs Scribe: high-accuracy speech-to-text with word-level timestamps.",
-            estimatedLatencyMs: 800, latencyTier: .fast),
-        Option(
-            id: "elevenlabs/scribe_v1_experimental",
-            displayName: "ElevenLabs Scribe v1 (Experimental)",
-            description: "ElevenLabs Scribe experimental model with cutting-edge accuracy improvements.",
-            estimatedLatencyMs: 900, latencyTier: .fast)
+            id: elevenLabsScribeV2BatchID, displayName: "ElevenLabs Scribe v2",
+            description: "ElevenLabs Scribe v2: high-accuracy speech-to-text across 90+ languages "
+                + "with word-level timestamps.",
+            estimatedLatencyMs: 800, latencyTier: .fast)
+    ]
+
+    /// Current ElevenLabs batch speech-to-text model. ElevenLabs removed
+    /// `scribe_v1` (and its experimental variant) on 2026-07-09.
+    public static let elevenLabsScribeV2BatchID = "elevenlabs/scribe_v2"
+
+    /// Retired ElevenLabs batch identifiers that must be migrated to Scribe v2
+    /// when they are read back out of persisted settings.
+    static let legacyElevenLabsBatchIDs: Set<String> = [
+        "elevenlabs/scribe_v1",
+        "elevenlabs/scribe_v1_experimental"
     ]
 
     public static let defaultBatchTranscriptionModel = "google/gemini-2.0-flash-001"
@@ -314,6 +321,9 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
         let trimmed = identifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if AssemblyAIModels.legacyUniversal3BatchIDs.contains(trimmed) {
             return AssemblyAIModels.universal35ProBatchID
+        }
+        if legacyElevenLabsBatchIDs.contains(trimmed) {
+            return elevenLabsScribeV2BatchID
         }
         if trimmed == AppleLocalModels.speechTranscriberModelID,
            !AppleLocalModels.supportsSpeechTranscriber {

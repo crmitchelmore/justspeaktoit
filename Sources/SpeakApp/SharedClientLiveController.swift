@@ -29,6 +29,7 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
   /// re-created in start() once the client is known.
   private var accumulated = TranscriptAccumulator(shape: .cumulativeTranscript)
   private var isStopping = false
+  private let audioProcessor = SharedClientAudioProcessor()
 
   init(
     permissionsManager: PermissionsManager,
@@ -113,6 +114,7 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     isStopping = true
     audioEngine.stop()
     audioEngine.inputNode.removeTap(onBus: 0)
+    audioProcessor.setRunning(false)
 
     if let finalizingClient = client as? FinalizingStreamingTranscriptionClient {
       // Contract: `finishAndWait()` returns the session's full transcript, so
@@ -213,50 +215,30 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
       throw TranscriptionManagerError.noUsableAudioInput
     }
     guard let targetFormat = AVAudioFormat(
-      commonFormat: .pcmFormatFloat32,
+      commonFormat: .pcmFormatInt16,
       sampleRate: Double(route.sampleRate),
       channels: 1,
-      interleaved: false
-    ), let converter = AVAudioConverter(from: inputFormat, to: targetFormat) else {
+      interleaved: true
+    ), AVAudioConverter(from: inputFormat, to: targetFormat) != nil else {
       throw TranscriptionManagerError.noUsableAudioInput
     }
 
+    let processor = audioProcessor
+    processor.setRunning(true)
     inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { buffer, _ in
-      let ratio = targetFormat.sampleRate / inputFormat.sampleRate
-      let capacity = AVAudioFrameCount(ceil(Double(buffer.frameLength) * ratio)) + 1
-      guard let output = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: capacity) else {
-        return
-      }
-      var conversionError: NSError?
-      var didProvideInput = false
-      let status = converter.convert(to: output, error: &conversionError) { _, outStatus in
-        guard !didProvideInput else {
-          outStatus.pointee = .noDataNow
-          return nil
-        }
-        didProvideInput = true
-        outStatus.pointee = .haveData
-        return buffer
-      }
-      guard status != .error, conversionError == nil,
-            let channelData = output.floatChannelData?[0] else {
-        return
-      }
-
-      let frameCount = Int(output.frameLength)
-      guard frameCount > 0 else { return }
-      var samples = [Int16](repeating: 0, count: frameCount)
-      for index in 0..<frameCount {
-        let clamped = max(-1, min(1, channelData[index]))
-        samples[index] = Int16(clamped * Float(Int16.max))
-      }
-      client.sendAudio(samples.withUnsafeBufferPointer { Data(buffer: $0) })
+      processor.handleAudioTap(
+        buffer,
+        inputFormat: inputFormat,
+        outputFormat: targetFormat,
+        client: client
+      )
     }
   }
 
   private func cleanupAfterFailedStart() async {
     audioEngine.stop()
     audioEngine.inputNode.removeTap(onBus: 0)
+    audioProcessor.setRunning(false)
     client?.stop()
     client = nil
     isRunning = false
@@ -271,5 +253,129 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     guard let session = activeInputSession else { return }
     activeInputSession = nil
     await audioDeviceManager.endUsingPreferredInput(session: session)
+  }
+}
+
+/// Copies each tap buffer out of a pool and converts it off the render
+/// thread, so the audio callback never allocates or blocks.
+///
+/// Mirrors the per-provider controllers on macOS: one converter cached per
+/// input format, one reusable output buffer, and no `converter.reset()`
+/// between chunks.
+private final class SharedClientAudioProcessor: @unchecked Sendable {
+  private let queue = DispatchQueue(label: "com.speak.app.sharedClient.audioProcessing")
+  private let copyBufferPool = LivePCMBufferPool(maximumBuffers: 4)
+  private let logger = SpeakLogger.logger(category: "SharedClientLiveController")
+  private var isRunning = false
+  private var cachedConverter: AVAudioConverter?
+  private var cachedInputFormat: AVAudioFormat?
+  private var reusableOutputBuffer: AVAudioPCMBuffer?
+
+  func setRunning(_ running: Bool) {
+    queue.sync {
+      isRunning = running
+      if !running {
+        cachedConverter = nil
+        cachedInputFormat = nil
+        reusableOutputBuffer = nil
+        copyBufferPool.removeAll()
+      }
+    }
+  }
+
+  func handleAudioTap(
+    _ buffer: AVAudioPCMBuffer,
+    inputFormat: AVAudioFormat,
+    outputFormat: AVAudioFormat,
+    client: StreamingTranscriptionClient
+  ) {
+    guard let copied = copyPCMBuffer(buffer) else { return }
+    queue.async { [weak self] in
+      guard let self else { return }
+      defer { self.copyBufferPool.recycle(copied) }
+      guard self.isRunning else { return }
+      self.convertAndSend(copied, from: inputFormat, to: outputFormat, client: client)
+    }
+  }
+
+  private func copyPCMBuffer(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+    let frameLength = buffer.frameLength
+    guard frameLength > 0,
+          let copy = copyBufferPool.buffer(format: buffer.format, frameCapacity: frameLength) else {
+      return nil
+    }
+    copy.frameLength = frameLength
+    let source = UnsafeMutableAudioBufferListPointer(
+      UnsafeMutablePointer(mutating: buffer.audioBufferList)
+    )
+    let destination = UnsafeMutableAudioBufferListPointer(
+      UnsafeMutablePointer(mutating: copy.audioBufferList)
+    )
+    for index in 0..<min(source.count, destination.count) {
+      let sourceBuffer = source[index]
+      guard let sourceData = sourceBuffer.mData,
+            let destinationData = destination[index].mData else { continue }
+      destinationData.copyMemory(from: sourceData, byteCount: Int(sourceBuffer.mDataByteSize))
+      destination[index].mDataByteSize = sourceBuffer.mDataByteSize
+    }
+    return copy
+  }
+
+  private func convertAndSend(
+    _ buffer: AVAudioPCMBuffer,
+    from inputFormat: AVAudioFormat,
+    to outputFormat: AVAudioFormat,
+    client: StreamingTranscriptionClient
+  ) {
+    let converter: AVAudioConverter
+    if let cached = cachedConverter, cachedInputFormat == inputFormat {
+      converter = cached
+    } else {
+      guard let created = AVAudioConverter(from: inputFormat, to: outputFormat) else {
+        logger.error("Failed to create audio converter")
+        return
+      }
+      cachedConverter = created
+      cachedInputFormat = inputFormat
+      converter = created
+    }
+
+    let ratio = outputFormat.sampleRate / inputFormat.sampleRate
+    let capacity = AVAudioFrameCount(ceil(Double(buffer.frameLength) * ratio)) + 1
+    let output: AVAudioPCMBuffer
+    if let reusable = reusableOutputBuffer, reusable.frameCapacity >= capacity {
+      reusable.frameLength = 0
+      output = reusable
+    } else {
+      guard let created = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: capacity) else {
+        return
+      }
+      reusableOutputBuffer = created
+      output = created
+    }
+
+    // NOTE: We deliberately do NOT call converter.reset() between chunks —
+    // doing so wipes the resampler's filter history and priming/trailing
+    // frames, which audibly clicks at chunk boundaries and pays the
+    // re-priming cost on every chunk. The converter is only created once
+    // per inputFormat, so its state is the *correct* thing to preserve.
+    var conversionError: NSError?
+    var didProvideInput = false
+    let status = converter.convert(to: output, error: &conversionError) { _, outStatus in
+      guard !didProvideInput else {
+        outStatus.pointee = .noDataNow
+        return nil
+      }
+      didProvideInput = true
+      outStatus.pointee = .haveData
+      return buffer
+    }
+    guard status != .error, conversionError == nil else {
+      logger.error("Audio conversion failed")
+      return
+    }
+    let frameCount = Int(output.frameLength)
+    guard frameCount > 0, let samples = output.int16ChannelData else { return }
+    client.sendAudio(Data(bytes: samples[0], count: frameCount * 2))
   }
 }

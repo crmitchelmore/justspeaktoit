@@ -929,6 +929,19 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     [liveTranscriptionModel, batchTranscriptionModel].contains { $0.split(separator: "/").first?.caseInsensitiveCompare("modulate") == .orderedSame } // swiftlint:disable:this line_length
   }
 
+  /// True when the model that will actually run — streaming or remote batch —
+  /// is a Meta Muse Voice Transcribe model, so its bias options apply.
+  var hasSelectedMetaMuseModel: Bool {
+    let selected: String
+    switch transcriptionMode {
+    case .liveNative: selected = liveTranscriptionModel
+    case .batchRemote: selected = batchTranscriptionModel
+    case .localModel: return false
+    }
+    return selected.split(separator: "/").first?
+      .caseInsensitiveCompare(MetaMuseVoiceTranscribe.providerID) == .orderedSame
+  }
+
   private func enforceSpeedModeConstraints() {
     if !supports(speedMode: speedMode) {
       speedMode = .instant

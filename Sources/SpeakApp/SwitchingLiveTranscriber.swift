@@ -207,7 +207,10 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       ("speechmatics/", controllers.speechmatics),
       ("cartesia/", controllers.cartesia),
       ("gladia/", controllers.gladia),
-      ("xai/", controllers.sharedClient)
+      ("xai/", controllers.sharedClient),
+      // Meta Muse Voice Transcribe streams through the shared SpeakCore client,
+      // so it uses the same macOS capture controller as xAI.
+      ("meta/", controllers.sharedClient)
     ]
   }
 

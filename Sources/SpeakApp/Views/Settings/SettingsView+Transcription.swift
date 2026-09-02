@@ -8,598 +8,615 @@ import SwiftUI
 extension SettingsView {
   var transcriptionSettings: some View {
     SpeakDensitySettingsSection(density: settings.visualDensity) {
-      SettingsCard(title: "Transcription mode", systemImage: "waveform", tint: Color.teal) {
-        VStack(alignment: .leading, spacing: 12) {
-          Picker("Where transcription runs", selection: transcriptionLocationBinding) {
-            ForEach(TranscriptionLocation.allCases) { location in
-              Text(location.displayName).tag(location)
-            }
-          }
-          .pickerStyle(.segmented)
-          .padding(.horizontal, 12)
-          .padding(.vertical, 8)
-          .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-              .fill(Color(nsColor: .controlBackgroundColor))
-          )
-          .speakTooltip("Choose whether Speak transcribes locally on this Mac or remotely with a provider.")
-          .accessibilityLabel("Transcription location picker")
+      // 1. Where transcription runs.
+      transcriptionModeCard
 
-          if isLocalTranscriptionSelected {
-            Picker("Local transcription source", selection: localTranscriptionSourceBinding) {
-              ForEach(LocalTranscriptionSource.allCases) { source in
-                Text(source.displayName).tag(source)
-              }
-            }
-            .modifier(TranscriptionModeSegmentedPickerStyle())
-            .speakTooltip("Choose built-in Apple Speech or a downloaded Core ML model.")
-            .accessibilityLabel("Local transcription source picker")
-
-            if settings.transcriptionMode == .localModel {
-              if DistributionChannel.current.supportsInProcessLocalStreaming {
-                Picker(
-                  "Downloaded transcription type",
-                  selection: settingsBinding(\AppSettings.localTranscriptionMode)
-                ) {
-                  ForEach(orderedLocalTranscriptionModes) { mode in
-                    Text(transcriptionModeSegmentLabel(from: mode.displayName)).tag(mode)
-                  }
-                }
-                .modifier(TranscriptionModeSegmentedPickerStyle())
-                .speakTooltip(
-                  "Choose Batch for WhisperKit/Core ML, or Streaming for FluidAudio/Core ML and optional sherpa-onnx."
-                )
-                .accessibilityLabel("Downloaded transcription type picker")
-              } else {
-                Text("Downloaded WhisperKit/Core ML models run in-process as Local Batch transcription.")
-                  .font(.caption)
-                  .foregroundStyle(.secondary)
-              }
-            }
-          } else {
-            Picker("Remote transcription type", selection: remoteTranscriptionModeBinding) {
-              ForEach(orderedRemoteTranscriptionModes) { mode in
-                Text(transcriptionModeSegmentLabel(from: mode.displayName)).tag(mode)
-              }
-            }
-            .modifier(TranscriptionModeSegmentedPickerStyle())
-            .speakTooltip(
-              "Choose Remote Streaming for live provider updates, or Remote Batch for post-recording transcription."
-            )
-            .accessibilityLabel("Remote transcription type picker")
-          }
-
-        }
-      }
-      .speakTooltip("Choose which transcription flow Speak uses and the locale it should prefer.")
-
+      // 2. Which model runs it. Exactly one of these matches the selected mode.
       if isRemoteStreamingTranscriptionSelected {
-        SettingsCard(
-          title: "Processing Speed",
-          systemImage: "gauge.with.dots.needle.67percent",
-          tint: Color.brandLagoon
-        ) {
-          let capabilities = settings.liveModelCapabilities
-          let anyEnhancedModeAvailable = AppSettings.SpeedMode.allCases
-            .contains { $0 != .instant && capabilities.supportedSpeedModes.contains($0.coreID) }
-
-          VStack(alignment: .leading, spacing: 12) {
-            Text("Auto-clean modes require a Remote Streaming transcription model and disable post-processing.")
-              .font(.callout)
-              .foregroundStyle(.secondary)
-
-            if !anyEnhancedModeAvailable {
-              Text("To enable these modes, select a Remote Streaming model such as Deepgram Nova-3 Streaming.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-
-            if settings.isAssemblyAIModel && capabilities.postStopFinalizeBudget > 0 {
-              let budgetSeconds = String(format: "%.1f", capabilities.postStopFinalizeBudget)
-              Text("Note: AssemblyAI may take up to ~\(budgetSeconds)s to finalise after you stop, "
-                   + "because it formats the full turn server-side.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-
-            VStack(spacing: 8) {
-              ForEach(AppSettings.SpeedMode.allCases) { mode in
-                let isSupported = settings.supports(speedMode: mode)
-                Button {
-                  settings.speedMode = mode
-                } label: {
-                  HStack(spacing: 12) {
-                    Image(systemName: speedModeIcon(for: mode))
-                      .font(.title3)
-                      .foregroundStyle(settings.speedMode == mode ? .white : .brandLagoon)
-                      .frame(width: 24)
-                    VStack(alignment: .leading, spacing: 2) {
-                      Text(mode.displayName)
-                        .font(.headline)
-                        .foregroundStyle(settings.speedMode == mode ? .white : .primary)
-                      Text(mode.description)
-                        .font(.caption)
-                        .foregroundStyle(settings.speedMode == mode ? .white.opacity(0.8) : .secondary)
-                    }
-                    Spacer()
-                    if settings.speedMode == mode {
-                      Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.white)
-                    }
-                  }
-                  .padding(12)
-                  .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                      .fill(settings.speedMode == mode ? Color.brandLagoon : Color(nsColor: .controlBackgroundColor))
-                  )
-                }
-                .buttonStyle(.plain)
-                .disabled(!isSupported)
-                .opacity(isSupported ? 1.0 : 0.6)
-              }
-            }
-          }
-        }
-        .speakTooltip("Control the trade-off between speed and AI-powered text cleanup.")
+        remoteStreamingModelCard
       }
-
-      if (settings.transcriptionMode == .liveNative && settings.liveTranscriptionModel.hasPrefix("meta/"))
-        || (settings.transcriptionMode == .batch && settings.batchTranscriptionModel.hasPrefix("meta/")) {
-        SettingsCard(
-          title: "Meta Muse recognition bias",
-          systemImage: "textformat.abc",
-          tint: Color.blue
-        ) {
-          VStack(alignment: .leading, spacing: 8) {
-            Text(
-              "The preferred language setting supplies Meta's language bias. "
-                + "Add comma-separated names, acronyms, places, or domain terms for vocabulary biasing."
-            )
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            TextField(
-              "JustSpeakToIt, Meta Model API, Muse Voice",
-              text: settingsBinding(\AppSettings.assemblyAIKeyterms)
-            )
-            .textFieldStyle(.roundedBorder)
-          }
-        }
-        .speakTooltip("Add vocabulary hints for Meta Muse Voice Transcribe.")
-      }
-
-      if !isStreamingTranscriptionSelected {
-        SettingsCard(title: "Recording buffer", systemImage: "waveform.path.ecg", tint: Color.brandLagoon) {
-          VStack(alignment: .leading, spacing: 12) {
-            Text("Keep recording for a moment after you let go to capture trailing words.")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-            HStack {
-              Slider(
-                value: settingsBinding(\AppSettings.postRecordingTailDuration),
-                in: 0...2,
-                step: 0.1
-              )
-              .speakTooltip("Control how long Speak keeps capturing after you finish talking.")
-              Text(
-                settings.postRecordingTailDuration,
-                format: .number.precision(.fractionLength(1))
-              )
-              .font(.caption.monospacedDigit())
-              .foregroundStyle(.secondary)
-              Text("sec")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-          }
-        }
-        .speakTooltip("Decide how much breathing room Speak gives you after releasing your shortcut.")
-      }
-
-      if isStreamingTranscriptionSelected {
-        SettingsCard(
-          title: "Streaming stop grace",
-          systemImage: "waveform.and.mic",
-          tint: Color.brandAccentDeep
-        ) {
-          VStack(alignment: .leading, spacing: 12) {
-            Text(
-              """
-              After stopping, keep the streaming transcription connection open briefly so providers \
-              or local streaming runtimes can flush their final words. Applied to Remote \
-              Streaming providers and Local Streaming.
-              """
-            )
-              .font(.caption)
-              .foregroundStyle(.secondary)
-            HStack {
-              Slider(
-                value: settingsBinding(\AppSettings.liveStopGracePeriod),
-                in: 0...2,
-                step: 0.1
-              )
-              .speakTooltip("Extra delay before closing the streaming transcription connection after you stop recording.")
-              Text(
-                settings.liveStopGracePeriod,
-                format: .number.precision(.fractionLength(1))
-              )
-              .font(.caption.monospacedDigit())
-              .foregroundStyle(.secondary)
-              Text("sec")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-          }
-        }
-        .speakTooltip("Helps reduce last-word cutoffs across Remote Streaming providers and Local Streaming.")
-      }
-
-      if !isStreamingTranscriptionSelected {
-        SettingsCard(title: "Silence detection", systemImage: "waveform.slash", tint: Color.brandAccentWarm) {
-          VStack(alignment: .leading, spacing: 12) {
-            Toggle(
-              "Auto-stop on silence",
-              isOn: settingsBinding(\AppSettings.silenceDetectionEnabled)
-            )
-            .speakTooltip("Automatically stop recording when you stop speaking.")
-
-            if settings.silenceDetectionEnabled {
-              Text("Stops recording after a period of silence, useful for hands-free operation.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-              VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                  Text("Silence threshold")
-                    .font(.caption)
-                  Spacer()
-                  Text("\(Int(settings.silenceThreshold * 100))%")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                }
-                Slider(
-                  value: settingsBinding(\AppSettings.silenceThreshold),
-                  in: 0.01...0.2,
-                  step: 0.01
-                )
-                .speakTooltip("Audio levels below this are considered silence. Lower = more sensitive.")
-              }
-
-              VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                  Text("Silence duration")
-                    .font(.caption)
-                  Spacer()
-                  Text(settings.silenceDuration, format: .number.precision(.fractionLength(1)))
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                  Text("sec")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-                Slider(
-                  value: settingsBinding(\AppSettings.silenceDuration),
-                  in: 0.5...5.0,
-                  step: 0.5
-                )
-                .speakTooltip("How long to wait in silence before auto-stopping.")
-              }
-            }
-          }
-        }
-        .speakTooltip("Configure automatic recording stop based on silence detection.")
-      }
-
-      SettingsCard(
-        title: "Hands-free dictation",
-        systemImage: "waveform.badge.mic",
-        tint: Color.brandLagoon
-      ) {
-        let captureConfigurationSupported = HandsFreeDictationPolicy.supportsCapture(
-          modelID: settings.liveTranscriptionModel,
-          isStreaming: settings.transcriptionMode == .liveNative
-        )
-        VStack(alignment: .leading, spacing: 12) {
-          Toggle(
-            "Arm on hotkey instead of recording",
-            isOn: settingsBinding(\AppSettings.handsFreeDictationEnabled)
-          )
-          .disabled(!settings.handsFreeDictationSupported || !captureConfigurationSupported)
-          .accessibilityIdentifier("handsFreeDictationToggle")
-          .speakTooltip("Your hotkey starts listening; speaking starts recording and silence stops it.")
-
-          if settings.handsFreeDictationSupported {
-            Text(
-              "The hotkey arms a listening session instead of recording straight away. "
-                + "Recording starts when you speak and stops after the silence duration below. "
-                + "Silent audio stays in memory only and is discarded immediately. "
-                + "Press the hotkey again to disarm."
-            )
-            .font(.caption)
-            .foregroundStyle(.secondary)
-
-            if !captureConfigurationSupported {
-              Text("Select an Apple on-device streaming model to use hands-free dictation.")
-                .font(.caption)
-                .foregroundStyle(.orange)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-              HStack {
-                Text("Silence duration")
-                  .font(.caption)
-                Spacer()
-                Text(settings.silenceDuration, format: .number.precision(.fractionLength(1)))
-                  .font(.caption.monospacedDigit())
-                  .foregroundStyle(.secondary)
-                Text("sec")
-                  .font(.caption)
-                  .foregroundStyle(.secondary)
-              }
-              Slider(
-                value: settingsBinding(\AppSettings.silenceDuration),
-                in: 0.5...5.0,
-                step: 0.5
-              )
-              .speakTooltip("How long to wait in silence before stopping hands-free recording.")
-            }
-          } else {
-            Text("Requires macOS 26 or later — Apple's on-device speech detector isn't available here.")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          }
-        }
-      }
-      .speakTooltip("Voice-activated dictation using Apple's on-device speech detector.")
-
-      if isRemoteStreamingTranscriptionSelected {
-        SettingsCard(title: "Remote Streaming model", systemImage: "mic.fill", tint: Color.brandAccentDeep) {
-          VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-              Image(systemName: "bolt.fill")
-                .foregroundStyle(Color.brandAccentDeep)
-                .imageScale(.small)
-              Text("Fastest - Real-time Response")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Color.brandAccentDeep)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(
-              Capsule()
-                .fill(Color.brandAccentDeep.opacity(0.12))
-            )
-
-            Text("Model used while recording. Provides instant feedback as you speak.")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-            ModelPicker(
-              title: "Remote Streaming Model",
-              help: "Choose the remote provider model used while recording.",
-              options: ModelCatalog.remoteLiveTranscription,
-              value: remoteTranscriptionModelBinding(
-                \AppSettings.liveTranscriptionModel,
-                options: ModelCatalog.remoteLiveTranscription
-              ),
-              credentialPurpose: .liveTranscription,
-              storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers)
-            )
-          }
-        }
-        .speakTooltip("Pick the remote model that transcribes as you speak during streaming recording.")
-      }
-
       if settings.transcriptionMode == .batchRemote {
-        SettingsCard(
-          title: "Remote Batch model", systemImage: "folder.badge.clock", tint: Color.brandLagoon
-        ) {
-          VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-              Image(systemName: "star.fill")
-                .foregroundStyle(Color.brandLagoon)
-                .imageScale(.small)
-              Text("Best Quality - Most Accurate")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Color.brandLagoon)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(
-              Capsule()
-                .fill(Color.brandLagoon.opacity(0.12))
-            )
-
-            Text("Model used when the recording is uploaded after it finishes. Delivers the highest accuracy.")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-            ModelPicker(
-              title: "Remote Batch Model",
-              help: """
-              Remote transcription runs after recording stops. Built-in providers use their own keys; \
-              custom model identifiers are sent through OpenRouter.
-              """,
-              options: ModelCatalog.batchTranscription,
-              value: remoteTranscriptionModelBinding(
-                \AppSettings.batchTranscriptionModel,
-                options: ModelCatalog.batchTranscription
-              ),
-              credentialPurpose: .batchTranscription,
-              storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers)
-            )
-            if isCustomBatchTranscriptionModel {
-              SettingsInlineInfo(
-                title: "Custom batch models use OpenRouter",
-                message:
-                  """
-                  Speak will send this custom model identifier to OpenRouter. Save an OpenRouter API key \
-                  before recording, or choose one of the built-in provider models above.
-                  """,
-                systemImage: "key.fill"
-              )
-              if !isOpenRouterKeyStored {
-                HStack(spacing: 10) {
-                  Label("OpenRouter API key missing", systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.orange)
-                  Button("Add OpenRouter Key") {
-                    sidebarSelection = .settings(.apiKeys)
-                  }
-                  .buttonStyle(.bordered)
-                }
-              }
-            }
-          }
-        }
-        .speakTooltip("Tell Speak which cloud transcription model should polish the full recording.")
+        remoteBatchModelCard
       }
-
       if isAppleOnDeviceTranscriptionSelected {
-        SettingsCard(
-          title: "Apple on-device transcription",
-          systemImage: "apple.logo",
-          tint: Color.green
-        ) {
-          VStack(alignment: .leading, spacing: 12) {
-            Text("Uses Apple's built-in speech engine. Audio stays on this device.")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-            ModelPicker(
-              title: "Apple Model",
-              help: "Choose the Apple on-device engine used while recording.",
-              options: ModelCatalog.onDeviceLiveTranscription,
-              value: remoteTranscriptionModelBinding(
-                \AppSettings.liveTranscriptionModel,
-                options: ModelCatalog.onDeviceLiveTranscription
-              ),
-              credentialPurpose: .liveTranscription,
-              storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers),
-              allowsCustom: false
-            )
-          }
-        }
-        .speakTooltip("Choose an on-device Apple transcription engine.")
+        appleOnDeviceModelCard
       }
-
       if settings.transcriptionMode == .localModel {
-        SettingsCard(
-          title: "Local transcription models",
-          systemImage: "externaldrive.badge.checkmark",
-          tint: Color.green
-        ) {
-          VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 8) {
-              Image(systemName: "lock.shield.fill")
-                .foregroundStyle(Color.green)
-                .imageScale(.small)
-              Text(
-                settings.localTranscriptionMode == .batch
-                  ? "Local Batch - private on this Mac"
-                  : "Local Streaming - private on this Mac"
-              )
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Color.green)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(
-              Capsule()
-                .fill(Color.green.opacity(0.12))
-            )
-
-            Text(
-              "Choose a ready-made setup below. Speak will select the right local mode "
-                + "and download everything it needs."
-            )
-            .font(.caption)
-            .foregroundStyle(.secondary)
-
-            localModelStarterSetup
-
-            DisclosureGroup(isExpanded: $isLocalTranscriptionAdvancedExpanded) {
-              VStack(alignment: .leading, spacing: 16) {
-                Text(
-                  {
-                    #if APP_STORE
-                    return """
-                    Downloaded transcription is separate from Apple Speech and cloud providers. \
-                    WhisperKit/Core ML model data runs in-process and is supported in this App Store build.
-                    """
-                    #else
-                    return """
-                    Downloaded transcription is separate from Apple Speech and cloud providers. \
-                    Local Batch uses in-process WhisperKit/Core ML model data. Local Streaming can use \
-                    in-process FluidAudio/Core ML or an optional external sherpa-onnx runtime.
-                    """
-                    #endif
-                  }()
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-                if !DistributionChannel.current.supportsExternalLocalModelRuntime {
-                  localRuntimeUnavailableNote
-                }
-
-                localModelQuickStart
-                if settings.localTranscriptionMode == .batch {
-                  selectedLocalModelCallout
-                  huggingFaceModelImport
-                } else {
-                  localStreamingStatus
-                }
-
-                if settings.localTranscriptionMode == .batch {
-                  if localTranscriptionOptions.isEmpty {
-                    Label(
-                      "Download a local batch model before selecting it for recording.",
-                      systemImage: "arrow.down.circle"
-                    )
-                      .font(.caption)
-                      .foregroundStyle(.orange)
-                  } else {
-                    ModelPicker(
-                      title: "Local Batch Model",
-                      help: "Used for local-only transcription after recording stops.",
-                      options: localTranscriptionOptions,
-                      value: localTranscriptionModelBinding,
-                      credentialPurpose: .batchTranscription,
-                      storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers),
-                      allowsCustom: false
-                    )
-                  }
-
-                  VStack(spacing: 10) {
-                    ForEach(localTranscriptionModels) { model in
-                      localModelRow(model)
-                    }
-                  }
-                }
-              }
-              .padding(.top, 12)
-            } label: {
-              Label("Advanced model configuration", systemImage: "slider.horizontal.3")
-                .font(.subheadline.weight(.semibold))
-            }
-            .padding(12)
-            .background(
-              RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.65))
-            )
-            .overlay(
-              RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.secondary.opacity(0.16), lineWidth: 1)
-            )
-            .speakTooltip(
-              "Show every downloaded model, custom Hugging Face sources, runtime controls, and manual selection."
-            )
-          }
-        }
-        .speakTooltip("Download and manage private local transcription models.")
+        localTranscriptionModelsCard
       }
 
+      // 3. Options that depend on the chosen model.
+      if isRemoteStreamingTranscriptionSelected {
+        processingSpeedCard
+      }
       if settings.hasSelectedModulateModel {
         modulateFeatureSettings
       }
+      if settings.hasSelectedMetaMuseModel {
+        metaMuseRecognitionBiasCard
+      }
+
+      // 4. How a recording starts and stops.
+      handsFreeDictationCard
+      if !isStreamingTranscriptionSelected {
+        silenceDetectionCard
+      }
+
+      // 5. Fine-tuning delays. Only one applies to the selected mode.
+      if isStreamingTranscriptionSelected {
+        streamingStopGraceCard
+      } else {
+        recordingBufferCard
+      }
     }
+  }
+
+  /// Local vs. remote, and batch vs. streaming.
+  private var transcriptionModeCard: some View {
+    SettingsCard(title: "Transcription mode", systemImage: "waveform", tint: Color.teal) {
+      VStack(alignment: .leading, spacing: 12) {
+        Picker("Where transcription runs", selection: transcriptionLocationBinding) {
+          ForEach(TranscriptionLocation.allCases) { location in
+            Text(location.displayName).tag(location)
+          }
+        }
+        .settingsSegmentedPicker()
+        .speakTooltip("Choose whether Speak transcribes locally on this Mac or remotely with a provider.")
+        .accessibilityLabel("Transcription location picker")
+
+        if isLocalTranscriptionSelected {
+          Picker("Local transcription source", selection: localTranscriptionSourceBinding) {
+            ForEach(LocalTranscriptionSource.allCases) { source in
+              Text(source.displayName).tag(source)
+            }
+          }
+          .modifier(TranscriptionModeSegmentedPickerStyle())
+          .speakTooltip("Choose built-in Apple Speech or a downloaded Core ML model.")
+          .accessibilityLabel("Local transcription source picker")
+
+          if settings.transcriptionMode == .localModel {
+            if DistributionChannel.current.supportsInProcessLocalStreaming {
+              Picker(
+                "Downloaded transcription type",
+                selection: settingsBinding(\AppSettings.localTranscriptionMode)
+              ) {
+                ForEach(orderedLocalTranscriptionModes) { mode in
+                  Text(transcriptionModeSegmentLabel(from: mode.displayName)).tag(mode)
+                }
+              }
+              .modifier(TranscriptionModeSegmentedPickerStyle())
+              .speakTooltip(
+                "Choose Batch for WhisperKit/Core ML, or Streaming for FluidAudio/Core ML and optional sherpa-onnx."
+              )
+              .accessibilityLabel("Downloaded transcription type picker")
+            } else {
+              Text("Downloaded WhisperKit/Core ML models run in-process as Local Batch transcription.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+          }
+        } else {
+          Picker("Remote transcription type", selection: remoteTranscriptionModeBinding) {
+            ForEach(orderedRemoteTranscriptionModes) { mode in
+              Text(transcriptionModeSegmentLabel(from: mode.displayName)).tag(mode)
+            }
+          }
+          .modifier(TranscriptionModeSegmentedPickerStyle())
+          .speakTooltip(
+            "Choose Remote Streaming for live provider updates, or Remote Batch for post-recording transcription."
+          )
+          .accessibilityLabel("Remote transcription type picker")
+        }
+
+      }
+    }
+    .speakTooltip("Choose whether Speak transcribes on this Mac or with a remote provider, and how.")
+  }
+
+  /// Language and vocabulary bias sent with Meta Muse Voice Transcribe requests.
+  /// Reuses the shared keyterms setting, as the OpenAI Realtime path does.
+  private var metaMuseRecognitionBiasCard: some View {
+    SettingsCard(
+      title: "Meta Muse recognition bias",
+      systemImage: "textformat.abc",
+      tint: Color.blue
+    ) {
+      VStack(alignment: .leading, spacing: 8) {
+        Text(
+          "The preferred language setting supplies Meta's language bias. "
+            + "Add comma-separated names, acronyms, places, or domain terms for vocabulary biasing."
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        TextField(
+          "JustSpeakToIt, Meta Model API, Muse Voice",
+          text: settingsBinding(\AppSettings.assemblyAIKeyterms)
+        )
+        .textFieldStyle(.roundedBorder)
+      }
+    }
+    .speakTooltip("Add vocabulary hints for Meta Muse Voice Transcribe.")
+  }
+
+  /// Provider model used while recording.
+  private var remoteStreamingModelCard: some View {
+    SettingsCard(title: "Remote Streaming model", systemImage: "mic.fill", tint: Color.brandAccentDeep) {
+      VStack(alignment: .leading, spacing: 12) {
+        SettingsModeBadge(
+          title: "Fastest - Real-time Response",
+          systemImage: "bolt.fill",
+          tint: Color.brandAccentDeep
+        )
+
+        Text("Model used while recording. Provides instant feedback as you speak.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        ModelPicker(
+          title: "Remote Streaming Model",
+          help: "Choose the remote provider model used while recording.",
+          options: ModelCatalog.remoteLiveTranscription,
+          value: remoteTranscriptionModelBinding(
+            \AppSettings.liveTranscriptionModel,
+            options: ModelCatalog.remoteLiveTranscription
+          ),
+          credentialPurpose: .liveTranscription,
+          storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers)
+        )
+      }
+    }
+    .speakTooltip("Pick the remote model that transcribes as you speak during streaming recording.")
+  }
+
+  /// Provider model used after recording stops.
+  private var remoteBatchModelCard: some View {
+    SettingsCard(
+      title: "Remote Batch model", systemImage: "folder.badge.clock", tint: Color.brandLagoon
+    ) {
+      VStack(alignment: .leading, spacing: 12) {
+        SettingsModeBadge(
+          title: "Best Quality - Most Accurate",
+          systemImage: "star.fill",
+          tint: Color.brandLagoon
+        )
+
+        Text("Model used when the recording is uploaded after it finishes. Delivers the highest accuracy.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        ModelPicker(
+          title: "Remote Batch Model",
+          help: """
+          Remote transcription runs after recording stops. Built-in providers use their own keys; \
+          custom model identifiers are sent through OpenRouter.
+          """,
+          options: ModelCatalog.batchTranscription,
+          value: remoteTranscriptionModelBinding(
+            \AppSettings.batchTranscriptionModel,
+            options: ModelCatalog.batchTranscription
+          ),
+          credentialPurpose: .batchTranscription,
+          storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers)
+        )
+        if isCustomBatchTranscriptionModel {
+          SettingsInlineInfo(
+            title: "Custom batch models use OpenRouter",
+            message:
+              """
+              Speak will send this custom model identifier to OpenRouter. Save an OpenRouter API key \
+              before recording, or choose one of the built-in provider models above.
+              """,
+            systemImage: "key.fill"
+          )
+          if !isOpenRouterKeyStored {
+            HStack(spacing: 10) {
+              Label("OpenRouter API key missing", systemImage: "exclamationmark.triangle.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.orange)
+              Button("Add OpenRouter Key") {
+                sidebarSelection = .settings(.apiKeys)
+              }
+              .buttonStyle(.bordered)
+            }
+          }
+        }
+      }
+    }
+    .speakTooltip("Tell Speak which cloud transcription model should polish the full recording.")
+  }
+
+  /// Apple's built-in speech engine.
+  private var appleOnDeviceModelCard: some View {
+    SettingsCard(
+      title: "Apple on-device transcription",
+      systemImage: "apple.logo",
+      tint: Color.green
+    ) {
+      VStack(alignment: .leading, spacing: 12) {
+        Text("Uses Apple's built-in speech engine. Audio stays on this device.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        ModelPicker(
+          title: "Apple Model",
+          help: "Choose the Apple on-device engine used while recording.",
+          options: ModelCatalog.onDeviceLiveTranscription,
+          value: remoteTranscriptionModelBinding(
+            \AppSettings.liveTranscriptionModel,
+            options: ModelCatalog.onDeviceLiveTranscription
+          ),
+          credentialPurpose: .liveTranscription,
+          storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers),
+          allowsCustom: false
+        )
+      }
+    }
+    .speakTooltip("Choose an on-device Apple transcription engine.")
+  }
+
+  /// Downloaded WhisperKit / FluidAudio / sherpa-onnx models.
+  private var localTranscriptionModelsCard: some View {
+    SettingsCard(
+      title: "Local transcription models",
+      systemImage: "externaldrive.badge.checkmark",
+      tint: Color.green
+    ) {
+      VStack(alignment: .leading, spacing: 16) {
+        SettingsModeBadge(
+          title: settings.localTranscriptionMode == .batch
+            ? "Local Batch - private on this Mac"
+            : "Local Streaming - private on this Mac",
+          systemImage: "lock.shield.fill",
+          tint: Color.green
+        )
+
+        Text(
+          "Choose a ready-made setup below. Speak will select the right local mode "
+            + "and download everything it needs."
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
+
+        localModelStarterSetup
+
+        DisclosureGroup(isExpanded: $isLocalTranscriptionAdvancedExpanded) {
+          VStack(alignment: .leading, spacing: 16) {
+            Text(
+              {
+                #if APP_STORE
+                return """
+                Downloaded transcription is separate from Apple Speech and cloud providers. \
+                WhisperKit/Core ML model data runs in-process and is supported in this App Store build.
+                """
+                #else
+                return """
+                Downloaded transcription is separate from Apple Speech and cloud providers. \
+                Local Batch uses in-process WhisperKit/Core ML model data. Local Streaming can use \
+                in-process FluidAudio/Core ML or an optional external sherpa-onnx runtime.
+                """
+                #endif
+              }()
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+            if !DistributionChannel.current.supportsExternalLocalModelRuntime {
+              localRuntimeUnavailableNote
+            }
+
+            localModelQuickStart
+            if settings.localTranscriptionMode == .batch {
+              selectedLocalModelCallout
+              huggingFaceModelImport
+            } else {
+              localStreamingStatus
+            }
+
+            if settings.localTranscriptionMode == .batch {
+              if localTranscriptionOptions.isEmpty {
+                Label(
+                  "Download a local batch model before selecting it for recording.",
+                  systemImage: "arrow.down.circle"
+                )
+                  .font(.caption)
+                  .foregroundStyle(.orange)
+              } else {
+                ModelPicker(
+                  title: "Local Batch Model",
+                  help: "Used for local-only transcription after recording stops.",
+                  options: localTranscriptionOptions,
+                  value: localTranscriptionModelBinding,
+                  credentialPurpose: .batchTranscription,
+                  storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers),
+                  allowsCustom: false
+                )
+              }
+
+              VStack(spacing: 10) {
+                ForEach(localTranscriptionModels) { model in
+                  localModelRow(model)
+                }
+              }
+            }
+          }
+          .padding(.top, 12)
+        } label: {
+          Label("Advanced model configuration", systemImage: "slider.horizontal.3")
+            .font(.subheadline.weight(.semibold))
+        }
+        .padding(12)
+        .background(
+          RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(Color(nsColor: .controlBackgroundColor).opacity(0.65))
+        )
+        .overlay(
+          RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .stroke(Color.secondary.opacity(0.16), lineWidth: 1)
+        )
+        .speakTooltip(
+          "Show every downloaded model, custom Hugging Face sources, runtime controls, and manual selection."
+        )
+      }
+    }
+    .speakTooltip("Download and manage private local transcription models.")
+  }
+
+  /// Auto-clean speed modes offered by Remote Streaming providers.
+  private var processingSpeedCard: some View {
+    SettingsCard(
+      title: "Processing Speed",
+      systemImage: "gauge.with.dots.needle.67percent",
+      tint: Color.brandLagoon
+    ) {
+      let capabilities = settings.liveModelCapabilities
+      let anyEnhancedModeAvailable = AppSettings.SpeedMode.allCases
+        .contains { $0 != .instant && capabilities.supportedSpeedModes.contains($0.coreID) }
+
+      VStack(alignment: .leading, spacing: 12) {
+        Text("Auto-clean modes require a Remote Streaming transcription model and disable post-processing.")
+          .font(.callout)
+          .foregroundStyle(.secondary)
+
+        if !anyEnhancedModeAvailable {
+          Text("To enable these modes, select a Remote Streaming model such as Deepgram Nova-3 Streaming.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+
+        if settings.isAssemblyAIModel && capabilities.postStopFinalizeBudget > 0 {
+          let budgetSeconds = String(format: "%.1f", capabilities.postStopFinalizeBudget)
+          Text("Note: AssemblyAI may take up to ~\(budgetSeconds)s to finalise after you stop, "
+               + "because it formats the full turn server-side.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+
+        VStack(spacing: 8) {
+          ForEach(AppSettings.SpeedMode.allCases) { mode in
+            let isSupported = settings.supports(speedMode: mode)
+            Button {
+              settings.speedMode = mode
+            } label: {
+              HStack(spacing: 12) {
+                Image(systemName: speedModeIcon(for: mode))
+                  .font(.title3)
+                  .foregroundStyle(settings.speedMode == mode ? .white : .brandLagoon)
+                  .frame(width: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                  Text(mode.displayName)
+                    .font(.headline)
+                    .foregroundStyle(settings.speedMode == mode ? .white : .primary)
+                  Text(mode.description)
+                    .font(.caption)
+                    .foregroundStyle(settings.speedMode == mode ? .white.opacity(0.8) : .secondary)
+                }
+                Spacer()
+                if settings.speedMode == mode {
+                  Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.white)
+                }
+              }
+              .padding(12)
+              .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                  .fill(settings.speedMode == mode ? Color.brandLagoon : Color(nsColor: .controlBackgroundColor))
+              )
+            }
+            .buttonStyle(.plain)
+            .disabled(!isSupported)
+            .opacity(isSupported ? 1.0 : 0.6)
+          }
+        }
+      }
+    }
+    .speakTooltip("Control the trade-off between speed and AI-powered text cleanup.")
+  }
+
+  /// Arm-on-hotkey voice activation (Apple on-device streaming only).
+  private var handsFreeDictationCard: some View {
+    SettingsCard(
+      title: "Hands-free dictation",
+      systemImage: "waveform.badge.mic",
+      tint: Color.brandLagoon
+    ) {
+      let captureConfigurationSupported = HandsFreeDictationPolicy.supportsCapture(
+        modelID: settings.liveTranscriptionModel,
+        isStreaming: settings.transcriptionMode == .liveNative
+      )
+      VStack(alignment: .leading, spacing: 12) {
+        Toggle(
+          "Arm on hotkey instead of recording",
+          isOn: settingsBinding(\AppSettings.handsFreeDictationEnabled)
+        )
+        .disabled(!settings.handsFreeDictationSupported || !captureConfigurationSupported)
+        .accessibilityIdentifier("handsFreeDictationToggle")
+        .speakTooltip("Your hotkey starts listening; speaking starts recording and silence stops it.")
+
+        if settings.handsFreeDictationSupported {
+          Text(
+            "The hotkey arms a listening session instead of recording straight away. "
+              + "Recording starts when you speak and stops after the silence duration below. "
+              + "Silent audio stays in memory only and is discarded immediately. "
+              + "Press the hotkey again to disarm."
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+
+          if !captureConfigurationSupported {
+            Text("Select an Apple on-device streaming model to use hands-free dictation.")
+              .font(.caption)
+              .foregroundStyle(.orange)
+          }
+
+          VStack(alignment: .leading, spacing: 8) {
+            HStack {
+              Text("Silence duration")
+                .font(.caption)
+              Spacer()
+              Text(settings.silenceDuration, format: .number.precision(.fractionLength(1)))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+              Text("sec")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            Slider(
+              value: settingsBinding(\AppSettings.silenceDuration),
+              in: 0.5...5.0,
+              step: 0.5
+            )
+            .speakTooltip("How long to wait in silence before stopping hands-free recording.")
+          }
+        } else {
+          Text("Requires macOS 26 or later — Apple's on-device speech detector isn't available here.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+      }
+    }
+    .speakTooltip("Voice-activated dictation using Apple's on-device speech detector.")
+  }
+
+  /// Auto-stop after silence for batch modes.
+  private var silenceDetectionCard: some View {
+    SettingsCard(title: "Silence detection", systemImage: "waveform.slash", tint: Color.brandAccentWarm) {
+      VStack(alignment: .leading, spacing: 12) {
+        Toggle(
+          "Auto-stop on silence",
+          isOn: settingsBinding(\AppSettings.silenceDetectionEnabled)
+        )
+        .speakTooltip("Automatically stop recording when you stop speaking.")
+
+        if settings.silenceDetectionEnabled {
+          Text("Stops recording after a period of silence, useful for hands-free operation.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+          VStack(alignment: .leading, spacing: 8) {
+            HStack {
+              Text("Silence threshold")
+                .font(.caption)
+              Spacer()
+              Text("\(Int(settings.silenceThreshold * 100))%")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+            }
+            Slider(
+              value: settingsBinding(\AppSettings.silenceThreshold),
+              in: 0.01...0.2,
+              step: 0.01
+            )
+            .speakTooltip("Audio levels below this are considered silence. Lower = more sensitive.")
+          }
+
+          VStack(alignment: .leading, spacing: 8) {
+            HStack {
+              Text("Silence duration")
+                .font(.caption)
+              Spacer()
+              Text(settings.silenceDuration, format: .number.precision(.fractionLength(1)))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+              Text("sec")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            Slider(
+              value: settingsBinding(\AppSettings.silenceDuration),
+              in: 0.5...5.0,
+              step: 0.5
+            )
+            .speakTooltip("How long to wait in silence before auto-stopping.")
+          }
+        }
+      }
+    }
+    .speakTooltip("Configure automatic recording stop based on silence detection.")
+  }
+
+  /// Extra time to flush final words from a streaming session.
+  private var streamingStopGraceCard: some View {
+    SettingsCard(
+      title: "Streaming stop grace",
+      systemImage: "waveform.and.mic",
+      tint: Color.brandAccentDeep
+    ) {
+      VStack(alignment: .leading, spacing: 12) {
+        Text(
+          """
+          After stopping, keep the streaming transcription connection open briefly so providers \
+          or local streaming runtimes can flush their final words. Applied to Remote \
+          Streaming providers and Local Streaming.
+          """
+        )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        HStack {
+          Slider(
+            value: settingsBinding(\AppSettings.liveStopGracePeriod),
+            in: 0...2,
+            step: 0.1
+          )
+          .speakTooltip("Extra delay before closing the streaming transcription connection after you stop recording.")
+          Text(
+            settings.liveStopGracePeriod,
+            format: .number.precision(.fractionLength(1))
+          )
+          .font(.caption.monospacedDigit())
+          .foregroundStyle(.secondary)
+          Text("sec")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+      }
+    }
+    .speakTooltip("Helps reduce last-word cutoffs across Remote Streaming providers and Local Streaming.")
+  }
+
+  /// Trailing capture after the hotkey is released in batch modes.
+  private var recordingBufferCard: some View {
+    SettingsCard(title: "Recording buffer", systemImage: "waveform.path.ecg", tint: Color.brandLagoon) {
+      VStack(alignment: .leading, spacing: 12) {
+        Text("Keep recording for a moment after you let go to capture trailing words.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        HStack {
+          Slider(
+            value: settingsBinding(\AppSettings.postRecordingTailDuration),
+            in: 0...2,
+            step: 0.1
+          )
+          .speakTooltip("Control how long Speak keeps capturing after you finish talking.")
+          Text(
+            settings.postRecordingTailDuration,
+            format: .number.precision(.fractionLength(1))
+          )
+          .font(.caption.monospacedDigit())
+          .foregroundStyle(.secondary)
+          Text("sec")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+      }
+    }
+    .speakTooltip("Decide how much breathing room Speak gives you after releasing your shortcut.")
   }
 
   private var localModelStarterSetup: some View {
@@ -1060,13 +1077,7 @@ extension SettingsView {
           }
         }
         .labelsHidden()
-        .pickerStyle(.menu)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(
-          RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .fill(Color(nsColor: .controlBackgroundColor))
-        )
+        .settingsMenuPicker()
         if let source = selectedRecommendedStreamingSource {
           Text("\(source.runtime) · \(localStreamingSizeLabel(for: source)) · local-only streaming.")
             .font(.caption)

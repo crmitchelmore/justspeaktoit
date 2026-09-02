@@ -31,7 +31,7 @@ actor PostHogProductAnalyticsSink: ProductAnalyticsSink {
     let createdAt: Date
     let event: String
     let distinctID: String
-    let properties: [String: String]
+    let properties: [String: AnalyticsPropertyValue]
   }
 
   private let configuration: Configuration?
@@ -87,7 +87,7 @@ actor PostHogProductAnalyticsSink: ProductAnalyticsSink {
   private func flush() async throws {
     guard isOpen, let configuration else { return }
     while let next = queue.first {
-      var properties: [String: Any] = next.properties
+      var properties = next.properties.mapValues(\.foundationValue)
       properties["distinct_id"] = next.distinctID
       properties["$lib"] = "just-speak-to-it"
       properties["$lib_version"] = "1"

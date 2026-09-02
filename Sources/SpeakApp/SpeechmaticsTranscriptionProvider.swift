@@ -493,17 +493,16 @@ final class SpeechmaticsLiveTranscriber: @unchecked Sendable {
   }
 
   private func sendAudioFrame(_ audioData: Data, on task: URLSessionWebSocketTask) {
-    var buffer = bufferPool.checkout()
-    buffer.append(audioData)
     withStateLock {
       self.sentAudioFrameCount += 1
     }
 
-    let dataToSend = buffer
-    enqueueOutbound(.data(dataToSend), on: task) { [weak self] error in
+    // Send the caller's `Data` straight through. Copying it into a pooled
+    // buffer only to hand that buffer back while the send is still in flight
+    // forced a copy-on-write (plus a memset) per chunk, because `returnBuffer`
+    // zeroes storage the queued message still references.
+    enqueueOutbound(.data(audioData), on: task) { [weak self] error in
       guard let self else { return }
-      var returnBuffer = buffer
-      self.bufferPool.returnBuffer(&returnBuffer)
       if let error {
         if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
         self.logger.error("Failed to send audio: \(error.localizedDescription, privacy: .public)")

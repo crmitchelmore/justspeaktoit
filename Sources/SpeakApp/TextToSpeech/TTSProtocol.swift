@@ -10,6 +10,7 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
   case azure
   case deepgram
   case soniox
+  case cartesia
   case system
 
   var id: String { rawValue }
@@ -21,6 +22,7 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     case .azure: return "Azure Cognitive Services"
     case .deepgram: return "Deepgram Aura"
     case .soniox: return "Soniox"
+    case .cartesia: return "Cartesia Sonic"
     case .system: return "macOS System"
     }
   }
@@ -40,6 +42,8 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     case .deepgram: return "deepgram.apiKey"
     // One Soniox key covers transcription and speech generation.
     case .soniox: return "soniox.apiKey"
+    // One Cartesia key covers Ink transcription and Sonic speech generation.
+    case .cartesia: return "cartesia.apiKey"
     case .system: return ""
     }
   }
@@ -50,7 +54,7 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
   /// separate transcription entry writing the same Keychain item.
   var sharesTranscriptionCredential: Bool {
     switch self {
-    case .elevenlabs, .soniox: return true
+    case .elevenlabs, .soniox, .cartesia: return true
     case .openai, .azure, .deepgram, .system: return false
     }
   }
@@ -61,6 +65,7 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     if voiceID.hasPrefix("azure/") { return .azure }
     if voiceID.hasPrefix("deepgram/") { return .deepgram }
     if voiceID.hasPrefix("soniox/") { return .soniox }
+    if voiceID.hasPrefix(CartesiaTTSCatalog.voiceIDPrefix) { return .cartesia }
     if voiceID.hasPrefix("system/") { return .system }
     return .system
   }
@@ -496,8 +501,20 @@ struct VoiceCatalog {
     )
   }
 
+  // Both platform pickers project from the canonical SpeakCore Cartesia catalogue.
+  static let cartesiaVoices: [TTSVoice] = CartesiaTTSCatalog.voices.map { voice in
+    TTSVoice(
+      id: voice.providerVoiceID,
+      name: voice.name,
+      provider: .cartesia,
+      traits: cartesiaTraits(for: voice),
+      previewURL: nil
+    )
+  }
+
   static let allVoices: [TTSVoice] =
-    elevenlabsVoices + openaiVoices + azureVoices + deepgramVoices + sonioxVoices + systemVoices
+    elevenlabsVoices + openaiVoices + azureVoices + deepgramVoices + sonioxVoices
+      + cartesiaVoices + systemVoices
 
   static func voices(for provider: TTSProvider) -> [TTSVoice] {
     switch provider {
@@ -506,6 +523,7 @@ struct VoiceCatalog {
     case .azure: return azureVoices
     case .deepgram: return deepgramVoices
     case .soniox: return sonioxVoices
+    case .cartesia: return cartesiaVoices
     case .system: return systemVoices
     }
   }
@@ -544,6 +562,12 @@ struct VoiceCatalog {
     case .filipino: .filipino
     case .irish: .irish
     }
+  }
+
+  private static func cartesiaTraits(for voice: CartesiaTTSVoice) -> [TTSVoice.VoiceTrait] {
+    let gender: TTSVoice.VoiceTrait = voice.gender == .female ? .female : .male
+    let accent: TTSVoice.VoiceTrait = voice.accent == .british ? .british : .american
+    return [gender, accent, .multilingual, .lowLatency]
   }
 
   private static func sonioxTraits(for voice: SonioxTTSVoice) -> [TTSVoice.VoiceTrait] {

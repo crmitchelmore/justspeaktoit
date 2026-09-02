@@ -785,6 +785,7 @@ struct DashboardView: View {
     case .azure: return .brandLagoonDeep
     case .deepgram: return .brandAccentWarm
     case .soniox: return .brandLagoon
+    case .cartesia: return .purple
     case .system: return .gray
     }
   }

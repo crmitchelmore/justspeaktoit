@@ -173,107 +173,45 @@ final class OnboardingState: ObservableObject {
           || permissionsGranted.contains(.accessibility))
     }
     
-    // swiftlint:disable:next cyclomatic_complexity function_body_length
     func validateAPIKey() async -> Bool {
         guard !apiKey.isEmpty else {
             validationError = "Please enter an API key"
             return false
         }
-        
+
         isValidating = true
         validationError = nil
-        
-        do {
-            switch selectedProvider {
-            case .deepgram:
-                let url = URL(string: "https://api.deepgram.com/v1/projects")!
-                var request = URLRequest(url: url)
-                request.setValue("Token \(apiKey)", forHTTPHeaderField: "Authorization")
-                let (_, response) = try await URLSession.shared.data(for: request)
-                if let httpResponse = response as? HTTPURLResponse {
-                    if httpResponse.statusCode == 200 {
-                        isValidating = false
-                        return true
-                    } else if httpResponse.statusCode == 401 {
-                        validationError = "Invalid API key"
-                    } else {
-                        validationError = "Unexpected response (\(httpResponse.statusCode))"
-                    }
-                }
-                
-            case .soniox:
-                let url = URL(string: "https://api.soniox.com/v1/auth/temporary-api-key")!
-                var request = URLRequest(url: url)
-                request.httpMethod = "POST"
-                request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                request.httpBody = Data("{\"usage_type\":\"transcribe_websocket\",\"expires_in_seconds\":60}".utf8)
-                let (_, response) = try await URLSession.shared.data(for: request)
-                if let httpResponse = response as? HTTPURLResponse {
-                    if (200...299).contains(httpResponse.statusCode) {
-                        isValidating = false
-                        return true
-                    } else if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
-                        validationError = "Invalid API key"
-                    } else {
-                        validationError = "Unexpected response (\(httpResponse.statusCode))"
-                    }
-                }
 
-            case .openai:
-                let url = URL(string: "https://api.openai.com/v1/models")!
-                var request = URLRequest(url: url)
-                request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-                let (_, response) = try await URLSession.shared.data(for: request)
-                if let httpResponse = response as? HTTPURLResponse {
-                    if httpResponse.statusCode == 200 {
-                        isValidating = false
-                        return true
-                    } else if httpResponse.statusCode == 401 {
-                        validationError = "Invalid API key"
-                    } else {
-                        validationError = "Unexpected response (\(httpResponse.statusCode))"
-                    }
-                }
-                
-            case .openrouter:
-                let url = URL(string: "https://openrouter.ai/api/v1/models")!
-                var request = URLRequest(url: url)
-                request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-                let (_, response) = try await URLSession.shared.data(for: request)
-                if let httpResponse = response as? HTTPURLResponse {
-                    if httpResponse.statusCode == 200 {
-                        isValidating = false
-                        return true
-                    } else if httpResponse.statusCode == 401 {
-                        validationError = "Invalid API key"
-                    } else {
-                        validationError = "Unexpected response (\(httpResponse.statusCode))"
-                    }
-                }
-                
-            case .revai:
-                let url = URL(string: "https://api.rev.ai/speechtotext/v1/account")!
-                var request = URLRequest(url: url)
-                request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-                let (_, response) = try await URLSession.shared.data(for: request)
-                if let httpResponse = response as? HTTPURLResponse {
-                    if httpResponse.statusCode == 200 {
-                        isValidating = false
-                        return true
-                    } else if httpResponse.statusCode == 401 {
-                        validationError = "Invalid API key"
-                    } else {
-                        validationError = "Unexpected response (\(httpResponse.statusCode))"
-                    }
-                }
-            }
-        } catch {
-            validationError = "Network error: \(error.localizedDescription)"
-        }
-        
+        let result = await validationResult(for: apiKey)
         isValidating = false
-        return false
+
+        switch result.outcome {
+        case .success:
+            return true
+        case .failure(let message):
+            validationError = message
+            return false
+        }
+    }
+
+    /// Validates the entered key with whichever component owns the provider's
+    /// credential, mirroring how Settings validates the same keys.
+    ///
+    /// Transcription providers go through `TranscriptionProviderRegistry`.
+    /// OpenRouter is an LLM provider rather than a transcription provider, so it
+    /// has no registry entry; Settings validates it through `OpenRouterAPIClient`
+    /// and onboarding does the same.
+    private func validationResult(for key: String) async -> APIKeyValidationResult {
+        if selectedProvider == .openrouter {
+            return await OpenRouterAPIClient(secureStorage: secureStorage).validateAPIKey(key)
+        }
+
+        guard let provider = await TranscriptionProviderRegistry.shared
+            .provider(withID: selectedProvider.rawValue)
+        else {
+            return .failure(message: "Provider not found")
+        }
+        return await provider.validateAPIKey(key)
     }
     
     func saveAPIKey() async throws {

@@ -372,6 +372,36 @@ jobs:
       - name: Test release-notes generator
         run: node --test Tests/ReleaseNotesTests/*.test.mjs
 
+  paid-access-worker:
+    name: Paid Access Worker
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: workers/paid-access
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: workers/paid-access/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
   api-compatibility:
     name: Public API compatibility
     runs-on: macos-latest

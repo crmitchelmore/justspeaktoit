@@ -32,6 +32,7 @@ struct SpeakApp: App {
                         MainView()
                             .environmentObject(environment)
                             .environmentObject(environment.settings)
+                            .environmentObject(environment.paidAccess)
                             .environmentObject(environment.history)
                             .environmentObject(environment.personalLexicon)
                             .environmentObject(environment.audioDevices)

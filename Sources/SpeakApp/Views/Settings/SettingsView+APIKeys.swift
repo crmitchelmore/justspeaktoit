@@ -14,6 +14,10 @@ extension SettingsView {
           compactMinimumWidth: 320,
           maximumColumns: 2
         ) {
+          if PaidAccessFeature.isEnabled {
+            paidAccessCard
+          }
+
           apiKeyListControls
 
           if DistributionChannel.current.supportsEncryptedCloudKitKeySync {

@@ -64,6 +64,8 @@ extension LiveTranscriptionProviderID {
             return "api.cartesia.ai"
         case .gladia:
             return "api.gladia.io"
+        case .google:
+            return GeminiTranscribeModels.apiHost
         case .modulate:
             return "modulate-developer-apis.com"
         case .assemblyai:
@@ -88,7 +90,7 @@ extension LiveTranscriptionProviderID {
         switch self {
         case .apple, .assemblyai, .openai:
             return .unsupported
-        case .deepgram, .cartesia, .gladia, .modulate, .soniox, .elevenlabs,
+        case .deepgram, .cartesia, .gladia, .google, .modulate, .soniox, .elevenlabs,
              .speechmatics, .xai:
             guard let host = self.streamingHost else { return .unsupported }
             return .endpointProbe(host: host)

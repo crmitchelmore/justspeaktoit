@@ -549,6 +549,7 @@ public final class CloudKitKeySync: ObservableObject {
         "cartesia.apiKey",
         "assemblyai.apiKey",
         "gladia.apiKey",
+        "google.apiKey",
         "modulate.apiKey",
         "soniox.apiKey",
         "xai.apiKey"

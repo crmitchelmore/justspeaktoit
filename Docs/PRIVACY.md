@@ -21,6 +21,7 @@ Speak is designed with privacy in mind. This document explains what data is coll
 | Deepgram | Cloud | Audio streamed to Deepgram for transcription |
 | Cartesia | Cloud | Audio streamed to Cartesia for transcription |
 | Gladia | Cloud | Audio streamed to Gladia for transcription |
+| Google Gemini | Cloud | Audio streamed to Google for Gemini 3.5 Transcribe (live and recorded) |
 | Modulate | Cloud | Audio streamed to Modulate for transcription |
 | AssemblyAI | Cloud | Audio streamed to AssemblyAI for transcription |
 | Soniox | Cloud | Audio streamed to Soniox for transcription |

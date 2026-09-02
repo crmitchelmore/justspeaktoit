@@ -82,7 +82,7 @@ final class ConfigTransferImportTests: XCTestCase {
     func testPreviouslyOmittedProviders_areNowTransferable() {
         let identifiers = Set(ConfigTransferManager.transferableSecretIdentifiers)
         for required in [
-            "assemblyai.apiKey", "cartesia.apiKey", "gladia.apiKey", "groq.apiKey",
+            "assemblyai.apiKey", "cartesia.apiKey", "gladia.apiKey", "google.apiKey", "groq.apiKey",
             "mistral.apiKey", "modulate.apiKey", "revai.apiKey", "soniox.apiKey",
             "speechmatics.apiKey", "xai.apiKey"
         ] {

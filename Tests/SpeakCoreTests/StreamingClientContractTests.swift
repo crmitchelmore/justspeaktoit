@@ -342,6 +342,7 @@ final class StreamingClientContractTests: XCTestCase {
         XCTAssertEqual(DeepgramLiveClient(apiKey: "k", model: "nova-3").finalShape, .standaloneSegments)
         XCTAssertEqual(ElevenLabsLiveClient(apiKey: "k").finalShape, .standaloneSegments)
         XCTAssertEqual(GladiaLiveClient(apiKey: "k").finalShape, .standaloneSegments)
+        XCTAssertEqual(GeminiLiveClient(apiKey: "k").finalShape, .standaloneSegments)
         XCTAssertEqual(CartesiaLiveClient(apiKey: "k").finalShape, .standaloneSegments)
         XCTAssertEqual(XAILiveClient(apiKey: "k").finalShape, .cumulativeTranscript)
         XCTAssertEqual(SonioxLiveClient(apiKey: "k").finalShape, .cumulativeTranscript)

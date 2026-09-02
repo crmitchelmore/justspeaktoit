@@ -323,6 +323,7 @@ public final class ConfigTransferManager: Sendable {
         "deepgram.apiKey",
         "elevenlabs.apiKey",
         "gladia.apiKey",
+        "google.apiKey",
         "groq.apiKey",
         "mistral.apiKey",
         "modulate.apiKey",

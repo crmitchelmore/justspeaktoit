@@ -203,6 +203,10 @@ public final class AppSettings: ObservableObject {
         didSet { persistSecret(gladiaAPIKey, identifier: Self.gladiaKeyID) }
     }
 
+    @Published public var googleAPIKey: String {
+        didSet { persistSecret(googleAPIKey, identifier: Self.googleKeyID) }
+    }
+
     @Published public var xAIAPIKey: String {
         didSet { persistSecret(xAIAPIKey, identifier: Self.xAIKeyID) }
     }
@@ -222,6 +226,7 @@ public final class AppSettings: ObservableObject {
     static let modulateKeyID = "modulate.apiKey"
     static let assemblyAIKeyID = "assemblyai.apiKey"
     static let gladiaKeyID = "gladia.apiKey"
+    static let googleKeyID = "google.apiKey"
     static let xAIKeyID = "xai.apiKey"
 
     private static let credentialStorage = SecureStorage(
@@ -435,6 +440,7 @@ public final class AppSettings: ObservableObject {
         self.modulateAPIKey = ""
         self.assemblyAIAPIKey = ""
         self.gladiaAPIKey = ""
+        self.googleAPIKey = ""
         self.xAIAPIKey = ""
         self.liveActivitiesEnabled = liveActivities
         self.visualDensity = density
@@ -546,6 +552,7 @@ public final class AppSettings: ObservableObject {
     public var hasModulateKey: Bool { !modulateAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasAssemblyAIKey: Bool { !assemblyAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasGladiaKey: Bool { !gladiaAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    public var hasGoogleKey: Bool { !googleAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasXAIKey: Bool { !xAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     /// Identifiers currently available to model pickers. Because this is
@@ -562,6 +569,7 @@ public final class AppSettings: ObservableObject {
         if hasModulateKey { identifiers.insert(Self.modulateKeyID) }
         if hasAssemblyAIKey { identifiers.insert(Self.assemblyAIKeyID) }
         if hasGladiaKey { identifiers.insert(Self.gladiaKeyID) }
+        if hasGoogleKey { identifiers.insert(Self.googleKeyID) }
         if hasXAIKey { identifiers.insert(Self.xAIKeyID) }
         return identifiers
     }
@@ -604,6 +612,10 @@ public final class AppSettings: ObservableObject {
         gladiaAPIKey = await Self.syncedAPIKeyValue(
             identifier: Self.gladiaKeyID,
             currentValue: gladiaAPIKey
+        )
+        googleAPIKey = await Self.syncedAPIKeyValue(
+            identifier: Self.googleKeyID,
+            currentValue: googleAPIKey
         )
         xAIAPIKey = await Self.syncedAPIKeyValue(
             identifier: Self.xAIKeyID,
@@ -657,18 +669,26 @@ public final class AppSettings: ObservableObject {
     /// Returns the stored API key for a resolved live-transcription route, used
     /// by the generic shared-client recording path.
     public func liveAPIKey(for route: LiveTranscriptionRoute) -> String {
-        switch route.apiKeyIdentifier {
-        case Self.deepgramKeyID: return deepgramAPIKey
-        case Self.openAIKeyID: return openAIAPIKey
-        case Self.elevenLabsKeyID: return elevenLabsAPIKey
-        case Self.cartesiaKeyID: return cartesiaAPIKey
-        case Self.sonioxKeyID: return sonioxAPIKey
-        case Self.modulateKeyID: return modulateAPIKey
-        case Self.assemblyAIKeyID: return assemblyAIAPIKey
-        case Self.gladiaKeyID: return gladiaAPIKey
-        case Self.xAIKeyID: return xAIAPIKey
-        default: return ""
-        }
+        guard let identifier = route.apiKeyIdentifier else { return "" }
+        return liveAPIKeysByIdentifier[identifier] ?? ""
+    }
+
+    /// Every cloud live-transcription credential this app stores, keyed by the
+    /// identifier `LiveTranscriptionRoute` resolves to. A table rather than a
+    /// switch so adding a provider is one line and the lookup stays flat.
+    private var liveAPIKeysByIdentifier: [String: String] {
+        [
+            Self.deepgramKeyID: deepgramAPIKey,
+            Self.openAIKeyID: openAIAPIKey,
+            Self.elevenLabsKeyID: elevenLabsAPIKey,
+            Self.cartesiaKeyID: cartesiaAPIKey,
+            Self.sonioxKeyID: sonioxAPIKey,
+            Self.modulateKeyID: modulateAPIKey,
+            Self.assemblyAIKeyID: assemblyAIAPIKey,
+            Self.gladiaKeyID: gladiaAPIKey,
+            Self.googleKeyID: googleAPIKey,
+            Self.xAIKeyID: xAIAPIKey
+        ]
     }
 
     public var batchAPIKey: String {
@@ -1690,6 +1710,7 @@ struct APIKeysView: View {
     @State private var modulateKey = ""
     @State private var assemblyAIKey = ""
     @State private var gladiaKey = ""
+    @State private var googleKey = ""
     @State private var xAIKey = ""
     @State private var isValidating = false
     @State private var validationMessage: String?
@@ -1739,6 +1760,10 @@ struct APIKeysView: View {
             ),
             APIKeyListEntry(
                 id: "gladia", title: "Gladia", category: "Transcription", isStored: settings.hasGladiaKey
+            ),
+            APIKeyListEntry(
+                id: "google", title: GeminiTranscribeModels.providerDisplayName,
+                category: "Transcription", isStored: settings.hasGoogleKey
             ),
             APIKeyListEntry(
                 id: "xai", title: "xAI", category: "Transcription", isStored: settings.hasXAIKey
@@ -1815,6 +1840,7 @@ struct APIKeysView: View {
                             && modulateKey.isEmpty
                             && assemblyAIKey.isEmpty
                             && gladiaKey.isEmpty
+                            && googleKey.isEmpty
                             && xAIKey.isEmpty
                     )
                 }
@@ -1853,6 +1879,7 @@ struct APIKeysView: View {
         }
     }
 
+    // swiftlint:disable:next cyclomatic_complexity function_body_length
     private func presentation(for id: String) -> KeyPresentation {
         switch id {
         case "deepgram":
@@ -1891,6 +1918,11 @@ struct APIKeysView: View {
             return KeyPresentation(
                 title: "AssemblyAI", systemImage: "waveform.badge.plus", help: "Get your key from assemblyai.com."
             )
+        case "google":
+            return KeyPresentation(
+                title: GeminiTranscribeModels.providerDisplayName, systemImage: "sparkles",
+                help: "Get your key from aistudio.google.com."
+            )
         case "xai":
             return KeyPresentation(
                 title: "xAI", systemImage: "waveform.badge.mic", help: "Get your key from console.x.ai."
@@ -1902,6 +1934,7 @@ struct APIKeysView: View {
         }
     }
 
+    // swiftlint:disable:next cyclomatic_complexity
     private func draftBinding(for id: String) -> Binding<String> {
         switch id {
         case "deepgram": return $deepgramKey
@@ -1912,11 +1945,13 @@ struct APIKeysView: View {
         case "soniox": return $sonioxKey
         case "modulate": return $modulateKey
         case "assemblyai": return $assemblyAIKey
+        case "google": return $googleKey
         case "xai": return $xAIKey
         default: return $gladiaKey
         }
     }
 
+    // swiftlint:disable:next cyclomatic_complexity
     private func clearStoredKey(for id: String) {
         switch id {
         case "deepgram": settings.deepgramAPIKey = ""
@@ -1927,6 +1962,7 @@ struct APIKeysView: View {
         case "soniox": settings.sonioxAPIKey = ""
         case "modulate": settings.modulateAPIKey = ""
         case "assemblyai": settings.assemblyAIAPIKey = ""
+        case "google": settings.googleAPIKey = ""
         case "xai": settings.xAIAPIKey = ""
         default: settings.gladiaAPIKey = ""
         }
@@ -2017,6 +2053,13 @@ struct APIKeysView: View {
                 settings.gladiaAPIKey = gladiaKey
                 gladiaKey = ""
                 messages.append("✓ Gladia key saved")
+            }
+
+            // Save Google Gemini key (validated when the session connects)
+            if !googleKey.isEmpty {
+                settings.googleAPIKey = googleKey
+                googleKey = ""
+                messages.append("✓ Google Gemini key saved")
             }
 
             // Save xAI key (validated when the realtime session connects)

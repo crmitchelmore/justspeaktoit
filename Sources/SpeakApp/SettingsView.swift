@@ -190,8 +190,8 @@ struct SettingsView: View {
         source: .openRouter
       )
     ]
-    // ElevenLabs and Soniox each use one key for transcription and voice
-    // output; their combined card is contributed by the TTS list below.
+    // ElevenLabs, Soniox and Cartesia each use one key for transcription and
+    // voice output; their combined card is contributed by the TTS list below.
     let sharedCredentialProviderIDs = Set(
       TTSProvider.allCases.filter(\.sharesTranscriptionCredential).map(\.id)
     )
@@ -208,7 +208,7 @@ struct SettingsView: View {
           source: .transcription(provider)
         )
       }
-    items += [TTSProvider.elevenlabs, .openai, .azure, .deepgram, .soniox].map { provider in
+    items += [TTSProvider.elevenlabs, .openai, .azure, .deepgram, .soniox, .cartesia].map { provider in
       let isShared = provider.sharesTranscriptionCredential
       return MacAPIKeyItem(
         entry: APIKeyListEntry(
@@ -715,9 +715,13 @@ struct SettingsView: View {
       presenting: missingTranscriptionAPIKeyAlert
     ) { alert in
       Button("Add API Key") {
-        environment.apiKeysScrollTarget = alert.provider.id == "elevenlabs"
-          ? "tts-elevenlabs"
-          : "transcription-\(alert.provider.id)"
+        // A provider whose single key also powers voice output has no
+        // transcription card; its combined card lives in the TTS list.
+        let sharedCredentialID = TTSProvider.allCases
+          .first { $0.sharesTranscriptionCredential && $0.id == alert.provider.id }?
+          .id
+        environment.apiKeysScrollTarget = sharedCredentialID.map { "tts-\($0)" }
+          ?? "transcription-\(alert.provider.id)"
         sidebarSelection = .settings(.apiKeys)
         missingTranscriptionAPIKeyAlert = nil
       }

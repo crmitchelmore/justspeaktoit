@@ -219,6 +219,7 @@ extension SettingsView {
       case .azure: return .brandLagoonDeep
       case .deepgram: return .brandAccentWarm
       case .soniox: return .brandLagoon
+      case .cartesia: return .purple
       case .system: return .gray
       }
     }()
@@ -229,6 +230,7 @@ extension SettingsView {
       case .azure: return "cloud"
       case .deepgram: return "bolt.circle"
       case .soniox: return "globe"
+      case .cartesia: return "waveform.and.person.filled"
       case .system: return "speaker.wave.2"
       }
     }()
@@ -239,11 +241,13 @@ extension SettingsView {
       case .azure: return "https://azure.microsoft.com/en-us/services/cognitive-services/text-to-speech/"
       case .deepgram: return "https://deepgram.com"
       case .soniox: return "https://soniox.com"
+      case .cartesia: return "https://cartesia.ai"
       case .system: return ""
       }
     }()
-    // Soniox uses one account key for transcription and speech generation, so
-    // this is the only card for it — the transcription list skips it.
+    // Soniox and Cartesia each use one account key for transcription and speech
+    // generation, so this is the only card for them — the transcription list
+    // skips those providers.
     let descriptionText: String = {
       switch provider {
       case .azure:
@@ -251,6 +255,9 @@ extension SettingsView {
       case .soniox:
         return "Stored securely in your macOS Keychain. Used for Soniox transcription and for "
           + "Soniox TTS v2 voice output in 60+ languages."
+      case .cartesia:
+        return "Stored securely in your macOS Keychain. Used for Cartesia Ink transcription and for "
+          + "Cartesia Sonic 3.6 voice output."
       default:
         return "Stored securely in your macOS Keychain. Used only for "
           + "\(provider.displayName) text-to-speech voice synthesis."
@@ -295,15 +302,17 @@ extension SettingsView {
     }
 
     return apiKeyCard(
-      title: provider == .soniox ? "Soniox API Key" : "\(provider.displayName) (TTS)",
+      title: provider.sharesTranscriptionCredential
+        ? "\(provider.displayName) API Key"
+        : "\(provider.displayName) (TTS)",
       systemImage: systemImage,
       tint: tintColor,
       statusIcon: isStored ? "checkmark.seal.fill" : "key.fill",
       statusTint: tintColor,
       isStored: isStored,
       descriptionText: descriptionText,
-      keyFieldLabel: provider == .soniox
-        ? "Soniox API Key"
+      keyFieldLabel: provider.sharesTranscriptionCredential
+        ? "\(provider.displayName) API Key"
         : "\(provider.displayName) TTS API Key",
       keyBinding: ttsBinding(for: provider.rawValue),
       onSave: { saveTTSProviderAPIKey(provider) },

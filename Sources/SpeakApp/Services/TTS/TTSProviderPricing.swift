@@ -34,6 +34,10 @@ extension TTSProvider {
       // Billed per token (~$0.70 per hour of generated speech); the shared API
       // exposes the equivalent character estimate.
       return SonioxTTSAPI.estimatedCostPerThousandCharacters
+    case .cartesia:
+      // Billed one credit per character; the shared API exposes the plan rate
+      // as a character estimate.
+      return CartesiaTTSAPI.estimatedCostPerThousandCharacters
     case .system:
       return nil
     }

@@ -713,6 +713,7 @@ enum WireUp {
       .azure: AzureSpeechClient(secureStorage: secureStorage, appSettings: settings),
       .deepgram: DeepgramTTSClient(secureStorage: secureStorage),
       .soniox: SonioxTTSClient(secureStorage: secureStorage, appSettings: settings),
+      .cartesia: CartesiaTTSClient(secureStorage: secureStorage),
       .system: SystemTTSClient()
     ]
     return TextToSpeechManager(

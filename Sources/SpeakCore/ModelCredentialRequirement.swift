@@ -163,6 +163,7 @@ public enum ModelCredentialResolver {
 
     private static let providerDisplayNames = [
         "assemblyai": "AssemblyAI",
+        "cartesia": "Cartesia",
         "deepgram": "Deepgram",
         "elevenlabs": "ElevenLabs",
         "gladia": "Gladia",

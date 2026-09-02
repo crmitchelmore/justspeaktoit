@@ -237,7 +237,9 @@ final class TextToSpeechManager: ObservableObject {
     }
 
     // Validate the voice ID. Some providers return dynamic voice IDs (not in VoiceCatalog).
-    let knownPrefixes = ["elevenlabs/", "openai/", "azure/", "deepgram/", "soniox/", "system/"]
+    let knownPrefixes = [
+      "elevenlabs/", "openai/", "azure/", "deepgram/", "soniox/", "cartesia/", "system/"
+    ]
     if VoiceCatalog.voice(forID: voiceID) != nil || knownPrefixes.contains(where: { voiceID.hasPrefix($0) }) {
       return voiceID
     }

@@ -743,7 +743,12 @@ public final class AppSettings: ObservableObject {
         ModelCatalog.batchTranscription.filter { option in
             AppleLocalModels.isSpeechAnalyzerModel(option.id)
                 || openAIBatchModelIDs.contains(option.id)
-                || option.id.hasPrefix("google/")
+                // OpenRouter-routed Gemini 2.x batch models upload through the
+                // OpenRouter client. Gemini 3.5 Transcribe's direct Interactions
+                // API client is macOS-only for now, so it stays out of this list
+                // until iOS gains that upload path (issue #862).
+                || (option.id.hasPrefix("google/")
+                    && !GeminiTranscribeModels.directBatchModelIDs.contains(option.id))
                 || option.id == "openai/gpt-4o-audio-preview-2024-12-17"
                 || option.id == MetaMuseVoiceTranscribe.batchCatalogID
         }

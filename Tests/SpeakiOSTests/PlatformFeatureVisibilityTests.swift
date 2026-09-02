@@ -38,11 +38,17 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
         // listed whenever the runtime supports one of the analyzer engines
         // (SpeechTranscriber needs Apple Intelligence; DictationTranscriber
         // needs OS 26), so the expected provider set depends on the runtime.
-        var expectedProviders: Set<String> = ["google", "openai"]
+        var expectedProviders: Set<String> = ["google", "meta", "openai"]
         if AppleLocalModels.supportsSpeechTranscriber || AppleLocalModels.supportsDictationTranscriber {
             expectedProviders.insert("apple")
         }
         XCTAssertEqual(visibleProviders, expectedProviders)
+
+        // Meta Muse uploads through MetaMuseBatchClient on iOS, so it is listed.
+        XCTAssertTrue(AppSettings.supportedBatchModels.contains { $0.id == MetaMuseVoiceTranscribe.batchCatalogID })
+        // Gemini 3.5 Transcribe's direct batch client is macOS-only; listing it
+        // here would route uploads to OpenRouter with the wrong model and key.
+        XCTAssertFalse(AppSettings.supportedBatchModels.contains { $0.id == GeminiTranscribeModels.batchCatalogID })
         XCTAssertTrue(
             AppSettings.supportedBatchModels.contains {
                 $0.id == OpenAITranscriptionModels.gptTranscribeCatalogID

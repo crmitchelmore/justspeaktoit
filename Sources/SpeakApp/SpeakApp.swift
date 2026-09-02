@@ -137,6 +137,14 @@ final class EnvironmentHolder: ObservableObject {
 struct SpeakCommands: Commands {
     let environment: AppEnvironment
     @ObservedObject private var updaterManager = UpdaterManager.shared
+    /// Observed so rebinding Start/Stop Recording in Settings re-renders the menu
+    /// item with the new shortcut, the same way `MenuBarManager` rebuilds its menu.
+    @ObservedObject private var shortcuts: ShortcutManager
+
+    init(environment: AppEnvironment) {
+        self.environment = environment
+        _shortcuts = ObservedObject(wrappedValue: environment.shortcuts)
+    }
 
     var body: some Commands {
         CommandGroup(after: .appInfo) {
@@ -146,10 +154,7 @@ struct SpeakCommands: Commands {
             CheckForUpdatesView()
 #endif
             Divider()
-            Button("Start/Stop Recording") {
-                environment.main.toggleRecordingFromUI()
-            }
-            .keyboardShortcut("s", modifiers: [.command, .shift])
+            startStopRecordingButton
         }
 
         CommandGroup(replacing: .help) {
@@ -158,6 +163,22 @@ struct SpeakCommands: Commands {
                     NSWorkspace.shared.open(url)
                 }
             }
+        }
+    }
+
+    /// The App menu's Start/Stop Recording item, carrying whatever shortcut the
+    /// user has bound to `.startStopRecording`. A disabled or unmappable binding
+    /// simply leaves the item without a shortcut.
+    @ViewBuilder
+    private var startStopRecordingButton: some View {
+        let binding = shortcuts.binding(for: .startStopRecording)
+        let button = Button("Start/Stop Recording") {
+            environment.main.toggleRecordingFromUI()
+        }
+        if let key = binding.keyEquivalent {
+            button.keyboardShortcut(key, modifiers: binding.eventModifiers)
+        } else {
+            button
         }
     }
 }

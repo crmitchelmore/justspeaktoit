@@ -11,6 +11,13 @@ struct DashboardView: View {
   @State private var requestingPermission: PermissionType?
   @StateObject private var speechInsights = SpeechInsightsModel()
 
+  /// Chart inputs derived from the *whole* history. Cached in state and
+  /// refreshed on `history.contentRevision` (same reasoning as the speech
+  /// insights below) so that unrelated `HistoryManager` publishes — paging
+  /// flipping `isLoadingMore`, a persistence error, a load-state change — do
+  /// not re-walk every record on the main actor while the body evaluates.
+  @State private var aggregates = DashboardAggregates(items: [])
+
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: density.sectionSpacing) {
@@ -243,6 +250,14 @@ struct DashboardView: View {
         ttsUsageChartSection
         ttsProviderChartSection
       }
+    }
+    // One pass over history per content revision feeds all five charts.
+    // `contentRevision` is bumped by every mutator that touches `allItems`
+    // (load, append, update, remove, remove-all — CloudKit merges included),
+    // and paging only ever appends to the already-counted `items` page, so it
+    // is the complete dependency for these aggregations.
+    .task(id: history.contentRevision) {
+      aggregates = DashboardAggregates(items: history.allItems)
     }
   }
 
@@ -645,7 +660,7 @@ struct DashboardView: View {
 
   private var dailyUsageChartSection: some View {
     DashboardCard(title: "Daily Usage", systemImage: "chart.bar.fill", tint: Color.brandLagoon) {
-      DailyRecordingsChart(data: history.allItems.dailyUsageForLastMonth())
+      DailyRecordingsChart(data: aggregates.dailyUsage)
     }
     .speakTooltip("See when you rely on Speak the most so you can plan deep work and reviews thoughtfully.")
   }
@@ -653,8 +668,8 @@ struct DashboardView: View {
   private var latencySection: some View {
     DashboardCard(title: "Latency", systemImage: "bolt.badge.clock", tint: Color.brandLagoonDeep) {
       LatencyInsightsView(
-        providers: history.allItems.latencyInsightsByProvider(),
-        overview: history.allItems.latencyOverview()
+        providers: aggregates.latencyProviders,
+        overview: aggregates.latencyOverview
       )
     }
     .speakTooltip(
@@ -666,7 +681,7 @@ struct DashboardView: View {
     DashboardCard(title: "Transcription Models", systemImage: "waveform", tint: Color.green) {
       ModelUsageChart(
         title: "Transcription Model Usage",
-        data: history.allItems.modelUsage(for: .transcription),
+        data: aggregates.transcriptionModels,
         color: .green
       )
     }
@@ -677,7 +692,7 @@ struct DashboardView: View {
     DashboardCard(title: "Post-Processing Models", systemImage: "wand.and.stars", tint: Color.brandAccent) {
       ModelUsageChart(
         title: "Post-Processing Model Usage",
-        data: history.allItems.modelUsage(for: .postProcessing),
+        data: aggregates.postProcessingModels,
         color: .brandAccent
       )
     }
@@ -772,6 +787,28 @@ struct DashboardView: View {
     case .soniox: return .brandLagoon
     case .system: return .gray
     }
+  }
+}
+
+/// The five full-history aggregations the dashboard charts render, computed
+/// together in one pass so the view body reads plain stored values.
+///
+/// Building it for an empty history is the same work the charts did on a cold
+/// dashboard before, so the initial value is identical to what the first
+/// refresh produces when there is nothing recorded yet.
+struct DashboardAggregates {
+  let dailyUsage: [DailyUsageData]
+  let latencyProviders: [ProviderLatencyInsight]
+  let latencyOverview: LatencyOverview
+  let transcriptionModels: [ModelUsageData]
+  let postProcessingModels: [ModelUsageData]
+
+  init(items: [HistoryItem]) {
+    dailyUsage = items.dailyUsageForLastMonth()
+    latencyProviders = items.latencyInsightsByProvider()
+    latencyOverview = items.latencyOverview()
+    transcriptionModels = items.modelUsage(for: .transcription)
+    postProcessingModels = items.modelUsage(for: .postProcessing)
   }
 }
 

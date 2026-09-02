@@ -187,6 +187,7 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
     private static let preferredChunkBytes = ElevenLabsLiveTranscriber.preferredChunkBytes
 
     private let queue = DispatchQueue(label: "com.speak.app.elevenlabs.audioProcessing")
+    private let copyBufferPool = LivePCMBufferPool(maximumBuffers: 4)
     private var isRunning: Bool = false
     private var cachedConverter: AVAudioConverter?
     private var cachedInputFormat: AVAudioFormat?
@@ -201,6 +202,7 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
           cachedInputFormat = nil
           reusableOutputBuffer = nil
           pendingPCMData.removeAll(keepingCapacity: false)
+          copyBufferPool.removeAll()
         }
       }
     }
@@ -238,7 +240,9 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
     ) {
       guard let copied = copyPCMBuffer(buffer) else { return }
       queue.async { [weak self] in
-        guard let self, self.isRunning else { return }
+        guard let self else { return }
+        defer { self.copyBufferPool.recycle(copied) }
+        guard self.isRunning else { return }
         self.processAndSendAudio(
           copied, from: inputFormat, to: outputFormat,
           transcriber: transcriber, logger: logger
@@ -248,7 +252,7 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
 
     private func copyPCMBuffer(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
       let frameLength = buffer.frameLength
-      guard let copy = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: frameLength) else {
+      guard let copy = copyBufferPool.buffer(format: buffer.format, frameCapacity: frameLength) else {
         return nil
       }
       copy.frameLength = frameLength
@@ -298,9 +302,20 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
         outputBuffer = newBuffer
       }
 
-      converter.reset()
+      // NOTE: We deliberately do NOT call converter.reset() between chunks —
+      // doing so wipes the resampler's filter history and priming/trailing
+      // frames, which audibly clicks at chunk boundaries and pays the
+      // re-priming cost on every chunk. The converter is only created once
+      // per inputFormat (cachedConverter), so its state is the *correct*
+      // thing to preserve across taps.
       var error: NSError?
+      var didProvideInput = false
       let status = converter.convert(to: outputBuffer, error: &error) { _, outStatus in
+        guard !didProvideInput else {
+          outStatus.pointee = .noDataNow
+          return nil
+        }
+        didProvideInput = true
         outStatus.pointee = .haveData
         return buffer
       }

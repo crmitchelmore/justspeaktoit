@@ -150,19 +150,12 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
     }
 
     private func transmit(_ audioData: Data, on task: URLSessionWebSocketTask) {
-        var buffer = bufferPool.checkout()
-        buffer.append(audioData)
-
-        let dataToSend = buffer
-        let message = URLSessionWebSocketTask.Message.data(dataToSend)
-
-        task.send(message) { [weak self] error in
+        // Send the caller's `Data` straight through. Copying it into a pooled
+        // buffer only to hand that buffer back while the send is still in
+        // flight forced a copy-on-write (plus a memset) per chunk, because
+        // `returnBuffer` zeroes storage the queued message still references.
+        task.send(.data(audioData)) { [weak self] error in
             guard let self else { return }
-
-            // Capture the immutable copy: a captured `var` in this @Sendable
-            // completion would be a strict-concurrency violation.
-            var returnBuffer = dataToSend
-            self.bufferPool.returnBuffer(&returnBuffer)
 
             if let error {
                 if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) {

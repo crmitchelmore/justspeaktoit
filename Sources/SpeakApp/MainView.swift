@@ -86,7 +86,8 @@ struct MainView: View {
       Button(action: environment.main.toggleRecordingFromUI) {
         toolbarRecordLabel
       }
-      .keyboardShortcut(.space, modifiers: [.command, .shift])
+      // No shortcut here: Start/Stop Recording has one canonical binding, owned
+      // by ShortcutManager and surfaced on the App menu item and the Speak menu.
       .speakTooltip("Start or stop a recording from anywhere in Speak. We'll let you know when we're listening.")
       .accessibilityLabel(recordButtonAccessibility.label)
       .accessibilityHint(recordButtonAccessibility.hint)

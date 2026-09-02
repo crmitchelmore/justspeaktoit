@@ -138,27 +138,32 @@ final class ModulateLiveTranscriber: @unchecked Sendable {
   func sendAudio(_ audioData: Data) {
     guard let webSocketTask = currentWebSocketTask(), webSocketTask.state == .running else { return }
 
-    var buffer = bufferPool.checkout()
     let shouldPrefixHeader = withStateLock { () -> Bool in
       if hasSentWAVHeader { return false }
       hasSentWAVHeader = true
       return true
     }
-    if shouldPrefixHeader {
-      buffer.append(Self.makeStreamingWAVHeader(sampleRate: sampleRate))
-    }
-    buffer.append(audioData)
 
-    let dataToSend = buffer
-    let message = URLSessionWebSocketTask.Message.data(dataToSend)
+    // Send the caller's `Data` straight through (only the first frame needs a
+    // new buffer for the WAV header). Copying every chunk into a pooled buffer
+    // only to hand that buffer back while the send is still in flight forced a
+    // copy-on-write (plus a memset) per chunk, because `returnBuffer` zeroes
+    // storage the queued message still references.
+    let dataToSend: Data
+    if shouldPrefixHeader {
+      var framed = Self.makeStreamingWAVHeader(sampleRate: sampleRate)
+      framed.append(audioData)
+      dataToSend = framed
+    } else {
+      dataToSend = audioData
+    }
+
     let sendGroup = pendingSendGroup
     sendGroup.enter()
 
-    webSocketTask.send(message) { [weak self] error in
+    webSocketTask.send(.data(dataToSend)) { [weak self] error in
       defer { sendGroup.leave() }
       guard let self else { return }
-      var returnBuffer = buffer
-      self.bufferPool.returnBuffer(&returnBuffer)
 
       if let error {
         if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }

@@ -56,32 +56,32 @@ extension SettingsView {
     }
   }
 
+  private var apiKeySearchField: some View {
+    TextField("Search provider or category", text: $apiKeySearchText)
+      .textFieldStyle(.roundedBorder)
+      .accessibilityLabel("Search API keys")
+  }
+
   private var apiKeyListControls: some View {
     SettingsCard(title: "Find API Keys", systemImage: "magnifyingglass", tint: .brandAccent) {
       if settings.visualDensity.isCompact {
         ViewThatFits(in: .horizontal) {
           HStack(spacing: settings.visualDensity.inlineSpacing) {
-            TextField("Search provider or category", text: $apiKeySearchText)
-              .textFieldStyle(.roundedBorder)
+            apiKeySearchField
               .frame(minWidth: 180)
-              .accessibilityLabel("Search API keys")
 
             apiKeyFilterControls
               .fixedSize(horizontal: true, vertical: false)
           }
 
           VStack(alignment: .leading, spacing: settings.visualDensity.inlineSpacing) {
-            TextField("Search provider or category", text: $apiKeySearchText)
-              .textFieldStyle(.roundedBorder)
-              .accessibilityLabel("Search API keys")
+            apiKeySearchField
             apiKeyFilterControls
           }
         }
       } else {
         VStack(alignment: .leading, spacing: 12) {
-          TextField("Search provider or category", text: $apiKeySearchText)
-            .textFieldStyle(.roundedBorder)
-            .accessibilityLabel("Search API keys")
+          apiKeySearchField
 
           apiKeyFilterControls
         }

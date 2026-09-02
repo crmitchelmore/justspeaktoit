@@ -95,7 +95,7 @@ struct SpeakApp: App {
                         }
                     }
                 } else {
-                    ProgressView("Loading...")
+                    ProgressView("Loading…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .task {
                             environmentHolder.bootstrap()

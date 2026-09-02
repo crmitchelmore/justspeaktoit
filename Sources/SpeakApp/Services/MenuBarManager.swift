@@ -116,7 +116,7 @@ final class MenuBarManager {
 
         addMenuItem(
             to: speakMenu,
-            title: "Settings...",
+            title: "Settings…",
             action: ShortcutAction.openSettings,
             selector: #selector(AppDelegate.openSettings)
         )
@@ -253,7 +253,7 @@ final class DockMenuManager {
                     let text = (item.postProcessedTranscription ?? item.rawTranscription ?? "Unknown")
                         .prefix(40)
                     let menuItem = NSMenuItem(
-                        title: String(text) + (text.count >= 40 ? "..." : ""),
+                        title: String(text) + (text.count >= 40 ? "…" : ""),
                         action: #selector(AppDelegate.openHistoryItem(_:)),
                         keyEquivalent: ""
                     )
@@ -268,7 +268,7 @@ final class DockMenuManager {
         menu.addItem(NSMenuItem.separator())
 
         let settingsItem = NSMenuItem(
-            title: "Settings...",
+            title: "Settings…",
             action: #selector(AppDelegate.openSettings),
             keyEquivalent: ""
         )

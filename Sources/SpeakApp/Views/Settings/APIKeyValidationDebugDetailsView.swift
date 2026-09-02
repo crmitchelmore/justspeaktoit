@@ -110,13 +110,8 @@ struct APIKeyValidationDebugDetailsView: View {
           .font(.caption)
           .foregroundStyle(.secondary)
         Spacer()
-        Button {
-          let pasteboard = NSPasteboard.general
-          pasteboard.clearContents()
-          pasteboard.setString(value, forType: .string)
-        } label: {
-          Label("Copy", systemImage: "doc.on.doc")
-            .labelStyle(.iconOnly)
+        CopyButton {
+          CopyFeedback.writeToPasteboard(value)
         }
         .buttonStyle(.borderless)
         .speakTooltip("Copy to clipboard")

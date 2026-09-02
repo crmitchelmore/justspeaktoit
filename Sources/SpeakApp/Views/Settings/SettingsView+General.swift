@@ -414,11 +414,8 @@ extension SettingsView {
                   .font(.system(.title2, design: .monospaced))
                   .fontWeight(.bold)
                   .foregroundStyle(.green)
-                Button {
-                  NSPasteboard.general.clearContents()
-                  NSPasteboard.general.setString(PairingManager.shared.pairingCode, forType: .string)
-                } label: {
-                  Image(systemName: "doc.on.doc")
+                CopyButton(title: "Copy pairing code") {
+                  CopyFeedback.writeToPasteboard(PairingManager.shared.pairingCode)
                 }
                 .buttonStyle(.borderless)
                 .speakTooltip("Copy pairing code to clipboard")
@@ -428,11 +425,20 @@ extension SettingsView {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-              Button("Regenerate Code") {
+              DestructiveConfirmButton(
+                "Regenerate Code",
+                dialogTitle: "Regenerate Pairing Code?",
+                message: "This disconnects every paired device.",
+                confirmTitle: "Regenerate Code"
+              ) {
                 _ = PairingManager.shared.regeneratePairingCode()
               }
               .buttonStyle(.bordered)
-              .speakTooltip("Generate a new pairing code. This will disconnect all paired devices.")
+              .speakTooltip("Generate a new pairing code.")
+
+              Text("Regenerating disconnects every paired device.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
             .padding()
             .background(

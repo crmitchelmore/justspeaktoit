@@ -480,7 +480,13 @@ extension SettingsView {
   @ViewBuilder
   private func compactAPIKeyRemoveButton(_ configuration: APIKeyCardConfiguration) -> some View {
     if let onRemove = configuration.onRemove, configuration.isStored {
-      Button(role: .destructive, action: onRemove) {
+      DestructiveConfirmButton(
+        dialogTitle: removeKeyDialogTitle(configuration),
+        message: removeKeyDialogMessage,
+        confirmTitle: configuration.removeButtonTitle,
+        triggerRole: .destructive,
+        action: onRemove
+      ) {
         Label(configuration.removeButtonTitle, systemImage: "trash")
           .labelStyle(.iconOnly)
       }
@@ -566,10 +572,26 @@ extension SettingsView {
   @ViewBuilder
   private func regularAPIKeyRemoveButton(_ configuration: APIKeyCardConfiguration) -> some View {
     if let onRemove = configuration.onRemove, configuration.isStored {
-      Button(configuration.removeButtonTitle, role: .destructive, action: onRemove)
-        .disabled(configuration.isRemoveDisabled)
-        .speakTooltip(configuration.removeTooltip)
+      DestructiveConfirmButton(
+        configuration.removeButtonTitle,
+        dialogTitle: removeKeyDialogTitle(configuration),
+        message: removeKeyDialogMessage,
+        confirmTitle: configuration.removeButtonTitle,
+        triggerRole: .destructive,
+        action: onRemove
+      )
+      .disabled(configuration.isRemoveDisabled)
+      .speakTooltip(configuration.removeTooltip)
     }
+  }
+
+  private func removeKeyDialogTitle(_ configuration: APIKeyCardConfiguration) -> String {
+    "Remove the \(configuration.title) key?"
+  }
+
+  private var removeKeyDialogMessage: String {
+    "Speak forgets this key and deletes it from your Keychain. "
+      + "Features that need it stop working until you paste it again."
   }
 
   private struct CloudKitKeySyncSettingsCard: View {

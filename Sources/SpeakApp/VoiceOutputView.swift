@@ -200,7 +200,7 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
       HStack(spacing: 12) {
         ProgressView()
           .controlSize(.small)
-        Text("Synthesizing...")
+        Text("Synthesizing…")
           .font(.headline)
       }
       .padding(.horizontal, 32)
@@ -314,7 +314,7 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
           }
           .buttonStyle(.bordered)
         } else if inputSource == .file {
-          Button("Choose File...") {
+          Button("Choose File…") {
             isImportingFile = true
           }
           .buttonStyle(.bordered)
@@ -330,7 +330,7 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
           HStack {
             ProgressView()
               .scaleEffect(0.7)
-            Text("Loading voices...")
+            Text("Loading voices…")
               .font(.caption)
               .foregroundStyle(.secondary)
           }
@@ -589,7 +589,7 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
                 .buttonStyle(.bordered)
               }
 
-              Button("Export...") {
+              Button("Export…") {
                 exportAudio(result.audioURL)
               }
               .buttonStyle(.bordered)
@@ -737,9 +737,8 @@ struct SSMLHelperView: View {
 
       Spacer()
 
-      Button("Copy") {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(tag, forType: .string)
+      CopyButton(presentation: .titleOnly) {
+        CopyFeedback.writeToPasteboard(tag)
       }
       .buttonStyle(.borderless)
       .controlSize(.mini)

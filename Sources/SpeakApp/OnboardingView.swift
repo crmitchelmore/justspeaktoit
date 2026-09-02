@@ -832,7 +832,7 @@ struct APIKeyStepView: View {
                             HStack {
                                 ProgressView()
                                     .scaleEffect(0.7)
-                                Text("Validating...")
+                                Text("Validating…")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                             }
@@ -1201,7 +1201,7 @@ struct CompleteStepView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     TipRow(icon: "keyboard", text: "Press \(state.selectedHotKey.displayString) to start recording")
                     TipRow(icon: "text.cursor", text: "Click in any text field, then record")
-                    TipRow(icon: "gearshape.fill", text: "Right-click the menu bar icon for settings")
+                    TipRow(icon: "gearshape.fill", text: "Click the menu bar icon for quick actions and Settings")
                 }
                 .padding(.horizontal, 40)
                 .padding(.top, 20)

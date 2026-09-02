@@ -117,6 +117,30 @@ enum SidebarItem: Hashable, Identifiable {
       return tab.shortcutAction
     }
   }
+
+  /// Rows in the "Speak" section, in display order.
+  static let speakItems: [SidebarItem] = [
+    .dashboard,
+    .history,
+    .voiceOutput,
+    .corrections,
+    .troubleshooting
+  ]
+
+  /// Rows in the "Settings" section, in display order.
+  static var settingsItems: [SidebarItem] {
+    SettingsTab.allCases.map(SidebarItem.settings)
+  }
+
+  /// Every sidebar row in keyboard-traversal order.
+  ///
+  /// The sidebar `List` owns selection, so the arrow keys walk exactly this
+  /// order, crossing the section boundary between `.troubleshooting` and the
+  /// first settings tab. Kept beside the row definitions so the traversal
+  /// order stays testable without rendering the view.
+  static var orderedItems: [SidebarItem] {
+    speakItems + settingsItems
+  }
 }
 
 struct SideBarView: View {
@@ -125,91 +149,22 @@ struct SideBarView: View {
   @EnvironmentObject private var shortcutManager: ShortcutManager
 
   var body: some View {
-    List {
+    // `List` owns selection, so the arrow keys, type-select and the system
+    // focus ring work without any hand-rolled focus scaffolding. Rows are
+    // plain content tagged with their item rather than buttons, because a
+    // button swallows the row's selection semantics.
+    List(selection: $selection) {
       Section {
-        ForEach([SidebarItem.dashboard, .history, .voiceOutput, .corrections, .troubleshooting]) { item in
-          Button {
-            selection = item
-          } label: {
-            HStack(spacing: settings.visualDensity.inlineSpacing) {
-              Image(systemName: item.systemImage)
-                .foregroundStyle(item.color)
-                .imageScale(settings.visualDensity.isCompact ? .small : .medium)
-                .frame(width: settings.visualDensity.isCompact ? 16 : 20)
-              sidebarTitle(
-                item.title(isAssemblyAI: settings.isActiveAssemblyAILiveModel),
-                isSelected: selection == item
-              )
-              ViewThatFits(in: .horizontal) {
-                shortcutHint(for: item)
-                EmptyView()
-              }
-            }
-            .contentShape(Rectangle())
-          }
-          .buttonStyle(.plain)
-          .focusable(true)
-          .focusEffectDisabled()
-          .padding(.horizontal, settings.visualDensity.isCompact ? 4 : 12)
-          .padding(.vertical, settings.visualDensity.isCompact ? 2 : 8)
-          .background(
-            selection == item
-              ? RoundedRectangle(cornerRadius: 8)
-                .fill(item.color.opacity(0.15))
-              : nil
-          )
-          .listRowInsets(sidebarInsets)
-          .listRowBackground(Color.clear)
-          .speakTooltip(item.helpMessage)
-          .accessibilityLabel(item.title(isAssemblyAI: settings.isActiveAssemblyAILiveModel))
-          .accessibilityHint(accessibilityHint(for: item))
-          .accessibilityAddTraits(selection == item ? [.isButton, .isSelected] : .isButton)
-          .accessibilityValue(selection == item ? "Selected" : "")
-          .accessibilityIdentifier(item.accessibilityID)
+        ForEach(SidebarItem.speakItems) { item in
+          sidebarRow(for: item)
         }
       } header: {
         sidebarSectionHeader("Speak")
       }
 
       Section {
-        ForEach(SettingsTab.allCases) { tab in
-          let item = SidebarItem.settings(tab)
-          Button {
-            selection = item
-          } label: {
-            HStack(spacing: settings.visualDensity.inlineSpacing) {
-              Image(systemName: tab.systemImage)
-                .foregroundStyle(Color.brandAccentWarm)
-                .imageScale(settings.visualDensity.isCompact ? .small : .medium)
-                .frame(width: settings.visualDensity.isCompact ? 16 : 20)
-              sidebarTitle(tab.title(isAssemblyAI: settings.isActiveAssemblyAILiveModel), isSelected: selection == item)
-              ViewThatFits(in: .horizontal) {
-                shortcutHint(for: item)
-                EmptyView()
-              }
-            }
-            .contentShape(Rectangle())
-            .padding(.leading, settings.visualDensity.isCompact ? 0 : 10)
-          }
-          .buttonStyle(.plain)
-          .focusable(true)
-          .focusEffectDisabled()
-          .padding(.horizontal, settings.visualDensity.isCompact ? 4 : 12)
-          .padding(.vertical, settings.visualDensity.isCompact ? 2 : 8)
-          .background(
-            selection == item
-              ? RoundedRectangle(cornerRadius: 8)
-                .fill(Color.brandAccentWarm.opacity(0.15))
-              : nil
-          )
-          .listRowInsets(sidebarInsets)
-          .listRowBackground(Color.clear)
-          .speakTooltip(item.helpMessage)
-          .accessibilityLabel(item.title(isAssemblyAI: settings.isActiveAssemblyAILiveModel))
-          .accessibilityHint(accessibilityHint(for: item))
-          .accessibilityAddTraits(selection == item ? [.isButton, .isSelected] : .isButton)
-          .accessibilityValue(selection == item ? "Selected" : "")
-          .accessibilityIdentifier(item.accessibilityID)
+        ForEach(SidebarItem.settingsItems) { item in
+          sidebarRow(for: item, indented: true)
         }
       } header: {
         sidebarSectionHeader("Settings")
@@ -217,6 +172,54 @@ struct SideBarView: View {
     }
     .listStyle(.sidebar)
     .scrollContentBackground(.hidden)
+  }
+
+  private func sidebarRow(for item: SidebarItem, indented: Bool = false) -> some View {
+    let isSelected = selection == item
+    let title = item.title(isAssemblyAI: settings.isActiveAssemblyAILiveModel)
+
+    return HStack(spacing: settings.visualDensity.inlineSpacing) {
+      Image(systemName: item.systemImage)
+        .foregroundStyle(item.color)
+        .imageScale(settings.visualDensity.isCompact ? .small : .medium)
+        .frame(width: settings.visualDensity.isCompact ? 16 : 20)
+      sidebarTitle(title, isSelected: isSelected)
+      ViewThatFits(in: .horizontal) {
+        shortcutHint(for: item)
+        EmptyView()
+      }
+    }
+    .contentShape(Rectangle())
+    .padding(.leading, indented && !settings.visualDensity.isCompact ? 10 : 0)
+    .padding(.horizontal, settings.visualDensity.isCompact ? 4 : 12)
+    .padding(.vertical, settings.visualDensity.isCompact ? 2 : 8)
+    .tag(item)
+    .listRowInsets(sidebarInsets)
+    .listRowBackground(selectionBackground(for: item))
+    .speakTooltip(item.helpMessage)
+    .accessibilityElement(children: .combine)
+    .accessibilityLabel(title)
+    .accessibilityHint(accessibilityHint(for: item))
+    .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    .accessibilityValue(isSelected ? "Selected" : "")
+    .accessibilityIdentifier(item.accessibilityID)
+  }
+
+  /// The brand selection tint, moved onto the row background so it survives
+  /// `List` selection instead of being painted inside a button label.
+  ///
+  /// Padded by `sidebarInsets` because a row background spans the whole row
+  /// while `listRowInsets` only insets the row's content, and the tint should
+  /// keep hugging the content the way it did before.
+  @ViewBuilder
+  private func selectionBackground(for item: SidebarItem) -> some View {
+    if selection == item {
+      RoundedRectangle(cornerRadius: 8)
+        .fill(item.color.opacity(0.15))
+        .padding(sidebarInsets)
+    } else {
+      Color.clear
+    }
   }
 
   private func sidebarTitle(_ title: String, isSelected: Bool) -> some View {

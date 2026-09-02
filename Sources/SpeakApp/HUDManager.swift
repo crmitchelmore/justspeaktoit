@@ -37,7 +37,6 @@ final class HUDManager: ObservableObject {
     var phase: Phase
     var headline: String
     var subheadline: String?
-    var elapsed: TimeInterval
     var showRetryHint: Bool
     var liveText: String?
     var liveTextIsFinal: Bool
@@ -47,7 +46,7 @@ final class HUDManager: ObservableObject {
     var interimTranscript: String
 
     static let hidden = Snapshot(
-      phase: .hidden, headline: "", subheadline: nil, elapsed: 0, showRetryHint: false,
+      phase: .hidden, headline: "", subheadline: nil, showRetryHint: false,
       liveText: nil, liveTextIsFinal: true, liveTextConfidence: nil, streamingText: nil,
       finalTranscript: "", interimTranscript: ""
     )
@@ -60,6 +59,16 @@ final class HUDManager: ObservableObject {
   @Published var isExpanded: Bool = false
 
   @Published private(set) var snapshot: Snapshot = .hidden
+  /// When the current phase's clock started, or `nil` for the phases that show
+  /// no clock (`armed`, the terminal phases and `hidden`).
+  ///
+  /// The HUD used to carry a `Snapshot.elapsed` that a 50 Hz timer wrote back
+  /// into the snapshot, so every tick republished phase, headline, transcripts
+  /// and capture health and re-rendered the whole HUD. Publishing only the
+  /// instant the clock started lets the views drive their own `TimelineView`
+  /// at the resolution they actually display, so nothing is published between
+  /// phase transitions.
+  @Published private(set) var sessionStart: Date?
   /// Current capture-health data shown in the HUD during recording and failure phases.
   @Published private(set) var captureHealth: CaptureHealthSnapshot = .empty
   /// Normalized audio level (0.0 to 1.0) during recording phase
@@ -67,8 +76,6 @@ final class HUDManager: ObservableObject {
 
   private let appSettings: AppSettings
   private let accessibilityAnnouncementPoster: ((String) -> Void)?
-  private var timer: Timer?
-  private var phaseStartDate: Date?
   private var autoHideTimer: Timer?
   /// The interval most recently passed to `scheduleAutoHide`. `Timer.timeInterval`
   /// reads back as 0 for a non-repeating timer, so this is the only way to
@@ -237,6 +244,7 @@ final class HUDManager: ObservableObject {
     guard snapshot.phase.isVisible else { return }
     invalidateTimers()
     audioLevel = 0
+    sessionStart = nil
     snapshot = .hidden
     postAccessibilityAnnouncement("HUD dismissed")
   }
@@ -253,37 +261,15 @@ final class HUDManager: ObservableObject {
     showRetryHint: Bool = false
   ) {
     invalidateTimers()
-    phaseStartDate = showsTimer ? Date() : nil
+    sessionStart = showsTimer ? Date() : nil
     snapshot = Snapshot(
-      phase: phase, headline: headline, subheadline: subheadline, elapsed: 0, showRetryHint: showRetryHint,
+      phase: phase, headline: headline, subheadline: subheadline, showRetryHint: showRetryHint,
       liveText: nil, liveTextIsFinal: true, liveTextConfidence: nil, streamingText: nil,
       finalTranscript: "", interimTranscript: ""
     )
     if let announcement = Self.accessibilityAnnouncement(for: phase, subheadline: subheadline) {
       postAccessibilityAnnouncement(announcement)
     }
-
-    guard showsTimer else { return }
-
-    // Use target-selector Timer pattern to completely bypass Swift concurrency runtime.
-    // Block-based timers with [weak self] can crash in swift_getObjectType during
-    // executor verification if the object is deallocating.
-    timer = Timer.scheduledTimer(
-      timeInterval: HUDPlatformWorkarounds.elapsedTimerInterval,
-      target: self,
-      selector: #selector(elapsedTimerFired),
-      userInfo: nil,
-      repeats: true
-    )
-    if let timer {
-      RunLoop.main.add(timer, forMode: .common)
-    }
-  }
-  
-  @objc private func elapsedTimerFired() {
-    guard let start = phaseStartDate else { return }
-    let elapsed = Date().timeIntervalSince(start)
-    snapshot.elapsed = elapsed
   }
 
   private func scheduleAutoHide(after delay: TimeInterval) {
@@ -310,8 +296,6 @@ final class HUDManager: ObservableObject {
   }
 
   private func invalidateTimers() {
-    timer?.invalidate()
-    timer = nil
     autoHideTimer?.invalidate()
     autoHideTimer = nil
   }

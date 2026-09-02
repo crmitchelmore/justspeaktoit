@@ -369,44 +369,6 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
   }
 }
 
-private final class OpenAIRealtimePCMBufferPool: @unchecked Sendable {
-  private let lock = NSLock()
-  private let maximumBuffers: Int
-  private var buffers: [AVAudioPCMBuffer] = []
-
-  init(maximumBuffers: Int) {
-    self.maximumBuffers = maximumBuffers
-  }
-
-  func buffer(format: AVAudioFormat, frameCapacity: AVAudioFrameCount) -> AVAudioPCMBuffer? {
-    lock.lock()
-    defer { lock.unlock() }
-
-    if let index = buffers.firstIndex(where: { $0.format == format && $0.frameCapacity >= frameCapacity }) {
-      let buffer = buffers.remove(at: index)
-      buffer.frameLength = 0
-      return buffer
-    }
-
-    return AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCapacity)
-  }
-
-  func recycle(_ buffer: AVAudioPCMBuffer) {
-    lock.lock()
-    defer { lock.unlock() }
-
-    guard buffers.count < maximumBuffers else { return }
-    buffer.frameLength = 0
-    buffers.append(buffer)
-  }
-
-  func removeAll() {
-    lock.lock()
-    defer { lock.unlock() }
-    buffers.removeAll(keepingCapacity: true)
-  }
-}
-
 // MARK: - Audio Processor
 
 /// PCM16 audio resampler that batches frames into ≥50 ms chunks and forwards
@@ -417,7 +379,7 @@ private final class OpenAIRealtimeAudioProcessor: @unchecked Sendable {
   private let queue = DispatchQueue(label: "com.speak.app.openairealtime.audioProcessing")
   private let minimumChunkBytes: Int
   private let preferredChunkBytes: Int
-  private let copyBufferPool = OpenAIRealtimePCMBufferPool(maximumBuffers: 4)
+  private let copyBufferPool = LivePCMBufferPool(maximumBuffers: 4)
 
   private var isRunning: Bool = false
   private var cachedConverter: AVAudioConverter?
@@ -478,8 +440,8 @@ private final class OpenAIRealtimeAudioProcessor: @unchecked Sendable {
     guard let copied = copyPCMBuffer(buffer) else { return }
     queue.async { [weak self] in
       guard let self else { return }
-      guard self.isRunning else { return }
       defer { self.copyBufferPool.recycle(copied) }
+      guard self.isRunning else { return }
       self.processAndSendAudio(
         copied, from: inputFormat, to: outputFormat,
         transcriber: transcriber, logger: logger

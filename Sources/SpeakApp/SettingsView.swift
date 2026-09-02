@@ -760,13 +760,7 @@ struct SettingsView: View {
                 .tag(voice.id)
               }
             }
-            .pickerStyle(.menu)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(
-              RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
-            )
+            .settingsMenuPicker()
             .speakTooltip("Choose your preferred voice for text-to-speech synthesis")
 
             Text("Your default voice for converting text to speech")
@@ -1099,12 +1093,7 @@ struct SettingsView: View {
   func settingsToggle(_ label: String, isOn: Binding<Bool>, tint: Color) -> some View {
     Toggle(label, isOn: isOn)
       .tint(tint)
-      .padding(.horizontal, 12)
-      .padding(.vertical, 8)
-      .background(
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
-          .fill(Color(nsColor: .controlBackgroundColor))
-      )
+      .settingsControlChrome()
   }
 
   func speedModeIcon(for mode: AppSettings.SpeedMode) -> String {

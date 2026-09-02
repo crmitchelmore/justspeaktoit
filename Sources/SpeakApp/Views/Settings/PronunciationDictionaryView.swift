@@ -16,7 +16,6 @@ struct PronunciationDictionaryView: View {
     @State private var showingImportSheet = false
     @State private var showingExportSheet = false
     @State private var editingEntry: PronunciationEntry?
-    @State private var exportURL: URL?
     @State private var importMerge = true
     @State private var alertMessage: String?
     @State private var showingAlert = false

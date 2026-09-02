@@ -107,7 +107,10 @@ extension SettingsView {
 
       SettingsCard(title: "Keyterms", systemImage: "textformat.abc", tint: Color.blue) {
         VStack(alignment: .leading, spacing: 8) {
-          Text("Comma-separated terms to boost recognition accuracy (e.g. proper nouns, jargon). Max 100 terms, each ≤50 characters.")
+          Text(
+            "Comma-separated terms to boost recognition accuracy (e.g. proper nouns, jargon). "
+              + "Max 100 terms, each ≤50 characters."
+          )
             .font(.caption)
             .foregroundStyle(.secondary)
           TextField(
@@ -252,40 +255,6 @@ extension SettingsView {
 
   private var remotePostProcessingSection: some View {
     VStack(alignment: .leading, spacing: 12) {
-      VStack(alignment: .leading, spacing: 8) {
-        Picker("Output Language", selection: settingsBinding(\AppSettings.postProcessingOutputLanguage)) {
-          Text("English").tag("English")
-          Text("Spanish").tag("Spanish")
-          Text("French").tag("French")
-          Text("German").tag("German")
-          Text("Italian").tag("Italian")
-          Text("Portuguese").tag("Portuguese")
-          Text("Chinese").tag("Chinese")
-          Text("Japanese").tag("Japanese")
-          Text("Korean").tag("Korean")
-          Text("Russian").tag("Russian")
-          Text("Arabic").tag("Arabic")
-          Text("Hindi").tag("Hindi")
-        }
-        .pickerStyle(.menu)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(
-          RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .fill(Color(nsColor: .controlBackgroundColor))
-        )
-        .speakTooltip("Let Speak know which language you want your polished transcript delivered in.")
-        .onChange(of: settings.postProcessingOutputLanguage) { _, _ in
-          if showSystemPromptPreview {
-            generateSystemPromptPreview()
-          }
-        }
-
-        Text("The language that the transcription will be output in.")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      }
-
       ModelPicker(
         title: "Remote Post-processing Model",
         help: """
@@ -339,6 +308,34 @@ extension SettingsView {
         )
       }
 
+      VStack(alignment: .leading, spacing: 8) {
+        Picker("Output Language", selection: settingsBinding(\AppSettings.postProcessingOutputLanguage)) {
+          Text("English").tag("English")
+          Text("Spanish").tag("Spanish")
+          Text("French").tag("French")
+          Text("German").tag("German")
+          Text("Italian").tag("Italian")
+          Text("Portuguese").tag("Portuguese")
+          Text("Chinese").tag("Chinese")
+          Text("Japanese").tag("Japanese")
+          Text("Korean").tag("Korean")
+          Text("Russian").tag("Russian")
+          Text("Arabic").tag("Arabic")
+          Text("Hindi").tag("Hindi")
+        }
+        .settingsMenuPicker()
+        .speakTooltip("Let Speak know which language you want your polished transcript delivered in.")
+        .onChange(of: settings.postProcessingOutputLanguage) { _, _ in
+          if showSystemPromptPreview {
+            generateSystemPromptPreview()
+          }
+        }
+
+        Text("The language that the transcription will be output in.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+
       VStack(alignment: .leading) {
         HStack {
           Text("Temperature")
@@ -359,19 +356,10 @@ extension SettingsView {
 
   private var localPostProcessingSection: some View {
     VStack(alignment: .leading, spacing: 16) {
-      HStack(spacing: 8) {
-        Image(systemName: "lock.shield.fill")
-          .foregroundStyle(Color.green)
-          .imageScale(.small)
-        Text("Local Post-processing - private on this Mac")
-          .font(.subheadline.weight(.semibold))
-          .foregroundStyle(Color.green)
-      }
-      .padding(.horizontal, 12)
-      .padding(.vertical, 6)
-      .background(
-        Capsule()
-          .fill(Color.green.opacity(0.12))
+      SettingsModeBadge(
+        title: "Local Post-processing - private on this Mac",
+        systemImage: "lock.shield.fill",
+        tint: Color.green
       )
 
       #if APP_STORE
@@ -445,7 +433,9 @@ extension SettingsView {
       #endif
 
       VStack(spacing: 10) {
-        ForEach(ModelCatalog.postProcessing.filter { $0.id == LocalPostProcessingModelManager.builtInRulesModelID }) { option in
+        ForEach(
+          ModelCatalog.postProcessing.filter { $0.id == LocalPostProcessingModelManager.builtInRulesModelID }
+        ) { option in
           builtInLocalPostProcessingRow(option)
         }
         #if !APP_STORE

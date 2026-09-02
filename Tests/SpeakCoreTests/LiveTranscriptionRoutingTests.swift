@@ -127,6 +127,17 @@ final class LiveTranscriptionRoutingTests: XCTestCase {
         XCTAssertFalse(LiveTranscriptionProviderID.speechmatics.isSupportedOnIOS)
     }
 
+    func testIOSSupportedProviders_areDerivedFromCatalogueInFirstAppearanceOrder() {
+        var seen: Set<LiveTranscriptionProviderID> = []
+        let expected: [LiveTranscriptionProviderID] = LiveTranscriptionRouting.allRoutes.compactMap { route in
+            guard route.isSupportedOnIOS, seen.insert(route.provider).inserted else { return nil }
+            return route.provider
+        }
+
+        XCTAssertEqual(LiveTranscriptionRouting.iOSSupportedProviders, expected)
+        XCTAssertEqual(Set(expected), Set(LiveTranscriptionProviderID.allCases.filter(\.isSupportedOnIOS)))
+    }
+
     // MARK: - Factory
 
     func testFactory_buildsSharedClientForShippedProviders() {

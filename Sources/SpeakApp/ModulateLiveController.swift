@@ -469,6 +469,7 @@ private extension ModulateLiveController {
       return copy
     }
 
+    // swiftlint:disable:next function_body_length
     private func processAndSendAudio(
       _ buffer: AVAudioPCMBuffer,
       from inputFormat: AVAudioFormat,
@@ -505,9 +506,20 @@ private extension ModulateLiveController {
         outputBuffer = newBuffer
       }
 
-      converter.reset()
+      // NOTE: We deliberately do NOT call converter.reset() between chunks —
+      // doing so wipes the resampler's filter history and priming/trailing
+      // frames, which audibly clicks at chunk boundaries and pays the
+      // re-priming cost on every chunk. The converter is only created once
+      // per inputFormat (cachedConverter), so its state is the *correct*
+      // thing to preserve across taps.
       var error: NSError?
+      var didProvideInput = false
       let status = converter.convert(to: outputBuffer, error: &error) { _, outStatus in
+        guard !didProvideInput else {
+          outStatus.pointee = .noDataNow
+          return nil
+        }
+        didProvideInput = true
         outStatus.pointee = .haveData
         return buffer
       }

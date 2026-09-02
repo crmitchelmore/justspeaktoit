@@ -288,12 +288,7 @@ struct ModelPicker: View {
           }
         }
         .buttonStyle(.plain)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(
-          RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .fill(Color(nsColor: .controlBackgroundColor))
-        )
+        .settingsControlChrome()
         .speakTooltip(tooltipText)
         .sheet(isPresented: $isShowingChooser) {
           ModelChooserSheet(
@@ -327,13 +322,7 @@ struct ModelPicker: View {
             .tag(ModelCatalog.customOptionID)
           }
         }
-        .pickerStyle(.menu)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(
-          RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .fill(Color(nsColor: .controlBackgroundColor))
-        )
+        .settingsMenuPicker()
         .speakTooltip(tooltipText)
       }
 

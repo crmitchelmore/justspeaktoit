@@ -13,7 +13,9 @@ import Foundation
 /// return `nil` — callers fall back to a platform-native path or surface a
 /// "not available yet" message.
 public enum LiveTranscriptionClientFactory {
-    // swiftlint:disable:next function_body_length
+    // One case per provider is the point of this switch: the catalogue-to-transport
+    // mapping stays auditable in one place, so its length grows with the provider list.
+    // swiftlint:disable:next cyclomatic_complexity function_body_length
     public static func makeClient(
         for route: LiveTranscriptionRoute,
         apiKey: String,

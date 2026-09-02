@@ -28,6 +28,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     private let route: LiveTranscriptionRoute
     private let apiKey: String
     private let language: String?
+    private let keywords: [String]
 
     private var client: StreamingTranscriptionClient?
     private let audioEngine = AVAudioEngine()
@@ -56,11 +57,13 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         route: LiveTranscriptionRoute,
         apiKey: String,
         language: String? = Locale.current.identifier,
+        keywords: [String] = [],
         audioSessionManager: AudioSessionManager
     ) {
         self.route = route
         self.apiKey = apiKey
         self.language = language
+        self.keywords = keywords
         self.audioSessionManager = audioSessionManager
         setupInterruptionHandling()
     }
@@ -78,7 +81,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         }
 
         guard let client = LiveTranscriptionClientFactory.makeClient(
-            for: route, apiKey: apiKey, language: language
+            for: route, apiKey: apiKey, language: language, keywords: keywords
         ) else {
             let err = LiveTranscriptionClientError.providerNotAvailable(route.provider)
             self.error = err

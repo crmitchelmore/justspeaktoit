@@ -18,6 +18,7 @@ extension OnboardingProvider {
         case .openai: return .openAI
         case .openrouter: return .openRouter
         case .revai: return .revAI
+        case .meta: return .meta
         }
     }
 }
@@ -44,6 +45,7 @@ enum OnboardingProvider: String, CaseIterable, Identifiable {
     case openai
     case openrouter
     case revai
+    case meta
     
     var id: String { rawValue }
     
@@ -52,6 +54,7 @@ enum OnboardingProvider: String, CaseIterable, Identifiable {
         case .deepgram: return "Deepgram"
         case .soniox: return "Soniox"
         case .openai: return "OpenAI Whisper"
+        case .meta: return "Meta Muse"
         case .openrouter: return "OpenRouter"
         case .revai: return "Rev.ai"
         }
@@ -64,6 +67,7 @@ enum OnboardingProvider: String, CaseIterable, Identifiable {
         case .openai: return URL(string: "https://platform.openai.com/signup")!
         case .openrouter: return URL(string: "https://openrouter.ai/keys")!
         case .revai: return URL(string: "https://www.rev.ai/auth/signup")!
+        case .meta: return URL(string: "https://llama.developer.meta.com")!
         }
     }
     
@@ -74,6 +78,7 @@ enum OnboardingProvider: String, CaseIterable, Identifiable {
         case .openai: return "Go to API Keys → Create new secret key"
         case .openrouter: return "Go to Keys → Create Key"
         case .revai: return "Go to Access Token → Generate Token"
+        case .meta: return "Open the Model API dashboard → API Keys → Create key"
         }
     }
     
@@ -84,6 +89,7 @@ enum OnboardingProvider: String, CaseIterable, Identifiable {
         case .openai: return nil
         case .openrouter: return "Pay-as-you-go with many model options"
         case .revai: return "Free tier includes 5 hours"
+        case .meta: return "Muse Voice Transcribe is billed by audio minute"
         }
     }
     
@@ -97,6 +103,7 @@ enum OnboardingProvider: String, CaseIterable, Identifiable {
         case .deepgram: return "deepgram/nova-3-streaming"
         case .soniox: return "soniox/stt-rt-v5-streaming"
         case .openai, .openrouter, .revai: return nil
+        case .meta: return MetaMuseVoiceTranscribe.liveCatalogID
         }
     }
 
@@ -107,6 +114,7 @@ enum OnboardingProvider: String, CaseIterable, Identifiable {
         case .deepgram: return "Deepgram"
         case .soniox: return "Soniox"
         case .openai: return "OpenAI"
+        case .meta: return "Meta"
         case .openrouter: return "OpenRouter"
         case .revai: return "Rev.ai"
         }
@@ -266,6 +274,15 @@ final class OnboardingState: ObservableObject {
                     } else {
                         validationError = "Unexpected response (\(httpResponse.statusCode))"
                     }
+                }
+            case .meta:
+                let result = await MetaMuseAPIKeyValidator().validate(apiKey)
+                switch result.outcome {
+                case .success:
+                    isValidating = false
+                    return true
+                case .failure(let message):
+                    validationError = message
                 }
             }
         } catch {

@@ -80,6 +80,8 @@ extension LiveTranscriptionProviderID {
             return "eu.rt.speechmatics.com"
         case .xai:
             return "api.x.ai"
+        case .meta:
+            return "api.meta.ai"
         }
     }
 
@@ -89,7 +91,7 @@ extension LiveTranscriptionProviderID {
         case .apple, .assemblyai, .openai:
             return .unsupported
         case .deepgram, .cartesia, .gladia, .modulate, .soniox, .elevenlabs,
-             .speechmatics, .xai:
+             .speechmatics, .xai, .meta:
             guard let host = self.streamingHost else { return .unsupported }
             return .endpointProbe(host: host)
         }

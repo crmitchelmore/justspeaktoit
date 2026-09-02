@@ -118,7 +118,8 @@ struct TranscribeAudioFileIntent: AppIntent {
             at: temporaryURL,
             model: model,
             apiKey: settings.batchAPIKey,
-            language: settings.preferredModelLanguage
+            language: settings.preferredModelLanguage,
+            keywords: MetaMuseVoiceTranscribe.keywords(from: settings.transcriptionKeywords)
         )
         iOSHistoryManager.shared.recordTranscription(
             text: result.text,

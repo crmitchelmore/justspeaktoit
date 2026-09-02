@@ -551,7 +551,8 @@ public final class CloudKitKeySync: ObservableObject {
         "gladia.apiKey",
         "modulate.apiKey",
         "soniox.apiKey",
-        "xai.apiKey"
+        "xai.apiKey",
+        "meta.apiKey"
     ]
 
     @Published public private(set) var status = CloudKitKeySyncStatus()

@@ -53,6 +53,14 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
                 + "faster semantic endpointing, and improved multilingual recognition across 60+ languages.",
             estimatedLatencyMs: 220, latencyTier: .fast),
         Option(
+            id: MetaMuseVoiceTranscribe.liveCatalogID,
+            displayName: "Meta Muse Voice Transcribe (Streaming)",
+            description: "Meta Model API realtime speech-to-text with partial transcripts, "
+                + "model-detected utterance boundaries, and language and vocabulary biasing.",
+            estimatedLatencyMs: 200,
+            latencyTier: .fast,
+            tags: [.fast, .leading]),
+        Option(
             id: "speechmatics/enhanced-streaming",
             displayName: "Speechmatics Enhanced (Streaming)",
             description: "Speechmatics realtime WebSocket transcription with partial and final results.",
@@ -135,6 +143,14 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             displayName: "Voxtral Mini Latest (Mistral)",
             description: "Mistral Voxtral Mini batch transcription for long-form multilingual audio.",
             estimatedLatencyMs: 900, latencyTier: .fast),
+        Option(
+            id: MetaMuseVoiceTranscribe.batchCatalogID,
+            displayName: "Meta Muse Voice Transcribe",
+            description: "Meta Model API file transcription with turn-level timestamps, "
+                + "language biasing, and vocabulary biasing. Recordings are converted to supported PCM WAV.",
+            estimatedLatencyMs: 800,
+            latencyTier: .fast,
+            tags: [.fast, .leading]),
         Option(
             id: "soniox/stt-async-v5",
             displayName: "Soniox Async v5",

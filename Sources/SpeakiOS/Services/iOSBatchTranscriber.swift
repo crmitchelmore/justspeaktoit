@@ -21,13 +21,14 @@ public final class IOSBatchTranscriber {
         audioSessionManager: AudioSessionManager,
         model: String,
         apiKey: String,
+        keywords: [String] = [],
         retainRecording: Bool = true,
         session: URLSession = .shared
     ) {
         self.audioSessionManager = audioSessionManager
         self.model = model
         self.retainRecording = retainRecording
-        self.client = IOSBatchTranscriptionClient(apiKey: apiKey, session: session)
+        self.client = IOSBatchTranscriptionClient(apiKey: apiKey, keywords: keywords, session: session)
     }
 
     public func start() async throws {
@@ -105,15 +106,17 @@ public final class IOSBatchTranscriber {
         model: String,
         apiKey: String,
         language: String?,
+        keywords: [String] = [],
         session: URLSession = .shared
     ) async throws -> TranscriptionResult {
-        try await IOSBatchTranscriptionClient(apiKey: apiKey, session: session)
+        try await IOSBatchTranscriptionClient(apiKey: apiKey, keywords: keywords, session: session)
             .transcribeFile(at: url, model: model, language: language)
     }
 }
 
 private struct IOSBatchTranscriptionClient {
     let apiKey: String
+    let keywords: [String]
     let session: URLSession
 
     func transcribeFile(at url: URL, model: String, language: String?) async throws -> TranscriptionResult {
@@ -137,6 +140,15 @@ private struct IOSBatchTranscriptionClient {
                 model: model,
                 language: language,
                 apiKey: trimmedKey
+            )
+        }
+        if model == MetaMuseVoiceTranscribe.batchCatalogID {
+            return try await MetaMuseBatchClient(session: session).transcribeFile(
+                at: url,
+                apiKey: trimmedKey,
+                model: model,
+                language: language,
+                keywords: keywords
             )
         }
         return try await transcribeWithOpenRouter(

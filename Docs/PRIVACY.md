@@ -17,6 +17,7 @@ Speak is designed with privacy in mind. This document explains what data is coll
 |----------|---------------|------------|
 | Apple Speech | On-device | Audio stays on your iPhone/Mac |
 | Deepgram | Cloud (US) | Audio streamed to Deepgram servers |
+| Meta Model API | Cloud | Audio streamed or uploaded to Meta for Muse Voice Transcribe |
 
 ## API Keys
 
@@ -35,6 +36,7 @@ Speak is designed with privacy in mind. This document explains what data is coll
 ### When does Speak connect to the internet?
 - **Apple Speech**: Only for initial language model download (if needed)
 - **Deepgram**: When actively transcribing via Deepgram
+- **Meta Model API**: When using Muse Voice Transcribe for live or file transcription
 - **Send to Mac**: Only on your local network (no internet required)
 - **iCloud Sync**: When syncing settings (optional)
 
@@ -44,6 +46,13 @@ When using Deepgram:
 - Audio stream (in real-time)
 - Language/model selection
 - No personal identifiers
+
+When using Meta Muse Voice Transcribe:
+- Live microphone audio, or the selected recording converted to mono PCM16 WAV
+- The selected model, optional language hint, and user-configured recognition keywords
+- A generated session identifier used to correlate API logs
+- Meta's API limits file requests to 10 minutes and 32 MB; its handling and
+  retention are governed by the Meta Model API account policy
 
 ## Local Network (Send to Mac)
 

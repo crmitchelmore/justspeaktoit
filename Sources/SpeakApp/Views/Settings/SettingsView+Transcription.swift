@@ -143,6 +143,30 @@ extension SettingsView {
         .speakTooltip("Control the trade-off between speed and AI-powered text cleanup.")
       }
 
+      if (settings.transcriptionMode == .liveNative && settings.liveTranscriptionModel.hasPrefix("meta/"))
+        || (settings.transcriptionMode == .batch && settings.batchTranscriptionModel.hasPrefix("meta/")) {
+        SettingsCard(
+          title: "Meta Muse recognition bias",
+          systemImage: "textformat.abc",
+          tint: Color.blue
+        ) {
+          VStack(alignment: .leading, spacing: 8) {
+            Text(
+              "The preferred language setting supplies Meta's language bias. "
+                + "Add comma-separated names, acronyms, places, or domain terms for vocabulary biasing."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            TextField(
+              "JustSpeakToIt, Meta Model API, Muse Voice",
+              text: settingsBinding(\AppSettings.assemblyAIKeyterms)
+            )
+            .textFieldStyle(.roundedBorder)
+          }
+        }
+        .speakTooltip("Add vocabulary hints for Meta Muse Voice Transcribe.")
+      }
+
       if !isStreamingTranscriptionSelected {
         SettingsCard(title: "Recording buffer", systemImage: "waveform.path.ecg", tint: Color.brandLagoon) {
           VStack(alignment: .leading, spacing: 12) {

@@ -16,6 +16,7 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
   private let permissionsManager: PermissionsManager
   private let audioDeviceManager: AudioInputDeviceManager
   private let secureStorage: SecureAppStorage
+  private let appSettings: AppSettings
 
   private var currentLanguage: String?
   private var currentModel: String?
@@ -32,11 +33,13 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
   init(
     permissionsManager: PermissionsManager,
     audioDeviceManager: AudioInputDeviceManager,
-    secureStorage: SecureAppStorage
+    secureStorage: SecureAppStorage,
+    appSettings: AppSettings
   ) {
     self.permissionsManager = permissionsManager
     self.audioDeviceManager = audioDeviceManager
     self.secureStorage = secureStorage
+    self.appSettings = appSettings
   }
 
   func configure(language: String?, model: String) {
@@ -44,6 +47,7 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     currentModel = model
   }
 
+  // swiftlint:disable:next function_body_length
   func start() async throws {
     guard !isRunning else { return }
     guard (await permissionsManager.ensureGranted(.microphone)).isGranted else {
@@ -59,7 +63,10 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     guard let client = LiveTranscriptionClientFactory.makeClient(
       for: route,
       apiKey: apiKey,
-      language: currentLanguage
+      language: currentLanguage,
+      keywords: route.provider == .meta
+        ? MetaMuseVoiceTranscribe.keywords(from: appSettings.assemblyAIKeyterms)
+        : []
     ) else {
       throw LiveTranscriptionClientError.providerNotAvailable(route.provider)
     }

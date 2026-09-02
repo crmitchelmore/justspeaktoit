@@ -207,6 +207,14 @@ public final class AppSettings: ObservableObject {
         didSet { persistSecret(xAIAPIKey, identifier: Self.xAIKeyID) }
     }
 
+    @Published public var metaAPIKey: String {
+        didSet { persistSecret(metaAPIKey, identifier: Self.metaKeyID) }
+    }
+
+    @Published public var transcriptionKeywords: String {
+        didSet { defaults.set(transcriptionKeywords, forKey: "transcriptionKeywords") }
+    }
+
     // MARK: - Canonical secure storage for API keys (SpeakCore)
     //
     // Every API key is stored locally through SpeakCore's SecureStorage using the
@@ -223,6 +231,7 @@ public final class AppSettings: ObservableObject {
     static let assemblyAIKeyID = "assemblyai.apiKey"
     static let gladiaKeyID = "gladia.apiKey"
     static let xAIKeyID = "xai.apiKey"
+    static let metaKeyID = "meta.apiKey"
 
     private static let credentialStorage = SecureStorage(
         configuration: SecureStorageConfiguration(
@@ -436,6 +445,8 @@ public final class AppSettings: ObservableObject {
         self.assemblyAIAPIKey = ""
         self.gladiaAPIKey = ""
         self.xAIAPIKey = ""
+        self.metaAPIKey = ""
+        self.transcriptionKeywords = defaults.string(forKey: "transcriptionKeywords") ?? ""
         self.liveActivitiesEnabled = liveActivities
         self.visualDensity = density
         self.autoStartRecording = autoStart
@@ -547,6 +558,7 @@ public final class AppSettings: ObservableObject {
     public var hasAssemblyAIKey: Bool { !assemblyAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasGladiaKey: Bool { !gladiaAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasXAIKey: Bool { !xAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    public var hasMetaKey: Bool { !metaAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     /// Identifiers currently available to model pickers. Because this is
     /// derived from the published key values, readiness badges refresh as soon
@@ -563,6 +575,7 @@ public final class AppSettings: ObservableObject {
         if hasAssemblyAIKey { identifiers.insert(Self.assemblyAIKeyID) }
         if hasGladiaKey { identifiers.insert(Self.gladiaKeyID) }
         if hasXAIKey { identifiers.insert(Self.xAIKeyID) }
+        if hasMetaKey { identifiers.insert(Self.metaKeyID) }
         return identifiers
     }
 
@@ -608,6 +621,10 @@ public final class AppSettings: ObservableObject {
         xAIAPIKey = await Self.syncedAPIKeyValue(
             identifier: Self.xAIKeyID,
             currentValue: xAIAPIKey
+        )
+        metaAPIKey = await Self.syncedAPIKeyValue(
+            identifier: Self.metaKeyID,
+            currentValue: metaAPIKey
         )
     }
 
@@ -656,7 +673,7 @@ public final class AppSettings: ObservableObject {
 
     /// Returns the stored API key for a resolved live-transcription route, used
     /// by the generic shared-client recording path.
-    public func liveAPIKey(for route: LiveTranscriptionRoute) -> String {
+    public func liveAPIKey(for route: LiveTranscriptionRoute) -> String { // swiftlint:disable:this cyclomatic_complexity line_length
         switch route.apiKeyIdentifier {
         case Self.deepgramKeyID: return deepgramAPIKey
         case Self.openAIKeyID: return openAIAPIKey
@@ -667,6 +684,7 @@ public final class AppSettings: ObservableObject {
         case Self.assemblyAIKeyID: return assemblyAIAPIKey
         case Self.gladiaKeyID: return gladiaAPIKey
         case Self.xAIKeyID: return xAIAPIKey
+        case Self.metaKeyID: return metaAPIKey
         default: return ""
         }
     }
@@ -681,6 +699,9 @@ public final class AppSettings: ObservableObject {
         }
         if Self.openAIBatchModelIDs.contains(modelIdentifier) {
             return openAIAPIKey
+        }
+        if modelIdentifier == MetaMuseVoiceTranscribe.batchCatalogID {
+            return metaAPIKey
         }
         return openRouterAPIKey
     }
@@ -704,6 +725,7 @@ public final class AppSettings: ObservableObject {
                 || openAIBatchModelIDs.contains(option.id)
                 || option.id.hasPrefix("google/")
                 || option.id == "openai/gpt-4o-audio-preview-2024-12-17"
+                || option.id == MetaMuseVoiceTranscribe.batchCatalogID
         }
 
     // MARK: - Legacy migration
@@ -1001,11 +1023,32 @@ public struct SettingsView: View {
                     Label(
                         AppSettings.openAIBatchModelIDs.contains(settings.batchTranscriptionModel)
                             ? "Add an OpenAI API key below to use this model."
-                            : "Add an OpenRouter API key below to use this model.",
+                            : settings.batchTranscriptionModel == MetaMuseVoiceTranscribe.batchCatalogID
+                                ? "Add a Meta Model API key below to use this model."
+                                : "Add an OpenRouter API key below to use this model.",
                         systemImage: "exclamationmark.triangle"
                     )
                     .foregroundStyle(.orange)
                     .font(.caption)
+                }
+
+                let activeRemoteModel = settings.transcriptionMode == .batch
+                    ? settings.batchTranscriptionModel
+                    : settings.selectedModel
+                if activeRemoteModel.hasPrefix("meta/") {
+                    TextField(
+                        "Recognition keywords (comma-separated)",
+                        text: $settings.transcriptionKeywords,
+                        axis: .vertical
+                    )
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    Text(
+                        "Meta uses these names, acronyms, and domain terms as vocabulary hints. "
+                            + "The Spoken Language setting above supplies its language bias."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
 
             }
@@ -1691,6 +1734,7 @@ struct APIKeysView: View {
     @State private var assemblyAIKey = ""
     @State private var gladiaKey = ""
     @State private var xAIKey = ""
+    @State private var metaKey = ""
     @State private var isValidating = false
     @State private var validationMessage: String?
     @State private var showingValidation = false
@@ -1742,6 +1786,9 @@ struct APIKeysView: View {
             ),
             APIKeyListEntry(
                 id: "xai", title: "xAI", category: "Transcription", isStored: settings.hasXAIKey
+            ),
+            APIKeyListEntry(
+                id: "meta", title: "Meta", category: "Transcription", isStored: settings.hasMetaKey
             )
         ]
     }
@@ -1816,6 +1863,7 @@ struct APIKeysView: View {
                             && assemblyAIKey.isEmpty
                             && gladiaKey.isEmpty
                             && xAIKey.isEmpty
+                            && metaKey.isEmpty
                     )
                 }
             }
@@ -1853,6 +1901,7 @@ struct APIKeysView: View {
         }
     }
 
+    // swiftlint:disable:next cyclomatic_complexity function_body_length
     private func presentation(for id: String) -> KeyPresentation {
         switch id {
         case "deepgram":
@@ -1895,6 +1944,11 @@ struct APIKeysView: View {
             return KeyPresentation(
                 title: "xAI", systemImage: "waveform.badge.mic", help: "Get your key from console.x.ai."
             )
+        case "meta":
+            return KeyPresentation(
+                title: "Meta", systemImage: "waveform.badge.mic",
+                help: "Get your Model API key from llama.developer.meta.com."
+            )
         default:
             return KeyPresentation(
                 title: "Gladia", systemImage: "waveform.badge.exclamationmark", help: "Get your key from gladia.io."
@@ -1902,6 +1956,7 @@ struct APIKeysView: View {
         }
     }
 
+    // swiftlint:disable:next cyclomatic_complexity
     private func draftBinding(for id: String) -> Binding<String> {
         switch id {
         case "deepgram": return $deepgramKey
@@ -1913,10 +1968,12 @@ struct APIKeysView: View {
         case "modulate": return $modulateKey
         case "assemblyai": return $assemblyAIKey
         case "xai": return $xAIKey
+        case "meta": return $metaKey
         default: return $gladiaKey
         }
     }
 
+    // swiftlint:disable:next cyclomatic_complexity
     private func clearStoredKey(for id: String) {
         switch id {
         case "deepgram": settings.deepgramAPIKey = ""
@@ -1928,6 +1985,7 @@ struct APIKeysView: View {
         case "modulate": settings.modulateAPIKey = ""
         case "assemblyai": settings.assemblyAIAPIKey = ""
         case "xai": settings.xAIAPIKey = ""
+        case "meta": settings.metaAPIKey = ""
         default: settings.gladiaAPIKey = ""
         }
     }
@@ -2026,6 +2084,18 @@ struct APIKeysView: View {
                 messages.append("✓ xAI key saved")
             }
 
+            if !metaKey.isEmpty {
+                let result = await MetaMuseAPIKeyValidator().validate(metaKey)
+                switch result.outcome {
+                case .success:
+                    settings.metaAPIKey = metaKey
+                    metaKey = ""
+                    messages.append("✓ Meta key validated for Muse Voice Transcribe and saved")
+                case .failure(let message):
+                    messages.append("✗ Meta: \(message)")
+                }
+            }
+
             isValidating = false
             validationMessage = messages.joined(separator: "\n")
             showingValidation = true
@@ -2036,6 +2106,18 @@ struct APIKeysView: View {
 // MARK: - Privacy View
 
 struct PrivacyView: View {
+    private var transcriptionProviders: [LiveTranscriptionProviderID] {
+        LiveTranscriptionRouting.iOSSupportedProviders
+    }
+
+    private func processingDescription(for provider: LiveTranscriptionProviderID) -> String {
+        if provider == .apple {
+            return "Microphone audio is transcribed on-device when supported; Apple's speech service may otherwise "
+                + "process it on its servers."
+        }
+        return "Microphone audio is streamed to \(provider.displayName) for transcription."
+    }
+
     var body: some View {
         Form {
             Section {
@@ -2048,29 +2130,13 @@ struct PrivacyView: View {
             }
 
             Section("Audio Processing") {
-                FeatureRow(
-                    icon: "mic.fill",
-                    title: "Apple Speech",
-                    description: "Audio stays on your device. No data sent to cloud."
-                )
-
-                FeatureRow(
-                    icon: "network",
-                    title: "Deepgram",
-                    description: "Audio streamed to Deepgram servers for transcription."
-                )
-
-                FeatureRow(
-                    icon: "mic.and.signal.meter",
-                    title: "ElevenLabs",
-                    description: "Audio streamed to ElevenLabs servers for transcription."
-                )
-
-                FeatureRow(
-                    icon: "waveform.badge.mic",
-                    title: "OpenAI",
-                    description: "Audio streamed to OpenAI servers using your selected transcription model."
-                )
+                ForEach(transcriptionProviders, id: \.self) { provider in
+                    FeatureRow(
+                        icon: provider == .apple ? "mic.fill" : "network",
+                        title: provider == .apple ? "Apple Speech" : provider.displayName,
+                        description: processingDescription(for: provider)
+                    )
+                }
             }
 
             Section("API Keys") {
@@ -2086,10 +2152,12 @@ struct PrivacyView: View {
 
             Section("Network Activity") {
                 VStack(alignment: .leading, spacing: 12) {
-                    InfoRow(label: "Apple Speech", value: "On-device only")
-                    InfoRow(label: "Deepgram", value: "During transcription")
-                    InfoRow(label: "ElevenLabs", value: "During transcription")
-                    InfoRow(label: "OpenAI", value: "During transcription")
+                    ForEach(transcriptionProviders, id: \.self) { provider in
+                        InfoRow(
+                            label: provider == .apple ? "Apple Speech" : provider.displayName,
+                            value: provider == .apple ? "On-device when supported" : "During transcription"
+                        )
+                    }
                     InfoRow(label: "Send to Mac", value: "Local network only")
                     InfoRow(label: "iCloud Sync", value: "Settings & keys (optional)")
                 }

@@ -412,7 +412,8 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       sharedClient = SharedClientLiveController(
         permissionsManager: permissionsManager,
         audioDeviceManager: audioDeviceManager,
-        secureStorage: secureStorage
+        secureStorage: secureStorage,
+        appSettings: appSettings
       )
       fluidAudio = FluidAudioParakeetLiveController(
         appSettings: appSettings,

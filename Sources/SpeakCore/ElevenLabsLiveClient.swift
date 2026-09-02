@@ -47,7 +47,7 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
 
     public init(
         apiKey: String,
-        modelID: String = "scribe_v1",
+        modelID: String = "scribe_v2_realtime",
         language: String? = nil,
         sampleRate: Int = LiveTranscriptionProviderID.elevenlabs.expectedSampleRate,
         session: URLSession = .shared,
@@ -381,11 +381,20 @@ public enum ElevenLabsLiveError: LocalizedError {
 // MARK: - API Key Validation
 
 public struct ElevenLabsSTTAPIKeyValidator {
+    /// Batch Scribe model used for the access probe. ElevenLabs removed
+    /// `scribe_v1` on 2026-07-09, so probing with it now fails for every key.
+    public static let defaultProbeModelID = "scribe_v2"
+
     private let session: URLSession
+    private let modelID: String
     private let baseURL = URL(string: "https://api.elevenlabs.io/v1")!
 
-    public init(session: URLSession = .shared) {
+    public init(
+        session: URLSession = .shared,
+        modelID: String = ElevenLabsSTTAPIKeyValidator.defaultProbeModelID
+    ) {
         self.session = session
+        self.modelID = modelID
     }
 
     /// Validates that an ElevenLabs API key is valid and has Scribe speech-to-text access.
@@ -443,7 +452,7 @@ public struct ElevenLabsSTTAPIKeyValidator {
             --\(boundary)\r
             Content-Disposition: form-data; name="model_id"\r
             \r
-            scribe_v1\r
+            \(modelID)\r
             --\(boundary)--\r
             """.utf8
         )

@@ -27,6 +27,36 @@ private final class TemporaryApplicationSupportFileManager: FileManager {
     }
 }
 
+/// Thread-safe counter shared with a `UserDefaults` subclass, which must stay
+/// `Sendable` and therefore cannot hold mutable state of its own.
+private final class WriteCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+
+    var total: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+
+    func increment() {
+        lock.lock()
+        value += 1
+        lock.unlock()
+    }
+}
+
+/// UserDefaults that counts writes, so the tests can assert how many times the
+/// synced-ID bookkeeping array is rewritten during a sync pass.
+private final class WriteCountingUserDefaults: UserDefaults {
+    let writes = WriteCounter()
+
+    override func set(_ value: Any?, forKey defaultName: String) {
+        writes.increment()
+        super.set(value, forKey: defaultName)
+    }
+}
+
 /// Covers the adapter's bridging contract from #685: local mutations reach the
 /// sync engine via the HistoryManager observers, remote changes are applied
 /// without echoing back as uploads, and acknowledgements survive a relaunch.
@@ -102,6 +132,8 @@ final class MacHistorySyncAdapterTests: XCTestCase {
         let first = MacHistorySyncAdapter(historyManager: manager, defaults: defaults)
         await first.didAcknowledgeSyncedEntries(ids: [item.id])
         XCTAssertFalse(first.pendingEntries().contains { $0.id == item.id })
+        // The write is coalesced; a relaunch after a clean shutdown sees it.
+        first.flushPendingSyncedIDs()
 
         // A fresh adapter over the same defaults simulates app relaunch: the
         // acknowledgement must be durable so the item is not uploaded again.
@@ -125,7 +157,79 @@ final class MacHistorySyncAdapterTests: XCTestCase {
         XCTAssertFalse(adapter.pendingEntries().contains { $0.id == item.id })
     }
 
+    // MARK: - Coalesced synced-ID bookkeeping
+
+    /// The sync engine hands a download pass to the delegate one entry at a
+    /// time. Each entry used to rewrite the whole synced-ID array to
+    /// UserDefaults; the pass must now cost a single write.
+    func testRemoteEntryPass_persistsSyncedIDsOnceForTheWholePass() async {
+        let manager = await makeManager()
+        let counting = WriteCountingUserDefaults(suiteName: suiteName)!
+        let adapter = MacHistorySyncAdapter(
+            historyManager: manager,
+            defaults: counting,
+            saveInterval: .seconds(30)
+        )
+        let entries = (0..<8).map { makeEntry(text: "remote-\($0)") }
+
+        for entry in entries {
+            await adapter.didReceiveRemoteEntry(entry)
+        }
+        let writesDuringPass = counting.writes.total
+        adapter.flushPendingSyncedIDs()
+
+        XCTAssertLessThanOrEqual(
+            writesDuringPass,
+            entries.count / 2,
+            "Per-entry bookkeeping writes must be coalesced, not one per entry"
+        )
+        XCTAssertEqual(
+            counting.writes.total,
+            1,
+            "The whole pass must cost exactly one synced-ID write"
+        )
+        XCTAssertEqual(
+            Set(counting.stringArray(forKey: syncedIDsKey) ?? []),
+            Set(entries.map(\.id.uuidString)),
+            "Every ID from the pass must be present in the single write"
+        )
+        for entry in entries {
+            XCTAssertTrue(
+                manager.allItems.contains { $0.id == entry.id },
+                "Every entry in the pass must still be applied locally"
+            )
+            XCTAssertFalse(
+                adapter.pendingEntries().contains { $0.id == entry.id },
+                "Coalescing must not make downloaded entries look unsynced"
+            )
+        }
+    }
+
+    /// The coalescing window must close on its own — nothing in the app calls
+    /// `flushPendingSyncedIDs()` during a normal sync.
+    func testCoalescedSyncedIDs_areWrittenWhenTheWindowElapses() async throws {
+        let manager = await makeManager()
+        let counting = WriteCountingUserDefaults(suiteName: suiteName)!
+        let adapter = MacHistorySyncAdapter(
+            historyManager: manager,
+            defaults: counting,
+            saveInterval: .milliseconds(20)
+        )
+        let entry = makeEntry(text: "remote")
+
+        await adapter.didReceiveRemoteEntry(entry)
+
+        let deadline = Date().addingTimeInterval(5)
+        while counting.writes.total == 0, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(counting.writes.total, 1)
+        XCTAssertEqual(counting.stringArray(forKey: syncedIDsKey), [entry.id.uuidString])
+    }
+
     // MARK: - Helpers
+
+    private let syncedIDsKey = "speak.sync.syncedMacHistoryIDs"
 
     private func makeManager() async -> HistoryManager {
         let manager = HistoryManager(

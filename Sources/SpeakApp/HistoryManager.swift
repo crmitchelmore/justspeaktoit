@@ -115,9 +115,25 @@ final class HistoryManager: ObservableObject {
   /// Full list of items loaded from disk (for pagination)
   private var allItemsOnDisk: [HistoryItem] = []
 
+  /// `allItemsOnDisk` indexed by id, maintained by the same mutators that
+  /// change the array so a lookup by id does not scan the whole history.
+  private var itemsByIDOnDisk: [UUID: HistoryItem] = [:]
+
   /// All known items (used for charts / totals). Falls back to the currently loaded page during startup.
   var allItems: [HistoryItem] {
     allItemsOnDisk.isEmpty ? items : allItemsOnDisk
+  }
+
+  /// The item with `id` from `allItems`, without scanning it.
+  ///
+  /// Mirrors `allItems` branch for branch: the on-disk list is served from the
+  /// id index, and the startup fallback searches the loaded page (which is
+  /// empty whenever the on-disk list is).
+  func item(id: UUID) -> HistoryItem? {
+    if allItemsOnDisk.isEmpty {
+      return items.first { $0.id == id }
+    }
+    return itemsByIDOnDisk[id]
   }
 
   /// Cached statistics to avoid recalculating
@@ -376,6 +392,7 @@ final class HistoryManager: ObservableObject {
       }.value
 
       allItemsOnDisk = sorted
+      itemsByIDOnDisk = Dictionary(sorted.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
       items = Array(sorted.prefix(pageSize))
       hasMoreItems = sorted.count > pageSize
       cachedStatistics = stats
@@ -431,6 +448,7 @@ final class HistoryManager: ObservableObject {
   func append(_ item: HistoryItem) async {
     await waitUntilLoaded()
     allItemsOnDisk.insert(item, at: 0)
+    itemsByIDOnDisk[item.id] = item
 
     var current = items
     current.insert(item, at: 0)
@@ -451,6 +469,7 @@ final class HistoryManager: ObservableObject {
     if let diskIndex = allItemsOnDisk.firstIndex(where: { $0.id == item.id }) {
       oldItem = allItemsOnDisk[diskIndex]
       allItemsOnDisk[diskIndex] = item
+      itemsByIDOnDisk[item.id] = item
       allItemsOnDisk.sort { $0.createdAt > $1.createdAt }
     }
 
@@ -477,6 +496,7 @@ final class HistoryManager: ObservableObject {
     await waitUntilLoaded()
     let diskItem = allItemsOnDisk.first(where: { $0.id == id })
     allItemsOnDisk.removeAll { $0.id == id }
+    itemsByIDOnDisk.removeValue(forKey: id)
 
     items.removeAll { $0.id == id }
 
@@ -495,6 +515,7 @@ final class HistoryManager: ObservableObject {
   func removeAll() async {
     await waitUntilLoaded()
     allItemsOnDisk = []
+    itemsByIDOnDisk = [:]
     items = []
     let stats = Self.calculateStatistics(for: [])
     cachedStatistics = stats

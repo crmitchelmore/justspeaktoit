@@ -22,7 +22,6 @@ public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @
     private let language: String?
     private let sampleRate: Int
     private let session: URLSession
-    private let bufferPool: AudioBufferPool
     private let logger = SpeakLogger.logger(category: "DeepgramLiveClient")
     private let stateLock = NSLock()
 
@@ -54,15 +53,13 @@ public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @
         model: String = "nova-3",
         language: String? = nil,
         sampleRate: Int = 16000,
-        session: URLSession = .shared,
-        bufferPool: AudioBufferPool = AudioBufferPool(poolSize: 10, bufferSize: 4096)
+        session: URLSession = .shared
     ) {
         self.apiKey = apiKey
         self.model = model
         self.language = language
         self.sampleRate = sampleRate
         self.session = session
-        self.bufferPool = bufferPool
         self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
     }
 
@@ -225,7 +222,6 @@ public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @
             )
         }
         preroll.reset()
-        bufferPool.logMetrics()
         task?.cancel(with: .normalClosure, reason: nil)
         resolveFinish()
         logger.info("Deepgram WebSocket connection closed")

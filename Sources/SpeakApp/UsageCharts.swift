@@ -21,9 +21,15 @@ struct ModelUsageData: Identifiable {
 // MARK: - Data Aggregation
 
 extension Array where Element == HistoryItem {
-  func dailyUsageForLastMonth() -> [DailyUsageData] {
+  /// The rolling 30-day series ending on `referenceDate`'s day.
+  ///
+  /// The window is passed in rather than read from the clock so callers that
+  /// cache the result (the dashboard does) can key that cache on the same day
+  /// the series was built for — otherwise a window opened before midnight keeps
+  /// rendering yesterday's axis. `Date.now` keeps the call sites unchanged.
+  func dailyUsageForLastMonth(referenceDate: Date = .now) -> [DailyUsageData] {
     let calendar = Calendar.current
-    let today = calendar.startOfDay(for: Date())
+    let today = calendar.startOfDay(for: referenceDate)
     let monthAgo = calendar.date(byAdding: .day, value: -30, to: today)!
 
     // Filter items from the last month

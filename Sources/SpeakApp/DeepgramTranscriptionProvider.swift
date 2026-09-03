@@ -15,11 +15,9 @@ struct DeepgramTranscriptionProvider: TranscriptionProvider {
 
     private let baseURL = URL(string: "https://api.deepgram.com/v1")!
     private let session: URLSession
-    private let bufferPool: AudioBufferPool
 
-    init(session: URLSession = .shared, bufferPool: AudioBufferPool? = nil) {
+    init(session: URLSession = .shared) {
         self.session = session
-        self.bufferPool = bufferPool ?? AudioBufferPool(poolSize: 10, bufferSize: 8192)
     }
 
     func transcribeFile(
@@ -111,8 +109,7 @@ struct DeepgramTranscriptionProvider: TranscriptionProvider {
             model: extractModelName(from: model),
             language: language,
             sampleRate: sampleRate,
-            session: session,
-            bufferPool: bufferPool
+            session: session
         )
     }
 

@@ -194,7 +194,6 @@ final class SpeechmaticsLiveTranscriber: @unchecked Sendable {
   private let language: String?
   private let sampleRate: Int
   private let session: URLSession
-  private let bufferPool: AudioBufferPool
   private let logger = SpeakLogger.logger(category: "SpeechmaticsLiveTranscriber")
   private let stateLock = NSLock()
   private let pendingSendGroup = DispatchGroup()
@@ -219,15 +218,13 @@ final class SpeechmaticsLiveTranscriber: @unchecked Sendable {
     model: String = "enhanced",
     language: String? = nil,
     sampleRate: Int = 16000,
-    session: URLSession = .shared,
-    bufferPool: AudioBufferPool = AudioBufferPool(poolSize: 10, bufferSize: 4096)
+    session: URLSession = .shared
   ) {
     self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
     self.model = model
     self.language = language
     self.sampleRate = sampleRate
     self.session = session
-    self.bufferPool = bufferPool
   }
 
   func start(
@@ -357,7 +354,6 @@ final class SpeechmaticsLiveTranscriber: @unchecked Sendable {
       self.isStopping = true
       return self.webSocketTask
     }
-    bufferPool.logMetrics()
 
     let pending = withStateLock { () -> CheckedContinuation<Void, Never>? in
       let saved = self.endOfTranscriptContinuation

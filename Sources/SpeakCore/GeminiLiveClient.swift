@@ -43,7 +43,9 @@ public final class GeminiLiveClient: FinalizingStreamingTranscriptionClient, @un
     private let apiKey: String
     private let model: String
     private let language: String?
-    private let customVocabulary: [String]
+    /// Keyword biasing forwarded by `LiveTranscriptionClientFactory`; internal
+    /// so tests can assert the forwarding rather than infer it.
+    let customVocabulary: [String]
     private let mode: GeminiTranscriptionMode
     private let sampleRate: Int
     private let session: URLSession
@@ -275,11 +277,14 @@ private extension GeminiLiveClient {
                 self.accumulated.append(final: event.text)
                 self.didReceiveFinalSinceFinish = true
             }
+            if self.resumeFinishIfNeeded(with: self.currentTranscript()) {
+                // Trailing final consumed by finishAndWait(), which returns the
+                // whole transcript; delivering it again through onTranscript
+                // would double it for callers that append.
+                return
+            }
         }
         self.currentOnTranscript()?(event.text, event.isFinal)
-        if event.isFinal {
-            self.resumeFinishIfNeeded(with: self.currentTranscript())
-        }
     }
 
     func handleSignal(_ signal: GeminiLiveServerSignal) {
@@ -334,7 +339,9 @@ private extension GeminiLiveClient {
 
 // MARK: - Sending
 
-private extension GeminiLiveClient {
+// Internal rather than private: `StreamingClientContractTests` drives the
+// finalisation helpers directly, since no socket can be opened in a test.
+extension GeminiLiveClient {
     func sendAudioFrame(_ audioData: Data, on task: URLSessionWebSocketTask) {
         guard let json = Self.audioChunkJSON(audioData, sampleRate: self.sampleRate) else {
             self.currentOnError()?(GeminiLiveError.encodingFailed)
@@ -392,7 +399,10 @@ private extension GeminiLiveClient {
         }
     }
 
-    func waitForTrailingFinal(deadline: Date) async -> String? {
+    /// Waits (bounded) for the trailing `inputTranscription`. `whenArmed` runs
+    /// once the waiter is installed, so a caller cannot race its own arrival;
+    /// tests use it to deliver a final into an armed finish without a socket.
+    func waitForTrailingFinal(deadline: Date, whenArmed: () -> Void = {}) async -> String? {
         await withCheckedContinuation { continuation in
             let shouldWait = self.withStateLock { () -> Bool in
                 guard !self.didReceiveFinalSinceFinish else { return false }
@@ -404,6 +414,7 @@ private extension GeminiLiveClient {
                 continuation.resume(returning: self.currentTranscript())
                 return
             }
+            whenArmed()
             let remaining = max(0, deadline.timeIntervalSinceNow)
             DispatchQueue.global().asyncAfter(deadline: .now() + remaining) { [weak self] in
                 guard let self else { return }
@@ -412,13 +423,18 @@ private extension GeminiLiveClient {
         }
     }
 
-    func resumeFinishIfNeeded(with transcript: String?) {
+    /// Resumes a pending `finishAndWait()` exactly once. Returns whether a
+    /// waiter consumed the result.
+    @discardableResult
+    func resumeFinishIfNeeded(with transcript: String?) -> Bool {
         let continuation = self.withStateLock { () -> CheckedContinuation<String?, Never>? in
             let continuation = self.finishContinuation
             self.finishContinuation = nil
             return continuation
         }
-        continuation?.resume(returning: transcript)
+        guard let continuation else { return false }
+        continuation.resume(returning: transcript)
+        return true
     }
 
     func close(_ task: URLSessionWebSocketTask) {

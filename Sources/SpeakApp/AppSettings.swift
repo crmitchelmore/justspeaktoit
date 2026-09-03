@@ -336,6 +336,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     case recordingSoundProfile
     case recordingSoundVolume
     case assemblyAIKeyterms
+    case transcriptionKeywords
     case assemblyAIIgnoredPronunciationTerms
     case modulateSpeakerDiarization
     case modulateEmotionSignal
@@ -547,8 +548,30 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     didSet { store(postProcessingTemperature, key: .postProcessingTemperature) }
   }
 
+  /// Words the user wants every provider to bias towards.
+  ///
+  /// `transcriptionKeywords` is the canonical spelling — iOS has always stored
+  /// them under that defaults key — and `assemblyAIKeyterms` is the older macOS
+  /// name kept alive for the existing settings field, its `@Published`
+  /// projection and the warm-up invalidation. The two are mirrored on every
+  /// write, so there is one value with two surfaces rather than two lists that
+  /// can disagree; the equality check makes the mirror terminate.
   @Published var assemblyAIKeyterms: String {
-    didSet { store(assemblyAIKeyterms, key: .assemblyAIKeyterms) }
+    didSet {
+      store(assemblyAIKeyterms, key: .assemblyAIKeyterms)
+      if transcriptionKeywords != assemblyAIKeyterms {
+        transcriptionKeywords = assemblyAIKeyterms
+      }
+    }
+  }
+
+  @Published var transcriptionKeywords: String {
+    didSet {
+      store(transcriptionKeywords, key: .transcriptionKeywords)
+      if assemblyAIKeyterms != transcriptionKeywords {
+        assemblyAIKeyterms = transcriptionKeywords
+      }
+    }
   }
 
   @Published var assemblyAIIgnoredPronunciationTerms: [String] {
@@ -1092,8 +1115,13 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     )
     postProcessingTemperature =
       defaults.object(forKey: DefaultsKey.postProcessingTemperature.rawValue) as? Double ?? 0.2
-    assemblyAIKeyterms =
-      defaults.string(forKey: DefaultsKey.assemblyAIKeyterms.rawValue) ?? ""
+    // One list, two keys: whichever side an existing install wrote is the
+    // seed, so upgrading from either platform's spelling keeps the words.
+    let storedKeywords = defaults.string(forKey: DefaultsKey.transcriptionKeywords.rawValue) ?? ""
+    let storedKeyterms = defaults.string(forKey: DefaultsKey.assemblyAIKeyterms.rawValue) ?? ""
+    let keywords = storedKeywords.isEmpty ? storedKeyterms : storedKeywords
+    assemblyAIKeyterms = keywords
+    transcriptionKeywords = keywords
     assemblyAIIgnoredPronunciationTerms =
       defaults.array(forKey: DefaultsKey.assemblyAIIgnoredPronunciationTerms.rawValue) as? [String] ?? []
     modulateSpeakerDiarizationEnabled =

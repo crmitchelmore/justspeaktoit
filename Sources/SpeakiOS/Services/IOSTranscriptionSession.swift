@@ -158,7 +158,8 @@ final class IOSTranscriptionSession {
                     route: route,
                     apiKey: liveAPIKey(route),
                     language: language,
-                    keywords: route.provider == .meta ? transcriptionKeywords : [],
+                    keywords: [.meta, .google].contains(route.provider)
+                        ? transcriptionKeywords : [],
                     audioSessionManager: audioSessionManager
                 )
             )

@@ -17,7 +17,6 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
     /// report the pre-roll, since the endpoint takes the rate from the stream.
     private let sampleRate: Int
     private let session: URLSession
-    private let bufferPool: AudioBufferPool
     private let logger = SpeakLogger.logger(category: "ElevenLabsLiveClient")
     private let stateLock = NSLock()
 
@@ -50,15 +49,13 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
         modelID: String = "scribe_v2_realtime",
         language: String? = nil,
         sampleRate: Int = LiveTranscriptionProviderID.elevenlabs.expectedSampleRate,
-        session: URLSession = .shared,
-        bufferPool: AudioBufferPool = AudioBufferPool(poolSize: 10, bufferSize: 4096)
+        session: URLSession = .shared
     ) {
         self.apiKey = apiKey
         self.modelID = modelID
         self.language = language
         self.sampleRate = sampleRate
         self.session = session
-        self.bufferPool = bufferPool
         self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
     }
 
@@ -232,7 +229,6 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
             )
         }
         preroll.reset()
-        bufferPool.logMetrics()
         task?.cancel(with: .normalClosure, reason: nil)
         resolveFinish()
         logger.info("ElevenLabs WebSocket connection closed")

@@ -143,6 +143,25 @@ enum SidebarItem: Hashable, Identifiable {
   }
 }
 
+extension Binding where Value == SidebarItem? {
+  /// A sidebar-selection binding that refuses to go empty.
+  ///
+  /// `List(selection:)` clears the selection when the highlighted row is
+  /// ⌘-clicked or when empty space below the rows is clicked. The detail pane
+  /// then falls back to the dashboard while no row is highlighted, so the
+  /// window looks like it has lost its place. Swallowing the `nil` keeps the
+  /// row and the detail pane agreeing; every real row selection still lands.
+  var clampedToLastSelection: Binding<SidebarItem?> {
+    Binding(
+      get: { wrappedValue },
+      set: { newValue in
+        guard let newValue else { return }
+        wrappedValue = newValue
+      }
+    )
+  }
+}
+
 struct SideBarView: View {
   @Binding var selection: SidebarItem?
   @EnvironmentObject private var settings: AppSettings

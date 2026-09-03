@@ -14,9 +14,9 @@ final class MenuBarManager {
         self.appSettings = appSettings
     }
 
-    /// Sets up the main application menu with shortcuts displayed.
-    func setupMainMenu() {
-        guard let mainMenu = NSApp.mainMenu else { return }
+    /// Sets up the main menu. `mainMenu` is injectable so tests can assert its shortcuts.
+    func setupMainMenu(in mainMenu: NSMenu? = NSApp.mainMenu) {
+        guard let mainMenu else { return }
 
         // Find or create the "Speak" menu
         if let existingSpeakMenu = mainMenu.item(withTitle: "Speak") {
@@ -134,7 +134,7 @@ final class MenuBarManager {
         let item = NSMenuItem(
             title: title,
             action: selector,
-            keyEquivalent: keyEquivalent(for: binding)
+            keyEquivalent: binding.menuKeyEquivalent
         )
         item.keyEquivalentModifierMask = binding.modifiers
         item.isEnabled = binding.isEnabled
@@ -153,55 +153,10 @@ final class MenuBarManager {
         let item = NSMenuItem(
             title: title,
             action: selector,
-            keyEquivalent: keyEquivalent(for: binding)
+            keyEquivalent: binding.menuKeyEquivalent
         )
         item.keyEquivalentModifierMask = binding.modifiers
         menu.addItem(item)
-    }
-
-    private func keyEquivalent(for binding: KeyBinding) -> String {
-        switch binding.keyCode {
-        case 0: return "a"
-        case 1: return "s"
-        case 2: return "d"
-        case 3: return "f"
-        case 4: return "h"
-        case 5: return "g"
-        case 6: return "z"
-        case 7: return "x"
-        case 8: return "c"
-        case 9: return "v"
-        case 11: return "b"
-        case 12: return "q"
-        case 13: return "w"
-        case 14: return "e"
-        case 15: return "r"
-        case 16: return "y"
-        case 17: return "t"
-        case 18: return "1"
-        case 19: return "2"
-        case 20: return "3"
-        case 21: return "4"
-        case 22: return "6"
-        case 23: return "5"
-        case 25: return "9"
-        case 26: return "7"
-        case 28: return "8"
-        case 29: return "0"
-        case 31: return "o"
-        case 32: return "u"
-        case 34: return "i"
-        case 35: return "p"
-        case 37: return "l"
-        case 38: return "j"
-        case 40: return "k"
-        case 43: return ","
-        case 45: return "n"
-        case 46: return "m"
-        case 49: return " "
-        case 53: return "\u{1B}"  // Escape
-        default: return ""
-        }
     }
 }
 

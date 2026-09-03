@@ -158,6 +158,7 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
     isRunning = false
 
     if let transcriber {
+      audioProcessor.drainConverterTail()
       audioProcessor.flushPendingAudio(to: transcriber)
       await transcriber.waitForPendingSends()
       audioProcessor.setRunning(false)
@@ -187,10 +188,13 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
     private static let preferredChunkBytes = ElevenLabsLiveTranscriber.preferredChunkBytes
 
     private let queue = DispatchQueue(label: "com.speak.app.elevenlabs.audioProcessing")
-    private let copyBufferPool = LivePCMBufferPool(maximumBuffers: 4)
+    private let copyBufferPool = LivePCMBufferPool(
+      maximumBuffers: 4,
+      tapBufferSize: 1024,
+      label: "elevenlabs"
+    )
     private var isRunning: Bool = false
-    private var cachedConverter: AVAudioConverter?
-    private var cachedInputFormat: AVAudioFormat?
+    private let converterCache = LiveConverterCache()
     private var reusableOutputBuffer: AVAudioPCMBuffer?
     private var pendingPCMData = Data()
 
@@ -198,12 +202,21 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
       queue.sync {
         isRunning = running
         if !running {
-          cachedConverter = nil
-          cachedInputFormat = nil
+          converterCache.reset()
           reusableOutputBuffer = nil
           pendingPCMData.removeAll(keepingCapacity: false)
           copyBufferPool.removeAll()
         }
+      }
+    }
+
+    /// Flushes the retained resampler's trailing frames into `pendingPCMData` so
+    /// the final flush sends them (issue #849). The converter is finished once
+    /// drained, so the cache releases it rather than reusing it.
+    func drainConverterTail() {
+      queue.sync {
+        guard let tail = converterCache.drainPCM16() else { return }
+        pendingPCMData.append(tail)
       }
     }
 
@@ -274,17 +287,9 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
       transcriber: ElevenLabsLiveTranscriber,
       logger: Logger
     ) {
-      let converter: AVAudioConverter
-      if let cached = cachedConverter, cachedInputFormat == inputFormat {
-        converter = cached
-      } else {
-        guard let newConverter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
-          logger.error("Failed to create audio converter")
-          return
-        }
-        cachedConverter = newConverter
-        cachedInputFormat = inputFormat
-        converter = newConverter
+      guard let converter = converterCache.converter(from: inputFormat, to: outputFormat) else {
+        logger.error("Failed to create audio converter")
+        return
       }
 
       let ratio = outputFormat.sampleRate / inputFormat.sampleRate
@@ -302,12 +307,8 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
         outputBuffer = newBuffer
       }
 
-      // NOTE: We deliberately do NOT call converter.reset() between chunks —
-      // doing so wipes the resampler's filter history and priming/trailing
-      // frames, which audibly clicks at chunk boundaries and pays the
-      // re-priming cost on every chunk. The converter is only created once
-      // per inputFormat (cachedConverter), so its state is the *correct*
-      // thing to preserve across taps.
+      // No `converter.reset()` between chunks: `LiveConverterCache` owns the
+      // retained converter and its end-of-stream drain (see issue #849).
       var error: NSError?
       var didProvideInput = false
       let status = converter.convert(to: outputBuffer, error: &error) { _, outStatus in

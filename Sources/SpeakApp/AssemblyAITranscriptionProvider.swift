@@ -19,7 +19,6 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
   /// "Socket is not connected" (ENOTCONN) failures during the wss handshake
   /// on macOS. A dedicated, default-configured session avoids that.
   private let session: URLSession
-  private let bufferPool: AudioBufferPool
   private let logger = SpeakLogger.logger(category: "AssemblyAILiveTranscriber")
   private let stateLock = NSLock()
   private let pendingSendGroup = DispatchGroup()
@@ -43,13 +42,11 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
     apiKey: String,
     sampleRate: Int = 16000,
     keyterms: [String] = [],
-    session: URLSession? = nil,
-    bufferPool: AudioBufferPool = AudioBufferPool(poolSize: 10, bufferSize: 4096)
+    session: URLSession? = nil
   ) {
     self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
     self.sampleRate = sampleRate
     self.keyterms = keyterms
-    self.bufferPool = bufferPool
     let delegate = AssemblyAIWebSocketDelegate()
     self.delegate = delegate
     if let session {
@@ -259,7 +256,6 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
       }
       return webSocketTask
     }
-    bufferPool.logMetrics()
 
     guard let task, task.state == .running else { return }
 
@@ -489,11 +485,9 @@ struct AssemblyAITranscriptionProvider: TranscriptionProvider {
 
   private let baseURL = URL(string: "https://api.assemblyai.com/v2")!
   private let session: URLSession
-  private let bufferPool: AudioBufferPool
 
-  init(session: URLSession = .shared, bufferPool: AudioBufferPool? = nil) {
+  init(session: URLSession = .shared) {
     self.session = session
-    self.bufferPool = bufferPool ?? AudioBufferPool(poolSize: 10, bufferSize: 8192)
   }
 
   // MARK: - Batch Transcription
@@ -695,8 +689,7 @@ struct AssemblyAITranscriptionProvider: TranscriptionProvider {
       apiKey: apiKey,
       sampleRate: sampleRate,
       keyterms: keyterms,
-      session: nil,
-      bufferPool: bufferPool
+      session: nil
     )
   }
 

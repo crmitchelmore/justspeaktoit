@@ -3,7 +3,7 @@ import XCTest
 
 @testable import SpeakCore
 
-final class MetaMuseVoiceTranscribeTests: XCTestCase {
+final class MetaMuseVoiceTranscribeTests: XCTestCase { // swiftlint:disable:this type_body_length
     func testCatalogAndRouting_exposeLiveAndBatchOnBothPlatforms() throws {
         XCTAssertTrue(ModelCatalog.liveTranscription.contains { $0.id == MetaMuseVoiceTranscribe.liveCatalogID })
         XCTAssertTrue(ModelCatalog.batchTranscription.contains { $0.id == MetaMuseVoiceTranscribe.batchCatalogID })
@@ -229,6 +229,101 @@ final class MetaMuseVoiceTranscribeTests: XCTestCase {
         )
     }
 
+    // MARK: - Frame handling
+
+    /// Anything the client does not recognise is data it has not learned yet,
+    /// never a reason to end the user's recording. Only an explicit `error`
+    /// envelope tears the session down.
+    func testUnknownFrames_areIgnoredAndKeepTheSessionAlive() {
+        let client = MetaMuseLiveClient(apiKey: "k")
+        let observer = MetaCallbackObserver()
+        client.beginSession(
+            onTranscript: { text, isFinal in observer.record(text: text, isFinal: isFinal) },
+            onError: { observer.record(error: $0) }
+        )
+
+        // Configure the session, then feed frames the client has no case for.
+        client.ingest(#"{"sessionId":"session-1"}"#)
+        client.ingest(#"{"type":"heartbeat"}"#)
+        client.ingest("not json at all")
+        client.ingest(#"{"type":"transcript"}"#)
+        client.ingest(#"{"unrecognised":true}"#)
+
+        XCTAssertTrue(observer.errors.isEmpty, "an unknown frame must not fail the session")
+        XCTAssertTrue(observer.transcripts.isEmpty)
+        XCTAssertTrue(client.isSessionConfigured, "the handshake must survive unknown frames")
+
+        // The session still works afterwards.
+        client.ingest(#"{"type":"transcript","transcript":"Hello"}"#)
+        XCTAssertEqual(observer.transcripts.map(\.text), ["Hello"])
+    }
+
+    func testServerErrorEnvelope_stillFailsTheSession() {
+        let client = MetaMuseLiveClient(apiKey: "k")
+        let observer = MetaCallbackObserver()
+        client.beginSession(
+            onTranscript: { _, _ in },
+            onError: { observer.record(error: $0) }
+        )
+
+        client.ingest(#"{"type":"error","message":"invalid access token"}"#)
+
+        XCTAssertEqual(observer.errors.compactMap { $0 as? MetaMuseError }, [.authentication])
+    }
+
+    // MARK: - Handshake
+
+    /// The endpoint documents exactly two PCM encodings; anything else is a
+    /// configuration error rather than something to mislabel as 24 kHz.
+    func testHandshake_rejectsAnUnsupportedCaptureRate() {
+        XCTAssertThrowsError(
+            try MetaMuseLiveClient.handshakeData(
+                apiKey: "secret",
+                model: MetaMuseVoiceTranscribe.modelID,
+                sampleRate: 48_000,
+                language: nil,
+                keywords: []
+            )
+        ) { error in
+            guard case MetaMuseError.invalidAudio(let detail) = error else {
+                return XCTFail("Expected invalidAudio, got \(error)")
+            }
+            XCTAssertTrue(detail.contains("48000"))
+        }
+
+        XCTAssertEqual(try MetaMuseLiveClient.audioEncoding(forSampleRate: 16_000), "PCM_16KHZ")
+        XCTAssertEqual(try MetaMuseLiveClient.audioEncoding(forSampleRate: 24_000), "PCM_24KHZ")
+    }
+
+    // MARK: - Multipart safety
+
+    /// The recording's name is user-controlled text. It is not sent at all, and
+    /// even a hostile name handed straight to the builder cannot inject a
+    /// header line or escape the quoted string.
+    func testMultipart_neverCarriesAUserControlledFilename() throws {
+        XCTAssertEqual(MetaMuseBatchClient.uploadFilename, "audio.wav")
+
+        let hostile = URL(fileURLWithPath: "/tmp/a\"b\r\nc.m4a")
+        let request = try MetaMuseBatchClient.makeRequest(
+            endpoint: MetaMuseVoiceTranscribe.transcribeURL,
+            apiKey: "secret",
+            audio: MetaMuseAudioPreparer.wavData(pcm: Data([0, 0]), sampleRate: 16_000),
+            filename: hostile.lastPathComponent,
+            model: MetaMuseVoiceTranscribe.modelID,
+            mode: .endpointing,
+            languageBias: [],
+            keywords: []
+        )
+        let body = try XCTUnwrap(String(data: try XCTUnwrap(request.httpBody), encoding: .isoLatin1))
+        let dispositions = body.components(separatedBy: "\r\n")
+            .filter { $0.hasPrefix("Content-Disposition:") }
+
+        // One header line per part, and the injected break is gone.
+        XCTAssertEqual(dispositions.count, 2)
+        XCTAssertEqual(dispositions.first, #"Content-Disposition: form-data; name="request""#)
+        XCTAssertEqual(dispositions.last, #"Content-Disposition: form-data; name="audio"; filename="abc.m4a""#)
+    }
+
     private func makeTemporaryWAV(sampleRate: Int = 16_000) throws -> URL {
         let pcm = Data(repeating: 0, count: sampleRate / 5)
         let data = MetaMuseAudioPreparer.wavData(pcm: pcm, sampleRate: sampleRate)
@@ -236,5 +331,36 @@ final class MetaMuseVoiceTranscribeTests: XCTestCase {
             .appendingPathComponent("meta-muse-\(UUID().uuidString).wav")
         try data.write(to: url, options: .atomic)
         return url
+    }
+}
+
+/// Collects callback deliveries from a live client's receive path.
+private final class MetaCallbackObserver: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedTranscripts: [(text: String, isFinal: Bool)] = []
+    private var storedErrors: [Error] = []
+
+    var transcripts: [(text: String, isFinal: Bool)] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedTranscripts
+    }
+
+    var errors: [Error] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedErrors
+    }
+
+    func record(text: String, isFinal: Bool) {
+        lock.lock()
+        defer { lock.unlock() }
+        storedTranscripts.append((text, isFinal))
+    }
+
+    func record(error: Error) {
+        lock.lock()
+        defer { lock.unlock() }
+        storedErrors.append(error)
     }
 }

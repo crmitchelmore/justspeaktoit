@@ -406,6 +406,123 @@ final class GeminiTranscriptionProviderTests: XCTestCase { // swiftlint:disable:
     }
   }
 
+  // MARK: - Files API
+
+  // A freshly uploaded file is `PROCESSING`; referencing its URI before the
+  // Files API reports `ACTIVE` fails the Interactions request. The provider
+  // polls the file resource and only then transcribes.
+  // swiftlint:disable:next function_body_length
+  func testUploadedFile_isPolledUntilActiveBeforeTheInteractionsRequest() async throws {
+    let recorder = GeminiRequestLog()
+    let audioURL = try Self.makeTemporaryAudioFile()
+    defer { try? FileManager.default.removeItem(at: audioURL) }
+
+    GeminiMockURLProtocol.requestHandler = { request in
+      let url = try XCTUnwrap(request.url)
+    let attempt = await recorder.record(method: request.httpMethod ?? "", path: url.path)
+
+      func respond(_ body: String, headers: [String: String] = [:]) throws
+        -> (HTTPURLResponse, Data) {
+        let response = HTTPURLResponse(
+          url: url, statusCode: 200, httpVersion: nil, headerFields: headers)!
+        return (response, Data(body.utf8))
+      }
+
+      switch (request.httpMethod, url.path) {
+      case ("POST", "/upload/v1beta/files") where request.value(
+        forHTTPHeaderField: "X-Goog-Upload-Command") == "start":
+        return try respond(
+          "{}",
+          headers: ["x-goog-upload-url": "https://generativelanguage.googleapis.com/upload/session"])
+      case ("POST", "/upload/session"):
+        return try respond(#"{"file":{"name":"files/abc123","uri":"\#(Self.fileURI)","state":"PROCESSING"}}"#)
+      case ("GET", "/v1beta/files/abc123"):
+        // First poll still processing, second one active.
+        let state = attempt == 1 ? "PROCESSING" : "ACTIVE"
+        return try respond(#"{"name":"files/abc123","uri":"\#(Self.fileURI)","state":"\#(state)"}"#)
+      case ("POST", "/v1beta/interactions"):
+        return try respond(#"{"status":"completed","output_text":"Hello world"}"#)
+      default:
+        XCTFail("Unexpected request \(request.httpMethod ?? "") \(url.path)")
+        return try respond("{}")
+      }
+    }
+    defer { GeminiMockURLProtocol.requestHandler = nil }
+
+    let provider = GeminiTranscriptionProvider(
+      session: makeMockSession(),
+      // Force the Files API path for a tiny fixture, and keep the poll quick.
+      inlineAudioByteLimit: 0,
+      filePollInterval: 0.01,
+      filePollTimeout: 5
+    )
+
+    let result = try await provider.transcribeFile(
+      at: audioURL, apiKey: "k", model: "google/gemini-3.5-transcribe", language: nil)
+
+    XCTAssertEqual(result.text, "Hello world")
+    let calls = await recorder.calls
+    XCTAssertEqual(
+      calls,
+      [
+        "POST /upload/v1beta/files",
+        "POST /upload/session",
+        "GET /v1beta/files/abc123",
+        "GET /v1beta/files/abc123",
+        "POST /v1beta/interactions"
+      ],
+      "the transcription request must wait for the ACTIVE state"
+    )
+  }
+
+  func testUploadedFile_failedProcessingSurfacesAnUploadFailure() async throws {
+    let audioURL = try Self.makeTemporaryAudioFile()
+    defer { try? FileManager.default.removeItem(at: audioURL) }
+
+    GeminiMockURLProtocol.requestHandler = { request in
+      let url = try XCTUnwrap(request.url)
+      let response = HTTPURLResponse(
+        url: url,
+        statusCode: 200,
+        httpVersion: nil,
+        headerFields: url.path == "/upload/v1beta/files"
+          ? ["x-goog-upload-url": "https://generativelanguage.googleapis.com/upload/session"] : nil
+      )!
+      switch url.path {
+      case "/upload/session":
+        return (
+          response,
+          Data(#"{"file":{"name":"files/abc123","uri":"u","state":"FAILED"}}"#.utf8)
+        )
+      default:
+        return (response, Data("{}".utf8))
+      }
+    }
+    defer { GeminiMockURLProtocol.requestHandler = nil }
+
+    let provider = GeminiTranscriptionProvider(
+      session: makeMockSession(), inlineAudioByteLimit: 0, filePollInterval: 0.01, filePollTimeout: 1)
+
+    do {
+      _ = try await provider.transcribeFile(
+        at: audioURL, apiKey: "k", model: "google/gemini-3.5-transcribe", language: nil)
+      XCTFail("Expected an uploadFailed error")
+    } catch {
+      guard case GeminiBatchError.uploadFailed = try XCTUnwrap(error as? GeminiBatchError) else {
+        return XCTFail("Expected uploadFailed, got \(error)")
+      }
+    }
+  }
+
+  private static let fileURI = "https://generativelanguage.googleapis.com/v1beta/files/abc123"
+
+  private static func makeTemporaryAudioFile() throws -> URL {
+    let url = FileManager.default.temporaryDirectory
+      .appendingPathComponent("gemini-\(UUID().uuidString).m4a")
+    try Data([0x00, 0x01, 0x02, 0x03]).write(to: url, options: .atomic)
+    return url
+  }
+
   private func makeMockSession() -> URLSession {
     let configuration = URLSessionConfiguration.ephemeral
     configuration.protocolClasses = [GeminiMockURLProtocol.self]
@@ -422,6 +539,20 @@ private actor GeminiRequestObserver {
 
   func capturedRequest() -> URLRequest? {
     request
+  }
+}
+
+/// Ordered log of the requests a test drove, so a test can assert not just
+/// which calls happened but in which order.
+private actor GeminiRequestLog {
+  private(set) var calls: [String] = []
+
+  /// Records one call and answers how many times that same call has been
+  /// made, so a handler can vary its answer per attempt.
+  func record(method: String, path: String) -> Int {
+    let call = "\(method) \(path)"
+    calls.append(call)
+    return calls.filter { $0 == call }.count
   }
 }
 

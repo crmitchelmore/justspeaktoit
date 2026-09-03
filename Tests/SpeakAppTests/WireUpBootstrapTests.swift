@@ -99,6 +99,37 @@ final class WireUpBootstrapTests: XCTestCase {
         XCTAssertFalse(env1 === env2, "Each bootstrap call should create a fresh environment")
     }
 
+    // MARK: - Termination
+
+    /// The history sync adapter coalesces its synced-ID bookkeeping behind a
+    /// short window. Termination has to drain that window, or the next launch
+    /// works from a stale set and can strand a locally newer item (#851).
+    @MainActor
+    func testPrepareForTermination_flushesPendingHistorySyncWrites() async throws {
+        let env = WireUp.bootstrap(options: makeWireUpTestOptions())
+        let adapter = try XCTUnwrap(
+            env.historySyncAdapter,
+            "Bootstrap must retain the history sync adapter so termination can flush it"
+        )
+        let syncedIDsKey = "speak.sync.syncedMacHistoryIDs"
+        let previous = UserDefaults.standard.stringArray(forKey: syncedIDsKey)
+        defer {
+            if let previous {
+                UserDefaults.standard.set(previous, forKey: syncedIDsKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: syncedIDsKey)
+            }
+        }
+
+        await adapter.didAcknowledgeSyncedEntries(ids: [UUID()])
+        await env.prepareForTermination()
+
+        XCTAssertFalse(
+            adapter.hasPendingSyncedIDWrites,
+            "prepareForTermination() must flush coalesced synced-ID writes"
+        )
+    }
+
     // MARK: - EnvironmentHolder
 
     @MainActor

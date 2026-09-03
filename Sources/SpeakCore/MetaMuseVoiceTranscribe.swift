@@ -143,7 +143,7 @@ public struct MetaMuseBatchClient: Sendable {
             endpoint: endpoint,
             apiKey: key,
             audio: prepared.data,
-            filename: url.deletingPathExtension().lastPathComponent + ".wav",
+            filename: Self.uploadFilename,
             model: Self.apiModelName(from: model),
             mode: .endpointing,
             languageBias: MetaMuseVoiceTranscribe.languageBias(for: language),
@@ -167,6 +167,11 @@ public struct MetaMuseBatchClient: Sendable {
             throw CancellationError()
         }
     }
+
+    /// Fixed multipart filename. The endpoint only needs *a* name, and the
+    /// recording's own name is user-controlled text with no business being
+    /// interpolated into a header line.
+    static let uploadFilename = "audio.wav"
 
     // Multipart construction keeps Meta's two required parts together.
     // swiftlint:disable:next function_parameter_count
@@ -412,7 +417,11 @@ private extension Data {
         boundary: String
     ) {
         append(Data("--\(boundary)\r\n".utf8))
-        let filenameValue = filename.map { "; filename=\"\($0)\"" } ?? ""
+        // Defence in depth: a caller-supplied name can never inject a header
+        // line break or escape the quoted-string of Content-Disposition.
+        let filenameValue = filename
+            .map { $0.components(separatedBy: CharacterSet(charactersIn: "\r\n\"\\")).joined() }
+            .map { "; filename=\"\($0)\"" } ?? ""
         append(Data("Content-Disposition: form-data; name=\"\(name)\"\(filenameValue)\r\n".utf8))
         append(Data("Content-Type: \(contentType)\r\n\r\n".utf8))
         append(data)

@@ -6,45 +6,69 @@ import SwiftUI
 
 extension SettingsView {
   var permissionsSettings: some View {
-    SpeakDensitySettingsSection(density: settings.visualDensity) {
+    // The rows live in their own view that observes `PermissionsManager`
+    // directly. `SettingsView` only observes `AppEnvironment`, so reading the
+    // manager through it never invalidated this tab: statuses changed under the
+    // hood (Refresh, the polling task, System Settings grants) but the pills
+    // kept their old value until the tab was recreated (issue #860).
+    PermissionsSettingsContent(permissions: environment.permissions, density: settings.visualDensity)
+  }
+
+  func statusLabel(for status: PermissionStatus) -> String {
+    PermissionsSettingsContent.statusLabel(for: status)
+  }
+
+  func volumeLabel(for volume: Float) -> String {
+    let percent = Int(volume * 100)
+    return "\(percent)%"
+  }
+}
+
+struct PermissionsSettingsContent: View {
+  @ObservedObject var permissions: PermissionsManager
+  let density: AppVisualDensity
+
+  var body: some View {
+    SpeakDensitySettingsSection(density: density) {
       SettingsCard(title: "System permissions", systemImage: "lock.shield", tint: Color.red) {
         VStack(alignment: .leading, spacing: 12) {
           ForEach(PermissionType.availablePermissions(for: DistributionChannel.current)) { permission in
-            let status = environment.permissions.status(for: permission)
+            let status = permissions.status(for: permission)
             VStack(alignment: .leading, spacing: 8) {
               HStack(spacing: 12) {
                 Label(permission.displayName, systemImage: permission.systemIconName)
                 Spacer()
-                Text(statusLabel(for: status))
+                Text(Self.statusLabel(for: status))
                   .padding(.horizontal, 8)
                   .padding(.vertical, 4)
-                  .background(statusColor(status).opacity(0.15), in: Capsule())
-                  .foregroundStyle(statusColor(status))
+                  .background(Self.statusColor(status).opacity(0.15), in: Capsule())
+                  .foregroundStyle(Self.statusColor(status))
+                  .accessibilityIdentifier("permissions.status.\(String(describing: permission))")
                 Button("Open Settings") {
-                  openSettings(for: permission)
+                  NSWorkspace.shared.open(permission.settingsURL)
                 }
                 .buttonStyle(.bordered)
                 .speakTooltip("Open the macOS privacy pane for \(permission.displayName).")
                 Button("Request") {
-                  Task { await environment.permissions.request(permission) }
+                  Task { await permissions.request(permission) }
                 }
                 .buttonStyle(.bordered)
                 .speakTooltip("Ask macOS to prompt again for \(permission.displayName) access.")
               }
 
-              if shouldShowManualSetupHelp(for: permission, status: status),
+              if Self.shouldShowManualSetupHelp(for: permission, status: status),
                  let steps = permission.manualSetupSteps {
-                permissionManualSetupNote(for: permission, steps: steps)
+                Self.manualSetupNote(for: permission, steps: steps)
               }
 
-              if let issue = environment.permissions.requestIssue(for: permission) {
-                channelAvailabilityNote(issue.guidance(for: permission))
+              if let issue = permissions.requestIssue(for: permission) {
+                Self.note(issue.guidance(for: permission))
               }
             }
           }
 
           Button("Refresh Statuses") {
-            environment.permissions.refreshAll()
+            permissions.refreshAll()
           }
           .buttonStyle(.borderedProminent)
           .speakTooltip("Re-check what the system currently allows without leaving Speak.")
@@ -54,13 +78,13 @@ extension SettingsView {
     }
     .task {
       while !Task.isCancelled {
-        environment.permissions.refreshAll()
+        permissions.refreshAll()
         try? await Task.sleep(for: .seconds(1))
       }
     }
   }
 
-  func statusLabel(for status: PermissionStatus) -> String {
+  static func statusLabel(for status: PermissionStatus) -> String {
     switch status {
     case .granted: return "Granted"
     case .denied: return "Denied"
@@ -69,11 +93,16 @@ extension SettingsView {
     }
   }
 
-  private func openSettings(for permission: PermissionType) {
-    NSWorkspace.shared.open(permission.settingsURL)
+  private static func statusColor(_ status: PermissionStatus) -> Color {
+    switch status {
+    case .granted: return .green
+    case .denied: return .red
+    case .restricted: return .orange
+    case .notDetermined: return .yellow
+    }
   }
 
-  private func shouldShowManualSetupHelp(for permission: PermissionType, status: PermissionStatus) -> Bool {
+  private static func shouldShowManualSetupHelp(for permission: PermissionType, status: PermissionStatus) -> Bool {
     guard permission.manualSetupSteps != nil else { return false }
     if status == .denied { return true }
     // Only Accessibility lacks an automatic prompt in sandboxed (App Store) builds.
@@ -83,7 +112,7 @@ extension SettingsView {
       && !DistributionChannel.current.supportsAutomaticAccessibilityPrompt
   }
 
-  private func permissionManualSetupNote(for permission: PermissionType, steps: [String]) -> some View {
+  private static func manualSetupNote(for permission: PermissionType, steps: [String]) -> some View {
     let cannotAutoPrompt = permission == .accessibility
       && !DistributionChannel.current.supportsAutomaticAccessibilityPrompt
     let intro = if cannotAutoPrompt {
@@ -91,20 +120,12 @@ extension SettingsView {
     } else {
       "Add \(permission.displayName) manually:"
     }
-    return channelAvailabilityNote("\(intro) \(steps.joined(separator: " "))")
+    return note("\(intro) \(steps.joined(separator: " "))")
   }
 
-  func volumeLabel(for volume: Float) -> String {
-    let percent = Int(volume * 100)
-    return "\(percent)%"
-  }
-
-  private func statusColor(_ status: PermissionStatus) -> Color {
-    switch status {
-    case .granted: return .green
-    case .denied: return .red
-    case .restricted: return .orange
-    case .notDetermined: return .yellow
-    }
+  private static func note(_ text: String) -> some View {
+    Label(text, systemImage: "info.circle")
+      .font(.caption)
+      .foregroundStyle(.secondary)
   }
 }

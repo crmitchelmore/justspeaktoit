@@ -713,17 +713,28 @@ public final class AppSettings: ObservableObject {
         batchAPIKey(for: batchTranscriptionModel)
     }
 
+    /// Batch credentials resolve through the same canonical mapping the
+    /// pickers and macOS use, so a directly-served model (OpenAI, Meta Muse,
+    /// Gemini 3.5 Transcribe) never silently falls back to the OpenRouter key.
+    /// Identifiers this app does not store keep the OpenRouter fallback, which
+    /// is the route `IOSBatchTranscriber` takes for those models.
     public func batchAPIKey(for modelIdentifier: String) -> String {
-        if AppleLocalModels.isSpeechAnalyzerModel(modelIdentifier) {
+        switch ModelCredentialResolver.requirement(
+            for: modelIdentifier, purpose: .batchTranscription
+        ) {
+        case .notRequired:
             return ""
+        case .apiKey(let identifier, _):
+            return apiKeysByIdentifier[identifier] ?? openRouterAPIKey
         }
-        if Self.openAIBatchModelIDs.contains(modelIdentifier) {
-            return openAIAPIKey
-        }
-        if modelIdentifier == MetaMuseVoiceTranscribe.batchCatalogID {
-            return metaAPIKey
-        }
-        return openRouterAPIKey
+    }
+
+    /// Every stored transcription credential keyed by its canonical
+    /// identifier, so credential lookups stay a table rather than a switch.
+    private var apiKeysByIdentifier: [String: String] {
+        var keys = liveAPIKeysByIdentifier
+        keys[Self.openRouterKeyID] = openRouterAPIKey
+        return keys
     }
 
     public static let openAIBatchModelIDs = OpenAITranscriptionModels.directBatchModelIDs
@@ -744,11 +755,11 @@ public final class AppSettings: ObservableObject {
             AppleLocalModels.isSpeechAnalyzerModel(option.id)
                 || openAIBatchModelIDs.contains(option.id)
                 // OpenRouter-routed Gemini 2.x batch models upload through the
-                // OpenRouter client. Gemini 3.5 Transcribe's direct Interactions
-                // API client is macOS-only for now, so it stays out of this list
-                // until iOS gains that upload path (issue #862).
-                || (option.id.hasPrefix("google/")
-                    && !GeminiTranscribeModels.directBatchModelIDs.contains(option.id))
+                // OpenRouter client; Gemini 3.5 Transcribe uploads through the
+                // shared `GeminiInteractionsClient` with the Google key
+                // (issue #862). Both are listed, and `batchAPIKey(for:)` and
+                // `IOSBatchTranscriptionRoute` keep them on separate paths.
+                || option.id.hasPrefix("google/")
                 || option.id == "openai/gpt-4o-audio-preview-2024-12-17"
                 || option.id == MetaMuseVoiceTranscribe.batchCatalogID
         }

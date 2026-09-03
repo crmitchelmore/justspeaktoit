@@ -114,13 +114,39 @@ public final class IOSBatchTranscriber {
     }
 }
 
+/// Which upload path a batch model takes on iOS.
+///
+/// A named decision rather than a chain of `if`s inside the request path, so
+/// the routing is assertable without a network round trip and adding a
+/// provider is one case rather than one more branch.
+enum IOSBatchTranscriptionRoute: Equatable, Sendable {
+    case appleSpeechAnalyzer
+    case openAI
+    case metaMuse
+    /// Google's own Interactions API, through the shared
+    /// `GeminiInteractionsClient`. Matched on the direct-batch identifiers
+    /// only: the `google/gemini-2.0-flash-*` catalogue entries share the
+    /// `google/` prefix but are OpenRouter-routed.
+    case gemini
+    case openRouter
+
+    static func route(for model: String) -> IOSBatchTranscriptionRoute {
+        if AppleLocalModels.isSpeechAnalyzerModel(model) { return .appleSpeechAnalyzer }
+        if AppSettings.openAIBatchModelIDs.contains(model) { return .openAI }
+        if model == MetaMuseVoiceTranscribe.batchCatalogID { return .metaMuse }
+        if GeminiTranscribeModels.directBatchModelIDs.contains(model) { return .gemini }
+        return .openRouter
+    }
+}
+
 private struct IOSBatchTranscriptionClient {
     let apiKey: String
     let keywords: [String]
     let session: URLSession
 
     func transcribeFile(at url: URL, model: String, language: String?) async throws -> TranscriptionResult {
-        if AppleLocalModels.isSpeechAnalyzerModel(model) {
+        switch IOSBatchTranscriptionRoute.route(for: model) {
+        case .appleSpeechAnalyzer:
             if #available(iOS 26.0, *) {
                 return try await AppleSpeechAnalyzerTranscriber.transcribeFile(
                     at: url,
@@ -129,34 +155,42 @@ private struct IOSBatchTranscriptionClient {
                 )
             }
             throw AppleLocalModelError.speechTranscriberUnavailable
-        }
-
-        let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedKey.isEmpty else { throw IOSBatchTranscriptionError.apiKeyMissing }
-
-        if AppSettings.openAIBatchModelIDs.contains(model) {
+        case .openAI:
             return try await transcribeWithOpenAI(
                 at: url,
                 model: model,
                 language: language,
-                apiKey: trimmedKey
+                apiKey: try requireAPIKey()
             )
-        }
-        if model == MetaMuseVoiceTranscribe.batchCatalogID {
+        case .metaMuse:
             return try await MetaMuseBatchClient(session: session).transcribeFile(
                 at: url,
-                apiKey: trimmedKey,
+                apiKey: try requireAPIKey(),
                 model: model,
                 language: language,
                 keywords: keywords
             )
+        case .gemini:
+            return try await transcribeWithGemini(
+                at: url,
+                model: model,
+                language: language,
+                apiKey: try requireAPIKey()
+            )
+        case .openRouter:
+            return try await transcribeWithOpenRouter(
+                at: url,
+                model: model,
+                language: language,
+                apiKey: try requireAPIKey()
+            )
         }
-        return try await transcribeWithOpenRouter(
-            at: url,
-            model: model,
-            language: language,
-            apiKey: trimmedKey
-        )
+    }
+
+    private func requireAPIKey() throws -> String {
+        let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw IOSBatchTranscriptionError.apiKeyMissing }
+        return trimmed
     }
 
     private func transcribeWithOpenAI(
@@ -205,6 +239,35 @@ private struct IOSBatchTranscriptionClient {
         let text = payload.transcriptText
         guard !text.isEmpty else { throw IOSBatchTranscriptionError.emptyTranscript }
         return await result(text: text, url: url, model: model, rawPayload: data)
+    }
+
+    /// Google's Interactions API, using the Google key rather than the
+    /// OpenRouter one. The shared client keeps word timings and the diarised
+    /// `spk_N` labels exactly as macOS does: one segment per annotated word,
+    /// with the speaker attribution preserved in the raw payload.
+    private func transcribeWithGemini(
+        at url: URL,
+        model: String,
+        language: String?,
+        apiKey: String
+    ) async throws -> TranscriptionResult {
+        do {
+            return try await GeminiInteractionsClient(session: session).transcribeFile(
+                at: url,
+                apiKey: apiKey,
+                model: model,
+                language: language
+            )
+        } catch GeminiBatchError.missingAPIKey {
+            throw IOSBatchTranscriptionError.apiKeyMissing
+        } catch GeminiBatchError.emptyTranscript {
+            throw IOSBatchTranscriptionError.emptyTranscript
+        } catch TranscriptionProviderError.invalidResponse {
+            throw IOSBatchTranscriptionError.invalidResponse
+        } catch let TranscriptionProviderError.httpError(statusCode, body) {
+            throw IOSBatchTranscriptionError.httpError(
+                GeminiTranscribeModels.providerDisplayName, statusCode, body)
+        }
     }
 
     private func transcribeWithOpenRouter(

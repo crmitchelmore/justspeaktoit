@@ -27,36 +27,6 @@ private final class TemporaryApplicationSupportFileManager: FileManager {
     }
 }
 
-/// Thread-safe counter shared with a `UserDefaults` subclass, which must stay
-/// `Sendable` and therefore cannot hold mutable state of its own.
-private final class WriteCounter: @unchecked Sendable {
-    private let lock = NSLock()
-    private var value = 0
-
-    var total: Int {
-        lock.lock()
-        defer { lock.unlock() }
-        return value
-    }
-
-    func increment() {
-        lock.lock()
-        value += 1
-        lock.unlock()
-    }
-}
-
-/// UserDefaults that counts writes, so the tests can assert how many times the
-/// synced-ID bookkeeping array is rewritten during a sync pass.
-private final class WriteCountingUserDefaults: UserDefaults {
-    let writes = WriteCounter()
-
-    override func set(_ value: Any?, forKey defaultName: String) {
-        writes.increment()
-        super.set(value, forKey: defaultName)
-    }
-}
-
 /// Covers the adapter's bridging contract from #685: local mutations reach the
 /// sync engine via the HistoryManager observers, remote changes are applied
 /// without echoing back as uploads, and acknowledgements survive a relaunch.
@@ -310,6 +280,57 @@ final class MacHistorySyncAdapterTests: XCTestCase {
         XCTAssertEqual(counting.writes.total, 1, "A flush with nothing pending must not write")
     }
 
+    /// A coalescing task that is already past its sleep when a later change
+    /// supersedes it still runs. It must not write, and above all must not
+    /// clear the replacement window's task handle and dirty flag, or the
+    /// replacement escapes `flushPendingSyncedIDs()` entirely (#870).
+    func testSupersededWindow_doesNotWriteOrClearItsReplacement() async throws {
+        let manager = await makeManager()
+        let counting = WriteCountingUserDefaults(suiteName: suiteName)!
+        let adapter = MacHistorySyncAdapter(
+            historyManager: manager,
+            defaults: counting,
+            saveInterval: .milliseconds(50)
+        )
+        let first = UUID()
+        let second = UUID()
+
+        await adapter.didAcknowledgeSyncedEntries(ids: [first])
+        // Let the first window's task actually start and reach its sleep, then
+        // block the main actor so the sleep elapses while its flush stays
+        // queued behind us — the exact interleaving from #870.
+        await Task.yield()
+        Thread.sleep(forTimeInterval: 0.15)
+        await adapter.didAcknowledgeSyncedEntries(ids: [second])
+        // Long enough to drain the superseded flush, short of the new window.
+        try await Task.sleep(for: .milliseconds(5))
+
+        XCTAssertEqual(
+            counting.writes.total,
+            0,
+            "A superseded window must not write; its replacement owns the write"
+        )
+        XCTAssertTrue(
+            adapter.hasPendingSyncedIDWrites,
+            "A superseded window must leave the replacement's dirty flag alone"
+        )
+
+        adapter.flushPendingSyncedIDs()
+
+        XCTAssertFalse(adapter.hasPendingSyncedIDWrites)
+        XCTAssertEqual(
+            Set(counting.stringArray(forKey: syncedIDsKey) ?? []),
+            Set([first, second].map(\.uuidString)),
+            "The flush must persist both windows' IDs"
+        )
+        XCTAssertEqual(counting.writes.total, 1, "The whole sequence must cost one write")
+
+        // The outstanding task must have been cancelled by the flush, not left
+        // running to write again once its window elapses.
+        try await Task.sleep(for: .milliseconds(120))
+        XCTAssertEqual(counting.writes.total, 1, "The flush must cancel the outstanding window")
+    }
+
     // MARK: - Helpers
 
     private let syncedIDsKey = "speak.sync.syncedMacHistoryIDs"
@@ -326,24 +347,6 @@ final class MacHistorySyncAdapterTests: XCTestCase {
 }
 
 // MARK: - Fixtures
-
-private func makeEntry(
-    id: UUID = UUID(),
-    text: String,
-    updatedAt: Date = Date(timeIntervalSince1970: 10)
-) -> SyncableHistoryEntry {
-    SyncableHistoryEntry(
-        id: id,
-        createdAt: Date(timeIntervalSince1970: 1),
-        rawTranscription: text,
-        postProcessedText: nil,
-        model: "test",
-        duration: 1,
-        wordCount: 1,
-        originPlatform: "ios",
-        updatedAt: updatedAt
-    )
-}
 
 private func makeItem(id: UUID = UUID(), updatedAt: Date = Date()) -> HistoryItem {
     HistoryItem(

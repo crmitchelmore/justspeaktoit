@@ -86,8 +86,10 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
     private var apiKey: String?
     private var startTime: Date?
     private var transcriber: OpenAIRealtimeWebSocketClient?
-    private var converter: AVAudioConverter?
-    private var targetFormat: AVAudioFormat?
+    /// The resampler retained for the whole session, plus its end-of-stream
+    /// flush (issue #872). Built on `start()` before the tap is installed and
+    /// only touched on `audioProcessingQueue` after that, so it needs no lock.
+    private let converterCache = LiveConverterCache()
     private static let targetSampleRate: Double = 24_000
 
     /// Per-segment bookkeeping keyed by `item_id`. Mirrors the macOS
@@ -172,6 +174,12 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
 
         preStopCompletedItemIDs = Set(finalsByItem.keys)
 
+        // The retained resampler is still holding the frames whose filter
+        // window has not closed. Flush them down the same send path the live
+        // chunks use, before the input buffer is committed, or the tail of a
+        // short utterance never reaches the model (issue #872).
+        await drainConverterTail(to: transcriber)
+
         if let client = transcriber {
             await finalizeRemoteSession(client)
         }
@@ -204,6 +212,27 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
         onFinalResult?(result)
 
         return result
+    }
+
+    /// Flushes the retained resampler's trailing frames down the same send path
+    /// the live chunks use, then releases the converter (issue #872).
+    ///
+    /// Hops through `audioProcessingQueue` so the tail lands strictly after the
+    /// last queued tap chunk and strictly before the commit — mirroring the
+    /// `queue.sync` drain in the macOS controllers. The target format is
+    /// already PCM16 at 24 kHz, so the drained bytes go out as-is.
+    private func drainConverterTail(to client: OpenAIRealtimeWebSocketClient?) async {
+        let cache = converterCache
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            audioProcessingQueue.async {
+                defer { continuation.resume() }
+                // Drain unconditionally: the converter is released either way,
+                // so a session that lost its client still starts clean.
+                let tail = cache.drainPCM16()
+                guard let client, let tail else { return }
+                client.sendAudio(tail)
+            }
+        }
     }
 
     /// Stop sequence that must run while we still have a live WebSocket client:
@@ -265,6 +294,9 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
         audioEngine.inputNode.removeTap(onBus: 0)
         transcriber?.stop()
         transcriber = nil
+        // Cancelled audio is thrown away, so there is nothing to drain — just
+        // drop the converter so the next session builds a fresh one.
+        converterCache.reset()
 
         audioRecorder.cancelRecording()
 
@@ -328,8 +360,6 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
         let inputNode = audioEngine.inputNode
         let nativeFormat = inputNode.outputFormat(forBus: 0)
         let (target, conv) = try createAudioConverter(from: nativeFormat)
-        targetFormat = target
-        converter = conv
         let client = transcriber
 
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) { [weak self] buffer, _ in
@@ -370,7 +400,11 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
             self.error = err
             throw err
         }
-        guard let conv = AVAudioConverter(from: nativeFormat, to: target) else {
+        // The cache owns the converter for the session: it is reused for every
+        // tap buffer (never `reset()` between chunks, which would wipe the
+        // resampler's filter history) and flushed at stop by
+        // `drainConverterTail(to:)`.
+        guard let conv = converterCache.converter(from: nativeFormat, to: target) else {
             let err = iOSTranscriptionError.audioSessionFailed(
                 NSError(domain: "OpenAIRealtimeLiveTranscriber", code: -2,
                         userInfo: [NSLocalizedDescriptionKey: "Failed to create audio converter"])

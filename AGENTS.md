@@ -98,6 +98,7 @@ The iOS app is built via Xcode but sources come from Swift packages:
 ## Build, Test, and Development Commands
 
 ### macOS (SwiftPM)
+- Use Xcode's toolchain only: `swift --version` must report `Apple Swift`. swift.org toolchains (swiftly) do not build this repo (#877).
 - `make` or `make run` – Build and launch the macOS app
 - `make build` – Debug compilation only
 - `make rebuild` – Clean and rebuild from scratch

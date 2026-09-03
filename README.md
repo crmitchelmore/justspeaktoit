@@ -70,7 +70,7 @@ Just Speak to It.xcodeproj/ # Generated via Tuist (iOS + macOS)
 
 ## Prerequisites
 
-- macOS 14 or newer with Xcode 15 (ships Swift toolchain 5.9) or a standalone Swift 5.9+ toolchain installed.
+- macOS 14 or newer with a current Xcode (Xcode 26.x, Apple Swift 6.2). Build with Xcode's toolchain: standalone swift.org toolchains (for example swiftly's default) do not build this repo today (the snapshot-testing dependency fails to compile and a release build crashes the optimiser in `argmax-oss-swift`, see #877). If `swift --version` does not say `Apple Swift`, run `xcode-select -s /Applications/Xcode.app` or unset `TOOLCHAINS`.
 - iOS 17+ for the iOS app
 - SwiftPM handles dependencies; no manual installations are required for linting/formatting.
 

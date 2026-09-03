@@ -4,6 +4,7 @@ import Foundation
 import SpeakCore
 import os.log
 
+// swiftlint:disable file_length
 /// Generic iOS live transcriber that drives **any** ``StreamingTranscriptionClient``.
 ///
 /// It captures microphone audio with `AVAudioEngine`, converts it to linear16
@@ -48,6 +49,10 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     /// Pools for tap-buffer copies and converter output so the hot path never allocates.
     private let tapBufferPool = PCMBufferPool(maximumBuffers: 4)
     private let outputBufferPool = PCMBufferPool(maximumBuffers: 2)
+    /// The resampler retained for the whole session, plus its end-of-stream
+    /// flush (issue #872). Built on `start()` before the tap is installed and
+    /// only touched on `audioProcessingQueue` after that, so it needs no lock.
+    private let converterCache = LiveConverterCache()
     /// Audio handed to the client that no response has accounted for yet — set
     /// on the audio-processing queue, read and cleared on the main actor, so it
     /// carries its own lock (issue #641: the short-utterance loss).
@@ -131,6 +136,11 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         // being written and sent; let them land before the client is finalised
         // and the recorder is closed.
         await audioProcessingQueue.drainPendingWork()
+        // The retained resampler is still holding the frames whose filter
+        // window has not closed. Flush them down the same send path the live
+        // chunks use, before the client is finalised, or the tail of a short
+        // utterance is dropped (issue #872).
+        await drainConverterTail()
         await finishClient()
         _ = audioRecorder.stopRecording()
         isRunning = false
@@ -154,6 +164,9 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         audioEngine.inputNode.removeTap(onBus: 0)
         client?.stop()
         client = nil
+        // Cancelled audio is thrown away, so there is nothing to drain — just
+        // drop the converter so the next session builds a fresh one.
+        converterCache.reset()
         // Cancel persistent recording (keeps the partial file).
         audioRecorder.cancelRecording()
         isRunning = false
@@ -332,7 +345,11 @@ private extension SharedClientLiveTranscriber {
             sampleRate: Double(route.sampleRate),
             channels: 1,
             interleaved: false
-        ), let converter = AVAudioConverter(from: nativeFormat, to: targetFormat) else {
+        // The cache owns the converter for the session: it is reused for every
+        // tap buffer (never `reset()` between chunks, which would wipe the
+        // resampler's filter history) and flushed at stop by
+        // `drainConverterTail()`.
+        ), let converter = converterCache.converter(from: nativeFormat, to: targetFormat) else {
             let err = iOSTranscriptionError.audioSessionFailed(
                 NSError(domain: "SharedClientLiveTranscriber", code: -1,
                         userInfo: [NSLocalizedDescriptionKey: "Failed to build audio converter"])
@@ -370,19 +387,47 @@ private extension SharedClientLiveTranscriber {
             outStatus.pointee = .haveData
             return buffer
         }
-        guard status != .error, let channelData = outputBuffer.floatChannelData?[0] else { return }
+        guard status != .error, let data = Self.pcm16Data(from: outputBuffer) else { return }
+        guard let client else { return }
+        unansweredAudio.record()
+        client.sendAudio(data)
+    }
 
-        let frameCount = Int(outputBuffer.frameLength)
-        guard frameCount > 0 else { return }
+    /// Flushes the retained resampler's trailing frames down the same send path
+    /// the live chunks use, then releases the converter (issue #872).
+    ///
+    /// Hops through `audioProcessingQueue` so the tail lands strictly after the
+    /// last queued tap chunk and strictly before the client is finalised —
+    /// mirroring the `queue.sync` drain in the macOS controllers.
+    func drainConverterTail() async {
+        let client = self.client
+        let cache = converterCache
+        let unansweredAudio = self.unansweredAudio
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            audioProcessingQueue.async {
+                defer { continuation.resume() }
+                // Drain unconditionally: the converter is released either way,
+                // so a session that lost its client still starts clean.
+                let tail = cache.drain()
+                guard let client, let tail, let data = Self.pcm16Data(from: tail) else { return }
+                unansweredAudio.record()
+                client.sendAudio(data)
+            }
+        }
+    }
+
+    /// Float32 mono frames → little-endian PCM16 bytes, the wire format the
+    /// shared clients expect.
+    nonisolated static func pcm16Data(from buffer: AVAudioPCMBuffer) -> Data? {
+        guard let channelData = buffer.floatChannelData?[0] else { return nil }
+        let frameCount = Int(buffer.frameLength)
+        guard frameCount > 0 else { return nil }
         var samples = [Int16](repeating: 0, count: frameCount)
         for index in 0..<frameCount {
             let clamped = max(-1.0, min(1.0, channelData[index]))
             samples[index] = Int16(clamped * Float(Int16.max))
         }
-        let data = samples.withUnsafeBufferPointer { Data(buffer: $0) }
-        guard let client else { return }
-        unansweredAudio.record()
-        client.sendAudio(data)
+        return samples.withUnsafeBufferPointer { Data(buffer: $0) }
     }
 }
 

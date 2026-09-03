@@ -15,6 +15,8 @@ final class VoiceEditController {
   private let selectionService: VoiceEditSelectionService
   private let replacementService: VoiceEditReplacementService
 
+  let hotKeyManager: HotKeyManager
+
   private var orchestrator: VoiceEditOrchestrator?
   var pendingCapture: VoiceEditSelectionService.Capture?
   private var escapeToken: ShortcutListenerToken?
@@ -36,6 +38,7 @@ final class VoiceEditController {
     self.hudManager = hudManager
     self.selectionService = selectionService
     self.replacementService = replacementService
+    self.hotKeyManager = hotKeyManager
     self.orchestrator = VoiceEditOrchestrator(dependencies: makeDependencies())
     self.escapeToken = hotKeyManager.register(shortcut: .escape) { [weak self] in
       Task { @MainActor [weak self] in

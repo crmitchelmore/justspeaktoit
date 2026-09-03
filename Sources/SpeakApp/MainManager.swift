@@ -488,6 +488,8 @@ final class MainManager: ObservableObject {
       }
     )
 
+    // ⌘R only retries a finished session, so it stays on the app-local monitor and never
+    // reaches Safari's reload or Xcode's run.
     shortcutTokens.append(
       hotKeyManager.register(shortcut: .commandR) { [weak self] in
         Task { @MainActor in
@@ -505,6 +507,10 @@ final class MainManager: ObservableObject {
         }
       }
     )
+
+    // Escape has to arrive from whichever app is being dictated into, but only while there
+    // is a recording to cancel — outside that window Speak reads no system-wide key presses.
+    hotKeyManager.trackRecordingState($state.map { $0 == .recording })
 
     hotKeyManager.startMonitoring()
 

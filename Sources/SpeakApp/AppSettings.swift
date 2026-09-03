@@ -438,8 +438,64 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     }
   }
 
-  @Published var localStreamingModelSource: String {
-    didSet { store(localStreamingModelSource, key: .localStreamingModelSource) }
+  /// Streaming sources the app is allowed to select, plus the fallback used when the persisted
+  /// choice is not one of them.
+  struct LocalStreamingCatalog {
+    var supportedIDs: Set<String>
+    var defaultID: String
+
+    @MainActor
+    static func current() -> LocalStreamingCatalog {
+      let whisperKitStreamingIDs = LocalModelManager.shared.availableModels
+        .filter(\.supportsLiveStreaming)
+        .map(WhisperKitStreamingModel.id(for:))
+      let defaultID = FluidAudioModelManager.supportsCurrentHardware
+        ? FluidAudioParakeetModel.id
+        : whisperKitStreamingIDs.first ?? ""
+      let fluidAudioStreamingIDs = FluidAudioModelManager.supportsCurrentHardware
+        ? [FluidAudioParakeetModel.id]
+        : []
+      var supportedIDs = Set(whisperKitStreamingIDs).union(fluidAudioStreamingIDs)
+      #if !APP_STORE
+      supportedIDs.formUnion(LocalModelManager.recommendedStreamingModelSources.map(\.id))
+      supportedIDs.formUnion(LocalModelManager.shared.streamingModelSources.map(\.id))
+      #endif
+      return LocalStreamingCatalog(supportedIDs: supportedIDs, defaultID: defaultID)
+    }
+  }
+
+  /// Resolves the streaming catalogue the first time ``localStreamingModelSource`` is read.
+  /// Overridable so tests can prove launch never forces `LocalModelManager.shared`.
+  static var localStreamingCatalogProvider: @MainActor () -> LocalStreamingCatalog =
+    LocalStreamingCatalog.current
+
+  /// Value read from `UserDefaults`, kept verbatim until the property is first read.
+  private var storedLocalStreamingModelSource: String?
+  /// Cached result of validating ``storedLocalStreamingModelSource`` against the catalogue.
+  private var normalizedLocalStreamingModelSource: String?
+
+  /// Selected local streaming source, normalised against the installed catalogue on first read.
+  ///
+  /// Resolving the catalogue builds `LocalModelManager.shared`, whose initialiser creates
+  /// directories, decodes the imported-models file and stats one marker file per catalogue
+  /// model. Normalising eagerly put all of that on the launch path
+  /// (`WireUp.bootstrap` -> `AppSettings.init`) before the first frame, so it is deferred until
+  /// something actually reads this property.
+  var localStreamingModelSource: String {
+    get {
+      if let normalizedLocalStreamingModelSource { return normalizedLocalStreamingModelSource }
+      let catalog = Self.localStreamingCatalogProvider()
+      let stored = storedLocalStreamingModelSource ?? ""
+      let normalized = catalog.supportedIDs.contains(stored) ? stored : catalog.defaultID
+      normalizedLocalStreamingModelSource = normalized
+      return normalized
+    }
+    set {
+      objectWillChange.send()
+      storedLocalStreamingModelSource = newValue
+      normalizedLocalStreamingModelSource = newValue
+      store(newValue, key: .localStreamingModelSource)
+    }
   }
 
   @Published var preferredLocaleIdentifier: String {
@@ -929,6 +985,19 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     [liveTranscriptionModel, batchTranscriptionModel].contains { $0.split(separator: "/").first?.caseInsensitiveCompare("modulate") == .orderedSame } // swiftlint:disable:this line_length
   }
 
+  /// True when the model that will actually run — streaming or remote batch —
+  /// is a Meta Muse Voice Transcribe model, so its bias options apply.
+  var hasSelectedMetaMuseModel: Bool {
+    let selected: String
+    switch transcriptionMode {
+    case .liveNative: selected = liveTranscriptionModel
+    case .batchRemote: selected = batchTranscriptionModel
+    case .localModel: return false
+    }
+    return selected.split(separator: "/").first?
+      .caseInsensitiveCompare(MetaMuseVoiceTranscribe.providerID) == .orderedSame
+  }
+
   private func enforceSpeedModeConstraints() {
     if !supports(speedMode: speedMode) {
       speedMode = .instant
@@ -1007,26 +1076,11 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     localTranscriptionMode = DistributionChannel.current.supportsInProcessLocalStreaming
       ? loadedLocalTranscriptionMode
       : .batch
-    let storedLocalStreamingSource = defaults.string(forKey: DefaultsKey.localStreamingModelSource.rawValue)
-    let whisperKitStreamingIDs = LocalModelManager.shared.availableModels
-      .filter(\.supportsLiveStreaming)
-      .map(WhisperKitStreamingModel.id(for:))
-    let defaultLocalStreamingSource = FluidAudioModelManager.supportsCurrentHardware
-      ? FluidAudioParakeetModel.id
-      : whisperKitStreamingIDs.first ?? ""
-    let fluidAudioStreamingIDs = FluidAudioModelManager.supportsCurrentHardware
-      ? [FluidAudioParakeetModel.id]
-      : []
-    var supportedLocalStreamingIDs = Set(whisperKitStreamingIDs)
-      .union(fluidAudioStreamingIDs)
-    #if !APP_STORE
-    supportedLocalStreamingIDs.formUnion(LocalModelManager.recommendedStreamingModelSources.map(\.id))
-    supportedLocalStreamingIDs.formUnion(LocalModelManager.shared.streamingModelSources.map(\.id))
-    #endif
-    localStreamingModelSource =
-      supportedLocalStreamingIDs.contains(storedLocalStreamingSource ?? "")
-      ? storedLocalStreamingSource ?? defaultLocalStreamingSource
-      : defaultLocalStreamingSource
+    // Kept raw here; validated against the local model catalogue on first read so launch never
+    // builds `LocalModelManager.shared`.
+    storedLocalStreamingModelSource = defaults.string(
+      forKey: DefaultsKey.localStreamingModelSource.rawValue
+    )
     preferredLocaleIdentifier = TranscriptionLanguageCatalog.normalizedIdentifier(
       defaults.string(forKey: DefaultsKey.preferredLocale.rawValue)
     )

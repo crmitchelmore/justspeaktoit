@@ -311,29 +311,6 @@ public final class ConfigTransferManager: Sendable {
     /// of the keys either platform can hold, so exporting from one platform
     /// and importing on the other never silently drops a stored credential.
     ///
-    /// This list is deliberately explicit rather than derived: it is the
-    /// bounded transfer policy (issue #699). A parity test asserts it equals
-    /// `ModelCredentialResolver.allKnownAPIKeyIdentifiers`, so adding a
-    /// provider to any catalogue fails the test until its transfer capability
-    /// is defined here. Dynamically registered identifiers are never exported.
-    public static let transferableSecretIdentifiers: [String] = [
-        "assemblyai.apiKey",
-        "azure.speech.apiKey",
-        "cartesia.apiKey",
-        "deepgram.apiKey",
-        "elevenlabs.apiKey",
-        "gladia.apiKey",
-        "groq.apiKey",
-        "mistral.apiKey",
-        "modulate.apiKey",
-        "openai.apiKey",
-        "openai.tts.apiKey",
-        "openrouter.apiKey",
-        "revai.apiKey",
-        "soniox.apiKey",
-        "speechmatics.apiKey",
-        "xai.apiKey"
-    ]
 
     /// Non-secret settings keys a transfer payload may carry. Import refuses
     /// anything else so a payload cannot write arbitrary defaults.
@@ -958,4 +935,34 @@ public struct SyncStatus: Equatable, Sendable {
             pendingChanges: false
         )
     }
+}
+
+// The bounded transfer policy lives in an extension so the manager's type body
+// stays under the lint limit as providers are added.
+extension ConfigTransferManager {
+    /// This list is deliberately explicit rather than derived: it is the
+    /// bounded transfer policy (issue #699). A parity test asserts it equals
+    /// `ModelCredentialResolver.allKnownAPIKeyIdentifiers`, so adding a
+    /// provider to any catalogue fails the test until its transfer capability
+    /// is defined here. Dynamically registered identifiers are never exported.
+    public static let transferableSecretIdentifiers: [String] = [
+        "assemblyai.apiKey",
+        "azure.speech.apiKey",
+        "cartesia.apiKey",
+        "deepgram.apiKey",
+        "elevenlabs.apiKey",
+        "gladia.apiKey",
+        "google.apiKey",
+        "groq.apiKey",
+        "meta.apiKey",
+        "mistral.apiKey",
+        "modulate.apiKey",
+        "openai.apiKey",
+        "openai.tts.apiKey",
+        "openrouter.apiKey",
+        "revai.apiKey",
+        "soniox.apiKey",
+        "speechmatics.apiKey",
+        "xai.apiKey"
+    ]
 }

@@ -91,11 +91,16 @@ struct CompactHUDContent: View {
   @ViewBuilder
   private var timerLabel: some View {
     if phaseHasTimer {
-      Text(compactElapsed)
-        .font(.title3.weight(.medium).monospacedDigit())
-        .foregroundStyle(.secondary)
-        .accessibilityLabel("Elapsed time: \(compactElapsed)")
-        .accessibilityAddTraits(.updatesFrequently)
+      // The compact clock shows whole seconds, so it redraws once a second -
+      // and only this label redraws, rather than the whole card.
+      HUDElapsedClock(start: manager.sessionStart, interval: 1) { elapsed in
+        let label = Self.elapsedLabel(for: elapsed)
+        Text(label)
+          .font(.title3.weight(.medium).monospacedDigit())
+          .foregroundStyle(.secondary)
+          .accessibilityLabel("Elapsed time: \(label)")
+          .accessibilityAddTraits(.updatesFrequently)
+      }
     } else {
       // Reserve the trailing slot so the dot stays hard against the left edge.
       Color.clear.frame(width: 1, height: 1)
@@ -216,10 +221,6 @@ struct CompactHUDContent: View {
   /// except `armed`, which has no running clock.
   private var phaseHasTimer: Bool {
     phase.isTerminal == false && phase != .armed
-  }
-
-  private var compactElapsed: String {
-    Self.elapsedLabel(for: snapshot.elapsed)
   }
 
   /// Minutes and seconds with a trailing `s`, no fractional seconds:

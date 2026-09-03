@@ -204,8 +204,17 @@ final class AppEnvironment: ObservableObject {
       historyManager: history,
       mainManager: main,
       hotKeyManager: hotKeys,
-      openMainWindow: { [weak self] in self?.presentMainWindow() }
+      openMainWindow: { [weak self] in self?.presentMainWindow() },
+      openSettings: { [weak self] in self?.presentSettings() }
     )
+  }
+
+  /// Opens the main window on the General settings tab. This backs the status
+  /// bar item's "Settings…"; the navigation target is set first so a window
+  /// SwiftUI has yet to create still receives the selection when it subscribes.
+  func presentSettings() {
+    sidebarNavigationTarget = .settings(.general)
+    presentMainWindow()
   }
 
   /// Brings the main window to the front, reopening it if the app is running
@@ -713,6 +722,7 @@ enum WireUp {
       .azure: AzureSpeechClient(secureStorage: secureStorage, appSettings: settings),
       .deepgram: DeepgramTTSClient(secureStorage: secureStorage),
       .soniox: SonioxTTSClient(secureStorage: secureStorage, appSettings: settings),
+      .cartesia: CartesiaTTSClient(secureStorage: secureStorage),
       .system: SystemTTSClient()
     ]
     return TextToSpeechManager(

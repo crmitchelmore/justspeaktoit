@@ -69,7 +69,8 @@ final class IOSTranscriptionSession {
         language: String? = nil,
         audioSessionManager: AudioSessionManager,
         batchAPIKey: String,
-        liveAPIKey: (LiveTranscriptionRoute) -> String
+        liveAPIKey: (LiveTranscriptionRoute) -> String,
+        transcriptionKeywords: [String] = []
     ) throws {
         let resolution = try Self.resolve(modelID: modelID, mode: mode)
         self.resolution = resolution
@@ -80,7 +81,8 @@ final class IOSTranscriptionSession {
             language: language,
             audioSessionManager: audioSessionManager,
             batchAPIKey: batchAPIKey,
-            liveAPIKey: liveAPIKey
+            liveAPIKey: liveAPIKey,
+            transcriptionKeywords: transcriptionKeywords
         )
         bindCallbacks()
     }
@@ -117,7 +119,8 @@ final class IOSTranscriptionSession {
         language: String?,
         audioSessionManager: AudioSessionManager,
         batchAPIKey: String,
-        liveAPIKey: (LiveTranscriptionRoute) -> String
+        liveAPIKey: (LiveTranscriptionRoute) -> String,
+        transcriptionKeywords: [String]
     ) throws -> Backend {
         switch resolution.backend {
         case .batch:
@@ -132,6 +135,7 @@ final class IOSTranscriptionSession {
                     audioSessionManager: audioSessionManager,
                     model: resolution.modelID,
                     apiKey: batchAPIKey,
+                    keywords: transcriptionKeywords,
                     retainRecording: retainRecording
                 )
             )
@@ -154,6 +158,7 @@ final class IOSTranscriptionSession {
                     route: route,
                     apiKey: liveAPIKey(route),
                     language: language,
+                    keywords: route.provider == .meta ? transcriptionKeywords : [],
                     audioSessionManager: audioSessionManager
                 )
             )

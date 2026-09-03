@@ -94,6 +94,7 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
     case deepgram
     case cartesia
     case gladia
+    case google
     case modulate
     case assemblyai
     case soniox
@@ -101,6 +102,7 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
     case openai
     case speechmatics
     case xai
+    case meta
 
     /// Keychain identifier for this provider's API key, or `nil` for on-device
     /// providers that need no credential. Matches the identifiers used by both
@@ -119,8 +121,8 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
     /// PCM sample rate (Hz) the provider's streaming client expects.
     public var expectedSampleRate: Int {
         switch self {
-        case .openai, .xai:
-            // OpenAI and xAI's Realtime transcription APIs ingest 24 kHz PCM16.
+        case .openai, .xai, .meta:
+            // OpenAI, xAI and Meta realtime transcription ingest 24 kHz PCM16.
             return 24_000
         default:
             return 16_000
@@ -135,7 +137,7 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
     public var isSupportedOnIOS: Bool {
         switch self {
         case .apple, .deepgram, .elevenlabs, .openai, .cartesia, .soniox, .modulate, .assemblyai,
-             .gladia, .xai:
+             .gladia, .google, .xai, .meta:
             return true
         case .speechmatics:
             return false
@@ -150,6 +152,7 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
         case .deepgram: return "Deepgram"
         case .cartesia: return "Cartesia"
         case .gladia: return "Gladia"
+        case .google: return GeminiTranscribeModels.providerDisplayName
         case .modulate: return "Modulate"
         case .assemblyai: return "AssemblyAI"
         case .soniox: return "Soniox"
@@ -157,6 +160,7 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
         case .openai: return "OpenAI"
         case .speechmatics: return "Speechmatics"
         case .xai: return "xAI"
+        case .meta: return "Meta"
         }
     }
 
@@ -171,6 +175,7 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
         case .deepgram: website = "https://deepgram.com"
         case .cartesia: website = "https://cartesia.ai"
         case .gladia: website = "https://www.gladia.io"
+        case .google: website = "https://aistudio.google.com/apikey"
         case .modulate: website = "https://www.modulate-developer-apis.com/web/docs.html"
         case .assemblyai: website = "https://assemblyai.com"
         case .soniox: website = "https://soniox.com"
@@ -178,6 +183,7 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
         case .openai: website = "https://platform.openai.com"
         case .speechmatics: website = "https://www.speechmatics.com"
         case .xai: website = "https://console.x.ai"
+        case .meta: website = "https://llama.developer.meta.com"
         }
         return URL(string: website)
     }
@@ -283,7 +289,7 @@ public enum LiveTranscriptionRouting {
     }
 }
 
-// MARK: - Factory
+// MARK: - Errors
 
 public enum LiveTranscriptionClientError: LocalizedError {
     case unknownModel(String)
@@ -316,82 +322,5 @@ public enum StreamingClientError: LocalizedError {
         case .missingAPIKey(let provider):
             return "\(provider) API key is missing. Please configure it in Settings."
         }
-    }
-}
-
-/// Constructs the shared streaming client for a resolved route.
-///
-/// Providers whose client already lives in `SpeakCore` are built here so both
-/// platforms share one implementation. Providers without a shared client yet
-/// (or on-device Apple, and OpenAI whose client is still platform-native)
-/// return `nil` — callers fall back to a platform-native path or surface a
-/// "not available yet" message.
-public enum LiveTranscriptionClientFactory {
-    public static func makeClient(
-        for route: LiveTranscriptionRoute,
-        apiKey: String,
-        language: String?
-    ) -> StreamingTranscriptionClient? {
-        switch route.provider {
-        case .deepgram:
-            return DeepgramLiveClient(
-                apiKey: apiKey,
-                model: route.apiModelName,
-                language: language,
-                sampleRate: route.sampleRate
-            )
-        case .elevenlabs:
-            return ElevenLabsLiveClient(
-                apiKey: apiKey,
-                modelID: route.apiModelName,
-                language: language,
-                sampleRate: route.sampleRate
-            )
-        case .cartesia:
-            return CartesiaLiveClient(
-                apiKey: apiKey,
-                model: route.apiModelName,
-                sampleRate: route.sampleRate
-            )
-        case .soniox:
-            return SonioxLiveClient(
-                apiKey: apiKey,
-                model: route.apiModelName,
-                language: language,
-                sampleRate: route.sampleRate
-            )
-        case .modulate:
-            return ModulateLiveClient(apiKey: apiKey, sampleRate: route.sampleRate)
-        case .assemblyai:
-            return AssemblyAILiveClient(
-                apiKey: apiKey,
-                speechModel: route.apiModelName,
-                sampleRate: route.sampleRate
-            )
-        case .gladia:
-            return GladiaLiveClient(
-                apiKey: apiKey,
-                model: route.apiModelName,
-                language: language,
-                sampleRate: route.sampleRate
-            )
-        case .xai:
-            return makeXAIClient(for: route, apiKey: apiKey, language: language)
-        case .apple, .openai, .speechmatics:
-            return nil
-        }
-    }
-
-    private static func makeXAIClient(
-        for route: LiveTranscriptionRoute,
-        apiKey: String,
-        language: String?
-    ) -> XAILiveClient {
-        XAILiveClient(
-            apiKey: apiKey,
-            model: route.apiModelName,
-            language: language,
-            sampleRate: route.sampleRate
-        )
     }
 }

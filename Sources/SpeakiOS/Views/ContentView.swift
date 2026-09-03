@@ -104,7 +104,8 @@ final class TranscriberCoordinator: ObservableObject {
             language: settings.preferredModelLanguage,
             audioSessionManager: audioSessionManager,
             batchAPIKey: settings.batchAPIKey,
-            liveAPIKey: settings.liveAPIKey(for:)
+            liveAPIKey: settings.liveAPIKey(for:),
+            transcriptionKeywords: MetaMuseVoiceTranscribe.keywords(from: settings.transcriptionKeywords)
         )
         session.onPartialResult = { [weak self, weak session] text, isFinal in
             self?.handlePartialResult(text: text, isFinal: isFinal)

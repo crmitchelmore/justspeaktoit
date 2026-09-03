@@ -3,9 +3,11 @@ import AppKit
 import Combine
 
 @MainActor
+// swiftlint:disable:next type_body_length
 final class StatusBarController {
   private let statusItem: NSStatusItem
   private let openMainWindow: () -> Void
+  private let openSettings: () -> Void
   private let appSettings: AppSettings
   private let historyManager: HistoryManager
   private let mainManager: MainManager
@@ -18,13 +20,15 @@ final class StatusBarController {
     historyManager: HistoryManager,
     mainManager: MainManager,
     hotKeyManager: HotKeyManager,
-    openMainWindow: @escaping () -> Void
+    openMainWindow: @escaping () -> Void,
+    openSettings: @escaping () -> Void
   ) {
     self.appSettings = appSettings
     self.historyManager = historyManager
     self.mainManager = mainManager
     self.hotKeyManager = hotKeyManager
     self.openMainWindow = openMainWindow
+    self.openSettings = openSettings
 
     statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     statusItem.button?.appearsDisabled = false
@@ -196,6 +200,15 @@ final class StatusBarController {
     openItem.setAccessibilityIdentifier("statusBarOpenAppItem")
     menu.addItem(openItem)
 
+    let settingsItem = NSMenuItem(
+      title: "Settings…",
+      action: #selector(openSettingsTab),
+      keyEquivalent: ""
+    )
+    settingsItem.target = self
+    settingsItem.setAccessibilityIdentifier("statusBarSettingsItem")
+    menu.addItem(settingsItem)
+
     menu.addItem(NSMenuItem.separator())
 
     let quitItem = NSMenuItem(
@@ -288,6 +301,10 @@ final class StatusBarController {
 
   @objc private func openApp() {
     openMainWindow()
+  }
+
+  @objc private func openSettingsTab() {
+    openSettings()
   }
 
   @objc private func quitApp() {

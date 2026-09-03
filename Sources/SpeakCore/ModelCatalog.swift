@@ -38,6 +38,12 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             description: "Real-time multilingual STT with automatic language detection and partial transcripts.",
             estimatedLatencyMs: 220, latencyTier: .fast),
         Option(
+            id: GeminiTranscribeModels.liveCatalogID,
+            displayName: "Gemini 3.5 Transcribe Live (Preview)",
+            description: "Google's real-time Gemini Live API transcription across 85+ languages with "
+                + "automatic language detection. Public preview — opt-in, never a default or fallback.",
+            estimatedLatencyMs: 200, latencyTier: .fast),
+        Option(
             id: "modulate/velma-2-stt-streaming", displayName: "Modulate Velma-2 (Streaming)",
             description: "Real-time multilingual WebSocket transcription with diarization and signal detection.",
             estimatedLatencyMs: 220, latencyTier: .fast),
@@ -52,6 +58,14 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             description: "Soniox v5 real-time WebSocket STT with reinvented speaker separation, "
                 + "faster semantic endpointing, and improved multilingual recognition across 60+ languages.",
             estimatedLatencyMs: 220, latencyTier: .fast),
+        Option(
+            id: MetaMuseVoiceTranscribe.liveCatalogID,
+            displayName: "Meta Muse Voice Transcribe (Streaming)",
+            description: "Meta Model API realtime speech-to-text with partial transcripts, "
+                + "model-detected utterance boundaries, and language and vocabulary biasing.",
+            estimatedLatencyMs: 200,
+            latencyTier: .fast,
+            tags: [.fast, .leading]),
         Option(
             id: "speechmatics/enhanced-streaming",
             displayName: "Speechmatics Enhanced (Streaming)",
@@ -136,10 +150,24 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             description: "Mistral Voxtral Mini batch transcription for long-form multilingual audio.",
             estimatedLatencyMs: 900, latencyTier: .fast),
         Option(
+            id: MetaMuseVoiceTranscribe.batchCatalogID,
+            displayName: "Meta Muse Voice Transcribe",
+            description: "Meta Model API file transcription with turn-level timestamps, "
+                + "language biasing, and vocabulary biasing. Recordings are converted to supported PCM WAV.",
+            estimatedLatencyMs: 800,
+            latencyTier: .fast,
+            tags: [.fast, .leading]),
+        Option(
             id: "soniox/stt-async-v5",
             displayName: "Soniox Async v5",
             description: "Soniox v5 asynchronous batch STT with speaker diarization and language identification.",
             estimatedLatencyMs: 1200, latencyTier: .medium),
+        Option(
+            id: GeminiTranscribeModels.batchCatalogID,
+            displayName: "Gemini 3.5 Transcribe (Google, Preview)",
+            description: "Google's Gemini Interactions API for recorded audio, with word-level "
+                + "timestamps and speaker attribution. Public preview — opt-in, never a default.",
+            estimatedLatencyMs: 900, latencyTier: .fast),
         Option(
             id: "revai/default", displayName: "Rev.ai",
             description: "Rev.ai's speech recognition. High accuracy with speaker identification.",

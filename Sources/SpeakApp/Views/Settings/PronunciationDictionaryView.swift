@@ -19,6 +19,7 @@ struct PronunciationDictionaryView: View {
     @State private var importMerge = true
     @State private var alertMessage: String?
     @State private var showingAlert = false
+    @State private var entryPendingDeletion: PronunciationEntry?
 
     private var filteredEntries: [PronunciationEntry] {
         var result = pronunciationManager.entries
@@ -94,6 +95,25 @@ struct PronunciationDictionaryView: View {
         } message: {
             Text(alertMessage ?? "")
         }
+        .confirmationDialog(
+            "Delete Entry",
+            isPresented: Binding(
+                get: { entryPendingDeletion != nil },
+                set: { if !$0 { entryPendingDeletion = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: entryPendingDeletion
+        ) { entry in
+            Button("Delete", role: .destructive) {
+                pronunciationManager.deleteEntry(entry)
+                entryPendingDeletion = nil
+            }
+            Button("Cancel", role: .cancel) {
+                entryPendingDeletion = nil
+            }
+        } message: { entry in
+            Text("Are you sure you want to delete the entry for \"\(entry.word)\"? This cannot be undone.")
+        }
     }
 
     // MARK: - Header
@@ -142,7 +162,7 @@ struct PronunciationDictionaryView: View {
         HStack {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
-            TextField("Search words or pronunciations...", text: $searchText)
+            TextField("Search words or pronunciations…", text: $searchText)
                 .textFieldStyle(.plain)
             if !searchText.isEmpty {
                 Button {
@@ -264,24 +284,26 @@ struct PronunciationDictionaryView: View {
             spacing: density.isCompact ? density.sectionSpacing : 8
         ) {
             ForEach(filteredEntries) { entry in
-                PronunciationEntryRow(entry: entry)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
+                Button {
+                    editingEntry = entry
+                } label: {
+                    PronunciationEntryRow(entry: entry)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Opens the editor for this entry.")
+                .contextMenu {
+                    Button {
                         editingEntry = entry
+                    } label: {
+                        Label("Edit", systemImage: "pencil")
                     }
-                    .contextMenu {
-                        Button {
-                            editingEntry = entry
-                        } label: {
-                            Label("Edit", systemImage: "pencil")
-                        }
 
-                        Button(role: .destructive) {
-                            pronunciationManager.deleteEntry(entry)
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
+                    Button(role: .destructive) {
+                        entryPendingDeletion = entry
+                    } label: {
+                        Label("Delete", systemImage: "trash")
                     }
+                }
             }
         }
         .padding(.horizontal, density.isCompact ? 8 : 16)

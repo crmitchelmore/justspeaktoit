@@ -28,7 +28,7 @@ struct ConfigTransferView: View {
                 .font(.headline)
             
             if isGenerating {
-                ProgressView("Generating QR Code...")
+                ProgressView("Generating QR Code…")
                     .padding()
             } else if let image = qrImage {
                 VStack(spacing: 16) {

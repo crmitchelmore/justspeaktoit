@@ -64,7 +64,12 @@ struct ShortcutsSettingsView: View {
 
             ShortcutSettingsCard(title: "Actions", systemImage: "arrow.counterclockwise", tint: .brandAccent) {
                 HStack(spacing: 12) {
-                    Button("Reset to Defaults") {
+                    DestructiveConfirmButton(
+                        "Reset to Defaults",
+                        dialogTitle: "Reset All Shortcuts?",
+                        message: "Every shortcut you have customised returns to its original setting.",
+                        confirmTitle: "Reset to Defaults"
+                    ) {
                         shortcutManager.resetToDefaults()
                     }
                     .buttonStyle(.bordered)
@@ -201,7 +206,7 @@ struct ShortcutsSettingsView: View {
             if isRecording {
                 HStack(spacing: 4) {
                     Image(systemName: "keyboard")
-                    Text("Press keys...")
+                    Text("Press keys…")
                 }
                 .font(.caption)
                 .padding(.horizontal, density.isCompact ? 5 : 8)

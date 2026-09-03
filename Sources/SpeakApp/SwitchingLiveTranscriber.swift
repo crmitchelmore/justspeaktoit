@@ -207,7 +207,13 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       ("speechmatics/", controllers.speechmatics),
       ("cartesia/", controllers.cartesia),
       ("gladia/", controllers.gladia),
-      ("xai/", controllers.sharedClient)
+      // Gemini 3.5 Transcribe Live runs on the shared SpeakCore client, so it
+      // needs no bespoke controller or audio processor.
+      (GeminiTranscribeModels.liveCatalogID, controllers.sharedClient),
+      ("xai/", controllers.sharedClient),
+      // Meta Muse Voice Transcribe streams through the shared SpeakCore client,
+      // so it uses the same macOS capture controller as xAI.
+      ("meta/", controllers.sharedClient)
     ]
   }
 
@@ -412,7 +418,8 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       sharedClient = SharedClientLiveController(
         permissionsManager: permissionsManager,
         audioDeviceManager: audioDeviceManager,
-        secureStorage: secureStorage
+        secureStorage: secureStorage,
+        appSettings: appSettings
       )
       fluidAudio = FluidAudioParakeetLiveController(
         appSettings: appSettings,

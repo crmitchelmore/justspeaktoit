@@ -118,7 +118,13 @@ final class LocalModelManager: ObservableObject {
   #endif
   private var storageError: Error?
 
+  /// Test accounting. `shared` is lazy, so an unchanged count across an operation proves
+  /// that operation did not force the singleton (and its filesystem work) into existence.
+  /// Not gated on DEBUG: CI also runs the tests in the Release configuration.
+  private(set) static var instanceCount = 0
+
   private init(fileManager: FileManager = .default) {
+    Self.instanceCount += 1
     self.fileManager = fileManager
     let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
       ?? fileManager.homeDirectoryForCurrentUser

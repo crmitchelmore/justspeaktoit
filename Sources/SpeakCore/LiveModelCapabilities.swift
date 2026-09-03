@@ -86,6 +86,13 @@ extension ModelCatalog {
             supportedSpeedModes: [.instant, .livePolish],
             postStopFinalizeBudget: 1.5
         ),
+        // Gemini finalises a turn after server-side VAD detects the pause; the
+        // client audioStreamEnd flush needs a moment to bring the trailing
+        // utterance back before teardown.
+        GeminiTranscribeModels.liveCatalogID: LiveModelCapabilities(
+            supportedSpeedModes: [.instant, .livePolish],
+            postStopFinalizeBudget: 2.0
+        ),
         "modulate/velma-2-stt-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish]
         ),

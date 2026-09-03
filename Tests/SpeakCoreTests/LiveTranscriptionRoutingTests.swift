@@ -53,6 +53,20 @@ final class LiveTranscriptionRoutingTests: XCTestCase {
         XCTAssertEqual(live?.sampleRate, 24_000)
     }
 
+    func testRoute_gemini_keepsTheUpstreamLiveModelName() {
+        // Act: the catalogue id already carries Google's own `-live` suffix, so
+        // the shared `-streaming` strip must leave it alone.
+        let route = LiveTranscriptionRouting.route(for: GeminiTranscribeModels.liveCatalogID)
+
+        // Assert
+        XCTAssertEqual(route?.provider, .google)
+        XCTAssertEqual(route?.apiModelName, GeminiTranscribeModels.liveAPIName)
+        XCTAssertEqual(route?.apiModelName, "gemini-3.5-transcribe-live")
+        XCTAssertEqual(route?.sampleRate, 16_000)
+        XCTAssertEqual(route?.apiKeyIdentifier, "google.apiKey")
+        XCTAssertTrue(route?.isSupportedOnIOS == true)
+    }
+
     func testRoute_apple_hasNoAPIKeyAndPreservesID() {
         // Act
         let route = LiveTranscriptionRouting.route(for: "apple/local/SFSpeechRecognizer")
@@ -150,6 +164,7 @@ final class LiveTranscriptionRoutingTests: XCTestCase {
             "modulate/velma-2-stt-streaming",
             AssemblyAIModels.universal35ProStreamingID,
             "gladia/solaria-1-streaming",
+            GeminiTranscribeModels.liveCatalogID,
             XAIVoiceModels.thinkFast2CatalogID
         ]
 

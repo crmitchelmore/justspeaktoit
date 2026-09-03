@@ -21,12 +21,14 @@ Speak is designed with privacy in mind. This document explains what data is coll
 | Deepgram | Cloud | Audio streamed to Deepgram for transcription |
 | Cartesia | Cloud | Audio streamed to Cartesia for transcription |
 | Gladia | Cloud | Audio streamed to Gladia for transcription |
+| Google Gemini | Cloud | Audio streamed to Google for Gemini 3.5 Transcribe (live and recorded) |
 | Modulate | Cloud | Audio streamed to Modulate for transcription |
 | AssemblyAI | Cloud | Audio streamed to AssemblyAI for transcription |
 | Soniox | Cloud | Audio streamed to Soniox for transcription |
 | ElevenLabs | Cloud | Audio streamed to ElevenLabs for transcription |
 | OpenAI | Cloud | Audio streamed to OpenAI for transcription |
 | xAI | Cloud | Audio streamed to xAI for transcription |
+| Meta Model API | Cloud | Audio streamed or uploaded to Meta for Muse Voice Transcribe |
 
 This table covers live providers available in the iOS app. macOS also supports Speechmatics streaming. Selectable iOS
 batch models upload recorded audio to OpenAI for supported OpenAI models or through OpenRouter for other remote models.
@@ -61,6 +63,13 @@ When using a cloud transcription provider:
 - Language/model selection
 - App-supplied language/model metadata, but no separate account identifier supplied by Speak. Spoken audio itself may
   contain names or other personal information.
+
+When using Meta Muse Voice Transcribe:
+- Live microphone audio, or the selected recording converted to mono PCM16 WAV
+- The selected model, optional language hint, and user-configured recognition keywords
+- A generated session identifier used to correlate API logs
+- Meta's API limits file requests to 10 minutes and 32 MB; its handling and
+  retention are governed by the Meta Model API account policy
 
 ## Local Network (Send to Mac)
 

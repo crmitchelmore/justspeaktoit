@@ -203,8 +203,20 @@ public final class AppSettings: ObservableObject {
         didSet { persistSecret(gladiaAPIKey, identifier: Self.gladiaKeyID) }
     }
 
+    @Published public var googleAPIKey: String {
+        didSet { persistSecret(googleAPIKey, identifier: Self.googleKeyID) }
+    }
+
     @Published public var xAIAPIKey: String {
         didSet { persistSecret(xAIAPIKey, identifier: Self.xAIKeyID) }
+    }
+
+    @Published public var metaAPIKey: String {
+        didSet { persistSecret(metaAPIKey, identifier: Self.metaKeyID) }
+    }
+
+    @Published public var transcriptionKeywords: String {
+        didSet { defaults.set(transcriptionKeywords, forKey: "transcriptionKeywords") }
     }
 
     // MARK: - Canonical secure storage for API keys (SpeakCore)
@@ -222,7 +234,9 @@ public final class AppSettings: ObservableObject {
     static let modulateKeyID = "modulate.apiKey"
     static let assemblyAIKeyID = "assemblyai.apiKey"
     static let gladiaKeyID = "gladia.apiKey"
+    static let googleKeyID = "google.apiKey"
     static let xAIKeyID = "xai.apiKey"
+    static let metaKeyID = "meta.apiKey"
 
     private static let credentialStorage = SecureStorage(
         configuration: SecureStorageConfiguration(
@@ -435,7 +449,10 @@ public final class AppSettings: ObservableObject {
         self.modulateAPIKey = ""
         self.assemblyAIAPIKey = ""
         self.gladiaAPIKey = ""
+        self.googleAPIKey = ""
         self.xAIAPIKey = ""
+        self.metaAPIKey = ""
+        self.transcriptionKeywords = defaults.string(forKey: "transcriptionKeywords") ?? ""
         self.liveActivitiesEnabled = liveActivities
         self.visualDensity = density
         self.autoStartRecording = autoStart
@@ -546,7 +563,9 @@ public final class AppSettings: ObservableObject {
     public var hasModulateKey: Bool { !modulateAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasAssemblyAIKey: Bool { !assemblyAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasGladiaKey: Bool { !gladiaAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    public var hasGoogleKey: Bool { !googleAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasXAIKey: Bool { !xAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    public var hasMetaKey: Bool { !metaAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     /// Identifiers currently available to model pickers. Because this is
     /// derived from the published key values, readiness badges refresh as soon
@@ -562,7 +581,9 @@ public final class AppSettings: ObservableObject {
         if hasModulateKey { identifiers.insert(Self.modulateKeyID) }
         if hasAssemblyAIKey { identifiers.insert(Self.assemblyAIKeyID) }
         if hasGladiaKey { identifiers.insert(Self.gladiaKeyID) }
+        if hasGoogleKey { identifiers.insert(Self.googleKeyID) }
         if hasXAIKey { identifiers.insert(Self.xAIKeyID) }
+        if hasMetaKey { identifiers.insert(Self.metaKeyID) }
         return identifiers
     }
 
@@ -605,9 +626,17 @@ public final class AppSettings: ObservableObject {
             identifier: Self.gladiaKeyID,
             currentValue: gladiaAPIKey
         )
+        googleAPIKey = await Self.syncedAPIKeyValue(
+            identifier: Self.googleKeyID,
+            currentValue: googleAPIKey
+        )
         xAIAPIKey = await Self.syncedAPIKeyValue(
             identifier: Self.xAIKeyID,
             currentValue: xAIAPIKey
+        )
+        metaAPIKey = await Self.syncedAPIKeyValue(
+            identifier: Self.metaKeyID,
+            currentValue: metaAPIKey
         )
     }
 
@@ -657,18 +686,27 @@ public final class AppSettings: ObservableObject {
     /// Returns the stored API key for a resolved live-transcription route, used
     /// by the generic shared-client recording path.
     public func liveAPIKey(for route: LiveTranscriptionRoute) -> String {
-        switch route.apiKeyIdentifier {
-        case Self.deepgramKeyID: return deepgramAPIKey
-        case Self.openAIKeyID: return openAIAPIKey
-        case Self.elevenLabsKeyID: return elevenLabsAPIKey
-        case Self.cartesiaKeyID: return cartesiaAPIKey
-        case Self.sonioxKeyID: return sonioxAPIKey
-        case Self.modulateKeyID: return modulateAPIKey
-        case Self.assemblyAIKeyID: return assemblyAIAPIKey
-        case Self.gladiaKeyID: return gladiaAPIKey
-        case Self.xAIKeyID: return xAIAPIKey
-        default: return ""
-        }
+        guard let identifier = route.apiKeyIdentifier else { return "" }
+        return liveAPIKeysByIdentifier[identifier] ?? ""
+    }
+
+    /// Every cloud live-transcription credential this app stores, keyed by the
+    /// identifier `LiveTranscriptionRoute` resolves to. A table rather than a
+    /// switch so adding a provider is one line and the lookup stays flat.
+    private var liveAPIKeysByIdentifier: [String: String] {
+        [
+            Self.deepgramKeyID: deepgramAPIKey,
+            Self.openAIKeyID: openAIAPIKey,
+            Self.elevenLabsKeyID: elevenLabsAPIKey,
+            Self.cartesiaKeyID: cartesiaAPIKey,
+            Self.sonioxKeyID: sonioxAPIKey,
+            Self.modulateKeyID: modulateAPIKey,
+            Self.assemblyAIKeyID: assemblyAIAPIKey,
+            Self.gladiaKeyID: gladiaAPIKey,
+            Self.googleKeyID: googleAPIKey,
+            Self.xAIKeyID: xAIAPIKey,
+            Self.metaKeyID: metaAPIKey
+        ]
     }
 
     public var batchAPIKey: String {
@@ -681,6 +719,9 @@ public final class AppSettings: ObservableObject {
         }
         if Self.openAIBatchModelIDs.contains(modelIdentifier) {
             return openAIAPIKey
+        }
+        if modelIdentifier == MetaMuseVoiceTranscribe.batchCatalogID {
+            return metaAPIKey
         }
         return openRouterAPIKey
     }
@@ -702,8 +743,14 @@ public final class AppSettings: ObservableObject {
         ModelCatalog.batchTranscription.filter { option in
             AppleLocalModels.isSpeechAnalyzerModel(option.id)
                 || openAIBatchModelIDs.contains(option.id)
-                || option.id.hasPrefix("google/")
+                // OpenRouter-routed Gemini 2.x batch models upload through the
+                // OpenRouter client. Gemini 3.5 Transcribe's direct Interactions
+                // API client is macOS-only for now, so it stays out of this list
+                // until iOS gains that upload path (issue #862).
+                || (option.id.hasPrefix("google/")
+                    && !GeminiTranscribeModels.directBatchModelIDs.contains(option.id))
                 || option.id == "openai/gpt-4o-audio-preview-2024-12-17"
+                || option.id == MetaMuseVoiceTranscribe.batchCatalogID
         }
 
     // MARK: - Legacy migration
@@ -1001,11 +1048,32 @@ public struct SettingsView: View {
                     Label(
                         AppSettings.openAIBatchModelIDs.contains(settings.batchTranscriptionModel)
                             ? "Add an OpenAI API key below to use this model."
-                            : "Add an OpenRouter API key below to use this model.",
+                            : settings.batchTranscriptionModel == MetaMuseVoiceTranscribe.batchCatalogID
+                                ? "Add a Meta Model API key below to use this model."
+                                : "Add an OpenRouter API key below to use this model.",
                         systemImage: "exclamationmark.triangle"
                     )
                     .foregroundStyle(.orange)
                     .font(.caption)
+                }
+
+                let activeRemoteModel = settings.transcriptionMode == .batch
+                    ? settings.batchTranscriptionModel
+                    : settings.selectedModel
+                if activeRemoteModel.hasPrefix("meta/") {
+                    TextField(
+                        "Recognition keywords (comma-separated)",
+                        text: $settings.transcriptionKeywords,
+                        axis: .vertical
+                    )
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    Text(
+                        "Meta uses these names, acronyms, and domain terms as vocabulary hints. "
+                            + "The Spoken Language setting above supplies its language bias."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
 
             }
@@ -1690,7 +1758,9 @@ struct APIKeysView: View {
     @State private var modulateKey = ""
     @State private var assemblyAIKey = ""
     @State private var gladiaKey = ""
+    @State private var googleKey = ""
     @State private var xAIKey = ""
+    @State private var metaKey = ""
     @State private var isValidating = false
     @State private var validationMessage: String?
     @State private var showingValidation = false
@@ -1741,7 +1811,14 @@ struct APIKeysView: View {
                 id: "gladia", title: "Gladia", category: "Transcription", isStored: settings.hasGladiaKey
             ),
             APIKeyListEntry(
+                id: "google", title: GeminiTranscribeModels.providerDisplayName,
+                category: "Transcription", isStored: settings.hasGoogleKey
+            ),
+            APIKeyListEntry(
                 id: "xai", title: "xAI", category: "Transcription", isStored: settings.hasXAIKey
+            ),
+            APIKeyListEntry(
+                id: "meta", title: "Meta", category: "Transcription", isStored: settings.hasMetaKey
             )
         ]
     }
@@ -1815,7 +1892,9 @@ struct APIKeysView: View {
                             && modulateKey.isEmpty
                             && assemblyAIKey.isEmpty
                             && gladiaKey.isEmpty
+                            && googleKey.isEmpty
                             && xAIKey.isEmpty
+                            && metaKey.isEmpty
                     )
                 }
             }
@@ -1853,6 +1932,7 @@ struct APIKeysView: View {
         }
     }
 
+    // swiftlint:disable:next cyclomatic_complexity function_body_length
     private func presentation(for id: String) -> KeyPresentation {
         switch id {
         case "deepgram":
@@ -1891,9 +1971,19 @@ struct APIKeysView: View {
             return KeyPresentation(
                 title: "AssemblyAI", systemImage: "waveform.badge.plus", help: "Get your key from assemblyai.com."
             )
+        case "google":
+            return KeyPresentation(
+                title: GeminiTranscribeModels.providerDisplayName, systemImage: "sparkles",
+                help: "Get your key from aistudio.google.com."
+            )
         case "xai":
             return KeyPresentation(
                 title: "xAI", systemImage: "waveform.badge.mic", help: "Get your key from console.x.ai."
+            )
+        case "meta":
+            return KeyPresentation(
+                title: "Meta", systemImage: "waveform.badge.mic",
+                help: "Get your Model API key from llama.developer.meta.com."
             )
         default:
             return KeyPresentation(
@@ -1902,6 +1992,7 @@ struct APIKeysView: View {
         }
     }
 
+    // swiftlint:disable:next cyclomatic_complexity
     private func draftBinding(for id: String) -> Binding<String> {
         switch id {
         case "deepgram": return $deepgramKey
@@ -1912,11 +2003,14 @@ struct APIKeysView: View {
         case "soniox": return $sonioxKey
         case "modulate": return $modulateKey
         case "assemblyai": return $assemblyAIKey
+        case "google": return $googleKey
         case "xai": return $xAIKey
+        case "meta": return $metaKey
         default: return $gladiaKey
         }
     }
 
+    // swiftlint:disable:next cyclomatic_complexity
     private func clearStoredKey(for id: String) {
         switch id {
         case "deepgram": settings.deepgramAPIKey = ""
@@ -1927,7 +2021,9 @@ struct APIKeysView: View {
         case "soniox": settings.sonioxAPIKey = ""
         case "modulate": settings.modulateAPIKey = ""
         case "assemblyai": settings.assemblyAIAPIKey = ""
+        case "google": settings.googleAPIKey = ""
         case "xai": settings.xAIAPIKey = ""
+        case "meta": settings.metaAPIKey = ""
         default: settings.gladiaAPIKey = ""
         }
     }
@@ -2019,11 +2115,30 @@ struct APIKeysView: View {
                 messages.append("✓ Gladia key saved")
             }
 
+            // Save Google Gemini key (validated when the session connects)
+            if !googleKey.isEmpty {
+                settings.googleAPIKey = googleKey
+                googleKey = ""
+                messages.append("✓ Google Gemini key saved")
+            }
+
             // Save xAI key (validated when the realtime session connects)
             if !xAIKey.isEmpty {
                 settings.xAIAPIKey = xAIKey
                 xAIKey = ""
                 messages.append("✓ xAI key saved")
+            }
+
+            if !metaKey.isEmpty {
+                let result = await MetaMuseAPIKeyValidator().validate(metaKey)
+                switch result.outcome {
+                case .success:
+                    settings.metaAPIKey = metaKey
+                    metaKey = ""
+                    messages.append("✓ Meta key validated for Muse Voice Transcribe and saved")
+                case .failure(let message):
+                    messages.append("✗ Meta: \(message)")
+                }
             }
 
             isValidating = false

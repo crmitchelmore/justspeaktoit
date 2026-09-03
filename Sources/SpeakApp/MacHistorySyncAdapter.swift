@@ -26,6 +26,12 @@ final class MacHistorySyncAdapter: HistorySyncDelegate {
     private var pendingSave: Task<Void, Never>?
     private var hasUnsavedSyncedIDs = false
 
+    /// Tags the current coalescing window. A task that already passed its sleep
+    /// when it is superseded still runs, so the deferred flush compares the
+    /// generation it captured against this one and bows out when stale rather
+    /// than clearing its replacement's task handle and dirty flag (issue #870).
+    private var saveGeneration: UInt64 = 0
+
     init(
         historyManager: HistoryManager,
         defaults: UserDefaults = .standard,
@@ -146,7 +152,7 @@ final class MacHistorySyncAdapter: HistorySyncDelegate {
     /// immediately via `persistSyncedIDsNow()`.
     private func scheduleSaveSyncedIDs() {
         hasUnsavedSyncedIDs = true
-        pendingSave?.cancel()
+        let generation = beginSaveWindow()
         let interval = saveInterval
         pendingSave = Task { @MainActor [weak self] in
             do {
@@ -154,8 +160,20 @@ final class MacHistorySyncAdapter: HistorySyncDelegate {
             } catch {
                 return  // Superseded by a later change, which owns the write.
             }
-            self?.flushSyncedIDs()
+            // Cancellation that lands after the sleep completes cannot throw,
+            // so the write has to be declined here instead.
+            guard !Task.isCancelled else { return }
+            self?.flushSyncedIDs(generation: generation)
         }
+    }
+
+    /// Cancels any outstanding coalescing task and opens a new window,
+    /// returning the generation that identifies it.
+    @discardableResult
+    private func beginSaveWindow() -> UInt64 {
+        pendingSave?.cancel()
+        saveGeneration &+= 1
+        return saveGeneration
     }
 
     /// Writes any coalesced synced-ID change immediately instead of waiting
@@ -165,7 +183,7 @@ final class MacHistorySyncAdapter: HistorySyncDelegate {
     /// Synchronous on purpose: termination does not wait for async work, so
     /// `AppEnvironment.prepareForTermination()` calls this directly.
     func flushPendingSyncedIDs() {
-        pendingSave?.cancel()
+        beginSaveWindow()
         flushSyncedIDs()
     }
 
@@ -176,12 +194,18 @@ final class MacHistorySyncAdapter: HistorySyncDelegate {
     /// anything the current coalescing window was still holding.
     private func persistSyncedIDsNow() {
         hasUnsavedSyncedIDs = true
-        pendingSave?.cancel()
+        beginSaveWindow()
         flushSyncedIDs()
     }
 
     /// Writes the coalesced synced-ID set, if anything is still unsaved.
-    private func flushSyncedIDs() {
+    ///
+    /// A `generation` identifies the window whose timer fired; when it no
+    /// longer matches, a newer window owns the write and this run must leave
+    /// `pendingSave` and the dirty flag untouched. Callers that write through
+    /// on demand pass none.
+    private func flushSyncedIDs(generation: UInt64? = nil) {
+        if let generation, generation != saveGeneration { return }
         pendingSave = nil
         guard hasUnsavedSyncedIDs else { return }
         hasUnsavedSyncedIDs = false

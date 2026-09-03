@@ -1,9 +1,12 @@
 import AVFoundation
 import XCTest
 
-@testable import SpeakApp
+@testable import SpeakCore
 
-/// Cover for issue #849: live controllers retain one `AVAudioConverter` for the
+/// Cover for issues #849 (macOS controllers) and #872 (the iOS live
+/// transcribers, which share this helper from `SpeakCore`).
+///
+/// Live capture paths retain one `AVAudioConverter` for the
 /// whole session and never `reset()` it, so at stop the resampler is still
 /// holding the frames whose filter window has not closed. Releasing the
 /// converter without an end-of-stream flush throws those frames away and clips
@@ -293,6 +296,31 @@ final class LiveConverterCacheTests: XCTestCase {
 
     let afterDrain = cache.converter(from: input, to: output)
     XCTAssertFalse(afterDrain === used, "A drained converter is finished; the next session gets a fresh one")
+  }
+
+  /// The iOS `SharedClientLiveTranscriber` resamples to float32 and converts
+  /// to PCM16 itself, so it drains buffers rather than bytes (issue #872).
+  func testDrainReturnsTheTrailingBufferForFloat32SendPaths() {
+    let cache = LiveConverterCache()
+    let input = makeInputFormat()
+    guard let output = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1) else {
+      return XCTFail("Failed to build 16 kHz float output format")
+    }
+
+    feedTone(cache, input: input, output: output)
+    let used = cache.converter(from: input, to: output)
+
+    guard let tail = cache.drain() else {
+      return XCTFail("The retained converter still owed trailing frames at stop")
+    }
+    XCTAssertGreaterThan(tail.frameLength, 0)
+    XCTAssertEqual(tail.format.sampleRate, output.sampleRate)
+    XCTAssertNotNil(tail.floatChannelData, "The tail must come back in the caller's output format")
+    XCTAssertNil(cache.drain(), "Draining twice must not re-emit or resurrect the converter")
+    XCTAssertFalse(
+      cache.converter(from: input, to: output) === used,
+      "A drained converter is finished; the next session gets a fresh one"
+    )
   }
 
   func testResetDropsTheConverterWithoutDraining() {

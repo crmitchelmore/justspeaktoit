@@ -2,9 +2,15 @@ import AppKit
 import SpeakHotKeys
 import SwiftUI
 
-/// Bridges a user-configurable `KeyBinding` into the SwiftUI shortcut types so
-/// SwiftUI menu commands can advertise the same shortcut `MenuBarManager`
-/// installs on the AppKit menu.
+/// The single source of truth for how a user-configurable `KeyBinding` is
+/// advertised in a menu.
+///
+/// Both shortcut surfaces derive their key equivalent from ``keyEquivalent``: the
+/// SwiftUI App menu commands use it directly, and `MenuBarManager` renders the
+/// AppKit Speak menu from ``menuKeyEquivalent``. Keeping one table means the two
+/// menus can never disagree about which bindings they are able to display -
+/// modified Return used to appear in the App menu and silently vanish from the
+/// Speak menu (issue #852).
 extension KeyBinding {
     /// The SwiftUI key for this binding, or `nil` when the binding is disabled or
     /// bound to a key SwiftUI has no equivalent for (function keys, keypad keys).
@@ -32,6 +38,15 @@ extension KeyBinding {
             guard name.count == 1, let character = name.lowercased().first else { return nil }
             return KeyEquivalent(character)
         }
+    }
+
+    /// The AppKit menu key equivalent for this binding, derived from the same
+    /// mapping the SwiftUI menu uses. Empty when the binding is disabled or bound
+    /// to a key no menu can display, which is how `NSMenuItem` spells "no
+    /// shortcut".
+    var menuKeyEquivalent: String {
+        guard let keyEquivalent else { return "" }
+        return String(keyEquivalent.character)
     }
 
     /// The SwiftUI modifiers matching this binding's AppKit modifier flags.

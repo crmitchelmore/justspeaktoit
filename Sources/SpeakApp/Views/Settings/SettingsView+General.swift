@@ -30,7 +30,7 @@ extension SettingsView {
             HStack(spacing: 8) {
               Image(systemName: "waveform")
                 .foregroundStyle(Color.brandAccentWarm)
-              Text("Currently active: \(audioDevices.systemDefaultDisplayName)")
+              Text("Currently active: \(audioDevices.activeDeviceLabel)")
               .font(.caption)
               .foregroundStyle(.secondary)
             Spacer()

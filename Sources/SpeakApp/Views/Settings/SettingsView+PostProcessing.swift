@@ -153,6 +153,8 @@ extension SettingsView {
               .foregroundStyle(.secondary)
           }
 
+          outputLanguageSection
+
           if isCloudPostProcessingModelSelected {
             remotePostProcessingSection
           } else {
@@ -253,6 +255,48 @@ extension SettingsView {
     }
   }
 
+  /// Output languages offered by the cleanup Output Language picker.
+  ///
+  /// Both post-processing locations read `postProcessingOutputLanguage`: the remote
+  /// prompt and the downloaded-local prompt are built from the same setting, so the
+  /// picker lives in the shared part of the Cleanup card (issue #852).
+  static let postProcessingOutputLanguages: [String] = [
+    "English",
+    "Spanish",
+    "French",
+    "German",
+    "Italian",
+    "Portuguese",
+    "Chinese",
+    "Japanese",
+    "Korean",
+    "Russian",
+    "Arabic",
+    "Hindi"
+  ]
+
+  /// Output-language picker shared by local and remote post-processing.
+  private var outputLanguageSection: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Picker("Output Language", selection: settingsBinding(\AppSettings.postProcessingOutputLanguage)) {
+        ForEach(Self.postProcessingOutputLanguages, id: \.self) { language in
+          Text(language).tag(language)
+        }
+      }
+      .settingsMenuPicker()
+      .speakTooltip("Let Speak know which language you want your polished transcript delivered in.")
+      .onChange(of: settings.postProcessingOutputLanguage) { _, _ in
+        if showSystemPromptPreview {
+          generateSystemPromptPreview()
+        }
+      }
+
+      Text("The language that the transcription will be output in.")
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+  }
+
   private var remotePostProcessingSection: some View {
     VStack(alignment: .leading, spacing: 12) {
       ModelPicker(
@@ -306,34 +350,6 @@ extension SettingsView {
           RoundedRectangle(cornerRadius: 12, style: .continuous)
             .stroke(Color.orange.opacity(0.25), lineWidth: 1)
         )
-      }
-
-      VStack(alignment: .leading, spacing: 8) {
-        Picker("Output Language", selection: settingsBinding(\AppSettings.postProcessingOutputLanguage)) {
-          Text("English").tag("English")
-          Text("Spanish").tag("Spanish")
-          Text("French").tag("French")
-          Text("German").tag("German")
-          Text("Italian").tag("Italian")
-          Text("Portuguese").tag("Portuguese")
-          Text("Chinese").tag("Chinese")
-          Text("Japanese").tag("Japanese")
-          Text("Korean").tag("Korean")
-          Text("Russian").tag("Russian")
-          Text("Arabic").tag("Arabic")
-          Text("Hindi").tag("Hindi")
-        }
-        .settingsMenuPicker()
-        .speakTooltip("Let Speak know which language you want your polished transcript delivered in.")
-        .onChange(of: settings.postProcessingOutputLanguage) { _, _ in
-          if showSystemPromptPreview {
-            generateSystemPromptPreview()
-          }
-        }
-
-        Text("The language that the transcription will be output in.")
-          .font(.caption)
-          .foregroundStyle(.secondary)
       }
 
       VStack(alignment: .leading) {

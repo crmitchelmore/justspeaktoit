@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import XCTest
 
@@ -33,5 +34,55 @@ final class KeyBindingSwiftUIBridgeTests: XCTestCase {
   func testEveryModifierFlag_isCarriedAcross() {
     let binding = KeyBinding(keyCode: 0, modifiers: [.command, .shift, .option, .control])
     XCTAssertEqual(binding.eventModifiers, [.command, .shift, .option, .control])
+  }
+
+  // MARK: - Both menu surfaces render the same bindings (issue #852)
+
+  func testModifiedReturn_isAdvertisedByBothMenuSurfaces() {
+    let binding = KeyBinding(keyCode: 36, modifiers: [.command, .shift], isGlobal: false)
+
+    XCTAssertEqual(binding.keyEquivalent, .return, "the SwiftUI App menu shows modified Return")
+    XCTAssertFalse(
+      binding.menuKeyEquivalent.isEmpty,
+      "the AppKit Speak menu used to drop modified Return entirely"
+    )
+
+    let item = NSMenuItem(title: "Start/Stop Recording", action: nil, keyEquivalent: binding.menuKeyEquivalent)
+    item.keyEquivalentModifierMask = binding.modifiers
+    XCTAssertEqual(item.keyEquivalent, String(KeyEquivalent.return.character))
+    XCTAssertEqual(item.keyEquivalentModifierMask, [.command, .shift])
+  }
+
+  func testMenuKeyEquivalent_agreesWithTheSwiftUIMappingForEveryKeyCode() {
+    for keyCode in UInt16(0)...UInt16(200) {
+      let binding = KeyBinding(keyCode: keyCode, modifiers: [.command])
+      let expected = binding.keyEquivalent.map { String($0.character) } ?? ""
+      XCTAssertEqual(
+        binding.menuKeyEquivalent,
+        expected,
+        "key code \(keyCode) renders differently in the two menus"
+      )
+    }
+  }
+
+  func testDisabledBinding_advertisesNoShortcutInEitherMenu() {
+    let binding = KeyBinding(keyCode: 36, modifiers: [.command], isGlobal: false, isEnabled: false)
+
+    XCTAssertNil(binding.keyEquivalent)
+    XCTAssertEqual(binding.menuKeyEquivalent, "")
+  }
+
+  func testUnmappableKey_advertisesNoShortcutInEitherMenu() {
+    // F13 has no SwiftUI equivalent, so neither surface may claim it.
+    let binding = KeyBinding(keyCode: 105, modifiers: [])
+
+    XCTAssertNil(binding.keyEquivalent)
+    XCTAssertEqual(binding.menuKeyEquivalent, "")
+  }
+
+  func testLetterKeys_useTheLowercasedMenuCharacter() {
+    XCTAssertEqual(KeyBinding(keyCode: 1, modifiers: [.command, .shift]).menuKeyEquivalent, "s")
+    XCTAssertEqual(KeyBinding(keyCode: 49, modifiers: [.command]).menuKeyEquivalent, " ")
+    XCTAssertEqual(KeyBinding(keyCode: 53, modifiers: []).menuKeyEquivalent, "\u{1B}")
   }
 }

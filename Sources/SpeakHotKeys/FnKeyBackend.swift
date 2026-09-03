@@ -201,10 +201,22 @@ final class FnKeyBackend {
     )
   }
 
+  /// The hardware poll's sole signal. Kept as a pure function so the rule
+  /// "the secondary-fn flag is never consulted" is pinned by a test.
+  nonisolated static func isFnKeyDown(keyState: Bool) -> Bool {
+    keyState
+  }
+
   private func reconcileHardwareState() {
-    let flagsDown = CGEventSource.flagsState(.hidSystemState).contains(.maskSecondaryFn)
-    let keyDown = CGEventSource.keyState(.hidSystemState, key: functionKeyCode)
-    updateFnState(isDown: flagsDown || keyDown, source: "hardwarePoll")
+    // Only key code 63 counts. `.maskSecondaryFn` is NX_SECONDARYFNMASK, the
+    // same bit as NSEvent.ModifierFlags.function, which macOS sets for *any*
+    // function key: arrows, F-keys, Home/End/PageUp/PageDown. Trusting it made
+    // two quick arrow presses look like a double-tap of Fn (issue #863). The
+    // event-tap path below already requires key code 63; the poll must too.
+    let keyDown = Self.isFnKeyDown(
+      keyState: CGEventSource.keyState(.hidSystemState, key: functionKeyCode)
+    )
+    updateFnState(isDown: keyDown, source: "hardwarePoll")
     // Re-evaluate every tick so secure-input toggles and expiring tap-recovery
     // windows change the cadence without needing a separate timer.
     updateHardwareStatePollingCadence()

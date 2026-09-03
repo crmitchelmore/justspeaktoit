@@ -119,6 +119,14 @@ final class FnKeyBackendPollingTests: XCTestCase {
       self.baseline
     )
   }
-}
 
+  /// Issue #863: arrow keys, F-keys and the navigation cluster set the
+  /// secondary-fn modifier bit while key code 63 stays up. The poll must
+  /// decide from the key state alone, so a raised flag with the key up is
+  /// never a press, and the key down is a press regardless of the flag.
+  func testHardwarePoll_usesKeyCode63Only() {
+    XCTAssertFalse(FnKeyBackend.isFnKeyDown(keyState: false), "flag-only (arrow/F-key) must not count as Fn")
+    XCTAssertTrue(FnKeyBackend.isFnKeyDown(keyState: true))
+  }
+}
 #endif

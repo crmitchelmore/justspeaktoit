@@ -65,8 +65,8 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
       for: route,
       apiKey: apiKey,
       language: currentLanguage,
-      keywords: route.provider == .meta
-        ? MetaMuseVoiceTranscribe.keywords(from: appSettings.assemblyAIKeyterms)
+      keywords: [.meta, .google].contains(route.provider)
+        ? MetaMuseVoiceTranscribe.keywords(from: appSettings.transcriptionKeywords)
         : []
     ) else {
       throw LiveTranscriptionClientError.providerNotAvailable(route.provider)

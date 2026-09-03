@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import XCTest
 import SpeakHotKeys
 import SpeakCore
@@ -22,6 +23,46 @@ final class AppSettingsDefaultsTests: XCTestCase {
         defaults = nil
         suiteName = nil
         super.tearDown()
+    }
+
+    // MARK: - Transcription keywords
+
+    /// Issue #849: macOS stored the keyword list under `assemblyAIKeyterms`
+    /// while iOS used `transcriptionKeywords`. They are now one value with two
+    /// names, so every provider biases on the same words.
+    @MainActor
+    func testTranscriptionKeywords_defaultToEmptyAndPersistUnderBothNames() {
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertEqual(settings.transcriptionKeywords, "")
+
+        settings.transcriptionKeywords = "JustSpeakToIt, Muse"
+
+        XCTAssertEqual(settings.assemblyAIKeyterms, "JustSpeakToIt, Muse")
+        XCTAssertEqual(defaults.string(forKey: "transcriptionKeywords"), "JustSpeakToIt, Muse")
+        XCTAssertEqual(defaults.string(forKey: "assemblyAIKeyterms"), "JustSpeakToIt, Muse")
+        XCTAssertEqual(AppSettings(defaults: defaults).transcriptionKeywords, "JustSpeakToIt, Muse")
+    }
+
+    /// The AssemblyAI keyterms field keeps working and feeds the same list.
+    @MainActor
+    func testAssemblyAIKeytermsField_stillWritesTheSharedKeywordList() {
+        let settings = AppSettings(defaults: defaults)
+
+        settings.assemblyAIKeyterms = "Deepgram, Gladia"
+
+        XCTAssertEqual(settings.transcriptionKeywords, "Deepgram, Gladia")
+        XCTAssertEqual(defaults.string(forKey: "transcriptionKeywords"), "Deepgram, Gladia")
+    }
+
+    /// An existing macOS install has only the old key; its words survive.
+    @MainActor
+    func testTranscriptionKeywords_migrateFromTheLegacyKeytermsKey() {
+        defaults.set("Muse Voice", forKey: "assemblyAIKeyterms")
+
+        let settings = AppSettings(defaults: defaults)
+
+        XCTAssertEqual(settings.transcriptionKeywords, "Muse Voice")
+        XCTAssertEqual(settings.assemblyAIKeyterms, "Muse Voice")
     }
 
     // MARK: - Core Settings

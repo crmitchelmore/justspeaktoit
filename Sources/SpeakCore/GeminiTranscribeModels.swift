@@ -41,6 +41,19 @@ public enum GeminiTranscribeModels {
     public static let fileUploadURL =
         URL(string: "https://generativelanguage.googleapis.com/upload/v1beta/files")!
 
+    /// Status endpoint for one uploaded file. `name` is the resource name the
+    /// upload response carries (`files/abc123`), which is what the Files API
+    /// documents polling for the `ACTIVE` state.
+    public static func fileStatusURL(name: String) -> URL? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let path = trimmed.hasPrefix("files/") ? trimmed : "files/\(trimmed)"
+        guard let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
+            return nil
+        }
+        return URL(string: "https://generativelanguage.googleapis.com/v1beta/\(encoded)")
+    }
+
     /// ListModels, used as a cheap credential probe.
     public static let listModelsURL =
         URL(string: "https://generativelanguage.googleapis.com/v1beta/models")!

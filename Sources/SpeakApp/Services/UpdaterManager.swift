@@ -101,6 +101,21 @@ extension UpdaterManager: SPUUpdaterDelegate {
         UpdateFeedSelection.current
     }
 
+    /// Refuse to start an update the staging volume cannot hold.
+    ///
+    /// Sparkle downloads and extracts under `~/Library/Caches/<bundle id>/
+    /// org.sparkle-project.Sparkle/`, so a full volume surfaces as Sparkle's
+    /// generic "update error" somewhere mid-pipeline. Throwing here aborts the
+    /// update before anything is downloaded and puts our own message — how much
+    /// is free, how much is needed — in the alert instead.
+    nonisolated func updater(
+        _ updater: SPUUpdater,
+        shouldProceedWithUpdate updateItem: SUAppcastItem,
+        updateCheck: SPUUpdateCheck
+    ) throws {
+        try UpdateDiskSpacePolicy.validateFreeSpace(forEnclosureLength: updateItem.contentLength)
+    }
+
     nonisolated func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
         Task { @MainActor in
             self.latestVersion = item.displayVersionString

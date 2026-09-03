@@ -11,7 +11,8 @@ Speak is designed with privacy in mind. This document explains what data is coll
 - Audio is processed in real-time and is **not stored** on your device after transcription
 - Apple Speech processes microphone audio on-device when the device and selected language support it. Its fallback can
   use Apple's speech-recognition servers. If you separately enable cloud post-processing or voice output, transcript or
-  assistant-response text may also be sent to that feature's provider.
+  assistant-response text is also sent to that feature's selected provider — see
+  [Voice Output](#voice-output-text-to-speech) for every provider that can receive spoken text.
 
 ### Where does audio go?
 
@@ -34,7 +35,36 @@ This table covers live providers available in the iOS app. macOS also supports S
 batch models upload recorded audio to OpenAI for supported OpenAI models or through OpenRouter for other remote models.
 The in-app iOS live-provider disclosure derives its list from the same model catalogue and platform-support metadata
 used by the transcription picker, so newly supported live providers appear automatically. When enabled,
-post-processing sends transcript text to OpenRouter and voice output sends text to Soniox.
+post-processing sends transcript text to OpenRouter.
+
+## Voice Output (text-to-speech)
+
+Voice output sends the text it speaks — an assistant response, or the text you ask the app to read — to whichever
+provider you select. It is off until you turn it on, and no other provider in this table receives that text.
+
+| Platform | Selectable voice-output provider | Data sent |
+|----------|----------------------------------|-----------|
+| iOS | Deepgram Aura | The text to speak, plus the selected model, voice, speed and language |
+| iOS | Soniox | The text to speak, plus the selected voice, speed, language and region |
+| macOS | ElevenLabs | The text to speak, plus the selected model and voice |
+| macOS | OpenAI | The text to speak, plus the selected model and voice |
+| macOS | Azure Cognitive Services | The text to speak, plus the selected voice and region |
+| macOS | Deepgram Aura | The text to speak, plus the selected model and voice |
+| macOS | Soniox | The text to speak, plus the selected voice, speed, language and region |
+| macOS | Cartesia Sonic | The text to speak, plus the selected model and voice |
+| macOS | macOS System voices | Nothing leaves the device — synthesis is performed by macOS |
+
+The in-app iOS disclosure derives this list from the same `VoiceOutputProvider` catalogue the provider picker uses, so
+a newly supported voice-output provider is disclosed automatically. The macOS list is `TTSProvider` minus the built-in
+system voices, which need no network access.
+
+## Your Effective Workflow
+
+The iOS Privacy screen opens with **What happens with your recordings right now**: the microphone/recording, transcript
+clean-up and spoken-reply steps as your current settings actually route them, each naming the provider that receives
+that content (or saying the step is on-device or switched off). It is derived from the live settings, so changing a
+model, toggling post-processing or switching voice provider updates it immediately. The provider catalogues further
+down the screen are reference material describing what the app *can* use, not what your settings *do* use.
 
 ## API Keys
 

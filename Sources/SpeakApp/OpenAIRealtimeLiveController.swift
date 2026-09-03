@@ -196,6 +196,7 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
       // 2. Flush local resampler tail into the transcriber (which will send
       //    immediately now that the session is ready, or buffer briefly if
       //    the readiness timeout lapsed).
+      audioProcessor.drainConverterTail()
       audioProcessor.flushPendingAudio(to: transcriber)
       // 3. Await all pending audio appends so the server has the full tail.
       await transcriber.waitForPendingSends()
@@ -379,11 +380,14 @@ private final class OpenAIRealtimeAudioProcessor: @unchecked Sendable {
   private let queue = DispatchQueue(label: "com.speak.app.openairealtime.audioProcessing")
   private let minimumChunkBytes: Int
   private let preferredChunkBytes: Int
-  private let copyBufferPool = LivePCMBufferPool(maximumBuffers: 4)
+  private let copyBufferPool = LivePCMBufferPool(
+    maximumBuffers: 4,
+    tapBufferSize: 1024,
+    label: "openai-realtime"
+  )
 
   private var isRunning: Bool = false
-  private var cachedConverter: AVAudioConverter?
-  private var cachedInputFormat: AVAudioFormat?
+  private let converterCache = LiveConverterCache()
   private var reusableOutputBuffer: AVAudioPCMBuffer?
   private var pendingPCMData = Data()
 
@@ -397,12 +401,21 @@ private final class OpenAIRealtimeAudioProcessor: @unchecked Sendable {
     queue.sync {
       isRunning = running
       if !running {
-        cachedConverter = nil
-        cachedInputFormat = nil
+        converterCache.reset()
         reusableOutputBuffer = nil
         copyBufferPool.removeAll()
         pendingPCMData.removeAll(keepingCapacity: false)
       }
+    }
+  }
+
+  /// Flushes the retained resampler's trailing frames into `pendingPCMData` so
+  /// the final flush sends them (issue #849). The converter is finished once
+  /// drained, so the cache releases it rather than reusing it.
+  func drainConverterTail() {
+    queue.sync {
+      guard let tail = converterCache.drainPCM16() else { return }
+      pendingPCMData.append(tail)
     }
   }
 
@@ -473,17 +486,9 @@ private final class OpenAIRealtimeAudioProcessor: @unchecked Sendable {
     transcriber: OpenAIRealtimeLiveTranscriber,
     logger: Logger
   ) {
-    let converter: AVAudioConverter
-    if let cached = cachedConverter, cachedInputFormat == inputFormat {
-      converter = cached
-    } else {
-      guard let newConverter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
-        logger.error("Failed to create audio converter")
-        return
-      }
-      cachedConverter = newConverter
-      cachedInputFormat = inputFormat
-      converter = newConverter
+    guard let converter = converterCache.converter(from: inputFormat, to: outputFormat) else {
+      logger.error("Failed to create audio converter")
+      return
     }
 
     let ratio = outputFormat.sampleRate / inputFormat.sampleRate
@@ -501,11 +506,8 @@ private final class OpenAIRealtimeAudioProcessor: @unchecked Sendable {
       outputBuffer = newBuffer
     }
 
-    // NOTE: We deliberately do NOT call converter.reset() between chunks —
-    // doing so wipes the resampler's filter history and priming/trailing
-    // frames, which audibly clicks at chunk boundaries (~50 Hz). The
-    // converter is only created once per inputFormat (cachedConverter), so
-    // its state is the *correct* thing to preserve across taps.
+    // No `converter.reset()` between chunks: `LiveConverterCache` owns the
+    // retained converter and its end-of-stream drain (see issue #849).
     var error: NSError?
     var didProvideInput = false
     let status = converter.convert(to: outputBuffer, error: &error) { _, outStatus in

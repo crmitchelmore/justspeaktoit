@@ -141,6 +141,7 @@ final class GladiaLiveController: NSObject, LiveTranscriptionController {
     isRunning = false
 
     if let transcriber {
+      audioProcessor.drainConverterTail()
       audioProcessor.flushPendingAudio(to: transcriber)
       await transcriber.waitForPendingSends()
       audioProcessor.setRunning(false)
@@ -220,10 +221,13 @@ final class GladiaLiveController: NSObject, LiveTranscriptionController {
     private static let preferredChunkBytes = GladiaLiveTranscriber.preferredChunkBytes
 
     private let queue = DispatchQueue(label: "com.speak.app.gladia.audioProcessing")
-    private let copyBufferPool = LivePCMBufferPool(maximumBuffers: 4)
+    private let copyBufferPool = LivePCMBufferPool(
+      maximumBuffers: 4,
+      tapBufferSize: 1024,
+      label: "gladia"
+    )
     private var isRunning: Bool = false
-    private var cachedConverter: AVAudioConverter?
-    private var cachedInputFormat: AVAudioFormat?
+    private let converterCache = LiveConverterCache()
     private var reusableOutputBuffer: AVAudioPCMBuffer?
     private var pendingPCMData = Data()
 
@@ -231,12 +235,21 @@ final class GladiaLiveController: NSObject, LiveTranscriptionController {
       queue.sync {
         isRunning = running
         if !running {
-          cachedConverter = nil
-          cachedInputFormat = nil
+          converterCache.reset()
           reusableOutputBuffer = nil
           copyBufferPool.removeAll()
           pendingPCMData.removeAll(keepingCapacity: false)
         }
+      }
+    }
+
+    /// Flushes the retained resampler's trailing frames into `pendingPCMData` so
+    /// the final flush sends them (issue #849). The converter is finished once
+    /// drained, so the cache releases it rather than reusing it.
+    func drainConverterTail() {
+      queue.sync {
+        guard let tail = converterCache.drainPCM16() else { return }
+        pendingPCMData.append(tail)
       }
     }
 
@@ -303,7 +316,6 @@ final class GladiaLiveController: NSObject, LiveTranscriptionController {
       return copy
     }
 
-    // swiftlint:disable:next function_body_length
     private func processAndSendAudio(
       _ buffer: AVAudioPCMBuffer,
       from inputFormat: AVAudioFormat,
@@ -311,17 +323,9 @@ final class GladiaLiveController: NSObject, LiveTranscriptionController {
       transcriber: GladiaLiveTranscriber,
       logger: Logger
     ) {
-      let converter: AVAudioConverter
-      if let cached = cachedConverter, cachedInputFormat == inputFormat {
-        converter = cached
-      } else {
-        guard let newConverter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
-          logger.error("Failed to create Gladia audio converter")
-          return
-        }
-        cachedConverter = newConverter
-        cachedInputFormat = inputFormat
-        converter = newConverter
+      guard let converter = converterCache.converter(from: inputFormat, to: outputFormat) else {
+        logger.error("Failed to create Gladia audio converter")
+        return
       }
 
       let ratio = outputFormat.sampleRate / inputFormat.sampleRate
@@ -340,12 +344,8 @@ final class GladiaLiveController: NSObject, LiveTranscriptionController {
         outputBuffer = newBuffer
       }
 
-      // NOTE: We deliberately do NOT call converter.reset() between chunks —
-      // doing so wipes the resampler's filter history and priming/trailing
-      // frames, which audibly clicks at chunk boundaries and pays the
-      // re-priming cost on every chunk. The converter is only created once
-      // per inputFormat (cachedConverter), so its state is the *correct*
-      // thing to preserve across taps.
+      // No `converter.reset()` between chunks: `LiveConverterCache` owns the
+      // retained converter and its end-of-stream drain (see issue #849).
       var error: NSError?
       var didProvideInput = false
       let status = converter.convert(to: outputBuffer, error: &error) { _, outStatus in

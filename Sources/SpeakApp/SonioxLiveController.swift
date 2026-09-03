@@ -193,6 +193,7 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
     isRunning = false
 
     if let transcriber {
+      audioProcessor.drainConverterTail()
       audioProcessor.flushPendingAudio(to: transcriber)
       await transcriber.waitForPendingSends()
       audioProcessor.setRunning(false)
@@ -241,9 +242,13 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
     private static let minimumChunkBytes = SonioxLiveTranscriber.minimumChunkBytes
 
     private let queue = DispatchQueue(label: "com.speak.app.soniox.audioProcessing")
+    private let copyBufferPool = LivePCMBufferPool(
+      maximumBuffers: 4,
+      tapBufferSize: 1024,
+      label: "soniox"
+    )
     private var isRunning: Bool = false
-    private var cachedConverter: AVAudioConverter?
-    private var cachedInputFormat: AVAudioFormat?
+    private let converterCache = LiveConverterCache()
     private var reusableOutputBuffer: AVAudioPCMBuffer?
     private var pendingPCMData = Data()
 
@@ -251,11 +256,21 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
       queue.sync {
         isRunning = running
         if !running {
-          cachedConverter = nil
-          cachedInputFormat = nil
+          converterCache.reset()
           reusableOutputBuffer = nil
+          copyBufferPool.removeAll()
           pendingPCMData.removeAll(keepingCapacity: false)
         }
+      }
+    }
+
+    /// Flushes the retained resampler's trailing frames into `pendingPCMData` so
+    /// the final flush sends them (issue #849). The converter is finished once
+    /// drained, so the cache releases it rather than reusing it.
+    func drainConverterTail() {
+      queue.sync {
+        guard let tail = converterCache.drainPCM16() else { return }
+        pendingPCMData.append(tail)
       }
     }
 
@@ -290,7 +305,9 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
     ) {
       guard let copied = copyPCMBuffer(buffer) else { return }
       queue.async { [weak self] in
-        guard let self, self.isRunning else { return }
+        guard let self else { return }
+        defer { self.copyBufferPool.recycle(copied) }
+        guard self.isRunning else { return }
         self.processAndSendAudio(
           copied, from: inputFormat, to: outputFormat,
           transcriber: transcriber, logger: logger
@@ -300,7 +317,7 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
 
     private func copyPCMBuffer(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
       let frameLength = buffer.frameLength
-      guard let copy = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: frameLength) else {
+      guard let copy = copyBufferPool.buffer(format: buffer.format, frameCapacity: frameLength) else {
         return nil
       }
       copy.frameLength = frameLength
@@ -322,17 +339,9 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
       transcriber: SonioxLiveTranscriber,
       logger: Logger
     ) {
-      let converter: AVAudioConverter
-      if let cached = cachedConverter, cachedInputFormat == inputFormat {
-        converter = cached
-      } else {
-        guard let newConverter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
-          logger.error("Failed to create audio converter")
-          return
-        }
-        cachedConverter = newConverter
-        cachedInputFormat = inputFormat
-        converter = newConverter
+      guard let converter = converterCache.converter(from: inputFormat, to: outputFormat) else {
+        logger.error("Failed to create audio converter")
+        return
       }
 
       let ratio = outputFormat.sampleRate / inputFormat.sampleRate
@@ -350,12 +359,8 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
         outputBuffer = newBuffer
       }
 
-      // NOTE: We deliberately do NOT call converter.reset() between chunks —
-      // doing so wipes the resampler's filter history and priming/trailing
-      // frames, which audibly clicks at chunk boundaries and pays the
-      // re-priming cost on every chunk. The converter is only created once
-      // per inputFormat (cachedConverter), so its state is the *correct*
-      // thing to preserve across taps.
+      // No `converter.reset()` between chunks: `LiveConverterCache` owns the
+      // retained converter and its end-of-stream drain (see issue #849).
       var error: NSError?
       var didProvideInput = false
       let status = converter.convert(to: outputBuffer, error: &error) { _, outStatus in

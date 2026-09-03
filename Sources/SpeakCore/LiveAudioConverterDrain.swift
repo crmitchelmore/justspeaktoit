@@ -1,8 +1,9 @@
 import AVFoundation
 import Foundation
 
-/// End-of-stream flush for the `AVAudioConverter` instances live controllers
-/// retain across tap buffers.
+/// End-of-stream flush for the `AVAudioConverter` instances the live capture
+/// paths retain across tap buffers — the macOS controllers in `SpeakApp` and
+/// the iOS live transcribers in `SpeakiOS` both use it.
 ///
 /// Live audio processors deliberately keep one converter per input format and
 /// never call `reset()` between tap buffers, so the resampler's filter history
@@ -15,18 +16,18 @@ import Foundation
 /// `drain(converter:outputFormat:)` signals `.endOfStream` to the converter and
 /// collects everything it still owes. The converter's state is finished
 /// afterwards, so callers must release it rather than reuse it.
-enum LiveAudioConverterDrain {
+public enum LiveAudioConverterDrain {
   /// Frames requested per drain pass. 4096 frames is ~256 ms at 16 kHz, far
   /// more than any resampler's latency, so one pass normally suffices.
-  static let drainFrameCapacity: AVAudioFrameCount = 4096
+  public static let drainFrameCapacity: AVAudioFrameCount = 4096
 
   /// Upper bound on drain passes so a converter that keeps reporting
   /// `.haveData` can never spin forever on the stop path.
-  static let maximumDrainPasses = 8
+  public static let maximumDrainPasses = 8
 
   /// Flushes `converter` and returns its trailing frames, or `nil` when the
   /// converter had nothing left to give.
-  static func drain(
+  public static func drain(
     converter: AVAudioConverter,
     outputFormat: AVAudioFormat,
     frameCapacity: AVAudioFrameCount = drainFrameCapacity
@@ -64,7 +65,7 @@ enum LiveAudioConverterDrain {
 
   /// Convenience wrapper for the PCM16 send paths: flushes `converter` and
   /// returns the trailing frames as little-endian 16-bit mono samples.
-  static func drainPCM16Data(
+  public static func drainPCM16Data(
     converter: AVAudioConverter,
     outputFormat: AVAudioFormat
   ) -> Data? {
@@ -77,7 +78,7 @@ enum LiveAudioConverterDrain {
   }
 
   /// Convenience wrapper for the float32 sidecar path.
-  static func drainFloat32Data(
+  public static func drainFloat32Data(
     converter: AVAudioConverter,
     outputFormat: AVAudioFormat
   ) -> Data? {
@@ -130,11 +131,16 @@ enum LiveAudioConverterDrain {
 /// remembered on another.
 ///
 /// A cache is owned by exactly one processor and only ever touched from that
-/// processor's serial audio queue, so it needs no locking of its own.
-final class LiveConverterCache {
+/// processor's serial audio queue, so it needs no locking of its own. That
+/// single-queue ownership is also what `@unchecked Sendable` asserts: the cache
+/// crosses an isolation boundary once, when the capture path hands it to the
+/// audio-processing queue, and every access after that happens on that queue.
+public final class LiveConverterCache: @unchecked Sendable {
   private var converter: AVAudioConverter?
   private var inputFormat: AVAudioFormat?
   private var outputFormat: AVAudioFormat?
+
+  public init() {}
 
   /// Returns the converter for `input` → `output`, creating it on first use
   /// and reusing it for every later tap buffer.
@@ -143,7 +149,7 @@ final class LiveConverterCache {
   /// resampler's filter history, which audibly clicks at chunk boundaries and
   /// pays the re-priming cost on every chunk. A change of input format
   /// (a device switch) builds a fresh converter.
-  func converter(from input: AVAudioFormat, to output: AVAudioFormat) -> AVAudioConverter? {
+  public func converter(from input: AVAudioFormat, to output: AVAudioFormat) -> AVAudioConverter? {
     if let converter, inputFormat == input, outputFormat == output {
       return converter
     }
@@ -154,22 +160,33 @@ final class LiveConverterCache {
     return created
   }
 
+  /// Flushes the converter at end of stream and returns its trailing frames,
+  /// releasing the (now finished) converter.
+  ///
+  /// For send paths whose output format already matches the wire format,
+  /// ``drainPCM16()`` and ``drainFloat32()`` return bytes directly; this is for
+  /// callers that post-process the frames (iOS's float32 → PCM16 conversion).
+  public func drain() -> AVAudioPCMBuffer? {
+    guard let (converter, format) = takeConverter() else { return nil }
+    return LiveAudioConverterDrain.drain(converter: converter, outputFormat: format)
+  }
+
   /// Flushes the converter at end of stream and returns its trailing frames as
   /// PCM16 bytes, releasing the (now finished) converter.
-  func drainPCM16() -> Data? {
+  public func drainPCM16() -> Data? {
     guard let (converter, format) = takeConverter() else { return nil }
     return LiveAudioConverterDrain.drainPCM16Data(converter: converter, outputFormat: format)
   }
 
   /// Float32 counterpart of ``drainPCM16()`` for the sidecar path.
-  func drainFloat32() -> Data? {
+  public func drainFloat32() -> Data? {
     guard let (converter, format) = takeConverter() else { return nil }
     return LiveAudioConverterDrain.drainFloat32Data(converter: converter, outputFormat: format)
   }
 
   /// Drops the converter without flushing it. Only for teardown paths that
   /// have already drained, or that never had audio worth keeping.
-  func reset() {
+  public func reset() {
     converter = nil
     inputFormat = nil
     outputFormat = nil

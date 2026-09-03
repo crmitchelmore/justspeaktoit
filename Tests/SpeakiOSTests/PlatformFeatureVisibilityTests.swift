@@ -46,9 +46,9 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
 
         // Meta Muse uploads through MetaMuseBatchClient on iOS, so it is listed.
         XCTAssertTrue(AppSettings.supportedBatchModels.contains { $0.id == MetaMuseVoiceTranscribe.batchCatalogID })
-        // Gemini 3.5 Transcribe's direct batch client is macOS-only; listing it
-        // here would route uploads to OpenRouter with the wrong model and key.
-        XCTAssertFalse(AppSettings.supportedBatchModels.contains { $0.id == GeminiTranscribeModels.batchCatalogID })
+        // Gemini 3.5 Transcribe uploads through the shared
+        // GeminiInteractionsClient on iOS, so it is listed too (issue #862).
+        XCTAssertTrue(AppSettings.supportedBatchModels.contains { $0.id == GeminiTranscribeModels.batchCatalogID })
         XCTAssertTrue(
             AppSettings.supportedBatchModels.contains {
                 $0.id == OpenAITranscriptionModels.gptTranscribeCatalogID
@@ -56,6 +56,54 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
         )
         XCTAssertTrue(
             AppSettings.openAIBatchModelIDs.contains(OpenAITranscriptionModels.gptTranscribeCatalogID)
+        )
+    }
+
+    /// The `google/` prefix is shared by two different upload paths, so the
+    /// routing has to split them: Gemini 3.5 Transcribe goes to Google's own
+    /// Interactions API, the Gemini 2.x entries stay on OpenRouter.
+    func testBatchRouting_sendsGemini35ToItsOwnClientAndLeavesOpenRouterModelsAlone() {
+        XCTAssertEqual(
+            IOSBatchTranscriptionRoute.route(for: GeminiTranscribeModels.batchCatalogID),
+            .gemini
+        )
+        XCTAssertEqual(IOSBatchTranscriptionRoute.route(for: "google/gemini-2.0-flash-001"), .openRouter)
+        XCTAssertEqual(
+            IOSBatchTranscriptionRoute.route(for: MetaMuseVoiceTranscribe.batchCatalogID),
+            .metaMuse
+        )
+        XCTAssertEqual(
+            IOSBatchTranscriptionRoute.route(for: OpenAITranscriptionModels.gptTranscribeCatalogID),
+            .openAI
+        )
+        XCTAssertEqual(
+            IOSBatchTranscriptionRoute.route(for: AppleLocalModels.speechTranscriberModelID),
+            .appleSpeechAnalyzer
+        )
+    }
+
+    /// `batchAPIKey(for:)` reads the canonical credential mapping, so the
+    /// Gemini branch is handed the Google key rather than the OpenRouter one.
+    func testBatchCredentials_splitDirectProvidersFromOpenRouter() {
+        let expected = [
+            GeminiTranscribeModels.batchCatalogID: "google.apiKey",
+            "google/gemini-2.0-flash-001": "openrouter.apiKey",
+            MetaMuseVoiceTranscribe.batchCatalogID: "meta.apiKey",
+            OpenAITranscriptionModels.gptTranscribeCatalogID: "openai.apiKey"
+        ]
+        for (model, identifier) in expected {
+            guard case .apiKey(let resolved, _) = ModelCredentialResolver.requirement(
+                for: model, purpose: .batchTranscription
+            ) else {
+                return XCTFail("\(model) must require an API key")
+            }
+            XCTAssertEqual(resolved, identifier, "\(model) must resolve to \(identifier)")
+        }
+        XCTAssertEqual(
+            ModelCredentialResolver.requirement(
+                for: AppleLocalModels.speechTranscriberModelID, purpose: .batchTranscription
+            ),
+            .notRequired
         )
     }
 

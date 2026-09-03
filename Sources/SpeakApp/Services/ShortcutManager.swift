@@ -70,7 +70,9 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .openDashboard:
             return KeyBinding(keyCode: 2, modifiers: [.command], isGlobal: false)  // ⌘D
         case .startStopRecording:
-            return KeyBinding(keyCode: 1, modifiers: [.command, .shift])  // ⌘+Shift+S
+            return KeyBinding(
+                keyCode: 1, modifiers: [.command, .shift], isGlobal: isGlobalByDefault
+            )  // ⌘+Shift+S
         case .speakSelectedText:
             return KeyBinding(keyCode: 17, modifiers: [.command, .shift])  // ⌘+Shift+T
         case .speakClipboard:
@@ -122,6 +124,11 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
 
     var legacyDefaultKeyBindings: [KeyBinding] {
         switch self {
+        case .startStopRecording:
+            // Migrates users who still hold the shipped global ⇧⌘S they never chose.
+            // `loadBindings` only rewrites a binding that still matches a shipped default,
+            // so anyone who re-bound or already toggled Global keeps their own setting.
+            return [KeyBinding(keyCode: 1, modifiers: [.command, .shift], isGlobal: true)]
         case .openDashboard:
             return [KeyBinding(keyCode: 18, modifiers: [.command, .option], isGlobal: false)]
         case .showHistory:
@@ -161,9 +168,31 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         }
     }
 
-    var isGlobalByDefault: Bool {
+    /// Whether the action can be registered system-wide at all.
+    ///
+    /// Drives which settings card the action appears under and whether it offers a Global
+    /// toggle, so an action must stay here even when it ships non-global — otherwise the
+    /// user loses the only control that can turn it back on.
+    var supportsGlobalShortcut: Bool {
         switch self {
         case .startStopRecording, .speakSelectedText, .speakClipboard, .pasteLastHistoryItem,
+             .editSelectionByVoice:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Whether a fresh install registers it system-wide.
+    ///
+    /// `startStopRecording` is deliberately absent. The configured hotkey is already a
+    /// system-wide way to record; shipping ⇧⌘S as a second global trigger gave users a
+    /// recording shortcut they never asked for, on a chord many apps use for Save As. It
+    /// stays bound, still works while the app is focused, and the Global toggle is still
+    /// there for anyone who wants it back.
+    var isGlobalByDefault: Bool {
+        switch self {
+        case .speakSelectedText, .speakClipboard, .pasteLastHistoryItem,
              .editSelectionByVoice:
             return true
         default:
@@ -277,9 +306,13 @@ final class ShortcutManager: ObservableObject {
     private let permissionsManager: PermissionsManager
 
     private let defaultsKey = "customShortcutBindings"
+    private let defaults: UserDefaults
 
-    init(permissionsManager: PermissionsManager) {
+    /// `defaults` is injectable so the stored-binding migration can be tested against a
+    /// throwaway suite instead of the user's real preferences.
+    init(permissionsManager: PermissionsManager, defaults: UserDefaults = .standard) {
         self.permissionsManager = permissionsManager
+        self.defaults = defaults
         loadBindings()
     }
 
@@ -408,7 +441,9 @@ final class ShortcutManager: ObservableObject {
             let newBinding = KeyBinding(
                 keyCode: event.keyCode,
                 modifiers: modifiers,
-                isGlobal: action.isGlobalByDefault,
+                // Re-recording the keys must not silently reset a Global choice the user
+                // already made either way.
+                isGlobal: self.bindings[action]?.isGlobal ?? action.isGlobalByDefault,
                 isEnabled: true
             )
 
@@ -580,7 +615,7 @@ final class ShortcutManager: ObservableObject {
     }
 
     private func loadBindings() {
-        if let data = UserDefaults.standard.data(forKey: defaultsKey),
+        if let data = defaults.data(forKey: defaultsKey),
             let decoded = try? JSONDecoder().decode([ShortcutAction: KeyBinding].self, from: data) {
             bindings = decoded
             var changedDefaults = false
@@ -606,7 +641,7 @@ final class ShortcutManager: ObservableObject {
 
     private func saveBindings() {
         if let data = try? JSONEncoder().encode(bindings) {
-            UserDefaults.standard.set(data, forKey: defaultsKey)
+            defaults.set(data, forKey: defaultsKey)
         }
     }
 
@@ -616,6 +651,9 @@ final class ShortcutManager: ObservableObject {
         // Check for common system shortcut conflicts
         let systemShortcuts: [SystemShortcut] = [
             SystemShortcut(keyCode: 1, modifiers: [.command], description: "Save (System)"),
+            SystemShortcut(
+                keyCode: 1, modifiers: [.command, .shift], description: "Save As (System)"
+            ),
             SystemShortcut(keyCode: 9, modifiers: [.command], description: "Paste (System)"),
             SystemShortcut(keyCode: 8, modifiers: [.command], description: "Copy (System)"),
             SystemShortcut(keyCode: 0, modifiers: [.command], description: "Select All (System)"),

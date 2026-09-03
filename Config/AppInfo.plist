@@ -26,6 +26,13 @@
 	<string></string>
 	<key>SpeakDistributionChannel</key>
 	<string>direct</string>
+	<!-- Marker read by scripts/sparkle-update-smoke.sh: this build understands
+	     --sparkle-smoke-update and can install a Sparkle update headlessly.
+	     Releases that predate the flag lack the key, and the smoke job skips
+	     rather than failing on them. Direct channel only: the App Store build
+	     does not embed Sparkle. -->
+	<key>SpeakSparkleSmokeSupported</key>
+	<integer>1</integer>
 	<key>PostHogProjectKey</key>
 	<string>$(POSTHOG_PROJECT_KEY)</string>
 	<key>PostHogHost</key>
@@ -48,6 +55,21 @@
 	<string>14.0</string>
 	<key>NSAccessibilityUsageDescription</key>
 	<string>Just Speak to It needs Accessibility access to observe the Fn key for global shortcuts.</string>
+	<!-- App Transport Security: the shipping feed and every download stay
+	     HTTPS. The single exception is the release smoke test
+	     (scripts/sparkle-update-smoke.sh), which serves a synthetic appcast from
+	     python3 -m http.server on http://127.0.0.1:<port> so a notarised build
+	     can be made to update itself in CI without publishing a throw-away feed.
+	     NSAllowsLocalNetworking relaxes ATS only for loopback, .local and
+	     link-local addresses; NSAllowsArbitraryLoads would have relaxed it for
+	     the whole internet, so it is deliberately not used. Sparkle still
+	     verifies the EdDSA signature on the enclosure, so an http feed cannot
+	     be used to install unsigned code. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright © 2024-2026 Chris Mitchelmore. All rights reserved.</string>
 	<key>NSInputMonitoringUsageDescription</key>

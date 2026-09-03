@@ -45,7 +45,12 @@ final class AppStoreInfoPlistTests: XCTestCase {
             "SUEnableAutomaticChecks",
             "SUFeedURL",
             "SUPublicEDKey",
-            "SUScheduledCheckInterval"
+            "SUScheduledCheckInterval",
+            // The headless self-update smoke mode and the loopback-only ATS
+            // exemption it needs exist for Sparkle alone, so they stay off the
+            // App Store build, which updates through the store.
+            "SpeakSparkleSmokeSupported",
+            "NSAppTransportSecurity"
         ]
         var directWithoutSparkle = directPlist!
         sparkleKeys.forEach { directWithoutSparkle.removeValue(forKey: $0) }

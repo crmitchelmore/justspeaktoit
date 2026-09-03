@@ -412,3 +412,76 @@ jobs:
         run: |
           security delete-keychain $RUNNER_TEMP/app-signing.keychain-db || true
           rm -f ~/.appstoreconnect/private_keys/AuthKey_${{ env.APP_STORE_CONNECT_KEY_ID }}.p8 || true
+
+  # Install the release we just published, for real, on a clean machine.
+  #
+  # Until now nothing ever exercised a Sparkle update: the artefacts were
+  # inspected, never installed. A broken feed, a mis-signed enclosure or an
+  # installer that cannot replace the bundle would have been found by a user
+  # first (2026-09-02). This job downloads the published arm64 DMG and its
+  # appcast, and makes a throw-away copy of the app update *itself* headlessly
+  # from a synthetic feed that re-uses the real signed enclosure — see the
+  # header of scripts/sparkle-update-smoke.sh for what that does and does not
+  # prove.
+  #
+  # Meaningful only from the first release that contains the headless smoke mode:
+  # the script prints SKIPPED and exits 0 for an app whose Info.plist has no
+  # SpeakSparkleSmokeSupported marker.
+  sparkle-update-smoke:
+    name: Sparkle Update Smoke
+    needs: build-and-release
+    if: startsWith(github.ref, 'refs/tags/mac-v')
+    runs-on: macos-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # A failed update round trip is surfaced as an issue as well as a failed job.
+      issues: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Download the published arm64 DMG and appcast
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/sparkle-smoke"
+          gh release download "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            -p 'JustSpeakToIt-arm64.dmg' \
+            -p 'appcast-arm64.xml' \
+            -D "$RUNNER_TEMP/sparkle-smoke"
+          ls -la "$RUNNER_TEMP/sparkle-smoke"
+
+      - name: Update the app from its own appcast
+        run: |
+          scripts/sparkle-update-smoke.sh \
+            "$RUNNER_TEMP/sparkle-smoke/JustSpeakToIt-arm64.dmg" \
+            "$RUNNER_TEMP/sparkle-smoke/appcast-arm64.xml"
+
+      - name: Report a failed update round trip
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TITLE="Sparkle update smoke failed for ${GITHUB_REF_NAME}"
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          BODY="The published \`${GITHUB_REF_NAME}\` build could not update itself from its own appcast: ${RUN_URL}
+
+          The smoke test copies the released app out of the DMG, serves the real
+          \`appcast-arm64.xml\` with \`sparkle:version\` bumped by one, and lets the copy
+          install the real signed enclosure over itself. A failure here means users on
+          the previous release may not be able to update — check the run log for which
+          assertion failed (Sparkle's verdict, the code signature, the installed
+          \`CFBundleVersion\`, or the relaunch) before announcing the release.
+
+          Refs \`scripts/sparkle-update-smoke.sh\`."
+          EXISTING="$(gh issue list --state open --search "\"$TITLE\" in:title" --json number --jq '.[0].number')"
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --body "$BODY" || echo "::warning::Could not comment on issue #$EXISTING"
+          else
+            gh issue create --title "$TITLE" --body "$BODY" || echo "::warning::Could not open the follow-up issue"
+          fi

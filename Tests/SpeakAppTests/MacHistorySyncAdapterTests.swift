@@ -227,6 +227,89 @@ final class MacHistorySyncAdapterTests: XCTestCase {
         XCTAssertEqual(counting.stringArray(forKey: syncedIDsKey), [entry.id.uuidString])
     }
 
+    /// A remote record that lost to a newer local item drops its synced ID so
+    /// the local edit uploads. That removal must not sit in the coalescing
+    /// window: a quit before the window elapses would leave the stale ID on
+    /// disk and strand the edit for good (#851).
+    func testStaleRemoteEntry_persistsTheSyncedIDRemovalBeforeRelaunch() async {
+        let manager = await makeManager()
+        let local = makeItem(updatedAt: Date(timeIntervalSince1970: 100))
+        await manager.append(local)
+
+        let counting = WriteCountingUserDefaults(suiteName: suiteName)!
+        let adapter = MacHistorySyncAdapter(
+            historyManager: manager,
+            defaults: counting,
+            saveInterval: .seconds(30)
+        )
+        await adapter.didAcknowledgeSyncedEntries(ids: [local.id])
+        adapter.flushPendingSyncedIDs()
+        XCTAssertFalse(adapter.pendingEntries().contains { $0.id == local.id })
+
+        // The remote copy is older than the local item, so the local one wins
+        // and has to be uploaded again.
+        let stale = makeEntry(
+            id: local.id,
+            text: "older-remote",
+            updatedAt: Date(timeIntervalSince1970: 50)
+        )
+        await adapter.didReceiveRemoteEntry(stale)
+
+        XCTAssertFalse(
+            adapter.hasPendingSyncedIDWrites,
+            "A removal that decides what gets uploaded must be written through, not coalesced"
+        )
+        XCTAssertEqual(
+            counting.stringArray(forKey: syncedIDsKey),
+            [],
+            "The stale synced ID must already be gone from UserDefaults"
+        )
+        XCTAssertEqual(
+            manager.item(id: local.id)?.rawTranscription,
+            local.rawTranscription,
+            "The older remote entry must not overwrite the newer local item"
+        )
+
+        // No clean shutdown, no elapsed window: a fresh adapter over the same
+        // defaults is exactly what the next launch sees.
+        let relaunched = MacHistorySyncAdapter(historyManager: manager, defaults: counting)
+        XCTAssertTrue(
+            relaunched.pendingEntries().contains { $0.id == local.id },
+            "The locally newer item must be pending upload after relaunch"
+        )
+    }
+
+    /// Termination calls `flushPendingSyncedIDs()`; everything the window was
+    /// still holding has to reach UserDefaults in that one call.
+    func testFlushPendingSyncedIDs_persistsEverythingTheWindowWasHolding() async {
+        let manager = await makeManager()
+        let counting = WriteCountingUserDefaults(suiteName: suiteName)!
+        let adapter = MacHistorySyncAdapter(
+            historyManager: manager,
+            defaults: counting,
+            saveInterval: .seconds(30)
+        )
+        let acknowledged = (0..<3).map { _ in UUID() }
+        let remote = makeEntry(text: "remote")
+        await adapter.didAcknowledgeSyncedEntries(ids: Set(acknowledged))
+        await adapter.didReceiveRemoteEntry(remote)
+        XCTAssertTrue(adapter.hasPendingSyncedIDWrites)
+        XCTAssertNil(counting.stringArray(forKey: syncedIDsKey))
+
+        adapter.flushPendingSyncedIDs()
+
+        XCTAssertFalse(adapter.hasPendingSyncedIDWrites)
+        XCTAssertEqual(
+            Set(counting.stringArray(forKey: syncedIDsKey) ?? []),
+            Set((acknowledged + [remote.id]).map(\.uuidString)),
+            "The flush must persist every ID the window was still holding"
+        )
+        XCTAssertEqual(counting.writes.total, 1, "The flush must cost a single write")
+
+        adapter.flushPendingSyncedIDs()
+        XCTAssertEqual(counting.writes.total, 1, "A flush with nothing pending must not write")
+    }
+
     // MARK: - Helpers
 
     private let syncedIDsKey = "speak.sync.syncedMacHistoryIDs"
@@ -240,50 +323,57 @@ final class MacHistorySyncAdapterTests: XCTestCase {
         await manager.waitUntilLoaded()
         return manager
     }
+}
 
-    private func makeEntry(id: UUID = UUID(), text: String) -> SyncableHistoryEntry {
-        SyncableHistoryEntry(
-            id: id,
-            createdAt: Date(timeIntervalSince1970: 1),
-            rawTranscription: text,
-            postProcessedText: nil,
-            model: "test",
-            duration: 1,
-            wordCount: 1,
-            originPlatform: "ios",
-            updatedAt: Date(timeIntervalSince1970: 10)
-        )
-    }
+// MARK: - Fixtures
 
-    private func makeItem(id: UUID = UUID()) -> HistoryItem {
-        HistoryItem(
-            id: id,
-            createdAt: Date(),
-            modelsUsed: ["apple/local/SFSpeechRecognizer"],
-            rawTranscription: "raw transcript",
-            postProcessedTranscription: nil,
-            recordingDuration: 5,
-            cost: nil,
-            audioFileURL: nil,
-            networkExchanges: [],
-            events: [],
-            phaseTimestamps: PhaseTimestamps(
-                recordingStarted: nil,
-                recordingEnded: nil,
-                transcriptionStarted: nil,
-                transcriptionEnded: nil,
-                postProcessingStarted: nil,
-                postProcessingEnded: nil,
-                outputDelivered: nil
-            ),
-            trigger: HistoryTrigger(
-                gesture: .singleTap,
-                hotKeyDescription: "Fn",
-                outputMethod: .clipboard,
-                destinationApplication: nil
-            ),
-            personalCorrections: nil,
-            errors: []
-        )
-    }
+private func makeEntry(
+    id: UUID = UUID(),
+    text: String,
+    updatedAt: Date = Date(timeIntervalSince1970: 10)
+) -> SyncableHistoryEntry {
+    SyncableHistoryEntry(
+        id: id,
+        createdAt: Date(timeIntervalSince1970: 1),
+        rawTranscription: text,
+        postProcessedText: nil,
+        model: "test",
+        duration: 1,
+        wordCount: 1,
+        originPlatform: "ios",
+        updatedAt: updatedAt
+    )
+}
+
+private func makeItem(id: UUID = UUID(), updatedAt: Date = Date()) -> HistoryItem {
+    HistoryItem(
+        id: id,
+        createdAt: Date(),
+        updatedAt: updatedAt,
+        modelsUsed: ["apple/local/SFSpeechRecognizer"],
+        rawTranscription: "raw transcript",
+        postProcessedTranscription: nil,
+        recordingDuration: 5,
+        cost: nil,
+        audioFileURL: nil,
+        networkExchanges: [],
+        events: [],
+        phaseTimestamps: PhaseTimestamps(
+            recordingStarted: nil,
+            recordingEnded: nil,
+            transcriptionStarted: nil,
+            transcriptionEnded: nil,
+            postProcessingStarted: nil,
+            postProcessingEnded: nil,
+            outputDelivered: nil
+        ),
+        trigger: HistoryTrigger(
+            gesture: .singleTap,
+            hotKeyDescription: "Fn",
+            outputMethod: .clipboard,
+            destinationApplication: nil
+        ),
+        personalCorrections: nil,
+        errors: []
+    )
 }

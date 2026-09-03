@@ -91,7 +91,14 @@ final class MacHistorySyncAdapter: HistorySyncDelegate {
             } else if entry.updatedAt == local.updatedAt {
                 syncedIDs.insert(entry.id)
             } else {
+                // The local copy is newer, so it must be uploaded. Dropping the
+                // ID is what puts it back into `pendingEntries()`, and a quit
+                // inside the coalescing window would leave the stale ID on disk
+                // and strand the local edit — so this one write is not
+                // deferred (issue #851).
                 syncedIDs.remove(entry.id)
+                persistSyncedIDsNow()
+                return
             }
             scheduleSaveSyncedIDs()
             return
@@ -133,7 +140,10 @@ final class MacHistorySyncAdapter: HistorySyncDelegate {
     /// `syncedIDs` from memory, so deferring the write changes nothing within
     /// a session; the only exposure is a quit inside the window, which at
     /// worst re-uploads already-synced entries (CloudKit saves are keyed by
-    /// record ID, so that is idempotent).
+    /// record ID, so that is idempotent). Termination flushes the window
+    /// anyway, and the one removal that is not merely wasteful to lose —
+    /// a remote record that lost to a newer local item — writes through
+    /// immediately via `persistSyncedIDsNow()`.
     private func scheduleSaveSyncedIDs() {
         hasUnsavedSyncedIDs = true
         pendingSave?.cancel()
@@ -151,7 +161,21 @@ final class MacHistorySyncAdapter: HistorySyncDelegate {
     /// Writes any coalesced synced-ID change immediately instead of waiting
     /// for the window to elapse. Safe to call at any time; a no-op when there
     /// is nothing pending.
+    ///
+    /// Synchronous on purpose: termination does not wait for async work, so
+    /// `AppEnvironment.prepareForTermination()` calls this directly.
     func flushPendingSyncedIDs() {
+        pendingSave?.cancel()
+        flushSyncedIDs()
+    }
+
+    /// True while a coalesced synced-ID change is still only in memory.
+    var hasPendingSyncedIDWrites: Bool { hasUnsavedSyncedIDs }
+
+    /// Writes the synced-ID set through to `UserDefaults` right now, folding in
+    /// anything the current coalescing window was still holding.
+    private func persistSyncedIDsNow() {
+        hasUnsavedSyncedIDs = true
         pendingSave?.cancel()
         flushSyncedIDs()
     }

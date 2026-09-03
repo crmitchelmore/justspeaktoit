@@ -249,11 +249,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard let mainManager = environment?.main else { return .terminateNow }
+        guard let environment else { return .terminateNow }
         guard terminationTask == nil else { return .terminateLater }
 
         terminationTask = Task { @MainActor in
-            await mainManager.prepareForTermination()
+            await environment.prepareForTermination()
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater

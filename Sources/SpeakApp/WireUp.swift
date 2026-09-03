@@ -387,6 +387,18 @@ extension AppEnvironment {
   /// Alias for permissions manager (for API consistency)
   var permissionsManager: PermissionsManager { permissions }
 
+  /// Makes every service durable before AppKit lets the process exit.
+  ///
+  /// The history sync adapter coalesces its synced-ID bookkeeping behind a
+  /// short window, so a quit inside that window would otherwise drop the
+  /// pending write and leave the next launch working from a stale set (#851).
+  /// The flush runs first and synchronously — termination does not wait for
+  /// work that is merely scheduled.
+  func prepareForTermination() async {
+    historySyncAdapter?.flushPendingSyncedIDs()
+    await main.prepareForTermination()
+  }
+
   fileprivate func switchToQuickVoice(_ index: Int) {
     let favorites = settings.ttsFavoriteVoices
     let arrayIndex = index - 1
